@@ -1,0 +1,22 @@
+; TikTok_API 数据库配置（导入 product/sku 报表用）
+; 复制为 db.ini 后填写实际密码，勿提交到公开仓库
+
+[数据库]
+host = 127.0.0.1
+port = 3306
+user = root
+password =
+database = shop_analytics_db
+charset = utf8mb4
+
+[表名]
+product_table = product_performance_report
+sku_table = sku_performance_report
+
+[站点]
+PH = 菲律宾
+MY = 马来
+TH = 泰国
+SG = 新加坡
+VN = 越南
+ID = 印尼

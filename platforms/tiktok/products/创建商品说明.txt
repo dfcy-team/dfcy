@@ -1,0 +1,44 @@
+创建商品 — 使用说明（创建商品.py）
+====================================
+
+你要的就是这个：在 TK6PH 等店铺 **新建一个商品 + 第一个 SKU**。
+
+一、准备（只做一次或换类目时）
+------------------------------
+1. 双击 run_category.bat
+   → 按 category_id 生成 create_attrs.json（类目必填属性）
+2. 把主图放到 samples/main.jpg（或改 image_path）
+
+二、改配置 测试设置.ini  [create]
+---------------------------------
+title          = 商品标题（英文/当地语言）
+description    = <p>详情 HTML</p>
+category_id    = 810376          ; 叶子类目，沙发套示例 810376
+image_path     = samples/main.jpg
+attributes_json = create_attrs.json
+seller_sku     = 你的商家编码
+price          = 99.00           ; PHP 售价
+quantity       = 10              ; 首 SKU 库存
+warehouse_id   = 7432356829526001413
+save_mode      = AS_DRAFT        ; 建议先草稿，测通再 LISTING
+dry_run        = 1               ; 1=只预览  0=真创建
+auto_activate  = 0               ; 1=创建成功后自动商品上架
+
+三、运行
+--------
+1. dry_run=1  → 双击 run_create.bat  → 看 logs/create_product_request.json
+2. dry_run=0  → python run_create.py --execute
+3. 成功后在 logs/create_product_summary.json 看 product_id、sku_id
+
+四、创建之后
+------------
+草稿(AS_DRAFT)：双击 run_product_activate.bat 上架
+改价：填 [price] 后 run_price.bat
+改库存：填 [inventory] 后 run_inventory.bat
+
+五、和店里已有商品对照填
+------------------------
+run_detail.bat 查老商品 → 抄 category_id、warehouse_id、属性风格
+run_category.bat 按你的 category_id 更新 create_attrs.json
+
+权限：seller.product.write

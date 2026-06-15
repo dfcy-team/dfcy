@@ -1,0 +1,40 @@
+[
+  {
+    "id": "100881",
+    "values": [{ "id": "1004555", "name": "Flat Weave" }]
+  },
+  {
+    "id": "100957",
+    "values": [{ "id": "1004941", "name": "Non-Customised" }]
+  },
+  {
+    "id": "100401",
+    "values": [
+      { "id": "1004549", "name": "Machine Wash" },
+      { "id": "1001195", "name": "Hand Wash Only" }
+    ]
+  },
+  {
+    "id": "100347",
+    "values": [{ "id": "1000256", "name": "1" }]
+  },
+  {
+    "id": "100443",
+    "values": [
+      { "id": "1004667", "name": "Wrinkle Resistant" },
+      { "id": "1004613", "name": "Stain Resistant" }
+    ]
+  },
+  {
+    "id": "100198",
+    "values": [{ "id": "1004314", "name": "Watercolour" }]
+  },
+  {
+    "id": "100397",
+    "values": [{ "id": "1005840", "name": "All Seasons" }]
+  },
+  {
+    "id": "100398",
+    "values": [{ "id": "1004424", "name": "Classic" }]
+  }
+]

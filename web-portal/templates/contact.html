@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}联系我们 · {{ brand }}{% endblock %}
+{% block content %}
+<section class="page-header">
+  <h1>联系我们</h1>
+  <p class="lead">技术支持、授权协助或商务合作，欢迎通过以下方式联系 {{ company_name }}。</p>
+</section>
+
+<div class="grid two">
+  <div class="card">
+    <h2>联系方式</h2>
+    <ul class="kv contact-kv">
+      <li><span>公司名称</span><strong>{{ company_name }}</strong></li>
+      <li><span>官方网站</span><a href="{{ site_base }}">{{ domain }}</a></li>
+      <li><span>电子邮箱</span><a href="mailto:{{ contact_email }}">{{ contact_email }}</a></li>
+      <li><span>办公地址</span><span>{{ contact_address }}</span></li>
+      <li><span>服务时间</span><span>工作日 9:00 – 18:00（北京时间）</span></li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>在线留言</h2>
+    <p class="muted">填写后将打开邮件客户端发送（本页不存储留言）。</p>
+    <form class="form-grid" action="mailto:{{ contact_email }}" method="post" enctype="text/plain">
+      <label class="span2">您的姓名
+        <input type="text" name="name" required placeholder="姓名"/>
+      </label>
+      <label class="span2">联系邮箱
+        <input type="email" name="email" required placeholder="you@company.com"/>
+      </label>
+      <label class="span2">主题
+        <input type="text" name="subject" value="鼎峰平台咨询"/>
+      </label>
+      <label class="span2">留言内容
+        <textarea name="body" rows="5" required placeholder="请描述您的问题或需求…"></textarea>
+      </label>
+      <button type="submit" class="btn primary span2">发送邮件</button>
+    </form>
+  </div>
+</div>
+
+<div class="card prose">
+  <h2>常见问题</h2>
+  <p><strong>店铺授权失败？</strong> 前往 <a href="{{ url_for('authorize_page') }}">店铺授权</a>，选择店铺完成 OAuth，或使用「粘贴回调 URL」。</p>
+  <p><strong>视频上传问题？</strong> 访问 <a href="{{ url_for('content_page') }}">视频上传</a> 完成 TikTok 账号授权后操作。</p>
+  <p><strong>数据与隐私？</strong> 请参阅 <a href="{{ url_for('privacy') }}">隐私政策</a> 与 <a href="{{ url_for('terms') }}">服务条款</a>。</p>
+</div>
+{% endblock %}

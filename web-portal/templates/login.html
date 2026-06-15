@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}登录 — {{ brand }}{% endblock %}
+{% block content %}
+<section class="login-page">
+  <div class="card login-card">
+    <h1>账号登录</h1>
+    <p class="muted">登录后可使用数据导出、店铺授权与视频上传等功能。</p>
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('login_page') }}" class="form-grid login-form">
+      <input type="hidden" name="next" value="{{ next_url }}"/>
+      <label>
+        用户名
+        <input type="text" name="username" value="{{ username }}" autocomplete="username" required autofocus/>
+      </label>
+      <label>
+        密码
+        <input type="password" name="password" autocomplete="current-password" required/>
+      </label>
+      <div class="span2 login-actions">
+        <button type="submit" class="btn primary">登录</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

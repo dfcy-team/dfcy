@@ -1,0 +1,29 @@
+[
+  {
+    "seller_sku": "API-MULTI-20260530-01",
+    "price": "99.00",
+    "quantity": 5,
+    "sales_attributes": [
+      { "id": "100000", "name": "Color", "value_name": "Black" },
+      { "name": "Size", "value_name": "70x70cm" }
+    ]
+  },
+  {
+    "seller_sku": "API-MULTI-20260530-02",
+    "price": "109.00",
+    "quantity": 8,
+    "sales_attributes": [
+      { "id": "100000", "name": "Color", "value_name": "Black" },
+      { "name": "Size", "value_name": "90x90cm" }
+    ]
+  },
+  {
+    "seller_sku": "API-MULTI-20260530-03",
+    "price": "99.00",
+    "quantity": 6,
+    "sales_attributes": [
+      { "id": "100000", "name": "Color", "value_name": "Grey" },
+      { "name": "Size", "value_name": "70x70cm" }
+    ]
+  }
+]

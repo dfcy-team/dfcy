@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}数据导出 · {{ brand }}{% endblock %}
+{% block content %}
+<h1>数据导出控制台</h1>
+<p class="lead">选择店铺与统计日期，后台调用 TikTok_API 脚本拉数并生成 Excel，完成后可直接下载。</p>
+
+<div class="grid two">
+  <div class="card">
+    <h2>新建导出任务</h2>
+    <form id="form-export" class="form-grid">
+      <label>导出类型
+        <select name="kind" id="export-kind">
+          <option value="analytics">店铺罗盘（产品/SKU/视频/店铺）</option>
+          <option value="finance">店铺流水（结算/付款/提现）</option>
+          <option value="orders">订单</option>
+        </select>
+      </label>
+      <label>店铺
+        <select name="shop_key" required>
+          {% for s in shops %}
+          <option value="{{ s.key }}">{{ s.key }} — {{ s.shop_name }}{% if not s.has_token %} (未授权){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>统计日期（当地自然日）
+        <input type="date" name="stat_day" required/>
+      </label>
+      <label id="wrap-types" class="span2">罗盘数据类型
+        <select name="types">
+          <option value="all">全部（产品+SKU+视频+店铺）</option>
+          <option value="product,sku">仅产品+SKU（较快）</option>
+          <option value="product">仅产品</option>
+          <option value="sku">仅 SKU</option>
+        </select>
+      </label>
+      <label class="check" id="wrap-fast">
+        <input type="checkbox" name="fast_mode" checked/>
+        快速模式（不拉每条视频详情，大幅缩短耗时）
+      </label>
+      <button type="submit" class="btn primary span2">开始导出</button>
+    </form>
+    <p class="muted">API 规则：结束日为统计日的次日。例如统计 2026-06-01，脚本使用 start=06-01, end=06-02。</p>
+  </div>
+
+  <div class="card">
+    <h2>任务状态</h2>
+    <p id="job-status" class="muted">尚未开始任务</p>
+    <pre id="job-log" class="log-box"></pre>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row-between">
+    <h2>Excel 文件下载</h2>
+    <button type="button" class="btn" id="btn-refresh-files">刷新列表</button>
+  </div>
+  <label>筛选店铺
+    <select id="file-shop-filter">
+      <option value="">全部</option>
+      {% for s in shops %}
+      <option value="{{ s.key }}">{{ s.key }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <table class="table" id="files-table">
+    <thead>
+      <tr><th>文件名</th><th>大小</th><th>时间</th><th></th></tr>
+    </thead>
+    <tbody id="files-body">
+      <tr><td colspan="4" class="muted">加载中…</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

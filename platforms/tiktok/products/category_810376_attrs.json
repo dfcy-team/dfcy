@@ -1,0 +1,86 @@
+{
+  "category_id": "810376",
+  "product_attributes": [
+    {
+      "id": "100443",
+      "values": [
+        {
+          "id": "1004667",
+          "name": "Wrinkle Resistant"
+        }
+      ]
+    },
+    {
+      "id": "100701",
+      "values": [
+        {
+          "id": "1000039",
+          "name": "Cotton"
+        }
+      ]
+    },
+    {
+      "id": "100198",
+      "values": [
+        {
+          "id": "1004314",
+          "name": "Watercolour"
+        }
+      ]
+    },
+    {
+      "id": "100398",
+      "values": [
+        {
+          "id": "1004422",
+          "name": "Antique"
+        }
+      ]
+    },
+    {
+      "id": "100957",
+      "values": [
+        {
+          "id": "1004940",
+          "name": "Customised"
+        }
+      ]
+    },
+    {
+      "id": "100401",
+      "values": [
+        {
+          "id": "1001195",
+          "name": "Hand Wash Only"
+        }
+      ]
+    },
+    {
+      "id": "100347",
+      "values": [
+        {
+          "id": "1000256",
+          "name": "1"
+        }
+      ]
+    },
+    {
+      "id": "100397",
+      "values": [
+        {
+          "id": "1001161",
+          "name": "Spring"
+        }
+      ]
+    },
+    {
+      "id": "100881",
+      "values": [
+        {
+          "id": "1004555",
+          "name": "Flat Weave"
+        }
+      ]
+    }
+  ]
+}

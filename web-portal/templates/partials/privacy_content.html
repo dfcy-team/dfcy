@@ -1,0 +1,99 @@
+<h1 id="privacy-policy">隐私政策 <span class="muted" style="font-size:1rem;font-weight:400;">/ Privacy Policy</span></h1>
+<p class="muted">最后更新 / Last updated: 2026-06-05</p>
+
+<div class="card prose">
+  <p>
+    本隐私政策说明 <strong>{{ brand }}</strong>（域名：<strong>{{ domain }}</strong>，以下简称「本应用」）
+    如何收集、使用、存储和保护通过 TikTok Shop Open API 获取的数据。
+  </p>
+  <p>
+    This Privacy Policy explains how <strong>{{ brand }}</strong> at <strong>{{ domain }}</strong>
+    collects, uses, stores, and protects data obtained through the TikTok Shop Open API.
+  </p>
+
+  <h2>1. 我们收集的数据 / Data We Collect</h2>
+  <p>在卖家完成 OAuth 授权后，本应用可能通过 TikTok Shop API 读取以下类型的数据：</p>
+  <ul>
+    <li>店铺基本信息（店铺名称、区域、授权状态等）</li>
+    <li>经营分析数据（产品、SKU、视频表现等）</li>
+    <li>订单数据（订单号、状态、金额等）</li>
+    <li>财务与流水数据（结算单、付款、提现记录等）</li>
+    <li>API 访问令牌（access_token / refresh_token）及授权元数据</li>
+  </ul>
+  <p>
+    After OAuth authorization, we may access shop profile, analytics, orders, finance records,
+    and API tokens required to call TikTok Shop Open API on the seller's behalf.
+  </p>
+
+  <h2>2. 数据用途 / How We Use Data</h2>
+  <ul>
+    <li>生成内部运营分析报表（Excel）</li>
+    <li>维护店铺授权状态与定时数据同步</li>
+    <li>排查 API 调用错误与服务可用性</li>
+    <li>We use data solely for internal reporting, authorization maintenance, and troubleshooting.</li>
+  </ul>
+
+  <h2>3. 数据存储 / Data Storage</h2>
+  <p>
+    数据保存在授权方自有服务器本地目录及受控配置文件中，不向无关第三方出售、出租或提供。
+    访问令牌存储于服务器本地配置文件，仅供本系统调用 TikTok API。
+  </p>
+  <p>
+    Data is stored on the operator's own servers. We do not sell or share shop data with unrelated
+    third parties. API tokens are stored locally and used only for authorized API calls.
+  </p>
+
+  <h2>4. 数据共享 / Data Sharing</h2>
+  <p>
+    本应用不与广告商或数据经纪人共享卖家店铺数据。仅在以下情况可能披露：
+  </p>
+  <ul>
+    <li>法律法规要求</li>
+    <li>保护本应用或授权卖家的合法权益</li>
+    <li>经卖家明确同意的情形</li>
+  </ul>
+  <p>We do not share seller data with advertisers or data brokers.</p>
+
+  <h2>5. 数据安全 / Data Security</h2>
+  <ul>
+    <li>API 请求按 TikTok Shop 规范进行签名与 HTTPS 传输</li>
+    <li>服务器访问权限受控，配置文件不对外公开</li>
+    <li>建议定期轮换应用密钥并限制运维人员访问范围</li>
+  </ul>
+
+  <h2>6. 数据保留 / Data Retention</h2>
+  <p>
+    报表与日志按内部运营需要保留。卖家撤销授权后，本应用将停止使用相关 token；
+    历史导出文件由运营方按内部制度管理，可按卖家要求协助删除（在法律允许范围内）。
+  </p>
+
+  <h2>7. 卖家权利 / Seller Rights</h2>
+  <ul>
+    <li>在 TikTok Shop 卖家中心撤销对本应用的授权</li>
+    <li>停止使用本应用的数据导出功能</li>
+    <li>联系运营方咨询数据处理相关问题</li>
+    <li>Sellers may revoke authorization in TikTok Shop Seller Center at any time.</li>
+  </ul>
+
+  <h2>8. 第三方服务 / Third-Party Services</h2>
+  <p>
+    本应用依赖 TikTok Shop Open API 及 TikTok 授权服务。卖家使用本应用亦受
+    TikTok Shop 平台条款与隐私政策约束。
+  </p>
+
+  <h2>9. 政策更新 / Policy Updates</h2>
+  <p>
+    我们可能更新本隐私政策，更新后的版本将发布于
+    <a href="https://{{ domain }}/privacy">https://{{ domain }}/privacy</a>。
+  </p>
+
+  <h2>10. 联系我们 / Contact</h2>
+  <p>
+    运营主体 / Operator: <strong>{{ company_name }}</strong><br/>
+    网站 / Website: <a href="https://{{ domain }}/">https://{{ domain }}/</a><br/>
+    联系我们 / Contact: <a href="https://{{ domain }}/contact">https://{{ domain }}/contact</a><br/>
+    服务条款 / Terms: <a href="https://{{ domain }}/terms">https://{{ domain }}/terms</a><br/>
+    电子邮箱 / Email: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a><br/>
+    Service ID: <code>{{ service_id }}</code>
+  </p>
+</div>

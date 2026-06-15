@@ -1,0 +1,732 @@
+{
+  "app": "app.env",
+  "active": "TKKJ1MY",
+  "shops": [
+    {
+      "key": "TKKJ1PH",
+      "aliases": [
+        "tkkj1ph"
+      ],
+      "config": "config_TKKJ1PH.env",
+      "label": "TKKJ1PH / TIKTOK跨境1号店PH",
+      "export_tag": "TIKTOK跨境1号店PH",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK跨境1号店PH"
+    },
+    {
+      "key": "TKKJ1TH",
+      "aliases": [
+        "tkkj1th"
+      ],
+      "config": "config_TKKJ1TH.env",
+      "label": "TKKJ1TH",
+      "export_tag": "TIKTOK跨境1号TH",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "LuminaFlex"
+    },
+    {
+      "key": "TKKJ1MY",
+      "aliases": [
+        "tkkj1my"
+      ],
+      "config": "config_TKKJ1MY.env",
+      "label": "TKKJ1MY",
+      "export_tag": "TIKTOK跨境1号MY",
+      "shop_mode": "cross_border",
+      "region": "MY",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "LuminaFlex"
+    },
+    {
+      "key": "TKKJ2PH",
+      "aliases": [
+        "tkkj2ph"
+      ],
+      "config": "config_TKKJ2PH.env",
+      "label": "TKKJ2PH / TIKTOK跨境2号店PH",
+      "export_tag": "TIKTOK跨境2号店PH",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境2号店PH"
+    },
+    {
+      "key": "TKKJ2TH",
+      "aliases": [
+        "tkkj2th"
+      ],
+      "config": "config_TKKJ2TH.env",
+      "label": "TKKJ2TH / TIKTOK跨境2号店TH",
+      "export_tag": "TIKTOK跨境2号店TH",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境2号店TH"
+    },
+    {
+      "key": "TKKJ3PH",
+      "aliases": [
+        "tkkj3ph"
+      ],
+      "config": "config_TKKJ3PH.env",
+      "label": "TKKJ3PH / TIKTOK跨境3号店PH",
+      "export_tag": "TIKTOK跨境3号店PH",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK跨境3号店PH"
+    },
+    {
+      "key": "TKKJ3TH",
+      "aliases": [
+        "tkkj3th"
+      ],
+      "config": "config_TKKJ3TH.env",
+      "label": "TKKJ3TH / TIKTOK跨境3号店TH",
+      "export_tag": "TIKTOK跨境3号店TH",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境3号店TH"
+    },
+    {
+      "key": "TKKJ3MY",
+      "aliases": [
+        "tkkj3my"
+      ],
+      "config": "config_TKKJ3MY.env",
+      "label": "TKKJ3MY",
+      "export_tag": "TIKTOK跨境3号MY",
+      "shop_mode": "cross_border",
+      "region": "MY",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "Lunava MY Store"
+    },
+    {
+      "key": "TKKJ4PH",
+      "aliases": [
+        "tkkj4ph"
+      ],
+      "config": "config_TKKJ4PH.env",
+      "label": "TKKJ4PH",
+      "export_tag": "TIKTOK跨境4号PH",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "Tropical Home"
+    },
+    {
+      "key": "TKKJ4TH",
+      "aliases": [
+        "tkkj4th"
+      ],
+      "config": "config_TKKJ4TH.env",
+      "label": "TKKJ4TH / TIKTOK跨境4号店TH",
+      "export_tag": "TIKTOK跨境4号店TH",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境4号店TH"
+    },
+    {
+      "key": "TKKJ5PH",
+      "aliases": [
+        "tkkj5ph"
+      ],
+      "config": "config_TKKJ5PH.env",
+      "label": "TKKJ5PH / TIKTOK跨境5号店PH",
+      "export_tag": "TIKTOK跨境5号店PH",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK跨境5号店PH"
+    },
+    {
+      "key": "TKKJ5TH",
+      "aliases": [
+        "tkkj5th"
+      ],
+      "config": "config_TKKJ5TH.env",
+      "label": "TKKJ5TH / TIKTOK跨境5号店TH",
+      "export_tag": "TIKTOK跨境5号店TH",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境5号店TH"
+    },
+    {
+      "key": "TKKJ6PH",
+      "aliases": [
+        "tkkj6ph"
+      ],
+      "config": "config_TKKJ6PH.env",
+      "label": "TKKJ6PH / TIKTOK跨境6号店PH",
+      "export_tag": "TIKTOK跨境6号店PH",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境6号店PH"
+    },
+    {
+      "key": "TKKJ6TH",
+      "aliases": [
+        "tkkj6th"
+      ],
+      "config": "config_TKKJ6TH.env",
+      "label": "TKKJ6TH / TIKTOK跨境6号店TH",
+      "export_tag": "TIKTOK跨境6号店TH",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境6号店TH"
+    },
+    {
+      "key": "TKKJ6MY",
+      "aliases": [
+        "tkkj6my"
+      ],
+      "config": "config_TKKJ6MY.env",
+      "label": "TKKJ6MY / TIKTOK跨境6号店MY",
+      "export_tag": "TIKTOK跨境6号店MY",
+      "shop_mode": "cross_border",
+      "region": "MY",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK跨境6号店MY"
+    },
+    {
+      "key": "TK1PH",
+      "aliases": [
+        "tk1ph"
+      ],
+      "config": "config_TK1PH.env",
+      "label": "TK1PH / TIKTOK1号店PH",
+      "export_tag": "TIKTOK1号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK1号店PH"
+    },
+    {
+      "key": "TK2PH",
+      "aliases": [
+        "tk2ph"
+      ],
+      "config": "config_TK2PH.env",
+      "label": "TK2PH / TIKTOK2号店PH",
+      "export_tag": "TIKTOK2号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "Lunava Offical Store"
+    },
+    {
+      "key": "TK3PH",
+      "aliases": [
+        "tk3ph"
+      ],
+      "config": "config_TK3PH.env",
+      "label": "TK3PH / TIKTOK3号店PH",
+      "export_tag": "TIKTOK3号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK3号店PH"
+    },
+    {
+      "key": "TK4PH",
+      "aliases": [
+        "tk4ph"
+      ],
+      "config": "config_TK4PH.env",
+      "label": "TK4PH",
+      "export_tag": "TIKTOK4号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "Luminaflex Branch"
+    },
+    {
+      "key": "TK5PH",
+      "aliases": [
+        "tk5ph"
+      ],
+      "config": "config_TK5PH.env",
+      "label": "TK5PH / TIKTOK5号店PH",
+      "export_tag": "TIKTOK5号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": false,
+      "notes": "TIKTOK5号店PH"
+    },
+    {
+      "key": "TK6PH",
+      "aliases": [
+        "tk6ph"
+      ],
+      "config": "config_TK6PH.env",
+      "label": "TK6PH / TIKTOK6号店PH",
+      "export_tag": "TIKTOK6号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK6号店PH"
+    },
+    {
+      "key": "TK7PH",
+      "aliases": [
+        "tk7ph"
+      ],
+      "config": "config_TK7PH.env",
+      "label": "TK7PH / TIKTOK7号店PH",
+      "export_tag": "TIKTOK7号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK7号店PH"
+    },
+    {
+      "key": "TK8PH",
+      "aliases": [
+        "tk8ph"
+      ],
+      "config": "config_TK8PH.env",
+      "label": "TK8PH / TIKTOK8号店PH",
+      "export_tag": "TIKTOK8号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "TIKTOK8号店PH"
+    },
+    {
+      "key": "SP8PH",
+      "aliases": [
+        "sp8ph"
+      ],
+      "config": "config_SP8PH.env",
+      "label": "SP8PH / SHOPEE8号店PH",
+      "export_tag": "SHOPEE8号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE8号店PH"
+    },
+    {
+      "key": "SP9PH",
+      "aliases": [
+        "sp9ph"
+      ],
+      "config": "config_SP9PH.env",
+      "label": "SP9PH / SHOPEE9号店PH",
+      "export_tag": "SHOPEE9号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE9号店PH"
+    },
+    {
+      "key": "SP10PH",
+      "aliases": [
+        "sp10ph"
+      ],
+      "config": "config_SP10PH.env",
+      "label": "SP10PH / SHOPEE10号店PH",
+      "export_tag": "SHOPEE10号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE10号店PH"
+    },
+    {
+      "key": "SP11PH",
+      "aliases": [
+        "sp11ph"
+      ],
+      "config": "config_SP11PH.env",
+      "label": "SP11PH / SHOPEE11号店PH",
+      "export_tag": "SHOPEE11号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE11号店PH"
+    },
+    {
+      "key": "SP13PH",
+      "aliases": [
+        "sp13ph"
+      ],
+      "config": "config_SP13PH.env",
+      "label": "SP13PH / SHOPEE13号店PH",
+      "export_tag": "SHOPEE13号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE13号店PH"
+    },
+    {
+      "key": "SP14PH",
+      "aliases": [
+        "sp14ph"
+      ],
+      "config": "config_SP14PH.env",
+      "label": "SP14PH / SHOPEE14号店PH",
+      "export_tag": "SHOPEE14号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE14号店PH"
+    },
+    {
+      "key": "SP21PH",
+      "aliases": [
+        "sp21ph"
+      ],
+      "config": "config_SP21PH.env",
+      "label": "SP21PH / SHOPEE21号店PH",
+      "export_tag": "SHOPEE21号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE21号店PH"
+    },
+    {
+      "key": "SP22PH",
+      "aliases": [
+        "sp22ph"
+      ],
+      "config": "config_SP22PH.env",
+      "label": "SP22PH / SHOPEE22号店PH",
+      "export_tag": "SHOPEE22号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE22号店PH"
+    },
+    {
+      "key": "SP23PH",
+      "aliases": [
+        "sp23ph"
+      ],
+      "config": "config_SP23PH.env",
+      "label": "SP23PH / SHOPEE23号店PH",
+      "export_tag": "SHOPEE23号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE23号店PH"
+    },
+    {
+      "key": "SP24PH",
+      "aliases": [
+        "sp24ph"
+      ],
+      "config": "config_SP24PH.env",
+      "label": "SP24PH / SHOPEE24号店PH",
+      "export_tag": "SHOPEE24号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE24号店PH"
+    },
+    {
+      "key": "SP25PH",
+      "aliases": [
+        "sp25ph"
+      ],
+      "config": "config_SP25PH.env",
+      "label": "SP25PH / SHOPEE25号店PH",
+      "export_tag": "SHOPEE25号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE25号店PH"
+    },
+    {
+      "key": "SP3TH",
+      "aliases": [
+        "sp3th"
+      ],
+      "config": "config_SP3TH.env",
+      "label": "SP3TH / SHOPEE3号店TH",
+      "export_tag": "SHOPEE3号店TH",
+      "shop_mode": "local",
+      "region": "TH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE3号店TH"
+    },
+    {
+      "key": "SPKJ1PH1",
+      "aliases": [
+        "spkj1ph1"
+      ],
+      "config": "config_SPKJ1PH1.env",
+      "label": "SPKJ1PH1 / SHOPEE跨境1号店PH1",
+      "export_tag": "SHOPEE跨境1号店PH1",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE跨境1号店PH1"
+    },
+    {
+      "key": "SPKJ1PH2",
+      "aliases": [
+        "spkj1ph2"
+      ],
+      "config": "config_SPKJ1PH2.env",
+      "label": "SPKJ1PH2 / SHOPEE跨境1号店PH2",
+      "export_tag": "SHOPEE跨境1号店PH2",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE跨境1号店PH2"
+    },
+    {
+      "key": "SPKJ1PH3",
+      "aliases": [
+        "spkj1ph3"
+      ],
+      "config": "config_SPKJ1PH3.env",
+      "label": "SPKJ1PH3 / SHOPEE跨境1号店PH3",
+      "export_tag": "SHOPEE跨境1号店PH3",
+      "shop_mode": "cross_border",
+      "region": "PH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE跨境1号店PH3"
+    },
+    {
+      "key": "SPKJ1TH1",
+      "aliases": [
+        "spkj1th1"
+      ],
+      "config": "config_SPKJ1TH1.env",
+      "label": "SPKJ1TH1 / SHOPEE跨境1号店TH1",
+      "export_tag": "SHOPEE跨境1号店TH1",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE跨境1号店TH1"
+    },
+    {
+      "key": "SPKJ1TH2",
+      "aliases": [
+        "spkj1th2"
+      ],
+      "config": "config_SPKJ1TH2.env",
+      "label": "SPKJ1TH2 / SHOPEE跨境1号店TH2",
+      "export_tag": "SHOPEE跨境1号店TH2",
+      "shop_mode": "cross_border",
+      "region": "TH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE跨境1号店TH2"
+    },
+    {
+      "key": "SPKJ1MY1",
+      "aliases": [
+        "spkj1my1"
+      ],
+      "config": "config_SPKJ1MY1.env",
+      "label": "SPKJ1MY1 / SHOPEE跨境1号店MY1",
+      "export_tag": "SHOPEE跨境1号店MY1",
+      "shop_mode": "cross_border",
+      "region": "MY",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE跨境1号店MY1"
+    },
+    {
+      "key": "SP1MY",
+      "aliases": [
+        "sp1my"
+      ],
+      "config": "config_SP1MY.env",
+      "label": "SP1MY / SHOPEE1号店MY",
+      "export_tag": "SHOPEE1号店MY",
+      "shop_mode": "local",
+      "region": "MY",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE1号店MY"
+    },
+    {
+      "key": "LZ1PH",
+      "aliases": [
+        "lz1ph"
+      ],
+      "config": "config_LZ1PH.env",
+      "label": "LZ1PH / LAZADA1号店PH",
+      "export_tag": "LAZADA1号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "lazada",
+      "enabled": false,
+      "notes": "LAZADA1号店PH"
+    },
+    {
+      "key": "LZ7PH",
+      "aliases": [
+        "lz7ph"
+      ],
+      "config": "config_LZ7PH.env",
+      "label": "LZ7PH / LAZADA7号店PH",
+      "export_tag": "LAZADA7号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "lazada",
+      "enabled": false,
+      "notes": "LAZADA7号店PH"
+    },
+    {
+      "key": "LZ9PH",
+      "aliases": [
+        "lz9ph"
+      ],
+      "config": "config_LZ9PH.env",
+      "label": "LZ9PH / LAZADA9号店PH",
+      "export_tag": "LAZADA9号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "lazada",
+      "enabled": false,
+      "notes": "LAZADA9号店PH"
+    },
+    {
+      "key": "LZ10PH",
+      "aliases": [
+        "lz10ph"
+      ],
+      "config": "config_LZ10PH.env",
+      "label": "LZ10PH / LAZADA10号店PH",
+      "export_tag": "LAZADA10号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "lazada",
+      "enabled": false,
+      "notes": "LAZADA10号店PH"
+    },
+    {
+      "key": "TK1TH",
+      "aliases": [
+        "tk1th"
+      ],
+      "config": "config_TK1TH.env",
+      "label": "TK1TH",
+      "export_tag": "TIKTOK1号店TH",
+      "shop_mode": "local",
+      "region": "TH",
+      "platform": "tiktok",
+      "enabled": true,
+      "notes": "LUNAVA Picks"
+    },
+    {
+      "key": "TEMU1PH",
+      "aliases": [
+        "temu1ph"
+      ],
+      "config": "config_TEMU1PH.env",
+      "label": "TEMU1PH / TUME-JAIJUPH",
+      "export_tag": "TUME-JAIJUPH",
+      "shop_mode": "local",
+      "region": "PH",
+      "platform": "other",
+      "enabled": false,
+      "notes": "TUME-JAIJUPH"
+    },
+    {
+      "key": "SPKJ2MY1",
+      "aliases": [
+        "spkj2my1"
+      ],
+      "config": "config_SPKJ2MY1.env",
+      "label": "SPKJ2MY1 / SHOPEE跨境2号店MY1",
+      "export_tag": "SHOPEE跨境2号店MY1",
+      "shop_mode": "cross_border",
+      "region": "MY",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE跨境2号店MY1"
+    },
+    {
+      "key": "SP5TH",
+      "aliases": [
+        "sp5th"
+      ],
+      "config": "config_SP5TH.env",
+      "label": "SP5TH / SHOPEE5号店TH",
+      "export_tag": "SHOPEE5号店TH",
+      "shop_mode": "local",
+      "region": "TH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE5号店TH"
+    },
+    {
+      "key": "SP7TH",
+      "aliases": [
+        "sp7th"
+      ],
+      "config": "config_SP7TH.env",
+      "label": "SP7TH / SHOPEE7号店TH",
+      "export_tag": "SHOPEE7号店TH",
+      "shop_mode": "local",
+      "region": "TH",
+      "platform": "shopee",
+      "enabled": false,
+      "notes": "SHOPEE7号店TH"
+    },
+    {
+      "key": "TKKJ4PH",
+      "aliases": [
+        "tkkj4ph"
+      ],
+      "config": "config_TKKJ4PH.env",
+      "label": "TKKJ4PH",
+      "export_tag": "TIKTOK跨境4号店PH",
+      "shop_mode": "local",
+      "region": "PH",
+      "notes": ""
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}店铺授权 · {{ brand }}{% endblock %}
+{% block content %}
+<section class="page-header">
+  <h1>店铺授权</h1>
+  <p class="lead">选择店铺并点击授权，登录 TikTok Shop 同意后即可完成绑定。</p>
+</section>
+
+<div class="card">
+  <h2>授权步骤</h2>
+  <ol class="steps">
+    <li>选择或填写店铺（如 <code>TKKJ1TH</code> 泰国、<code>TKKJ4PH</code> 菲律宾）。</li>
+    <li>请先 <a href="{{ url_for('login_page', next=url_for('authorize_page')) }}">登录网站</a>，再点击「前往 TikTok 授权」。</li>
+    <li>授权链接请使用 <code>https://</code>；回调 URL 里的 <code>code</code> 只能用一次，失效后需重新授权。</li>
+    <li>若自动跳回并显示成功，即可使用 <a href="{{ url_for('dashboard') }}">数据导出</a>。</li>
+    <li>若跳转到 <code>/callback?app_key=...&amp;code=...</code> 且提示「请从授权页选择店铺」，请复制地址栏 URL，在下方「粘贴回调 URL 授权」中选择店铺并提交。</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h2>开始授权</h2>
+  <form id="form-open-auth" class="form-grid">
+    <label class="span2">店铺
+      <select name="shop_key" id="shop-key" required>
+        <option value="">— 请选择店铺 —</option>
+        {% for s in shops %}
+        <option value="{{ s.key }}" {% if prefill_shop == s.key %}selected{% endif %}>
+          {{ s.key }} — {{ s.shop_name }}{% if s.has_token %}（已授权）{% endif %}
+        </option>
+        {% endfor %}
+        <option value="__custom__">手动输入店键…</option>
+      </select>
+    </label>
+    <label class="span2" id="wrap-custom-key" style="display:none;">
+      店铺键
+      <input type="text" id="custom-shop-key" placeholder="TKKJ4PH" pattern="[A-Za-z0-9_]+"/>
+    </label>
+    <button type="button" class="btn primary span2" id="btn-open-tiktok">前往 TikTok 授权</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>粘贴回调 URL 授权</h2>
+
+  <div class="auth-quick-box">
+    <h3>一键授权（推荐，全部 TikTok 店铺）</h3>
+    <p class="muted" style="margin:0 0 10px;">
+      从下面链接进入 TikTok 授权，回调 URL 会带 <code>state=店键</code>，系统可<strong>自动绑定</strong>，不必再粘贴。
+      若你从 TikTok 后台或其它入口授权，回调往往<strong>没有 state</strong>，就会落到本页「粘贴 URL」流程。
+    </p>
+    <div class="auth-link-grid">
+      {% for item in auth_links %}
+      <a class="auth-link-chip{% if item.has_token %} is-ok{% endif %}" href="{{ item.url }}" data-key="{{ item.key }}" title="{{ item.label }}">
+        <span class="auth-link-key">{{ item.key }}</span>
+        <span class="auth-link-meta">{{ item.region }}{% if item.has_token %} · 已授权{% else %} · 待授权{% endif %}</span>
+      </a>
+      {% else %}
+      <span class="muted">暂无 TikTok 店铺</span>
+      {% endfor %}
+    </div>
+    <p class="muted auth-quick-tip">提示：先登录本站；支持 PH / TH / MY 等全部区域；<code>code</code> 只能用一次，授权后不要反复打开同一回调链接。</p>
+  </div>
+
+  <hr class="card-divider"/>
+
+  <h3>备用：粘贴回调 URL</h3>
+  <p class="muted" style="margin:0 0 12px;">
+    仅当回调里<strong>没有 state</strong>、或自动绑定失败时使用。请选店铺并粘贴<strong>浏览器地址栏完整 https URL</strong>（含 <code>code=</code>），立即点「解析并保存」。
+  </p>
+  <form id="form-callback-auth" class="form-grid">
+    <label class="span2">店铺
+      <select name="shop_key_paste" id="shop-key-paste" required>
+        <option value="">— 请选择店铺 —</option>
+        {% for s in shops %}
+        <option value="{{ s.key }}" {% if prefill_shop == s.key %}selected{% endif %}>
+          {{ s.key }} — {{ s.shop_name }}{% if s.has_token %}（已授权）{% endif %}
+        </option>
+        {% endfor %}
+        <option value="__custom__">手动输入店键…</option>
+      </select>
+    </label>
+    <label class="span2" id="wrap-custom-key-paste" style="display:none;">
+      店铺键
+      <input type="text" id="custom-shop-key-paste" placeholder="TKKJ4PH" pattern="[A-Za-z0-9_]+"/>
+    </label>
+    <label class="span2">TikTok 回调 URL
+      <textarea name="callback_url" id="callback-url" rows="3" placeholder="https://dingfengchuangyu.top/callback?app_key=...&amp;code=...&amp;shop_region=PH" required>{{ prefill_callback }}</textarea>
+    </label>
+    <label>多店铺时选第几个（可选）
+      <input type="number" name="pick_index" id="pick-index" min="0" placeholder="默认 0"/>
+    </label>
+    <label class="span2">
+      <input type="checkbox" name="create_if_missing" id="create-if-missing" checked/>
+      店铺未登记时自动创建配置
+    </label>
+    <div class="span2">
+      <button type="button" class="btn" id="btn-preview-url">预览解析</button>
+      <button type="submit" class="btn primary">解析并保存授权</button>
+    </div>
+  </form>
+  <div id="callback-preview" class="muted" style="margin-top:10px;"></div>
+  <div id="callback-result" style="margin-top:10px;"></div>
+</div>
+
+{% if request.args.get('error') and not auto_result %}
+<div class="card alert">
+  <h2>授权未完成</h2>
+  <p>{{ request.args.get('error') }}</p>
+</div>
+{% endif %}
+
+{% if auto_result %}
+<div class="card {% if auto_result.ok %}ok{% else %}alert{% endif %}">
+  <h2>{% if auto_result.ok %}授权成功{% else %}授权失败{% endif %}</h2>
+  {% if auto_result.ok %}
+  <p>店铺 <code>{{ auto_result.shop_key }}</code> 已完成授权，可以开始导出数据。</p>
+  <p><a class="btn primary" href="{{ url_for('dashboard') }}">去导出数据</a></p>
+  {% else %}
+  <p>{{ auto_result.error }}</p>
+  <p><a class="btn" href="{{ url_for('authorize_page') }}">重新授权</a></p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>店铺状态</h2>
+  <table class="table">
+    <thead><tr><th>店键</th><th>名称</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for s in shops %}
+      <tr>
+        <td><code>{{ s.key }}</code></td>
+        <td>{{ s.shop_name }}</td>
+        <td>{% if s.has_token %}<span class="badge ok">已授权</span>{% else %}<span class="badge warn">待授权</span>{% endif %}</td>
+        <td>
+          <button type="button" class="btn btn-sm open-auth-shop" data-key="{{ s.key }}">去授权</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">暂无店铺</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/authorize.js') }}"></script>
+{% endblock %}

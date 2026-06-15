@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}部署说明 · {{ brand }}{% endblock %}
+{% block content %}
+<h1>部署状态 <span class="badge ok">运行中</span></h1>
+<p>本页对应 <code>http://{{ domain }}{{ request.path }}</code>，表示 Web 服务已上线。</p>
+
+<div class="grid two">
+  <div class="card">
+    <h2>访问地址</h2>
+    <ul class="kv">
+      <li><span>首页</span><a href="/">/</a></li>
+      <li><span>控制台</span><a href="/dashboard">/dashboard</a></li>
+      <li><span>OAuth 回调</span><a href="{{ callback_url }}">{{ callback_url }}</a></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>服务参数</h2>
+    <ul class="kv">
+      <li><span>监听</span><code>{{ listen }}</code></li>
+      <li><span>项目代码</span><code class="small">{{ project_root }}</code></li>
+    </ul>
+  </div>
+</div>
+
+<div class="card">
+  <h2>启动方式</h2>
+  <pre>cd C:\Users\Administrator\Desktop\TikTok_API\web-portal
+右键 start.bat → 以管理员身份运行（端口 80）</pre>
+  <p class="muted">域名 dingfengchuangyu.top 需解析到本机，安全组放行 TCP 80。</p>
+</div>
+{% endblock %}

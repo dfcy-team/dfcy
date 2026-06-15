@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="description" content="{{ company_name }} — TikTok Shop 数据分析与内容发布平台"/>
+  <title>{% block title %}{{ brand }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="logo" href="{{ url_for('index') }}">
+        <span class="logo-mark">DF</span>
+        <span>{{ brand }}</span>
+      </a>
+      <button type="button" class="nav-toggle" id="nav-toggle" aria-label="菜单">☰ 菜单</button>
+      <nav id="main-nav">
+        <a href="{{ url_for('index') }}">首页</a>
+        <a href="{{ url_for('about') }}">关于我们</a>
+        <a href="{{ url_for('contact') }}">联系我们</a>
+        {% if current_user %}
+        <a href="{{ url_for('content_page') }}">视频上传</a>
+        <a href="{{ url_for('dashboard') }}">数据导出</a>
+        <a href="{{ url_for('authorize_page') }}">店铺授权</a>
+        {% endif %}
+        <a href="{{ url_for('terms') }}">服务条款</a>
+        <a href="{{ url_for('privacy') }}">隐私政策</a>
+        <span class="topbar-user">
+          {% if current_user %}
+          <span class="user-pill">{{ current_user.display_name or current_user.username }}</span>
+          <a href="{{ url_for('logout') }}">退出</a>
+          {% else %}
+          <a href="{{ url_for('login_page') }}" class="nav-cta">登录</a>
+          {% endif %}
+        </span>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">{{ brand }}</div>
+          <p class="footer-desc">
+            {{ company_name }} 旗下企业级 TikTok 运营平台，提供店铺数据分析、报表导出与视频内容发布服务。
+          </p>
+        </div>
+        <div>
+          <h4>产品</h4>
+          <ul class="footer-links">
+            <li><a href="{{ url_for('dashboard') }}">数据导出</a></li>
+            <li><a href="{{ url_for('content_page') }}">视频上传</a></li>
+            <li><a href="{{ url_for('authorize_page') }}">店铺授权</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>公司</h4>
+          <ul class="footer-links">
+            <li><a href="{{ url_for('about') }}">关于我们</a></li>
+            <li><a href="{{ url_for('contact') }}">联系我们</a></li>
+            <li><a href="{{ url_for('terms') }}">服务条款</a></li>
+            <li><a href="{{ url_for('privacy') }}">隐私政策</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© {{ company_name }} · {{ domain }}</span>
+        <span><a href="mailto:{{ contact_email }}">{{ contact_email }}</a></span>
+      </div>
+    </div>
+  </footer>
+  <script>
+    document.getElementById("nav-toggle")?.addEventListener("click", function () {
+      document.getElementById("main-nav")?.classList.toggle("open");
+    });
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

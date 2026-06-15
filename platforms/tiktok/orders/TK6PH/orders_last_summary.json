@@ -1,0 +1,65 @@
+{
+  "time": "2026-06-03T14:57:48",
+  "list": {
+    "total_count": 5,
+    "summaries": [
+      {
+        "order_id": "584305792828605483",
+        "status": "IN_TRANSIT",
+        "create_time": 1780306971,
+        "update_time": 1780461625,
+        "currency": "PHP",
+        "total_amount": "0",
+        "buyer_email_masked": "v4***@scs2.tiktok.com",
+        "tracking": "JT0018723265759",
+        "item_count": 1
+      },
+      {
+        "order_id": "584305827841214312",
+        "status": "DELIVERED",
+        "create_time": 1780306853,
+        "update_time": 1780449554,
+        "currency": "PHP",
+        "total_amount": "0",
+        "buyer_email_masked": "v4***@scs2.tiktok.com",
+        "tracking": "JT0018722499490",
+        "item_count": 1
+      },
+      {
+        "order_id": "584305516339496727",
+        "status": "IN_TRANSIT",
+        "create_time": 1780306573,
+        "update_time": 1780463914,
+        "currency": "PHP",
+        "total_amount": "0",
+        "buyer_email_masked": "v4***@scs2.tiktok.com",
+        "tracking": "JT0018723185038",
+        "item_count": 1
+      },
+      {
+        "order_id": "584305701220746449",
+        "status": "IN_TRANSIT",
+        "create_time": 1780306507,
+        "update_time": 1780460683,
+        "currency": "PHP",
+        "total_amount": "0",
+        "buyer_email_masked": "v4***@scs2.tiktok.com",
+        "tracking": "JT0018724220555",
+        "item_count": 1
+      },
+      {
+        "order_id": "584305712882812427",
+        "status": "DELIVERED",
+        "create_time": 1780306441,
+        "update_time": 1780469500,
+        "currency": "PHP",
+        "total_amount": "0",
+        "buyer_email_masked": "v4***@scs2.tiktok.com",
+        "tracking": "JT0018724819623",
+        "item_count": 1
+      }
+    ],
+    "raw_count": 5
+  },
+  "details": []
+}

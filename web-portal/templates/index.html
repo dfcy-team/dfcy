@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}首页 · {{ brand }}{% endblock %}
+{% block content %}
+<section class="site-hero">
+  <span class="hero-badge">企业级 TikTok 运营平台</span>
+  <h1>{{ brand }}</h1>
+  <p class="lead">
+    {{ company_name }} 为已授权卖家与内部营销团队提供
+    TikTok Shop 数据分析、Excel 报表导出，以及 TikTok 内容发布能力。
+  </p>
+  <div class="hero-actions">
+    <a class="btn primary" href="{{ url_for('dashboard') }}">进入数据导出</a>
+    <a class="btn" href="{{ url_for('content_page') }}">视频上传</a>
+    <a class="btn" href="{{ url_for('authorize_page') }}">店铺授权</a>
+  </div>
+</section>
+
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-num">{{ shop_count }}</div>
+    <div class="stat-label">登记店铺</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ authorized_count }}</div>
+    <div class="stat-label">已授权店铺</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">2</div>
+    <div class="stat-label">核心产品模块</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">HTTPS</div>
+    <div class="stat-label">全站安全加密</div>
+  </div>
+</div>
+
+<p class="section-title">核心能力</p>
+<div class="grid three">
+  <div class="card feature-card">
+    <div class="feature-icon shop">📊</div>
+    <h2>TikTok Shop 数据分析</h2>
+    <p class="muted">授权后读取店铺经营、订单与财务数据，一键生成 Excel 报表，覆盖菲律宾等市场本土店与跨境店。</p>
+    <a class="feature-link" href="{{ url_for('dashboard') }}">进入控制台 →</a>
+  </div>
+  <div class="card feature-card">
+    <div class="feature-icon video">🎬</div>
+    <h2>鼎峰TK内容管家</h2>
+    <p class="muted">通过 Content Posting API，将本地视频上传至 TikTok 收件箱草稿，或发布至已授权创作者账号。</p>
+    <a class="feature-link" href="{{ url_for('content_page') }}">视频上传 →</a>
+  </div>
+  <div class="card feature-card">
+    <div class="feature-icon shield">🔒</div>
+    <h2>安全合规</h2>
+    <p class="muted">OAuth 官方授权接入，数据仅用于内部运营，不出售、不向无关第三方提供，公开条款与隐私政策。</p>
+    <a class="feature-link" href="{{ url_for('privacy') }}">隐私政策 →</a>
+  </div>
+</div>
+
+<div class="grid two">
+  <div class="card">
+    <h2>平台概览</h2>
+    <ul class="kv">
+      <li><span>运营主体</span><strong>{{ company_name }}</strong></li>
+      <li><span>官方网站</span><a href="{{ site_base }}">{{ domain }}</a></li>
+      <li><span>联系邮箱</span><a href="mailto:{{ contact_email }}">{{ contact_email }}</a></li>
+      <li><span>Service ID</span><code>{{ service_id }}</code></li>
+      <li><span>内容发布</span><a href="{{ url_for('content_page') }}">/content</a></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>如何开始使用</h2>
+    <ol class="steps">
+      <li>由企业管理员分配权限（不对外开放注册）。</li>
+      <li><strong>店铺数据</strong>：<a href="{{ url_for('authorize_page') }}">店铺授权</a> → 数据导出。</li>
+      <li><strong>视频发布</strong>：<a href="{{ url_for('content_page') }}">视频上传</a> → TikTok 授权。</li>
+      <li>需要帮助？<a href="{{ url_for('contact') }}">联系我们</a></li>
+    </ol>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,81 @@
+<h1 id="terms-of-service">服务条款 <span class="muted" style="font-size:1rem;font-weight:400;">/ Terms of Service</span></h1>
+<p class="muted">最后更新 / Last updated: 2026-06-05</p>
+
+<div class="card prose">
+  <p>
+    欢迎使用 <strong>{{ brand }}</strong>（以下简称「本应用」）。本应用由
+    <strong>dingfengchuangyu.top</strong> 运营，面向已完成 TikTok Shop OAuth 授权的卖家，
+    提供店铺数据分析与 Excel 报表导出服务。
+  </p>
+  <p>
+    Welcome to <strong>{{ brand }}</strong> (the "Application"), operated at
+    <strong>dingfengchuangyu.top</strong>. The Application provides authorized TikTok Shop sellers
+    with analytics and Excel report export services.
+  </p>
+
+  <h2>1. 服务说明 / Service Description</h2>
+  <p>
+    本应用通过 TikTok Shop Open API，在卖家主动授权后读取其店铺的经营分析、订单与财务数据，
+    并生成内部运营报表。本应用不面向消费者销售商品，不提供支付或物流功能。
+  </p>
+  <p>
+    The Application accesses shop analytics, order, and finance data via the TikTok Shop Open API
+    only after the seller grants OAuth authorization. The Application is an internal business tool
+    and does not sell products to consumers.
+  </p>
+
+  <h2>2. 授权与账户 / Authorization</h2>
+  <ul>
+    <li>卖家须在 TikTok Shop Partner Center 完成应用授权后方可使用相关功能。</li>
+    <li>卖家应确保其授权行为符合 TikTok Shop 平台规则及当地法律法规。</li>
+    <li>卖家可随时在 TikTok Shop 卖家中心撤销对本应用的授权。</li>
+    <li>Sellers must authorize the Application through TikTok Shop before using data features.</li>
+    <li>Sellers may revoke authorization at any time in TikTok Shop Seller Center.</li>
+  </ul>
+
+  <h2>3. 使用限制 / Acceptable Use</h2>
+  <ul>
+    <li>不得将本应用用于任何违法、欺诈或侵犯第三方权利的行为。</li>
+    <li>不得尝试绕过 TikTok API 安全机制或滥用访问令牌。</li>
+    <li>不得将获取的数据出售给无关第三方。</li>
+    <li>Do not misuse API tokens, circumvent security controls, or resell shop data to third parties.</li>
+  </ul>
+
+  <h2>4. 数据与隐私 / Data &amp; Privacy</h2>
+  <p>
+    本应用的数据收集与使用方式详见
+    <a href="{{ url_for('privacy') }}">隐私政策 / Privacy Policy</a>
+    （<code>https://{{ domain }}/privacy</code>）。
+  </p>
+
+  <h2>5. 免责声明 / Disclaimer</h2>
+  <p>
+    本应用按「现状」提供。因 TikTok API 变更、网络故障、授权失效或卖家自身操作导致的服务中断或数据差异，
+    运营方不承担超出法律强制规定范围的责任。
+  </p>
+  <p>
+    The Application is provided "as is". We are not liable for interruptions caused by TikTok API
+    changes, network issues, revoked authorization, or seller operations beyond mandatory legal limits.
+  </p>
+
+  <h2>6. 服务变更与终止 / Changes &amp; Termination</h2>
+  <p>
+    运营方有权更新本服务条款。重大变更将在本页面公布。卖家撤销授权或运营方停止服务后，
+    相关 API 访问将终止。
+  </p>
+
+  <h2>7. 适用法律 / Governing Law</h2>
+  <p>
+    本条款受运营方所在地适用法律管辖。如与 TikTok Shop 平台协议冲突，以 TikTok Shop 平台协议为准。
+  </p>
+
+  <h2>8. 联系我们 / Contact</h2>
+  <p>
+    运营主体 / Operator: <strong>{{ company_name }}</strong><br/>
+    网站 / Website: <a href="https://{{ domain }}/">https://{{ domain }}/</a><br/>
+    联系我们 / Contact: <a href="https://{{ domain }}/contact">https://{{ domain }}/contact</a><br/>
+    隐私政策 / Privacy Policy: <a href="https://{{ domain }}/privacy">https://{{ domain }}/privacy</a><br/>
+    电子邮箱 / Email: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a><br/>
+    Service ID: <code>{{ service_id }}</code>
+  </p>
+</div>

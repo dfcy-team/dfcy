@@ -1,0 +1,643 @@
+{
+  "orders": [
+    {
+      "buyer_email": "v4bGYUWHUIHLFG5GNVPEMRMUFJ72Y@scs2.tiktok.com",
+      "buyer_message": "",
+      "cancel_order_sla_time": 1780588799,
+      "collection_due_time": 1780588799,
+      "collection_time": 1780380362,
+      "commerce_platform": "TIKTOK_SHOP",
+      "create_time": 1780306971,
+      "delivery_option_id": "7062707930285475586",
+      "delivery_option_name": "Standard shipping",
+      "delivery_type": "HOME_DELIVERY",
+      "fulfillment_priority_level": 600,
+      "fulfillment_type": "FULFILLMENT_BY_SELLER",
+      "has_updated_recipient_address": false,
+      "id": "584305792828605483",
+      "is_cod": false,
+      "is_on_hold_order": false,
+      "is_replacement_order": false,
+      "is_sample_order": true,
+      "line_items": [
+        {
+          "currency": "PHP",
+          "display_status": "IN_TRANSIT",
+          "gift_retail_price": "2200",
+          "id": "584305792828736555",
+          "is_gift": false,
+          "original_price": "0",
+          "package_id": "1198361139763905579",
+          "package_status": "FULFILLING",
+          "platform_discount": "0",
+          "product_id": "1734452917660911274",
+          "product_name": "Home-Set New Sofa Cover L Shape Universal  Elastic Sofa Cover L Shape 1 2 3 4 Seater",
+          "rts_time": 1780326162,
+          "sale_price": "0",
+          "seller_discount": "0",
+          "seller_sku": "HY154-KK-I",
+          "shipping_provider_id": "6841743441349706241",
+          "shipping_provider_name": "J&T Express",
+          "sku_id": "1734452916168197802",
+          "sku_image": "https://p16-oec-va.ibyteimg.com/tos-maliva-i-o3syd03w52-us/c30db7ce59cd480994f64e05a21d37d4~tplv-o3syd03w52-origin-jpeg.jpeg?dr=15568&t=555f072d&ps=933b5bde&shp=54477afb&shcp=3c3d9ffb&idc=my2&from=1413970683",
+          "sku_name": "Khaki, 90×210cm",
+          "sku_type": "UNKNOWN",
+          "tracking_number": "JT0018723265759"
+        }
+      ],
+      "order_type": "SELLER_FUND_FREE_SAMPLE",
+      "packages": [
+        {
+          "id": "1198361139763905579"
+        }
+      ],
+      "paid_time": 1780306970,
+      "payment": {
+        "currency": "PHP",
+        "original_shipping_fee": "0",
+        "original_total_product_price": "0",
+        "platform_discount": "0",
+        "seller_discount": "0",
+        "shipping_fee": "0",
+        "shipping_fee_cofunded_discount": "0",
+        "shipping_fee_platform_discount": "0",
+        "shipping_fee_seller_discount": "0",
+        "sub_total": "0",
+        "tax": "0",
+        "total_amount": "0"
+      },
+      "payment_method_name": "",
+      "recipient_address": {
+        "address_detail": "Da*******************************************************************************************************************************************",
+        "address_line1": "Da**********************************************************************************************",
+        "address_line2": "In******************************************",
+        "address_line3": "",
+        "address_line4": "",
+        "district_info": [
+          {
+            "address_level": "L0",
+            "address_level_name": "Country",
+            "address_name": "Philippines",
+            "iso_code": "PH"
+          },
+          {
+            "address_level": "L1",
+            "address_level_name": "region",
+            "address_name": "Central Luzon",
+            "iso_code": "03"
+          },
+          {
+            "address_level": "L2",
+            "address_level_name": "province",
+            "address_name": "Tarlac",
+            "iso_code": "TAR"
+          },
+          {
+            "address_level": "L3",
+            "address_level_name": "municipality",
+            "address_name": "Sa***********"
+          },
+          {
+            "address_level": "L4",
+            "address_level_name": "barangay",
+            "address_name": "Po************"
+          }
+        ],
+        "first_name": "",
+        "first_name_local_script": "",
+        "full_address": "Philippines, Central Luzon, Tarlac, Sa***********, Po************,Da*******************************************************************************************************************************************",
+        "last_name": "",
+        "last_name_local_script": "",
+        "name": "E***a D***el",
+        "phone_number": "(+63)916*****22",
+        "postal_code": "",
+        "region_code": "PH"
+      },
+      "recommended_shipping_time": 1780415999000,
+      "rts_sla_time": 1780387200,
+      "rts_time": 1780326162,
+      "shipping_due_time": 1780502399,
+      "shipping_provider": "J&T Express",
+      "shipping_provider_id": "6841743441349706241",
+      "shipping_type": "TIKTOK",
+      "status": "IN_TRANSIT",
+      "tracking_number": "JT0018723265759",
+      "tts_sla_time": 1780415999,
+      "update_time": 1780461625,
+      "user_id": "7494539007283136555",
+      "warehouse_id": "7432356829526001413"
+    },
+    {
+      "buyer_email": "v4bGYUWHUIHLFG5GKXPEBMGBJQZ24@scs2.tiktok.com",
+      "buyer_message": "",
+      "cancel_order_sla_time": 1780588799,
+      "collection_due_time": 1780588799,
+      "collection_time": 1780380620,
+      "commerce_platform": "TIKTOK_SHOP",
+      "create_time": 1780306853,
+      "delivery_option_id": "7062707930285475586",
+      "delivery_option_name": "Standard shipping",
+      "delivery_time": 1780449053,
+      "delivery_type": "HOME_DELIVERY",
+      "fulfillment_priority_level": 600,
+      "fulfillment_type": "FULFILLMENT_BY_SELLER",
+      "has_updated_recipient_address": false,
+      "id": "584305827841214312",
+      "is_cod": false,
+      "is_on_hold_order": false,
+      "is_replacement_order": false,
+      "is_sample_order": true,
+      "line_items": [
+        {
+          "currency": "PHP",
+          "display_status": "DELIVERED",
+          "gift_retail_price": "2400",
+          "id": "584305827841345384",
+          "is_gift": false,
+          "original_price": "0",
+          "package_id": "1198361105554245480",
+          "package_status": "COMPLETED",
+          "platform_discount": "0",
+          "product_id": "1734452917660911274",
+          "product_name": "Home-Set New Sofa Cover L Shape Universal  Elastic Sofa Cover L Shape 1 2 3 4 Seater",
+          "rts_time": 1780326164,
+          "sale_price": "0",
+          "seller_discount": "0",
+          "seller_sku": "HY154-BG-J",
+          "shipping_provider_id": "6841743441349706241",
+          "shipping_provider_name": "J&T Express",
+          "sku_id": "1734452916167542442",
+          "sku_image": "https://p16-oec-va.ibyteimg.com/tos-maliva-i-o3syd03w52-us/5a55ec74d3d54a8481865d40c7dfb6ef~tplv-o3syd03w52-origin-jpeg.jpeg?dr=15568&t=555f072d&ps=933b5bde&shp=54477afb&shcp=3c3d9ffb&idc=my2&from=1413970683",
+          "sku_name": "Beige, 110×180cm",
+          "sku_type": "UNKNOWN",
+          "tracking_number": "JT0018722499490"
+        }
+      ],
+      "order_type": "SELLER_FUND_FREE_SAMPLE",
+      "packages": [
+        {
+          "id": "1198361105554245480"
+        }
+      ],
+      "paid_time": 1780306853,
+      "payment": {
+        "currency": "PHP",
+        "original_shipping_fee": "0",
+        "original_total_product_price": "0",
+        "platform_discount": "0",
+        "seller_discount": "0",
+        "shipping_fee": "0",
+        "shipping_fee_cofunded_discount": "0",
+        "shipping_fee_platform_discount": "0",
+        "shipping_fee_seller_discount": "0",
+        "sub_total": "0",
+        "tax": "0",
+        "total_amount": "0"
+      },
+      "payment_method_name": "",
+      "recipient_address": {
+        "address_detail": "Pu************************************************************************************************************************************************************************************************************************************",
+        "address_line1": "Pu***************************************************************************************************************************************************************************",
+        "address_line2": "85******************************************************",
+        "address_line3": "",
+        "address_line4": "",
+        "district_info": [
+          {
+            "address_level": "L0",
+            "address_level_name": "Country",
+            "address_name": "Philippines",
+            "iso_code": "PH"
+          },
+          {
+            "address_level": "L1",
+            "address_level_name": "region",
+            "address_name": "Calabarzon",
+            "iso_code": "40"
+          },
+          {
+            "address_level": "L2",
+            "address_level_name": "province",
+            "address_name": "Laguna",
+            "iso_code": "LAG"
+          },
+          {
+            "address_level": "L3",
+            "address_level_name": "municipality",
+            "address_name": "Sa*************"
+          },
+          {
+            "address_level": "L4",
+            "address_level_name": "barangay",
+            "address_name": "Ba******"
+          }
+        ],
+        "first_name": "",
+        "first_name_local_script": "",
+        "full_address": "Philippines, Calabarzon, Laguna, Sa*************, Ba******,Pu************************************************************************************************************************************************************************************************************************************",
+        "last_name": "",
+        "last_name_local_script": "",
+        "name": "F***cia D***nte",
+        "phone_number": "(+63)920*****94",
+        "postal_code": "",
+        "region_code": "PH"
+      },
+      "recommended_shipping_time": 1780415999000,
+      "rts_sla_time": 1780387200,
+      "rts_time": 1780326164,
+      "shipping_due_time": 1780502399,
+      "shipping_provider": "J&T Express",
+      "shipping_provider_id": "6841743441349706241",
+      "shipping_type": "TIKTOK",
+      "status": "DELIVERED",
+      "tracking_number": "JT0018722499490",
+      "tts_sla_time": 1780415999,
+      "update_time": 1780449554,
+      "user_id": "7494831256066689896",
+      "warehouse_id": "7432356829526001413"
+    },
+    {
+      "buyer_email": "v4bGYUWHUIHLFG5GNPPUBWHIMBR2Y@scs2.tiktok.com",
+      "buyer_message": "",
+      "cancel_order_sla_time": 1780588799,
+      "collection_due_time": 1780588799,
+      "collection_time": 1780379889,
+      "commerce_platform": "TIKTOK_SHOP",
+      "create_time": 1780306573,
+      "delivery_option_id": "7062707930285475586",
+      "delivery_option_name": "Standard shipping",
+      "delivery_type": "HOME_DELIVERY",
+      "fulfillment_priority_level": 600,
+      "fulfillment_type": "FULFILLMENT_BY_SELLER",
+      "has_updated_recipient_address": false,
+      "id": "584305516339496727",
+      "is_cod": false,
+      "is_on_hold_order": false,
+      "is_replacement_order": false,
+      "is_sample_order": true,
+      "line_items": [
+        {
+          "currency": "PHP",
+          "display_status": "IN_TRANSIT",
+          "gift_retail_price": "2400",
+          "id": "584305516339627799",
+          "is_gift": false,
+          "original_price": "0",
+          "package_id": "1198360312570742551",
+          "package_status": "FULFILLING",
+          "platform_discount": "0",
+          "product_id": "1734452917660911274",
+          "product_name": "Home-Set New Sofa Cover L Shape Universal  Elastic Sofa Cover L Shape 1 2 3 4 Seater",
+          "rts_time": 1780326172,
+          "sale_price": "0",
+          "seller_discount": "0",
+          "seller_sku": "HY154-KK-J",
+          "shipping_provider_id": "6841743441349706241",
+          "shipping_provider_name": "J&T Express",
+          "sku_id": "1734452916168263338",
+          "sku_image": "https://p16-oec-va.ibyteimg.com/tos-maliva-i-o3syd03w52-us/c30db7ce59cd480994f64e05a21d37d4~tplv-o3syd03w52-origin-jpeg.jpeg?dr=15568&t=555f072d&ps=933b5bde&shp=54477afb&shcp=3c3d9ffb&idc=my2&from=1413970683",
+          "sku_name": "Khaki, 110×180cm",
+          "sku_type": "UNKNOWN",
+          "tracking_number": "JT0018723185038"
+        }
+      ],
+      "order_type": "SELLER_FUND_FREE_SAMPLE",
+      "packages": [
+        {
+          "id": "1198360312570742551"
+        }
+      ],
+      "paid_time": 1780306573,
+      "payment": {
+        "currency": "PHP",
+        "original_shipping_fee": "0",
+        "original_total_product_price": "0",
+        "platform_discount": "0",
+        "seller_discount": "0",
+        "shipping_fee": "0",
+        "shipping_fee_cofunded_discount": "0",
+        "shipping_fee_platform_discount": "0",
+        "shipping_fee_seller_discount": "0",
+        "sub_total": "0",
+        "tax": "0",
+        "total_amount": "0"
+      },
+      "payment_method_name": "",
+      "recipient_address": {
+        "address_detail": "Ud*****************************************************************",
+        "address_line1": "Ud************",
+        "address_line2": "Gi**************************************************",
+        "address_line3": "",
+        "address_line4": "",
+        "district_info": [
+          {
+            "address_level": "L0",
+            "address_level_name": "Country",
+            "address_name": "Philippines",
+            "iso_code": "PH"
+          },
+          {
+            "address_level": "L1",
+            "address_level_name": "region",
+            "address_name": "Ilocos",
+            "iso_code": "01"
+          },
+          {
+            "address_level": "L2",
+            "address_level_name": "province",
+            "address_name": "La Union",
+            "iso_code": "LUN"
+          },
+          {
+            "address_level": "L3",
+            "address_level_name": "municipality",
+            "address_name": "Ro*****"
+          },
+          {
+            "address_level": "L4",
+            "address_level_name": "barangay",
+            "address_name": "Ud***"
+          }
+        ],
+        "first_name": "",
+        "first_name_local_script": "",
+        "full_address": "Philippines, Ilocos, La Union, Ro*****, Ud***,Ud*****************************************************************",
+        "last_name": "",
+        "last_name_local_script": "",
+        "name": "C***o M***osong",
+        "phone_number": "(+63)992*****39",
+        "postal_code": "",
+        "region_code": "PH"
+      },
+      "recommended_shipping_time": 1780415999000,
+      "rts_sla_time": 1780387200,
+      "rts_time": 1780326172,
+      "shipping_due_time": 1780502399,
+      "shipping_provider": "J&T Express",
+      "shipping_provider_id": "6841743441349706241",
+      "shipping_type": "TIKTOK",
+      "status": "IN_TRANSIT",
+      "tracking_number": "JT0018723185038",
+      "tts_sla_time": 1780415999,
+      "update_time": 1780463914,
+      "user_id": "7494008598175581975",
+      "warehouse_id": "7432356829526001413"
+    },
+    {
+      "buyer_email": "v4bGYUWHUIHLFG5GNVPEAOAIYIP2A@scs2.tiktok.com",
+      "buyer_message": "",
+      "cancel_order_sla_time": 1780588799,
+      "collection_due_time": 1780588799,
+      "collection_time": 1780380362,
+      "commerce_platform": "TIKTOK_SHOP",
+      "create_time": 1780306507,
+      "delivery_option_id": "7062707930285475586",
+      "delivery_option_name": "Standard shipping",
+      "delivery_type": "HOME_DELIVERY",
+      "fulfillment_priority_level": 600,
+      "fulfillment_type": "FULFILLMENT_BY_SELLER",
+      "has_updated_recipient_address": false,
+      "id": "584305701220746449",
+      "is_cod": false,
+      "is_on_hold_order": false,
+      "is_replacement_order": false,
+      "is_sample_order": true,
+      "line_items": [
+        {
+          "currency": "PHP",
+          "display_status": "IN_TRANSIT",
+          "gift_retail_price": "1600",
+          "id": "584305701220877521",
+          "is_gift": false,
+          "original_price": "0",
+          "package_id": "1198361040691561681",
+          "package_status": "FULFILLING",
+          "platform_discount": "0",
+          "product_id": "1734452917660911274",
+          "product_name": "Home-Set New Sofa Cover L Shape Universal  Elastic Sofa Cover L Shape 1 2 3 4 Seater",
+          "rts_time": 1780326164,
+          "sale_price": "0",
+          "seller_discount": "0",
+          "seller_sku": "HY154-BG-F",
+          "shipping_provider_id": "6841743441349706241",
+          "shipping_provider_name": "J&T Express",
+          "sku_id": "1734452916167280298",
+          "sku_image": "https://p16-oec-va.ibyteimg.com/tos-maliva-i-o3syd03w52-us/5a55ec74d3d54a8481865d40c7dfb6ef~tplv-o3syd03w52-origin-jpeg.jpeg?dr=15568&t=555f072d&ps=933b5bde&shp=54477afb&shcp=3c3d9ffb&idc=my2&from=1413970683",
+          "sku_name": "Beige, 90×120cm",
+          "sku_type": "UNKNOWN",
+          "tracking_number": "JT0018724220555"
+        }
+      ],
+      "order_type": "SELLER_FUND_FREE_SAMPLE",
+      "packages": [
+        {
+          "id": "1198361040691561681"
+        }
+      ],
+      "paid_time": 1780306507,
+      "payment": {
+        "currency": "PHP",
+        "original_shipping_fee": "0",
+        "original_total_product_price": "0",
+        "platform_discount": "0",
+        "seller_discount": "0",
+        "shipping_fee": "0",
+        "shipping_fee_cofunded_discount": "0",
+        "shipping_fee_platform_discount": "0",
+        "shipping_fee_seller_discount": "0",
+        "sub_total": "0",
+        "tax": "0",
+        "total_amount": "0"
+      },
+      "payment_method_name": "",
+      "recipient_address": {
+        "address_detail": "Lo************************************************************************************************************************",
+        "address_line1": "Lo************************************************************************************",
+        "address_line2": "Un*********************************",
+        "address_line3": "",
+        "address_line4": "",
+        "district_info": [
+          {
+            "address_level": "L0",
+            "address_level_name": "Country",
+            "address_name": "Philippines",
+            "iso_code": "PH"
+          },
+          {
+            "address_level": "L1",
+            "address_level_name": "region",
+            "address_name": "Central Luzon",
+            "iso_code": "03"
+          },
+          {
+            "address_level": "L2",
+            "address_level_name": "province",
+            "address_name": "Bulacan",
+            "iso_code": "BUL"
+          },
+          {
+            "address_level": "L3",
+            "address_level_name": "municipality",
+            "address_name": "Gu*******"
+          },
+          {
+            "address_level": "L4",
+            "address_level_name": "barangay",
+            "address_name": "Ta**"
+          }
+        ],
+        "first_name": "",
+        "first_name_local_script": "",
+        "full_address": "Philippines, Central Luzon, Bulacan, Gu*******, Ta**,Lo************************************************************************************************************************",
+        "last_name": "",
+        "last_name_local_script": "",
+        "name": "P***ICIA A***O",
+        "phone_number": "(+63)915*****09",
+        "postal_code": "",
+        "region_code": "PH"
+      },
+      "recommended_shipping_time": 1780415999000,
+      "rts_sla_time": 1780387200,
+      "rts_time": 1780326164,
+      "shipping_due_time": 1780502399,
+      "shipping_provider": "J&T Express",
+      "shipping_provider_id": "6841743441349706241",
+      "shipping_type": "TIKTOK",
+      "status": "IN_TRANSIT",
+      "tracking_number": "JT0018724220555",
+      "tts_sla_time": 1780415999,
+      "update_time": 1780460683,
+      "user_id": "7494054691328134353",
+      "warehouse_id": "7432356829526001413"
+    },
+    {
+      "buyer_email": "v4bGYUWHUIHLFG5GKVPEAYO77C22A@scs2.tiktok.com",
+      "buyer_message": "",
+      "cancel_order_sla_time": 1780588799,
+      "collection_due_time": 1780588799,
+      "collection_time": 1780379889,
+      "commerce_platform": "TIKTOK_SHOP",
+      "create_time": 1780306441,
+      "delivery_option_id": "7062707930285475586",
+      "delivery_option_name": "Standard shipping",
+      "delivery_time": 1780469000,
+      "delivery_type": "HOME_DELIVERY",
+      "fulfillment_priority_level": 600,
+      "fulfillment_type": "FULFILLMENT_BY_SELLER",
+      "has_updated_recipient_address": false,
+      "id": "584305712882812427",
+      "is_cod": false,
+      "is_on_hold_order": false,
+      "is_replacement_order": false,
+      "is_sample_order": true,
+      "line_items": [
+        {
+          "currency": "PHP",
+          "display_status": "DELIVERED",
+          "gift_retail_price": "2400",
+          "id": "584305712882943499",
+          "is_gift": false,
+          "original_price": "0",
+          "package_id": "1198360800894354955",
+          "package_status": "COMPLETED",
+          "platform_discount": "0",
+          "product_id": "1734452917660911274",
+          "product_name": "Home-Set New Sofa Cover L Shape Universal  Elastic Sofa Cover L Shape 1 2 3 4 Seater",
+          "rts_time": 1780326164,
+          "sale_price": "0",
+          "seller_discount": "0",
+          "seller_sku": "HY154-KK-J",
+          "shipping_provider_id": "6841743441349706241",
+          "shipping_provider_name": "J&T Express",
+          "sku_id": "1734452916168263338",
+          "sku_image": "https://p16-oec-va.ibyteimg.com/tos-maliva-i-o3syd03w52-us/c30db7ce59cd480994f64e05a21d37d4~tplv-o3syd03w52-origin-jpeg.jpeg?dr=15568&t=555f072d&ps=933b5bde&shp=54477afb&shcp=3c3d9ffb&idc=my2&from=1413970683",
+          "sku_name": "Khaki, 110×180cm",
+          "sku_type": "UNKNOWN",
+          "tracking_number": "JT0018724819623"
+        }
+      ],
+      "order_type": "SELLER_FUND_FREE_SAMPLE",
+      "packages": [
+        {
+          "id": "1198360800894354955"
+        }
+      ],
+      "paid_time": 1780306441,
+      "payment": {
+        "currency": "PHP",
+        "original_shipping_fee": "0",
+        "original_total_product_price": "0",
+        "platform_discount": "0",
+        "seller_discount": "0",
+        "shipping_fee": "0",
+        "shipping_fee_cofunded_discount": "0",
+        "shipping_fee_platform_discount": "0",
+        "shipping_fee_seller_discount": "0",
+        "sub_total": "0",
+        "tax": "0",
+        "total_amount": "0"
+      },
+      "payment_method_name": "",
+      "recipient_address": {
+        "address_detail": "72******************************************",
+        "address_line1": "72******************************************",
+        "address_line2": "",
+        "address_line3": "",
+        "address_line4": "",
+        "district_info": [
+          {
+            "address_level": "L0",
+            "address_level_name": "Country",
+            "address_name": "Philippines",
+            "iso_code": "PH"
+          },
+          {
+            "address_level": "L1",
+            "address_level_name": "region",
+            "address_name": "Central Luzon",
+            "iso_code": "03"
+          },
+          {
+            "address_level": "L2",
+            "address_level_name": "province",
+            "address_name": "Bulacan",
+            "iso_code": "BUL"
+          },
+          {
+            "address_level": "L3",
+            "address_level_name": "municipality",
+            "address_name": "Bu*****"
+          },
+          {
+            "address_level": "L4",
+            "address_level_name": "barangay",
+            "address_name": "Ta******"
+          }
+        ],
+        "first_name": "",
+        "first_name_local_script": "",
+        "full_address": "Philippines, Central Luzon, Bulacan, Bu*****, Ta******,72******************************************",
+        "last_name": "",
+        "last_name_local_script": "",
+        "name": "J***lyn V***anueva",
+        "phone_number": "(+63)950*****96",
+        "postal_code": "",
+        "region_code": "PH"
+      },
+      "recommended_shipping_time": 1780415999000,
+      "rts_sla_time": 1780387200,
+      "rts_time": 1780326164,
+      "shipping_due_time": 1780502399,
+      "shipping_provider": "J&T Express",
+      "shipping_provider_id": "6841743441349706241",
+      "shipping_type": "TIKTOK",
+      "status": "DELIVERED",
+      "tracking_number": "JT0018724819623",
+      "tts_sla_time": 1780415999,
+      "update_time": 1780469500,
+      "user_id": "7494694883233925643",
+      "warehouse_id": "7432356829526001413"
+    }
+  ],
+  "details": [],
+  "total_count": 5
+}
