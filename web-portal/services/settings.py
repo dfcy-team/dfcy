@@ -42,17 +42,23 @@ JOBS_DIR = WEB_ROOT / "data" / "jobs"
 EXPORT_CACHE = WEB_ROOT / "data" / "exports"
 
 LOCAL_ENV = WEB_ROOT / "local.env"
+DB_ENV = WEB_ROOT / "db.env"
 
 
-def load_local_env() -> None:
-    if not LOCAL_ENV.is_file():
+def _load_env_file(path: Path) -> None:
+    if not path.is_file():
         return
-    for raw in LOCAL_ENV.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
         os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+
+
+def load_local_env() -> None:
+    _load_env_file(LOCAL_ENV)
+    _load_env_file(DB_ENV)
 
 
 load_local_env()

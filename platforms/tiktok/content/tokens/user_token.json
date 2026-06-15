@@ -1,0 +1,10 @@
+{
+  "access_token": "act.5nflJbhp1jldLZi8yMSJxgYd3wDVh0dIHjUcQdyw5LnIuWSXqtIa7F2tRdRZ!6419.u1",
+  "expires_in": 86400,
+  "open_id": "-0009NzcDc5-ZwRTwokIwHuM-uZYdt1GbWh5",
+  "refresh_expires_in": 31536000,
+  "refresh_token": "rft.ZO8MbRLyGjddDf2ugcw5PZ4SADTSCAQqPtPFfuhAEbje61ilORXCn7p6wI90!6408.u1",
+  "scope": "user.info.basic,video.publish,video.upload",
+  "token_type": "Bearer",
+  "saved_at": "2026-06-09T02:58:25.409304+00:00"
+}

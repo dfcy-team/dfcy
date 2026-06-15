@@ -5,9 +5,8 @@ __pycache__/
 .venv/
 venv/
 
-# 本地密钥与 token（店铺 token 仍忽略）
-platforms/tiktok/content/tokens/
-platforms/tiktok/shop/config_*.env
+# 数据库配置（勿提交）
+web-portal/db.env
 config/db.ini
 
 # 日志与运行时数据
