@@ -59,7 +59,7 @@ load_local_env()
 
 HOST = os.environ.get("LISTEN_HOST", "0.0.0.0")
 PORT = int(os.environ.get("LISTEN_PORT", "80"))
-SITE_DOMAIN = os.environ.get("SITE_DOMAIN", "dingfengchuangyu.top").strip() or "dingfengchuangyu.top"
+SITE_DOMAIN = os.environ.get("SITE_DOMAIN", "dingfengchuangyu.com").strip() or "dingfengchuangyu.com"
 SITE_BRAND = os.environ.get("SITE_BRAND", "鼎峰 TikTok Shop 数据平台").strip()
 COMPANY_NAME = os.environ.get("COMPANY_NAME", "厦门市鼎峰创域科技有限公司").strip()
 CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "postmaster@dingfengchuangyu.top").strip()
@@ -81,12 +81,13 @@ DB_CHARSET = os.environ.get("DB_CHARSET", "utf8mb4").strip() or "utf8mb4"
 
 
 def public_site_base(domain: str | None = None, port: int | None = None) -> str:
-    """当前站点对外根 URL，如 http://127.0.0.1:8080 或 http://dingfengchuangyu.top"""
+    """对外网站根 URL（浏览用，默认 SITE_DOMAIN/.com）。"""
     dom = (domain or SITE_DOMAIN).strip()
     p = PORT if port is None else int(port)
-    if dom in ("127.0.0.1", "localhost") or p not in (80, 443):
+    if dom in ("127.0.0.1", "localhost"):
         return f"http://{dom}:{p}"
-    return f"http://{dom}"
+    scheme = "https" if os.environ.get("TTS_REDIRECT_URL", "").startswith("https") else "http"
+    return f"{scheme}://{dom}"
 
 
 def _production_public_base() -> str:
