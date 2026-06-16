@@ -27,7 +27,7 @@ WEB_ROOT = Path(__file__).resolve().parent
 if str(WEB_ROOT) not in sys.path:
     sys.path.insert(0, str(WEB_ROOT))
 
-from services import auth, content_video, exporter, files, oauth, shops  # noqa: E402
+from services import auth, content_video, exporter, files, marketing_auth, oauth, shops  # noqa: E402
 from services.settings import (  # noqa: E402
     APP_KEY,
     APP_SECRET,
@@ -240,6 +240,48 @@ def dashboard():
     return render_template("dashboard.html", shops=shops.load_shops())
 
 
+@app.route("/ads")
+@app.route("/ads/")
+def ads_page():
+    tok = marketing_auth.token_status()
+    auth_ok = request.args.get("ok") == "1" and tok.get("authorized")
+    auth_error = request.args.get("error", "")
+    if request.args.get("ok") == "1" and not tok.get("authorized"):
+        auth_error = auth_error or "授权回调完成但未保存 token，请重新点击「连接广告账户」"
+    if tok.get("authorized") and auth_error:
+        auth_error = ""
+    cred_probe = marketing_auth.verify_credentials()
+    return render_template(
+        "ads.html",
+        token=tok,
+        auth_ok=auth_ok,
+        auth_error=auth_error,
+        app_id=marketing_auth.APP_ID,
+        redirect_uri=marketing_auth.REDIRECT_URI,
+        credentials_ok=cred_probe.get("ok"),
+    )
+
+
+@app.route("/ads/authorize")
+def ads_authorize():
+    url, _state = marketing_auth.build_authorize_url()
+    return redirect(url)
+
+
+@app.post("/api/ads/secret")
+def api_ads_secret():
+    data = request.get_json(silent=True) or {}
+    secret = (data.get("secret") or request.form.get("secret") or "").strip()
+    if not secret:
+        return jsonify({"ok": False, "error": "请填写 App Secret"}), 400
+    try:
+        marketing_auth.save_app_secret(secret)
+        probe = marketing_auth.verify_credentials()
+        return jsonify({"ok": probe.get("ok"), "probe": probe})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
 @app.route("/content")
 def content_page():
     tok = content_video.token_status()
@@ -373,6 +415,27 @@ def callback():
     scopes = request.args.get("scopes", "").strip()
     app_key = request.args.get("app_key", "").strip()
     full_url = request.url
+
+    auth_code = (
+        marketing_auth.extract_auth_code_from_query(request.query_string)
+        or request.args.get("auth_code", "").strip()
+    )
+
+    # TikTok Marketing API（auth_code 或 state=ads_*）
+    if marketing_auth.is_marketing_callback(
+        state_raw, auth_code, code=code, app_key=app_key, scopes=scopes
+    ):
+        if error:
+            return redirect(url_for("ads_page", error=error))
+        if auth_code:
+            try:
+                marketing_auth.exchange_auth_code(auth_code)
+                if not marketing_auth.token_status().get("authorized"):
+                    return redirect(url_for("ads_page", error="token 保存失败，请重试"))
+                return redirect(url_for("ads_page", ok=1))
+            except Exception as e:
+                return redirect(url_for("ads_page", error=str(e)))
+        return redirect(url_for("ads_page", error="未收到 auth_code"))
 
     # TikTok Content Posting / Login Kit（带 scopes，无 app_key）
     if content_video.is_content_callback(state_raw, scopes, app_key):
@@ -556,6 +619,7 @@ def main() -> None:
     print(f"Home:     http://127.0.0.1:{PORT}/")
     print(f"Dashboard http://127.0.0.1:{PORT}/dashboard")
     print(f"Authorize  http://127.0.0.1:{PORT}/authorize")
+    print(f"Ads OAuth  http://127.0.0.1:{PORT}/ads")
     print(f"Deploy:   http://{SITE_DOMAIN}{INFO_PATH}")
     print(f"Callback: http://{SITE_DOMAIN}{CALLBACK_PATH}")
     print(f"Project:  {PROJECT_ROOT}")

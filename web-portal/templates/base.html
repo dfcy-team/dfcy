@@ -21,6 +21,7 @@
         <a href="{{ url_for('contact') }}">联系我们</a>
         {% if current_user %}
         <a href="{{ url_for('content_page') }}">视频上传</a>
+        <a href="{{ url_for('ads_page') }}">广告数据</a>
         <a href="{{ url_for('dashboard') }}">数据导出</a>
         <a href="{{ url_for('authorize_page') }}">店铺授权</a>
         {% endif %}
@@ -54,6 +55,7 @@
           <ul class="footer-links">
             <li><a href="{{ url_for('dashboard') }}">数据导出</a></li>
             <li><a href="{{ url_for('content_page') }}">视频上传</a></li>
+            <li><a href="{{ url_for('ads_page') }}">广告数据</a></li>
             <li><a href="{{ url_for('authorize_page') }}">店铺授权</a></li>
           </ul>
         </div>

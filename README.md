@@ -25,6 +25,7 @@ erp/
 
 1. 复制 `web-portal/local.env.example` 为 `web-portal/local.env`
 2. 复制 `platforms/tiktok/content/app.env.example` 为 `platforms/tiktok/content/app.env` 并填写密钥
-3. 店铺授权后会在 `platforms/tiktok/shop/` 生成 `config_*.env`（已在 .gitignore 中，不会上传）
+3. 复制 `platforms/tiktok/marketing/app.env.example` 为 `platforms/tiktok/marketing/app.env` 并填写 App Secret
+4. 店铺授权后会在 `platforms/tiktok/shop/` 生成 `config_*.env`（已在 .gitignore 中，不会上传）
 
 详细说明见各子目录 `README.txt`。

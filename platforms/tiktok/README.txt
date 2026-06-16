@@ -9,7 +9,8 @@ platforms/tiktok/
 ├── finance/        流水/结算
 ├── products/       商品管理（改价、库存、上下架）
 ├── promotions/     促销活动
-└── content/        视频上传（Content Posting API）
+├── content/        视频上传（Content Posting API）
+└── marketing/      广告数据分析（Marketing API OAuth）
 
 Web 入口: web-portal/services/tiktok_auth.py
 共用工具: erp/common/

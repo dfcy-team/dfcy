@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}广告数据授权 · 鼎峰 TikTok 广告数据分析{% endblock %}
+{% block content %}
+<section class="page-header">
+  <h1>鼎峰 TikTok 广告数据分析</h1>
+  <p class="lead">TikTok Marketing API — 授权广告账户后拉取广告报表（与店铺授权独立）。</p>
+</section>
+
+{% if token.authorized %}
+<div class="card ok">
+  <h2>✓ 广告账户已授权</h2>
+  <p>已保存 Marketing API access_token，可对接报表拉取。账户数：<strong>{{ token.advertiser_count }}</strong></p>
+</div>
+{% elif auth_ok %}
+<div class="card ok">
+  <h2>授权成功</h2>
+  <p>已保存广告 API token，下方可查看授权到的广告账户。</p>
+</div>
+{% elif auth_error %}
+<div class="card alert">
+  <h2>授权失败</h2>
+  <p>{{ auth_error }}</p>
+</div>
+{% endif %}
+
+{% if not token.authorized or not credentials_ok %}
+<div class="card">
+  <h2>凭据配置</h2>
+  {% if credentials_ok %}
+  <p class="ok" style="margin:0 0 12px;">
+    App Secret 已配置（<code>platforms/tiktok/marketing/app.env</code>）。
+    Portal 重置 Secret 后可在下方更新。
+  </p>
+  <details>
+    <summary class="muted" style="cursor:pointer;">需要更新 Secret 时展开</summary>
+    <form id="form-ads-secret" class="form-grid" style="margin-top:12px;">
+      <label class="span2">App Secret
+        <input type="password" name="secret" placeholder="TikTok for Business Portal 中的 Secret" autocomplete="off"/>
+      </label>
+      <button type="submit" class="btn span2">保存 Secret 并验证</button>
+    </form>
+    <div id="ads-secret-result" class="muted" style="margin-top:8px;"></div>
+  </details>
+  {% else %}
+  <p class="alert" style="margin:0 0 12px;">
+    尚未配置 App Secret。请从
+    <a href="https://business-api.tiktok.com/portal/apps/7651554890895851537" target="_blank" rel="noopener">TikTok for Business Portal</a>
+    复制 Secret 粘贴到下方。
+  </p>
+  <form id="form-ads-secret" class="form-grid">
+    <label class="span2">App Secret
+      <input type="password" name="secret" placeholder="60a...a84 完整 Secret" autocomplete="off"/>
+    </label>
+    <button type="submit" class="btn primary span2">保存 Secret 并验证</button>
+  </form>
+  <div id="ads-secret-result" class="muted" style="margin-top:8px;"></div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="grid two">
+  <div class="card">
+    <h2>① 广告账户授权</h2>
+    {% if token.authorized %}
+    <ul class="kv">
+      <li><span>状态</span><span class="badge ok">已授权</span></li>
+      <li><span>Token 保存时间</span><code>{{ token.saved_at or '—' }}</code></li>
+      <li><span>Advertiser 数量</span><code>{{ token.advertiser_count }}</code></li>
+    </ul>
+    <details style="margin-top:12px;">
+      <summary class="muted" style="cursor:pointer;">换账号 / 重新授权</summary>
+      <p style="margin:8px 0;">
+        <a class="btn" href="{{ url_for('ads_authorize') }}">重新授权</a>
+      </p>
+    </details>
+    {% else %}
+    <p class="muted">尚未授权。请用有广告权限的 TikTok For Business 账号登录。</p>
+    <p style="margin-top:12px;">
+      <a class="btn primary" href="{{ url_for('ads_authorize') }}" {% if not credentials_ok %}aria-disabled="true" style="pointer-events:none;opacity:.5"{% endif %}>连接广告账户</a>
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>② 已授权广告账户</h2>
+    {% if token.advertisers %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Advertiser ID</th>
+            <th>名称</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for adv in token.advertisers %}
+          <tr>
+            <td><code>{{ adv.advertiser_id or adv.get('advertiser_id', '—') }}</code></td>
+            <td>{{ adv.advertiser_name or adv.get('name', '—') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% elif token.advertiser_ids %}
+    <ul>
+      {% for aid in token.advertiser_ids %}
+      <li><code>{{ aid }}</code></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">授权后将显示 advertiser_id 列表。后续可在此对接创意/直播广告报表导出。</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>说明</h2>
+  <ul>
+    <li><strong>与店铺授权分开</strong>：Shop 授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页；此处只处理广告 API。</li>
+    <li><strong>回调地址</strong>：<code>{{ redirect_uri }}</code>（Portal 已配置，与 Shop 共用 <code>/callback</code>）。</li>
+    <li>App ID: <code>{{ app_id }}</code></li>
+    <li>应用须已通过 TikTok 审核（Reporting 只读权限）。</li>
+  </ul>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("form-ads-secret")?.addEventListener("submit", async function (e) {
+  e.preventDefault();
+  const secret = new FormData(this).get("secret");
+  const box = document.getElementById("ads-secret-result");
+  box.textContent = "验证中…";
+  try {
+    const res = await fetch("/api/ads/secret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      box.textContent = "已保存并通过凭据探测。";
+      setTimeout(() => location.reload(), 800);
+    } else {
+      box.textContent = data.error || "保存失败";
+    }
+  } catch (err) {
+    box.textContent = String(err);
+  }
+});
+</script>
+{% endblock %}
