@@ -727,6 +727,18 @@
       "shop_mode": "local",
       "region": "PH",
       "notes": ""
+    },
+    {
+      "key": "ADS",
+      "aliases": [
+        "ads"
+      ],
+      "config": "config_ADS.env",
+      "label": "ADS",
+      "export_tag": "TIKTOKADS",
+      "shop_mode": "local",
+      "region": "PH",
+      "notes": ""
     }
   ]
 }
