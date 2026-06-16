@@ -42,7 +42,7 @@ if not (_TEST_ENV / "shop_tz.py").exists():
         _TEST_ENV = _LEGACY
 if str(_TEST_ENV) not in sys.path:
     sys.path.insert(0, str(_TEST_ENV))
-from tts_client import API_VERSION, TikTokShopClient, cfg, init_shop_config, is_ok, strip_config_argv
+from tts_client import API_VERSION, TikTokShopClient, cfg, get_shop_token, init_shop_config, is_ok, strip_config_argv
 
 _PROJECT_ROOT = _SCRIPT.parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
@@ -240,17 +240,6 @@ ORDER_EXCEL_HEADERS = [
 LINE_EXCEL_HEADERS = [
     "订单ID", "订单状态", "卖家SKU", "商品ID", "商品名", "数量", "行金额", "币种",
 ]
-
-
-def get_token(client: TikTokShopClient) -> str | None:
-    if TOKEN:
-        return TOKEN
-    if REFRESH:
-        r = client.token_refresh(REFRESH)
-        if is_ok(r):
-            return r["data"]["access_token"]
-    print("错误: config.env 缺少 TTS_ACCESS_TOKEN，请先运行 正式测试.py 或 续期token.py")
-    return None
 
 
 def mask_email(email: str) -> str:
@@ -582,7 +571,7 @@ def main() -> int:
         return 1
 
     client = TikTokShopClient(APP_KEY, APP_SECRET)
-    token = get_token(client)
+    token = get_shop_token(client, CONFIG_FILE)
     if not token:
         return 1
 

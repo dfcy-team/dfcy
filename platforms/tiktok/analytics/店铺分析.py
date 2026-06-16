@@ -83,7 +83,7 @@ if str(_TEST_ENV) not in sys.path:
 if str(_PROJECT) not in sys.path:
     sys.path.insert(0, str(_PROJECT))
 from shop_tz import infer_shop_region_from_cfg, get_shop_tz, pick_config_before_init, today_local, tz_label
-from tts_client import TikTokShopClient, cfg, init_shop_config, is_ok, strip_config_argv
+from tts_client import TikTokShopClient, cfg, get_shop_token, init_shop_config, is_ok, strip_config_argv
 from common.excel_names import analytics_export_filename_by_cache_stem, excel_sheet_title
 from common.shop_registry import load_filename_stems
 
@@ -134,17 +134,6 @@ LIST_KEYS = {
     "product_list_rich": ("products",),
     "sku_list": ("skus", "shop_skus"),
 }
-
-
-def get_token(client: TikTokShopClient) -> str | None:
-    if TOKEN:
-        return TOKEN
-    if REFRESH:
-        r = client.token_refresh(REFRESH)
-        if is_ok(r):
-            return r["data"]["access_token"]
-    print("错误: config.env 缺少 TTS_ACCESS_TOKEN，请先运行 正式测试.py 或 续期token.py")
-    return None
 
 
 def parse_args() -> dict:
@@ -1769,7 +1758,7 @@ def main() -> int:
         return 1
 
     client = TikTokShopClient(APP_KEY, APP_SECRET)
-    token = get_token(client)
+    token = get_shop_token(client, CONFIG_FILE)
     if not token:
         return 1
 

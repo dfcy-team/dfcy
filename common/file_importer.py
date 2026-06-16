@@ -7,6 +7,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from common.excel_names import (
+    FINANCE_DIR_KEYS,
+    FINANCE_STEM_LEGACY,
     analytics_export_filename,
     finance_export_filename,
     finance_export_filename_legacy,
@@ -84,13 +86,14 @@ def finance_filenames(
 ) -> dict[str, str]:
     return {
         kind: finance_export_filename(export_tag, kind, start, api_end, stems=stems)
-        for kind in ("statements", "statement_tx", "payments", "withdrawals", "unsettled")
+        for kind in ("statements", "statement_tx", "order_tx", "payments", "withdrawals", "unsettled")
     }
 
 
 LEGACY_FINANCE_FILENAMES: dict[str, str] = {
     "statements": "statements_{start}_{api_end}.xlsx",
     "statement_tx": "statement_transactions_{start}_{api_end}.xlsx",
+    "order_tx": "order_transactions_{start}_{api_end}.xlsx",
     "payments": "payments_{start}_{api_end}.xlsx",
     "withdrawals": "withdrawals_{start}_{api_end}.xlsx",
     "unsettled": "unsettled_{start}_{api_end}.xlsx",
@@ -117,6 +120,12 @@ def resolve_finance_src(
     legacy = LEGACY_FINANCE_FILENAMES.get(kind, "").format(start=start, api_end=api_end)
     if legacy:
         alt = src_dir / legacy
+        if alt.exists():
+            return alt
+    merged = {**(stems or {})}
+    for old in FINANCE_STEM_LEGACY.get(kind, ()):
+        alt_name = f"{tag}_{old}_{start}_{api_end}.xlsx"
+        alt = src_dir / alt_name
         if alt.exists():
             return alt
     return src
@@ -239,13 +248,7 @@ def import_finance_files(
     src_dir = logs_dir / shop_key
     tag = export_tag or shop_key
     stems = filename_stems or load_filename_stems()
-    dir_map = {
-        "statements": "结算单目录",
-        "statement_tx": "结算明细目录",
-        "payments": "付款目录",
-        "withdrawals": "提现目录",
-        "unsettled": "未结算目录",
-    }
+    dir_map = dict(FINANCE_DIR_KEYS)
     copied: list[str] = []
     for kind, dir_key in dir_map.items():
         if kind not in data_types:
@@ -268,8 +271,8 @@ def import_finance_json_files(
     import_dirs: dict[str, Path],
     skip_existing: bool,
 ) -> list[str]:
-    """流水完整 JSON / 摘要 JSON → Z:\\...\\店铺分析API接口\\json缓存\\店铺流水"""
-    json_dir = import_dirs.get("流水_JSON目录")
+    """财务完整 JSON / 摘要 JSON → Z:\\...\\店铺分析API接口\\json缓存\\店铺财务"""
+    json_dir = import_dirs.get("财务_JSON目录") or import_dirs.get("流水_JSON目录")
     if not json_dir:
         return []
     src_dir = logs_dir / shop_key

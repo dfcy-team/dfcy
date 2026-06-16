@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-TikTok Shop 流水分析 — Finance API
-权限: seller.finance.info（结算单、流水、付款、未结算）
+TikTok Shop 财务 API 导出 — Finance API（seller.finance.info）
 
 【双击运行】改同目录 导出设置.ini，再双击 运行流水分析.bat
 【命令行】python 流水分析.py --shop TK2PH --start 2026-05-01 --end 2026-05-21 --type all
 
-店铺: --shop TK2PH 或 导出设置.ini 里「店铺键」或 店铺配置\\CURRENT_SHOP.txt
-日期: 导出设置.ini 或 --start / --end（按店铺当地自然日 PH/TH/MY）
-
-默认 --type all 导出 Excel 到 Z:\\Tk每日数据\\店铺分析API接口\\ 对应子目录
-（文件名含 TTS_EXPORT_SHOP_TAG，如 TIKTOK4号店PH_结算单流水_日期_日期.xlsx）:
-  结算单\\、结算单流水\\、付款记录\\、提现流水\\
+默认 --type all 导出 6 类 Excel（命名对齐 Partner Center Finance API）:
+  获取对账单、按对账单获取交易记录、按订单获取交易记录、
+  获取付款记录、获取提现记录、获取未结算交易
+（文件名示例 TIKTOK4号店PH_获取对账单_2026-05-01_2026-05-21.xlsx）
   同时在 logs/<店名>/ 留一份本地副本与摘要 JSON
 
 Partner Center -> 应用 -> 管理 API -> 勾选 Finance information -> 店铺重新授权
@@ -56,8 +53,15 @@ from shop_tz import (
     today_local,
     tz_label,
 )
-from tts_client import API_VERSION, TikTokShopClient, cfg, init_shop_config, is_ok, strip_config_argv
-from common.excel_names import excel_sheet_title, finance_export_filename, finance_excel_path, load_finance_import_dirs
+from tts_client import API_VERSION, TikTokShopClient, cfg, get_shop_token, init_shop_config, is_ok, strip_config_argv
+from common.excel_names import (
+    excel_sheet_title,
+    finance_export_filename,
+    finance_excel_path,
+    finance_import_root,
+    finance_label,
+    load_finance_import_dirs,
+)
 from common.file_importer import finance_json_filename, finance_summary_json_filename
 from common.shop_registry import load_filename_stems
 
@@ -67,6 +71,7 @@ UNSETTLED_VER = "202507"
 ENDPOINTS = {
     "statements": f"/finance/{FIN_VER}/statements",
     "statement_tx": f"/finance/{FIN_VER}/statements/{{id}}/statement_transactions",
+    "order_tx": f"/finance/{FIN_VER}/orders/{{id}}/statement_transactions",
     "payments": f"/finance/{FIN_VER}/payments",
     "withdrawals": f"/finance/{FIN_VER}/withdrawals",
     "unsettled": f"/finance/{UNSETTLED_VER}/orders/unsettled_transactions",
@@ -75,6 +80,7 @@ ENDPOINTS = {
 LIST_KEYS = {
     "statements": ("statements",),
     "statement_tx": ("statement_transactions", "transactions"),
+    "order_tx": ("statement_transactions", "transactions"),
     "payments": ("payments",),
     "withdrawals": ("withdrawals",),
     "unsettled": ("transactions", "unsettled_transactions", "orders"),
@@ -98,12 +104,13 @@ def load_finance_ini() -> dict:
         "export_excel": True,
         "save_json": False,
         "stmt_tx_limit": 0,
+        "order_tx_limit": 0,
     }
     if not SETTINGS_INI.exists():
         return d
     cp = configparser.ConfigParser()
     cp.read(SETTINGS_INI, encoding="utf-8")
-    sec = "流水导出"
+    sec = "店铺财务导出" if cp.has_section("店铺财务导出") else "流水导出"
     if not cp.has_section(sec):
         return d
     g = cp[sec]
@@ -122,8 +129,10 @@ def load_finance_ini() -> dict:
     d["all_pages"] = _yes(_get("全部翻页", "是"))
     d["export_excel"] = _yes(_get("导出Excel", "是"))
     d["save_json"] = _yes(_get("保存JSON", "否"))
-    if _get("结算单流水上限"):
-        d["stmt_tx_limit"] = int(_get("结算单流水上限", "0"))
+    if _get("对账单交易上限") or _get("结算单流水上限"):
+        d["stmt_tx_limit"] = int(_get("对账单交易上限") or _get("结算单流水上限", "0"))
+    if _get("按订单交易上限") or _get("订单交易上限"):
+        d["order_tx_limit"] = int(_get("按订单交易上限") or _get("订单交易上限", "0"))
     return d
 
 
@@ -158,17 +167,6 @@ REFRESH = cfg("TTS_REFRESH_TOKEN")
 CIPHER = cfg("TTS_SHOP_CIPHER")
 
 
-def get_token(client: TikTokShopClient) -> str | None:
-    if TOKEN:
-        return TOKEN
-    if REFRESH:
-        r = client.token_refresh(REFRESH)
-        if is_ok(r):
-            return r["data"]["access_token"]
-    print("错误: 缺少 TTS_ACCESS_TOKEN，请运行 验通token.bat 或上层 正式测试.py")
-    return None
-
-
 def parse_args() -> dict:
     ini = load_finance_ini()
     args = {
@@ -179,6 +177,7 @@ def parse_args() -> dict:
         "page_size": ini["size"],
         "all_pages": ini["all_pages"],
         "stmt_tx_limit": ini["stmt_tx_limit"],
+        "order_tx_limit": ini["order_tx_limit"],
         "export_excel": ini["export_excel"],
         "save_json": ini["save_json"],
         "from_ini": False,
@@ -209,6 +208,9 @@ def parse_args() -> dict:
             i += 1
         elif a == "--stmt-tx-limit" and i + 1 < len(argv):
             args["stmt_tx_limit"] = int(argv[i + 1])
+            i += 2
+        elif a == "--order-tx-limit" and i + 1 < len(argv):
+            args["order_tx_limit"] = int(argv[i + 1])
             i += 2
         elif a == "--no-excel":
             args["export_excel"] = False
@@ -292,6 +294,52 @@ def fetch_pages(
     return merged, {"code": -1, "message": "翻页达到上限，可能仍有下一页"}
 
 
+def fetch_orders_in_range(
+    client: TikTokShopClient,
+    token: str,
+    t_start: int,
+    t_end: int,
+    *,
+    all_pages: bool,
+    page_size: int,
+) -> tuple[list[dict], dict | None]:
+    merged: list[dict] = []
+    page_token = ""
+    max_pages = 200 if all_pages else 1
+    body: dict = {}
+    if t_start:
+        body["create_time_ge"] = t_start
+    if t_end:
+        body["create_time_lt"] = t_end
+
+    for page in range(1, max_pages + 1):
+        q: dict = {
+            "shop_cipher": CIPHER,
+            "page_size": min(page_size, 100),
+            "sort_field": "create_time",
+            "sort_order": "DESC",
+        }
+        if page_token:
+            q["page_token"] = page_token
+        r = client.post(f"/order/{API_VERSION}/orders/search", token, body, q)
+        if not is_ok(r):
+            return merged, r
+        data = r.get("data") or {}
+        batch = data.get("orders") or []
+        merged.extend(batch)
+        page_token = data.get("next_page_token") or ""
+        if page % 5 == 0 or not page_token:
+            print(f"  订单列表 第{page}页 +{len(batch)} 条，累计 {len(merged)}")
+        if not page_token:
+            break
+        time.sleep(0.2)
+    return merged, None
+
+
+def order_id_of(order: dict) -> str:
+    return str(order.get("id") or order.get("order_id") or "")
+
+
 def flatten_item(obj: dict, prefix: str = "") -> dict[str, str]:
     out: dict[str, str] = {}
     for k, v in obj.items():
@@ -363,18 +411,26 @@ def save_finance_excel(
     finance_stems: dict[str, str] | None = None,
 ) -> str | None:
     """主输出写到 Z 盘 店铺分析API接口\\<类型>\\，logs 目录留本地副本。"""
+    fname = finance_export_filename(export_tag, kind, start_s, end_s, stems=finance_stems)
     z_path = finance_excel_path(export_tag, kind, start_s, end_s, import_dirs, stems=finance_stems)
-    z_path.parent.mkdir(parents=True, exist_ok=True)
-    if not export_excel(z_path, title, headers, rows, start_s, end_s, sheet_kind=kind):
-        return None
     try:
-        local = LOG_DIR / finance_export_filename(export_tag, kind, start_s, end_s, stems=finance_stems)
-        if local.resolve() != z_path.resolve():
-            local.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(z_path, local)
-    except OSError:
-        pass
-    return str(z_path)
+        z_path.parent.mkdir(parents=True, exist_ok=True)
+        if export_excel(z_path, title, headers, rows, start_s, end_s, sheet_kind=kind):
+            try:
+                local = LOG_DIR / fname
+                if local.resolve() != z_path.resolve():
+                    local.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(z_path, local)
+            except OSError:
+                pass
+            return str(z_path)
+    except OSError as e:
+        print(f"  主目录写入失败 ({z_path.parent}): {e}")
+    local = LOG_DIR / fname
+    local.parent.mkdir(parents=True, exist_ok=True)
+    if export_excel(local, title, headers, rows, start_s, end_s, sheet_kind=kind):
+        return str(local)
+    return None
 
 
 def print_scope_hint(resp: dict, name: str) -> None:
@@ -393,7 +449,17 @@ def statement_id_of(st: dict) -> str:
 
 def main() -> int:
     args = parse_args()
-    valid = {"all", "all-no-unsettled", "statements", "transactions", "payments", "withdrawals", "unsettled"}
+    valid = {
+        "all",
+        "all-no-unsettled",
+        "statements",
+        "transactions",
+        "statement_tx",
+        "order_tx",
+        "payments",
+        "withdrawals",
+        "unsettled",
+    }
     if args["type"] not in valid:
         print(f"无效 --type，可选: {', '.join(sorted(valid))}")
         return 1
@@ -403,7 +469,7 @@ def main() -> int:
         return 1
 
     client = TikTokShopClient(APP_KEY, APP_SECRET)
-    token = get_token(client)
+    token = get_shop_token(client, CONFIG_FILE)
     if not token:
         return 1
 
@@ -411,24 +477,26 @@ def main() -> int:
     finance_stems = load_filename_stems()
     import_dirs = load_finance_import_dirs()
     export_tag = cfg("TTS_EXPORT_SHOP_TAG", "") or cfg("TTS_CONFIG_LABEL", CONFIG_FILE.stem)
+    _all = args["type"] in ("all", "all-no-unsettled")
     want = {
-        "statements": args["type"] in ("all", "all-no-unsettled", "statements", "transactions"),
-        "transactions": args["type"] in ("all", "all-no-unsettled", "transactions"),
-        "payments": args["type"] in ("all", "all-no-unsettled", "payments"),
-        "withdrawals": args["type"] in ("all", "all-no-unsettled", "withdrawals"),
+        "statements": _all or args["type"] in ("statements", "transactions", "statement_tx"),
+        "statement_tx": _all or args["type"] in ("transactions", "statement_tx"),
+        "order_tx": _all or args["type"] == "order_tx",
+        "payments": _all or args["type"] == "payments",
+        "withdrawals": _all or args["type"] == "withdrawals",
         "unsettled": args["type"] in ("all", "unsettled"),
     }
 
     print("=" * 60)
-    print(f"流水分析 | {cfg('TTS_SHOP_NAME')} | region={REGION} | 配置={CONFIG_FILE.name}")
+    print(f"店铺财务 | {cfg('TTS_SHOP_NAME')} | region={REGION} | 配置={CONFIG_FILE.name}")
     print(f"时区 = {tz_label(SHOP_REGION)}（日期按当地时间筛选）")
     if args.get("from_ini"):
         print(f"参数来源 = {SETTINGS_INI.name}（可改开始/结束日期、导出类型）")
     print(f"日期(当地): {start_s} ~ {end_s}  (unix {t0} ~ {t1})")
     print(f"导出类型 = {args['type']}")
     print(f"导出标签 = {export_tag}")
-    print(f"权限: seller.finance.info  Z盘→{import_dirs['结算单目录'].parent}")
-    print(f"文件名示例 = {export_tag}_结算单流水_{start_s}_{end_s}.xlsx")
+    print(f"权限: seller.finance.info  Z盘→{finance_import_root(import_dirs)}")
+    print(f"文件名示例 = {export_tag}_{finance_label('statements')}_{start_s}_{end_s}.xlsx 等 6 类")
     print(f"日志副本: logs/{cfg('TTS_CONFIG_LABEL', CONFIG_FILE.stem)}/")
     print("=" * 60)
 
@@ -444,10 +512,10 @@ def main() -> int:
         )
         out["sections"]["statements"] = statements
         if err:
-            print_scope_hint(err, "结算单")
+            print_scope_hint(err, finance_label("statements"))
             failed += 1
         else:
-            print(f"\n[结算单] {len(statements)} 条")
+            print(f"\n[{finance_label('statements')}] {len(statements)} 条")
             for i, st in enumerate(statements[:10], 1):
                 print(
                     f"  {i}. id={statement_id_of(st)}  "
@@ -460,17 +528,18 @@ def main() -> int:
             if args["export_excel"] and statements:
                 h, rows = items_to_rows(statements)
                 saved = save_finance_excel(
-                    "statements", "结算单", h, rows, start_s, end_s,
+                    "statements", finance_label("statements"), h, rows, start_s, end_s,
                     export_tag=export_tag, import_dirs=import_dirs, finance_stems=finance_stems,
                 )
                 if saved:
                     excel_paths.append(saved)
 
     all_tx: list[dict] = []
-    if want["transactions"] and statements:
+    all_order_tx: list[dict] = []
+    if want["statement_tx"] and statements:
         limit = args["stmt_tx_limit"] or len(statements)
         targets = statements[:limit]
-        print(f"\n[结算单流水] 拉取 {len(targets)} 个结算单的 statement_transactions ...")
+        print(f"\n[{finance_label('statement_tx')}] 拉取 {len(targets)} 个对账单 ...")
         for i, st in enumerate(targets, 1):
             sid = statement_id_of(st)
             if not sid:
@@ -483,7 +552,7 @@ def main() -> int:
             }
             txs, err = fetch_pages(client, token, path, "statement_tx", q, args["all_pages"], args["page_size"])
             if err:
-                print_scope_hint(err, f"结算单流水 {sid}")
+                print_scope_hint(err, f"{finance_label('statement_tx')} {sid}")
                 failed += 1
                 continue
             for tx in txs:
@@ -493,17 +562,65 @@ def main() -> int:
                 print(f"  进度 {i}/{len(targets)}...")
             time.sleep(0.15)
         out["sections"]["statement_transactions"] = all_tx
-        print(f"[结算单流水] 合计 {len(all_tx)} 条")
+        print(f"[{finance_label('statement_tx')}] 合计 {len(all_tx)} 条")
         if args["export_excel"] and all_tx:
             h, rows = items_to_rows(all_tx)
             saved = save_finance_excel(
-                "statement_tx", "结算单流水", h, rows, start_s, end_s,
+                "statement_tx", finance_label("statement_tx"), h, rows, start_s, end_s,
                 export_tag=export_tag, import_dirs=import_dirs, finance_stems=finance_stems,
             )
             if saved:
                 excel_paths.append(saved)
-    elif want["transactions"] and not statements:
-        print("\n[结算单流水] 无结算单，跳过（先拉 statements 或扩大日期）")
+    elif want["statement_tx"] and not statements:
+        print(f"\n[{finance_label('statement_tx')}] 无对账单，跳过")
+
+    if want["order_tx"]:
+        print(f"\n[{finance_label('order_tx')}] 按日期拉订单列表，再逐单获取交易 ...")
+        orders, order_err = fetch_orders_in_range(
+            client, token, t0, t1, all_pages=args["all_pages"], page_size=args["page_size"]
+        )
+        if order_err:
+            print_scope_hint(order_err, "订单列表")
+            failed += 1
+        elif not orders:
+            print("  日期范围内无订单，跳过")
+        else:
+            limit = args["order_tx_limit"] or len(orders)
+            targets = orders[:limit]
+            print(f"  共 {len(orders)} 单，拉取前 {len(targets)} 单的交易明细 ...")
+            for i, order in enumerate(targets, 1):
+                oid = order_id_of(order)
+                if not oid:
+                    continue
+                path = ENDPOINTS["order_tx"].format(id=oid)
+                q = {
+                    "shop_cipher": CIPHER,
+                    "sort_field": "order_create_time",
+                    "page_size": args["page_size"],
+                }
+                txs, err = fetch_pages(client, token, path, "order_tx", q, args["all_pages"], args["page_size"])
+                if err:
+                    print_scope_hint(err, f"{finance_label('order_tx')} {oid}")
+                    failed += 1
+                    continue
+                for tx in txs:
+                    tx["_order_id"] = oid
+                all_order_tx.extend(txs)
+                if i % 20 == 0:
+                    print(f"  进度 {i}/{len(targets)}...")
+                time.sleep(0.12)
+            out["sections"]["order_transactions"] = all_order_tx
+            print(f"[{finance_label('order_tx')}] 合计 {len(all_order_tx)} 条")
+            if args["export_excel"] and all_order_tx:
+                h, rows = items_to_rows(all_order_tx)
+                saved = save_finance_excel(
+                    "order_tx", finance_label("order_tx"), h, rows, start_s, end_s,
+                    export_tag=export_tag, import_dirs=import_dirs, finance_stems=finance_stems,
+                )
+                if saved:
+                    excel_paths.append(saved)
+            elif args["export_excel"] and not all_order_tx:
+                print("  有订单但无交易明细，不生成空 Excel")
 
     if want["payments"]:
         q = {
@@ -518,14 +635,14 @@ def main() -> int:
         )
         out["sections"]["payments"] = payments
         if err:
-            print_scope_hint(err, "付款记录")
+            print_scope_hint(err, finance_label("payments"))
             failed += 1
         else:
-            print(f"\n[付款记录] {len(payments)} 条")
+            print(f"\n[{finance_label('payments')}] {len(payments)} 条")
             if args["export_excel"] and payments:
                 h, rows = items_to_rows(payments)
                 saved = save_finance_excel(
-                    "payments", "付款记录", h, rows, start_s, end_s,
+                    "payments", finance_label("payments"), h, rows, start_s, end_s,
                     export_tag=export_tag, import_dirs=import_dirs, finance_stems=finance_stems,
                 )
                 if saved:
@@ -544,14 +661,14 @@ def main() -> int:
         )
         out["sections"]["withdrawals"] = wds
         if err:
-            print_scope_hint(err, "提现/划拨流水")
+            print_scope_hint(err, finance_label("withdrawals"))
             failed += 1
         else:
-            print(f"\n[提现/划拨流水] {len(wds)} 条")
+            print(f"\n[{finance_label('withdrawals')}] {len(wds)} 条")
             if args["export_excel"] and wds:
                 h, rows = items_to_rows(wds)
                 saved = save_finance_excel(
-                    "withdrawals", "提现流水", h, rows, start_s, end_s,
+                    "withdrawals", finance_label("withdrawals"), h, rows, start_s, end_s,
                     export_tag=export_tag, import_dirs=import_dirs, finance_stems=finance_stems,
                 )
                 if saved:
@@ -564,19 +681,19 @@ def main() -> int:
         )
         out["sections"]["unsettled"] = unsettled
         if err:
-            print_scope_hint(err, "未结算")
+            print_scope_hint(err, finance_label("unsettled"))
             code = err.get("code")
             if code in (36009009, "36009009"):
-                print("  未结算 API 未对该应用开放，已跳过（非 finance 权限问题）")
+                print(f"  {finance_label('unsettled')} API 未对该应用开放，已跳过")
             elif code not in (0,):
                 failed += 1
                 print("  提示: 未结算接口为 202507 版，若应用未开通可忽略或联系 TikTok 开通。")
         else:
-            print(f"\n[未结算] {len(unsettled)} 条")
+            print(f"\n[{finance_label('unsettled')}] {len(unsettled)} 条")
             if args["export_excel"] and unsettled:
                 h, rows = items_to_rows(unsettled)
                 saved = save_finance_excel(
-                    "unsettled", "未结算", h, rows, start_s, end_s,
+                    "unsettled", finance_label("unsettled"), h, rows, start_s, end_s,
                     export_tag=export_tag, import_dirs=import_dirs, finance_stems=finance_stems,
                 )
                 if saved:
@@ -587,6 +704,7 @@ def main() -> int:
         "range": {"start": start_s, "end": end_s},
         "statements": len(statements),
         "statement_transactions": len(all_tx),
+        "order_transactions": len(all_order_tx),
         "payments": len(out["sections"].get("payments") or []),
         "withdrawals": len(out["sections"].get("withdrawals") or []),
         "unsettled": len(out["sections"].get("unsettled") or []),
@@ -595,27 +713,33 @@ def main() -> int:
     }
     summary_text = json.dumps(summary, ensure_ascii=False, indent=2)
     (LOG_DIR / "finance_last_summary.json").write_text(summary_text, encoding="utf-8")
-    json_dir = import_dirs.get("流水_JSON目录")
+    json_dir = import_dirs.get("财务_JSON目录") or import_dirs.get("流水_JSON目录")
     if json_dir:
-        json_dir.mkdir(parents=True, exist_ok=True)
-        z_summary = json_dir / finance_summary_json_filename(export_tag, start_s, end_s)
-        z_summary.write_text(summary_text, encoding="utf-8")
-        print(f"\n摘要: {z_summary}")
+        try:
+            json_dir.mkdir(parents=True, exist_ok=True)
+            z_summary = json_dir / finance_summary_json_filename(export_tag, start_s, end_s)
+            z_summary.write_text(summary_text, encoding="utf-8")
+            print(f"\n摘要: {z_summary}")
+        except OSError as e:
+            print(f"\n摘要(Z盘写入失败，见本地): {LOG_DIR / 'finance_last_summary.json'} ({e})")
     else:
         print(f"\n摘要: {LOG_DIR / 'finance_last_summary.json'}")
 
     if excel_paths:
-        print(f"\n共 {len(excel_paths)} 个 Excel -> {import_dirs['结算单目录'].parent}")
+        print(f"\n共 {len(excel_paths)} 个 Excel -> {finance_import_root(import_dirs)}")
         for p in excel_paths:
             print(f"  - {p}")
 
     if args["save_json"]:
-        json_dir = import_dirs.get("流水_JSON目录")
+        json_dir = import_dirs.get("财务_JSON目录") or import_dirs.get("流水_JSON目录")
         if json_dir:
-            json_dir.mkdir(parents=True, exist_ok=True)
-            z_json = json_dir / finance_json_filename(export_tag, start_s, end_s)
-            z_json.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"完整 JSON: {z_json}")
+            try:
+                json_dir.mkdir(parents=True, exist_ok=True)
+                z_json = json_dir / finance_json_filename(export_tag, start_s, end_s)
+                z_json.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+                print(f"完整 JSON: {z_json}")
+            except OSError as e:
+                print(f"完整 JSON(Z盘写入失败): {e}")
         jp = LOG_DIR / f"finance_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         jp.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"JSON 副本: {jp}")

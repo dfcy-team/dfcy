@@ -165,13 +165,32 @@ def load_config(config_path: Path | None = None) -> dict:
         enabled_shops = _parse_enabled_shops(shops_raw)
 
     analytics_sec = "店铺罗盘API"
-    finance_sec = "店铺流水"
+    finance_sec = "店铺财务" if cp.has_section("店铺财务") else "店铺流水"
     order_sec = "订单" if cp.has_section("订单") else "订单数据"
 
     def import_dirs(section: str, defaults: dict[str, str]) -> dict[str, Path]:
         out: dict[str, Path] = {}
         for key, rel in defaults.items():
             raw = _get(cp, section, key, rel)
+            if raw.startswith("根目录"):
+                raw = raw.replace("根目录", str(z_root), 1)
+            out[key] = _resolve_path(raw, PROJECT_ROOT)
+        return out
+
+    def finance_import_dirs(section: str, defaults: dict[str, str]) -> dict[str, Path]:
+        from common.excel_names import FINANCE_DIR_LEGACY_INI_KEYS
+
+        out: dict[str, Path] = {}
+        for key, rel in defaults.items():
+            raw = _get(cp, section, key, "").strip()
+            if not raw and key == "财务_JSON目录":
+                raw = _get(cp, section, "流水_JSON目录", rel).strip()
+            if not raw:
+                legacy = FINANCE_DIR_LEGACY_INI_KEYS.get(key, "")
+                if legacy:
+                    raw = _get(cp, section, legacy, rel).strip()
+            if not raw:
+                raw = rel
             if raw.startswith("根目录"):
                 raw = raw.replace("根目录", str(z_root), 1)
             out[key] = _resolve_path(raw, PROJECT_ROOT)
@@ -190,12 +209,13 @@ def load_config(config_path: Path | None = None) -> dict:
         "店铺数据目录": str(z_root / "店铺数据"),
     }
     finance_defaults = {
-        "结算单目录": str(Z_API_INTERFACE / "结算单"),
-        "结算明细目录": str(Z_API_INTERFACE / "结算单流水"),
-        "付款目录": str(Z_API_INTERFACE / "付款记录"),
-        "提现目录": str(Z_API_INTERFACE / "提现流水"),
-        "未结算目录": str(Z_API_INTERFACE / "未结算"),
-        "流水_JSON目录": str(Z_JSON_CACHE / "店铺流水"),
+        "对账单目录": str(Z_API_INTERFACE / "获取对账单"),
+        "按对账单交易目录": str(Z_API_INTERFACE / "按对账单获取交易记录"),
+        "按订单交易目录": str(Z_API_INTERFACE / "按订单获取交易记录"),
+        "付款记录目录": str(Z_API_INTERFACE / "获取付款记录"),
+        "提现记录目录": str(Z_API_INTERFACE / "获取提现记录"),
+        "未结算交易目录": str(Z_API_INTERFACE / "获取未结算交易"),
+        "财务_JSON目录": str(Z_JSON_CACHE / "店铺财务"),
     }
     order_defaults = {
         "订单目录": str(Z_API_INTERFACE / "订单数据表"),
@@ -209,23 +229,37 @@ def load_config(config_path: Path | None = None) -> dict:
         default=("product", "sku", "video"),
     )
 
-    finance_types_raw = _get(cp, finance_sec, "数据类型", "结算单,结算明细,付款,提现")
+    finance_types_raw = _get(
+        cp, finance_sec, "数据类型",
+        "获取对账单,按对账单获取交易记录,按订单获取交易记录,获取付款记录,获取提现记录,获取未结算交易",
+    )
     finance_types = _parse_types(
         finance_types_raw,
         {
-            "结算单": "statements",
+            "获取对账单": "statements",
+            "对账单": "statements",
             "statements": "statements",
+            "结算单": "statements",
+            "按对账单获取交易记录": "statement_tx",
+            "按对账单交易": "statement_tx",
             "结算明细": "statement_tx",
             "流水": "statement_tx",
             "transactions": "statement_tx",
+            "按订单获取交易记录": "order_tx",
+            "按订单交易": "order_tx",
+            "订单交易": "order_tx",
+            "order_tx": "order_tx",
+            "获取付款记录": "payments",
             "付款": "payments",
             "payments": "payments",
+            "获取提现记录": "withdrawals",
             "提现": "withdrawals",
             "withdrawals": "withdrawals",
+            "获取未结算交易": "unsettled",
             "未结算": "unsettled",
             "unsettled": "unsettled",
         },
-        default=("statements", "statement_tx", "payments", "withdrawals"),
+        default=("statements", "statement_tx", "order_tx", "payments", "withdrawals", "unsettled"),
     )
 
     return {
@@ -257,7 +291,7 @@ def load_config(config_path: Path | None = None) -> dict:
             "script": _resolve_path(_get(cp, finance_sec, "脚本", str(DEFAULT_FINANCE_SCRIPT)), PROJECT_ROOT),
             "logs_dir": _resolve_path(_get(cp, finance_sec, "日志目录", str(DEFAULT_FINANCE_LOGS)), PROJECT_ROOT),
             "data_types": finance_types,
-            "import_dirs": import_dirs(finance_sec, finance_defaults),
+            "import_dirs": finance_import_dirs(finance_sec, finance_defaults),
         },
         "order": {
             "enabled": _yes(_get(cp, order_sec, "启用", "否"), False),

@@ -12,13 +12,16 @@ DEFAULT_ANALYTICS_STEMS: dict[str, str] = {
     "shop": "店铺数据",
 }
 
-DEFAULT_FINANCE_STEMS: dict[str, str] = {
-    "statements": "结算单",
-    "statement_tx": "结算单流水",
-    "payments": "付款记录",
-    "withdrawals": "提现流水",
-    "unsettled": "未结算",
+FINANCE_API_LABELS: dict[str, str] = {
+    "statements": "获取对账单",
+    "statement_tx": "按对账单获取交易记录",
+    "order_tx": "按订单获取交易记录",
+    "payments": "获取付款记录",
+    "withdrawals": "获取提现记录",
+    "unsettled": "获取未结算交易",
 }
+
+DEFAULT_FINANCE_STEMS: dict[str, str] = dict(FINANCE_API_LABELS)
 
 ANALYTICS_CACHE_STEM: dict[str, str] = {
     "product": "product_list",
@@ -35,21 +38,47 @@ ANALYTICS_SHEET_TITLES: dict[str, str] = {
 }
 
 FINANCE_SHEET_TITLES: dict[str, str] = {
-    "statements": "结算单",
-    "statement_tx": "结算单流水",
-    "payments": "付款记录",
-    "withdrawals": "提现流水",
-    "unsettled": "未结算",
+    k: v[:31] for k, v in FINANCE_API_LABELS.items()
 }
 
-# 与 导入总配置.ini [流水导入] 键名对应
+# 与 导入总配置.ini [店铺财务] 键名对应
 FINANCE_DIR_KEYS: dict[str, str] = {
-    "statements": "结算单目录",
-    "statement_tx": "结算明细目录",
-    "payments": "付款目录",
-    "withdrawals": "提现目录",
-    "unsettled": "未结算目录",
+    "statements": "对账单目录",
+    "statement_tx": "按对账单交易目录",
+    "order_tx": "按订单交易目录",
+    "payments": "付款记录目录",
+    "withdrawals": "提现记录目录",
+    "unsettled": "未结算交易目录",
 }
+
+FINANCE_DIR_LEGACY_INI_KEYS: dict[str, str] = {
+    "对账单目录": "结算单目录",
+    "按对账单交易目录": "结算明细目录",
+    "按订单交易目录": "订单交易目录",
+    "付款记录目录": "付款目录",
+    "提现记录目录": "提现目录",
+    "未结算交易目录": "未结算目录",
+}
+
+FINANCE_STEM_LEGACY: dict[str, list[str]] = {
+    "statements": ["结算单"],
+    "statement_tx": ["结算单流水", "结算明细"],
+    "order_tx": ["订单交易流水", "订单交易"],
+    "payments": ["付款记录", "付款"],
+    "withdrawals": ["提现流水", "提现"],
+    "unsettled": ["未结算"],
+}
+
+
+def finance_label(kind: str) -> str:
+    return FINANCE_API_LABELS.get(kind, kind)
+
+
+def finance_import_root(import_dirs: dict[str, Path]) -> Path:
+    for key in FINANCE_DIR_KEYS.values():
+        if key in import_dirs:
+            return import_dirs[key].parent
+    return next(iter(import_dirs.values())).parent
 
 
 def zhanfu_day_tag(start: str, api_end: str) -> str:
@@ -102,7 +131,7 @@ def finance_export_filename(
     *,
     stems: dict[str, str] | None = None,
 ) -> str:
-    """与订单/罗盘一致：TIKTOK4号店PH_结算单流水_2026-06-01_2026-06-02.xlsx"""
+    """与订单/罗盘一致：TIKTOK4号店PH_获取对账单_2026-06-01_2026-06-02.xlsx"""
     s = {**DEFAULT_FINANCE_STEMS, **(stems or {})}
     name = s.get(kind, kind)
     tag = export_tag or "shop"
@@ -126,12 +155,13 @@ def default_finance_import_dirs() -> dict[str, Path]:
     from common.paths import Z_API_INTERFACE, Z_JSON_CACHE
 
     return {
-        "结算单目录": Z_API_INTERFACE / "结算单",
-        "结算明细目录": Z_API_INTERFACE / "结算单流水",
-        "付款目录": Z_API_INTERFACE / "付款记录",
-        "提现目录": Z_API_INTERFACE / "提现流水",
-        "未结算目录": Z_API_INTERFACE / "未结算",
-        "流水_JSON目录": Z_JSON_CACHE / "店铺流水",
+        "对账单目录": Z_API_INTERFACE / "获取对账单",
+        "按对账单交易目录": Z_API_INTERFACE / "按对账单获取交易记录",
+        "按订单交易目录": Z_API_INTERFACE / "按订单获取交易记录",
+        "付款记录目录": Z_API_INTERFACE / "获取付款记录",
+        "提现记录目录": Z_API_INTERFACE / "获取提现记录",
+        "未结算交易目录": Z_API_INTERFACE / "获取未结算交易",
+        "财务_JSON目录": Z_JSON_CACHE / "店铺财务",
     }
 
 

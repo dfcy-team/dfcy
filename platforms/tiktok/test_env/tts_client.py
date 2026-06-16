@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -183,10 +184,173 @@ def cfg(key: str, default: str = "") -> str:
     return os.getenv(key, default).strip()
 
 
+TOKEN_EXPIRED_CODES = {105002, "105002"}
+_TOKEN_REFRESH_BUFFER = timedelta(minutes=10)
+
+
+def is_token_expired_error(resp: dict | None) -> bool:
+    if not resp:
+        return False
+    if resp.get("code") in TOKEN_EXPIRED_CODES:
+        return True
+    msg = str(resp.get("message") or resp.get("msg") or "").lower()
+    return "expired credentials" in msg or ("access_token" in msg and "expired" in msg)
+
+
+def _shop_config_path(config_path: Path | None = None) -> Path | None:
+    if config_path and config_path.exists():
+        return config_path
+    raw = cfg("TTS_CONFIG_FILE")
+    if raw:
+        p = Path(raw)
+        if p.exists():
+            return p
+    return None
+
+
+def _token_expires_at(key: str = "TTS_ACCESS_TOKEN_EXPIRES_AT") -> datetime | None:
+    raw = cfg(key)
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _access_token_still_valid() -> bool:
+    access = cfg("TTS_ACCESS_TOKEN")
+    if not access:
+        return False
+    exp = _token_expires_at()
+    if exp is None:
+        return True
+    if exp > datetime.now() + timedelta(days=30):
+        return False
+    return datetime.now() + _TOKEN_REFRESH_BUFFER < exp
+
+
+def _expiry_iso_from_field(d: dict[str, Any], keys: tuple[str, ...], default_seconds: int) -> str:
+    now = datetime.now()
+    for k in keys:
+        v = d.get(k)
+        if v is None or str(v).strip() == "":
+            continue
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n > 10_000_000_000:
+            n = n // 1000
+        if n > 1_000_000_000:
+            return datetime.fromtimestamp(n).isoformat(timespec="seconds")
+        return (now + timedelta(seconds=n)).isoformat(timespec="seconds")
+    return (now + timedelta(seconds=default_seconds)).isoformat(timespec="seconds")
+
+
+def token_updates_from_data(d: dict[str, Any]) -> dict[str, str]:
+    access = str(d.get("access_token") or "")
+    refresh = str(d.get("refresh_token") or cfg("TTS_REFRESH_TOKEN") or "")
+    return {
+        "TTS_ACCESS_TOKEN": access,
+        "TTS_REFRESH_TOKEN": refresh,
+        "TTS_ACCESS_TOKEN_EXPIRES_AT": _expiry_iso_from_field(
+            d, ("access_token_expire_in", "expires_in"), 86400
+        ),
+        "TTS_REFRESH_TOKEN_EXPIRES_AT": _expiry_iso_from_field(
+            d, ("refresh_token_expire_in", "refresh_expires_in"), 31536000
+        ),
+    }
+
+
+def refresh_shop_token(
+    client: TikTokShopClient,
+    config_path: Path | None = None,
+    *,
+    quiet: bool = False,
+) -> str | None:
+    refresh = cfg("TTS_REFRESH_TOKEN")
+    if not refresh:
+        if not quiet:
+            print("错误: 缺少 TTS_REFRESH_TOKEN，请重新授权店铺")
+        return None
+    path = _shop_config_path(config_path)
+    r = client.token_refresh(refresh)
+    if not is_ok(r):
+        if not quiet:
+            print(f"续期失败: code={r.get('code')} {r.get('message')}")
+        return None
+    updates = token_updates_from_data(r.get("data") or {})
+    if not updates.get("TTS_ACCESS_TOKEN"):
+        if not quiet:
+            print("续期失败: 响应中无 access_token")
+        return None
+    if path:
+        update_config_file(path, updates)
+        load_env(path, override=True)
+    else:
+        for k, v in updates.items():
+            os.environ[k] = v
+    if not quiet:
+        print(f"[token] 已自动续期，有效至 {updates['TTS_ACCESS_TOKEN_EXPIRES_AT']}")
+    return updates["TTS_ACCESS_TOKEN"]
+
+
+def get_shop_token(client: TikTokShopClient, config_path: Path | None = None) -> str | None:
+    path = _shop_config_path(config_path)
+    if path:
+        client.config_path = path
+    exp = _token_expires_at()
+    if _access_token_still_valid():
+        if exp is not None:
+            token = cfg("TTS_ACCESS_TOKEN")
+            if token:
+                client.access_token = token
+                return token
+        elif cfg("TTS_REFRESH_TOKEN"):
+            token = refresh_shop_token(client, path)
+            if token:
+                client.access_token = token
+                return token
+        token = cfg("TTS_ACCESS_TOKEN")
+        if token:
+            client.access_token = token
+            return token
+    if cfg("TTS_REFRESH_TOKEN"):
+        token = refresh_shop_token(client, path)
+        if token:
+            client.access_token = token
+            return token
+    token = cfg("TTS_ACCESS_TOKEN")
+    if token:
+        client.access_token = token
+        return token
+    print("错误: 缺少 TTS_ACCESS_TOKEN / TTS_REFRESH_TOKEN，请运行授权或 授权换token.py")
+    return None
+
+
 class TikTokShopClient:
     def __init__(self, app_key: str, app_secret: str):
         self.app_key = app_key
         self.app_secret = app_secret
+        self.config_path: Path | None = None
+        self.access_token: str = ""
+
+    def _active_token(self, token: str) -> str:
+        return self.access_token or token
+
+    def _retry_after_refresh(self, resp: dict, token: str) -> str | None:
+        if not is_token_expired_error(resp):
+            if is_ok(resp):
+                self.access_token = self._active_token(token)
+            return None
+        if not self.config_path:
+            return None
+        new = refresh_shop_token(self, self.config_path)
+        if new:
+            self.access_token = new
+            return new
+        return None
 
     def sign(self, path: str, query: dict[str, Any], body: str = "") -> str:
         params = {k: v for k, v in query.items() if k not in ("sign", "access_token", "x-tts-access-token")}
@@ -195,6 +359,7 @@ class TikTokShopClient:
         return hmac.new(self.app_secret.encode(), wrapped.encode(), hashlib.sha256).hexdigest()
 
     def get(self, path: str, token: str, extra: dict | None = None) -> dict:
+        tok = self._active_token(token)
         query: dict[str, Any] = {"app_key": self.app_key, "timestamp": int(time.time())}
         if extra:
             query.update(extra)
@@ -203,12 +368,26 @@ class TikTokShopClient:
             "GET",
             f"{API_HOST}{path}",
             params=query,
-            headers={"content-type": "application/json", "x-tts-access-token": token},
+            headers={"content-type": "application/json", "x-tts-access-token": tok},
             timeout=60,
         )
-        return r.json()
+        data = r.json()
+        new = self._retry_after_refresh(data, tok)
+        if new:
+            query["timestamp"] = int(time.time())
+            query["sign"] = self.sign(path, query)
+            r = _request_with_retry(
+                "GET",
+                f"{API_HOST}{path}",
+                params=query,
+                headers={"content-type": "application/json", "x-tts-access-token": new},
+                timeout=60,
+            )
+            return r.json()
+        return data
 
     def post(self, path: str, token: str, body: dict, extra: dict | None = None) -> dict:
+        tok = self._active_token(token)
         query: dict[str, Any] = {"app_key": self.app_key, "timestamp": int(time.time())}
         if extra:
             query.update(extra)
@@ -219,10 +398,24 @@ class TikTokShopClient:
             f"{API_HOST}{path}",
             params=query,
             data=raw,
-            headers={"content-type": "application/json", "x-tts-access-token": token},
+            headers={"content-type": "application/json", "x-tts-access-token": tok},
             timeout=60,
         )
-        return r.json()
+        data = r.json()
+        new = self._retry_after_refresh(data, tok)
+        if new:
+            query["timestamp"] = int(time.time())
+            query["sign"] = self.sign(path, query, raw)
+            r = _request_with_retry(
+                "POST",
+                f"{API_HOST}{path}",
+                params=query,
+                data=raw,
+                headers={"content-type": "application/json", "x-tts-access-token": new},
+                timeout=60,
+            )
+            return r.json()
+        return data
 
     def put(self, path: str, token: str, body: dict | None = None, extra: dict | None = None) -> dict:
         query: dict[str, Any] = {"app_key": self.app_key, "timestamp": int(time.time())}

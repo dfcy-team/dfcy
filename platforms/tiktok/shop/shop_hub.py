@@ -211,6 +211,7 @@ def authorize_shop(shop_key: str, auth_input: str, pick_index: int | None = None
         get_shops,
         is_ok,
         pick_shop,
+        token_updates_from_data,
         update_config_file,
     )
 
@@ -234,13 +235,13 @@ def authorize_shop(shop_key: str, auth_input: str, pick_index: int | None = None
     region = parsed.get("region") or shop.get("region") or cfg("TTS_TARGET_REGION", "PH")
 
     client = TikTokShopClient(cfg("TTS_APP_KEY"), cfg("TTS_APP_SECRET"))
+    client.config_path = config_path
     tr = client.token_by_code(code)
     if not is_ok(tr):
         raise RuntimeError(f"换 token 失败: {tr}")
 
     d = tr["data"]
     access = d["access_token"]
-    refresh = d.get("refresh_token", "")
 
     r = client.get(f"/authorization/{API_VERSION}/shops", access)
     cipher = shop_id = shop_name = ""
@@ -260,11 +261,8 @@ def authorize_shop(shop_key: str, auth_input: str, pick_index: int | None = None
             shop_id = str(picked.get("id") or "")
             shop_name = str(picked.get("name") or "")
 
-    updates = {
-        "TTS_ACCESS_TOKEN": access,
-        "TTS_REFRESH_TOKEN": refresh,
-        "TTS_AUTH_CODE": "",
-    }
+    updates = token_updates_from_data(d)
+    updates["TTS_AUTH_CODE"] = ""
     if cipher:
         updates["TTS_SHOP_CIPHER"] = cipher
     if shop_id:

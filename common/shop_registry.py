@@ -35,6 +35,14 @@ def load_export_tags(ini_path: Path | None = None) -> dict[str, str]:
     return out
 
 
+def _pick_stem(sec, primary: str, legacy: str, default: str) -> str:
+    val = sec.get(primary, fallback="").strip()
+    if val:
+        return val
+    val = sec.get(legacy, fallback="").strip()
+    return val or default
+
+
 def load_filename_stems(ini_path: Path | None = None) -> dict[str, str]:
     """导出 Excel 文件名中间段，如 产品数据表 / 商品sku信息。"""
     from common.excel_names import DEFAULT_ANALYTICS_STEMS, DEFAULT_FINANCE_STEMS
@@ -57,11 +65,12 @@ def load_filename_stems(ini_path: Path | None = None) -> dict[str, str]:
         "video": sec.get("视频表", fallback=defaults["video"]).strip() or defaults["video"],
         "shop": sec.get("店铺表", fallback=defaults["shop"]).strip() or defaults["shop"],
         "order": sec.get("订单表", fallback=defaults["order"]).strip() or defaults["order"],
-        "statements": sec.get("结算单", fallback=defaults["statements"]).strip() or defaults["statements"],
-        "statement_tx": sec.get("结算明细", fallback=defaults["statement_tx"]).strip() or defaults["statement_tx"],
-        "payments": sec.get("付款", fallback=defaults["payments"]).strip() or defaults["payments"],
-        "withdrawals": sec.get("提现", fallback=defaults["withdrawals"]).strip() or defaults["withdrawals"],
-        "unsettled": sec.get("未结算", fallback=defaults["unsettled"]).strip() or defaults["unsettled"],
+        "statements": _pick_stem(sec, "对账单", "结算单", defaults["statements"]),
+        "statement_tx": _pick_stem(sec, "按对账单交易", "结算明细", defaults["statement_tx"]),
+        "order_tx": _pick_stem(sec, "按订单交易", "订单交易", defaults["order_tx"]),
+        "payments": _pick_stem(sec, "付款", "付款记录", defaults["payments"]),
+        "withdrawals": _pick_stem(sec, "提现", "提现流水", defaults["withdrawals"]),
+        "unsettled": _pick_stem(sec, "未结算", "未结算", defaults["unsettled"]),
     }
     return mapping
 

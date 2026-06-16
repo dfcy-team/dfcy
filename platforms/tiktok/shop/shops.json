@@ -1,6 +1,6 @@
 {
   "app": "app.env",
-  "active": "TKKJ1MY",
+  "active": "TK2PH",
   "shops": [
     {
       "key": "TKKJ1PH",
@@ -218,13 +218,13 @@
         "tk1ph"
       ],
       "config": "config_TK1PH.env",
-      "label": "TK1PH / TIKTOK1号店PH",
+      "label": "TK1PH",
       "export_tag": "TIKTOK1号店PH",
       "shop_mode": "local",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK1号店PH"
+      "notes": "Lunava living store"
     },
     {
       "key": "TK2PH",
@@ -232,7 +232,7 @@
         "tk2ph"
       ],
       "config": "config_TK2PH.env",
-      "label": "TK2PH / TIKTOK2号店PH",
+      "label": "TK2PH",
       "export_tag": "TIKTOK2号店PH",
       "shop_mode": "local",
       "region": "PH",
