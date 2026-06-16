@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextvars import ContextVar
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from config import (
@@ -27,6 +30,107 @@ from config import (
 
 _exchange_lock = threading.Lock()
 _exchanged_codes: set[str] = set()
+_active_shop_label: ContextVar[str] = ContextVar("marketing_shop_label", default="")
+
+SHOP_TOKENS_DIR = TOKENS_FILE.parent / "shops"
+
+
+def _safe_shop_key(shop_label: str) -> str:
+    s = (shop_label or "").strip()
+    if not s:
+        raise ValueError("店铺名不能为空")
+    for c in '<>:"/\\|?*':
+        s = s.replace(c, "_")
+    return s
+
+
+def shop_token_path(shop_label: str) -> Path:
+    return SHOP_TOKENS_DIR / f"{_safe_shop_key(shop_label)}.json"
+
+
+def set_active_shop_label(shop_label: str) -> None:
+    _active_shop_label.set((shop_label or "").strip())
+
+
+def _resolve_shop_label(shop_label: str | None = None) -> str:
+    label = (shop_label or _active_shop_label.get() or "").strip()
+    if label:
+        return label
+    legacy = load_token_legacy()
+    if legacy:
+        return (legacy.get("shop_label") or "ADS").strip() or "ADS"
+    raise RuntimeError("未指定店铺名，请先完成广告授权")
+
+
+def _migrate_legacy_token() -> None:
+    """将旧版单文件 marketing_token.json 迁入 shops/。"""
+    if not TOKENS_FILE.is_file():
+        return
+    SHOP_TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+    if any(SHOP_TOKENS_DIR.glob("*.json")):
+        return
+    try:
+        data = json.loads(TOKENS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not data.get("access_token"):
+        return
+    label = (data.get("shop_label") or "ADS").strip() or "ADS"
+    data["shop_label"] = label
+    if ADVERTISERS_FILE.is_file() and not data.get("advertisers"):
+        try:
+            adv_data = json.loads(ADVERTISERS_FILE.read_text(encoding="utf-8"))
+            data["advertisers"] = adv_data.get("advertisers") or []
+        except (OSError, json.JSONDecodeError):
+            pass
+    shop_token_path(label).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_token_legacy() -> dict[str, Any] | None:
+    if not TOKENS_FILE.is_file():
+        return None
+    try:
+        return json.loads(TOKENS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def load_shop_token(shop_label: str) -> dict[str, Any] | None:
+    _migrate_legacy_token()
+    path = shop_token_path(shop_label)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def list_shop_bindings() -> list[dict[str, Any]]:
+    _migrate_legacy_token()
+    SHOP_TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+    out: list[dict[str, Any]] = []
+    for path in sorted(SHOP_TOKENS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not data.get("access_token"):
+            continue
+        label = (data.get("shop_label") or path.stem).strip()
+        advertisers = data.get("advertisers") or []
+        adv_ids = data.get("advertiser_ids") or []
+        out.append(
+            {
+                "shop_label": label,
+                "advertiser_count": len(advertisers) or len(adv_ids),
+                "advertisers": advertisers,
+                "advertiser_ids": adv_ids,
+                "saved_at": data.get("saved_at", ""),
+                "token_file": path.name,
+            }
+        )
+    return out
 
 
 def build_authorize_url(state: str | None = None) -> tuple[str, str]:
@@ -55,7 +159,6 @@ def is_marketing_callback(
     st = (state or "").lower()
     if st.startswith(get_config()["OAUTH_STATE_PREFIX"].lower()):
         return True
-    # Marketing 回调用 auth_code；Shop 用 code。仅有 code 且无 shop state 时不视为 marketing。
     if code and not auth_code:
         return False
     return False
@@ -140,13 +243,17 @@ def verify_credentials() -> dict[str, Any]:
         return {"ok": False, "error": msg}
 
 
-def exchange_auth_code(auth_code: str) -> dict[str, Any]:
+def exchange_auth_code(auth_code: str, *, shop_label: str = "") -> dict[str, Any]:
     cfg = get_config()
     secret = (cfg.get("APP_SECRET") or "").strip()
     if not secret:
         raise RuntimeError(f"未配置 APP_SECRET，请编辑 {ENV_FILE}")
     if secret == cfg.get("APP_ID"):
         raise RuntimeError("APP_SECRET 误填为 App ID")
+
+    label = (shop_label or "").strip()
+    if not label:
+        raise RuntimeError("请先填写绑定店铺名")
 
     code = auth_code.strip()
     if not code:
@@ -159,7 +266,7 @@ def exchange_auth_code(auth_code: str) -> dict[str, Any]:
         _exchanged_codes.add(code_key)
 
     _log_oauth(
-        f"EXCHANGE app_id={cfg['APP_ID']} secret_fp={secret[:4]}...{secret[-4:]} "
+        f"EXCHANGE shop={label} app_id={cfg['APP_ID']} secret_fp={secret[:4]}...{secret[-4:]} "
         f"code_len={len(code)} code_tail={code[-12:]!r}"
     )
 
@@ -171,43 +278,69 @@ def exchange_auth_code(auth_code: str) -> dict[str, Any]:
         data = resp.get("data") or {}
         if not data.get("access_token"):
             raise RuntimeError("未获得 access_token")
-        save_token(data)
+        data["shop_label"] = label
         advertisers = fetch_advertiser_list(data["access_token"])
+        data["advertisers"] = advertisers
+        save_shop_token(data)
         save_advertisers(advertisers)
-        _log_oauth(f"OK advertisers={len(advertisers)} ids={data.get('advertiser_ids', [])}")
+        _log_oauth(f"OK shop={label} advertisers={len(advertisers)} ids={data.get('advertiser_ids', [])}")
         return data
     except Exception as e:
-        _log_oauth(f"FAIL {e}")
+        _log_oauth(f"FAIL shop={label} {e}")
         raise
 
 
-def fetch_advertiser_list(access_token: str | None = None) -> list[dict[str, Any]]:
-    token = access_token or get_access_token()
+def fetch_advertiser_list(access_token: str | None = None, *, shop_label: str | None = None) -> list[dict[str, Any]]:
+    token = access_token or get_access_token(shop_label)
     url = f"{API_BASE}/oauth2/advertiser/get/"
     resp = _get_json(url, token, {"app_id": get_config()["APP_ID"], "secret": get_config()["APP_SECRET"]})
     items = (resp.get("data") or {}).get("list") or []
     return items if isinstance(items, list) else []
 
 
-def save_token(data: dict[str, Any]) -> None:
+def save_shop_token(data: dict[str, Any]) -> None:
     if not data.get("access_token"):
         raise RuntimeError("未获得 access_token，授权失败")
+    label = (data.get("shop_label") or "").strip()
+    if not label:
+        raise ValueError("token 缺少 shop_label")
     payload = dict(data)
     payload["saved_at"] = datetime.now(timezone.utc).isoformat()
+    SHOP_TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+    shop_token_path(label).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 兼容旧读取逻辑：最新一家也写一份 legacy（可选，便于排查）
     TOKENS_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_token() -> dict[str, Any] | None:
-    if not TOKENS_FILE.is_file():
-        return None
-    return json.loads(TOKENS_FILE.read_text(encoding="utf-8"))
+def save_token(data: dict[str, Any]) -> None:
+    save_shop_token(data)
 
 
-def get_access_token() -> str:
-    tok = load_token()
+def load_token(shop_label: str | None = None) -> dict[str, Any] | None:
+    if shop_label:
+        return load_shop_token(shop_label)
+    bindings = list_shop_bindings()
+    if bindings:
+        return load_shop_token(bindings[0]["shop_label"])
+    return load_token_legacy()
+
+
+def get_access_token(shop_label: str | None = None) -> str:
+    label = _resolve_shop_label(shop_label)
+    tok = load_shop_token(label)
     if not tok or not tok.get("access_token"):
-        raise RuntimeError("尚未授权广告账户，请先打开 /ads 完成授权")
+        raise RuntimeError(f"店铺「{label}」尚未授权广告账户，请先在 /ads 完成授权")
     return tok["access_token"]
+
+
+def binding_for_shop(shop_label: str) -> dict[str, Any] | None:
+    label = (shop_label or "").strip()
+    if not label:
+        return None
+    for b in list_shop_bindings():
+        if b.get("shop_label") == label:
+            return b
+    return None
 
 
 def save_advertisers(items: list[dict[str, Any]]) -> None:
@@ -218,25 +351,59 @@ def save_advertisers(items: list[dict[str, Any]]) -> None:
     ADVERTISERS_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_advertisers() -> list[dict[str, Any]]:
-    if not ADVERTISERS_FILE.is_file():
-        return []
-    data = json.loads(ADVERTISERS_FILE.read_text(encoding="utf-8"))
-    items = data.get("advertisers") or []
-    return items if isinstance(items, list) else []
+def load_advertisers(shop_label: str | None = None) -> list[dict[str, Any]]:
+    label = (shop_label or _active_shop_label.get() or "").strip()
+    if label:
+        tok = load_shop_token(label)
+        if tok and tok.get("advertisers"):
+            return tok["advertisers"]
+    if ADVERTISERS_FILE.is_file():
+        try:
+            data = json.loads(ADVERTISERS_FILE.read_text(encoding="utf-8"))
+            items = data.get("advertisers") or []
+            return items if isinstance(items, list) else []
+        except (OSError, json.JSONDecodeError):
+            pass
+    return []
 
 
-def token_status() -> dict[str, Any]:
-    tok = load_token()
+def save_shop_label(shop_label: str, *, new_label: str | None = None) -> None:
+    old = (shop_label or "").strip()
+    if not old:
+        raise ValueError("店铺名不能为空")
+    tok = load_shop_token(old)
     if not tok or not tok.get("access_token"):
-        return {"authorized": False}
-    adv_ids = tok.get("advertiser_ids") or []
-    advertisers = load_advertisers()
+        raise RuntimeError(f"店铺「{old}」尚未授权广告账户")
+    target = (new_label or old).strip()
+    if not target:
+        raise ValueError("店铺名不能为空")
+    tok["shop_label"] = target
+    if target != old:
+        old_path = shop_token_path(old)
+        if old_path.is_file():
+            old_path.unlink()
+    save_shop_token(tok)
+
+
+def token_status(shop_label: str | None = None) -> dict[str, Any]:
+    bindings = list_shop_bindings()
+    if shop_label:
+        b = binding_for_shop(shop_label)
+        if not b:
+            return {"authorized": False, "shop_label": shop_label}
+        return {"authorized": True, **b}
+    if not bindings:
+        return {"authorized": False, "bindings": [], "binding_count": 0}
+    first = bindings[0]
+    total_adv = sum(int(b.get("advertiser_count") or 0) for b in bindings)
     return {
         "authorized": True,
-        "advertiser_ids": adv_ids,
-        "advertiser_count": len(adv_ids) if adv_ids else len(advertisers),
-        "advertisers": advertisers,
-        "scope": tok.get("scope"),
-        "saved_at": tok.get("saved_at", ""),
+        "bindings": bindings,
+        "binding_count": len(bindings),
+        "shop_label": first.get("shop_label", ""),
+        "advertiser_ids": first.get("advertiser_ids") or [],
+        "advertiser_count": first.get("advertiser_count") or 0,
+        "advertisers": first.get("advertisers") or [],
+        "saved_at": first.get("saved_at", ""),
+        "total_advertiser_slots": total_adv,
     }

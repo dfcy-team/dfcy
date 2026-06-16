@@ -25,11 +25,8 @@ ENV_ROOT = TIKTOK_DIR
 TEST_ENV = TIKTOK_TEST_ENV
 DEFAULT_SHOP_HUB = TIKTOK_SHOP_DIR
 DEFAULT_ANALYTICS_SCRIPT = TIKTOK_ANALYTICS_DIR / "店铺分析.py"
-DEFAULT_ANALYTICS_LOGS = TIKTOK_ANALYTICS_DIR / "logs"
 DEFAULT_FINANCE_SCRIPT = TIKTOK_FINANCE_DIR / "流水分析.py"
-DEFAULT_FINANCE_LOGS = TIKTOK_FINANCE_DIR / "logs"
 DEFAULT_ORDER_SCRIPT = TIKTOK_ORDERS_DIR / "订单查询.py"
-DEFAULT_ORDER_LOGS = TIKTOK_ORDERS_DIR
 DEFAULT_PRODUCT_DIR = TIKTOK_PRODUCTS_DIR
 
 # 顶层分类目录
@@ -60,6 +57,59 @@ SHOW_SHOPS_SCRIPT = TOOLS_DIR / "查看店铺配置.py"
 DEFAULT_Z_ROOT = Path(r"Z:\Tk每日数据")
 Z_API_INTERFACE = DEFAULT_Z_ROOT / "店铺分析API接口"
 Z_JSON_CACHE = Z_API_INTERFACE / "json缓存"
+
+# 本地导出/下载目录（不进 git 仓库）
+EXPORT_DATA_ROOT = Path(r"C:\Users\Administrator\Desktop\下载")
+EXPORT_SHOP_DIR = EXPORT_DATA_ROOT / "店铺"
+CURRENT_SHOP_FILE = EXPORT_SHOP_DIR / "CURRENT_SHOP.txt"
+EXPORT_ORDERS_DIR = EXPORT_DATA_ROOT / "订单"
+EXPORT_FINANCE_DIR = EXPORT_DATA_ROOT / "财务"
+EXPORT_ANALYTICS_DIR = EXPORT_DATA_ROOT / "罗盘"
+LEGACY_CURRENT_SHOP_FILE = TIKTOK_SHOP_DIR / "CURRENT_SHOP.txt"
+
+DEFAULT_ANALYTICS_LOGS = EXPORT_ANALYTICS_DIR
+DEFAULT_FINANCE_LOGS = EXPORT_FINANCE_DIR
+DEFAULT_ORDER_LOGS = EXPORT_ORDERS_DIR
+
+
+def ensure_export_dirs() -> Path:
+    for d in (
+        EXPORT_DATA_ROOT,
+        EXPORT_SHOP_DIR,
+        EXPORT_ORDERS_DIR,
+        EXPORT_FINANCE_DIR,
+        EXPORT_ANALYTICS_DIR,
+    ):
+        d.mkdir(parents=True, exist_ok=True)
+    return EXPORT_DATA_ROOT
+
+
+def migrate_current_shop_file() -> None:
+    ensure_export_dirs()
+    if CURRENT_SHOP_FILE.exists():
+        return
+    if LEGACY_CURRENT_SHOP_FILE.exists():
+        key = LEGACY_CURRENT_SHOP_FILE.read_text(encoding="utf-8").strip()
+        if key:
+            CURRENT_SHOP_FILE.write_text(key + "\n", encoding="utf-8")
+
+
+def resolve_current_shop_file() -> Path:
+    migrate_current_shop_file()
+    return CURRENT_SHOP_FILE
+
+
+def export_shop_dir(module: str, shop_label: str) -> Path:
+    """module: orders | finance | analytics"""
+    mapping = {
+        "orders": EXPORT_ORDERS_DIR,
+        "finance": EXPORT_FINANCE_DIR,
+        "analytics": EXPORT_ANALYTICS_DIR,
+    }
+    d = mapping[module] / shop_label
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 
 ALL_SHOP_KEYS = (
     "TKKJ1PH,TKKJ1TH,TKKJ1MY,TKKJ2PH,TKKJ2TH,TKKJ3PH,TKKJ3TH,TKKJ3MY,"

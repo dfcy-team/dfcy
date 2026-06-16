@@ -85,6 +85,7 @@ if str(_PROJECT) not in sys.path:
 from shop_tz import infer_shop_region_from_cfg, get_shop_tz, pick_config_before_init, today_local, tz_label
 from tts_client import TikTokShopClient, cfg, get_shop_token, init_shop_config, is_ok, strip_config_argv
 from common.excel_names import analytics_export_filename_by_cache_stem, excel_sheet_title
+from common.paths import ensure_export_dirs, export_shop_dir, EXPORT_ANALYTICS_DIR
 from common.shop_registry import load_filename_stems
 
 BASE = Path(__file__).parent
@@ -103,8 +104,8 @@ pick_config_before_init(ENV_ROOT, USE_CONFIG)
 CONFIG_FILE = init_shop_config(ENV_ROOT)
 SHOP_REGION = infer_shop_region_from_cfg(CONFIG_FILE)
 SHOP_TZ = get_shop_tz(SHOP_REGION)
-LOG_DIR = BASE / "logs" / cfg("TTS_CONFIG_LABEL", CONFIG_FILE.stem)
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+ensure_export_dirs()
+LOG_DIR = export_shop_dir("analytics", cfg("TTS_CONFIG_LABEL", CONFIG_FILE.stem))
 
 _env_tag = cfg("TTS_EXPORT_SHOP_TAG", "").strip()
 if _env_tag:

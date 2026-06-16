@@ -18,6 +18,8 @@ platforms/tiktok/shop/CURRENT_SHOP.txt
 platforms/tiktok/orders/**/orders_last_summary.json
 platforms/tiktok/orders/**/orders_*.json
 platforms/tiktok/orders/**/*.xlsx
+platforms/tiktok/marketing/exports/
+platforms/tiktok/marketing/tokens/shops/
 
 # 系统文件
 .DS_Store

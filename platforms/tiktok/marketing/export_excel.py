@@ -9,6 +9,23 @@ from pathlib import Path
 MODULE_ROOT = Path(__file__).resolve().parent
 EXPORT_DIR = MODULE_ROOT / "exports"
 
+
+def _marketing_runtime():
+    """按文件路径加载 runtime_loader，不依赖 sys.path。"""
+    import importlib.util
+
+    name = "tiktok_marketing_runtime_loader"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = MODULE_ROOT / "runtime_loader.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载 {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
 CREATIVE_HEADERS = [
     "广告计划名称",
     "广告计划 ID",
@@ -100,29 +117,28 @@ def run_export(
     end_date: str,
     report_kind: str,
     file_prefix: str,
+    shop_label: str = "",
 ) -> Path:
-    from report_client import (
-        build_creative_rows,
-        build_live_rows,
-        fetch_ad_report,
-        fetch_all_ads,
-        fetch_all_campaigns,
-        fetch_campaign_report,
-    )
+    rt = _marketing_runtime()
+
+    label = (shop_label or file_prefix or "").strip()
+    if label:
+        rt.marketing_oauth().set_active_shop_label(label)
+    rc = rt.marketing_report_client()
 
     kind = report_kind.strip().lower()
     if kind not in ("creative", "live"):
         raise ValueError(f"未知报表类型: {report_kind}")
 
     if kind == "creative":
-        ads = fetch_all_ads(advertiser_id)
-        report = fetch_ad_report(advertiser_id, start_date, end_date)
-        rows = build_creative_rows(report, ads)
+        ads = rc.fetch_all_ads(advertiser_id)
+        report = rc.fetch_ad_report(advertiser_id, start_date, end_date)
+        rows = rc.build_creative_rows(report, ads)
         suffix = "广告创意"
     else:
-        camps = fetch_all_campaigns(advertiser_id)
-        report = fetch_campaign_report(advertiser_id, start_date, end_date)
-        rows = build_live_rows(report, camps)
+        camps = rc.fetch_all_campaigns(advertiser_id)
+        report = rc.fetch_campaign_report(advertiser_id, start_date, end_date)
+        rows = rc.build_live_rows(report, camps)
         suffix = "直播广告"
 
     name = f"{file_prefix}_{suffix}_{start_date}_{end_date}.xlsx"

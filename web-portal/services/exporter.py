@@ -11,8 +11,10 @@ from pathlib import Path
 from services.settings import (
     ANALYTICS_LOGS,
     ANALYTICS_SCRIPT,
+    FINANCE_LOGS,
     FINANCE_SCRIPT,
     JOBS_DIR,
+    ORDER_LOGS,
     ORDER_SCRIPT,
     PROJECT_ROOT,
 )
@@ -174,6 +176,15 @@ def start_order_export(*, shop_key: str, start_date: str, end_date: str) -> str:
     return _start_job("orders", shop_key, start_date, end_date, ORDER_SCRIPT, args, ORDER_SCRIPT.parent)
 
 
+def _export_logs_dir(kind: str, shop_key: str) -> Path:
+    roots = {
+        "analytics": ANALYTICS_LOGS,
+        "finance": FINANCE_LOGS,
+        "orders": ORDER_LOGS,
+    }
+    return roots[kind] / shop_key.upper()
+
+
 def _start_job(
     kind: str,
     shop_key: str,
@@ -196,7 +207,7 @@ def _start_job(
         "script": str(script),
         "args": args,
         "log": "",
-        "logs_dir": str(ANALYTICS_LOGS / shop_key.upper()),
+        "logs_dir": str(_export_logs_dir(kind, shop_key)),
     }
     _save_job(job)
     t = threading.Thread(target=_run_subprocess, args=(job, script, args, cwd), daemon=True)

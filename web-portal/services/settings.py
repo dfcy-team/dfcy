@@ -31,11 +31,27 @@ APP_ENV = HUB_DIR / "app.env"
 SHOPS_JSON = HUB_DIR / "shops.json"
 MASTER_CONFIG = PROJECT_ROOT / "config" / "导入总配置.ini"
 
+import sys
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from common.paths import (  # noqa: E402
+    EXPORT_ANALYTICS_DIR,
+    EXPORT_DATA_ROOT,
+    EXPORT_FINANCE_DIR,
+    EXPORT_ORDERS_DIR,
+    ensure_export_dirs,
+)
+
+ensure_export_dirs()
+
 ANALYTICS_SCRIPT = TIKTOK_DIR / "analytics" / "店铺分析.py"
 FINANCE_SCRIPT = TIKTOK_DIR / "finance" / "流水分析.py"
 ORDER_SCRIPT = TIKTOK_DIR / "orders" / "订单查询.py"
-ANALYTICS_LOGS = TIKTOK_DIR / "analytics" / "logs"
-ORDER_LOGS = TIKTOK_DIR / "orders"
+ANALYTICS_LOGS = EXPORT_ANALYTICS_DIR
+FINANCE_LOGS = EXPORT_FINANCE_DIR
+ORDER_LOGS = EXPORT_ORDERS_DIR
+EXPORT_DOWNLOAD_ROOT = EXPORT_DATA_ROOT
 CONTENT_DIR = TIKTOK_DIR / "content"
 
 JOBS_DIR = WEB_ROOT / "data" / "jobs"

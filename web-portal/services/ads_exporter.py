@@ -20,7 +20,6 @@ def _load_export_module():
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules["tiktok_marketing_export"] = mod
-    # export_excel imports report_client from same dir
     prev = sys.path[:]
     if str(MARKETING_ROOT) not in sys.path:
         sys.path.insert(0, str(MARKETING_ROOT))
@@ -37,13 +36,20 @@ def _run_export_job(job: dict) -> None:
     try:
         mod = _load_export_module()
         _append_log(job, f"拉取 {job['report_kind']} 报表 {job['start_date']} ~ {job['end_date']}\n")
-        out = mod.run_export(
-            advertiser_id=job["advertiser_id"],
-            start_date=job["start_date"],
-            end_date=job["end_date"],
-            report_kind=job["report_kind"],
-            file_prefix=job["file_prefix"],
-        )
+        prev = sys.path[:]
+        if str(MARKETING_ROOT) not in sys.path:
+            sys.path.insert(0, str(MARKETING_ROOT))
+        try:
+            out = mod.run_export(
+                advertiser_id=job["advertiser_id"],
+                start_date=job["start_date"],
+                end_date=job["end_date"],
+                report_kind=job["report_kind"],
+                file_prefix=job["file_prefix"],
+                shop_label=job.get("shop_label") or job["file_prefix"],
+            )
+        finally:
+            sys.path[:] = prev
         job["output_file"] = str(out)
         job["status"] = "done"
         job["finished_at"] = datetime.now().isoformat(timespec="seconds")
@@ -64,11 +70,13 @@ def start_ads_export(
     end_date: str,
     report_kind: str,
     file_prefix: str,
+    shop_label: str = "",
 ) -> str:
     job_id = uuid.uuid4().hex[:12]
     job = {
         "id": job_id,
         "kind": f"ads_{report_kind}",
+        "shop_label": shop_label,
         "advertiser_id": advertiser_id,
         "start_date": start_date,
         "end_date": end_date,

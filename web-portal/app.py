@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import re
+import json
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -20,6 +21,7 @@ from flask import (
     render_template,
     request,
     send_file,
+    session,
     url_for,
 )
 
@@ -251,21 +253,65 @@ def ads_page():
     if tok.get("authorized") and auth_error:
         auth_error = ""
     cred_probe = marketing_auth.verify_credentials()
+    shop_suggestions: list[dict[str, str]] = []
+    seen_tags: set[str] = set()
+    for s in shops.load_shops():
+        tag = (s.get("export_tag") or s.get("label") or s.get("key") or "").strip()
+        if not tag or tag in seen_tags:
+            continue
+        seen_tags.add(tag)
+        shop_suggestions.append(
+            {
+                "key": s.get("key", ""),
+                "tag": tag,
+                "label": s.get("label", s.get("key", "")),
+            }
+        )
     return render_template(
         "ads.html",
         token=tok,
+        bindings=tok.get("bindings") or [],
+        bindings_json=json.dumps(tok.get("bindings") or [], ensure_ascii=False),
         auth_ok=auth_ok,
+        auth_shop=request.args.get("shop", "").strip(),
         auth_error=auth_error,
         app_id=marketing_auth.APP_ID,
         redirect_uri=marketing_auth.REDIRECT_URI,
         credentials_ok=cred_probe.get("ok"),
+        shop_suggestions=shop_suggestions,
     )
 
 
 @app.route("/ads/authorize")
 def ads_authorize():
+    shop_name = (request.args.get("shop_name") or request.form.get("shop_name") or "").strip()
+    if not shop_name:
+        return redirect(url_for("ads_page", error="请先填写绑定店铺名"))
+    session["ads_shop_label"] = shop_name
     url, _state = marketing_auth.build_authorize_url()
     return redirect(url)
+
+
+@app.post("/api/ads/shop-label")
+def api_ads_shop_label():
+    tok = marketing_auth.token_status()
+    if not tok.get("authorized"):
+        return jsonify({"ok": False, "error": "请先完成广告账户授权"}), 400
+    data = request.get_json(force=True, silent=True) or {}
+    old_name = (data.get("old_shop_name") or data.get("shop_label") or "").strip()
+    shop_name = (data.get("shop_name") or "").strip()
+    if not shop_name:
+        return jsonify({"ok": False, "error": "请填写店铺名"}), 400
+    try:
+        if old_name and old_name != shop_name:
+            marketing_auth.save_shop_label(old_name, new_label=shop_name)
+        elif old_name:
+            marketing_auth.save_shop_label(old_name)
+        else:
+            marketing_auth.save_shop_label(shop_name)
+        return jsonify({"ok": True, "shop_label": shop_name})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.post("/api/ads/export")
@@ -274,11 +320,18 @@ def api_ads_export():
     if not tok.get("authorized"):
         return jsonify({"ok": False, "error": "请先完成广告账户授权"}), 400
     data = request.get_json(force=True, silent=True) or {}
+    shop_label = (data.get("shop_label") or "").strip()
     advertiser_id = (data.get("advertiser_id") or "").strip()
     start_date = (data.get("start_date") or "").strip()
     end_date = (data.get("end_date") or "").strip()
     report_kind = (data.get("report_kind") or "creative").strip().lower()
-    file_prefix = (data.get("file_prefix") or "ADS").strip() or "ADS"
+    if not shop_label:
+        shop_label = (data.get("file_prefix") or tok.get("shop_label") or "").strip()
+    file_prefix = (data.get("file_prefix") or shop_label or "ADS").strip() or "ADS"
+    if not shop_label:
+        return jsonify({"ok": False, "error": "请选择或填写绑定店铺名"}), 400
+    if not marketing_auth.binding_for_shop(shop_label):
+        return jsonify({"ok": False, "error": f"店铺「{shop_label}」尚未授权广告"}), 400
     if not advertiser_id or not start_date or not end_date:
         return jsonify({"ok": False, "error": "请填写广告账户与日期范围"}), 400
     if report_kind not in ("creative", "live"):
@@ -290,6 +343,7 @@ def api_ads_export():
             end_date=end_date,
             report_kind=report_kind,
             file_prefix=file_prefix,
+            shop_label=shop_label,
         )
         return jsonify({"ok": True, "job_id": job_id})
     except Exception as e:
@@ -465,10 +519,12 @@ def callback():
             return redirect(url_for("ads_page", error=error))
         if auth_code:
             try:
-                marketing_auth.exchange_auth_code(auth_code)
+                shop_label = (session.pop("ads_shop_label", None) or "").strip()
+                marketing_auth.exchange_auth_code(auth_code, shop_label=shop_label)
                 if not marketing_auth.token_status().get("authorized"):
                     return redirect(url_for("ads_page", error="token 保存失败，请重试"))
-                return redirect(url_for("ads_page", ok=1))
+                qs = f"ok=1&shop={quote(shop_label)}" if shop_label else "ok=1"
+                return redirect(url_for("ads_page") + "?" + qs)
             except Exception as e:
                 return redirect(url_for("ads_page", error=str(e)))
         return redirect(url_for("ads_page", error="未收到 auth_code"))

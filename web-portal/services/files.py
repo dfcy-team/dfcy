@@ -4,12 +4,14 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from services.settings import ANALYTICS_LOGS, DESKTOP_ROOT, ORDER_LOGS, PROJECT_ROOT
+from services.settings import ANALYTICS_LOGS, DESKTOP_ROOT, EXPORT_DOWNLOAD_ROOT, FINANCE_LOGS, ORDER_LOGS, PROJECT_ROOT
 
 
 def _safe_roots() -> list[Path]:
     roots = [
+        EXPORT_DOWNLOAD_ROOT,
         ANALYTICS_LOGS,
+        FINANCE_LOGS,
         ORDER_LOGS,
         DESKTOP_ROOT,
         PROJECT_ROOT / "platforms" / "tiktok",

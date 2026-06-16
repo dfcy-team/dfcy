@@ -6,7 +6,7 @@ TikTok Shop 订单查询 — 列表 + 详情
 【命令行】python 订单查询.py --start 2026-05-01 --end 2026-05-21 --all
 
 导出：Excel 主路径 Z:\\Tk每日数据\\店铺分析API接口\\订单数据表\\
-      本地副本 正式环境\\订单\\<店键>\\
+      本地副本 Desktop\\下载\\订单\\<店键>\\
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 from common.excel_names import load_order_import_dirs, order_excel_path  # noqa: E402
 from common.file_importer import order_filename  # noqa: E402
+from common.paths import ensure_export_dirs, export_shop_dir, resolve_current_shop_file  # noqa: E402
 from common.shop_registry import load_filename_stems  # noqa: E402
 
 
@@ -67,8 +68,13 @@ def _pick_config() -> None:
     if any(a in ("--config", "-c", "--shop", "-s") for a in argv):
         return
     hub = ENV_ROOT / "shop"
-    if hub.exists() and (hub / "CURRENT_SHOP.txt").exists():
-        return  # init_shop_config 会读 CURRENT_SHOP + app.env
+    if hub.exists():
+        try:
+            if resolve_current_shop_file().exists():
+                return
+        except Exception:
+            if (hub / "CURRENT_SHOP.txt").exists():
+                return  # init_shop_config 会读 CURRENT_SHOP + app.env
     p = _default_config_path()
     if p:
         os.environ["TTS_CONFIG"] = str(p)
@@ -78,8 +84,8 @@ _pick_config()
 CONFIG_FILE = init_shop_config(ENV_ROOT)
 LABEL = cfg("TTS_CONFIG_LABEL", CONFIG_FILE.stem)
 ORDER_IMPORT_DIRS = load_order_import_dirs()
-LOCAL_DIR = SCRIPT_DIR / LABEL
-LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+ensure_export_dirs()
+LOCAL_DIR = export_shop_dir("orders", LABEL)
 LOG_DIR = LOCAL_DIR
 
 APP_KEY = cfg("TTS_APP_KEY", "6k3vv9pooutd9")

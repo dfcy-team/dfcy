@@ -3,18 +3,13 @@
 {% block content %}
 <section class="page-header">
   <h1>鼎峰 TikTok 广告数据分析</h1>
-  <p class="lead">TikTok Marketing API — 授权广告账户后拉取广告报表（与店铺授权独立）。</p>
+  <p class="lead">每家店铺单独授权广告账户；可授权多家，互不影响。</p>
 </section>
 
-{% if token.authorized %}
-<div class="card ok">
-  <h2>✓ 广告账户已授权</h2>
-  <p>已保存 Marketing API access_token，可对接报表拉取。账户数：<strong>{{ token.advertiser_count }}</strong></p>
-</div>
-{% elif auth_ok %}
+{% if auth_ok %}
 <div class="card ok">
   <h2>授权成功</h2>
-  <p>已保存广告 API token，下方可查看授权到的广告账户。</p>
+  <p>{% if auth_shop %}店铺 <strong>{{ auth_shop }}</strong> 的广告账户已绑定。{% else %}已保存广告 API token。{% endif %}</p>
 </div>
 {% elif auth_error %}
 <div class="card alert">
@@ -23,25 +18,9 @@
 </div>
 {% endif %}
 
-{% if not token.authorized or not credentials_ok %}
+{% if not credentials_ok %}
 <div class="card">
   <h2>凭据配置</h2>
-  {% if credentials_ok %}
-  <p class="ok" style="margin:0 0 12px;">
-    App Secret 已配置（<code>platforms/tiktok/marketing/app.env</code>）。
-    Portal 重置 Secret 后可在下方更新。
-  </p>
-  <details>
-    <summary class="muted" style="cursor:pointer;">需要更新 Secret 时展开</summary>
-    <form id="form-ads-secret" class="form-grid" style="margin-top:12px;">
-      <label class="span2">App Secret
-        <input type="password" name="secret" placeholder="TikTok for Business Portal 中的 Secret" autocomplete="off"/>
-      </label>
-      <button type="submit" class="btn span2">保存 Secret 并验证</button>
-    </form>
-    <div id="ads-secret-result" class="muted" style="margin-top:8px;"></div>
-  </details>
-  {% else %}
   <p class="alert" style="margin:0 0 12px;">
     尚未配置 App Secret。请从
     <a href="https://business-api.tiktok.com/portal/apps/7651554890895851537" target="_blank" rel="noopener">TikTok for Business Portal</a>
@@ -49,89 +28,113 @@
   </p>
   <form id="form-ads-secret" class="form-grid">
     <label class="span2">App Secret
-      <input type="password" name="secret" placeholder="60a...a84 完整 Secret" autocomplete="off"/>
+      <input type="password" name="secret" placeholder="完整 Secret" autocomplete="off"/>
     </label>
     <button type="submit" class="btn primary span2">保存 Secret 并验证</button>
   </form>
   <div id="ads-secret-result" class="muted" style="margin-top:8px;"></div>
-  {% endif %}
+</div>
+{% elif not token.authorized %}
+<div class="card">
+  <h2>凭据配置</h2>
+  <p class="ok" style="margin:0;">App Secret 已配置。</p>
 </div>
 {% endif %}
 
-<div class="grid two">
-  <div class="card">
-    <h2>① 广告账户授权</h2>
-    {% if token.authorized %}
-    <ul class="kv">
-      <li><span>状态</span><span class="badge ok">已授权</span></li>
-      <li><span>Token 保存时间</span><code>{{ token.saved_at or '—' }}</code></li>
-      <li><span>Advertiser 数量</span><code>{{ token.advertiser_count }}</code></li>
-    </ul>
-    <details style="margin-top:12px;">
-      <summary class="muted" style="cursor:pointer;">换账号 / 重新授权</summary>
-      <p style="margin:8px 0;">
-        <a class="btn" href="{{ url_for('ads_authorize') }}">重新授权</a>
-      </p>
-    </details>
-    {% else %}
-    <p class="muted">尚未授权。请用有广告权限的 TikTok For Business 账号登录。</p>
-    <p style="margin-top:12px;">
-      <a class="btn primary" href="{{ url_for('ads_authorize') }}" {% if not credentials_ok %}aria-disabled="true" style="pointer-events:none;opacity:.5"{% endif %}>连接广告账户</a>
-    </p>
-    {% endif %}
+<div class="card">
+  <h2>① 已授权店铺（{{ token.binding_count or 0 }}）</h2>
+  {% if bindings %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>绑定店铺名</th>
+          <th>广告账户数</th>
+          <th>授权时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in bindings %}
+        <tr>
+          <td><strong>{{ b.shop_label }}</strong></td>
+          <td>{{ b.advertiser_count }}</td>
+          <td><code>{{ b.saved_at or '—' }}</code></td>
+          <td>
+            <a class="btn" href="{{ url_for('ads_authorize', shop_name=b.shop_label) }}">重新授权</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
+  {% else %}
+  <p class="muted">还没有店铺完成广告授权。</p>
+  {% endif %}
 
-  <div class="card">
-    <h2>② 已授权广告账户</h2>
-    {% if token.advertisers %}
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Advertiser ID</th>
-            <th>名称</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for adv in token.advertisers %}
-          <tr>
-            <td><code>{{ adv.advertiser_id or adv.get('advertiser_id', '—') }}</code></td>
-            <td>{{ adv.advertiser_name or adv.get('name', '—') }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% elif token.advertiser_ids %}
-    <ul>
-      {% for aid in token.advertiser_ids %}
-      <li><code>{{ aid }}</code></li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="muted">授权后将显示 advertiser_id 列表。</p>
-    {% endif %}
+  {% if credentials_ok %}
+  <h3 style="margin-top:20px;">{{ '添加另一家店铺' if bindings else '授权第一家店铺' }}</h3>
+  <form action="{{ url_for('ads_authorize') }}" method="get" class="form-grid" style="margin-top:8px;">
+    <label class="span2">绑定店铺名
+      <input type="text" name="shop_name" list="ads-shop-names" required
+             placeholder="如 TIKTOK2号店PH（每家店授权一次，名称不要重复）"/>
+    </label>
+    <button type="submit" class="btn primary span2">连接该店广告账户</button>
+  </form>
+  <p class="muted" style="margin-top:8px;">
+    用该店铺对应的 TikTok For Business 账号登录。不同店请换店铺名后再次点击授权。
+  </p>
+  {% endif %}
+  <datalist id="ads-shop-names">
+    {% for s in shop_suggestions %}
+    <option value="{{ s.tag }}">{{ s.key }} · {{ s.label }}</option>
+    {% endfor %}
+  </datalist>
+</div>
+
+<div class="card">
+  <h2>② 各店广告账户明细</h2>
+  {% if bindings %}
+  {% for b in bindings %}
+  <h3 style="margin:16px 0 8px;">{{ b.shop_label }}</h3>
+  {% if b.advertisers %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Advertiser ID</th><th>名称</th></tr></thead>
+      <tbody>
+        {% for adv in b.advertisers %}
+        <tr>
+          <td><code>{{ adv.advertiser_id or adv.get('advertiser_id', '—') }}</code></td>
+          <td>{{ adv.advertiser_name or adv.get('name', '—') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
+  {% elif b.advertiser_ids %}
+  <ul>{% for aid in b.advertiser_ids %}<li><code>{{ aid }}</code></li>{% endfor %}</ul>
+  {% else %}
+  <p class="muted">无广告账户列表</p>
+  {% endif %}
+  {% endfor %}
+  {% else %}
+  <p class="muted">授权后将按店铺显示 advertiser 列表。</p>
+  {% endif %}
 </div>
 
 <div class="card">
   <h2>③ 导出 Excel 报表</h2>
-  {% if token.authorized %}
+  {% if bindings %}
   <form id="form-ads-export" class="form-grid">
-    <label>广告账户
-      <select name="advertiser_id" required>
-        {% if token.advertisers %}
-          {% for adv in token.advertisers %}
-          <option value="{{ adv.advertiser_id or adv.get('advertiser_id') }}">
-            {{ adv.advertiser_name or adv.get('name', adv.advertiser_id) }} ({{ adv.advertiser_id or adv.get('advertiser_id') }})
-          </option>
-          {% endfor %}
-        {% elif token.advertiser_ids %}
-          {% for aid in token.advertiser_ids %}
-          <option value="{{ aid }}">{{ aid }}</option>
-          {% endfor %}
-        {% endif %}
+    <label>绑定店铺
+      <select name="shop_label" id="ads-export-shop" required>
+        {% for b in bindings %}
+        <option value="{{ b.shop_label }}">{{ b.shop_label }}（{{ b.advertiser_count }} 个广告账户）</option>
+        {% endfor %}
       </select>
+    </label>
+    <label>广告账户
+      <select name="advertiser_id" id="ads-export-advertiser" required></select>
     </label>
     <label>报表类型
       <select name="report_kind">
@@ -145,11 +148,12 @@
     <label>结束日期
       <input type="date" name="end_date" required/>
     </label>
-    <label class="span2">文件名前缀（如店铺简称 TKKJ1PH）
-      <input type="text" name="file_prefix" placeholder="TKKJ1PH" value="ADS"/>
+    <label class="span2">文件名前缀
+      <input type="text" name="file_prefix" id="ads-export-prefix" list="ads-shop-names"/>
     </label>
     <button type="submit" class="btn primary span2">开始导出</button>
   </form>
+  <script id="ads-bindings-json" type="application/json">{{ bindings_json | safe }}</script>
   <p id="ads-job-status" class="muted" style="margin-top:12px;">尚未开始任务</p>
   <pre id="ads-job-log" class="log-box" style="max-height:200px;"></pre>
   <div class="row-between" style="margin-top:16px;">
@@ -161,17 +165,18 @@
     <tbody id="ads-files-body"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
   </table>
   {% else %}
-  <p class="muted">完成广告账户授权后可导出创意/直播广告报表。</p>
+  <p class="muted">至少完成一家店铺的广告授权后可导出。</p>
   {% endif %}
 </div>
 
 <div class="card">
   <h2>说明</h2>
   <ul>
-    <li><strong>与店铺授权分开</strong>：Shop 授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页；此处只处理广告 API。</li>
-    <li><strong>回调地址</strong>：<code>{{ redirect_uri }}</code>（Portal 已配置，与 Shop 共用 <code>/callback</code>）。</li>
-    <li>App ID: <code>{{ app_id }}</code></li>
-    <li>授权后可导出<strong>广告创意</strong>与<strong>直播广告</strong> Excel，格式对齐 TikTok 后台导出列。</li>
+    <li><strong>一家店授权一次</strong>：填店铺名 → 连接广告账户 → 用该店 TikTok 广告后台账号登录。</li>
+    <li><strong>多家店</strong>：换另一个店铺名（如 TIKTOK3号店PH），再点「连接该店广告账户」，不会覆盖已授权的店。</li>
+    <li><strong>同一 Business 账号下多个广告主</strong>：一次授权会列出多个 advertiser，导出时在下拉里选择即可。</li>
+    <li>Shop 店铺授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页，与广告授权分开。</li>
+    <li>回调地址：<code>{{ redirect_uri }}</code> · App ID: <code>{{ app_id }}</code></li>
   </ul>
 </div>
 {% endblock %}
@@ -202,6 +207,40 @@
       box.textContent = String(err);
     }
   });
+
+  const bindingsEl = document.getElementById("ads-bindings-json");
+  const bindings = bindingsEl ? JSON.parse(bindingsEl.textContent || "[]") : [];
+  const shopSelect = document.getElementById("ads-export-shop");
+  const advSelect = document.getElementById("ads-export-advertiser");
+  const prefixInput = document.getElementById("ads-export-prefix");
+
+  function fillAdvertisers(shopLabel) {
+    if (!advSelect) return;
+    const b = bindings.find((x) => x.shop_label === shopLabel);
+    advSelect.innerHTML = "";
+    const list = (b && b.advertisers) || [];
+    if (list.length) {
+      list.forEach((adv) => {
+        const id = adv.advertiser_id || adv.advertiser_id;
+        const name = adv.advertiser_name || adv.name || id;
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = name + " (" + id + ")";
+        advSelect.appendChild(opt);
+      });
+    } else if (b && b.advertiser_ids) {
+      b.advertiser_ids.forEach((id) => {
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = id;
+        advSelect.appendChild(opt);
+      });
+    }
+    if (prefixInput) prefixInput.value = shopLabel || "";
+  }
+
+  shopSelect?.addEventListener("change", () => fillAdvertisers(shopSelect.value));
+  if (shopSelect && shopSelect.value) fillAdvertisers(shopSelect.value);
 
   const exportForm = document.getElementById("form-ads-export");
   if (!exportForm) return;
@@ -267,12 +306,14 @@
   exportForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(exportForm);
+    const shopLabel = fd.get("shop_label");
     const body = {
+      shop_label: shopLabel,
       advertiser_id: fd.get("advertiser_id"),
       start_date: fd.get("start_date"),
       end_date: fd.get("end_date"),
       report_kind: fd.get("report_kind"),
-      file_prefix: fd.get("file_prefix") || "ADS",
+      file_prefix: fd.get("file_prefix") || shopLabel || "ADS",
     };
     jobStatus.textContent = "正在提交…";
     jobLog.textContent = "";

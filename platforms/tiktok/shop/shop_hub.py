@@ -11,8 +11,15 @@ from urllib.parse import parse_qs, urlparse
 
 HUB_DIR = Path(__file__).resolve().parent
 FORMAL_ROOT = HUB_DIR.parent
+_PROJECT = HUB_DIR.parents[2]
+if str(_PROJECT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT))
+from common.paths import CURRENT_SHOP_FILE, ensure_export_dirs, migrate_current_shop_file
+
+ensure_export_dirs()
+migrate_current_shop_file()
 MANIFEST_PATH = HUB_DIR / "shops.json"
-CURRENT_PATH = HUB_DIR / "CURRENT_SHOP.txt"
+CURRENT_PATH = CURRENT_SHOP_FILE
 APP_ENV = HUB_DIR / "app.env"
 TEMPLATE_ENV = HUB_DIR / "_template.env"
 

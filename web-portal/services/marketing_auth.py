@@ -49,3 +49,7 @@ is_marketing_callback = marketing_oauth.is_marketing_callback
 token_status = marketing_oauth.token_status
 fetch_advertiser_list = marketing_oauth.fetch_advertiser_list
 load_advertisers = marketing_oauth.load_advertisers
+save_shop_label = marketing_oauth.save_shop_label
+list_shop_bindings = marketing_oauth.list_shop_bindings
+binding_for_shop = marketing_oauth.binding_for_shop
+set_active_shop_label = marketing_oauth.set_active_shop_label

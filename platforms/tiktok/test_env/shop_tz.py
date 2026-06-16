@@ -138,8 +138,18 @@ def pick_config_before_init(env_root: Path, default_config: str = "") -> None:
     argv = sys.argv[1:]
     if any(a in ("--config", "-c", "--shop", "-s") for a in argv):
         return
-    hub = ENV_ROOT / "shop"
-    if hub.exists() and (hub / "CURRENT_SHOP.txt").exists():
-        return
+    hub = env_root / "shop"
+    if hub.exists():
+        try:
+            proj = env_root.parent
+            if str(proj) not in sys.path:
+                sys.path.insert(0, str(proj))
+            from common.paths import resolve_current_shop_file
+
+            if resolve_current_shop_file().exists():
+                return
+        except Exception:
+            if (hub / "CURRENT_SHOP.txt").exists():
+                return
     if default_config.strip():
         os.environ["TTS_CONFIG"] = default_config.strip()

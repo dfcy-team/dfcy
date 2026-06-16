@@ -91,6 +91,18 @@ def _hub_config_for_key(hub: Path, key: str) -> Path | None:
     return hub / f"config_{key.upper()}.env"
 
 
+def _current_shop_path(hub: Path) -> Path:
+    try:
+        proj = hub.parents[2]
+        if str(proj) not in sys.path:
+            sys.path.insert(0, str(proj))
+        from common.paths import resolve_current_shop_file
+
+        return resolve_current_shop_file()
+    except Exception:
+        return hub / "CURRENT_SHOP.txt"
+
+
 def resolve_config_path(base_dir: Path, argv: list[str] | None = None) -> Path:
     argv = argv if argv is not None else sys.argv[1:]
     hub = find_shops_hub_dir(base_dir)
@@ -115,7 +127,7 @@ def resolve_config_path(base_dir: Path, argv: list[str] | None = None) -> Path:
             if p and p.exists():
                 return p
 
-        cur_file = hub / "CURRENT_SHOP.txt"
+        cur_file = _current_shop_path(hub)
         if cur_file.exists():
             key = cur_file.read_text(encoding="utf-8").strip()
             if key:

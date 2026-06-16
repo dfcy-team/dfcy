@@ -9,7 +9,7 @@ TikTok Shop 财务 API 导出 — Finance API（seller.finance.info）
   获取对账单、按对账单获取交易记录、按订单获取交易记录、
   获取付款记录、获取提现记录、获取未结算交易
 （文件名示例 TIKTOK4号店PH_获取对账单_2026-05-01_2026-05-21.xlsx）
-  同时在 logs/<店名>/ 留一份本地副本与摘要 JSON
+  同时在 Desktop\\下载\\财务\\<店名>\\ 留一份本地副本与摘要 JSON
 
 Partner Center -> 应用 -> 管理 API -> 勾选 Finance information -> 店铺重新授权
 """
@@ -63,6 +63,7 @@ from common.excel_names import (
     load_finance_import_dirs,
 )
 from common.file_importer import finance_json_filename, finance_summary_json_filename
+from common.paths import ensure_export_dirs, export_shop_dir, EXPORT_FINANCE_DIR
 from common.shop_registry import load_filename_stems
 
 FIN_VER = API_VERSION
@@ -154,7 +155,8 @@ CONFIG_FILE = init_shop_config(ENV_ROOT)
 SHOP_REGION = infer_shop_region_from_cfg(CONFIG_FILE)
 SHOP_TZ = get_shop_tz(SHOP_REGION)
 REGION = SHOP_REGION
-LOG_DIR = BASE / "logs" / cfg("TTS_CONFIG_LABEL", CONFIG_FILE.stem)
+ensure_export_dirs()
+LOG_DIR = export_shop_dir("finance", cfg("TTS_CONFIG_LABEL", CONFIG_FILE.stem))
 _dbg = cfg("TTS_FINANCE_LOG_SUBDIR", "").strip()
 if _dbg:
     LOG_DIR = LOG_DIR / _dbg
@@ -497,7 +499,7 @@ def main() -> int:
     print(f"导出标签 = {export_tag}")
     print(f"权限: seller.finance.info  Z盘→{finance_import_root(import_dirs)}")
     print(f"文件名示例 = {export_tag}_{finance_label('statements')}_{start_s}_{end_s}.xlsx 等 6 类")
-    print(f"日志副本: logs/{cfg('TTS_CONFIG_LABEL', CONFIG_FILE.stem)}/")
+    print(f"日志副本: {EXPORT_FINANCE_DIR / cfg('TTS_CONFIG_LABEL', CONFIG_FILE.stem)}/")
     print("=" * 60)
 
     failed = 0
