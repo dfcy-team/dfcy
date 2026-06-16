@@ -8,11 +8,17 @@
   const filesBody = document.getElementById("files-body");
   const fileShopFilter = document.getElementById("file-shop-filter");
 
-  const dayInput = form?.querySelector('input[name="stat_day"]');
-  if (dayInput && !dayInput.value) {
+  const startInput = form?.querySelector('input[name="start_date"]');
+  const endInput = form?.querySelector('input[name="end_date"]');
+  if (endInput && !endInput.value) {
     const d = new Date();
-    d.setDate(d.getDate() - 2);
-    dayInput.value = d.toISOString().slice(0, 10);
+    d.setDate(d.getDate() - 1);
+    endInput.value = d.toISOString().slice(0, 10);
+  }
+  if (startInput && !startInput.value && endInput?.value) {
+    const d = new Date(endInput.value + "T00:00:00");
+    d.setDate(d.getDate() - 30);
+    startInput.value = d.toISOString().slice(0, 10);
   }
 
   function toggleKindFields() {
@@ -31,7 +37,13 @@
     const data = await r.json();
     if (!data.ok) return;
     const job = data.job;
-    jobStatus.textContent = `任务 ${job.id} · ${job.kind} · ${job.shop_key} · ${job.stat_day} · 状态：${job.status}`;
+    const range =
+      job.start_date && job.end_date
+        ? job.start_date === job.end_date
+          ? job.start_date
+          : `${job.start_date} ~ ${job.end_date}`
+        : job.stat_day || "";
+    jobStatus.textContent = `任务 ${job.id} · ${job.kind} · ${job.shop_key} · ${range} · 状态：${job.status}`;
     jobLog.textContent = job.log || "";
     jobLog.scrollTop = jobLog.scrollHeight;
     if (job.status === "running" || job.status === "queued") {
@@ -44,10 +56,17 @@
   form?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
+    const startDate = fd.get("start_date");
+    const endDate = fd.get("end_date");
+    if (startDate && endDate && startDate > endDate) {
+      jobStatus.textContent = "失败：结束日期不能早于开始日期";
+      return;
+    }
     const body = {
       kind: fd.get("kind"),
       shop_key: fd.get("shop_key"),
-      stat_day: fd.get("stat_day"),
+      start_date: startDate,
+      end_date: endDate,
       types: fd.get("types") || "all",
       fast_mode: fd.get("fast_mode") === "on",
     };

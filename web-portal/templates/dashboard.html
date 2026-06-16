@@ -2,7 +2,7 @@
 {% block title %}数据导出 · {{ brand }}{% endblock %}
 {% block content %}
 <h1>数据导出控制台</h1>
-<p class="lead">选择店铺与统计日期，后台调用 TikTok_API 脚本拉数并生成 Excel，完成后可直接下载。</p>
+<p class="lead">选择店铺与日期范围，后台拉取 TikTok 数据并生成 Excel，完成后可直接下载。</p>
 
 <div class="grid two">
   <div class="card">
@@ -22,8 +22,11 @@
           {% endfor %}
         </select>
       </label>
-      <label>统计日期（当地自然日）
-        <input type="date" name="stat_day" required/>
+      <label>开始日期（含）
+        <input type="date" name="start_date" required/>
+      </label>
+      <label>结束日期（含）
+        <input type="date" name="end_date" required/>
       </label>
       <label id="wrap-types" class="span2">罗盘数据类型
         <select name="types">
@@ -39,7 +42,7 @@
       </label>
       <button type="submit" class="btn primary span2">开始导出</button>
     </form>
-    <p class="muted">API 规则：结束日为统计日的次日。例如统计 2026-06-01，脚本使用 start=06-01, end=06-02。</p>
+    <p class="muted">按店铺当地自然日统计。例如导出 5月14日～6月14日：开始填 2026-05-14，结束填 2026-06-14。单次最多 93 天。</p>
   </div>
 
   <div class="card">

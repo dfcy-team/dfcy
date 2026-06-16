@@ -109,9 +109,60 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="muted">授权后将显示 advertiser_id 列表。后续可在此对接创意/直播广告报表导出。</p>
+    <p class="muted">授权后将显示 advertiser_id 列表。</p>
     {% endif %}
   </div>
+</div>
+
+<div class="card">
+  <h2>③ 导出 Excel 报表</h2>
+  {% if token.authorized %}
+  <form id="form-ads-export" class="form-grid">
+    <label>广告账户
+      <select name="advertiser_id" required>
+        {% if token.advertisers %}
+          {% for adv in token.advertisers %}
+          <option value="{{ adv.advertiser_id or adv.get('advertiser_id') }}">
+            {{ adv.advertiser_name or adv.get('name', adv.advertiser_id) }} ({{ adv.advertiser_id or adv.get('advertiser_id') }})
+          </option>
+          {% endfor %}
+        {% elif token.advertiser_ids %}
+          {% for aid in token.advertiser_ids %}
+          <option value="{{ aid }}">{{ aid }}</option>
+          {% endfor %}
+        {% endif %}
+      </select>
+    </label>
+    <label>报表类型
+      <select name="report_kind">
+        <option value="creative">广告创意</option>
+        <option value="live">直播广告</option>
+      </select>
+    </label>
+    <label>开始日期
+      <input type="date" name="start_date" required/>
+    </label>
+    <label>结束日期
+      <input type="date" name="end_date" required/>
+    </label>
+    <label class="span2">文件名前缀（如店铺简称 TKKJ1PH）
+      <input type="text" name="file_prefix" placeholder="TKKJ1PH" value="ADS"/>
+    </label>
+    <button type="submit" class="btn primary span2">开始导出</button>
+  </form>
+  <p id="ads-job-status" class="muted" style="margin-top:12px;">尚未开始任务</p>
+  <pre id="ads-job-log" class="log-box" style="max-height:200px;"></pre>
+  <div class="row-between" style="margin-top:16px;">
+    <h3 style="margin:0;">已生成文件</h3>
+    <button type="button" class="btn" id="btn-refresh-ads-files">刷新</button>
+  </div>
+  <table class="data-table" id="ads-files-table" style="margin-top:8px;">
+    <thead><tr><th>文件名</th><th>大小</th><th>时间</th><th></th></tr></thead>
+    <tbody id="ads-files-body"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody>
+  </table>
+  {% else %}
+  <p class="muted">完成广告账户授权后可导出创意/直播广告报表。</p>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -120,34 +171,132 @@
     <li><strong>与店铺授权分开</strong>：Shop 授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页；此处只处理广告 API。</li>
     <li><strong>回调地址</strong>：<code>{{ redirect_uri }}</code>（Portal 已配置，与 Shop 共用 <code>/callback</code>）。</li>
     <li>App ID: <code>{{ app_id }}</code></li>
-    <li>应用须已通过 TikTok 审核（Reporting 只读权限）。</li>
+    <li>授权后可导出<strong>广告创意</strong>与<strong>直播广告</strong> Excel，格式对齐 TikTok 后台导出列。</li>
   </ul>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-document.getElementById("form-ads-secret")?.addEventListener("submit", async function (e) {
-  e.preventDefault();
-  const secret = new FormData(this).get("secret");
-  const box = document.getElementById("ads-secret-result");
-  box.textContent = "验证中…";
-  try {
-    const res = await fetch("/api/ads/secret", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ secret }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      box.textContent = "已保存并通过凭据探测。";
-      setTimeout(() => location.reload(), 800);
-    } else {
-      box.textContent = data.error || "保存失败";
+(function () {
+  const formSecret = document.getElementById("form-ads-secret");
+  formSecret?.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const secret = new FormData(this).get("secret");
+    const box = document.getElementById("ads-secret-result");
+    box.textContent = "验证中…";
+    try {
+      const res = await fetch("/api/ads/secret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        box.textContent = "已保存并通过凭据探测。";
+        setTimeout(() => location.reload(), 800);
+      } else {
+        box.textContent = data.error || "保存失败";
+      }
+    } catch (err) {
+      box.textContent = String(err);
     }
-  } catch (err) {
-    box.textContent = String(err);
+  });
+
+  const exportForm = document.getElementById("form-ads-export");
+  if (!exportForm) return;
+
+  const startInput = exportForm.querySelector('input[name="start_date"]');
+  const endInput = exportForm.querySelector('input[name="end_date"]');
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const day = yesterday.toISOString().slice(0, 10);
+  if (startInput && !startInput.value) startInput.value = day;
+  if (endInput && !endInput.value) endInput.value = day;
+
+  const jobStatus = document.getElementById("ads-job-status");
+  const jobLog = document.getElementById("ads-job-log");
+  const filesBody = document.getElementById("ads-files-body");
+  let pollTimer = null;
+
+  function fmtSize(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1024 / 1024).toFixed(1) + " MB";
   }
-});
+
+  async function loadAdsFiles() {
+    if (!filesBody) return;
+    try {
+      const r = await fetch("/api/ads/files");
+      const data = await r.json();
+      if (!data.ok || !data.files.length) {
+        filesBody.innerHTML = '<tr><td colspan="4" class="muted">暂无文件</td></tr>';
+        return;
+      }
+      filesBody.innerHTML = data.files.map((f) => {
+        const url = "/download?path=" + encodeURIComponent(f.path);
+        return `<tr>
+          <td>${f.name}</td>
+          <td>${fmtSize(f.size)}</td>
+          <td>${f.mtime}</td>
+          <td><a class="btn" href="${url}">下载</a></td>
+        </tr>`;
+      }).join("");
+    } catch (e) {
+      filesBody.innerHTML = '<tr><td colspan="4" class="muted">' + e + "</td></tr>";
+    }
+  }
+
+  async function pollJob(jobId) {
+    const r = await fetch("/api/jobs/" + jobId);
+    const data = await r.json();
+    if (!data.ok) return;
+    const job = data.job;
+    jobStatus.textContent = `任务 ${job.id} · ${job.kind} · ${job.start_date}~${job.end_date} · ${job.status}`;
+    jobLog.textContent = job.log || "";
+    jobLog.scrollTop = jobLog.scrollHeight;
+    if (job.status === "running" || job.status === "queued") {
+      pollTimer = setTimeout(() => pollJob(jobId), 2000);
+    } else if (job.status === "done" && job.output_file) {
+      jobStatus.textContent += " — 可下载";
+      loadAdsFiles();
+    }
+  }
+
+  exportForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(exportForm);
+    const body = {
+      advertiser_id: fd.get("advertiser_id"),
+      start_date: fd.get("start_date"),
+      end_date: fd.get("end_date"),
+      report_kind: fd.get("report_kind"),
+      file_prefix: fd.get("file_prefix") || "ADS",
+    };
+    jobStatus.textContent = "正在提交…";
+    jobLog.textContent = "";
+    if (pollTimer) clearTimeout(pollTimer);
+    try {
+      const r = await fetch("/api/ads/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!data.ok) {
+        jobStatus.textContent = "失败：" + data.error;
+        return;
+      }
+      jobStatus.textContent = "任务已创建：" + data.job_id;
+      pollJob(data.job_id);
+    } catch (err) {
+      jobStatus.textContent = String(err);
+    }
+  });
+
+  document.getElementById("btn-refresh-ads-files")?.addEventListener("click", loadAdsFiles);
+  loadAdsFiles();
+})();
 </script>
 {% endblock %}

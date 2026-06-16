@@ -1,4 +1,9 @@
 {
-  "updated_at": "",
-  "advertisers": []
+  "updated_at": "2026-06-16T03:06:05.258496+00:00",
+  "advertisers": [
+    {
+      "advertiser_id": "7365788829120397328",
+      "advertiser_name": "Nova.ph store"
+    }
+  ]
 }

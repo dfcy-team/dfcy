@@ -27,7 +27,7 @@ WEB_ROOT = Path(__file__).resolve().parent
 if str(WEB_ROOT) not in sys.path:
     sys.path.insert(0, str(WEB_ROOT))
 
-from services import auth, content_video, exporter, files, marketing_auth, oauth, shops  # noqa: E402
+from services import auth, ads_exporter, content_video, exporter, files, marketing_auth, oauth, shops  # noqa: E402
 from services.settings import (  # noqa: E402
     APP_KEY,
     APP_SECRET,
@@ -266,6 +266,42 @@ def ads_page():
 def ads_authorize():
     url, _state = marketing_auth.build_authorize_url()
     return redirect(url)
+
+
+@app.post("/api/ads/export")
+def api_ads_export():
+    tok = marketing_auth.token_status()
+    if not tok.get("authorized"):
+        return jsonify({"ok": False, "error": "请先完成广告账户授权"}), 400
+    data = request.get_json(force=True, silent=True) or {}
+    advertiser_id = (data.get("advertiser_id") or "").strip()
+    start_date = (data.get("start_date") or "").strip()
+    end_date = (data.get("end_date") or "").strip()
+    report_kind = (data.get("report_kind") or "creative").strip().lower()
+    file_prefix = (data.get("file_prefix") or "ADS").strip() or "ADS"
+    if not advertiser_id or not start_date or not end_date:
+        return jsonify({"ok": False, "error": "请填写广告账户与日期范围"}), 400
+    if report_kind not in ("creative", "live"):
+        return jsonify({"ok": False, "error": "报表类型须为 creative 或 live"}), 400
+    try:
+        job_id = ads_exporter.start_ads_export(
+            advertiser_id=advertiser_id,
+            start_date=start_date,
+            end_date=end_date,
+            report_kind=report_kind,
+            file_prefix=file_prefix,
+        )
+        return jsonify({"ok": True, "job_id": job_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/ads/files")
+def api_ads_files():
+    items = files.list_excel_files(limit=int(request.args.get("limit", 40)))
+    ads_dir = str((PROJECT_ROOT / "platforms" / "tiktok" / "marketing" / "exports").resolve())
+    out = [f for f in items if str(Path(f["path"]).resolve()).startswith(ads_dir)]
+    return jsonify({"ok": True, "files": out})
 
 
 @app.post("/api/ads/secret")
@@ -527,27 +563,32 @@ def api_export():
     data = request.get_json(force=True, silent=True) or {}
     kind = (data.get("kind") or "analytics").strip().lower()
     shop_key = (data.get("shop_key") or "").strip().upper()
-    stat_day = (data.get("stat_day") or "").strip()
-    if not shop_key or not stat_day:
-        return jsonify({"ok": False, "error": "请选择店铺和统计日期"}), 400
+    start_date = (data.get("start_date") or data.get("stat_day") or "").strip()
+    end_date = (data.get("end_date") or data.get("stat_day") or start_date or "").strip()
+    if not shop_key or not start_date or not end_date:
+        return jsonify({"ok": False, "error": "请选择店铺和日期范围"}), 400
     try:
         if kind == "analytics":
             types = (data.get("types") or "all").strip()
             fast = bool(data.get("fast_mode", True))
             job_id = exporter.start_analytics_export(
                 shop_key=shop_key,
-                stat_day=stat_day,
+                start_date=start_date,
+                end_date=end_date,
                 export_types=types,
                 fast_mode=fast,
             )
         elif kind == "finance":
             job_id = exporter.start_finance_export(
                 shop_key=shop_key,
-                stat_day=stat_day,
+                start_date=start_date,
+                end_date=end_date,
                 finance_type=(data.get("finance_type") or "all").strip(),
             )
         elif kind == "orders":
-            job_id = exporter.start_order_export(shop_key=shop_key, stat_day=stat_day)
+            job_id = exporter.start_order_export(
+                shop_key=shop_key, start_date=start_date, end_date=end_date
+            )
         else:
             return jsonify({"ok": False, "error": f"未知导出类型: {kind}"}), 400
         return jsonify({"ok": True, "job_id": job_id})

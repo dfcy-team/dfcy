@@ -48,10 +48,19 @@ def _append_log(job: dict, line: str) -> None:
     _save_job(job)
 
 
-def _api_end_date(stat_day: str) -> str:
-    """店铺分析 API：end 为次日（不含该日）。"""
-    d = date.fromisoformat(stat_day)
-    return (d + timedelta(days=1)).isoformat()
+def _validate_date_range(start_date: str, end_date: str, *, max_days: int = 93) -> tuple[str, str]:
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    if end < start:
+        raise ValueError("结束日期不能早于开始日期")
+    span = (end - start).days + 1
+    if span > max_days:
+        raise ValueError(f"日期范围不能超过 {max_days} 天")
+    return start_date, end_date
+
+
+def _analytics_api_end(end_inclusive: str) -> str:
+    return (date.fromisoformat(end_inclusive) + timedelta(days=1)).isoformat()
 
 
 def _subprocess_env() -> dict:
@@ -107,16 +116,18 @@ def _run_subprocess(job: dict, script: Path, args: list[str], cwd: Path) -> None
 def start_analytics_export(
     *,
     shop_key: str,
-    stat_day: str,
+    start_date: str,
+    end_date: str,
     export_types: str = "all",
     fast_mode: bool = True,
 ) -> str:
-    end_api = _api_end_date(stat_day)
+    start_date, end_date = _validate_date_range(start_date, end_date)
+    end_api = _analytics_api_end(end_date)
     args = [
         "--shop",
         shop_key.upper(),
         "--start",
-        stat_day,
+        start_date,
         "--end",
         end_api,
         "--type",
@@ -126,45 +137,48 @@ def start_analytics_export(
     ]
     if fast_mode:
         args.append("--no-video-detail")
-    return _start_job("analytics", shop_key, stat_day, ANALYTICS_SCRIPT, args, ANALYTICS_SCRIPT.parent)
+    return _start_job("analytics", shop_key, start_date, end_date, ANALYTICS_SCRIPT, args, ANALYTICS_SCRIPT.parent)
 
 
-def start_finance_export(*, shop_key: str, stat_day: str, finance_type: str = "all") -> str:
-    end_api = _api_end_date(stat_day)
+def start_finance_export(
+    *, shop_key: str, start_date: str, end_date: str, finance_type: str = "all"
+) -> str:
+    start_date, end_date = _validate_date_range(start_date, end_date)
     args = [
         "--shop",
         shop_key.upper(),
         "--start",
-        stat_day,
+        start_date,
         "--end",
-        end_api,
+        end_date,
         "--type",
         finance_type or "all",
         "--all-pages",
         "--excel",
     ]
-    return _start_job("finance", shop_key, stat_day, FINANCE_SCRIPT, args, FINANCE_SCRIPT.parent)
+    return _start_job("finance", shop_key, start_date, end_date, FINANCE_SCRIPT, args, FINANCE_SCRIPT.parent)
 
 
-def start_order_export(*, shop_key: str, stat_day: str) -> str:
-    end_api = _api_end_date(stat_day)
+def start_order_export(*, shop_key: str, start_date: str, end_date: str) -> str:
+    start_date, end_date = _validate_date_range(start_date, end_date)
     args = [
         "--shop",
         shop_key.upper(),
         "--start",
-        stat_day,
+        start_date,
         "--end",
-        end_api,
+        end_date,
         "--all-pages",
         "--excel",
     ]
-    return _start_job("orders", shop_key, stat_day, ORDER_SCRIPT, args, ORDER_SCRIPT.parent)
+    return _start_job("orders", shop_key, start_date, end_date, ORDER_SCRIPT, args, ORDER_SCRIPT.parent)
 
 
 def _start_job(
     kind: str,
     shop_key: str,
-    stat_day: str,
+    start_date: str,
+    end_date: str,
     script: Path,
     args: list[str],
     cwd: Path,
@@ -174,7 +188,9 @@ def _start_job(
         "id": job_id,
         "kind": kind,
         "shop_key": shop_key.upper(),
-        "stat_day": stat_day,
+        "start_date": start_date,
+        "end_date": end_date,
+        "stat_day": start_date if start_date == end_date else f"{start_date}~{end_date}",
         "status": "queued",
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "script": str(script),
