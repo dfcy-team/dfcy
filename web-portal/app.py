@@ -352,9 +352,15 @@ def api_ads_export():
 
 @app.get("/api/ads/files")
 def api_ads_files():
-    items = files.list_excel_files(limit=int(request.args.get("limit", 40)))
-    ads_dir = str((PROJECT_ROOT / "platforms" / "tiktok" / "marketing" / "exports").resolve())
-    out = [f for f in items if str(Path(f["path"]).resolve()).startswith(ads_dir)]
+    from common.paths import EXPORT_ADS_DIR, ensure_export_dirs
+
+    ensure_export_dirs()
+    items = files.list_excel_files(limit=int(request.args.get("limit", 60)))
+    roots = {
+        str(EXPORT_ADS_DIR.resolve()),
+        str((PROJECT_ROOT / "platforms" / "tiktok" / "marketing" / "exports").resolve()),
+    }
+    out = [f for f in items if str(Path(f["path"]).resolve()).startswith(tuple(roots))]
     return jsonify({"ok": True, "files": out})
 
 

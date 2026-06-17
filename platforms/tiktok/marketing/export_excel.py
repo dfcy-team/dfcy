@@ -7,7 +7,29 @@ import sys
 from pathlib import Path
 
 MODULE_ROOT = Path(__file__).resolve().parent
-EXPORT_DIR = MODULE_ROOT / "exports"
+PROJECT_ROOT = MODULE_ROOT.parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _resolve_export_dir() -> Path:
+    try:
+        import importlib
+
+        paths_mod = importlib.import_module("common.paths")
+        paths_mod = importlib.reload(paths_mod)
+        export_dir = getattr(paths_mod, "EXPORT_ADS_DIR", None)
+        if export_dir is None:
+            export_dir = paths_mod.EXPORT_DATA_ROOT / "广告"
+        paths_mod.ensure_export_dirs()
+        return Path(export_dir)
+    except Exception:
+        export_dir = Path(r"C:\Users\Administrator\Desktop\下载\广告")
+        export_dir.mkdir(parents=True, exist_ok=True)
+        return export_dir
+
+
+EXPORT_DIR = _resolve_export_dir()
 
 
 def _marketing_runtime():
@@ -131,9 +153,20 @@ def run_export(
         raise ValueError(f"未知报表类型: {report_kind}")
 
     if kind == "creative":
-        ads = rc.fetch_all_ads(advertiser_id)
-        report = rc.fetch_ad_report(advertiser_id, start_date, end_date)
-        rows = rc.build_creative_rows(report, ads)
+        try:
+            rows = rc.fetch_product_creative_rows(
+                advertiser_id,
+                start_date,
+                end_date,
+                shop_tag=label or None,
+            )
+        except RuntimeError as e:
+            msg = str(e)
+            if "40001" in msg or "permission" in msg.lower() or "No permission" in msg:
+                raise RuntimeError(
+                    "广告 API 无权限或 token 已过期：权限变更后请在「广告数据」页对店铺重新授权，再导出。"
+                ) from e
+            raise
         suffix = "广告创意"
     else:
         camps = rc.fetch_all_campaigns(advertiser_id)
@@ -154,6 +187,7 @@ def main() -> int:
     p.add_argument("--end", required=True)
     p.add_argument("--type", choices=["creative", "live"], required=True)
     p.add_argument("--prefix", default="ADS")
+    p.add_argument("--shop", default="", help="店铺标签（用于选择 token）")
     args = p.parse_args()
     path = run_export(
         advertiser_id=args.advertiser,
@@ -161,6 +195,7 @@ def main() -> int:
         end_date=args.end,
         report_kind=args.type,
         file_prefix=args.prefix,
+        shop_label=args.shop or args.prefix,
     )
     print(str(path))
     return 0

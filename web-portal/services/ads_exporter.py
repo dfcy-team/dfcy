@@ -12,6 +12,7 @@ from pathlib import Path
 from services.exporter import _append_log, _save_job, get_job
 
 MARKETING_ROOT = Path(__file__).resolve().parents[2] / "platforms" / "tiktok" / "marketing"
+PROJECT_ROOT = MARKETING_ROOT.parents[2]
 
 
 def _load_export_module():
@@ -21,8 +22,9 @@ def _load_export_module():
     assert spec.loader is not None
     sys.modules["tiktok_marketing_export"] = mod
     prev = sys.path[:]
-    if str(MARKETING_ROOT) not in sys.path:
-        sys.path.insert(0, str(MARKETING_ROOT))
+    for p in (str(PROJECT_ROOT), str(MARKETING_ROOT)):
+        if p not in sys.path:
+            sys.path.insert(0, p)
     try:
         spec.loader.exec_module(mod)
     finally:

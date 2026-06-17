@@ -3,17 +3,53 @@
 from __future__ import annotations
 
 import json
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from config import API_BASE
 from oauth import get_access_token
 
+_TIKTOK_ROOT = Path(__file__).resolve().parent.parent
+_SHOP_DIR = _TIKTOK_ROOT / "shop"
+_TEST_ENV_DIR = _TIKTOK_ROOT / "test_env"
+_PRODUCT_POOL_DIR = Path(__file__).resolve().parent / "data"
+_SHOP_PRODUCT_STATUSES = (None, "ACTIVATE", "DELETED", "FREEZE", "SELLER_DEACTIVATED", "PLATFORM_DEACTIVATED")
+
 REPORT_URL = f"{API_BASE}/report/integrated/get/"
 AD_URL = f"{API_BASE}/ad/get/"
 CAMPAIGN_URL = f"{API_BASE}/campaign/get/"
+GMV_MAX_STORE_URL = f"{API_BASE}/gmv_max/store/list/"
+GMV_MAX_REPORT_URL = f"{API_BASE}/gmv_max/report/get/"
+GMV_MAX_VIDEO_URL = f"{API_BASE}/gmv_max/video/get/"
+GMV_MAX_CAMPAIGN_INFO_URL = f"{API_BASE}/campaign/gmv_max/info/"
+
+GMV_MAX_CREATIVE_METRICS = [
+    "cost",
+    "orders",
+    "cost_per_order",
+    "gross_revenue",
+    "roi",
+    "product_impressions",
+    "product_clicks",
+    "product_click_rate",
+    "ad_click_rate",
+    "ad_conversion_rate",
+    "ad_video_view_rate_2s",
+    "ad_video_view_rate_6s",
+    "ad_video_view_rate_p25",
+    "ad_video_view_rate_p50",
+    "ad_video_view_rate_p75",
+    "ad_video_view_rate_p100",
+]
+
+# 创意级商品 GMV Max 报表维度（需配合 filtering 中的 campaign_ids / item_group_ids）
+GMV_MAX_CREATIVE_DIMENSIONS = ["campaign_id", "item_group_id", "item_id"]
+GMV_MAX_ITEM_DIMENSIONS = ["campaign_id", "item_group_id"]
+GMV_MAX_CAMPAIGN_DIMENSIONS = ["campaign_id"]
 
 CREATIVE_METRICS = [
     "spend",
@@ -166,6 +202,712 @@ def fetch_campaign_report(
             "page_size": 1000,
         },
     )
+
+
+def _find_shop_config_by_tag(shop_tag: str) -> Path | None:
+    tag = (shop_tag or "").strip()
+    if not tag:
+        return None
+    for cfg in _SHOP_DIR.glob("config_*.env"):
+        try:
+            text = cfg.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if line.startswith("TTS_EXPORT_SHOP_TAG=") and line.split("=", 1)[1].strip() == tag:
+                return cfg
+    return None
+
+
+def _load_supplemental_product_ids(shop_tag: str | None = None) -> set[str]:
+    """可选：从 data/gmv_max_product_pool_<tag>.json 读取官方对账补全的商品 ID。"""
+    tag = (shop_tag or "").strip()
+    if not tag:
+        return set()
+    safe = "".join(c if c not in '<>:"/\\|?*' else "_" for c in tag)
+    path = _PRODUCT_POOL_DIR / f"gmv_max_product_pool_{safe}.json"
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if isinstance(data, list):
+        return {str(x) for x in data if x}
+    if isinstance(data, dict):
+        items = data.get("product_ids") or data.get("item_group_ids") or []
+        if isinstance(items, list):
+            return {str(x) for x in items if x}
+    return set()
+
+
+def _fetch_shop_product_ids(shop_tag: str | None = None) -> set[str]:
+    """店铺商品目录（含多状态并集），用于 GMV Max 跨商品零消耗行展开。"""
+    tag = (shop_tag or "").strip()
+    if not tag:
+        return set()
+    cfg_path = _find_shop_config_by_tag(tag)
+    if cfg_path is None:
+        return set()
+    if not (_TEST_ENV_DIR / "tts_client.py").is_file():
+        return set()
+    if str(_TEST_ENV_DIR) not in sys.path:
+        sys.path.insert(0, str(_TEST_ENV_DIR))
+    try:
+        from tts_client import TikTokShopClient, load_env
+    except ImportError:
+        return set()
+
+    load_env(_SHOP_DIR / "app.env", override=True)
+    load_env(cfg_path, override=True)
+    import os
+
+    app_key = os.environ.get("TTS_APP_KEY", "")
+    app_secret = os.environ.get("TTS_APP_SECRET", "")
+    token = os.environ.get("TTS_ACCESS_TOKEN", "")
+    cipher = os.environ.get("TTS_SHOP_CIPHER", "")
+    if not all((app_key, app_secret, token, cipher)):
+        return set()
+
+    client = TikTokShopClient(app_key, app_secret)
+    pool: set[str] = set()
+    for status in _SHOP_PRODUCT_STATUSES:
+        page_token: str | None = None
+        for _ in range(50):
+            extra: dict[str, Any] = {"shop_cipher": cipher, "page_size": 100}
+            if page_token:
+                extra["page_token"] = page_token
+            body: dict[str, Any] = {"status": status} if status else {}
+            try:
+                resp = client.post("/product/202309/products/search", token, body, extra)
+            except Exception:
+                break
+            if resp.get("code") not in (0, None):
+                break
+            data = resp.get("data") or {}
+            for product in data.get("products") or []:
+                pid = str(product.get("id") or "")
+                if pid:
+                    pool.add(pid)
+            page_token = data.get("next_page_token") or ""
+            if not page_token:
+                break
+    return pool
+
+
+def _collect_gmv_max_campaign_ids(
+    advertiser_id: str,
+    store_ids: list[str],
+    start_date: str,
+    end_date: str,
+    access_token: str,
+) -> list[str]:
+    campaign_rows = _paginate_gmv_max_report(
+        advertiser_id,
+        store_ids,
+        GMV_MAX_CAMPAIGN_DIMENSIONS,
+        ["cost"],
+        start_date,
+        end_date,
+        access_token,
+    )
+    campaign_ids: list[str] = []
+    for row in campaign_rows:
+        dims, _ = _row_dims_metrics(row)
+        cid = str(dims.get("campaign_id") or "")
+        if cid and cid not in campaign_ids:
+            campaign_ids.append(cid)
+    return campaign_ids
+
+
+def _build_gmv_max_item_group_pool(
+    advertiser_id: str,
+    store_ids: list[str],
+    campaign_ids: list[str],
+    start_date: str,
+    end_date: str,
+    access_token: str,
+    campaign_info_cache: dict[str, dict[str, Any]],
+    *,
+    shop_tag: str | None = None,
+    video_spus: set[str] | None = None,
+    include_historical: bool = True,
+) -> list[str]:
+    """商品池 = 报表商品 ∪ 计划配置商品 ∪ 店铺目录 ∪ 视频 spu ∪ 可选补全文件。"""
+    pool: set[str] = set()
+
+    for cid in campaign_ids:
+        item_rows = _paginate_gmv_max_report(
+            advertiser_id,
+            store_ids,
+            GMV_MAX_ITEM_DIMENSIONS,
+            ["cost"],
+            start_date,
+            end_date,
+            access_token,
+            filtering={"campaign_ids": [cid]},
+        )
+        for row in item_rows:
+            dims, _ = _row_dims_metrics(row)
+            igid = str(dims.get("item_group_id") or "")
+            if igid:
+                pool.add(igid)
+
+        info = _fetch_gmv_max_campaign_info(advertiser_id, cid, access_token, campaign_info_cache)
+        for spu in info.get("item_group_ids") or info.get("product_ids") or []:
+            if spu:
+                pool.add(str(spu))
+
+    if include_historical and campaign_ids:
+        try:
+            from datetime import date, timedelta
+
+            end_d = date.fromisoformat(end_date)
+            hist_start = (end_d - timedelta(days=364)).isoformat()
+            if hist_start < end_date:
+                for cid in campaign_ids:
+                    item_rows = _paginate_gmv_max_report(
+                        advertiser_id,
+                        store_ids,
+                        GMV_MAX_ITEM_DIMENSIONS,
+                        ["cost"],
+                        hist_start,
+                        end_date,
+                        access_token,
+                        filtering={"campaign_ids": [cid]},
+                    )
+                    for row in item_rows:
+                        dims, _ = _row_dims_metrics(row)
+                        igid = str(dims.get("item_group_id") or "")
+                        if igid:
+                            pool.add(igid)
+        except (ValueError, RuntimeError):
+            pass
+
+    pool.update(_fetch_shop_product_ids(shop_tag))
+    pool.update(_load_supplemental_product_ids(shop_tag))
+    if video_spus:
+        pool.update(video_spus)
+    return sorted(pool)
+
+
+def fetch_gmv_max_stores(advertiser_id: str, access_token: str | None = None) -> list[dict[str, Any]]:
+    token = access_token or get_access_token()
+    resp = _get_json(GMV_MAX_STORE_URL, token, {"advertiser_id": advertiser_id})
+    data = resp.get("data") or {}
+    stores = data.get("store_list") or data.get("list") or []
+    if not isinstance(stores, list):
+        return []
+    return [s for s in stores if isinstance(s, dict)]
+
+
+def _paginate_gmv_max_report(
+    advertiser_id: str,
+    store_ids: list[str],
+    dimensions: list[str],
+    metrics: list[str],
+    start_date: str,
+    end_date: str,
+    access_token: str,
+    filtering: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        params: dict[str, Any] = {
+            "advertiser_id": advertiser_id,
+            "store_ids": store_ids,
+            "dimensions": dimensions,
+            "metrics": metrics,
+            "start_date": start_date,
+            "end_date": end_date,
+            "page": page,
+            "page_size": 1000,
+        }
+        if filtering:
+            params["filtering"] = filtering
+        resp = _get_json(GMV_MAX_REPORT_URL, access_token, params)
+        data = resp.get("data") or {}
+        batch = data.get("list") or []
+        if not isinstance(batch, list):
+            break
+        items.extend(batch)
+        info = data.get("page_info") or {}
+        total_page = int(info.get("total_page") or 1)
+        if page >= total_page:
+            break
+        page += 1
+    return items
+
+
+def _fetch_gmv_max_campaign_info(
+    advertiser_id: str,
+    campaign_id: str,
+    access_token: str,
+    cache: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    if campaign_id in cache:
+        return cache[campaign_id]
+    try:
+        resp = _get_json(
+            GMV_MAX_CAMPAIGN_INFO_URL,
+            access_token,
+            {"advertiser_id": advertiser_id, "campaign_id": campaign_id},
+        )
+        info = resp.get("data") or {}
+    except Exception:
+        info = {}
+    cache[campaign_id] = info if isinstance(info, dict) else {}
+    return cache[campaign_id]
+
+
+def fetch_gmv_max_creative_report(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    access_token: str | None = None,
+    *,
+    shop_tag: str | None = None,
+    expand_all_products: bool = False,
+    item_group_pool: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """拉取商品 GMV Max 创意级全量报表。
+
+    expand_all_products=True 时按「计划 × 商品池 × 创意」展开（阶段 B，对齐官方零消耗跨商品行）。
+    商品池默认含：当日/历史报表商品、计划配置、店铺目录、视频 spu、可选补全 JSON。
+    """
+    token = access_token or get_access_token()
+    stores = fetch_gmv_max_stores(advertiser_id, token)
+    store_ids = [str(s.get("store_id") or s.get("id") or "") for s in stores]
+    store_ids = [sid for sid in store_ids if sid]
+    if not store_ids:
+        raise RuntimeError("未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop")
+
+    campaign_ids = _collect_gmv_max_campaign_ids(
+        advertiser_id, store_ids, start_date, end_date, token
+    )
+    campaign_info_cache: dict[str, dict[str, Any]] = {}
+    campaign_infos: list[dict[str, Any]] = []
+    for cid in campaign_ids:
+        campaign_infos.append(
+            _fetch_gmv_max_campaign_info(advertiser_id, cid, token, campaign_info_cache)
+        )
+
+    pool = item_group_pool
+    if pool is None and expand_all_products:
+        pool = _build_gmv_max_item_group_pool(
+            advertiser_id,
+            store_ids,
+            campaign_ids,
+            start_date,
+            end_date,
+            token,
+            campaign_info_cache,
+            shop_tag=shop_tag,
+        )
+
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict[str, Any]] = []
+    for cid in campaign_ids:
+        info = campaign_info_cache.get(cid) or {}
+        campaign_name = str(info.get("campaign_name") or cid)
+        status = info.get("operation_status")
+
+        if expand_all_products and pool:
+            item_group_ids = pool
+            filtering = {"campaign_ids": [cid], "item_group_ids": item_group_ids}
+            creative_rows = _paginate_gmv_max_report(
+                advertiser_id,
+                store_ids,
+                GMV_MAX_CREATIVE_DIMENSIONS,
+                GMV_MAX_CREATIVE_METRICS,
+                start_date,
+                end_date,
+                token,
+                filtering=filtering,
+            )
+            for row in creative_rows:
+                dims, metrics = _row_dims_metrics(row)
+                dims = dict(dims)
+                igid = str(dims.get("item_group_id") or "")
+                item_id = str(dims.get("item_id") or "")
+                key = (cid, igid, item_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                dims.setdefault("campaign_id", cid)
+                if igid:
+                    dims.setdefault("item_group_id", igid)
+                dims["campaign_name"] = campaign_name
+                if status:
+                    dims.setdefault("campaign_status", status)
+                out.append({"dimensions": dims, "metrics": metrics})
+            continue
+
+        item_rows = _paginate_gmv_max_report(
+            advertiser_id,
+            store_ids,
+            GMV_MAX_ITEM_DIMENSIONS,
+            ["cost"],
+            start_date,
+            end_date,
+            token,
+            filtering={"campaign_ids": [cid]},
+        )
+        item_group_ids = []
+        for row in item_rows:
+            dims, _ = _row_dims_metrics(row)
+            igid = str(dims.get("item_group_id") or "")
+            if igid and igid not in item_group_ids:
+                item_group_ids.append(igid)
+
+        for igid in item_group_ids:
+            creative_rows = _paginate_gmv_max_report(
+                advertiser_id,
+                store_ids,
+                GMV_MAX_CREATIVE_DIMENSIONS,
+                GMV_MAX_CREATIVE_METRICS,
+                start_date,
+                end_date,
+                token,
+                filtering={"campaign_ids": [cid], "item_group_ids": [igid]},
+            )
+            for row in creative_rows:
+                dims, metrics = _row_dims_metrics(row)
+                dims = dict(dims)
+                igid = str(dims.get("item_group_id") or igid)
+                item_id = str(dims.get("item_id") or "")
+                key = (cid, igid, item_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                dims.setdefault("campaign_id", cid)
+                dims.setdefault("item_group_id", igid)
+                dims["campaign_name"] = campaign_name
+                if status:
+                    dims.setdefault("campaign_status", status)
+                out.append({"dimensions": dims, "metrics": metrics})
+    return out, campaign_infos
+
+
+def _normalize_gmv_video_item(raw: dict[str, Any]) -> dict[str, Any]:
+    info = raw.get("identity_info") or {}
+    vi = raw.get("video_info") or {}
+    identity_type = str(info.get("identity_type") or "")
+    auth_map = {
+        "AUTH_CODE": "Affiliate mass authorization",
+        "TTS_TT": "Authorized creatives",
+        "BC_AUTH_TT": "Authorized creatives",
+    }
+    item_id = str(raw.get("item_id") or "")
+    return {
+        "item_id": item_id,
+        "video_id": str(vi.get("video_id") or item_id),
+        "tiktok_item_id": item_id,
+        "text": raw.get("text") or "",
+        "title": raw.get("text") or "",
+        "video_title": raw.get("text") or "",
+        "display_name": info.get("display_name") or "",
+        "identity_name": info.get("display_name") or "",
+        "identity_type": identity_type,
+        "authorization_type": auth_map.get(identity_type, identity_type or "N/A"),
+        "spu_id_list": raw.get("spu_id_list") or [],
+        "create_time": raw.get("create_time") or raw.get("posted_time") or "-",
+    }
+
+
+def _fetch_gmv_max_video_index(
+    advertiser_id: str,
+    stores: list[dict[str, Any]],
+    access_token: str,
+    campaign_infos: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+
+    def _ingest(v: dict[str, Any]) -> None:
+        norm = _normalize_gmv_video_item(v)
+        for key in (norm.get("item_id"), norm.get("video_id"), norm.get("tiktok_item_id")):
+            if key:
+                index[str(key)] = norm
+
+    def _paginate_videos(params: dict[str, Any]) -> None:
+        page = 1
+        while True:
+            req = dict(params)
+            req["page"] = page
+            req.setdefault("page_size", 50)
+            resp = _get_json(GMV_MAX_VIDEO_URL, access_token, req)
+            data = resp.get("data") or {}
+            batch = data.get("item_list") or data.get("list") or data.get("video_list") or []
+            if not isinstance(batch, list):
+                break
+            for v in batch:
+                if isinstance(v, dict):
+                    _ingest(v)
+            info = data.get("page_info") or {}
+            total_page = int(info.get("total_page") or 1)
+            if page >= total_page or not batch:
+                break
+            page += 1
+
+    campaigns = campaign_infos or []
+    if campaigns:
+        for info in campaigns:
+            identity_list = [
+                ident
+                for ident in (info.get("identity_list") or [])
+                if isinstance(ident, dict) and ident.get("identity_id")
+            ]
+            if not identity_list:
+                continue
+            spu_ids = [
+                str(spu)
+                for spu in (info.get("item_group_ids") or info.get("product_ids") or [])
+                if spu
+            ]
+            for store in stores:
+                store_id = str(store.get("store_id") or store.get("id") or "")
+                bc_id = str(store.get("store_authorized_bc_id") or store.get("bc_id") or "")
+                if not store_id or not bc_id:
+                    continue
+                base = {
+                    "advertiser_id": advertiser_id,
+                    "store_id": store_id,
+                    "store_authorized_bc_id": bc_id,
+                    "need_auth_code_video": True,
+                    "identity_list": identity_list,
+                }
+                _paginate_videos(base)
+                for spu_id in spu_ids:
+                    _paginate_videos(
+                        {
+                            **base,
+                            "custom_posts_eligible": True,
+                            "spu_id_list": [spu_id],
+                        }
+                    )
+        return index
+
+    for store in stores:
+        store_id = str(store.get("store_id") or store.get("id") or "")
+        bc_id = str(store.get("store_authorized_bc_id") or store.get("bc_id") or "")
+        if not store_id or not bc_id:
+            continue
+        _paginate_videos(
+            {
+                "advertiser_id": advertiser_id,
+                "store_id": store_id,
+                "store_authorized_bc_id": bc_id,
+                "need_auth_code_video": True,
+            }
+        )
+    return index
+
+
+def _row_dims_metrics(row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    dims = row.get("dimensions") or {}
+    metrics = row.get("metrics") or {}
+    if dims or metrics:
+        return dims, metrics
+    metric_keys = set(GMV_MAX_CREATIVE_METRICS)
+    dims = {k: v for k, v in row.items() if k not in metric_keys}
+    metrics = {k: v for k, v in row.items() if k in metric_keys}
+    return dims, metrics
+
+
+def _fmt_roi(val: Any) -> str:
+    if val is None or val == "" or val == "-":
+        return "0.00"
+    try:
+        return f"{float(val):.2f}"
+    except (TypeError, ValueError):
+        return str(val)
+
+
+def _fmt_rate_metric(val: Any) -> str:
+    if val is None or val == "" or val == "-":
+        return "-"
+    try:
+        f = float(val)
+        if f <= 0:
+            return "-"
+        return f"{f:.4f}"
+    except (TypeError, ValueError):
+        return str(val)
+
+
+def _gmv_creative_type_label(raw: Any) -> str:
+    s = str(raw or "").upper()
+    if "CARD" in s or "PRODUCT_CARD" in s:
+        return "Product card"
+    if "VIDEO" in s:
+        return "Video"
+    return str(raw) if raw not in (None, "") else "-"
+
+
+def _gmv_status_label(raw: Any) -> str:
+    s = str(raw or "").upper()
+    if "DELIVER" in s or "ENABLE" in s or s == "STATUS_DELIVERY_OK":
+        return "Delivering"
+    if "DISABLE" in s or "PAUSE" in s:
+        return "Paused"
+    return str(raw) if raw not in (None, "") else "-"
+
+
+def _is_product_card_row(dims: dict[str, Any], creative_type: str) -> bool:
+    item_id = str(dims.get("item_id") or "")
+    if item_id == "-1":
+        return True
+    if "PRODUCT" in creative_type.upper() and "CARD" in creative_type.upper():
+        return True
+    ct = str(dims.get("creative_type") or "").upper()
+    return "CARD" in ct or ct == "PRODUCT_CARD"
+
+
+def build_gmv_max_creative_rows(
+    report_rows: list[dict[str, Any]],
+    video_index: dict[str, dict[str, Any]] | None = None,
+    currency: str = "PHP",
+) -> list[list[Any]]:
+    videos = video_index or {}
+    out: list[list[Any]] = []
+    for row in report_rows:
+        dims, metrics = _row_dims_metrics(row)
+        item_id = str(dims.get("item_id") or "")
+        item_group_id = str(dims.get("item_group_id") or dims.get("product_id") or dims.get("spu_id") or "")
+        campaign_id = str(dims.get("campaign_id") or "")
+        campaign_name = str(dims.get("campaign_name") or dims.get("campaign") or campaign_id or "-")
+        creative_type = _gmv_creative_type_label(dims.get("creative_type"))
+        is_card = _is_product_card_row(dims, creative_type)
+        if is_card:
+            creative_type = "Product card"
+
+        video = videos.get(item_id) or videos.get(str(dims.get("video_id") or ""))
+        if not is_card and video:
+            creative_type = "Video"
+
+        video_id = "N/A"
+        video_title = "-"
+        tiktok_account = "-"
+        time_posted = "-"
+        auth_type = "N/A"
+        status = _gmv_status_label(
+            dims.get("creative_delivery_status")
+            or dims.get("status")
+            or dims.get("campaign_status")
+            or (video or {}).get("creative_delivery_status")
+            or (video or {}).get("status")
+        )
+
+        if not is_card and video:
+            video_id = str(
+                video.get("item_id")
+                or video.get("tiktok_item_id")
+                or item_id
+                or video.get("video_id")
+                or "N/A"
+            )
+            video_title = (
+                video.get("text")
+                or video.get("title")
+                or video.get("video_title")
+                or video.get("ad_text")
+                or "-"
+            )
+            tiktok_account = (
+                video.get("identity_name")
+                or video.get("display_name")
+                or video.get("tiktok_account")
+                or video.get("nickname")
+                or "-"
+            )
+            time_posted = (
+                video.get("create_time")
+                or video.get("time_posted")
+                or video.get("posted_time")
+                or "-"
+            )
+            auth_type = (
+                video.get("authorization_type")
+                or video.get("auth_type")
+                or video.get("creative_authorization_type")
+                or "N/A"
+            )
+            status = _gmv_status_label(
+                video.get("creative_delivery_status")
+                or video.get("status")
+                or status
+            )
+        elif not is_card and item_id and item_id != "-1":
+            creative_type = "Video"
+            video_id = item_id
+
+        has_video_metrics = not is_card and creative_type == "Video"
+        row_currency = str(metrics.get("currency") or currency or "PHP")
+        out.append(
+            [
+                campaign_name,
+                campaign_id or "-",
+                item_group_id or "-",
+                creative_type,
+                video_title,
+                video_id,
+                tiktok_account,
+                time_posted,
+                status,
+                auth_type,
+                _fmt_money(metrics.get("cost")),
+                int(_num(metrics.get("orders"))),
+                _fmt_money(metrics.get("cost_per_order")),
+                _fmt_money(metrics.get("gross_revenue")),
+                _fmt_roi(metrics.get("roi")),
+                int(_num(metrics.get("product_impressions"))),
+                int(_num(metrics.get("product_clicks"))),
+                _fmt_rate_metric(metrics.get("product_click_rate")),
+                _fmt_rate_metric(metrics.get("ad_conversion_rate")),
+                _fmt_rate_metric(metrics.get("ad_video_view_rate_2s")) if has_video_metrics else "-",
+                _fmt_rate_metric(metrics.get("ad_video_view_rate_6s")) if has_video_metrics else "-",
+                _fmt_rate_metric(metrics.get("ad_video_view_rate_p25")) if has_video_metrics else "-",
+                _fmt_rate_metric(metrics.get("ad_video_view_rate_p50")) if has_video_metrics else "-",
+                _fmt_rate_metric(metrics.get("ad_video_view_rate_p75")) if has_video_metrics else "-",
+                _fmt_rate_metric(metrics.get("ad_video_view_rate_p100")) if has_video_metrics else "-",
+                row_currency,
+            ]
+        )
+    return out
+
+
+def fetch_product_creative_rows(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    access_token: str | None = None,
+    currency: str = "PHP",
+    shop_tag: str | None = None,
+    expand_all_products: bool = False,
+) -> list[list[Any]]:
+    """商品 GMV Max 创意报表（阶段 A：有消耗与汇总对齐官方；阶段 B 需 expand_all_products=True）。"""
+    token = access_token or get_access_token()
+    resolved_tag = (shop_tag or "").strip()
+    if not resolved_tag:
+        try:
+            from oauth import _active_shop_label
+
+            resolved_tag = (_active_shop_label.get() or "").strip()
+        except ImportError:
+            resolved_tag = ""
+
+    stores = fetch_gmv_max_stores(advertiser_id, token)
+    report, campaign_infos = fetch_gmv_max_creative_report(
+        advertiser_id,
+        start_date,
+        end_date,
+        token,
+        shop_tag=resolved_tag or None,
+        expand_all_products=expand_all_products,
+    )
+    video_index = _fetch_gmv_max_video_index(advertiser_id, stores, token, campaign_infos)
+    return build_gmv_max_creative_rows(report, video_index, currency=currency)
 
 
 def _num(val: Any) -> float:
