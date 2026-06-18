@@ -225,7 +225,7 @@
 | 现场商务商店 | gmv_max/video/get、store/list | ✅ |
 | TikTok 账号 | identity/video/info（标题补全） | ❌ 未开通 |
 
-**回调域名：** `https://dingfengchuangyu.top/callback`（`.top` 过户后 ServerHold 恢复中；网站暂用 `dingfengchuangyu.com`）
+**回调域名：** `https://dingfengchuangyu.com/callback`（店铺与广告 Marketing API 共用；`.top` 已停用）
 
 ---
 

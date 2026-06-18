@@ -33,7 +33,7 @@ def get_config() -> dict[str, str]:
     return {
         "APP_ID": vals.get("APP_ID", "7651554890895851537"),
         "APP_SECRET": vals.get("APP_SECRET", ""),
-        "REDIRECT_URI": vals.get("REDIRECT_URI", "https://dingfengchuangyu.top/callback"),
+        "REDIRECT_URI": vals.get("REDIRECT_URI", "https://dingfengchuangyu.com/callback"),
         "OAUTH_STATE_PREFIX": vals.get("OAUTH_STATE_PREFIX", "ads"),
     }
 

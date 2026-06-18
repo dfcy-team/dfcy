@@ -12,6 +12,6 @@ erp/
 启动
 ----
 本机:  启动网站.bat
-HTTPS: 启动HTTPS服务.bat  → https://dingfengchuangyu.top/
+HTTPS: 启动HTTPS服务.bat  → https://dingfengchuangyu.com/
 
 

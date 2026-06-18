@@ -19,7 +19,7 @@ erp/
 | 脚本 | 说明 |
 |------|------|
 | `启动网站.bat` | 本机 http://127.0.0.1:8080 |
-| `启动HTTPS服务.bat` | Flask + Nginx → https://dingfengchuangyu.top |
+| `启动HTTPS服务.bat` | Flask + Nginx → https://dingfengchuangyu.com |
 
 ## 首次配置
 

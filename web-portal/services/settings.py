@@ -89,7 +89,7 @@ CONTACT_ADDRESS = os.environ.get(
     "CONTACT_ADDRESS",
     "福建省福州市厦门市厦门火炬高新区软件园三期溪西山尾路3号1901-4",
 ).strip()
-PRODUCTION_SITE = os.environ.get("PRODUCTION_SITE", "dingfengchuangyu.top").strip() or "dingfengchuangyu.top"
+PRODUCTION_SITE = os.environ.get("PRODUCTION_SITE", "dingfengchuangyu.com").strip() or "dingfengchuangyu.com"
 CALLBACK_PATH = os.environ.get("CALLBACK_PATH", "/callback").rstrip() or "/callback"
 INFO_PATH = os.environ.get("INFO_PATH", "/ruike").rstrip() or "/ruike"
 SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "change-me-in-local-env")

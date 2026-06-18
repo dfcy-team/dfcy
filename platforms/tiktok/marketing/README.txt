@@ -1,8 +1,8 @@
 鼎峰 TikTok 广告数据分析（Marketing API）
 ==========================================
 
-OAuth 入口:  https://dingfengchuangyu.top/ads
-授权回调:    https://dingfengchuangyu.top/callback  （与 Shop 共用，靠 state=ads 区分）
+OAuth 入口:  https://dingfengchuangyu.com/ads
+授权回调:    https://dingfengchuangyu.com/callback  （与 Shop 共用，靠 state=ads 区分）
 
 配置
 ----
