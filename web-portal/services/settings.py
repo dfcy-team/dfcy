@@ -36,6 +36,7 @@ import sys
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 from common.paths import (  # noqa: E402
+    EXPORT_AFFILIATE_DIR,
     EXPORT_ANALYTICS_DIR,
     EXPORT_DATA_ROOT,
     EXPORT_FINANCE_DIR,
@@ -48,9 +49,11 @@ ensure_export_dirs()
 ANALYTICS_SCRIPT = TIKTOK_DIR / "analytics" / "店铺分析.py"
 FINANCE_SCRIPT = TIKTOK_DIR / "finance" / "流水分析.py"
 ORDER_SCRIPT = TIKTOK_DIR / "orders" / "订单查询.py"
+AFFILIATE_SCRIPT = TIKTOK_DIR / "affiliate" / "产品佣金.py"
 ANALYTICS_LOGS = EXPORT_ANALYTICS_DIR
 FINANCE_LOGS = EXPORT_FINANCE_DIR
 ORDER_LOGS = EXPORT_ORDERS_DIR
+AFFILIATE_LOGS = EXPORT_AFFILIATE_DIR
 EXPORT_DOWNLOAD_ROOT = EXPORT_DATA_ROOT
 CONTENT_DIR = TIKTOK_DIR / "content"
 

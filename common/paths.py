@@ -66,6 +66,7 @@ EXPORT_ORDERS_DIR = EXPORT_DATA_ROOT / "订单"
 EXPORT_FINANCE_DIR = EXPORT_DATA_ROOT / "财务"
 EXPORT_ANALYTICS_DIR = EXPORT_DATA_ROOT / "罗盘"
 EXPORT_ADS_DIR = EXPORT_DATA_ROOT / "广告"
+EXPORT_AFFILIATE_DIR = EXPORT_DATA_ROOT / "联盟"
 LEGACY_CURRENT_SHOP_FILE = TIKTOK_SHOP_DIR / "CURRENT_SHOP.txt"
 
 DEFAULT_ANALYTICS_LOGS = EXPORT_ANALYTICS_DIR
@@ -81,6 +82,7 @@ def ensure_export_dirs() -> Path:
         EXPORT_FINANCE_DIR,
         EXPORT_ANALYTICS_DIR,
         EXPORT_ADS_DIR,
+        EXPORT_AFFILIATE_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)
     return EXPORT_DATA_ROOT
@@ -108,6 +110,7 @@ def export_shop_dir(module: str, shop_label: str) -> Path:
         "finance": EXPORT_FINANCE_DIR,
         "analytics": EXPORT_ANALYTICS_DIR,
         "ads": EXPORT_ADS_DIR,
+        "affiliate": EXPORT_AFFILIATE_DIR,
     }
     d = mapping[module] / shop_label
     d.mkdir(parents=True, exist_ok=True)

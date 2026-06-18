@@ -651,6 +651,10 @@ def api_export():
             job_id = exporter.start_order_export(
                 shop_key=shop_key, start_date=start_date, end_date=end_date
             )
+        elif kind == "affiliate":
+            job_id = exporter.start_affiliate_export(
+                shop_key=shop_key, start_date=start_date, end_date=end_date
+            )
         else:
             return jsonify({"ok": False, "error": f"未知导出类型: {kind}"}), 400
         return jsonify({"ok": True, "job_id": job_id})

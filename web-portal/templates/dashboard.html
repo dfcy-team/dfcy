@@ -13,6 +13,7 @@
           <option value="analytics">店铺罗盘（产品/SKU/视频/店铺）</option>
           <option value="finance">店铺财务（6类Finance API全部导出）</option>
           <option value="orders">订单</option>
+          <option value="affiliate">联盟产品佣金（达人 GMV / 预计佣金）</option>
         </select>
       </label>
       <label>店铺
@@ -42,7 +43,7 @@
       </label>
       <button type="submit" class="btn primary span2">开始导出</button>
     </form>
-    <p class="muted">按店铺当地自然日统计。例如导出 5月14日～6月14日：开始填 2026-05-14，结束填 2026-06-14。单次最多 93 天。</p>
+    <p class="muted">按店铺当地自然日统计。例如导出 5月14日～6月14日：开始填 2026-05-14，结束填 2026-06-14。单次最多 93 天。联盟佣金需店铺已授权 <code>seller.affiliate_collaboration.read</code>。</p>
   </div>
 
   <div class="card">

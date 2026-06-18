@@ -9,6 +9,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from services.settings import (
+    AFFILIATE_LOGS,
+    AFFILIATE_SCRIPT,
     ANALYTICS_LOGS,
     ANALYTICS_SCRIPT,
     FINANCE_LOGS,
@@ -176,11 +178,30 @@ def start_order_export(*, shop_key: str, start_date: str, end_date: str) -> str:
     return _start_job("orders", shop_key, start_date, end_date, ORDER_SCRIPT, args, ORDER_SCRIPT.parent)
 
 
+def start_affiliate_export(*, shop_key: str, start_date: str, end_date: str) -> str:
+    """联盟产品佣金（达人 GMV / 预计佣金），对齐联盟中心「表现→商品」。"""
+    start_date, end_date = _validate_date_range(start_date, end_date)
+    out_dir = AFFILIATE_LOGS / shop_key.upper()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    args = [
+        "--shop",
+        shop_key.upper(),
+        "--start",
+        start_date,
+        "--end",
+        end_date,
+        "--output-dir",
+        str(out_dir),
+    ]
+    return _start_job("affiliate", shop_key, start_date, end_date, AFFILIATE_SCRIPT, args, AFFILIATE_SCRIPT.parent)
+
+
 def _export_logs_dir(kind: str, shop_key: str) -> Path:
     roots = {
         "analytics": ANALYTICS_LOGS,
         "finance": FINANCE_LOGS,
         "orders": ORDER_LOGS,
+        "affiliate": AFFILIATE_LOGS,
     }
     return roots[kind] / shop_key.upper()
 
