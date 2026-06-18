@@ -32,7 +32,7 @@ def get_config() -> dict[str, str]:
     return {
         "CLIENT_KEY": vals.get("CLIENT_KEY", "sbaw5qeahefu7vcr2t"),
         "CLIENT_SECRET": vals.get("CLIENT_SECRET", ""),
-        "REDIRECT_URI": vals.get("REDIRECT_URI", "https://dingfengchuangyu.top/content/callback"),
+        "REDIRECT_URI": vals.get("REDIRECT_URI", "https://dingfengchuangyu.com/content/callback"),
         "SCOPES": vals.get("SCOPES", "user.info.basic,video.upload,video.publish"),
         "OAUTH_STATE_PREFIX": vals.get("OAUTH_STATE_PREFIX", "content"),
     }

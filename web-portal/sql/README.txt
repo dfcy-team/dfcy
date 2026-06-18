@@ -26,7 +26,7 @@ login_logs        登录日志（成功/失败、IP）
 admin / dfcyadmin        管理员（全部权限）
 yanxinjie / yanxinjie001 运营（导出、授权、上传）
 
-登录地址: https://dingfengchuangyu.top/login
+登录地址: https://dingfengchuangyu.com/login
 
 四、预置角色与权限
 ------------------

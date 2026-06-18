@@ -15,7 +15,7 @@ Developer Portal → Sandbox settings → 添加你的 TikTok 账号为测试用
 
 第三步：Web 授权 + 上传
 ------------------------
-1. 打开 https://dingfengchuangyu.top/content
+1. 打开 https://dingfengchuangyu.com/content
 2. 点「连接 TikTok」完成 Login Kit 授权
 3. 选择 mp4 视频 → 上传草稿 或 直接发布
 
@@ -30,10 +30,10 @@ python 上传视频.py poll <publish_id>  # 查状态
 
 Partner 配置（你已填）
 ----------------------
-- Web URL: https://dingfengchuangyu.top/
-- Terms: https://dingfengchuangyu.top/terms
-- Privacy: https://dingfengchuangyu.top/privacy
-- Redirect URI: https://dingfengchuangyu.top/callback
+- Web URL: https://dingfengchuangyu.com/
+- Terms: https://dingfengchuangyu.com/terms
+- Privacy: https://dingfengchuangyu.com/privacy
+- Redirect URI: https://dingfengchuangyu.com/content/callback
 - Scopes: user.info.basic, video.upload, video.publish
 
 注意

@@ -49,6 +49,6 @@ if auth_test.get("error") == "invalid_client":
     sys.exit(1)
 if auth_test.get("error") == "invalid_grant":
     print("结论: 凭据正确（TikTok 已接受 Key/Secret）。")
-    print("请打开 https://dingfengchuangyu.top/content 点「连接 TikTok」完成授权。")
+    print("请打开 https://dingfengchuangyu.com/content 点「连接 TikTok」完成授权。")
 else:
     print("结论: 见上方响应")

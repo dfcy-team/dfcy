@@ -3,7 +3,7 @@
 一键生成店铺 env：输入店键 + 授权回调 URL → 写出 config_<店键>.env
 
 用法:
-  python 生成店铺env.py TKKJ5PH "http://dingfengchuangyu.top/callback?...code=ROW_..."
+  python 生成店铺env.py TKKJ5PH "https://dingfengchuangyu.com/callback?...code=ROW_..."
   python 生成店铺env.py TKKJ5PH --url "http://..."
   python 生成店铺env.py                          # 交互输入
 

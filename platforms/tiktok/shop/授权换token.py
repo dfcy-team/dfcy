@@ -3,7 +3,7 @@
 多店授权 — 粘贴 Partner 回调完整 URL 即可（code 只能用一次）
 
 用法:
-  python 授权换token.py TK2PH "http://dingfengchuangyu.top/callback?app_key=...&code=ROW_..."
+  python 授权换token.py TK2PH "https://dingfengchuangyu.com/callback?app_key=...&code=ROW_..."
   python 授权换token.py TK2PH
   python 授权换token.py              # 交互：先选店键，再粘贴 URL
 
