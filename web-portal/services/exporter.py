@@ -117,6 +117,13 @@ def _run_subprocess(job: dict, script: Path, args: list[str], cwd: Path) -> None
         _save_job(job)
 
 
+def _analytics_includes_product(export_types: str) -> bool:
+    t = (export_types or "all").strip().lower()
+    if t == "all":
+        return True
+    return any(part.strip() == "product" for part in t.split(","))
+
+
 def start_analytics_export(
     *,
     shop_key: str,
@@ -141,6 +148,8 @@ def start_analytics_export(
     ]
     if fast_mode:
         args.append("--no-video-detail")
+    if _analytics_includes_product(export_types):
+        args.append("--product-images")
     return _start_job("analytics", shop_key, start_date, end_date, ANALYTICS_SCRIPT, args, ANALYTICS_SCRIPT.parent)
 
 
