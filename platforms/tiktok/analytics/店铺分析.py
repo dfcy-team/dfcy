@@ -17,6 +17,7 @@ TikTok Shop 店铺分析 — Shop Analytics API
   <店名>_视频自营明细_<日期>_<日期>.xlsx
   <店名>_店铺数据_<日期>_<日期>.xlsx
 加 --no-excel 可关闭；加 --no-all 可只导当前页（不全量翻页）。
+产品数据表主图 URL: --product-images（预览可加 --product-images-limit 20 --type product --no-video-detail）。
 逐条拉取规则: 每条 API 内重试 2 次（共 3 次）；商品表失败 ID 再补拉最多 5 轮；仍失败则不导出（宁缺毋滥）。
 
 入库（与 Excel 列完全一致，不要 xlsx）:
@@ -57,6 +58,13 @@ PRODUCT_DETAIL_WORKERS = 4
 # 每条请求间隔秒（有并发时一般设 0；仍断网可改 0.1）
 VIDEO_DETAIL_SLEEP = 0
 PRODUCT_DETAIL_SLEEP = 0
+
+# 产品数据表加主图 URL 列（需额外调 Product 详情 API；默认关，加 --product-images 开启）
+PRODUCT_IMAGE_URLS = False
+# 主图 URL API 并发
+PRODUCT_IMAGE_WORKERS = 8
+# 0=全部拉 URL；>0 仅前 N 个商品（预览时可设 20）
+PRODUCT_IMAGES_LIMIT = 0
 
 # Excel 写入失败时重试次数（如缺 openpyxl 会先尝试自动安装）
 EXCEL_EXPORT_RETRIES = 3
@@ -156,6 +164,9 @@ def parse_args() -> dict:
         "no_video_detail": not FETCH_VIDEO_DETAIL,
         "video_workers": VIDEO_DETAIL_WORKERS,
         "product_workers": PRODUCT_DETAIL_WORKERS,
+        "embed_images": PRODUCT_IMAGE_URLS,
+        "image_workers": PRODUCT_IMAGE_WORKERS,
+        "embed_images_limit": PRODUCT_IMAGES_LIMIT,
         "only_export_excel": False,
     }
     argv = strip_config_argv(sys.argv[1:])
@@ -219,6 +230,15 @@ def parse_args() -> dict:
         elif a == "--product-workers" and i + 1 < len(argv):
             args["product_workers"] = max(1, min(16, int(argv[i + 1])))
             i += 2
+        elif a in ("--embed-images", "--product-images"):
+            args["embed_images"] = True
+            i += 1
+        elif a in ("--embed-images-limit", "--product-images-limit") and i + 1 < len(argv):
+            args["embed_images_limit"] = max(0, int(argv[i + 1]))
+            i += 2
+        elif a == "--image-workers" and i + 1 < len(argv):
+            args["image_workers"] = max(1, min(16, int(argv[i + 1])))
+            i += 2
         elif a == "--only-export-excel":
             args["only_export_excel"] = True
             i += 1
@@ -240,6 +260,12 @@ def apply_top_config(args: dict) -> None:
         args["video_workers"] = VIDEO_DETAIL_WORKERS
     if not any(a == "--product-workers" for a in argv):
         args["product_workers"] = PRODUCT_DETAIL_WORKERS
+    if not any(a in ("--embed-images", "--product-images") for a in argv):
+        args["embed_images"] = PRODUCT_IMAGE_URLS
+    if not any(a in ("--embed-images-limit", "--product-images-limit") for a in argv):
+        args["embed_images_limit"] = PRODUCT_IMAGES_LIMIT
+    if not any(a == "--image-workers" for a in argv):
+        args["image_workers"] = PRODUCT_IMAGE_WORKERS
 
 
 def apply_export_defaults(args: dict) -> None:
@@ -641,7 +667,9 @@ def export_filename(stem: str, start: str, end: str) -> str:
     )
 
 
-def active_headers(kind: str) -> list[str]:
+def active_headers(kind: str, with_image_url: bool = False) -> list[str]:
+    if kind == "product" and with_image_url:
+        return ["主图URL", *PRODUCT_EXCEL_HEADERS]
     if not is_zhanfu_export():
         return {
             "product": PRODUCT_EXCEL_HEADERS,
@@ -719,7 +747,21 @@ def _parse_money_str(s: str) -> float:
         return 0.0
 
 
-def legacy_video_row_to_zhanfu(row: list) -> list:
+def format_video_products(v: dict) -> str:
+    products = v.get("products") or []
+    if isinstance(products, list) and products:
+        names = []
+        for p in products:
+            if isinstance(p, dict):
+                n = p.get("name") or p.get("title") or ""
+                if n:
+                    names.append(str(n))
+        if names:
+            return "; ".join(names)
+    return str(v.get("product_name") or v.get("linked_product") or "")
+
+
+def legacy_video_row_to_zhanfu(row: list, *, product: str = "") -> list:
     """把旧版 17 列缓存行转成站斧 30 列（用于预览/重导）。"""
     if len(row) < 12:
         return [""] * len(ZHANFU_VIDEO_HEADERS)
@@ -744,7 +786,7 @@ def legacy_video_row_to_zhanfu(row: list) -> list:
         except (TypeError, ValueError, ZeroDivisionError):
             pass
     return [
-        user, "", title, vid, post_time, "",
+        user, "", title, vid, post_time, product or "",
         vv, likes, comments, shares, "", "",
         "", "", "",
         orders, orders, 0,
@@ -787,7 +829,7 @@ def build_video_zhanfu_rows(details: list[dict], videos: list[dict] | None = Non
                     str(v.get("title") or ""),
                     str(item.get("video_id") or v.get("id") or ""),
                     perf.get("video_post_time", ""),
-                    str(v.get("product_name") or v.get("linked_product") or ""),
+                    str(v.get("product_name") or v.get("linked_product") or format_video_products(v)),
                     vv,
                     eng.get("total_likes", ""),
                     eng.get("total_comments", ""),
@@ -825,7 +867,7 @@ def build_video_zhanfu_rows(details: list[dict], videos: list[dict] | None = Non
             v.get("sku_orders", ""),
             fmt_rate(v.get("click_through_rate")),
         ] + [""] * 10
-        rows.append(legacy_video_row_to_zhanfu(legacy))
+        rows.append(legacy_video_row_to_zhanfu(legacy, product=format_video_products(v)))
     return rows
 
 
@@ -1026,6 +1068,18 @@ def load_catalog_titles_from_exports(log_dir: Path) -> dict[str, dict]:
     return out
 
 
+def main_image_url_from_payload(p: dict) -> str:
+    """从 Product 详情取主图 URL（优先原图链接）。"""
+    for img in p.get("main_images") or p.get("images") or []:
+        if not isinstance(img, dict):
+            continue
+        for key in ("urls", "thumb_urls"):
+            urls = img.get(key) or []
+            if urls:
+                return str(urls[0])
+    return ""
+
+
 def fetch_one_product_info(client: TikTokShopClient, token: str, product_id: str) -> dict | None:
     path = f"/product/202309/products/{product_id}"
     for attempt in range(ITEM_ATTEMPTS):
@@ -1033,13 +1087,75 @@ def fetch_one_product_info(client: TikTokShopClient, token: str, product_id: str
         if is_ok(r):
             p = r.get("data") or {}
             title = _product_title_from_payload(p)
-            if title:
-                return {"id": product_id, "title": title, "status": p.get("status", "")}
+            info = {
+                "id": product_id,
+                "title": title,
+                "status": p.get("status", ""),
+                "image_url": main_image_url_from_payload(p),
+            }
+            if title or info["image_url"]:
+                return info
             return None
         if r.get("code") in PRODUCT_DETAIL_SKIP_CODES:
             return None
         time.sleep(0.3 * (attempt + 1))
     return None
+
+
+def fetch_product_image_url(client: TikTokShopClient, token: str, product_id: str) -> str:
+    """仅拉主图 URL（已有商品名、缺图时用）。"""
+    path = f"/product/202309/products/{product_id}"
+    for attempt in range(ITEM_ATTEMPTS):
+        r = client.get(path, token, {"shop_cipher": CIPHER})
+        if is_ok(r):
+            return main_image_url_from_payload(r.get("data") or {})
+        if r.get("code") in PRODUCT_DETAIL_SKIP_CODES:
+            return ""
+        time.sleep(0.2 * (attempt + 1))
+    return ""
+
+
+def enrich_product_images(
+    client: TikTokShopClient,
+    token: str,
+    catalog: dict[str, dict],
+    product_ids: list[str],
+    workers: int = 8,
+) -> dict[str, dict]:
+    """并发补全 catalog 里的 image_url（与 enrich 商品名共用 Product 详情 API）。"""
+    merged = dict(catalog)
+    missing = [pid for pid in product_ids if not merged.get(pid, {}).get("image_url")]
+    if not missing:
+        return merged
+    print(f"  拉取主图 URL: {len(missing)} 个（并发 {workers}）...")
+    ok = 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futs = {pool.submit(fetch_product_image_url, client, token, pid): pid for pid in missing}
+        for fut in as_completed(futs):
+            pid = futs[fut]
+            url = fut.result()
+            if url:
+                merged.setdefault(pid, {"id": pid})
+                merged[pid]["image_url"] = url
+                ok += 1
+    print(f"  主图 URL: {ok}/{len(missing)}")
+    return merged
+
+
+def product_excel_rows_with_image_urls(
+    product_rows: list[dict],
+    catalog: dict[str, dict],
+    *,
+    limit: int = 0,
+) -> list[list]:
+    rows: list[list] = []
+    for i, r in enumerate(product_rows):
+        pid = str(r.get("id") or "")
+        url = ""
+        if limit <= 0 or i < limit:
+            url = str(catalog.get(pid, {}).get("image_url") or "")
+        rows.append([url, *r["excel"]])
+    return rows
 
 
 def enrich_product_catalog(
@@ -1072,7 +1188,7 @@ def enrich_product_catalog(
         for fut in as_completed(futs):
             info = fut.result()
             if info:
-                merged[info["id"]] = info
+                merged[info["id"]] = {**merged.get(info["id"], {}), **info}
                 ok += 1
             if PRODUCT_DETAIL_SLEEP:
                 time.sleep(PRODUCT_DETAIL_SLEEP)
@@ -1471,7 +1587,12 @@ def ensure_openpyxl() -> bool:
 
 
 def export_table_excel(
-    headers: list[str], rows: list[list], start: str, end: str, path: Path, table_kind: str = ""
+    headers: list[str],
+    rows: list[list],
+    start: str,
+    end: str,
+    path: Path,
+    table_kind: str = "",
 ) -> None:
     from openpyxl import Workbook
 
@@ -1565,7 +1686,14 @@ def deliver_table(
     if args["export_excel"]:
         xlsx = LOG_DIR / export_filename(stem, start, end)
         excel_ok = try_export_excel(
-            label, headers, rows, start, end, xlsx, retries=EXCEL_EXPORT_RETRIES, table_kind=stem_to_kind(stem)
+            label,
+            headers,
+            rows,
+            start,
+            end,
+            xlsx,
+            retries=EXCEL_EXPORT_RETRIES,
+            table_kind=stem_to_kind(stem),
         )
         if excel_ok:
             excel_paths.append(str(xlsx))
@@ -1977,10 +2105,27 @@ def main() -> int:
                 skip_excel_incomplete("商品表现", product_failed, len(list_items))
                 failed += 1
             elif product_rows:
+                with_urls = bool(args.get("embed_images"))
+                excel_rows = [r["excel"] for r in product_rows]
+                if with_urls:
+                    limit = int(args.get("embed_images_limit") or 0)
+                    ids_for_img = [str(r["id"]) for r in product_rows if r.get("id")]
+                    if limit > 0:
+                        ids_for_img = ids_for_img[:limit]
+                    catalog = enrich_product_images(
+                        client,
+                        token,
+                        catalog,
+                        ids_for_img,
+                        workers=args.get("image_workers", PRODUCT_IMAGE_WORKERS),
+                    )
+                    excel_rows = product_excel_rows_with_image_urls(
+                        product_rows, catalog, limit=limit
+                    )
                 deliver_table(
                     "商品表现",
-                    active_headers("product"),
-                    [r["excel"] for r in product_rows],
+                    active_headers("product", with_image_url=with_urls),
+                    excel_rows,
                     start,
                     end,
                     "product_list",
