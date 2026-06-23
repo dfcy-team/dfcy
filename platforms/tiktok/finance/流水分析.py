@@ -22,7 +22,7 @@ import os
 import shutil
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 # ========== 无 导出设置.ini / --shop 时的兜底 config 文件名 ==========
@@ -47,6 +47,7 @@ if str(_PROJECT) not in sys.path:
     sys.path.insert(0, str(_PROJECT))
 from shop_tz import (
     date_range_to_unix,
+    default_export_inclusive_range,
     infer_shop_region_from_cfg,
     get_shop_tz,
     pick_config_before_init,
@@ -228,20 +229,20 @@ def parse_args() -> dict:
 def date_range(args: dict) -> tuple[str, str, int, int]:
     if args["start"] and args["end"]:
         start_s, end_s = args["start"], args["end"]
+    elif not args["start"] and not args["end"]:
+        start_s, end_s = default_export_inclusive_range(SHOP_TZ)
     else:
-        fs, fe = cfg("TTS_FINANCE_START"), cfg("TTS_FINANCE_END")
-        if not (fs and fe):
-            fs, fe = cfg("TTS_ANALYTICS_START"), cfg("TTS_ANALYTICS_END")
-        if fs and fe:
-            start_s, end_s = fs, fe
-        else:
-            days = args["days"]
-            fd = cfg("TTS_FINANCE_DAYS") or cfg("TTS_ANALYTICS_DAYS")
-            if fd.isdigit():
-                days = int(fd)
-            end_d = today_local(SHOP_TZ)
-            start_d = end_d - timedelta(days=days)
-            start_s, end_s = start_d.isoformat(), end_d.isoformat()
+        days = args["days"]
+        fd = cfg("TTS_FINANCE_DAYS") or cfg("TTS_ANALYTICS_DAYS")
+        if fd.isdigit():
+            days = int(fd)
+        end_d = today_local(SHOP_TZ)
+        if args["end"]:
+            end_d = date.fromisoformat(args["end"])
+        start_d = end_d - timedelta(days=days)
+        if args["start"]:
+            start_d = date.fromisoformat(args["start"])
+        start_s, end_s = start_d.isoformat(), end_d.isoformat()
 
     t0, t1 = date_range_to_unix(start_s, end_s, SHOP_TZ)
     return start_s, end_s, int(t0 or 0), int(t1 or 0)

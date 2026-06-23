@@ -95,6 +95,27 @@ def today_local(tz: timezone | ZoneInfo) -> date:
     return datetime.now(tz).date()
 
 
+# 与网页导出控制台一致：默认统计「前两天」单日
+DEFAULT_EXPORT_LAG_DAYS = 2
+
+
+def default_export_day(tz: timezone | ZoneInfo) -> date:
+    return today_local(tz) - timedelta(days=DEFAULT_EXPORT_LAG_DAYS)
+
+
+def default_export_inclusive_range(tz: timezone | ZoneInfo) -> tuple[str, str]:
+    """返回含首含尾的默认导出日（start, end）。"""
+    day = default_export_day(tz)
+    s = day.isoformat()
+    return s, s
+
+
+def default_analytics_api_range(tz: timezone | ZoneInfo) -> tuple[str, str]:
+    """店铺分析 API：start_date_ge + end_date_lt（次日）。"""
+    day = default_export_day(tz)
+    return day.isoformat(), (day + timedelta(days=1)).isoformat()
+
+
 def parse_local_date(s: str, tz: timezone | ZoneInfo) -> datetime | None:
     s = (s or "").strip()
     if not s:

@@ -507,8 +507,8 @@ def setup_client(shop: str) -> tuple[TikTokShopClient, str, str, Path]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="联盟产品佣金 Excel 导出")
     ap.add_argument("--shop", "-s", default="TK1PH")
-    ap.add_argument("--start", default="2026-06-16")
-    ap.add_argument("--end", default="2026-06-16")
+    ap.add_argument("--start", default="", help="开始日期（含）；默认前两天")
+    ap.add_argument("--end", default="", help="结束日期（含）；默认前两天")
     ap.add_argument(
         "--compare",
         metavar="REF_XLSX",
@@ -525,6 +525,14 @@ def main() -> int:
         help="文件名附加标识，如 联盟订单 → TIKTOK1号店PH_产品佣金_联盟订单_2026-06-16_2026-06-16.xlsx",
     )
     args = ap.parse_args()
+    if not args.start or not args.end:
+        from shop_tz import default_export_inclusive_range, get_shop_tz, infer_shop_region_from_cfg
+
+        config_pre = init_shop_config(ENV_ROOT, ["--shop", args.shop])
+        region = infer_shop_region_from_cfg(config_pre)
+        day, _ = default_export_inclusive_range(get_shop_tz(region))
+        args.start = args.start or day
+        args.end = args.end or day
 
     client, token, cipher, config = setup_client(args.shop)
     export_tag = cfg("TTS_EXPORT_SHOP_TAG") or args.shop

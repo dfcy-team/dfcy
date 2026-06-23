@@ -256,11 +256,19 @@
 
   const startInput = exportForm.querySelector('input[name="start_date"]');
   const endInput = exportForm.querySelector('input[name="end_date"]');
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const day = yesterday.toISOString().slice(0, 10);
-  if (startInput && !startInput.value) startInput.value = day;
-  if (endInput && !endInput.value) endInput.value = day;
+  function formatLocalDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  const defaultDay = formatLocalDate((() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 2);
+    return d;
+  })());
+  if (startInput && !startInput.value) startInput.value = defaultDay;
+  if (endInput && !endInput.value) endInput.value = defaultDay;
 
   const jobStatus = document.getElementById("ads-job-status");
   const jobLog = document.getElementById("ads-job-log");

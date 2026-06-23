@@ -100,8 +100,9 @@ def analytics_export_filename(
     name = s.get(kind, kind)
     tag = export_tag or "shop"
     if zhanfu:
-        day = zhanfu_day_tag(start, end)
-        return f"{tag}_{name}_{day}_{day}.xlsx"
+        start_inc = start
+        end_inc = zhanfu_day_tag(start, end)
+        return f"{tag}_{name}_{start_inc}_{end_inc}.xlsx"
     return f"{tag}_{name}_{start}_{end}.xlsx"
 
 

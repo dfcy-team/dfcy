@@ -8,18 +8,24 @@
   const filesBody = document.getElementById("files-body");
   const fileShopFilter = document.getElementById("file-shop-filter");
 
+  function formatLocalDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function defaultExportDay() {
+    const d = new Date();
+    d.setDate(d.getDate() - 2);
+    return formatLocalDate(d);
+  }
+
   const startInput = form?.querySelector('input[name="start_date"]');
   const endInput = form?.querySelector('input[name="end_date"]');
-  if (endInput && !endInput.value) {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    endInput.value = d.toISOString().slice(0, 10);
-  }
-  if (startInput && !startInput.value && endInput?.value) {
-    const d = new Date(endInput.value + "T00:00:00");
-    d.setDate(d.getDate() - 30);
-    startInput.value = d.toISOString().slice(0, 10);
-  }
+  const defaultDay = defaultExportDay();
+  if (startInput && !startInput.value) startInput.value = defaultDay;
+  if (endInput && !endInput.value) endInput.value = defaultDay;
 
   function toggleKindFields() {
     const k = kindSel?.value || "analytics";

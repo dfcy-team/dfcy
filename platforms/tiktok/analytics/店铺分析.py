@@ -90,7 +90,14 @@ if str(_TEST_ENV) not in sys.path:
     sys.path.insert(0, str(_TEST_ENV))
 if str(_PROJECT) not in sys.path:
     sys.path.insert(0, str(_PROJECT))
-from shop_tz import infer_shop_region_from_cfg, get_shop_tz, pick_config_before_init, today_local, tz_label
+from shop_tz import (
+    default_analytics_api_range,
+    infer_shop_region_from_cfg,
+    get_shop_tz,
+    pick_config_before_init,
+    today_local,
+    tz_label,
+)
 from tts_client import TikTokShopClient, cfg, get_shop_token, init_shop_config, is_ok, strip_config_argv
 from common.excel_names import analytics_export_filename_by_cache_stem, excel_sheet_title
 from common.paths import ensure_export_dirs, export_shop_dir, EXPORT_ANALYTICS_DIR
@@ -286,27 +293,21 @@ def date_range(args: dict) -> tuple[str, str, str]:
     if cli_start and cli_end:
         return cli_start, cli_end, "命令行 --start/--end"
 
-    cfg_start = cfg("TTS_ANALYTICS_START")
-    cfg_end = cfg("TTS_ANALYTICS_END")
-    if cfg_start and cfg_end:
-        return cfg_start, cfg_end, "config.env TTS_ANALYTICS_START/END"
+    if not cli_start and not cli_end:
+        start, end = default_analytics_api_range(SHOP_TZ)
+        return start, end, "默认前两天（与网页一致）"
 
     days = args["days"]
-    if not cli_start and not cli_end:
-        cfg_days = cfg("TTS_ANALYTICS_DAYS")
-        if cfg_days.isdigit():
-            days = int(cfg_days)
+    cfg_days = cfg("TTS_ANALYTICS_DAYS")
+    if cfg_days.isdigit():
+        days = int(cfg_days)
 
     end_d = today_local(SHOP_TZ)
     if cli_end:
         end_d = date.fromisoformat(cli_end)
-    elif cfg_end and not cfg_start:
-        end_d = date.fromisoformat(cfg_end)
     start_d = end_d - timedelta(days=days)
     if cli_start:
         start_d = date.fromisoformat(cli_start)
-    elif cfg_start and not cfg_end:
-        start_d = date.fromisoformat(cfg_start)
     src = "config.env TTS_ANALYTICS_DAYS" if cfg("TTS_ANALYTICS_DAYS") and not cli_start else f"--days {days}"
     return str(start_d), str(end_d), src
 
