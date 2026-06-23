@@ -202,10 +202,10 @@ def load_config(config_path: Path | None = None) -> dict:
         "视频目录": str(z_root / "视频自营"),
         "产品_API目录": str(Z_API_INTERFACE / "产品数据表"),
         "SKU_API目录": str(Z_API_INTERFACE / "商品sku信息"),
-        "视频_API目录": str(Z_API_INTERFACE / "视频自营明细"),
+        "视频_API目录": str(Z_API_INTERFACE / "视频总和明细"),
         "产品_JSON目录": str(Z_JSON_CACHE / "产品"),
         "SKU_JSON目录": str(Z_JSON_CACHE / "商品sku信息"),
-        "视频_JSON目录": str(Z_JSON_CACHE / "视频自营明细"),
+        "视频_JSON目录": str(Z_JSON_CACHE / "视频总和明细"),
         "店铺数据目录": str(z_root / "店铺数据"),
     }
     finance_defaults = {

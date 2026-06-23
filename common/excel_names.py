@@ -8,7 +8,7 @@ from pathlib import Path
 DEFAULT_ANALYTICS_STEMS: dict[str, str] = {
     "product": "产品数据表",
     "sku": "商品sku信息",
-    "video": "视频自营明细",
+    "video": "视频总和明细",
     "shop": "店铺数据",
 }
 
@@ -33,7 +33,7 @@ ANALYTICS_CACHE_STEM: dict[str, str] = {
 ANALYTICS_SHEET_TITLES: dict[str, str] = {
     "product": "产品数据表",
     "sku": "商品sku信息",
-    "video": "视频自营明细",
+    "video": "视频总和明细",
     "shop": "店铺数据",
 }
 

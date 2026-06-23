@@ -14,7 +14,7 @@ TikTok Shop 店铺分析 — Shop Analytics API
 默认（--type all）会导出 4 类 Excel 到 logs/<店名>/（中文文件名）：
   <店名>_产品数据表_<日期>_<日期>.xlsx
   <店名>_商品sku信息_<日期>_<日期>.xlsx
-  <店名>_视频自营明细_<日期>_<日期>.xlsx
+  <店名>_视频总和明细_<日期>_<日期>.xlsx
   <店名>_店铺数据_<日期>_<日期>.xlsx
 加 --no-excel 可关闭；加 --no-all 可只导当前页（不全量翻页）。
 产品数据表主图 URL: --product-images（预览可加 --product-images-limit 20 --type product --no-video-detail）。
