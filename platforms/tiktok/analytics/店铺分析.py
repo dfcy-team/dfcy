@@ -515,8 +515,53 @@ def video_gmv_vwx(attributed: float, direct: float) -> tuple[float, float, float
     if att <= 0:
         return 0.0, 0.0, 0.0
     if dir_ <= 0:
+        return att, 0.0, att
+    if dir_ >= att - 0.01:
         return att, att, 0.0
     return att, dir_, round(max(att - dir_, 0), 2)
+
+
+def merge_video_lists(primary: list[dict], secondary: list[dict] | None = None) -> list[dict]:
+    """合并视频列表（以 primary 顺序为准，补上 secondary 独有 ID）。"""
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for v in primary:
+        vid = str(v.get("id") or "")
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        merged.append(v)
+    for v in secondary or []:
+        vid = str(v.get("id") or "")
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        merged.append(v)
+    return merged
+
+
+def fetch_video_list_items(
+    client: TikTokShopClient,
+    token: str,
+    start: str,
+    end: str,
+    *,
+    endpoint_key: str = "video_list",
+    page_size: int,
+    all_pages: bool,
+) -> tuple[list[dict], dict]:
+    if all_pages:
+        return fetch_all_list(client, token, endpoint_key, start, end, page_size=page_size)
+    r = fetch_get(client, token, ENDPOINTS[endpoint_key], start, end, page_size=page_size)
+    if not is_ok(r):
+        return [], {"error": r, "complete": False}
+    items = extract_list(r.get("data") or {}, endpoint_key)
+    data = r.get("data") or {}
+    return items, {
+        "complete": not bool(data.get("next_page_token")),
+        "fetched": len(items),
+        "total_count": data.get("total_count"),
+    }
 
 
 def load_video_direct_gmv_map(
@@ -527,29 +572,28 @@ def load_video_direct_gmv_map(
     *,
     page_size: int,
     all_pages: bool,
-) -> dict[str, float]:
-    """拉 202409 视频列表，建立 video_id -> 视频GMV(W)。"""
+) -> tuple[dict[str, float], list[dict], dict]:
+    """拉 202409 视频列表：video_id -> 视频GMV(W)，并返回原始列表供合并。"""
+    items, meta = fetch_video_list_items(
+        client,
+        token,
+        start,
+        end,
+        endpoint_key="video_list_direct",
+        page_size=page_size,
+        all_pages=all_pages,
+    )
+    if meta.get("error"):
+        print(f"  [视频GMV对照 202409] 翻页失败: {(meta['error'] or {}).get('message', '')[:80]}")
+        return {}, items, meta
+    if not all_pages and not meta.get("complete", True):
+        print("  [视频GMV对照 202409] 仍有下一页，请加 --all")
     out: dict[str, float] = {}
-    if all_pages:
-        items, meta = fetch_all_list(
-            client, token, "video_list_direct", start, end, page_size=page_size
-        )
-        if meta.get("error"):
-            print(f"  [视频GMV对照 202409] 翻页失败: {(meta['error'] or {}).get('message', '')[:80]}")
-            return out
-    else:
-        r = fetch_get(
-            client, token, ENDPOINTS["video_list_direct"], start, end, page_size=page_size
-        )
-        if not is_ok(r):
-            print(f"  [视频GMV对照 202409] 失败 code={r.get('code')}")
-            return out
-        items = extract_list(r.get("data") or {}, "video_list_direct")
     for v in items:
         vid = str(v.get("id") or "")
         if vid:
             out[vid] = video_direct_gmv_from_list_item(v)
-    return out
+    return out, items, meta
 
 
 def print_shop(data: dict) -> None:
@@ -875,7 +919,10 @@ def format_video_products(v: dict) -> str:
         for p in products:
             if isinstance(p, dict):
                 n = p.get("name") or p.get("title") or ""
-                if n:
+                pid = p.get("id") or ""
+                if n and pid:
+                    names.append(f"{n}({pid})")
+                elif n:
                     names.append(str(n))
         if names:
             return "; ".join(names)
@@ -1044,9 +1091,10 @@ def build_video_zhanfu_rows(
         vid = str(v.get("id") or "")
         attributed = video_attributed_gmv_from_list_item(v)
         direct = direct_map.get(vid, 0.0)
+        user = str(v.get("username") or "").lstrip("@")
         rows.append(
             _video_zhanfu_row_from_parts(
-                user=str(v.get("username") or ""),
+                user=user,
                 creator_id=str(v.get("creator_id") or v.get("author_id") or ""),
                 title=str(v.get("title") or ""),
                 vid=vid,
@@ -2218,8 +2266,14 @@ def main() -> int:
             print(f"\n[视频概览] 失败 code={ro.get('code')} {ro.get('message')}")
 
         if args["all_pages"]:
-            videos, meta = fetch_all_list(
-                client, token, "video_list", start, end, page_size=args["size"]
+            videos, meta = fetch_video_list_items(
+                client,
+                token,
+                start,
+                end,
+                endpoint_key="video_list",
+                page_size=args["size"],
+                all_pages=True,
             )
             out["sections"]["video_list"] = {
                 "code": 0 if not meta.get("error") else (meta["error"] or {}).get("code"),
@@ -2421,7 +2475,7 @@ def main() -> int:
     video_direct_gmv: dict[str, float] = {}
     if want["video"] and videos and (args["export_excel"] or args["save_tables"]):
         print("\n拉取 202409 视频列表（对照「视频GMV」/间接GMV）...")
-        video_direct_gmv = load_video_direct_gmv_map(
+        video_direct_gmv, videos_409, meta409 = load_video_direct_gmv_map(
             client,
             token,
             start,
@@ -2429,7 +2483,16 @@ def main() -> int:
             page_size=args["size"],
             all_pages=args["all_pages"],
         )
-        print(f"  已对照 {len(video_direct_gmv)} 条视频的直接 GMV")
+        if meta409.get("error"):
+            failed += 1
+        before = len(videos)
+        videos = merge_video_lists(videos, videos_409)
+        added = len(videos) - before
+        print(
+            f"  已对照 {len(video_direct_gmv)} 条直接 GMV"
+            + (f"，从 202409 补全 {added} 条视频" if added else "")
+            + f"；导出共 {len(videos)} 条"
+        )
 
     if want["video"] and videos:
         want_detail = (
