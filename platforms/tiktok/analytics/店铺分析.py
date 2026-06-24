@@ -135,9 +135,12 @@ REGION = SHOP_REGION
 
 ENDPOINTS = {
     "shop": "/analytics/202509/shop/performance",
-    "video_overview": "/analytics/202409/shop_videos/overview_performance",
-    "video_list": "/analytics/202409/shop_videos/performance",
-    "video_detail": "/analytics/202409/shop_videos/{video_id}/performance",
+    "video_overview": "/analytics/202509/shop_videos/overview_performance",
+    "video_list": "/analytics/202509/shop_videos/performance",
+    "video_detail": "/analytics/202509/shop_videos/{video_id}/performance",
+    # 202509 列表/详情为「视频归因 GMV」；202409 列表/详情 interval.gmv 为「视频 GMV」(W)，用于算间接 GMV
+    "video_list_direct": "/analytics/202409/shop_videos/performance",
+    "video_detail_direct": "/analytics/202409/shop_videos/{video_id}/performance",
     "product_list": "/analytics/202405/shop_products/performance",
     "product_list_rich": "/analytics/202605/shop_products/performance",
     "product_detail": "/analytics/202405/shop_products/{product_id}/performance",
@@ -146,6 +149,7 @@ ENDPOINTS = {
 
 LIST_KEYS = {
     "video_list": ("videos", "shop_videos"),
+    "video_list_direct": ("videos", "shop_videos"),
     "product_list": ("products", "shop_products"),
     "product_list_rich": ("products",),
     "sku_list": ("skus", "shop_skus"),
@@ -409,8 +413,10 @@ def fetch_video_detail(
     video_id: str,
     start: str,
     end: str,
+    *,
+    endpoint_key: str = "video_detail",
 ) -> dict:
-    path = ENDPOINTS["video_detail"].format(video_id=video_id)
+    path = ENDPOINTS[endpoint_key].format(video_id=video_id)
     return fetch_get(client, token, path, start, end)
 
 
@@ -420,6 +426,8 @@ def fetch_video_detail_safe(
     video_id: str,
     start: str,
     end: str,
+    *,
+    endpoint_key: str = "video_detail",
 ) -> tuple[dict, bool]:
     """单条视频详情：最多 ITEM_ATTEMPTS 次；成功=API code 0。"""
     from requests.exceptions import ChunkedEncodingError, ConnectionError, SSLError, Timeout
@@ -427,7 +435,9 @@ def fetch_video_detail_safe(
     last_err: Exception | None = None
     for attempt in range(ITEM_ATTEMPTS):
         try:
-            r = fetch_video_detail(client, token, video_id, start, end)
+            r = fetch_video_detail(
+                client, token, video_id, start, end, endpoint_key=endpoint_key
+            )
             if is_ok(r):
                 return r, True
             last_err = RuntimeError(r.get("message") or f"code={r.get('code')}")
@@ -436,6 +446,110 @@ def fetch_video_detail_safe(
         if attempt < ITEM_ATTEMPTS - 1:
             time.sleep(2.0 * (attempt + 1))
     return {"code": -1, "message": f"failed_after_{ITEM_ATTEMPTS}_tries: {last_err}"}, False
+
+
+def video_direct_gmv_from_detail(data: dict) -> float:
+    """202409 详情 intervals[].gmv = 平台「视频 GMV」(W)。"""
+    perf = (data or {}).get("performance") or {}
+    for iv in perf.get("intervals") or []:
+        gmv = iv.get("gmv")
+        if isinstance(gmv, dict) and str(gmv.get("amount", "")).strip() not in ("", "0", "0.00"):
+            try:
+                return float(gmv_amount(gmv) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def video_direct_gmv_from_list_item(v: dict) -> float:
+    try:
+        return float(gmv_amount(v.get("gmv")) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def video_attributed_gmv_from_list_item(v: dict) -> float:
+    sales = v.get("sales") or {}
+    overall = sales.get("overall") or {}
+    overall_gmv = overall.get("gmv")
+    if overall_gmv:
+        try:
+            return float(gmv_amount(overall_gmv) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    try:
+        return float(gmv_amount(v.get("gmv")) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def video_attributed_gmv_from_interval(iv: dict, list_item: dict | None = None) -> float:
+    sales = iv.get("sales") or {}
+    overall = sales.get("overall") or {}
+    overall_gmv = overall.get("gmv")
+    if overall_gmv:
+        try:
+            return float(gmv_amount(overall_gmv) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    nested = (sales.get("gmv") or {}).get("overall")
+    if nested:
+        try:
+            return float(gmv_amount(nested) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    if list_item:
+        return video_attributed_gmv_from_list_item(list_item)
+    gmv = iv.get("gmv")
+    if gmv:
+        try:
+            return float(gmv_amount(gmv if isinstance(gmv, dict) else None) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
+def video_gmv_vwx(attributed: float, direct: float) -> tuple[float, float, float]:
+    att = float(attributed or 0)
+    dir_ = float(direct or 0)
+    if att <= 0:
+        return 0.0, 0.0, 0.0
+    if dir_ <= 0:
+        return att, att, 0.0
+    return att, dir_, round(max(att - dir_, 0), 2)
+
+
+def load_video_direct_gmv_map(
+    client: TikTokShopClient,
+    token: str,
+    start: str,
+    end: str,
+    *,
+    page_size: int,
+    all_pages: bool,
+) -> dict[str, float]:
+    """拉 202409 视频列表，建立 video_id -> 视频GMV(W)。"""
+    out: dict[str, float] = {}
+    if all_pages:
+        items, meta = fetch_all_list(
+            client, token, "video_list_direct", start, end, page_size=page_size
+        )
+        if meta.get("error"):
+            print(f"  [视频GMV对照 202409] 翻页失败: {(meta['error'] or {}).get('message', '')[:80]}")
+            return out
+    else:
+        r = fetch_get(
+            client, token, ENDPOINTS["video_list_direct"], start, end, page_size=page_size
+        )
+        if not is_ok(r):
+            print(f"  [视频GMV对照 202409] 失败 code={r.get('code')}")
+            return out
+        items = extract_list(r.get("data") or {}, "video_list_direct")
+    for v in items:
+        vid = str(v.get("id") or "")
+        if vid:
+            out[vid] = video_direct_gmv_from_list_item(v)
+    return out
 
 
 def print_shop(data: dict) -> None:
@@ -550,22 +664,28 @@ def print_video_row(i: int, v: dict) -> None:
 
 
 def print_video_detail(video_id: str, data: dict) -> None:
-    eng = (data or {}).get("engagement_data") or {}
     perf = (data or {}).get("performance") or {}
+    eng = (data or {}).get("engagement_data") or {}
     print(f"\n[视频详情] id={video_id}  数据截至 {data.get('latest_available_date', '-')}")
-    print(
-        f"  播放(累计)={eng.get('total_views')}  赞={eng.get('total_likes')}  "
-        f"评={eng.get('total_comments')}  分享={eng.get('total_shares')}"
-    )
+    if eng:
+        print(
+            f"  播放(累计)={eng.get('total_views')}  赞={eng.get('total_likes')}  "
+            f"评={eng.get('total_comments')}  分享={eng.get('total_shares')}"
+        )
     print(f"  发布时间={perf.get('video_post_time')}")
     for iv in perf.get("intervals") or []:
         sales = iv.get("sales") or {}
-        gmv = (sales.get("gmv") or {}).get("overall")
+        traffic = iv.get("traffic") or {}
+        overall = sales.get("overall") or {}
+        gmv_att = overall.get("gmv") or (sales.get("gmv") or {}).get("overall") or iv.get("gmv")
         extra = ""
-        if gmv:
-            extra = f"  GMV={money(gmv)}  订单={sales.get('orders_count')}"
+        if gmv_att:
+            items_sold = overall.get("items_sold", sales.get("items_sold", ""))
+            extra = f"  归因GMV={money(gmv_att)}  件数={items_sold}"
+        if traffic:
+            extra += f"  播放={traffic.get('views')}"
         print(f"  区间 {iv.get('start_date')} ~ {iv.get('end_date')}{extra}")
-        if not sales and iv.keys() - {"start_date", "end_date"}:
+        if not sales and not traffic and iv.keys() - {"start_date", "end_date"}:
             print(f"       {json.dumps(iv, ensure_ascii=False)[:200]}")
 
 
@@ -762,7 +882,13 @@ def format_video_products(v: dict) -> str:
     return str(v.get("product_name") or v.get("linked_product") or "")
 
 
-def legacy_video_row_to_zhanfu(row: list, *, product: str = "") -> list:
+def legacy_video_row_to_zhanfu(
+    row: list,
+    *,
+    product: str = "",
+    attributed_gmv: float | None = None,
+    direct_gmv: float | None = None,
+) -> list:
     """把旧版 17 列缓存行转成站斧 30 列（用于预览/重导）。"""
     if len(row) < 12:
         return [""] * len(ZHANFU_VIDEO_HEADERS)
@@ -774,12 +900,14 @@ def legacy_video_row_to_zhanfu(row: list, *, product: str = "") -> list:
     likes, comments, shares = row[8], row[9], row[10]
     post_time = row[11]
     units = row[16] if len(row) > 16 else ""
-    gmv = _parse_money_str(str(gmv_s))
+    att = float(attributed_gmv) if attributed_gmv is not None else _parse_money_str(str(gmv_s))
+    direct = float(direct_gmv) if direct_gmv is not None else att
+    gmv_v, gmv_w, gmv_x = video_gmv_vwx(att, direct)
     try:
         vv_n = float(vv) if vv not in ("", None) else 0
     except (TypeError, ValueError):
         vv_n = 0
-    gpm = round(gmv / vv_n * 1000, 2) if vv_n else ""
+    gpm = round(gmv_w / vv_n * 1000, 2) if vv_n and gmv_w else ""
     ctor = ""
     if orders and vv_n:
         try:
@@ -792,13 +920,68 @@ def legacy_video_row_to_zhanfu(row: list, *, product: str = "") -> list:
         "", "", "",
         orders, orders, 0,
         units, units, 0,
-        gmv, gmv, 0,
+        gmv_v, gmv_w, gmv_x,
         gpm, ctr, "", "", ctor, "No issues",
     ]
 
 
-def build_video_zhanfu_rows(details: list[dict], videos: list[dict] | None = None) -> list[list]:
+def _video_zhanfu_row_from_parts(
+    *,
+    user: str,
+    creator_id: str,
+    title: str,
+    vid: str,
+    post_time: str,
+    product: str,
+    views,
+    likes,
+    comments,
+    shares,
+    new_followers,
+    product_clicks,
+    product_impressions,
+    customers,
+    orders,
+    units,
+    attributed_gmv: float,
+    direct_gmv: float,
+    ctr,
+    gpm_val="",
+) -> list:
+    gmv_v, gmv_w, gmv_x = video_gmv_vwx(attributed_gmv, direct_gmv)
+    try:
+        vv_n = float(views or 0)
+    except (TypeError, ValueError):
+        vv_n = 0
+    gpm = gpm_val
+    if gpm in ("", None) and vv_n and gmv_w:
+        gpm = round(float(gmv_w) / vv_n * 1000, 2)
+    ctor = ""
+    if orders and vv_n:
+        try:
+            ctor = f"{float(orders) / float(views) * 100:.2f}%"
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+    return [
+        user, creator_id, title, vid, post_time, product,
+        views, likes, comments, shares, new_followers,
+        "", product_impressions, product_clicks, customers,
+        orders, orders, 0,
+        units, units, 0,
+        gmv_v, gmv_w, gmv_x,
+        gpm, ctr, "", "", ctor,
+        "No issues",
+    ]
+
+
+def build_video_zhanfu_rows(
+    details: list[dict],
+    videos: list[dict] | None = None,
+    *,
+    video_direct_gmv: dict[str, float] | None = None,
+) -> list[list]:
     rows: list[list] = []
+    direct_map = video_direct_gmv or {}
     if details:
         for item in details:
             v = item.get("list") or {}
@@ -812,73 +995,99 @@ def build_video_zhanfu_rows(details: list[dict], videos: list[dict] | None = Non
                     iv = it
                     break
             sales = iv.get("sales") or {}
-            gmv_o = (sales.get("gmv") or {}).get("overall") or v.get("gmv")
-            gmv = gmv_amount(gmv_o if isinstance(gmv_o, dict) else None)
-            vv = iv.get("views", v.get("views", 0))
-            try:
-                vv_n = float(vv or 0)
-            except (TypeError, ValueError):
-                vv_n = 0
-            orders = sales.get("orders_count", v.get("sku_orders", ""))
-            units = sales.get("items_sold", "")
-            ctr = fmt_rate(iv.get("click_through_rate") or v.get("click_through_rate"))
-            gpm = round(float(gmv) / vv_n * 1000, 2) if vv_n and gmv else ""
+            overall = sales.get("overall") or {}
+            traffic = iv.get("traffic") or {}
+            vid_key = str(item.get("video_id") or v.get("id") or "")
+            attributed = video_attributed_gmv_from_interval(iv, v)
+            direct = item.get("direct_gmv")
+            if direct is None:
+                api_d = item.get("api_direct") or {}
+                if is_ok(api_d):
+                    direct = video_direct_gmv_from_detail(api_d.get("data") or {})
+                else:
+                    direct = direct_map.get(vid_key, 0.0)
+            else:
+                direct = float(direct)
+            orders = v.get("sku_orders", "")
+            units = overall.get("items_sold", v.get("items_sold", ""))
+            ctr = fmt_rate(overall.get("ctr") or iv.get("click_through_rate") or v.get("click_through_rate"))
+            gpm_obj = overall.get("gpm") or v.get("gpm")
+            gpm = gmv_amount(gpm_obj if isinstance(gpm_obj, dict) else None)
+            if gpm == "" and isinstance(gpm_obj, dict):
+                gpm = ""
             rows.append(
-                [
-                    v.get("username", ""),
-                    str(v.get("creator_id") or v.get("author_id") or ""),
-                    str(v.get("title") or ""),
-                    str(item.get("video_id") or v.get("id") or ""),
-                    perf.get("video_post_time", ""),
-                    str(v.get("product_name") or v.get("linked_product") or format_video_products(v)),
-                    vv,
-                    eng.get("total_likes", ""),
-                    eng.get("total_comments", ""),
-                    eng.get("total_shares", ""),
-                    eng.get("new_followers", ""),
-                    iv.get("traffic", {}).get("clicks") if isinstance(iv.get("traffic"), dict) else "",
-                    "",
-                    "",
-                    "",
-                    orders,
-                    orders,
-                    0,
-                    units,
-                    units,
-                    0,
-                    gmv,
-                    gmv,
-                    0,
-                    gpm,
-                    ctr,
-                    "",
-                    "",
-                    "",
-                    "No issues",
-                ]
+                _video_zhanfu_row_from_parts(
+                    user=v.get("username", ""),
+                    creator_id=str(v.get("creator_id") or v.get("author_id") or ""),
+                    title=str(v.get("title") or ""),
+                    vid=str(item.get("video_id") or v.get("id") or ""),
+                    post_time=perf.get("video_post_time") or v.get("video_post_time", ""),
+                    product=str(v.get("product_name") or v.get("linked_product") or format_video_products(v)),
+                    views=traffic.get("views", v.get("views", 0)),
+                    likes=traffic.get("likes", eng.get("total_likes", "")),
+                    comments=traffic.get("comments", eng.get("total_comments", "")),
+                    shares=traffic.get("shares", eng.get("total_shares", "")),
+                    new_followers=traffic.get("new_followers", ""),
+                    product_clicks=overall.get("product_clicks", ""),
+                    product_impressions=overall.get("product_impressions", ""),
+                    customers=overall.get("customers", v.get("avg_customers", "")),
+                    orders=orders,
+                    units=units,
+                    attributed_gmv=attributed,
+                    direct_gmv=direct,
+                    ctr=ctr,
+                    gpm_val=gpm,
+                )
             )
         return rows
     for v in videos or []:
-        legacy = [
-            str(v.get("id") or ""),
-            str(v.get("title") or ""),
-            str(v.get("username") or ""),
-            v.get("views", ""),
-            fmt_php(v.get("gmv") if isinstance(v.get("gmv"), dict) else None),
-            v.get("sku_orders", ""),
-            fmt_rate(v.get("click_through_rate")),
-        ] + [""] * 10
-        rows.append(legacy_video_row_to_zhanfu(legacy, product=format_video_products(v)))
+        vid = str(v.get("id") or "")
+        attributed = video_attributed_gmv_from_list_item(v)
+        direct = direct_map.get(vid, 0.0)
+        rows.append(
+            _video_zhanfu_row_from_parts(
+                user=str(v.get("username") or ""),
+                creator_id=str(v.get("creator_id") or v.get("author_id") or ""),
+                title=str(v.get("title") or ""),
+                vid=vid,
+                post_time=v.get("video_post_time", ""),
+                product=format_video_products(v),
+                views=v.get("views", ""),
+                likes="",
+                comments="",
+                shares="",
+                new_followers="",
+                product_clicks="",
+                product_impressions="",
+                customers=v.get("avg_customers", ""),
+                orders=v.get("sku_orders", ""),
+                units=v.get("items_sold", ""),
+                attributed_gmv=attributed,
+                direct_gmv=direct,
+                ctr=fmt_rate(v.get("click_through_rate")),
+                gpm_val=gmv_amount(v.get("gpm") if isinstance(v.get("gpm"), dict) else None),
+            )
+        )
     return rows
 
 
-def build_video_excel_rows(details: list[dict], videos: list[dict] | None = None) -> list[list]:
+def build_video_excel_rows(
+    details: list[dict],
+    videos: list[dict] | None = None,
+    *,
+    video_direct_gmv: dict[str, float] | None = None,
+) -> list[list]:
     if is_zhanfu_export():
-        return build_video_zhanfu_rows(details, videos)
-    return _build_video_excel_rows_api(details, videos)
+        return build_video_zhanfu_rows(details, videos, video_direct_gmv=video_direct_gmv)
+    return _build_video_excel_rows_api(details, videos, video_direct_gmv=video_direct_gmv)
 
 
-def _build_video_excel_rows_api(details: list[dict], videos: list[dict] | None = None) -> list[list]:
+def _build_video_excel_rows_api(
+    details: list[dict],
+    videos: list[dict] | None = None,
+    *,
+    video_direct_gmv: dict[str, float] | None = None,
+) -> list[list]:
     """原 API 17 列视频表。"""
     if details:
         rows: list[list] = []
@@ -1817,11 +2026,26 @@ def _fetch_one_video_detail(
     if not vid:
         return None, None
     r, ok = fetch_video_detail_safe(client, token, vid, start, end)
+    api_direct: dict = {}
+    direct_gmv: float | None = None
+    if ok:
+        r409, ok409 = fetch_video_detail_safe(
+            client, token, vid, start, end, endpoint_key="video_detail_direct"
+        )
+        if ok409:
+            api_direct = r409
+            direct_gmv = video_direct_gmv_from_detail(r409.get("data") or {})
     if VIDEO_DETAIL_SLEEP > 0:
         time.sleep(VIDEO_DETAIL_SLEEP)
     if not ok:
         return None, vid
-    return {"video_id": vid, "list": v, "api": r}, None
+    return {
+        "video_id": vid,
+        "list": v,
+        "api": r,
+        "api_direct": api_direct,
+        "direct_gmv": direct_gmv,
+    }, None
 
 
 def fetch_video_details(
@@ -2194,6 +2418,19 @@ def main() -> int:
                 print("\n[SKU表现] 无数据，不导出")
 
     # 商品/SKU 之后再拉视频详情
+    video_direct_gmv: dict[str, float] = {}
+    if want["video"] and videos and (args["export_excel"] or args["save_tables"]):
+        print("\n拉取 202409 视频列表（对照「视频GMV」/间接GMV）...")
+        video_direct_gmv = load_video_direct_gmv_map(
+            client,
+            token,
+            start,
+            end,
+            page_size=args["size"],
+            all_pages=args["all_pages"],
+        )
+        print(f"  已对照 {len(video_direct_gmv)} 条视频的直接 GMV")
+
     if want["video"] and videos:
         want_detail = (
             (args["detail"] or args["export_excel"] or args["save_tables"]) and not args["no_video_detail"]
@@ -2228,7 +2465,7 @@ def main() -> int:
                 if not deliver_table(
                     "视频详情",
                     active_headers("video"),
-                    build_video_excel_rows(video_details, None),
+                    build_video_excel_rows(video_details, None, video_direct_gmv=video_direct_gmv),
                     start,
                     end,
                     "video_detail",
@@ -2246,7 +2483,7 @@ def main() -> int:
                     deliver_table(
                         "视频详情(仅列表)",
                         active_headers("video"),
-                        build_video_excel_rows([], videos),
+                        build_video_excel_rows([], videos, video_direct_gmv=video_direct_gmv),
                         start,
                         end,
                         "video_detail",
