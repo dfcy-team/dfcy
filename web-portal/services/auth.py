@@ -32,6 +32,8 @@ PUBLIC_ENDPOINTS = frozenset(
         "tiktok_service_verification",
         "tiktok_terms_verification",
         "tiktok_privacy_verification",
+        "tiktok_content_verification",
+        "tiktok_site_verification_jyha",
         "favicon",
         "static",
     }
@@ -157,7 +159,7 @@ def _is_public_path(path: str) -> bool:
     p = (path or "").rstrip("/") or "/"
     if p in ("/callback", "/content/callback"):
         return True
-    if p.startswith("/tiktok") and p.endswith(".txt"):
+    if p.endswith(".txt") and "tiktok" in p.rsplit("/", 1)[-1]:
         return True
     return False
 

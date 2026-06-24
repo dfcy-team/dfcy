@@ -716,6 +716,19 @@ def tiktok_privacy_verification():
     return _tiktok_verification_file("tiktokoRH2kRDaeVaajfRtjDqaqnNPEnos3UCU.txt")
 
 
+@app.get("/privacy/tiktokJYHatFCahMnEtgVPcVRfpwJlgbjT8MRN.txt")
+@app.get("/terms/tiktokJYHatFCahMnEtgVPcVRfpwJlgbjT8MRN.txt")
+@app.get("/tiktokJYHatFCahMnEtgVPcVRfpwJlgbjT8MRN.txt")
+def tiktok_site_verification_jyha():
+    return _tiktok_verification_file("tiktokJYHatFCahMnEtgVPcVRfpwJlgbjT8MRN.txt")
+
+
+@app.get("/terms/tiktoklphphpRqPXc1N6534Tvf3JqF33sCHgmk.txt")
+@app.get("/tiktoklphphpRqPXc1N6534Tvf3JqF33sCHgmk.txt")
+def tiktok_content_verification():
+    return _tiktok_verification_file("tiktoklphphpRqPXc1N6534Tvf3JqF33sCHgmk.txt")
+
+
 @app.get("/favicon.ico")
 def favicon():
     return "", 204
