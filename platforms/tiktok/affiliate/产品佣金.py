@@ -5,6 +5,9 @@ TikTok Shop 联盟产品佣金导出 — 对齐联盟中心「表现 → 商品�
 数据来源（混合）:
   GMV / 订单 / 件数 / 达人内容 → GET /analytics/202605/shop_products/performance
     权限: data.shop_analytics.public.read
+  退款金额 / 已退款件数 → 同上 API 的 total_performance（默认，与报表日归因一致）
+    可选 --refund-source returns → POST /return_refund/202309/returns/search
+    权限: seller.return_refund.basic（仅事件时间口径，与联盟中心常有偏差）
   预计佣金 → POST /affiliate_seller/202410/orders/search
     权限: seller.affiliate_collaboration.read
   商品名称/类目 → seller.product.basic
@@ -92,6 +95,8 @@ ZH_HEADER_MAP = {
 }
 
 AFFILIATE_ORDERS_PATH = "/affiliate_seller/202410/orders/search"
+RETURNS_SEARCH_PATH = "/return_refund/202309/returns/search"
+ORDER_DETAIL_PATH = "/order/202309/orders"
 
 
 def infer_region() -> str:
@@ -119,14 +124,23 @@ def money_amount(obj) -> float:
     if obj is None:
         return 0.0
     if isinstance(obj, dict):
-        try:
-            return float(obj.get("amount") or 0)
-        except (TypeError, ValueError):
-            return 0.0
+        for key in ("amount", "refund_total", "refund_subtotal"):
+            if obj.get(key) is not None:
+                try:
+                    return float(obj[key])
+                except (TypeError, ValueError):
+                    pass
+        return 0.0
     try:
         return float(obj)
     except (TypeError, ValueError):
         return 0.0
+
+
+def product_refunds_from_analytics(item: dict) -> tuple[float, int]:
+    """Shop Analytics 商品表现 — total_performance 与报表日归因一致。"""
+    tp = item.get("total_performance") or {}
+    return money_amount(tp.get("refunds")), int(tp.get("refunded_items") or 0)
 
 
 def cell_str(v) -> str:
@@ -176,6 +190,80 @@ def fetch_all_affiliate_orders(
         if not batch or not page_token:
             break
     return orders
+
+
+def fetch_order_sku_product_map(
+    client: TikTokShopClient, token: str, cipher: str, order_ids: list[str]
+) -> dict[str, str]:
+    """return_line_items.sku_id → product_id（经订单详情反查）。"""
+    sku_to_pid: dict[str, str] = {}
+    for i in range(0, len(order_ids), 50):
+        chunk = order_ids[i : i + 50]
+        r = client.get(
+            ORDER_DETAIL_PATH,
+            token,
+            {"shop_cipher": cipher, "ids": ",".join(chunk)},
+        )
+        if not is_ok(r):
+            continue
+        for order in (r.get("data") or {}).get("orders") or []:
+            for li in order.get("line_items") or []:
+                sku = str(li.get("sku_id") or "")
+                pid = str(li.get("product_id") or "")
+                if sku and pid:
+                    sku_to_pid[sku] = pid
+    return sku_to_pid
+
+
+def fetch_returns_refunds_by_product(
+    client: TikTokShopClient,
+    token: str,
+    cipher: str,
+    start: str,
+    end: str,
+    region: str,
+    *,
+    time_field: str = "update_time",
+) -> dict[str, dict]:
+    """
+    按商品汇总退货退款（returns/search + 订单详情映射 sku→product）。
+    注意：按退款 create/update 事件时间筛选，与联盟中心报表日归因可能不一致。
+    """
+    t0, t1 = day_range_unix(start, end, region)
+    body = {f"{time_field}_ge": t0, f"{time_field}_lt": t1}
+    returns: list[dict] = []
+    page_token: str | None = None
+    for _ in range(100):
+        extra: dict = {"shop_cipher": cipher, "page_size": 50}
+        if page_token:
+            extra["page_token"] = page_token
+        r = client.post(RETURNS_SEARCH_PATH, token, body, extra)
+        if not is_ok(r):
+            code = r.get("code")
+            msg = r.get("message") or ""
+            print(f"  [returns/search] code={code} {msg[:80]}")
+            break
+        data = r.get("data") or {}
+        batch = data.get("return_orders") or []
+        returns.extend(batch)
+        page_token = data.get("next_page_token")
+        if not batch or not page_token:
+            break
+
+    order_ids = list({str(x.get("order_id") or "") for x in returns if x.get("order_id")})
+    sku_to_pid = fetch_order_sku_product_map(client, token, cipher, order_ids)
+
+    out: dict[str, dict] = {}
+    for ret in returns:
+        for li in ret.get("return_line_items") or []:
+            sku = str(li.get("sku_id") or "")
+            pid = sku_to_pid.get(sku) or sku
+            if not pid:
+                continue
+            bucket = out.setdefault(pid, {"refund_amount": 0.0, "items_refunded": 0})
+            bucket["refund_amount"] += money_amount(li.get("refund_amount"))
+            bucket["items_refunded"] += 1
+    return out
 
 
 def aggregate_affiliate_orders(orders: list[dict]) -> dict[str, dict]:
@@ -249,6 +337,7 @@ def build_row(
     *,
     single_day: bool,
     order_agg: dict | None = None,
+    refund_agg: dict | None = None,
 ) -> list:
     aff = item.get("affiliate_total_performance") or {}
     vid = item.get("affiliate_video_performance") or {}
@@ -259,6 +348,13 @@ def build_row(
     posted = aff.get("avg_daily_creator_posted_content") or 0
     videos = vid.get("new_video_count") or 0
     creators_sales = customers if single_day else customers
+
+    if refund_agg is not None:
+        ref_amt = round(float(refund_agg.get("refund_amount") or 0), 2)
+        ref_items = int(refund_agg.get("items_refunded") or 0)
+    else:
+        ref_amt, ref_items = product_refunds_from_analytics(item)
+        ref_amt = round(ref_amt, 2)
 
     est_commission = ""
     if order_agg:
@@ -271,9 +367,9 @@ def build_row(
         str(item.get("id") or ""),
         meta.get("category", ""),
         gmv,
-        0,  # Refunds — 分析 API 无独立字段
+        ref_amt,
         cell_str(items_sold),
-        "0",  # Items refunded
+        cell_str(ref_items),
         orders,
         customers,
         creators_sales,
@@ -432,7 +528,7 @@ def write_comparison(
             if not ok and metric in ("Creator-attributed GMV", "Attributed orders", "Creator-attributed items sold"):
                 note = "Shop Analytics 归因口径可能与联盟中心略有差异"
             elif not ok and metric in ("Refunds", "Items refunded"):
-                note = "退款字段分析 API 暂无，需 return_refund 或平台导出"
+                note = "退款来自 total_performance 或 returns/search，联盟归因口径可能有差"
             elif not ok and metric == "Est. commission":
                 note = "佣金按 estimated_paid_commission 汇总"
             elif not ok and metric == "Samples shipped":
@@ -469,8 +565,9 @@ def write_comparison(
         [
             "备注",
             "GMV/订单/件数来自 Shop Analytics affiliate_total_performance；"
+            "退款来自 total_performance 或 returns/search；"
             "预计佣金来自 affiliate_seller/202410/orders/search；"
-            "退款/寄样 API 暂无对应字段",
+            "寄样 API 暂无对应字段",
         ]
     )
 
@@ -524,6 +621,12 @@ def main() -> int:
         default="",
         help="文件名附加标识，如 联盟订单 → TIKTOK1号店PH_产品佣金_联盟订单_2026-06-16_2026-06-16.xlsx",
     )
+    ap.add_argument(
+        "--refund-source",
+        choices=("analytics", "returns"),
+        default="analytics",
+        help="退款数据来源：analytics=商品分析 total_performance（默认）；returns=退货单搜索",
+    )
     args = ap.parse_args()
     if not args.start or not args.end:
         from shop_tz import default_export_inclusive_range, get_shop_tz, infer_shop_region_from_cfg
@@ -542,7 +645,12 @@ def main() -> int:
     print("=" * 60)
     print(f"联盟产品佣金 | {export_tag} | {config.name}")
     print(f"日期: {args.start} ~ {args.end} ({REGION_IANA.get(region, 'Asia/Manila')})")
-    print("GMV/订单: Shop Analytics | 佣金: 联盟订单 API")
+    refund_label = (
+        "Shop Analytics total_performance"
+        if args.refund_source == "analytics"
+        else "return_refund returns/search"
+    )
+    print(f"GMV/订单: Shop Analytics | 佣金: 联盟订单 API | 退款: {refund_label}")
     print("权限: data.shop_analytics.public.read + seller.affiliate_collaboration.read")
     print("=" * 60)
 
@@ -555,6 +663,13 @@ def main() -> int:
     products = fetch_all_product_performance(client, token, cipher, args.start, args.end)
     print(f"分析 API 商品数: {len(products)}")
 
+    returns_by_pid: dict[str, dict] = {}
+    if args.refund_source == "returns":
+        returns_by_pid = fetch_returns_refunds_by_product(
+            client, token, cipher, args.start, args.end, region
+        )
+        print(f"退货单涉及商品: {len(returns_by_pid)}")
+
     meta_cache: dict[str, dict] = {}
     rows: list[list] = []
     seen_pids: set[str] = set()
@@ -564,12 +679,14 @@ def main() -> int:
             continue
         seen_pids.add(pid)
         meta = load_product_meta(client, token, cipher, pid, meta_cache)
+        refund_agg = returns_by_pid.get(pid) if args.refund_source == "returns" else None
         rows.append(
             build_row(
                 item,
                 meta,
                 single_day=single_day,
                 order_agg=order_by_pid.get(pid),
+                refund_agg=refund_agg,
             )
         )
 
@@ -577,15 +694,18 @@ def main() -> int:
         if pid in seen_pids or agg.get("est_commission", 0) <= 0:
             continue
         meta = load_product_meta(client, token, cipher, pid, meta_cache)
+        ret = returns_by_pid.get(pid, {}) if args.refund_source == "returns" else {}
+        ref_amt = round(float(ret.get("refund_amount") or 0), 2)
+        ref_items = int(ret.get("items_refunded") or 0)
         rows.append(
             [
                 meta.get("title", ""),
                 pid,
                 meta.get("category", ""),
                 0,
-                0,
+                ref_amt,
                 "0",
-                "0",
+                cell_str(ref_items),
                 0,
                 0,
                 0,
