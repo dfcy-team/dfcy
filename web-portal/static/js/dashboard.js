@@ -2,7 +2,6 @@
   const form = document.getElementById("form-export");
   const kindSel = document.getElementById("export-kind");
   const wrapTypes = document.getElementById("wrap-types");
-  const wrapFast = document.getElementById("wrap-fast");
   const jobStatus = document.getElementById("job-status");
   const jobLog = document.getElementById("job-log");
   const filesBody = document.getElementById("files-body");
@@ -31,7 +30,6 @@
     const k = kindSel?.value || "analytics";
     const showAnalytics = k === "analytics";
     if (wrapTypes) wrapTypes.style.display = showAnalytics ? "" : "none";
-    if (wrapFast) wrapFast.style.display = showAnalytics ? "" : "none";
   }
   kindSel?.addEventListener("change", toggleKindFields);
   toggleKindFields();
@@ -74,7 +72,6 @@
       start_date: startDate,
       end_date: endDate,
       types: fd.get("types") || "all",
-      fast_mode: fd.get("fast_mode") === "on",
     };
     jobStatus.textContent = "正在提交任务…";
     jobLog.textContent = "";

@@ -159,6 +159,10 @@ def run_export(
     if kind not in ("creative", "live"):
         raise ValueError(f"未知报表类型: {report_kind}")
 
+    from common.excel_names import ads_export_filename
+
+    adv_name = oauth.resolve_advertiser_name(label, adv)
+
     if kind == "creative":
         # 与 Ads Manager「商品计划创意」对齐：PHP 口径 + 平台五大家族计划名筛选
         platform_families = ["HYYL226", "HY107", "HY207", "HYYL191", "HYYL392"]
@@ -178,14 +182,12 @@ def run_export(
                     "广告 API 无权限或 token 已过期：权限变更后请在「广告数据」页对店铺重新授权，再导出。"
                 ) from e
             raise
-        suffix = "广告创意"
     else:
         camps = rc.fetch_all_campaigns(adv)
         report = rc.fetch_campaign_report(adv, start_date, end_date)
         rows = rc.build_live_rows(report, camps)
-        suffix = "直播广告"
 
-    name = f"{file_prefix}_{suffix}_{start_date}_{end_date}.xlsx"
+    name = ads_export_filename(file_prefix, adv_name, kind, start_date, end_date)
     out = EXPORT_DIR / name
     export_workbook(report_kind=kind, rows=rows, output_path=out)
     return out

@@ -2,6 +2,7 @@
 """Excel 导出中文文件名 / 工作表名（与 店铺配置.ini [导出文件名] 对齐）。"""
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -229,3 +230,33 @@ def excel_sheet_title(kind: str, *, finance: bool = False) -> str:
     titles = FINANCE_SHEET_TITLES if finance else ANALYTICS_SHEET_TITLES
     title = titles.get(kind, kind)
     return title[:31]
+
+
+ADS_REPORT_SUFFIX: dict[str, str] = {
+    "creative": "广告创意",
+    "live": "直播广告",
+}
+
+
+def sanitize_filename_part(text: str, *, max_len: int = 48) -> str:
+    """去掉 Windows 非法字符，供广告户名等拼进 Excel 文件名。"""
+    s = (text or "").strip()
+    s = re.sub(r'[\\/:*?"<>|]', "_", s)
+    s = re.sub(r"\s+", " ", s)
+    return s[:max_len].strip()
+
+
+def ads_export_filename(
+    shop_tag: str,
+    advertiser_name: str,
+    report_kind: str,
+    start: str,
+    end: str,
+) -> str:
+    """例：TIKTOK2号店PH_Nova.ph store_广告创意_2026-06-21_2026-06-21.xlsx"""
+    tag = (shop_tag or "ADS").strip() or "ADS"
+    suffix = ADS_REPORT_SUFFIX.get(report_kind.strip().lower(), report_kind)
+    adv = sanitize_filename_part(advertiser_name)
+    if adv:
+        return f"{tag}_{adv}_{suffix}_{start}_{end}.xlsx"
+    return f"{tag}_{suffix}_{start}_{end}.xlsx"

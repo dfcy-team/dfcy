@@ -348,6 +348,32 @@ def refresh_shop_advertisers(
     return tok
 
 
+def resolve_advertiser_name(shop_label: str, advertiser_id: str) -> str:
+    """按店铺 token / 全局列表解析广告户显示名（用于导出文件名）。"""
+    adv_id = (advertiser_id or "").strip()
+    if not adv_id:
+        return ""
+    label = (shop_label or "").strip()
+
+    def _name_from_list(items: list[dict[str, Any]] | None) -> str:
+        for adv in items or []:
+            if str(adv.get("advertiser_id") or "").strip() == adv_id:
+                return str(adv.get("advertiser_name") or adv.get("name") or "").strip()
+        return ""
+
+    if label:
+        tok = load_shop_token(label)
+        name = _name_from_list(tok.get("advertisers") if tok else None)
+        if name:
+            return name
+    legacy = load_token_legacy()
+    if legacy:
+        name = _name_from_list(legacy.get("advertisers"))
+        if name:
+            return name
+    return _name_from_list(load_advertisers()) or adv_id
+
+
 def resolve_default_advertiser_id(shop_label: str) -> str:
     """导出时默认广告户：token 中已保存的专属户，或列表中唯一户。"""
     label = (shop_label or "").strip()

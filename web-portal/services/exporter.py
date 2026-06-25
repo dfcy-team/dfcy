@@ -130,7 +130,6 @@ def start_analytics_export(
     start_date: str,
     end_date: str,
     export_types: str = "all",
-    fast_mode: bool = True,
 ) -> str:
     start_date, end_date = _validate_date_range(start_date, end_date)
     end_api = _analytics_api_end(end_date)
@@ -146,8 +145,6 @@ def start_analytics_export(
         "--all-pages",
         "--export-excel",
     ]
-    if fast_mode:
-        args.append("--no-video-detail")
     if _analytics_includes_product(export_types):
         args.append("--product-images")
     return _start_job("analytics", shop_key, start_date, end_date, ANALYTICS_SCRIPT, args, ANALYTICS_SCRIPT.parent)

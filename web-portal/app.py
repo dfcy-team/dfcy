@@ -671,13 +671,11 @@ def api_export():
     try:
         if kind == "analytics":
             types = (data.get("types") or "all").strip()
-            fast = bool(data.get("fast_mode", True))
             job_id = exporter.start_analytics_export(
                 shop_key=shop_key,
                 start_date=start_date,
                 end_date=end_date,
                 export_types=types,
-                fast_mode=fast,
             )
         elif kind == "finance":
             job_id = exporter.start_finance_export(

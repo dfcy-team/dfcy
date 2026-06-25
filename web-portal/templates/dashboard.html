@@ -37,13 +37,9 @@
           <option value="sku">仅 SKU</option>
         </select>
       </label>
-      <label class="check" id="wrap-fast">
-        <input type="checkbox" name="fast_mode" checked/>
-        快速模式（不拉每条视频详情，大幅缩短耗时）
-      </label>
       <button type="submit" class="btn primary span2">开始导出</button>
     </form>
-    <p class="muted">按店铺当地自然日统计；默认日期为<strong>前两天</strong>（开始、结束同一天即单日）。例如导出 6月21日单日：开始与结束都填 2026-06-21；导出 5月14日～6月14日：开始 2026-05-14、结束 2026-06-14。单次最多 93 天。文件名与 Excel 第一行日期与所选范围一致。店铺罗盘含「商品表现」时 Excel 首列自动带 <code>主图URL</code>。联盟佣金需 <code>seller.affiliate_collaboration.read</code>。</p>
+    <p class="muted">按店铺当地自然日统计；默认日期为<strong>前两天</strong>（开始、结束同一天即单日）。例如导出 6月21日单日：开始与结束都填 2026-06-21；导出 5月14日～6月14日：开始 2026-05-14、结束 2026-06-14。单次最多 93 天。文件名与 Excel 第一行日期与所选范围一致。店铺罗盘含「商品表现」时 Excel 首列自动带 <code>主图URL</code>；含视频时<strong>全量拉取每条视频详情</strong>（耗时会明显变长）。联盟佣金需 <code>seller.affiliate_collaboration.read</code>。</p>
   </div>
 
   <div class="card">

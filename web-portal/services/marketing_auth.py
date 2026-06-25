@@ -55,4 +55,5 @@ binding_for_shop = marketing_oauth.binding_for_shop
 set_active_shop_label = marketing_oauth.set_active_shop_label
 refresh_shop_advertisers = marketing_oauth.refresh_shop_advertisers
 resolve_default_advertiser_id = marketing_oauth.resolve_default_advertiser_id
+resolve_advertiser_name = marketing_oauth.resolve_advertiser_name
 refresh_all_shop_advertisers = marketing_oauth.refresh_all_shop_advertisers
