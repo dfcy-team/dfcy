@@ -788,3 +788,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+else:
+    # 通过 gunicorn / import app 启动时同样加载内置调度
+    start_ads_refresh_scheduler()
