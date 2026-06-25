@@ -30,6 +30,7 @@ if str(WEB_ROOT) not in sys.path:
     sys.path.insert(0, str(WEB_ROOT))
 
 from services import auth, ads_exporter, content_video, exporter, files, marketing_auth, oauth, shops  # noqa: E402
+from services.ads_refresh_scheduler import start_if_enabled as start_ads_refresh_scheduler  # noqa: E402
 from services.settings import (  # noqa: E402
     APP_KEY,
     APP_SECRET,
@@ -314,6 +315,42 @@ def api_ads_shop_label():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+@app.post("/api/ads/refresh-advertisers")
+def api_ads_refresh_advertisers():
+    tok = marketing_auth.token_status()
+    if not tok.get("authorized"):
+        return jsonify({"ok": False, "error": "请先完成广告账户授权"}), 400
+    data = request.get_json(force=True, silent=True) or {}
+    shop_label = (data.get("shop_label") or request.args.get("shop_label") or "").strip()
+    try:
+        if shop_label:
+            refreshed = marketing_auth.refresh_shop_advertisers(shop_label)
+            return jsonify(
+                {
+                    "ok": True,
+                    "shop_label": shop_label,
+                    "advertiser_count": len(refreshed.get("advertisers") or []),
+                    "default_advertiser_id": refreshed.get("default_advertiser_id", ""),
+                    "advertisers": refreshed.get("advertisers") or [],
+                }
+            )
+        results = marketing_auth.refresh_all_shop_advertisers()
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.get("/api/ads/default-advertiser")
+def api_ads_default_advertiser():
+    shop_label = (request.args.get("shop_label") or "").strip()
+    if not shop_label:
+        return jsonify({"ok": False, "error": "请提供 shop_label"}), 400
+    if not marketing_auth.binding_for_shop(shop_label):
+        return jsonify({"ok": False, "error": f"店铺「{shop_label}」尚未授权广告"}), 400
+    adv_id = marketing_auth.resolve_default_advertiser_id(shop_label)
+    return jsonify({"ok": True, "shop_label": shop_label, "advertiser_id": adv_id})
+
+
 @app.post("/api/ads/export")
 def api_ads_export():
     tok = marketing_auth.token_status()
@@ -332,8 +369,10 @@ def api_ads_export():
         return jsonify({"ok": False, "error": "请选择或填写绑定店铺名"}), 400
     if not marketing_auth.binding_for_shop(shop_label):
         return jsonify({"ok": False, "error": f"店铺「{shop_label}」尚未授权广告"}), 400
+    if not advertiser_id:
+        advertiser_id = marketing_auth.resolve_default_advertiser_id(shop_label)
     if not advertiser_id or not start_date or not end_date:
-        return jsonify({"ok": False, "error": "请填写广告账户与日期范围"}), 400
+        return jsonify({"ok": False, "error": "请填写广告账户与日期范围（未选广告户时将自动使用卖家中心绑定户）"}), 400
     if report_kind not in ("creative", "live"):
         return jsonify({"ok": False, "error": "报表类型须为 creative 或 live"}), 400
     try:
@@ -743,6 +782,7 @@ def main() -> None:
     print(f"Deploy:   http://{SITE_DOMAIN}{INFO_PATH}")
     print(f"Callback: http://{SITE_DOMAIN}{CALLBACK_PATH}")
     print(f"Project:  {PROJECT_ROOT}")
+    start_ads_refresh_scheduler()
     app.run(host=HOST, port=PORT, debug=False, threaded=True)
 
 

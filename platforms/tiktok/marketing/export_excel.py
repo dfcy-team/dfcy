@@ -147,18 +147,29 @@ def run_export(
     if label:
         rt.marketing_oauth().set_active_shop_label(label)
     rc = rt.marketing_report_client()
+    oauth = rt.marketing_oauth()
+
+    adv = (advertiser_id or "").strip()
+    if not adv and label:
+        adv = oauth.resolve_default_advertiser_id(label)
+    if not adv:
+        raise ValueError("未指定 advertiser_id，且未能解析店铺默认广告户，请先在 /ads 刷新广告户")
 
     kind = report_kind.strip().lower()
     if kind not in ("creative", "live"):
         raise ValueError(f"未知报表类型: {report_kind}")
 
     if kind == "creative":
+        # 与 Ads Manager「商品计划创意」对齐：PHP 口径 + 平台五大家族计划名筛选
+        platform_families = ["HYYL226", "HY107", "HY207", "HYYL191", "HYYL392"]
         try:
             rows = rc.fetch_product_creative_rows(
-                advertiser_id,
+                adv,
                 start_date,
                 end_date,
                 shop_tag=label or None,
+                expand_all_products=False,
+                campaign_name_filters=platform_families,
             )
         except RuntimeError as e:
             msg = str(e)
@@ -169,8 +180,8 @@ def run_export(
             raise
         suffix = "广告创意"
     else:
-        camps = rc.fetch_all_campaigns(advertiser_id)
-        report = rc.fetch_campaign_report(advertiser_id, start_date, end_date)
+        camps = rc.fetch_all_campaigns(adv)
+        report = rc.fetch_campaign_report(adv, start_date, end_date)
         rows = rc.build_live_rows(report, camps)
         suffix = "直播广告"
 
@@ -182,7 +193,7 @@ def run_export(
 
 def main() -> int:
     p = argparse.ArgumentParser(description="导出 TikTok 广告 Excel")
-    p.add_argument("--advertiser", required=True)
+    p.add_argument("--advertiser", default="", help="广告主 ID；留空则用店铺默认广告户")
     p.add_argument("--start", required=True)
     p.add_argument("--end", required=True)
     p.add_argument("--type", choices=["creative", "live"], required=True)

@@ -320,6 +320,40 @@ def _collect_gmv_max_campaign_ids(
     return campaign_ids
 
 
+def _collect_gmv_max_campaign_ids_by_name_filters(
+    advertiser_id: str,
+    store_ids: list[str],
+    start_date: str,
+    end_date: str,
+    access_token: str,
+    name_filters: list[str],
+) -> list[str]:
+    """按 campaign_name 模糊筛选（与 Ads Manager 家族名 HYYL226 / HY107 等对齐）。"""
+    campaign_ids: list[str] = []
+    seen: set[str] = set()
+    for name in name_filters:
+        name = str(name or "").strip()
+        if not name:
+            continue
+        rows = _paginate_gmv_max_report(
+            advertiser_id,
+            store_ids,
+            GMV_MAX_CAMPAIGN_DIMENSIONS,
+            ["cost"],
+            start_date,
+            end_date,
+            access_token,
+            filtering={"campaign_name": name},
+        )
+        for row in rows:
+            dims, _ = _row_dims_metrics(row)
+            cid = str(dims.get("campaign_id") or "")
+            if cid and cid not in seen:
+                seen.add(cid)
+                campaign_ids.append(cid)
+    return campaign_ids
+
+
 def _build_gmv_max_item_group_pool(
     advertiser_id: str,
     store_ids: list[str],
@@ -401,6 +435,52 @@ def fetch_gmv_max_stores(advertiser_id: str, access_token: str | None = None) ->
     return [s for s in stores if isinstance(s, dict)]
 
 
+def find_shop_exclusive_advertiser_id(
+    advertisers: list[dict[str, Any]],
+    access_token: str,
+) -> str:
+    """从 OAuth 广告主列表中解析店铺绑定的专属广告户（与卖家中心 GMV Max 面板同源）。"""
+    authorized = {
+        str(a.get("advertiser_id") or "").strip()
+        for a in advertisers
+        if str(a.get("advertiser_id") or "").strip()
+    }
+    if not authorized:
+        return ""
+
+    seen_exclusive: set[str] = set()
+    for adv in advertisers:
+        aid = str(adv.get("advertiser_id") or "").strip()
+        if not aid:
+            continue
+        try:
+            stores = fetch_gmv_max_stores(aid, access_token)
+        except Exception:
+            continue
+        for store in stores:
+            ex = store.get("exclusive_authorized_advertiser_info") or {}
+            ex_id = str(ex.get("advertiser_id") or "").strip()
+            if ex_id and ex_id in authorized:
+                seen_exclusive.add(ex_id)
+
+    if len(seen_exclusive) == 1:
+        return next(iter(seen_exclusive))
+    if len(seen_exclusive) > 1:
+        # 多个店铺绑定时优先 GMV Max 可用户
+        for adv in advertisers:
+            aid = str(adv.get("advertiser_id") or "").strip()
+            if aid not in seen_exclusive:
+                continue
+            try:
+                stores = fetch_gmv_max_stores(aid, access_token)
+            except Exception:
+                continue
+            if any(s.get("is_gmv_max_available") for s in stores):
+                return aid
+        return sorted(seen_exclusive)[0]
+    return ""
+
+
 def _paginate_gmv_max_report(
     advertiser_id: str,
     store_ids: list[str],
@@ -470,6 +550,7 @@ def fetch_gmv_max_creative_report(
     shop_tag: str | None = None,
     expand_all_products: bool = False,
     item_group_pool: list[str] | None = None,
+    campaign_name_filters: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """拉取商品 GMV Max 创意级全量报表。
 
@@ -483,9 +564,14 @@ def fetch_gmv_max_creative_report(
     if not store_ids:
         raise RuntimeError("未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop")
 
-    campaign_ids = _collect_gmv_max_campaign_ids(
-        advertiser_id, store_ids, start_date, end_date, token
-    )
+    if campaign_name_filters:
+        campaign_ids = _collect_gmv_max_campaign_ids_by_name_filters(
+            advertiser_id, store_ids, start_date, end_date, token, campaign_name_filters
+        )
+    else:
+        campaign_ids = _collect_gmv_max_campaign_ids(
+            advertiser_id, store_ids, start_date, end_date, token
+        )
     campaign_info_cache: dict[str, dict[str, Any]] = {}
     campaign_infos: list[dict[str, Any]] = []
     for cid in campaign_ids:
@@ -885,6 +971,7 @@ def fetch_product_creative_rows(
     currency: str = "PHP",
     shop_tag: str | None = None,
     expand_all_products: bool = False,
+    campaign_name_filters: list[str] | None = None,
 ) -> list[list[Any]]:
     """商品 GMV Max 创意报表（阶段 A：有消耗与汇总对齐官方；阶段 B 需 expand_all_products=True）。"""
     token = access_token or get_access_token()
@@ -905,6 +992,7 @@ def fetch_product_creative_rows(
         token,
         shop_tag=resolved_tag or None,
         expand_all_products=expand_all_products,
+        campaign_name_filters=campaign_name_filters,
     )
     video_index = _fetch_gmv_max_video_index(advertiser_id, stores, token, campaign_infos)
     return build_gmv_max_creative_rows(report, video_index, currency=currency)

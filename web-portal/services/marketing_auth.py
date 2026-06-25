@@ -53,3 +53,6 @@ save_shop_label = marketing_oauth.save_shop_label
 list_shop_bindings = marketing_oauth.list_shop_bindings
 binding_for_shop = marketing_oauth.binding_for_shop
 set_active_shop_label = marketing_oauth.set_active_shop_label
+refresh_shop_advertisers = marketing_oauth.refresh_shop_advertisers
+resolve_default_advertiser_id = marketing_oauth.resolve_default_advertiser_id
+refresh_all_shop_advertisers = marketing_oauth.refresh_all_shop_advertisers

@@ -53,12 +53,17 @@
 <div class="card">
   <h2>① 已授权店铺（{{ token.binding_count or 0 }}）</h2>
   {% if bindings %}
+  <div class="row-between" style="margin-bottom:8px;">
+    <p class="muted" style="margin:0;">BC 下新增广告户后，点「刷新广告户」即可，无需重新登录（除非换 Business 账号）。</p>
+    <button type="button" class="btn" id="btn-refresh-all-advertisers">刷新全部广告户</button>
+  </div>
   <div class="table-wrap">
     <table class="data-table">
       <thead>
         <tr>
           <th>绑定店铺名</th>
           <th>广告账户数</th>
+          <th>默认广告户（卖家中心）</th>
           <th>授权时间</th>
           <th>操作</th>
         </tr>
@@ -68,8 +73,16 @@
         <tr>
           <td><strong>{{ b.shop_label }}</strong></td>
           <td>{{ b.advertiser_count }}</td>
-          <td><code>{{ b.saved_at or '—' }}</code></td>
           <td>
+            {% if b.default_advertiser_id %}
+            <code>{{ b.default_advertiser_id }}</code>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td><code>{{ b.saved_at or '—' }}</code></td>
+          <td class="row-actions">
+            <button type="button" class="btn btn-refresh-advertisers" data-shop="{{ b.shop_label }}">刷新广告户</button>
             <a class="btn" href="{{ url_for('ads_authorize', shop_name=b.shop_label) }}">重新授权</a>
           </td>
         </tr>
@@ -109,12 +122,18 @@
   {% if b.advertisers %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Advertiser ID</th><th>名称</th></tr></thead>
+      <thead><tr><th>Advertiser ID</th><th>名称</th><th>备注</th></tr></thead>
       <tbody>
         {% for adv in b.advertisers %}
         <tr>
           <td><code>{{ adv.advertiser_id or adv.get('advertiser_id', '—') }}</code></td>
           <td>{{ adv.advertiser_name or adv.get('name', '—') }}</td>
+          <td>
+            {% set aid = adv.advertiser_id or adv.get('advertiser_id', '') %}
+            {% if b.default_advertiser_id and aid == b.default_advertiser_id %}
+            <span class="badge ok">卖家中心默认</span>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -143,8 +162,9 @@
       </select>
     </label>
     <label>广告账户
-      <select name="advertiser_id" id="ads-export-advertiser" required></select>
+      <select name="advertiser_id" id="ads-export-advertiser"></select>
     </label>
+    <p class="muted span2" style="margin:0;">未手动选择时，将自动使用「卖家中心绑定」的默认广告户。</p>
     <label>报表类型
       <select name="report_kind">
         <option value="creative">广告创意</option>
@@ -183,7 +203,8 @@
   <ul>
     <li><strong>一家店授权一次</strong>：填店铺名 → 连接广告账户 → 用该店 TikTok 广告后台账号登录。</li>
     <li><strong>多家店</strong>：换另一个店铺名（如 TIKTOK3号店PH），再点「连接该店广告账户」，不会覆盖已授权的店。</li>
-    <li><strong>同一 Business 账号下多个广告主</strong>：一次授权会列出多个 advertiser，导出时在下拉里选择即可。</li>
+    <li><strong>同一 Business 账号下多个广告主</strong>：一次授权会列出多个 advertiser；导出默认选卖家中心绑定户，也可手动切换。</li>
+    <li><strong>BC 内新增广告户</strong>：点「刷新广告户」更新列表，或安装 <code>tools\安装广告刷新定时任务.bat</code> 每天自动刷新（默认 00:05、22:05）。</li>
     <li>Shop 店铺授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页，与广告授权分开。</li>
     <li>回调地址：<code>{{ redirect_uri }}</code> · App ID: <code>{{ app_id }}</code></li>
   </ul>
@@ -227,6 +248,7 @@
     if (!advSelect) return;
     const b = bindings.find((x) => x.shop_label === shopLabel);
     advSelect.innerHTML = "";
+    const defaultId = (b && b.default_advertiser_id) || "";
     const list = (b && b.advertisers) || [];
     if (list.length) {
       list.forEach((adv) => {
@@ -234,7 +256,8 @@
         const name = adv.advertiser_name || adv.name || id;
         const opt = document.createElement("option");
         opt.value = id;
-        opt.textContent = name + " (" + id + ")";
+        const tag = defaultId && id === defaultId ? " ★卖家中心" : "";
+        opt.textContent = name + tag + " (" + id + ")";
         advSelect.appendChild(opt);
       });
     } else if (b && b.advertiser_ids) {
@@ -245,8 +268,55 @@
         advSelect.appendChild(opt);
       });
     }
+    if (defaultId) {
+      advSelect.value = defaultId;
+    }
     if (prefixInput) prefixInput.value = shopLabel || "";
   }
+
+  async function refreshAdvertisers(shopLabel) {
+    const body = shopLabel ? { shop_label: shopLabel } : {};
+    const res = await fetch("/api/ads/refresh-advertisers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "刷新失败");
+    return data;
+  }
+
+  document.querySelectorAll(".btn-refresh-advertisers").forEach((btn) => {
+    btn.addEventListener("click", async function () {
+      const shop = this.getAttribute("data-shop") || "";
+      const old = this.textContent;
+      this.disabled = true;
+      this.textContent = "刷新中…";
+      try {
+        await refreshAdvertisers(shop);
+        location.reload();
+      } catch (err) {
+        alert(String(err));
+        this.disabled = false;
+        this.textContent = old;
+      }
+    });
+  });
+
+  document.getElementById("btn-refresh-all-advertisers")?.addEventListener("click", async function () {
+    const btn = this;
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "刷新中…";
+    try {
+      await refreshAdvertisers("");
+      location.reload();
+    } catch (err) {
+      alert(String(err));
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  });
 
   shopSelect?.addEventListener("change", () => fillAdvertisers(shopSelect.value));
   if (shopSelect && shopSelect.value) fillAdvertisers(shopSelect.value);
