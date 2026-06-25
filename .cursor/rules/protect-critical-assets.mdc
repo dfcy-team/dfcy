@@ -1,0 +1,39 @@
+---
+description: 禁止误删数据库、Git、授权与配置等重要文件；清理仅限临时脚本
+alwaysApply: true
+---
+
+# 保护重要资产（开发必读）
+
+## 禁止删除或覆盖（未经用户明确要求）
+
+- **数据库**：`web-portal/db.env`、`config/db.ini`、MySQL 数据目录、SQL 初始化脚本（`web-portal/sql/`）
+- **Git**：`.git/` 目录；禁止 `git clean -fdx`、`git reset --hard`、`git push --force` 等破坏性命令，除非用户书面明确要求
+- **店铺 / API 授权**：`platforms/tiktok/shop/config_*.env`、`platforms/tiktok/shop/app.env`、`platforms/tiktok/marketing/tokens/`、`platforms/tiktok/content/tokens/`
+- **业务配置**：`config/*.ini`、`platforms/tiktok/shop/shops.json`、各模块 `*.env`
+- **用户数据与导出**：`Z:\` 盘路径、用户桌面 `下载\`、`对比\` 目录下的 Excel/数据文件
+- **已纳入版本库且非本次任务产生的文件**：不要为了「清理」删除用户或历史提交的文件
+
+## 可以删除的仅限
+
+- 本会话临时探测脚本（如 `logs/_probe_*.py`），且须确认无业务逻辑、未纳入 git
+- 明确由用户要求删除的文件
+
+## 开发习惯
+
+- 重构时 **移动/重命名** 优先于删除；删文件前确认 git 历史与用户意图
+- 不提交含 token/secret 的文件（见 `.gitignore`）
+- 删除 `tools/`、`launch/`、`config/` 下文件前必须说明原因并征得用户同意
+- `git commit` / `git push` 仅在用户明确要求时执行
+
+## 示例
+
+```
+❌ 删除 marketing_token.json「简化结构」
+❌ git clean -fd 清理工作区
+❌ 删掉 db.ini「改用新配置」但未迁移
+
+✅ 只改代码逻辑，保留现有配置与 token 文件
+✅ 新增功能用新文件，旧文件标记废弃而非直接删
+✅ 临时脚本用完可删，且不碰授权与数据库
+```
