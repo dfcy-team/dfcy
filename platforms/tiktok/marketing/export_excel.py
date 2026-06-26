@@ -164,8 +164,6 @@ def run_export(
     adv_name = oauth.resolve_advertiser_name(label, adv)
 
     if kind == "creative":
-        # 与 Ads Manager「商品计划创意」对齐：PHP 口径 + 平台五大家族计划名筛选
-        platform_families = ["HYYL226", "HY107", "HY207", "HYYL191", "HYYL392"]
         try:
             rows = rc.fetch_product_creative_rows(
                 adv,
@@ -173,7 +171,6 @@ def run_export(
                 end_date,
                 shop_tag=label or None,
                 expand_all_products=False,
-                campaign_name_filters=platform_families,
             )
         except RuntimeError as e:
             msg = str(e)
