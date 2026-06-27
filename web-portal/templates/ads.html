@@ -85,6 +85,7 @@
           <td class="row-actions">
             <button type="button" class="btn btn-refresh-advertisers" data-shop="{{ b.shop_label }}">刷新广告户</button>
             <a class="btn" href="{{ url_for('ads_authorize', shop_name=b.shop_label) }}">重新授权</a>
+            <button type="button" class="btn btn-revoke-ads" data-shop="{{ b.shop_label }}" style="color:#b91c1c;border-color:#fecaca;">删除授权</button>
           </td>
         </tr>
         {% endfor %}
@@ -207,6 +208,7 @@
     <li><strong>多家店</strong>：换另一个店铺名（如 TIKTOK3号店PH），再点「连接该店广告账户」，不会覆盖已授权的店。</li>
     <li><strong>同一 Business 账号下多个广告主</strong>：一次授权会列出多个 advertiser；导出时在「广告账户」下拉切换，文件名自动带 <strong>店名 + 广告户名称</strong>（如 <code>TIKTOK2号店PH_Nova.ph store_广告创意_…</code>）。未手动选择时默认用卖家中心绑定户。</li>
     <li><strong>BC 内新增广告户</strong>：网站运行时会按 <code>config\广告定时刷新.ini</code> 自动刷新（默认每天 00:05、22:05，马尼拉时间）；也可手动点「刷新广告户」。</li>
+    <li><strong>删除授权</strong>：仅清除本站保存的 token 与广告户绑定，不影响 TikTok 广告后台本身；删除后需重新「连接该店广告账户」才能再导出。</li>
     <li>Shop 店铺授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页，与广告授权分开。</li>
     <li>回调地址：<code>{{ redirect_uri }}</code> · App ID: <code>{{ app_id }}</code></li>
   </ul>
@@ -287,6 +289,36 @@
     if (!data.ok) throw new Error(data.error || "刷新失败");
     return data;
   }
+
+  document.querySelectorAll(".btn-revoke-ads").forEach((btn) => {
+    btn.addEventListener("click", async function () {
+      const shop = this.getAttribute("data-shop") || "";
+      if (!shop) return;
+      const ok = confirm(
+        "确定删除店铺「" + shop + "」的广告授权？\n\n" +
+          "将清除本站保存的 token 与广告户列表，之后需重新连接广告账户才能导出。\n" +
+          "（不会在 TikTok 广告后台解除应用授权）"
+      );
+      if (!ok) return;
+      const old = this.textContent;
+      this.disabled = true;
+      this.textContent = "删除中…";
+      try {
+        const res = await fetch("/api/ads/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shop_label: shop }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "删除失败");
+        location.reload();
+      } catch (err) {
+        alert(String(err));
+        this.disabled = false;
+        this.textContent = old;
+      }
+    });
+  });
 
   document.querySelectorAll(".btn-refresh-advertisers").forEach((btn) => {
     btn.addEventListener("click", async function () {

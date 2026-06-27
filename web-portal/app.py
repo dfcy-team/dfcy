@@ -315,6 +315,27 @@ def api_ads_shop_label():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+@app.post("/api/ads/revoke")
+def api_ads_revoke():
+    data = request.get_json(force=True, silent=True) or {}
+    shop_label = (data.get("shop_label") or "").strip()
+    if not shop_label:
+        return jsonify({"ok": False, "error": "请提供 shop_label"}), 400
+    try:
+        marketing_auth.delete_shop_authorization(shop_label)
+        tok = marketing_auth.token_status()
+        return jsonify(
+            {
+                "ok": True,
+                "shop_label": shop_label,
+                "binding_count": tok.get("binding_count") or 0,
+                "authorized": bool(tok.get("authorized")),
+            }
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
 @app.post("/api/ads/refresh-advertisers")
 def api_ads_refresh_advertisers():
     tok = marketing_auth.token_status()

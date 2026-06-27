@@ -496,6 +496,41 @@ def load_advertisers(shop_label: str | None = None) -> list[dict[str, Any]]:
     return []
 
 
+def _sync_legacy_token_file() -> None:
+    """legacy marketing_token.json 与 shops/ 下剩余绑定保持一致。"""
+    bindings = list_shop_bindings()
+    if bindings:
+        label = (bindings[0].get("shop_label") or "").strip()
+        tok = load_shop_token(label) if label else None
+        if tok:
+            TOKENS_FILE.write_text(json.dumps(tok, ensure_ascii=False, indent=2), encoding="utf-8")
+        return
+    if TOKENS_FILE.is_file():
+        TOKENS_FILE.unlink()
+
+
+def delete_shop_authorization(shop_label: str) -> None:
+    """删除本地广告 OAuth 绑定（不调用 TikTok 远端 revoke，需重新授权才能再导出）。"""
+    label = (shop_label or "").strip()
+    if not label:
+        raise ValueError("店铺名不能为空")
+    path = shop_token_path(label)
+    deleted = False
+    if path.is_file():
+        path.unlink()
+        deleted = True
+    legacy = load_token_legacy()
+    if legacy and legacy.get("access_token"):
+        legacy_label = (legacy.get("shop_label") or "ADS").strip() or "ADS"
+        if legacy_label == label and TOKENS_FILE.is_file():
+            TOKENS_FILE.unlink()
+            deleted = True
+    if not deleted:
+        raise RuntimeError(f"店铺「{label}」未找到广告授权")
+    _sync_legacy_token_file()
+    _log_oauth(f"DELETE shop={label}")
+
+
 def save_shop_label(shop_label: str, *, new_label: str | None = None) -> None:
     old = (shop_label or "").strip()
     if not old:

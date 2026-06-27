@@ -57,3 +57,4 @@ refresh_shop_advertisers = marketing_oauth.refresh_shop_advertisers
 resolve_default_advertiser_id = marketing_oauth.resolve_default_advertiser_id
 resolve_advertiser_name = marketing_oauth.resolve_advertiser_name
 refresh_all_shop_advertisers = marketing_oauth.refresh_all_shop_advertisers
+delete_shop_authorization = marketing_oauth.delete_shop_authorization
