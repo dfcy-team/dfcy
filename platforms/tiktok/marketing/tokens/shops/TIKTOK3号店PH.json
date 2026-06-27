@@ -1,0 +1,30 @@
+{
+  "access_token": "e7a8c36251b27739959dd22b92de46786ab4fd4c",
+  "advertiser_ids": [
+    "7381339567011561473",
+    "7477542124922421265",
+    "7651940537888440327"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK3号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7381339567011561473",
+      "advertiser_name": "Motor WD.PH"
+    },
+    {
+      "advertiser_id": "7477542124922421265",
+      "advertiser_name": "TIKTOK3号店-2"
+    },
+    {
+      "advertiser_id": "7651940537888440327",
+      "advertiser_name": "YX-菲律宾-本土3号店"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:27.028908+00:00"
+}

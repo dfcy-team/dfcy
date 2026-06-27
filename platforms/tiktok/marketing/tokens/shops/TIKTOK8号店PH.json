@@ -1,0 +1,21 @@
+{
+  "access_token": "2a224e7ca1a01a9dffb8c5b6b5b1eb94ea9c210b",
+  "advertiser_ids": [
+    "7476019743615877121"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK8号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7476019743615877121",
+      "advertiser_name": "SiglaGear PH"
+    }
+  ],
+  "default_advertiser_id": "7476019743615877121",
+  "saved_at": "2026-06-27T07:03:24.442279+00:00"
+}

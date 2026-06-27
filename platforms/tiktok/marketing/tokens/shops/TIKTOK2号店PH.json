@@ -1,0 +1,44 @@
+{
+  "access_token": "738d10e496a320f12cb9db54b6d34abc1483b49a",
+  "advertiser_ids": [
+    "7366121708752994320",
+    "7389169561414664193",
+    "7413687332047470593",
+    "7428501897205874705",
+    "7429242203949547537",
+    "7651940738606940180"
+  ],
+  "scope": [
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK2号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7366121708752994320",
+      "advertiser_name": "ET Living Store"
+    },
+    {
+      "advertiser_id": "7389169561414664193",
+      "advertiser_name": "1803996484231169"
+    },
+    {
+      "advertiser_id": "7413687332047470593",
+      "advertiser_name": "ET 2"
+    },
+    {
+      "advertiser_id": "7428501897205874705",
+      "advertiser_name": "Sofa Cover"
+    },
+    {
+      "advertiser_id": "7429242203949547537",
+      "advertiser_name": "TK跨境4号店-家居-菲律宾-01"
+    },
+    {
+      "advertiser_id": "7651940738606940180",
+      "advertiser_name": "YX-菲律宾-本土2号店"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:26.292129+00:00"
+}

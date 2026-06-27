@@ -1,0 +1,30 @@
+{
+  "access_token": "96476b19be3c1a28c20dbc4febba15b5d4413399",
+  "advertiser_ids": [
+    "7381348270146142224",
+    "7445271019998838800",
+    "7471177596312010768"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK4号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7381348270146142224",
+      "advertiser_name": "TK4号店广告户01"
+    },
+    {
+      "advertiser_id": "7445271019998838800",
+      "advertiser_name": "TK4号店广告户-2"
+    },
+    {
+      "advertiser_id": "7471177596312010768",
+      "advertiser_name": "TK4号店广告户-3"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:27.330560+00:00"
+}

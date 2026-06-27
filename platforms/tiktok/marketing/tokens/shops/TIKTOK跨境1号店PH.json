@@ -1,0 +1,65 @@
+{
+  "access_token": "c24b1293e63da9e1bca6f0a9aef9880d350943cd",
+  "advertiser_ids": [
+    "7552787331926736897",
+    "7552804357947932688",
+    "7572125036879708178",
+    "7576585503260360711",
+    "7585138217448456193",
+    "7603568625159995410",
+    "7611815089167171591",
+    "7650420167360512007",
+    "7651940890000277512",
+    "7654416388122624008"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK跨境1号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7552787331926736897",
+      "advertiser_name": "TK跨境1号泰国站"
+    },
+    {
+      "advertiser_id": "7552804357947932688",
+      "advertiser_name": "LuminaFlex"
+    },
+    {
+      "advertiser_id": "7572125036879708178",
+      "advertiser_name": "GIMC-鼎峰-泰国-跨境1"
+    },
+    {
+      "advertiser_id": "7576585503260360711",
+      "advertiser_name": "GIMC-鼎峰-菲律宾-跨境1"
+    },
+    {
+      "advertiser_id": "7585138217448456193",
+      "advertiser_name": "GIMC-鼎峰-马来-跨境-1"
+    },
+    {
+      "advertiser_id": "7603568625159995410",
+      "advertiser_name": "ET outdoors"
+    },
+    {
+      "advertiser_id": "7611815089167171591",
+      "advertiser_name": "GIMC-鼎峰-马来-跨境1"
+    },
+    {
+      "advertiser_id": "7650420167360512007",
+      "advertiser_name": "YX-泰国-跨境1号店"
+    },
+    {
+      "advertiser_id": "7651940890000277512",
+      "advertiser_name": "YX-马来-跨境1号店"
+    },
+    {
+      "advertiser_id": "7654416388122624008",
+      "advertiser_name": "YX-菲律宾-跨境1号店"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:25.974770+00:00"
+}

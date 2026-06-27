@@ -1,0 +1,35 @@
+{
+  "access_token": "19f5e4d31877971f0d5934d44d6759d482f90baf",
+  "advertiser_ids": [
+    "7561280105587736583",
+    "7576215140618944528",
+    "7650420431622586388",
+    "7651940658709823508"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK跨境4号PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7561280105587736583",
+      "advertiser_name": "GIMC-鼎峰-泰国-跨境4"
+    },
+    {
+      "advertiser_id": "7576215140618944528",
+      "advertiser_name": "GIMC-鼎峰-菲律宾-跨境4"
+    },
+    {
+      "advertiser_id": "7650420431622586388",
+      "advertiser_name": "YX-泰国-跨境4号店"
+    },
+    {
+      "advertiser_id": "7651940658709823508",
+      "advertiser_name": "YX-菲律宾-跨境4号店"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:25.341949+00:00"
+}

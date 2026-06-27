@@ -1,0 +1,25 @@
+{
+  "access_token": "11238cf8bf3d281f341c40ac776827ea04eb8ef8",
+  "advertiser_ids": [
+    "7365788829120397328",
+    "7651940663654678546"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK1号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7365788829120397328",
+      "advertiser_name": "Nova.ph store"
+    },
+    {
+      "advertiser_id": "7651940663654678546",
+      "advertiser_name": "YX-菲律宾-本土1号店"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:26.687646+00:00"
+}

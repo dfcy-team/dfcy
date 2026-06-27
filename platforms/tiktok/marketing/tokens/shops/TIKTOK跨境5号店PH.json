@@ -1,0 +1,30 @@
+{
+  "access_token": "19d4d04eef18765eca45014e1a90f7788d743026",
+  "advertiser_ids": [
+    "7423711175692763137",
+    "7477548160160645136",
+    "7651940571352580114"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK跨境5号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7423711175692763137",
+      "advertiser_name": "TK跨境5号店-家居-菲律宾-01"
+    },
+    {
+      "advertiser_id": "7477548160160645136",
+      "advertiser_name": "TK跨境5号店-家居-菲律宾-02"
+    },
+    {
+      "advertiser_id": "7651940571352580114",
+      "advertiser_name": "YX-菲律宾-跨境5"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:25.046621+00:00"
+}

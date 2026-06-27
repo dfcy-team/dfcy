@@ -1,0 +1,30 @@
+{
+  "access_token": "f9bc69749a7b4d84f068a89b5d2223498a0264bc",
+  "advertiser_ids": [
+    "7433312323265200144",
+    "7477544119762649104",
+    "7486739494155239432"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK6号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7433312323265200144",
+      "advertiser_name": "Tropi Home"
+    },
+    {
+      "advertiser_id": "7477544119762649104",
+      "advertiser_name": "TIKTOK 6号店-2"
+    },
+    {
+      "advertiser_id": "7486739494155239432",
+      "advertiser_name": "TIKTOK跨境3号店-1"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:27.726864+00:00"
+}

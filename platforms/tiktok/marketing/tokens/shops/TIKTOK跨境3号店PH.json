@@ -1,0 +1,60 @@
+{
+  "access_token": "ff28af9331a563cc252208aa918006d7eb2b20d5",
+  "advertiser_ids": [
+    "7443698173430153232",
+    "7486732196427186177",
+    "7486739494155239432",
+    "7546486274043953160",
+    "7585137645697761298",
+    "7585150305239597064",
+    "7639694763834540053",
+    "7651940693199618055",
+    "7655630946657632273"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK跨境3号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7443698173430153232",
+      "advertiser_name": "十色网络—1"
+    },
+    {
+      "advertiser_id": "7486732196427186177",
+      "advertiser_name": "TIKTOK跨境3号店-2"
+    },
+    {
+      "advertiser_id": "7486739494155239432",
+      "advertiser_name": "TIKTOK跨境3号店-1"
+    },
+    {
+      "advertiser_id": "7546486274043953160",
+      "advertiser_name": "GIMC-鼎峰-菲律宾-跨境3"
+    },
+    {
+      "advertiser_id": "7585137645697761298",
+      "advertiser_name": "GIMC-鼎峰-马来-跨境3"
+    },
+    {
+      "advertiser_id": "7585150305239597064",
+      "advertiser_name": "跨境3号店-马来"
+    },
+    {
+      "advertiser_id": "7639694763834540053",
+      "advertiser_name": "MAX-DFCY-CH-01"
+    },
+    {
+      "advertiser_id": "7651940693199618055",
+      "advertiser_name": "YX-马来-跨境3号店"
+    },
+    {
+      "advertiser_id": "7655630946657632273",
+      "advertiser_name": "LUCKYFORTUNE'ONLINE STORE"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:25.654572+00:00"
+}

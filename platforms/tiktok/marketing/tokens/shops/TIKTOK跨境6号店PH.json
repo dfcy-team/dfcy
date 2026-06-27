@@ -1,0 +1,35 @@
+{
+  "access_token": "048abbe0d2bb4fad74b5f3733a262bb2aa2afe86",
+  "advertiser_ids": [
+    "7572125036879642642",
+    "7572407264938672145",
+    "7585138194145034256",
+    "7650420305189486613"
+  ],
+  "scope": [
+    19000000,
+    1,
+    2,
+    4
+  ],
+  "shop_label": "TIKTOK跨境6号店PH",
+  "advertisers": [
+    {
+      "advertiser_id": "7572125036879642642",
+      "advertiser_name": "GIMC-鼎峰-泰国-跨境6"
+    },
+    {
+      "advertiser_id": "7572407264938672145",
+      "advertiser_name": "TK 跨境6号店-泰国"
+    },
+    {
+      "advertiser_id": "7585138194145034256",
+      "advertiser_name": "GIMC-鼎峰-马来-跨境-6"
+    },
+    {
+      "advertiser_id": "7650420305189486613",
+      "advertiser_name": "YX-泰国-跨境6号店"
+    }
+  ],
+  "saved_at": "2026-06-27T07:03:24.753200+00:00"
+}
