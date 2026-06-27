@@ -509,6 +509,80 @@ def _sync_legacy_token_file() -> None:
         TOKENS_FILE.unlink()
 
 
+def load_custom_ad_shops() -> list[dict[str, str]]:
+    """用户手动登记的广告绑定店名（可不在 shops.json 里）。"""
+    from config import CUSTOM_SHOPS_FILE
+
+    if not CUSTOM_SHOPS_FILE.is_file():
+        return []
+    try:
+        data = json.loads(CUSTOM_SHOPS_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    items = data.get("shops") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in items:
+        if isinstance(item, str):
+            tag = item.strip()
+            if tag:
+                out.append({"tag": tag, "note": "", "added_at": ""})
+        elif isinstance(item, dict):
+            tag = str(item.get("tag") or "").strip()
+            if tag:
+                out.append(
+                    {
+                        "tag": tag,
+                        "note": str(item.get("note") or "").strip(),
+                        "added_at": str(item.get("added_at") or "").strip(),
+                    }
+                )
+    return out
+
+
+def save_custom_ad_shops(shops: list[dict[str, str]]) -> None:
+    from config import CUSTOM_SHOPS_FILE
+
+    CUSTOM_SHOPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CUSTOM_SHOPS_FILE.write_text(
+        json.dumps({"shops": shops}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def add_custom_ad_shop(tag: str, *, note: str = "") -> list[dict[str, str]]:
+    name = (tag or "").strip()
+    if not name:
+        raise ValueError("店铺名不能为空")
+    if len(name) > 80:
+        raise ValueError("店铺名过长（最多 80 字）")
+    shops = load_custom_ad_shops()
+    if any(s.get("tag") == name for s in shops):
+        return shops
+    shops.append(
+        {
+            "tag": name,
+            "note": (note or "").strip(),
+            "added_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+    )
+    save_custom_ad_shops(shops)
+    return shops
+
+
+def remove_custom_ad_shop(tag: str) -> list[dict[str, str]]:
+    name = (tag or "").strip()
+    if not name:
+        raise ValueError("店铺名不能为空")
+    shops = load_custom_ad_shops()
+    new_shops = [s for s in shops if s.get("tag") != name]
+    if len(new_shops) == len(shops):
+        raise RuntimeError(f"自定义店铺「{name}」不在列表中")
+    save_custom_ad_shops(new_shops)
+    return new_shops
+
+
 def delete_shop_authorization(shop_label: str) -> None:
     """删除本地广告 OAuth 绑定（不调用 TikTok 远端 revoke，需重新授权才能再导出）。"""
     label = (shop_label or "").strip()

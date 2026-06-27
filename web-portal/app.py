@@ -266,6 +266,21 @@ def ads_page():
                 "key": s.get("key", ""),
                 "tag": tag,
                 "label": s.get("label", s.get("key", "")),
+                "custom": False,
+            }
+        )
+    custom_shops = marketing_auth.load_custom_ad_shops()
+    for item in custom_shops:
+        tag = (item.get("tag") or "").strip()
+        if not tag or tag in seen_tags:
+            continue
+        seen_tags.add(tag)
+        shop_suggestions.append(
+            {
+                "key": "",
+                "tag": tag,
+                "label": (item.get("note") or tag) + "（自定义）",
+                "custom": True,
             }
         )
     return render_template(
@@ -280,6 +295,7 @@ def ads_page():
         redirect_uri=marketing_auth.REDIRECT_URI,
         credentials_ok=cred_probe.get("ok"),
         shop_suggestions=shop_suggestions,
+        custom_shops=custom_shops,
     )
 
 
@@ -311,6 +327,38 @@ def api_ads_shop_label():
         else:
             marketing_auth.save_shop_label(shop_name)
         return jsonify({"ok": True, "shop_label": shop_name})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.get("/api/ads/custom-shops")
+def api_ads_custom_shops_list():
+    return jsonify({"ok": True, "shops": marketing_auth.load_custom_ad_shops()})
+
+
+@app.post("/api/ads/custom-shops")
+def api_ads_custom_shops_add():
+    data = request.get_json(force=True, silent=True) or {}
+    tag = (data.get("tag") or data.get("shop_name") or "").strip()
+    note = (data.get("note") or "").strip()
+    if not tag:
+        return jsonify({"ok": False, "error": "请填写店铺名/导出标签"}), 400
+    try:
+        shops = marketing_auth.add_custom_ad_shop(tag, note=note)
+        return jsonify({"ok": True, "shops": shops, "tag": tag})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.delete("/api/ads/custom-shops")
+def api_ads_custom_shops_remove():
+    data = request.get_json(force=True, silent=True) or {}
+    tag = (data.get("tag") or data.get("shop_name") or request.args.get("tag") or "").strip()
+    if not tag:
+        return jsonify({"ok": False, "error": "请提供店铺名"}), 400
+    try:
+        shops = marketing_auth.remove_custom_ad_shop(tag)
+        return jsonify({"ok": True, "shops": shops})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 

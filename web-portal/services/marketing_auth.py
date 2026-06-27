@@ -58,3 +58,6 @@ resolve_default_advertiser_id = marketing_oauth.resolve_default_advertiser_id
 resolve_advertiser_name = marketing_oauth.resolve_advertiser_name
 refresh_all_shop_advertisers = marketing_oauth.refresh_all_shop_advertisers
 delete_shop_authorization = marketing_oauth.delete_shop_authorization
+load_custom_ad_shops = marketing_oauth.load_custom_ad_shops
+add_custom_ad_shop = marketing_oauth.add_custom_ad_shop
+remove_custom_ad_shop = marketing_oauth.remove_custom_ad_shop

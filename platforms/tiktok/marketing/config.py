@@ -8,6 +8,7 @@ MODULE_ROOT = Path(__file__).resolve().parent
 TOKENS_DIR = MODULE_ROOT / "tokens"
 TOKENS_FILE = TOKENS_DIR / "marketing_token.json"
 ADVERTISERS_FILE = MODULE_ROOT / "advertisers.json"
+CUSTOM_SHOPS_FILE = MODULE_ROOT / "ads_custom_shops.json"
 ENV_FILE = MODULE_ROOT / "app.env"
 
 AUTH_URL = "https://business-api.tiktok.com/portal/auth"

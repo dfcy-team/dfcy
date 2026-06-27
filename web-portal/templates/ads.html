@@ -98,16 +98,51 @@
 
   {% if credentials_ok %}
   <h3 style="margin-top:20px;">{{ '添加另一家店铺' if bindings else '授权第一家店铺' }}</h3>
-  <form action="{{ url_for('ads_authorize') }}" method="get" class="form-grid" style="margin-top:8px;">
+  <form action="{{ url_for('ads_authorize') }}" method="get" class="form-grid" style="margin-top:8px;" id="form-ads-authorize">
     <label class="span2">绑定店铺名
-      <input type="text" name="shop_name" list="ads-shop-names" required
-             placeholder="如 TIKTOK2号店PH（每家店授权一次，名称不要重复）"/>
+      <input type="text" name="shop_name" id="ads-authorize-shop-name" list="ads-shop-names" required
+             placeholder="如 TIKTOK1号店TH（可手输，不必在系统店铺列表里）"/>
     </label>
     <button type="submit" class="btn primary span2">连接该店广告账户</button>
   </form>
   <p class="muted" style="margin-top:8px;">
     用该店铺对应的 TikTok For Business 账号登录。不同店请换店铺名后再次点击授权。
   </p>
+
+  <h3 style="margin-top:20px;">自定义店铺名（不在下拉列表里）</h3>
+  <p class="muted" style="margin:0 0 8px;">
+    例如 <code>TIKTOK1号店TH</code>：先保存到列表，再点「填入并授权」。导出 Excel 也会用这个名称作文件名前缀。
+  </p>
+  <form id="form-add-custom-shop" class="form-grid">
+    <label>店名/导出标签
+      <input type="text" id="custom-shop-tag" placeholder="TIKTOK1号店TH" required/>
+    </label>
+    <label>备注（可选）
+      <input type="text" id="custom-shop-note" placeholder="泰国1号店"/>
+    </label>
+    <button type="submit" class="btn span2">保存到自定义列表</button>
+  </form>
+  {% if custom_shops %}
+  <div class="table-wrap" style="margin-top:12px;">
+    <table class="data-table">
+      <thead><tr><th>店名</th><th>备注</th><th>操作</th></tr></thead>
+      <tbody id="custom-shops-body">
+        {% for c in custom_shops %}
+        <tr data-tag="{{ c.tag }}">
+          <td><strong>{{ c.tag }}</strong></td>
+          <td>{{ c.note or '—' }}</td>
+          <td class="row-actions">
+            <button type="button" class="btn btn-use-custom-shop" data-tag="{{ c.tag }}">填入并授权</button>
+            <button type="button" class="btn btn-remove-custom-shop" data-tag="{{ c.tag }}" style="color:#b91c1c;border-color:#fecaca;">删除</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" id="custom-shops-empty" style="margin-top:8px;">暂无自定义店铺，可在上方添加。</p>
+  {% endif %}
   {% endif %}
   <datalist id="ads-shop-names">
     {% for s in shop_suggestions %}
@@ -204,6 +239,7 @@
 <div class="card">
   <h2>说明</h2>
   <ul>
+    <li><strong>自定义店名</strong>：不在系统店铺列表里时，先在「自定义店铺名」保存（如 <code>TIKTOK1号店TH</code>），再点「填入并授权」完成 OAuth。</li>
     <li><strong>一家店授权一次</strong>：填店铺名 → 连接广告账户 → 用该店 TikTok 广告后台账号登录。</li>
     <li><strong>多家店</strong>：换另一个店铺名（如 TIKTOK3号店PH），再点「连接该店广告账户」，不会覆盖已授权的店。</li>
     <li><strong>同一 Business 账号下多个广告主</strong>：一次授权会列出多个 advertiser；导出时在「广告账户」下拉切换，文件名自动带 <strong>店名 + 广告户名称</strong>（如 <code>TIKTOK2号店PH_Nova.ph store_广告创意_…</code>）。未手动选择时默认用卖家中心绑定户。</li>
@@ -333,6 +369,57 @@
         alert(String(err));
         this.disabled = false;
         this.textContent = old;
+      }
+    });
+  });
+
+  const authorizeShopInput = document.getElementById("ads-authorize-shop-name");
+  document.getElementById("form-add-custom-shop")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const tag = document.getElementById("custom-shop-tag")?.value?.trim();
+    const note = document.getElementById("custom-shop-note")?.value?.trim() || "";
+    if (!tag) return;
+    try {
+      const res = await fetch("/api/ads/custom-shops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag, note }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "保存失败");
+      location.reload();
+    } catch (err) {
+      alert(String(err));
+    }
+  });
+
+  document.querySelectorAll(".btn-use-custom-shop").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tag = btn.getAttribute("data-tag") || "";
+      if (authorizeShopInput) {
+        authorizeShopInput.value = tag;
+        authorizeShopInput.focus();
+        authorizeShopInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      if (prefixInput) prefixInput.value = tag;
+    });
+  });
+
+  document.querySelectorAll(".btn-remove-custom-shop").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const tag = btn.getAttribute("data-tag") || "";
+      if (!tag || !confirm("从自定义列表删除「" + tag + "」？（不影响已完成的广告授权）")) return;
+      try {
+        const res = await fetch("/api/ads/custom-shops", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "删除失败");
+        location.reload();
+      } catch (err) {
+        alert(String(err));
       }
     });
   });
