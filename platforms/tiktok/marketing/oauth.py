@@ -19,6 +19,7 @@ from config import (
     API_BASE,
     APP_ID,
     AUTH_URL,
+    CUSTOM_SHOPS_FILE,
     ENV_FILE,
     OAUTH_STATE_PREFIX,
     REDIRECT_URI,
@@ -511,8 +512,6 @@ def _sync_legacy_token_file() -> None:
 
 def load_custom_ad_shops() -> list[dict[str, str]]:
     """用户手动登记的广告绑定店名（可不在 shops.json 里）。"""
-    from config import CUSTOM_SHOPS_FILE
-
     if not CUSTOM_SHOPS_FILE.is_file():
         return []
     try:
@@ -542,8 +541,6 @@ def load_custom_ad_shops() -> list[dict[str, str]]:
 
 
 def save_custom_ad_shops(shops: list[dict[str, str]]) -> None:
-    from config import CUSTOM_SHOPS_FILE
-
     CUSTOM_SHOPS_FILE.parent.mkdir(parents=True, exist_ok=True)
     CUSTOM_SHOPS_FILE.write_text(
         json.dumps({"shops": shops}, ensure_ascii=False, indent=2),
