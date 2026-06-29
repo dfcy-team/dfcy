@@ -1,6 +1,6 @@
 {
   "app": "app.env",
-  "active": "TK1MY",
+  "active": "TKKJ4TH",
   "shops": [
     {
       "key": "TKKJ1PH",
@@ -125,8 +125,8 @@
       "shop_mode": "cross_border",
       "region": "PH",
       "platform": "tiktok",
-      "enabled": false,
-      "notes": "Tropical Home"
+      "enabled": true,
+      "notes": "LUNAVA Bedding PH"
     },
     {
       "key": "TKKJ4TH",
@@ -134,13 +134,13 @@
         "tkkj4th"
       ],
       "config": "config_TKKJ4TH.env",
-      "label": "TKKJ4TH / TIKTOK跨境4号店TH",
-      "export_tag": "TIKTOK跨境4号店TH",
+      "label": "TKKJ4TH",
+      "export_tag": "TIKTOK跨境4号TH",
       "shop_mode": "cross_border",
       "region": "TH",
       "platform": "tiktok",
-      "enabled": false,
-      "notes": "TIKTOK跨境4号店TH"
+      "enabled": true,
+      "notes": "Lunava.TH"
     },
     {
       "key": "TKKJ5PH",
@@ -148,13 +148,13 @@
         "tkkj5ph"
       ],
       "config": "config_TKKJ5PH.env",
-      "label": "TKKJ5PH / TIKTOK跨境5号店PH",
-      "export_tag": "TIKTOK跨境5号店PH",
+      "label": "TKKJ5PH",
+      "export_tag": "TIKTOK跨境5号PH",
       "shop_mode": "cross_border",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK跨境5号店PH"
+      "notes": "LUNAVA Life PH"
     },
     {
       "key": "TKKJ5TH",

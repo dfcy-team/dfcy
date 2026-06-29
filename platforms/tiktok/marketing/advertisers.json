@@ -1,9 +1,25 @@
 {
-  "updated_at": "2026-06-27T07:03:28.071042+00:00",
+  "updated_at": "2026-06-29T07:26:00.945609+00:00",
   "advertisers": [
     {
-      "advertiser_id": "7436013401111085073",
-      "advertiser_name": "Tahoe Home"
+      "advertiser_id": "7572125265309368321",
+      "advertiser_name": "GIMC-鼎峰-泰国-本土1"
+    },
+    {
+      "advertiser_id": "7587445742554447888",
+      "advertiser_name": "GODDESSyjhjyjrfshangmao"
+    },
+    {
+      "advertiser_id": "7594382263014621200",
+      "advertiser_name": "LUNAVA Picks TH"
+    },
+    {
+      "advertiser_id": "7605521566654513169",
+      "advertiser_name": "GIMC-DFCY-曼谷-1"
+    },
+    {
+      "advertiser_id": "7650420006773374994",
+      "advertiser_name": "YX-泰国-本土1号店"
     }
   ]
 }
