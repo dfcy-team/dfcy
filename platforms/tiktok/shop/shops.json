@@ -78,13 +78,13 @@
         "tkkj3ph"
       ],
       "config": "config_TKKJ3PH.env",
-      "label": "TKKJ3PH / TIKTOK跨境3号店PH",
-      "export_tag": "TIKTOK跨境3号店PH",
+      "label": "TKKJ3PH",
+      "export_tag": "TIKTOK跨境3号PH",
       "shop_mode": "cross_border",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK跨境3号店PH"
+      "notes": "Golden Eagle PH"
     },
     {
       "key": "TKKJ3TH",
@@ -111,7 +111,7 @@
       "shop_mode": "cross_border",
       "region": "MY",
       "platform": "tiktok",
-      "enabled": false,
+      "enabled": true,
       "notes": "Lunava MY Store"
     },
     {
