@@ -1,6 +1,6 @@
 {
   "app": "app.env",
-  "active": "TKKJ1PH",
+  "active": "TK1MY",
   "shops": [
     {
       "key": "TKKJ1PH",
@@ -190,13 +190,13 @@
         "tkkj6th"
       ],
       "config": "config_TKKJ6TH.env",
-      "label": "TKKJ6TH / TIKTOK跨境6号店TH",
-      "export_tag": "TIKTOK跨境6号店TH",
+      "label": "TKKJ6TH",
+      "export_tag": "TIKTOK跨境6号TH",
       "shop_mode": "cross_border",
       "region": "TH",
       "platform": "tiktok",
-      "enabled": false,
-      "notes": "TIKTOK跨境6号店TH"
+      "enabled": true,
+      "notes": "ET Living Store"
     },
     {
       "key": "TKKJ6MY",
@@ -204,13 +204,13 @@
         "tkkj6my"
       ],
       "config": "config_TKKJ6MY.env",
-      "label": "TKKJ6MY / TIKTOK跨境6号店MY",
-      "export_tag": "TIKTOK跨境6号店MY",
+      "label": "TKKJ6MY",
+      "export_tag": "TIKTOK跨境6号MY",
       "shop_mode": "cross_border",
       "region": "MY",
       "platform": "tiktok",
-      "enabled": false,
-      "notes": "TIKTOK跨境6号店MY"
+      "enabled": true,
+      "notes": "LUNAVA MY"
     },
     {
       "key": "TK1PH",
@@ -246,13 +246,13 @@
         "tk3ph"
       ],
       "config": "config_TK3PH.env",
-      "label": "TK3PH / TIKTOK3号店PH",
+      "label": "TK3PH",
       "export_tag": "TIKTOK3号店PH",
       "shop_mode": "local",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK3号店PH"
+      "notes": "Thumb Toe PH"
     },
     {
       "key": "TK4PH",
@@ -288,13 +288,13 @@
         "tk6ph"
       ],
       "config": "config_TK6PH.env",
-      "label": "TK6PH / TIKTOK6号店PH",
+      "label": "TK6PH",
       "export_tag": "TIKTOK6号店PH",
       "shop_mode": "local",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK6号店PH"
+      "notes": "NAHARA  Store"
     },
     {
       "key": "TK7PH",
@@ -302,13 +302,13 @@
         "tk7ph"
       ],
       "config": "config_TK7PH.env",
-      "label": "TK7PH / TIKTOK7号店PH",
+      "label": "TK7PH",
       "export_tag": "TIKTOK7号店PH",
       "shop_mode": "local",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK7号店PH"
+      "notes": "LUNAVA Picks"
     },
     {
       "key": "TK8PH",
@@ -316,13 +316,13 @@
         "tk8ph"
       ],
       "config": "config_TK8PH.env",
-      "label": "TK8PH / TIKTOK8号店PH",
+      "label": "TK8PH",
       "export_tag": "TIKTOK8号店PH",
       "shop_mode": "local",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK8号店PH"
+      "notes": "LuminaFlex PH Store"
     },
     {
       "key": "SP8PH",
@@ -739,6 +739,18 @@
       "shop_mode": "local",
       "region": "PH",
       "notes": ""
+    },
+    {
+      "key": "TK1MY",
+      "aliases": [
+        "tk1my"
+      ],
+      "config": "config_TK1MY.env",
+      "label": "TK1MY",
+      "export_tag": "TIKTOK1号店MY",
+      "shop_mode": "local",
+      "region": "MY",
+      "notes": "NAHARA"
     }
   ]
 }
