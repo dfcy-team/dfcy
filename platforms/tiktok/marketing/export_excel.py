@@ -49,6 +49,11 @@ def _marketing_runtime():
     return mod
 
 CREATIVE_HEADERS = [
+    "店铺简写",
+    "导出标签",
+    "投放国家",
+    "广告户ID",
+    "广告户名称",
     "广告计划名称",
     "广告计划 ID",
     "商品 ID",
@@ -78,6 +83,11 @@ CREATIVE_HEADERS = [
 ]
 
 LIVE_HEADERS = [
+    "店铺简写",
+    "导出标签",
+    "投放国家",
+    "广告户ID",
+    "广告户名称",
     "直播名称",
     "启动时间",
     "状态",
@@ -132,6 +142,12 @@ def export_workbook(
     return output_path
 
 
+def _prepend_export_meta(rows: list[list], meta_prefix: list) -> list[list]:
+    if not meta_prefix:
+        return rows
+    return [meta_prefix + list(row) for row in rows]
+
+
 def run_export(
     *,
     advertiser_id: str,
@@ -159,9 +175,29 @@ def run_export(
     if kind not in ("creative", "live"):
         raise ValueError(f"未知报表类型: {report_kind}")
 
+    from advertiser_region import resolve_advertiser_meta, resolve_export_shop_meta
     from common.excel_names import ads_export_filename
 
     adv_name = oauth.resolve_advertiser_name(label, adv)
+    tok = oauth.load_shop_token(label) if label else None
+    adv_meta = resolve_advertiser_meta(
+        (tok or {}).get("advertisers"),
+        adv,
+        access_token=(tok or {}).get("access_token") or oauth.get_access_token(label),
+        get_json=rc._get_json,
+        ads_shop_label=label,
+    )
+    shop_meta = resolve_export_shop_meta(label, adv_meta.get("region") or "")
+    shop_key = shop_meta.get("shop_key") or label
+    export_tag = shop_meta.get("export_tag") or file_prefix or label
+    region = shop_meta.get("region") or adv_meta.get("region") or ""
+    meta_prefix = [
+        shop_key.lower(),
+        export_tag,
+        region,
+        adv,
+        adv_name or adv_meta.get("advertiser_name") or adv,
+    ]
 
     if kind == "creative":
         try:
@@ -184,7 +220,16 @@ def run_export(
         report = rc.fetch_campaign_report(adv, start_date, end_date)
         rows = rc.build_live_rows(report, camps)
 
-    name = ads_export_filename(file_prefix, adv_name, kind, start_date, end_date)
+    rows = _prepend_export_meta(rows, meta_prefix)
+    name = ads_export_filename(
+        shop_key,
+        export_tag,
+        region,
+        adv_name,
+        kind,
+        start_date,
+        end_date,
+    )
     out = EXPORT_DIR / name
     export_workbook(report_kind=kind, rows=rows, output_path=out)
     return out

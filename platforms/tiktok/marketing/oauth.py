@@ -335,6 +335,9 @@ def refresh_shop_advertisers(
     token_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """用现有 token 刷新广告户列表，并解析店铺专属默认广告户（无需重新 OAuth）。"""
+    from advertiser_region import enrich_advertisers
+    from report_client import _get_json
+
     label = (shop_label or "").strip()
     if not label:
         raise ValueError("店铺名不能为空")
@@ -343,6 +346,12 @@ def refresh_shop_advertisers(
         raise RuntimeError(f"店铺「{label}」尚未授权广告账户，请先在 /ads 完成授权")
     tok["shop_label"] = label
     advertisers = fetch_advertiser_list(tok["access_token"])
+    advertisers = enrich_advertisers(
+        advertisers,
+        tok["access_token"],
+        get_json=_get_json,
+        ads_shop_label=label,
+    )
     tok = _apply_advertiser_snapshot(tok, advertisers, access_token=tok["access_token"])
     save_shop_token(tok)
     save_advertisers(advertisers)

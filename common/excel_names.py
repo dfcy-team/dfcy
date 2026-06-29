@@ -247,16 +247,20 @@ def sanitize_filename_part(text: str, *, max_len: int = 48) -> str:
 
 
 def ads_export_filename(
-    shop_tag: str,
+    shop_key: str,
+    export_tag: str,
+    region: str,
     advertiser_name: str,
     report_kind: str,
     start: str,
     end: str,
 ) -> str:
-    """例：TIKTOK2号店PH_Nova.ph store_广告创意_2026-06-21_2026-06-21.xlsx"""
-    tag = (shop_tag or "ADS").strip() or "ADS"
+    """例：TKKJ1MY_TIKTOK跨境1号店MY_MY_广告创意_2026-06-21_2026-06-21.xlsx"""
+    key = sanitize_filename_part((shop_key or "ads").lower(), max_len=24) or "ads"
+    tag = sanitize_filename_part(export_tag or key, max_len=40) or key
+    reg = sanitize_filename_part((region or "XX").upper(), max_len=4) or "XX"
     suffix = ADS_REPORT_SUFFIX.get(report_kind.strip().lower(), report_kind)
     adv = sanitize_filename_part(advertiser_name)
     if adv:
-        return f"{tag}_{adv}_{suffix}_{start}_{end}.xlsx"
-    return f"{tag}_{suffix}_{start}_{end}.xlsx"
+        return f"{key}_{tag}_{reg}_{adv}_{suffix}_{start}_{end}.xlsx"
+    return f"{key}_{tag}_{reg}_{suffix}_{start}_{end}.xlsx"

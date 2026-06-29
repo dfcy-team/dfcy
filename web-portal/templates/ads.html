@@ -159,12 +159,14 @@
   {% if b.advertisers %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Advertiser ID</th><th>名称</th><th>备注</th></tr></thead>
+      <thead><tr><th>Advertiser ID</th><th>名称</th><th>投放国家</th><th>时区</th><th>备注</th></tr></thead>
       <tbody>
         {% for adv in b.advertisers %}
         <tr>
           <td><code>{{ adv.advertiser_id or adv.get('advertiser_id', '—') }}</code></td>
           <td>{{ adv.advertiser_name or adv.get('name', '—') }}</td>
+          <td>{{ adv.region or adv.get('region', '—') }}</td>
+          <td><span class="muted">{{ adv.timezone or adv.get('timezone', '—') }}</span></td>
           <td>
             {% set aid = adv.advertiser_id or adv.get('advertiser_id', '') %}
             {% if b.default_advertiser_id and aid == b.default_advertiser_id %}
@@ -217,7 +219,7 @@
     <label class="span2">店名/导出标签
       <input type="text" name="file_prefix" id="ads-export-prefix" list="ads-shop-names" placeholder="如 TIKTOK2号店PH"/>
     </label>
-    <p class="muted span2" style="margin:0;">Excel 文件名：<code>店名_广告户名称_报表类型_日期.xlsx</code>（切换上方广告账户即区分多广告户）。</p>
+    <p class="muted span2" style="margin:0;">Excel 文件名：<code>店铺简写_导出标签_国家_广告户名_报表类型_日期.xlsx</code>（例：<code>tkkj1my_TIKTOK跨境1号店MY_MY_…</code>）。表内前五列含店铺简写、导出标签、投放国家，便于入库。</p>
     <button type="submit" class="btn primary span2">开始导出</button>
   </form>
   <script id="ads-bindings-json" type="application/json">{{ bindings_json | safe }}</script>
@@ -242,7 +244,8 @@
     <li><strong>自定义店名</strong>：不在系统店铺列表里时，先在「自定义店铺名」保存（如 <code>TIKTOK1号店TH</code>），再点「填入并授权」完成 OAuth。</li>
     <li><strong>一家店授权一次</strong>：填店铺名 → 连接广告账户 → 用该店 TikTok 广告后台账号登录。</li>
     <li><strong>多家店</strong>：换另一个店铺名（如 TIKTOK3号店PH），再点「连接该店广告账户」，不会覆盖已授权的店。</li>
-    <li><strong>同一 Business 账号下多个广告主</strong>：一次授权会列出多个 advertiser；导出时在「广告账户」下拉切换，文件名自动带 <strong>店名 + 广告户名称</strong>（如 <code>TIKTOK2号店PH_Nova.ph store_广告创意_…</code>）。未手动选择时默认用卖家中心绑定户。</li>
+    <li><strong>本土店</strong>（如 TIKTOK1号店PH、TIKTOK3号店PH）：导出固定用绑定店名，所有广告户均为同一店铺/国家，不按时区再分。</li>
+    <li><strong>跨境店</strong>（如 TIKTOK跨境1号店PH）：一次授权列出多国广告户，导出时按<strong>时区识别投放国家</strong>，自动匹配 TKKJ1PH / TKKJ1TH / TKKJ1MY 等同系列店铺。</li>
     <li><strong>BC 内新增广告户</strong>：网站运行时会按 <code>config\广告定时刷新.ini</code> 自动刷新（默认每天 00:05、22:05，马尼拉时间）；也可手动点「刷新广告户」。</li>
     <li><strong>删除授权</strong>：仅清除本站保存的 token 与广告户绑定，不影响 TikTok 广告后台本身；删除后需重新「连接该店广告账户」才能再导出。</li>
     <li>Shop 店铺授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页，与广告授权分开。</li>
@@ -294,10 +297,11 @@
       list.forEach((adv) => {
         const id = adv.advertiser_id || adv.advertiser_id;
         const name = adv.advertiser_name || adv.name || id;
+        const region = adv.region ? " [" + adv.region + "]" : "";
         const opt = document.createElement("option");
         opt.value = id;
         const tag = defaultId && id === defaultId ? " ★卖家中心" : "";
-        opt.textContent = name + tag + " (" + id + ")";
+        opt.textContent = name + region + tag + " (" + id + ")";
         advSelect.appendChild(opt);
       });
     } else if (b && b.advertiser_ids) {
