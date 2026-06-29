@@ -3,6 +3,17 @@
 {% block content %}
 <section class="login-page">
   <div class="card login-card">
+    {% if login_disabled %}
+    <h1>登录功能已暂时关闭</h1>
+    <p class="muted">当前无需登录即可使用全部功能。</p>
+    <div class="login-off-actions">
+      <a class="btn primary" href="{{ url_for('dashboard') }}">数据导出</a>
+      <a class="btn" href="{{ url_for('ads_page') }}">广告数据</a>
+      <a class="btn" href="{{ url_for('content_page') }}">视频上传</a>
+      <a class="btn" href="{{ url_for('authorize_page') }}">店铺授权</a>
+      <a class="btn" href="{{ url_for('index') }}">返回首页</a>
+    </div>
+    {% else %}
     <h1>账号登录</h1>
     <p class="muted">登录后可使用数据导出、店铺授权与视频上传等功能。</p>
     {% if error %}
@@ -22,6 +33,7 @@
         <button type="submit" class="btn primary">登录</button>
       </div>
     </form>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

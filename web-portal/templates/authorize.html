@@ -10,7 +10,11 @@
   <h2>授权步骤</h2>
   <ol class="steps">
     <li>选择或填写店铺（如 <code>TKKJ1TH</code> 泰国、<code>TKKJ4PH</code> 菲律宾）。</li>
+    {% if login_enabled %}
     <li>请先 <a href="{{ url_for('login_page', next=url_for('authorize_page')) }}">登录网站</a>，再点击「前往 TikTok 授权」。</li>
+    {% else %}
+    <li>直接点击「前往 TikTok 授权」或下方一键授权链接即可（当前无需登录本站）。</li>
+    {% endif %}
     <li>授权链接请使用 <code>https://</code>；回调 URL 里的 <code>code</code> 只能用一次，失效后需重新授权。</li>
     <li>若自动跳回并显示成功，即可使用 <a href="{{ url_for('dashboard') }}">数据导出</a>。</li>
     <li>若跳转到 <code>/callback?app_key=...&amp;code=...</code> 且提示「请从授权页选择店铺」，请复制地址栏 URL，在下方「粘贴回调 URL 授权」中选择店铺并提交。</li>
@@ -58,7 +62,7 @@
       <span class="muted">暂无 TikTok 店铺</span>
       {% endfor %}
     </div>
-    <p class="muted auth-quick-tip">提示：先登录本站；支持 PH / TH / MY 等全部区域；<code>code</code> 只能用一次，授权后不要反复打开同一回调链接。</p>
+    <p class="muted auth-quick-tip">提示：{% if login_enabled %}先登录本站；{% endif %}支持 PH / TH / MY 等全部区域；<code>code</code> 只能用一次，授权后不要反复打开同一回调链接。</p>
   </div>
 
   <hr class="card-divider"/>

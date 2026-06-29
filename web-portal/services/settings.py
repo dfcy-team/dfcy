@@ -152,6 +152,13 @@ AUTO_EXCHANGE_TOKEN = os.environ.get("TIKTOK_AUTO_EXCHANGE", "true").strip().low
     "on",
 )
 
+LOGIN_REQUIRED = os.environ.get("PORTAL_LOGIN_REQUIRED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 
 def sync_credentials_from_app_env() -> None:
     """若 local.env 未填密钥，则从 TikTok_API app.env 读取。"""

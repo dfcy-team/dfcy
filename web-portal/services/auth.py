@@ -11,6 +11,7 @@ from flask import jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from services.db import db_session, fetch_one
+from services.settings import LOGIN_REQUIRED
 
 SESSION_USER_ID = "user_id"
 SESSION_USERNAME = "username"
@@ -146,7 +147,7 @@ def safe_next_url(raw: str | None) -> str:
 def login_required(view: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(view)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        if get_current_user():
+        if not LOGIN_REQUIRED or get_current_user():
             return view(*args, **kwargs)
         if request.path.startswith("/api/"):
             return jsonify({"ok": False, "error": "请先登录"}), 401
@@ -165,6 +166,8 @@ def _is_public_path(path: str) -> bool:
 
 
 def check_request_auth() -> Any | None:
+    if not LOGIN_REQUIRED:
+        return None
     if _is_public_path(request.path):
         return None
     endpoint = request.endpoint or ""

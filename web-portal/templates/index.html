@@ -10,6 +10,7 @@
   </p>
   <div class="hero-actions">
     <a class="btn primary" href="{{ url_for('dashboard') }}">进入数据导出</a>
+    <a class="btn" href="{{ url_for('ads_page') }}">广告数据</a>
     <a class="btn" href="{{ url_for('content_page') }}">视频上传</a>
     <a class="btn" href="{{ url_for('authorize_page') }}">店铺授权</a>
   </div>
@@ -70,8 +71,13 @@
   <div class="card">
     <h2>如何开始使用</h2>
     <ol class="steps">
+      {% if login_enabled %}
       <li>由企业管理员分配权限（不对外开放注册）。</li>
-      <li><strong>店铺数据</strong>：<a href="{{ url_for('authorize_page') }}">店铺授权</a> → 数据导出。</li>
+      {% else %}
+      <li>当前登录已关闭，可直接使用下方功能。</li>
+      {% endif %}
+      <li><strong>店铺数据</strong>：<a href="{{ url_for('authorize_page') }}">店铺授权</a> → <a href="{{ url_for('dashboard') }}">数据导出</a>。</li>
+      <li><strong>广告数据</strong>：<a href="{{ url_for('ads_page') }}">广告授权与导出</a>。</li>
       <li><strong>视频发布</strong>：<a href="{{ url_for('content_page') }}">视频上传</a> → TikTok 授权。</li>
       <li>需要帮助？<a href="{{ url_for('contact') }}">联系我们</a></li>
     </ol>

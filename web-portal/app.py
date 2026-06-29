@@ -46,6 +46,7 @@ from services.settings import (  # noqa: E402
     PRODUCTION_PUBLIC_BASE,
     PROJECT_ROOT,
     REDIRECT_URL,
+    LOGIN_REQUIRED,
     SECRET_KEY,
     SERVICE_ID,
     SITE_BRAND,
@@ -70,6 +71,7 @@ def _require_login():
 def inject_globals():
     return {
         "current_user": auth.get_current_user(),
+        "login_enabled": LOGIN_REQUIRED,
         "brand": SITE_BRAND,
         "domain": SITE_DOMAIN,
         "site_base": SITE_PUBLIC_BASE,
@@ -90,6 +92,8 @@ def inject_globals():
 
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
+    if not LOGIN_REQUIRED:
+        return render_template("login.html", login_disabled=True)
     if auth.get_current_user():
         return redirect(auth.safe_next_url(request.args.get("next")))
     error = ""
