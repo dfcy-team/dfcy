@@ -1,6 +1,6 @@
 {
   "app": "app.env",
-  "active": "TK1PH",
+  "active": "TKKJ1PH",
   "shops": [
     {
       "key": "TKKJ1PH",
@@ -8,13 +8,13 @@
         "tkkj1ph"
       ],
       "config": "config_TKKJ1PH.env",
-      "label": "TKKJ1PH / TIKTOK跨境1号店PH",
-      "export_tag": "TIKTOK跨境1号店PH",
+      "label": "TKKJ1PH",
+      "export_tag": "TIKTOK跨境1号PH",
       "shop_mode": "cross_border",
       "region": "PH",
       "platform": "tiktok",
       "enabled": true,
-      "notes": "TIKTOK跨境1号店PH"
+      "notes": "LuminaFlex"
     },
     {
       "key": "TKKJ1TH",
