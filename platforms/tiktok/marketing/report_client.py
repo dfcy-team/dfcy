@@ -435,6 +435,56 @@ def fetch_gmv_max_stores(advertiser_id: str, access_token: str | None = None) ->
     return [s for s in stores if isinstance(s, dict)]
 
 
+def _infer_shop_region(shop_tag: str | None) -> str:
+    tag = (shop_tag or "").upper()
+    for region in ("PH", "TH", "MY", "VN", "ID", "SG"):
+        if region in tag:
+            return region
+    return ""
+
+
+def _select_gmv_max_stores(
+    stores: list[dict[str, Any]],
+    *,
+    shop_tag: str | None = None,
+    advertiser_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """GMV Max 报表 API 的 store_ids 每次最多 1 个；跨境户常绑多国店铺，需按区域筛选。"""
+    if not stores:
+        return []
+
+    candidates = list(stores)
+    region = _infer_shop_region(shop_tag)
+    if region:
+        by_region = [
+            s
+            for s in candidates
+            if region in [str(c).upper() for c in (s.get("targeting_region_codes") or [])]
+        ]
+        if by_region:
+            candidates = by_region
+
+    adv = (advertiser_id or "").strip()
+    if adv:
+        by_adv = [
+            s
+            for s in candidates
+            if str((s.get("exclusive_authorized_advertiser_info") or {}).get("advertiser_id") or "").strip()
+            == adv
+        ]
+        if by_adv:
+            candidates = by_adv
+
+    available = [s for s in candidates if s.get("is_gmv_max_available")]
+    if available:
+        candidates = available
+
+    if len(candidates) > 1:
+        # 仍有多店时取第一个（已按区域/专属户收窄）；避免 API 40002
+        candidates = [candidates[0]]
+    return candidates
+
+
 def find_shop_exclusive_advertiser_id(
     advertisers: list[dict[str, Any]],
     access_token: str,
@@ -491,12 +541,17 @@ def _paginate_gmv_max_report(
     access_token: str,
     filtering: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    if not store_ids:
+        raise RuntimeError("store_ids 不能为空")
+    # TikTok GMV Max report: store_ids 最多 1 项（跨境广告户常返回 PH+TH 多店）
+    api_store_ids = [store_ids[0]]
+
     items: list[dict[str, Any]] = []
     page = 1
     while True:
         params: dict[str, Any] = {
             "advertiser_id": advertiser_id,
-            "store_ids": store_ids,
+            "store_ids": api_store_ids,
             "dimensions": dimensions,
             "metrics": metrics,
             "start_date": start_date,
@@ -589,11 +644,19 @@ def fetch_gmv_max_creative_report(
     商品池默认含：当日/历史报表商品、计划配置、店铺目录、视频 spu、可选补全 JSON。
     """
     token = access_token or get_access_token()
-    stores = fetch_gmv_max_stores(advertiser_id, token)
+    all_stores = fetch_gmv_max_stores(advertiser_id, token)
+    stores = _select_gmv_max_stores(
+        all_stores,
+        shop_tag=shop_tag,
+        advertiser_id=advertiser_id,
+    )
     store_ids = [str(s.get("store_id") or s.get("id") or "") for s in stores]
     store_ids = [sid for sid in store_ids if sid]
     if not store_ids:
-        raise RuntimeError("未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop")
+        hint = ""
+        if len(all_stores) > 1 and shop_tag:
+            hint = f"（广告户下共 {len(all_stores)} 个 GMV Max 店铺，未能按店名区域「{shop_tag}」匹配）"
+        raise RuntimeError(f"未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop{hint}")
 
     if campaign_name_filters:
         raw_campaign_ids = _collect_gmv_max_campaign_ids_by_name_filters(
@@ -1021,7 +1084,12 @@ def fetch_product_creative_rows(
         except ImportError:
             resolved_tag = ""
 
-    stores = fetch_gmv_max_stores(advertiser_id, token)
+    all_stores = fetch_gmv_max_stores(advertiser_id, token)
+    stores = _select_gmv_max_stores(
+        all_stores,
+        shop_tag=resolved_tag or None,
+        advertiser_id=advertiser_id,
+    )
     report, campaign_infos = fetch_gmv_max_creative_report(
         advertiser_id,
         start_date,
