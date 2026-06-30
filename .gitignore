@@ -10,6 +10,7 @@ web-portal/db.env
 config/db.ini
 
 # 日志与运行时数据
+logs/
 *.log
 web-portal/data/jobs/
 platforms/tiktok/**/logs/

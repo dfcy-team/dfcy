@@ -216,9 +216,16 @@ def run_export(
                 ) from e
             raise
     else:
-        camps = rc.fetch_all_campaigns(adv)
-        report = rc.fetch_campaign_report(adv, start_date, end_date)
-        rows = rc.build_live_rows(report, camps)
+        try:
+            rows = rc.fetch_gmv_max_live_rows(
+                adv,
+                start_date,
+                end_date,
+            )
+        except RuntimeError:
+            camps = rc.fetch_all_campaigns(adv)
+            report = rc.fetch_campaign_report(adv, start_date, end_date)
+            rows = rc.build_live_rows(report, camps)
 
     rows = _prepend_export_meta(rows, meta_prefix)
     name = ads_export_filename(

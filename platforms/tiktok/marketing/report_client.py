@@ -541,6 +541,37 @@ def _fetch_gmv_max_campaign_info(
     return cache[campaign_id]
 
 
+def _shopping_ads_type(info: dict[str, Any]) -> str:
+    return str(info.get("shopping_ads_type") or "").strip().upper()
+
+
+def classify_gmv_max_campaign_ids(
+    advertiser_id: str,
+    store_ids: list[str],
+    start_date: str,
+    end_date: str,
+    access_token: str,
+    *,
+    shopping_ads_type: str | None = None,
+    campaign_ids: list[str] | None = None,
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """按 shopping_ads_type（PRODUCT / LIVE）筛选 GMV Max 计划。"""
+    ids = campaign_ids
+    if ids is None:
+        ids = _collect_gmv_max_campaign_ids(
+            advertiser_id, store_ids, start_date, end_date, access_token
+        )
+    cache: dict[str, dict[str, Any]] = {}
+    filtered: list[str] = []
+    want = (shopping_ads_type or "").strip().upper()
+    for cid in ids:
+        info = _fetch_gmv_max_campaign_info(advertiser_id, cid, access_token, cache)
+        t = _shopping_ads_type(info)
+        if not want or t == want:
+            filtered.append(cid)
+    return filtered, cache
+
+
 def fetch_gmv_max_creative_report(
     advertiser_id: str,
     start_date: str,
@@ -565,19 +596,25 @@ def fetch_gmv_max_creative_report(
         raise RuntimeError("未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop")
 
     if campaign_name_filters:
-        campaign_ids = _collect_gmv_max_campaign_ids_by_name_filters(
+        raw_campaign_ids = _collect_gmv_max_campaign_ids_by_name_filters(
             advertiser_id, store_ids, start_date, end_date, token, campaign_name_filters
         )
     else:
-        campaign_ids = _collect_gmv_max_campaign_ids(
+        raw_campaign_ids = _collect_gmv_max_campaign_ids(
             advertiser_id, store_ids, start_date, end_date, token
         )
-    campaign_info_cache: dict[str, dict[str, Any]] = {}
-    campaign_infos: list[dict[str, Any]] = []
-    for cid in campaign_ids:
-        campaign_infos.append(
-            _fetch_gmv_max_campaign_info(advertiser_id, cid, token, campaign_info_cache)
-        )
+    campaign_ids, campaign_info_cache = classify_gmv_max_campaign_ids(
+        advertiser_id,
+        store_ids,
+        start_date,
+        end_date,
+        token,
+        shopping_ads_type="PRODUCT",
+        campaign_ids=raw_campaign_ids,
+    )
+    campaign_infos: list[dict[str, Any]] = [
+        campaign_info_cache[cid] for cid in campaign_ids if cid in campaign_info_cache
+    ]
 
     pool = item_group_pool
     if pool is None and expand_all_products:
@@ -996,6 +1033,182 @@ def fetch_product_creative_rows(
     )
     video_index = _fetch_gmv_max_video_index(advertiser_id, stores, token, campaign_infos)
     return build_gmv_max_creative_rows(report, video_index, currency=currency)
+
+
+GMV_MAX_LIVE_CAMPAIGN_METRICS = [
+    "cost",
+    "orders",
+    "cost_per_order",
+    "gross_revenue",
+    "roi",
+]
+
+GMV_MAX_LIVE_ROOM_DIMENSIONS = ["campaign_id", "room_id"]
+GMV_MAX_LIVE_ROOM_METRICS = [
+    "cost",
+    "net_cost",
+    "orders",
+    "cost_per_order",
+    "gross_revenue",
+    "roi",
+    "live_views",
+    "cost_per_live_view",
+    "10_second_live_views",
+    "cost_per_10_second_live_view",
+    "live_follows",
+]
+
+
+def _live_room_label(dims: dict[str, Any], campaign_name: str) -> str:
+    for key in ("room_name", "live_room_name", "live_name", "title"):
+        val = dims.get(key)
+        if val not in (None, "", "-"):
+            return str(val)
+    return campaign_name
+
+
+def _live_room_start(dims: dict[str, Any], fallback: Any = "-") -> str:
+    for key in ("room_start_time", "live_start_time", "start_time", "stat_time"):
+        val = dims.get(key)
+        if val not in (None, "", "-"):
+            return str(val)
+    return str(fallback or "-")
+
+
+def _build_gmv_max_live_row(
+    dims: dict[str, Any],
+    metrics: dict[str, Any],
+    *,
+    campaign_name: str,
+    campaign_id: str,
+    campaign_info: dict[str, Any],
+    currency: str,
+) -> list[Any]:
+    room_name = _live_room_label(dims, campaign_name)
+    orders = int(_num(metrics.get("orders")))
+    spend = _num(metrics.get("cost"))
+    net_spend = _num(metrics.get("net_cost") or metrics.get("cost"))
+    revenue = _num(metrics.get("gross_revenue"))
+    live_views = int(_num(metrics.get("live_views")))
+    live_10s = int(_num(metrics.get("10_second_live_views")))
+    row_currency = str(metrics.get("currency") or currency or "USD")
+    return [
+        room_name,
+        _live_room_start(dims, campaign_info.get("schedule_start_time")),
+        _gmv_status_label(campaign_info.get("operation_status")),
+        campaign_name,
+        campaign_id or "-",
+        _fmt_money(spend),
+        _fmt_money(net_spend),
+        orders,
+        orders,
+        _fmt_money(metrics.get("cost_per_order")),
+        _fmt_money(revenue),
+        _fmt_money(revenue),
+        _fmt_roi(metrics.get("roi")),
+        live_views if live_views > 0 else "-",
+        _fmt_money(metrics.get("cost_per_live_view"))
+        if metrics.get("cost_per_live_view") not in (None, "", "-")
+        else (_fmt_money(spend / live_views) if live_views > 0 else "-"),
+        live_10s if live_10s > 0 else "-",
+        _fmt_money(metrics.get("cost_per_10_second_live_view"))
+        if metrics.get("cost_per_10_second_live_view") not in (None, "", "-")
+        else (_fmt_money(spend / live_10s) if live_10s > 0 else "-"),
+        int(_num(metrics.get("live_follows"))) if _num(metrics.get("live_follows")) > 0 else "-",
+        row_currency,
+    ]
+
+
+def fetch_gmv_max_live_rows(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    access_token: str | None = None,
+    *,
+    currency: str = "USD",
+) -> list[list[Any]]:
+    """GMV Max 直播广告（shopping_ads_type=LIVE）按直播场次导出，对齐卖家中心「直播广告」。"""
+    token = access_token or get_access_token()
+    stores = fetch_gmv_max_stores(advertiser_id, token)
+    store_ids = [str(s.get("store_id") or s.get("id") or "") for s in stores]
+    store_ids = [sid for sid in store_ids if sid]
+    if not store_ids:
+        raise RuntimeError("未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop")
+
+    live_ids, cache = classify_gmv_max_campaign_ids(
+        advertiser_id,
+        store_ids,
+        start_date,
+        end_date,
+        token,
+        shopping_ads_type="LIVE",
+    )
+    if not live_ids:
+        return []
+
+    out: list[list[Any]] = []
+    try:
+        report_rows = _paginate_gmv_max_report(
+            advertiser_id,
+            store_ids,
+            GMV_MAX_LIVE_ROOM_DIMENSIONS,
+            GMV_MAX_LIVE_ROOM_METRICS,
+            start_date,
+            end_date,
+            token,
+            filtering={"campaign_ids": live_ids},
+        )
+        live_set = set(live_ids)
+        for row in report_rows:
+            dims, metrics = _row_dims_metrics(row)
+            cid = str(dims.get("campaign_id") or "")
+            if cid not in live_set:
+                continue
+            info = cache.get(cid) or {}
+            campaign_name = str(info.get("campaign_name") or cid)
+            out.append(
+                _build_gmv_max_live_row(
+                    dims,
+                    metrics,
+                    campaign_name=campaign_name,
+                    campaign_id=cid,
+                    campaign_info=info,
+                    currency=currency,
+                )
+            )
+        if out:
+            return out
+    except Exception:
+        pass
+
+    live_set = set(live_ids)
+    report_rows = _paginate_gmv_max_report(
+        advertiser_id,
+        store_ids,
+        GMV_MAX_CAMPAIGN_DIMENSIONS,
+        GMV_MAX_LIVE_CAMPAIGN_METRICS,
+        start_date,
+        end_date,
+        token,
+    )
+    for row in report_rows:
+        dims, metrics = _row_dims_metrics(row)
+        cid = str(dims.get("campaign_id") or "")
+        if cid not in live_set:
+            continue
+        info = cache.get(cid) or {}
+        campaign_name = str(info.get("campaign_name") or cid)
+        out.append(
+            _build_gmv_max_live_row(
+                dims,
+                metrics,
+                campaign_name=campaign_name,
+                campaign_id=cid,
+                campaign_info=info,
+                currency=currency,
+            )
+        )
+    return out
 
 
 def _num(val: Any) -> float:
