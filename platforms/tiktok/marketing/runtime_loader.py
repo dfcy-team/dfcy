@@ -46,6 +46,12 @@ def marketing_report_client() -> ModuleType:
     prev_oauth = sys.modules.get("oauth")
     sys.modules["config"] = marketing_config()
     sys.modules["oauth"] = oauth
+    ar_path = ROOT / "advertiser_region.py"
+    ar_spec = importlib.util.spec_from_file_location("advertiser_region", ar_path)
+    if ar_spec and ar_spec.loader:
+        ar_mod = importlib.util.module_from_spec(ar_spec)
+        ar_spec.loader.exec_module(ar_mod)
+        sys.modules["advertiser_region"] = ar_mod
     try:
         # 报表模块依赖顶层 config/oauth 名称
         sys.modules.pop("tiktok_marketing_report_client", None)

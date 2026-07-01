@@ -21,11 +21,11 @@ TIMEZONE_REGION: dict[str, str] = {
     "Asia/Singapore": "SG",
 }
 
+# 跨境广告户：仅从名称识别国家（顺序优先匹配；不含时区）
 NAME_REGION_HINTS: tuple[tuple[str, str], ...] = (
-    ("菲律宾", "PH"),
-    ("马来", "MY"),
-    ("泰国站", "TH"),
     ("泰国", "TH"),
+    ("马来", "MY"),
+    ("菲律宾", "PH"),
     ("-PH", "PH"),
     ("-MY", "MY"),
     ("-TH", "TH"),
@@ -48,6 +48,7 @@ def region_from_timezone(timezone: str) -> str:
 
 
 def region_from_name(name: str) -> str:
+    """从店铺/广告户名称文本识别 PH/TH/MY（不含时区）。"""
     text = (name or "").strip()
     if not text:
         return ""
@@ -60,8 +61,32 @@ def region_from_name(name: str) -> str:
     return ""
 
 
+def region_from_advertiser_name(name: str) -> str:
+    """跨境广告户名称 → 投放国家（仅看名称关键词）。"""
+    return region_from_name(name)
+
+
+def binding_region(ads_shop_label: str) -> str:
+    """授权绑定名上的默认站点（如 TIKTOK跨境1号店PH → PH）。"""
+    label = (ads_shop_label or "").strip()
+    if not label:
+        return ""
+    cfg = lookup_ads_shop_config(label)
+    if cfg:
+        return (cfg.get("region") or region_from_name(label) or "").upper()
+    return region_from_name(label)
+
+
+def detect_cross_border_region(*, name: str = "", ads_shop_label: str = "") -> str:
+    """跨境：名称含泰国/马来/菲律宾则对应 TH/MY/PH；否则用授权绑定店的站点。"""
+    reg = region_from_advertiser_name(name)
+    if reg:
+        return reg.upper()
+    return binding_region(ads_shop_label)
+
+
 def detect_region(*, timezone: str = "", name: str = "") -> str:
-    """优先时区，名称作兜底。"""
+    """legacy：优先时区（跨境入库请用 detect_cross_border_region）。"""
     reg = region_from_timezone(timezone)
     if reg:
         return reg
@@ -69,10 +94,59 @@ def detect_region(*, timezone: str = "", name: str = "") -> str:
 
 
 def _shop_family_base(name: str) -> str:
+    """同跨境系列基名（TIKTOK跨境1号店PH / TIKTOK跨境4号PH → 同一 1号 / 4号 系列）。"""
     text = (name or "").strip()
     if len(text) >= 2 and text[-2:].upper() in ("PH", "TH", "MY"):
-        return text[:-2]
+        text = text[:-2]
+    if text.endswith("号店"):
+        text = text[:-1]
     return text
+
+
+def shop_family_base(name: str) -> str:
+    return _shop_family_base(name)
+
+
+def find_cross_border_token_label(ads_label: str, token_labels: list[str]) -> str | None:
+    """跨境同系列：在已有 token 绑定名中找与 ads_label 同号店系列的一项。"""
+    label = (ads_label or "").strip()
+    if not label:
+        return None
+    cfg = lookup_ads_shop_config(label)
+    if not cfg or cfg.get("shop_mode") != "cross_border":
+        return None
+    if label in token_labels:
+        return label
+    base = _shop_family_base(label)
+    for cand in token_labels:
+        if _shop_family_base(cand) == base:
+            return cand
+    return None
+
+
+def resolve_advertiser_shop_meta(
+    ads_shop_label: str,
+    advertiser_name: str,
+) -> dict[str, str]:
+    """单个广告户 → 入库 shop_key / export_tag（本土固定绑定；跨境按名称分国家）。"""
+    label = (ads_shop_label or "").strip()
+    local_cfg = lookup_ads_shop_config(label)
+    if local_cfg and local_cfg.get("shop_mode") == "local":
+        reg = local_cfg.get("region") or region_from_name(label)
+        meta = resolve_export_shop_meta(label, reg or "")
+        meta["shop_key"] = str(meta.get("shop_key") or local_cfg["shop_key"]).upper()
+        return meta
+    region = region_from_advertiser_name(advertiser_name)
+    if not region:
+        return {
+            "shop_key": "",
+            "export_tag": "",
+            "region": "",
+            "shop_mode": "cross_border",
+        }
+    meta = resolve_export_shop_meta(label, region)
+    meta["shop_key"] = str(meta.get("shop_key") or "").upper()
+    return meta
 
 
 def _read_shop_ini() -> configparser.ConfigParser:
@@ -123,7 +197,7 @@ def resolve_export_shop_meta(ads_shop_label: str, region: str) -> dict[str, str]
     local_cfg = lookup_ads_shop_config(label)
     if local_cfg and local_cfg.get("shop_mode") == "local":
         return {
-            "shop_key": local_cfg["shop_key"],
+            "shop_key": local_cfg["shop_key"].upper(),
             "export_tag": local_cfg["export_tag"],
             "region": local_cfg["region"],
             "shop_mode": "local",
@@ -145,7 +219,7 @@ def resolve_export_shop_meta(ads_shop_label: str, region: str) -> dict[str, str]
             continue
         if _shop_family_base(shop_name) == base and site == reg:
             return {
-                "shop_key": sec,
+                "shop_key": sec.upper(),
                 "export_tag": export_tag or shop_name,
                 "region": reg,
                 "shop_mode": "cross_border",
@@ -164,7 +238,7 @@ def resolve_export_shop_meta(ads_shop_label: str, region: str) -> dict[str, str]
                     export_tag = cp.get(sec, "导出标签", fallback=shop_name).strip() or export_tag
                     break
     return {
-        "shop_key": shop_key,
+        "shop_key": str(shop_key).upper(),
         "export_tag": export_tag,
         "region": reg,
         "shop_mode": "cross_border",
@@ -215,7 +289,7 @@ def enrich_advertisers(
     """为每个广告户补充 timezone / currency / region。
 
     本土店：region 固定为绑定店铺站点（如 TIKTOK1号店PH → PH）。
-    跨境店：region 按时区识别。
+    跨境店：region 仅按广告户名称（泰国/马来/菲律宾）；无关键词则用授权绑定店站点。
     """
     local_cfg = lookup_ads_shop_config(ads_shop_label)
     is_local = bool(local_cfg and local_cfg.get("shop_mode") == "local")
@@ -232,7 +306,7 @@ def enrich_advertisers(
         if is_local:
             region = local_cfg.get("region") or region_from_name(ads_shop_label)
         else:
-            region = detect_region(timezone=tz, name=name)
+            region = detect_cross_border_region(name=name, ads_shop_label=ads_shop_label)
         if tz:
             item["timezone"] = tz
         if currency:
@@ -274,8 +348,8 @@ def resolve_advertiser_meta(
         currency = currency or str(info.get("currency") or "")
     if is_local:
         region = local_cfg.get("region") or region_from_name(ads_shop_label)
-    elif not region:
-        region = detect_region(timezone=timezone, name=name)
+    else:
+        region = detect_cross_border_region(name=name, ads_shop_label=ads_shop_label)
     return {
         "advertiser_id": adv_id,
         "advertiser_name": name,
