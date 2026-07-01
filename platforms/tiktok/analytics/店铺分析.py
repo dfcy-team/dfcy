@@ -407,6 +407,39 @@ def fetch_all_list(
     return merged, meta
 
 
+def fetch_sku_list_with_retry(
+    client: TikTokShopClient,
+    token: str,
+    start: str,
+    end: str,
+    page_size: int,
+    *,
+    retries: int = 2,
+) -> tuple[list[dict], dict]:
+    """SKU 表现 API 在批量任务中偶发空列表，空结果时短暂重试。"""
+    skus, meta = fetch_all_list(client, token, "sku_list", start, end, page_size=page_size)
+    if meta.get("error") or skus:
+        return skus, meta
+    for attempt in range(retries):
+        time.sleep(2.0 * (attempt + 1))
+        skus2, meta2 = fetch_all_list(client, token, "sku_list", start, end, page_size=page_size)
+        if meta2.get("error"):
+            return skus2, meta2
+        if skus2:
+            print(f"\n[SKU表现] 空列表重试第 {attempt + 1} 次成功，共 {len(skus2)} 条")
+            return skus2, meta2
+        meta = meta2
+    if not list_fetch_complete(meta) and not skus:
+        tc = meta.get("total_count")
+        print(
+            f"\n[SKU表现] 警告: API 返回空列表且分页未完成"
+            + (f"（total_count={tc}）" if tc is not None else "")
+            + "，按 0 条处理"
+        )
+        meta = {**meta, "complete": True}
+    return skus, meta
+
+
 def fetch_video_detail(
     client: TikTokShopClient,
     token: str,
@@ -2434,8 +2467,8 @@ def main() -> int:
             sku_meta = build_sku_meta_map(fetch_product_catalog(client, token))
         sku_has_next = False
         if args["all_pages"]:
-            skus, sku_list_meta = fetch_all_list(
-                client, token, "sku_list", start, end, page_size=args["size"]
+            skus, sku_list_meta = fetch_sku_list_with_retry(
+                client, token, start, end, args["size"]
             )
             out["sections"]["sku_list"] = {"data": {"skus": skus}, **sku_list_meta}
             if sku_list_meta.get("error"):
@@ -2453,9 +2486,11 @@ def main() -> int:
 
         if args["export_excel"] or args["save_tables"]:
             sku_ok = list_fetch_complete(sku_list_meta, sku_has_next)
-            if not sku_ok:
+            if not sku_ok and skus:
                 print("\n[SKU表现] 列表未拉全，不导出（请加 --all）")
                 failed += 1
+            elif not sku_ok and not skus:
+                print("\n[SKU表现] 无数据（分页未完整，按 0 条处理，不影响产品导出）")
             elif skus:
                 deliver_table(
                     "SKU表现",
