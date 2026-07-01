@@ -435,12 +435,41 @@ def fetch_gmv_max_stores(advertiser_id: str, access_token: str | None = None) ->
     return [s for s in stores if isinstance(s, dict)]
 
 
-def _infer_shop_region(shop_tag: str | None) -> str:
-    tag = (shop_tag or "").upper()
-    for region in ("PH", "TH", "MY", "VN", "ID", "SG"):
-        if region in tag:
-            return region
-    return ""
+def _resolve_gmv_region(
+    *,
+    shop_tag: str | None = None,
+    advertiser_id: str | None = None,
+    access_token: str | None = None,
+    advertisers: list[dict[str, Any]] | None = None,
+    target_region: str | None = None,
+) -> str:
+    """解析 GMV Max 店铺筛选用的国家：本土店固定站点；跨境店优先广告户时区。"""
+    reg = (target_region or "").strip().upper()
+    if reg:
+        return reg
+
+    from advertiser_region import lookup_ads_shop_config, region_from_name, resolve_advertiser_meta
+
+    label = (shop_tag or "").strip()
+    local_cfg = lookup_ads_shop_config(label)
+    if local_cfg and local_cfg.get("shop_mode") == "local":
+        return (local_cfg.get("region") or region_from_name(label) or "").upper()
+
+    adv = (advertiser_id or "").strip()
+    token = access_token or (get_access_token(label) if label else get_access_token())
+    if adv and token:
+        meta = resolve_advertiser_meta(
+            advertisers,
+            adv,
+            access_token=token,
+            get_json=_get_json,
+            ads_shop_label=label,
+        )
+        reg = (meta.get("region") or "").strip().upper()
+        if reg:
+            return reg
+
+    return region_from_name(label)
 
 
 def _select_gmv_max_stores(
@@ -448,13 +477,22 @@ def _select_gmv_max_stores(
     *,
     shop_tag: str | None = None,
     advertiser_id: str | None = None,
+    access_token: str | None = None,
+    advertisers: list[dict[str, Any]] | None = None,
+    target_region: str | None = None,
 ) -> list[dict[str, Any]]:
-    """GMV Max 报表 API 的 store_ids 每次最多 1 个；跨境户常绑多国店铺，需按区域筛选。"""
+    """GMV Max 报表 API 的 store_ids 每次最多 1 个；跨境户常绑多国店铺，需按投放国家筛选。"""
     if not stores:
         return []
 
     candidates = list(stores)
-    region = _infer_shop_region(shop_tag)
+    region = _resolve_gmv_region(
+        shop_tag=shop_tag,
+        advertiser_id=advertiser_id,
+        access_token=access_token,
+        advertisers=advertisers,
+        target_region=target_region,
+    )
     if region:
         by_region = [
             s
@@ -480,7 +518,7 @@ def _select_gmv_max_stores(
         candidates = available
 
     if len(candidates) > 1:
-        # 仍有多店时取第一个（已按区域/专属户收窄）；避免 API 40002
+        # 仍有多店时取第一个（已按国家/专属户收窄）；避免 API 40002
         candidates = [candidates[0]]
     return candidates
 
@@ -637,6 +675,8 @@ def fetch_gmv_max_creative_report(
     expand_all_products: bool = False,
     item_group_pool: list[str] | None = None,
     campaign_name_filters: list[str] | None = None,
+    target_region: str | None = None,
+    advertisers: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """拉取商品 GMV Max 创意级全量报表。
 
@@ -649,13 +689,28 @@ def fetch_gmv_max_creative_report(
         all_stores,
         shop_tag=shop_tag,
         advertiser_id=advertiser_id,
+        access_token=token,
+        advertisers=advertisers,
+        target_region=target_region,
     )
     store_ids = [str(s.get("store_id") or s.get("id") or "") for s in stores]
     store_ids = [sid for sid in store_ids if sid]
     if not store_ids:
         hint = ""
-        if len(all_stores) > 1 and shop_tag:
-            hint = f"（广告户下共 {len(all_stores)} 个 GMV Max 店铺，未能按店名区域「{shop_tag}」匹配）"
+        resolved = _resolve_gmv_region(
+            shop_tag=shop_tag,
+            advertiser_id=advertiser_id,
+            access_token=token,
+            advertisers=advertisers,
+            target_region=target_region,
+        )
+        if len(all_stores) > 1:
+            hint = f"（广告户下共 {len(all_stores)} 个 GMV Max 店铺"
+            if resolved:
+                hint += f"，未能匹配投放国家 {resolved}"
+            elif shop_tag:
+                hint += f"，未能识别店名/时区对应国家"
+            hint += "）"
         raise RuntimeError(f"未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop{hint}")
 
     if campaign_name_filters:
@@ -1072,6 +1127,8 @@ def fetch_product_creative_rows(
     shop_tag: str | None = None,
     expand_all_products: bool = False,
     campaign_name_filters: list[str] | None = None,
+    target_region: str | None = None,
+    advertisers: list[dict[str, Any]] | None = None,
 ) -> list[list[Any]]:
     """商品 GMV Max 创意报表（阶段 A：有消耗与汇总对齐官方；阶段 B 需 expand_all_products=True）。"""
     token = access_token or get_access_token()
@@ -1084,11 +1141,24 @@ def fetch_product_creative_rows(
         except ImportError:
             resolved_tag = ""
 
+    if advertisers is None and resolved_tag:
+        try:
+            from oauth import load_shop_token
+
+            tok = load_shop_token(resolved_tag)
+            if tok:
+                advertisers = tok.get("advertisers")
+        except ImportError:
+            pass
+
     all_stores = fetch_gmv_max_stores(advertiser_id, token)
     stores = _select_gmv_max_stores(
         all_stores,
         shop_tag=resolved_tag or None,
         advertiser_id=advertiser_id,
+        access_token=token,
+        advertisers=advertisers,
+        target_region=target_region,
     )
     report, campaign_infos = fetch_gmv_max_creative_report(
         advertiser_id,
@@ -1098,6 +1168,8 @@ def fetch_product_creative_rows(
         shop_tag=resolved_tag or None,
         expand_all_products=expand_all_products,
         campaign_name_filters=campaign_name_filters,
+        target_region=target_region,
+        advertisers=advertisers,
     )
     video_index = _fetch_gmv_max_video_index(advertiser_id, stores, token, campaign_infos)
     return build_gmv_max_creative_rows(report, video_index, currency=currency)
@@ -1194,10 +1266,21 @@ def fetch_gmv_max_live_rows(
     access_token: str | None = None,
     *,
     currency: str = "USD",
+    shop_tag: str | None = None,
+    target_region: str | None = None,
+    advertisers: list[dict[str, Any]] | None = None,
 ) -> list[list[Any]]:
     """GMV Max 直播广告（shopping_ads_type=LIVE）按直播场次导出，对齐卖家中心「直播广告」。"""
     token = access_token or get_access_token()
-    stores = fetch_gmv_max_stores(advertiser_id, token)
+    all_stores = fetch_gmv_max_stores(advertiser_id, token)
+    stores = _select_gmv_max_stores(
+        all_stores,
+        shop_tag=shop_tag,
+        advertiser_id=advertiser_id,
+        access_token=token,
+        advertisers=advertisers,
+        target_region=target_region,
+    )
     store_ids = [str(s.get("store_id") or s.get("id") or "") for s in stores]
     store_ids = [sid for sid in store_ids if sid]
     if not store_ids:

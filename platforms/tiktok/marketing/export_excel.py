@@ -206,6 +206,8 @@ def run_export(
                 start_date,
                 end_date,
                 shop_tag=label or None,
+                target_region=region or None,
+                advertisers=(tok or {}).get("advertisers"),
                 expand_all_products=False,
             )
         except RuntimeError as e:
@@ -221,6 +223,9 @@ def run_export(
                 adv,
                 start_date,
                 end_date,
+                shop_tag=label or None,
+                target_region=region or None,
+                advertisers=(tok or {}).get("advertisers"),
             )
         except RuntimeError:
             camps = rc.fetch_all_campaigns(adv)
