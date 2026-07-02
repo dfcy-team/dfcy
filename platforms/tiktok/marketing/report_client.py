@@ -1,8 +1,17 @@
 # -*- coding: utf-8 -*-
-"""TikTok Marketing API 报表拉取。"""
+"""TikTok Marketing API 报表拉取。
+
+广告入库加速（供每日导入 / ad_importer 调用）：
+- ``advertiser_gmv_max_has_cost``：零消耗预检，cost=0 跳过后续创意/直播明细
+- ``fetch_product_creative_rows(skip_video_index=True)``：跳过视频索引（无视频标题，金额不变）
+- 环境变量 ``TIKTOK_MARKETING_HTTP_TIMEOUT``：HTTP 超时秒数（默认 60）
+
+单店广告户并发、多店并行由 ``每日数据导入数据库`` 配置（``TIKTOK_AD_ADV_WORKERS``、``run_local_ads_parallel.py``）。
+"""
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
@@ -93,8 +102,9 @@ def _get_json(url: str, access_token: str, params: dict[str, Any] | None = None)
             q[k] = str(v)
     full = f"{url}?{urllib.parse.urlencode(q)}" if q else url
     req = urllib.request.Request(full, headers={"Access-Token": access_token, "Cache-Control": "no-cache"})
+    timeout = int(os.environ.get("TIKTOK_MARKETING_HTTP_TIMEOUT", "60") or "60")
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8", errors="replace")
@@ -318,6 +328,48 @@ def _collect_gmv_max_campaign_ids(
         if cid and cid not in campaign_ids:
             campaign_ids.append(cid)
     return campaign_ids
+
+
+def advertiser_gmv_max_has_cost(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    access_token: str | None = None,
+    *,
+    shop_tag: str | None = None,
+    target_region: str | None = None,
+    advertisers: list[dict[str, Any]] | None = None,
+) -> bool:
+    """当日 GMV Max 是否有消耗（cost>0；零消耗广告户可跳过后续创意/直播明细拉取）。"""
+    token = access_token or get_access_token()
+    all_stores = fetch_gmv_max_stores(advertiser_id, token)
+    stores = _select_gmv_max_stores(
+        all_stores,
+        shop_tag=shop_tag,
+        advertiser_id=advertiser_id,
+        access_token=token,
+        advertisers=advertisers,
+        target_region=target_region,
+    )
+    store_ids = [str(s.get("store_id") or s.get("id") or "") for s in stores]
+    store_ids = [sid for sid in store_ids if sid]
+    if not store_ids:
+        raise RuntimeError("未找到 GMV Max 店铺，请确认广告主已授权 TikTok Shop")
+
+    rows = _paginate_gmv_max_report(
+        advertiser_id,
+        store_ids,
+        GMV_MAX_CAMPAIGN_DIMENSIONS,
+        ["cost"],
+        start_date,
+        end_date,
+        token,
+    )
+    for row in rows:
+        _, metrics = _row_dims_metrics(row)
+        if _num(metrics.get("cost")) > 0:
+            return True
+    return False
 
 
 def _collect_gmv_max_campaign_ids_by_name_filters(
@@ -1129,6 +1181,7 @@ def fetch_product_creative_rows(
     campaign_name_filters: list[str] | None = None,
     target_region: str | None = None,
     advertisers: list[dict[str, Any]] | None = None,
+    skip_video_index: bool = False,
 ) -> list[list[Any]]:
     """商品 GMV Max 创意报表（阶段 A：有消耗与汇总对齐官方；阶段 B 需 expand_all_products=True）。"""
     token = access_token or get_access_token()
@@ -1171,7 +1224,9 @@ def fetch_product_creative_rows(
         target_region=target_region,
         advertisers=advertisers,
     )
-    video_index = _fetch_gmv_max_video_index(advertiser_id, stores, token, campaign_infos)
+    video_index: dict[str, dict[str, Any]] = {}
+    if not skip_video_index:
+        video_index = _fetch_gmv_max_video_index(advertiser_id, stores, token, campaign_infos)
     return build_gmv_max_creative_rows(report, video_index, currency=currency)
 
 
