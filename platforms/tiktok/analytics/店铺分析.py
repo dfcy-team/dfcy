@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
 import sys
 import time
@@ -1487,6 +1488,44 @@ def enrich_product_catalog(
     return merged
 
 
+# Product 目录 API 限流（如 36009002 downstream）；遇限流指数退避重试
+_CATALOG_RATE_LIMIT_CODES = frozenset({36009002, "36009002", 20001, "20001"})
+_CATALOG_RATE_LIMIT_RETRIES = 4
+_CATALOG_RATE_LIMIT_BASE_WAIT = 5.0
+
+
+def is_rate_limit_error(resp: dict) -> bool:
+    code = resp.get("code")
+    if code in _CATALOG_RATE_LIMIT_CODES or str(code) in {str(c) for c in _CATALOG_RATE_LIMIT_CODES}:
+        return True
+    msg = str(resp.get("message") or "").lower()
+    return "too many request" in msg or "rate limit" in msg
+
+
+def _post_catalog_page_with_retry(
+    client: TikTokShopClient,
+    path: str,
+    token: str,
+    extra: dict,
+    *,
+    label: str,
+) -> dict:
+    last: dict = {}
+    for attempt in range(_CATALOG_RATE_LIMIT_RETRIES):
+        r = client.post(path, token, {}, extra)
+        if is_ok(r) or not is_rate_limit_error(r):
+            return r
+        last = r
+        if attempt < _CATALOG_RATE_LIMIT_RETRIES - 1:
+            wait = _CATALOG_RATE_LIMIT_BASE_WAIT * (2**attempt) + random.uniform(0, 1.5)
+            print(
+                f"  {label}: code={r.get('code')} 限流，"
+                f"{wait:.1f}s 后重试 ({attempt + 1}/{_CATALOG_RATE_LIMIT_RETRIES - 1})..."
+            )
+            time.sleep(wait)
+    return last
+
+
 def fetch_product_catalog_local(client: TikTokShopClient, token: str) -> dict[str, dict]:
     """seller.product.basic → 本店已发布商品（分析里的 product_id 多为这类 ID）。"""
     catalog: dict[str, dict] = {}
@@ -1495,7 +1534,13 @@ def fetch_product_catalog_local(client: TikTokShopClient, token: str) -> dict[st
         extra: dict = {"shop_cipher": CIPHER, "page_size": 100}
         if page_token:
             extra["page_token"] = page_token
-        r = client.post("/product/202309/products/search", token, {}, extra)
+        r = _post_catalog_page_with_retry(
+            client,
+            "/product/202309/products/search",
+            token,
+            extra,
+            label="本地商品目录",
+        )
         if not is_ok(r):
             if not catalog:
                 print(f"  本地商品目录: code={r.get('code')} {str(r.get('message', ''))[:100]}")
@@ -1518,7 +1563,13 @@ def fetch_product_catalog_global(client: TikTokShopClient, token: str) -> dict[s
         extra: dict = {"page_size": 100}
         if page_token:
             extra["page_token"] = page_token
-        r = client.post("/product/202309/global_products/search", token, {}, extra)
+        r = _post_catalog_page_with_retry(
+            client,
+            "/product/202309/global_products/search",
+            token,
+            extra,
+            label="全球商品目录",
+        )
         if not is_ok(r):
             if not catalog:
                 print(f"  全球商品目录: code={r.get('code')} {str(r.get('message', ''))[:100]}")
@@ -2354,6 +2405,8 @@ def main() -> int:
 
         # 视频详情放到商品/SKU 导出之后，避免 SSL 中断导致整次无 Excel
 
+    catalog_for_sku: dict[str, dict] | None = None
+
     if want["product"]:
         print(f"\n正在拉取商品目录（{catalog_api_label()}，名称/状态）...")
         catalog = fetch_product_catalog(client, token)
@@ -2388,6 +2441,7 @@ def main() -> int:
         catalog = enrich_product_catalog(
             client, token, catalog, product_ids, LOG_DIR, workers=args["product_workers"]
         )
+        catalog_for_sku = catalog
 
         product_rows: list[dict] | None = None
         product_failed: list[str] = []
@@ -2463,8 +2517,12 @@ def main() -> int:
     if want["sku"]:
         sku_meta: dict[str, dict] = {}
         if is_zhanfu_export():
-            print("\n正在拉取商品目录（SKU 表需要商品名/状态）...")
-            sku_meta = build_sku_meta_map(fetch_product_catalog(client, token))
+            if catalog_for_sku is not None:
+                print("\nSKU 表复用产品步骤商品目录（跳过重复目录 API）")
+                sku_meta = build_sku_meta_map(catalog_for_sku)
+            else:
+                print("\n正在拉取商品目录（SKU 表需要商品名/状态）...")
+                sku_meta = build_sku_meta_map(fetch_product_catalog(client, token))
         sku_has_next = False
         if args["all_pages"]:
             skus, sku_list_meta = fetch_sku_list_with_retry(
