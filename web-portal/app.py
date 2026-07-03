@@ -446,8 +446,8 @@ def api_ads_export():
         advertiser_id = marketing_auth.resolve_default_advertiser_id(shop_label)
     if not advertiser_id or not start_date or not end_date:
         return jsonify({"ok": False, "error": "请填写广告账户与日期范围（未选广告户时将自动使用卖家中心绑定户）"}), 400
-    if report_kind not in ("creative", "live"):
-        return jsonify({"ok": False, "error": "报表类型须为 creative 或 live"}), 400
+    if report_kind not in ("creative", "live", "cost"):
+        return jsonify({"ok": False, "error": "报表类型须为 creative、live 或 cost"}), 400
     try:
         job_id = ads_exporter.start_ads_export(
             advertiser_id=advertiser_id,

@@ -205,9 +205,10 @@
     </label>
     <p class="muted span2" style="margin:0;">未手动选择时，将自动使用「卖家中心绑定」的默认广告户。</p>
     <label>报表类型
-      <select name="report_kind">
+      <select name="report_kind" id="ads-export-kind">
         <option value="creative">广告创意</option>
         <option value="live">直播广告</option>
+        <option value="cost">总花费</option>
       </select>
     </label>
     <label>开始日期
@@ -219,7 +220,7 @@
     <label class="span2">店名/导出标签
       <input type="text" name="file_prefix" id="ads-export-prefix" list="ads-shop-names" placeholder="如 TIKTOK2号店PH"/>
     </label>
-    <p class="muted span2" style="margin:0;">Excel 文件名：<code>店铺简写_导出标签_国家_广告户名_报表类型_日期.xlsx</code>（例：<code>tkkj1my_TIKTOK跨境1号店MY_MY_…</code>）。表内前五列含店铺简写、导出标签、投放国家，便于入库。</p>
+    <p class="muted span2" style="margin:0;" id="ads-export-name-hint">Excel 文件名：<code>店铺简写_导出标签_国家_广告户名_报表类型_日期.xlsx</code>（例：<code>tkkj1my_TIKTOK跨境1号店MY_MY_…</code>）。表内前五列含店铺简写、导出标签、投放国家，便于入库。</p>
     <button type="submit" class="btn primary span2">开始导出</button>
   </form>
   <script id="ads-bindings-json" type="application/json">{{ bindings_json | safe }}</script>
@@ -248,6 +249,7 @@
     <li><strong>跨境店</strong>（如 TIKTOK跨境1号店PH）：一次授权列出多国广告户，导出时按<strong>时区识别投放国家</strong>，自动匹配 TKKJ1PH / TKKJ1TH / TKKJ1MY 等同系列店铺。</li>
     <li><strong>广告创意</strong>：仅导出 GMV Max <strong>商品计划</strong>（<code>shopping_ads_type=PRODUCT</code>），与卖家中心「商品计划创意」一致。</li>
     <li><strong>直播广告</strong>：仅导出 GMV Max <strong>直播计划</strong>（<code>shopping_ads_type=LIVE</code>），与卖家中心「直播广告」一致；与商品创意分开，不会混在一起。</li>
+    <li><strong>总花费</strong>：按推广系列 × 日导出计划级消耗（GMV Max + 社区互动等），对齐站斧 <code>Cost_*.xlsx</code>；文件名 <code>Cost_{广告户ID}_{开始}_{结束}_{时间}.xlsx</code>。</li>
     <li><strong>BC 内新增广告户</strong>：网站运行时会按 <code>config\广告定时刷新.ini</code> 自动刷新（默认每天 00:05、22:05，马尼拉时间）；也可手动点「刷新广告户」。</li>
     <li><strong>删除授权</strong>：仅清除本站保存的 token 与广告户绑定，不影响 TikTok 广告后台本身；删除后需重新「连接该店广告账户」才能再导出。</li>
     <li>Shop 店铺授权在 <a href="{{ url_for('authorize_page') }}">店铺授权</a> 页，与广告授权分开。</li>
@@ -450,6 +452,21 @@
 
   const exportForm = document.getElementById("form-ads-export");
   if (!exportForm) return;
+
+  const kindSelect = document.getElementById("ads-export-kind");
+  const nameHint = document.getElementById("ads-export-name-hint");
+  function updateExportNameHint() {
+    if (!nameHint || !kindSelect) return;
+    if (kindSelect.value === "cost") {
+      nameHint.innerHTML =
+        'Excel 文件名：<code>Cost_{广告户ID}_{开始}_{结束}_{时间}.xlsx</code>（例：<code>Cost_7651940571352580114_2026-06-01_2026-06-30_2026-07-03 11_22_32.xlsx</code>）。表结构与站斧 Cost 导出一致。';
+    } else {
+      nameHint.innerHTML =
+        'Excel 文件名：<code>店铺简写_导出标签_国家_广告户名_报表类型_日期.xlsx</code>（例：<code>tkkj1my_TIKTOK跨境1号店MY_MY_…</code>）。表内前五列含店铺简写、导出标签、投放国家，便于入库。';
+    }
+  }
+  kindSelect?.addEventListener("change", updateExportNameHint);
+  updateExportNameHint();
 
   const startInput = exportForm.querySelector('input[name="start_date"]');
   const endInput = exportForm.querySelector('input[name="end_date"]');

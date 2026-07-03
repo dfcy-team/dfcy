@@ -15,12 +15,13 @@ MARKETING_ROOT = Path(__file__).resolve().parents[2] / "platforms" / "tiktok" / 
 PROJECT_ROOT = MARKETING_ROOT.parents[2]
 
 
-def _load_export_module():
-    path = MARKETING_ROOT / "export_excel.py"
-    spec = importlib.util.spec_from_file_location("tiktok_marketing_export", path)
+def _load_export_module(report_kind: str = "creative"):
+    mod_name = "tiktok_marketing_export_cost" if report_kind == "cost" else "tiktok_marketing_export"
+    path = MARKETING_ROOT / ("export_cost_excel.py" if report_kind == "cost" else "export_excel.py")
+    spec = importlib.util.spec_from_file_location(mod_name, path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
-    sys.modules["tiktok_marketing_export"] = mod
+    sys.modules[mod_name] = mod
     prev = sys.path[:]
     for p in (str(PROJECT_ROOT), str(MARKETING_ROOT)):
         if p not in sys.path:
@@ -36,20 +37,28 @@ def _run_export_job(job: dict) -> None:
     job["status"] = "running"
     _save_job(job)
     try:
-        mod = _load_export_module()
-        _append_log(job, f"拉取 {job['report_kind']} 报表 {job['start_date']} ~ {job['end_date']}\n")
+        kind = job["report_kind"]
+        mod = _load_export_module(kind)
+        label = "总花费" if kind == "cost" else kind
+        _append_log(job, f"拉取 {label} 报表 {job['start_date']} ~ {job['end_date']}\n")
         prev = sys.path[:]
         if str(MARKETING_ROOT) not in sys.path:
             sys.path.insert(0, str(MARKETING_ROOT))
         try:
-            out = mod.run_export(
-                advertiser_id=job["advertiser_id"],
-                start_date=job["start_date"],
-                end_date=job["end_date"],
-                report_kind=job["report_kind"],
-                file_prefix=job["file_prefix"],
-                shop_label=job.get("shop_label") or job["file_prefix"],
-            )
+            export_kwargs = {
+                "advertiser_id": job["advertiser_id"],
+                "start_date": job["start_date"],
+                "end_date": job["end_date"],
+                "shop_label": job.get("shop_label") or job["file_prefix"],
+            }
+            if kind == "cost":
+                out = mod.run_export(**export_kwargs)
+            else:
+                out = mod.run_export(
+                    **export_kwargs,
+                    report_kind=kind,
+                    file_prefix=job["file_prefix"],
+                )
         finally:
             sys.path[:] = prev
         job["output_file"] = str(out)

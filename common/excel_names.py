@@ -235,7 +235,17 @@ def excel_sheet_title(kind: str, *, finance: bool = False) -> str:
 ADS_REPORT_SUFFIX: dict[str, str] = {
     "creative": "广告创意",
     "live": "直播广告",
+    "cost": "总花费",
 }
+
+
+def cost_export_filename(advertiser_id: str, start: str, end: str, *, stamp: str | None = None) -> str:
+    """站斧 Cost 表命名：Cost_{广告户ID}_{开始}_{结束}_{时间}.xlsx"""
+    from datetime import datetime
+
+    ts = stamp or datetime.now().strftime("%Y-%m-%d %H_%M_%S")
+    adv = sanitize_filename_part(advertiser_id, max_len=32) or "adv"
+    return f"Cost_{adv}_{start}_{end}_{ts}.xlsx"
 
 
 def sanitize_filename_part(text: str, *, max_len: int = 48) -> str:
