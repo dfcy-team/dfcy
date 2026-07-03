@@ -161,7 +161,7 @@ def _seed_admin(conn: pymysql.connections.Connection) -> None:
     username = os.environ.get("PORTAL_ADMIN_USER", "admin").strip() or "admin"
     password = os.environ.get("PORTAL_ADMIN_PASSWORD", "dfcyadmin").strip() or "dfcyadmin"
     display_name = os.environ.get("PORTAL_ADMIN_NAME", "系统管理员").strip() or "系统管理员"
-    email = os.environ.get("PORTAL_ADMIN_EMAIL", "postmaster@dingfengchuangyu.top").strip()
+    email = os.environ.get("PORTAL_ADMIN_EMAIL", "postmaster@dingfengchuangyu.com").strip()
     pwd_hash = generate_password_hash(password)
 
     with conn.cursor() as cur:

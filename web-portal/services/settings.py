@@ -87,7 +87,7 @@ PORT = int(os.environ.get("LISTEN_PORT", "80"))
 SITE_DOMAIN = os.environ.get("SITE_DOMAIN", "dingfengchuangyu.com").strip() or "dingfengchuangyu.com"
 SITE_BRAND = os.environ.get("SITE_BRAND", "鼎峰 TikTok Shop 数据平台").strip()
 COMPANY_NAME = os.environ.get("COMPANY_NAME", "厦门市鼎峰创域科技有限公司").strip()
-CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "postmaster@dingfengchuangyu.top").strip()
+CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "postmaster@dingfengchuangyu.com").strip()
 CONTACT_ADDRESS = os.environ.get(
     "CONTACT_ADDRESS",
     "福建省福州市厦门市厦门火炬高新区软件园三期溪西山尾路3号1901-4",
