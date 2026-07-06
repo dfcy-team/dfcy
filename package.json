@@ -1,0 +1,9 @@
+{
+  "name": "saas-collab-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Starter workspace for a SaaS collaboration system.",
+  "scripts": {
+    "test": "echo \"No tests configured yet\""
+  }
+}
