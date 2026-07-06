@@ -36,5 +36,6 @@ def load_db_config(ini_path: Path | None = None) -> dict:
         "charset": cp.get(sec, "charset", fallback="utf8mb4"),
         "product_table": cp.get(tables, "product_table", fallback="product_performance_report"),
         "sku_table": cp.get(tables, "sku_table", fallback="sku_performance_report"),
+        "affiliate_table": cp.get(tables, "affiliate_table", fallback="affiliate_product_performance_report"),
         "site_map": site_map or {"PH": "菲律宾", "MY": "马来", "TH": "泰国"},
     }

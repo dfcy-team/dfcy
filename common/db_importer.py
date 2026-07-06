@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from common.cross_border_shop import is_primary_shop_for_import
 from common.db_config import load_db_config
 from common.file_importer import analytics_cache_filename, local_cache_filename
 
@@ -264,6 +265,19 @@ def import_shop_analytics_to_db(
     data_time = report_date(start, api_end)
     site = site_from_shop_abbr(shop_key, cfg["site_map"])
     shop_display = export_tag or shop_name or shop_key
+
+    ok_primary, primary_msg = is_primary_shop_for_import(shop_key)
+    if not ok_primary:
+        return {
+            "shop": shop_key,
+            "data_time": data_time,
+            "site": site,
+            "product_rows": 0,
+            "sku_rows": 0,
+            "ok": True,
+            "messages": [f"[跳过入库] {primary_msg}"],
+            "skipped_non_primary": True,
+        }
 
     result = {
         "shop": shop_key,

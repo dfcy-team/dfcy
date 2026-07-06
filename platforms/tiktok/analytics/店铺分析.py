@@ -408,6 +408,26 @@ def fetch_all_list(
     return merged, meta
 
 
+_SKU_RETRY_WAITS = (5.0, 15.0, 30.0, 30.0, 30.0)
+
+
+def classify_sku_empty(meta: dict | None, product_row_count: int | None) -> str:
+    """区分限流空返回 vs 真无数据。返回 rate_limit_suspect | likely_no_data。"""
+    if not meta:
+        return "likely_no_data"
+    err = meta.get("error")
+    if err and isinstance(err, dict) and is_rate_limit_error(err):
+        return "rate_limit_suspect"
+    tc = meta.get("total_count")
+    if tc is not None and int(tc) > 0:
+        return "rate_limit_suspect"
+    if not meta.get("complete", True):
+        return "rate_limit_suspect"
+    if product_row_count is not None and product_row_count > 0:
+        return "rate_limit_suspect"
+    return "likely_no_data"
+
+
 def fetch_sku_list_with_retry(
     client: TikTokShopClient,
     token: str,
@@ -415,21 +435,43 @@ def fetch_sku_list_with_retry(
     end: str,
     page_size: int,
     *,
-    retries: int = 2,
+    product_row_count: int | None = None,
+    retries: int = 5,
 ) -> tuple[list[dict], dict]:
-    """SKU 表现 API 在批量任务中偶发空列表，空结果时短暂重试。"""
+    """SKU 表现 API 在批量任务中偶发空列表（code=0），空结果时加长退避重试。"""
     skus, meta = fetch_all_list(client, token, "sku_list", start, end, page_size=page_size)
     if meta.get("error") or skus:
         return skus, meta
-    for attempt in range(retries):
-        time.sleep(2.0 * (attempt + 1))
+
+    empty_kind = classify_sku_empty(meta, product_row_count)
+    waits = _SKU_RETRY_WAITS[: max(1, retries)]
+    for attempt, wait in enumerate(waits):
+        if empty_kind == "rate_limit_suspect":
+            hint = "疑似限流空返回（code=0 无 SKU，但产品有数据或分页未完成）"
+        else:
+            hint = "空列表"
+        print(f"\n[SKU表现] {hint}，{wait:.0f}s 后重试 ({attempt + 1}/{len(waits)})...")
+        time.sleep(wait)
         skus2, meta2 = fetch_all_list(client, token, "sku_list", start, end, page_size=page_size)
         if meta2.get("error"):
             return skus2, meta2
         if skus2:
-            print(f"\n[SKU表现] 空列表重试第 {attempt + 1} 次成功，共 {len(skus2)} 条")
+            print(f"\n[SKU表现] 重试第 {attempt + 1} 次成功，共 {len(skus2)} 条")
             return skus2, meta2
         meta = meta2
+        empty_kind = classify_sku_empty(meta, product_row_count)
+
+    final_kind = classify_sku_empty(meta, product_row_count)
+    if not skus:
+        tc = meta.get("total_count")
+        if final_kind == "rate_limit_suspect":
+            print(
+                f"\n[SKU表现] 警告: {len(waits)} 次重试后仍为空，判定为【限流空返回】"
+                + (f"（total_count={tc}）" if tc is not None else "")
+                + "；建议分阶段跑 SKU 或加大店间间隔"
+            )
+        else:
+            print("\n[SKU表现] 判定为【真无数据】（code=0 且分页完整、无 total_count）")
     if not list_fetch_complete(meta) and not skus:
         tc = meta.get("total_count")
         print(
@@ -2515,18 +2557,47 @@ def main() -> int:
                 print("\n[商品表现] 无商品数据，不导出")
 
     if want["sku"]:
+        if want["product"]:
+            product_hint = len(product_rows) if product_rows else len(list_items) if list_items else 0
+            cooldown = float(os.environ.get("TTS_PRODUCT_SKU_COOLDOWN_SEC", "12") or "12")
+            if cooldown > 0 and product_hint > 0:
+                print(f"\n[SKU表现] 产品步骤已完成（{product_hint} 条），冷却 {cooldown:.0f}s 后再拉 SKU ...")
+                time.sleep(cooldown)
         sku_meta: dict[str, dict] = {}
+        sku_product_count: int | None = None
+        if want["product"]:
+            sku_product_count = (
+                len(product_rows)
+                if product_rows
+                else (len(list_items) if list_items else None)
+            )
         if is_zhanfu_export():
             if catalog_for_sku is not None:
                 print("\nSKU 表复用产品步骤商品目录（跳过重复目录 API）")
                 sku_meta = build_sku_meta_map(catalog_for_sku)
             else:
                 print("\n正在拉取商品目录（SKU 表需要商品名/状态）...")
-                sku_meta = build_sku_meta_map(fetch_product_catalog(client, token))
+                catalog_raw = fetch_product_catalog(client, token)
+                sku_meta = build_sku_meta_map(catalog_raw)
+                catalog_size = len(sku_meta)
+                if not want["product"] and catalog_size > 0:
+                    sku_product_count = catalog_size
+                    cooldown = float(os.environ.get("TTS_SKU_CATALOG_COOLDOWN_SEC", "15") or "15")
+                    if cooldown > 0:
+                        print(
+                            f"\n[SKU表现] 目录已拉取（{catalog_size} 个商品），"
+                            f"冷却 {cooldown:.0f}s 后再拉 SKU 表现（减轻限流）..."
+                        )
+                        time.sleep(cooldown)
         sku_has_next = False
         if args["all_pages"]:
             skus, sku_list_meta = fetch_sku_list_with_retry(
-                client, token, start, end, args["size"]
+                client,
+                token,
+                start,
+                end,
+                args["size"],
+                product_row_count=sku_product_count,
             )
             out["sections"]["sku_list"] = {"data": {"skus": skus}, **sku_list_meta}
             if sku_list_meta.get("error"):

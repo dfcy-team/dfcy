@@ -12,6 +12,7 @@ charset = utf8mb4
 [表名]
 product_table = product_performance_report
 sku_table = sku_performance_report
+affiliate_table = affiliate_product_performance_report
 
 [站点]
 PH = 菲律宾
