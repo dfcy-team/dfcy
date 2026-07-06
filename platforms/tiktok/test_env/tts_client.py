@@ -519,16 +519,27 @@ def get_shops(resp: dict) -> list[dict]:
 
 
 def pick_shop(shops: list[dict], region: str, manual_cipher: str, shop_code: str = "") -> tuple[str, dict | None]:
+    """从 /authorization/shops 列表里选一家店写入 env。
+
+    跨境同品牌多国店（如 LuminaFlex PH/TH/MY）名称相同，必须靠 region 区分。
+    续绑时 env 里可能残留上一国的 cipher，因此 region 优先于 manual_cipher。
+    """
+    target_region = (region or "").upper()
+
+    if shop_code:
+        for s in shops:
+            if s.get("code") == shop_code:
+                return s.get("cipher", ""), s
+
+    if target_region:
+        for s in shops:
+            if (s.get("region") or "").upper() == target_region:
+                return s.get("cipher", ""), s
+
     if manual_cipher:
         for s in shops:
             if s.get("cipher") == manual_cipher:
                 return manual_cipher, s
         return manual_cipher, None
-    if shop_code:
-        for s in shops:
-            if s.get("code") == shop_code:
-                return s.get("cipher", ""), s
-    for s in shops:
-        if (s.get("region") or "").upper() == region:
-            return s.get("cipher", ""), s
+
     return (shops[0].get("cipher", ""), shops[0]) if shops else ("", None)
