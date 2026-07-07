@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "apps.tenants",
     "apps.accounts",
     "apps.permissions",
+    "apps.rpa",
 ]
 
 MIDDLEWARE = [
