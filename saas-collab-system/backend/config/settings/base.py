@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "apps.tenants",
     "apps.accounts",
+    "apps.permissions",
 ]
 
 MIDDLEWARE = [
