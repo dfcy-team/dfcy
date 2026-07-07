@@ -1,7 +1,16 @@
 """Root URL configuration for the backend project."""
-from django.urls import path
+from django.contrib import admin
+from django.urls import include, path
 
 
 urlpatterns = [
-    path("api/", lambda request: None, name="api-placeholder"),
+    path("admin/", admin.site.urls),
+    path("api/internal/", include("apps.accounts.urls_internal")),
+    path("api/external/", include("apps.accounts.urls_external")),
+    path("api/rpa/", include("apps.rpa.urls")),
+    path("api/platform/", include("apps.integrations.urls_platform")),
+    path("api/wechat/", include("apps.integrations.urls_wechat")),
+    path("api/feishu/", include("apps.integrations.urls_feishu")),
+    path("api/finance/", include("apps.finance.urls")),
+    path("api/report/", include("apps.reports.urls")),
 ]
