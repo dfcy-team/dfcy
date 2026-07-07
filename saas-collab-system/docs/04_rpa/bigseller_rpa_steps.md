@@ -1,0 +1,440 @@
+# BigSeller RPA 操作步骤文档
+
+## 约束说明
+
+- 本文档仅描述 RPA 操作步骤，不实现自动化脚本。
+- 不记录真实 BigSeller 账号、密码、Token、Cookie 或验证码。
+- 页面选择器全部使用占位名称，后续由 RPA Agent 实现时再维护真实选择器。
+- RPA Agent 不得直连 MySQL。
+- RPA Agent 只能通过后端 `/api/rpa/*` 接口领取任务、回写状态、上传日志和截图。
+
+## 1. BigSeller 登录检查流程
+
+- 流程名称：BigSeller 登录检查流程
+- 输入字段：
+  - `task_id`
+  - `agent_name`
+  - `bigseller_login_url`
+  - `account_alias`
+- 页面步骤：
+  - 打开 `bigseller_login_url`。
+  - 检查是否存在 `PLACEHOLDER_SELECTOR_HOME_PAGE`。
+  - 如未登录，检查是否存在 `PLACEHOLDER_SELECTOR_LOGIN_FORM`。
+  - 使用运行环境中配置的凭据占位完成登录动作。
+  - 登录后等待 `PLACEHOLDER_SELECTOR_HOME_PAGE` 出现。
+- 成功判断：
+  - 页面出现 `PLACEHOLDER_SELECTOR_HOME_PAGE`。
+  - 当前会话可访问 BigSeller 首页或任务目标页面。
+- 失败判断：
+  - 登录页加载超时。
+  - 登录后仍停留在登录页。
+  - 出现账号异常、风控、验证码或二次验证提示。
+- 截图节点：
+  - 打开登录页后。
+  - 登录提交后。
+  - 登录成功首页。
+  - 登录失败或验证码出现时。
+- 回写字段：
+  - `task_id`
+  - `status`
+  - `agent_name`
+  - `started_at`
+  - `finished_at`
+  - `error_reason`
+  - `screenshots`
+- 人工接管条件：
+  - 出现验证码。
+  - 出现二次验证。
+  - 出现账号冻结、密码错误、风控拦截。
+
+## 2. 商品建档流程
+
+- 流程名称：商品建档流程
+- 输入字段：
+  - `task_id`
+  - `product_code`
+  - `spu`
+  - `sku`
+  - `product_name`
+  - `category`
+  - `brand`
+  - `material`
+  - `size`
+  - `selling_points`
+  - `package_weight`
+- 页面步骤：
+  - 确认 BigSeller 已登录。
+  - 进入商品建档页面 `PLACEHOLDER_SELECTOR_PRODUCT_CREATE_PAGE`。
+  - 点击新建商品按钮 `PLACEHOLDER_SELECTOR_CREATE_PRODUCT_BUTTON`。
+  - 填写基础商品字段。
+  - 填写 SPU/SKU、类目、材质、尺码、卖点、箱规重量等字段。
+  - 保存草稿或提交建档。
+- 成功判断：
+  - 页面出现保存成功提示 `PLACEHOLDER_SELECTOR_SUCCESS_TOAST`。
+  - 页面返回商品详情或商品列表。
+  - 可读取 BigSeller 商品 ID 占位字段。
+- 失败判断：
+  - 必填字段校验失败。
+  - 商品编码或 SKU 重复。
+  - 页面保存超时。
+  - 出现系统错误提示。
+- 截图节点：
+  - 进入建档页后。
+  - 填写完成提交前。
+  - 保存成功后。
+  - 保存失败提示出现时。
+- 回写字段：
+  - `task_id`
+  - `product_code`
+  - `sku`
+  - `bigseller_product_id`
+  - `status`
+  - `error_reason`
+  - `screenshots`
+- 人工接管条件：
+  - 类目无法自动匹配。
+  - 必填字段规则变化。
+  - SKU 重复但无法自动判断处理策略。
+  - 页面出现验证码或账号异常。
+
+## 3. 图片上传流程
+
+- 流程名称：图片上传流程
+- 输入字段：
+  - `task_id`
+  - `product_code`
+  - `sku`
+  - `image_files`
+  - `image_type`
+- 页面步骤：
+  - 确认 BigSeller 已登录。
+  - 进入商品图片管理页 `PLACEHOLDER_SELECTOR_IMAGE_PAGE`。
+  - 定位目标商品或 SKU。
+  - 点击上传区域 `PLACEHOLDER_SELECTOR_IMAGE_UPLOAD_AREA`。
+  - 选择任务提供的图片文件。
+  - 等待上传进度完成。
+  - 保存图片配置。
+- 成功判断：
+  - 每张图片均出现上传完成状态。
+  - 页面出现保存成功提示。
+  - 商品图片列表可看到对应图片占位。
+- 失败判断：
+  - 图片文件不存在。
+  - 图片格式、大小、尺寸不符合平台要求。
+  - 上传超时或上传失败。
+  - 保存图片配置失败。
+- 截图节点：
+  - 上传前图片区域。
+  - 上传进度中。
+  - 上传完成后。
+  - 上传失败提示出现时。
+- 回写字段：
+  - `task_id`
+  - `product_code`
+  - `sku`
+  - `uploaded_images`
+  - `failed_images`
+  - `status`
+  - `error_reason`
+  - `screenshots`
+- 人工接管条件：
+  - 图片需人工裁剪或重排。
+  - 图片违反平台规则。
+  - 上传控件变化导致无法选择文件。
+  - 页面出现验证码或账号异常。
+
+## 4. 多国家复制/刊登流程
+
+- 流程名称：多国家复制/刊登流程
+- 输入字段：
+  - `task_id`
+  - `source_site_profile_id`
+  - `target_countries`
+  - `platform`
+  - `store`
+  - `sku`
+  - `localized_title`
+  - `localized_keywords`
+  - `localized_description`
+  - `platform_category`
+- 页面步骤：
+  - 确认 BigSeller 已登录。
+  - 进入刊登管理页 `PLACEHOLDER_SELECTOR_LISTING_PAGE`。
+  - 定位源站点资料。
+  - 点击复制刊登按钮 `PLACEHOLDER_SELECTOR_COPY_LISTING_BUTTON`。
+  - 选择目标国家、店铺和平台类目。
+  - 填写本地化标题、关键词、描述和尺码规则。
+  - 提交刊登或保存草稿。
+- 成功判断：
+  - 页面出现复制成功或刊登提交成功提示。
+  - 目标国家生成对应刊登记录。
+  - 可读取目标刊登 ID 或页面链接占位字段。
+- 失败判断：
+  - 目标国家类目缺失。
+  - 本地化字段校验失败。
+  - 平台图片或尺码规则不满足要求。
+  - 提交刊登超时或失败。
+- 截图节点：
+  - 源刊登资料页。
+  - 目标国家选择页。
+  - 提交前预览页。
+  - 提交成功或失败提示页。
+- 回写字段：
+  - `task_id`
+  - `source_site_profile_id`
+  - `target_country`
+  - `listing_id`
+  - `listing_status`
+  - `status`
+  - `error_reason`
+  - `screenshots`
+- 人工接管条件：
+  - 类目、品牌、变体或尺码规则需要人工选择。
+  - 平台提示侵权、敏感词或合规风险。
+  - 页面出现验证码或账号异常。
+
+## 5. 页面价格回读流程
+
+- 流程名称：页面价格回读流程
+- 输入字段：
+  - `task_id`
+  - `platform`
+  - `store`
+  - `country`
+  - `sku`
+  - `listing_id`
+- 页面步骤：
+  - 确认 BigSeller 已登录。
+  - 进入价格或刊登详情页 `PLACEHOLDER_SELECTOR_PRICE_PAGE`。
+  - 按 SKU 或刊登 ID 定位目标记录。
+  - 读取页面价格、币种、促销价和生效状态。
+  - 与任务期望值进行占位比对。
+- 成功判断：
+  - 成功读取页面价。
+  - 页面价字段非空且格式可解析。
+  - 页面价状态可识别。
+- 失败判断：
+  - 找不到目标 SKU 或刊登 ID。
+  - 页面价字段为空。
+  - 页面价格区域加载超时。
+  - 页面提示权限不足或系统错误。
+- 截图节点：
+  - 价格列表筛选后。
+  - 目标价格详情区域。
+  - 读取失败或字段为空时。
+- 回写字段：
+  - `task_id`
+  - `sku`
+  - `listing_id`
+  - `page_price`
+  - `currency`
+  - `price_status`
+  - `status`
+  - `error_reason`
+  - `screenshots`
+- 人工接管条件：
+  - 同一 SKU 匹配多条记录。
+  - 页面价与审批价差异超过阈值。
+  - 页面出现验证码、权限不足或账号异常。
+
+## 6. 刊登状态采集流程
+
+- 流程名称：刊登状态采集流程
+- 输入字段：
+  - `task_id`
+  - `platform`
+  - `store`
+  - `country`
+  - `sku`
+  - `listing_id`
+- 页面步骤：
+  - 确认 BigSeller 已登录。
+  - 进入刊登列表页 `PLACEHOLDER_SELECTOR_LISTING_STATUS_PAGE`。
+  - 按 SKU、店铺、国家筛选目标记录。
+  - 读取刊登状态、审核状态、异常原因和更新时间。
+  - 保存采集结果。
+- 成功判断：
+  - 找到目标刊登记录。
+  - 成功读取刊登状态。
+  - 状态字段可映射为系统枚举。
+- 失败判断：
+  - 查无目标记录。
+  - 状态字段为空或无法识别。
+  - 页面加载超时。
+  - 页面提示权限不足。
+- 截图节点：
+  - 刊登列表筛选后。
+  - 目标记录状态区域。
+  - 查无记录或读取失败时。
+- 回写字段：
+  - `task_id`
+  - `sku`
+  - `listing_id`
+  - `listing_status`
+  - `review_status`
+  - `reject_reason`
+  - `status`
+  - `error_reason`
+  - `screenshots`
+- 人工接管条件：
+  - 状态无法映射。
+  - 审核失败原因需要人工判定。
+  - 页面出现验证码或账号异常。
+
+## 7. 失败截图规则
+
+- 流程名称：失败截图规则
+- 输入字段：
+  - `task_id`
+  - `step_name`
+  - `error_reason`
+  - `page_url`
+- 页面步骤：
+  - 任一流程发生失败时，立即捕获当前页面截图。
+  - 截图文件名使用 `task_id_step_name_timestamp.png` 格式。
+  - 同时记录当前 URL、步骤名、错误摘要和页面标题。
+  - 通过 `/api/rpa/*` 上传截图元数据和文件占位。
+- 成功判断：
+  - 截图文件生成成功。
+  - 截图路径或上传结果已回写任务日志。
+- 失败判断：
+  - 浏览器页面已关闭导致无法截图。
+  - 截图文件写入失败。
+  - 截图上传失败。
+- 截图节点：
+  - 每个失败发生点。
+  - 页面超时点。
+  - 验证码或人工接管触发点。
+- 回写字段：
+  - `task_id`
+  - `step_name`
+  - `screenshot_path`
+  - `page_url`
+  - `error_reason`
+  - `created_at`
+- 人工接管条件：
+  - 失败截图显示验证码。
+  - 失败截图显示账号异常。
+  - 失败原因无法自动归类。
+
+## 8. 验证码转人工规则
+
+- 流程名称：验证码转人工规则
+- 输入字段：
+  - `task_id`
+  - `agent_name`
+  - `page_url`
+  - `detected_selector`
+- 页面步骤：
+  - 每个关键步骤后检查 `PLACEHOLDER_SELECTOR_CAPTCHA`。
+  - 如发现验证码或二次验证页面，停止后续自动化动作。
+  - 截图并记录验证码出现页面。
+  - 将任务状态回写为 `manual_required`。
+- 成功判断：
+  - 验证码被识别并停止自动化。
+  - 任务状态成功回写为 `manual_required`。
+  - 人工接管原因记录完整。
+- 失败判断：
+  - 未识别验证码导致任务继续执行。
+  - 状态回写失败。
+  - 截图失败。
+- 截图节点：
+  - 验证码首次出现时。
+  - 二次验证页面出现时。
+  - 人工接管状态回写失败时。
+- 回写字段：
+  - `task_id`
+  - `status`
+  - `manual_reason`
+  - `detected_selector`
+  - `screenshots`
+  - `updated_at`
+- 人工接管条件：
+  - 出现验证码。
+  - 出现短信、邮箱、扫码、设备确认等二次验证。
+  - 出现账号安全确认。
+
+## 9. 同账号任务串行规则
+
+- 流程名称：同账号任务串行规则
+- 输入字段：
+  - `task_id`
+  - `account_alias`
+  - `platform`
+  - `store`
+  - `task_type`
+- 页面步骤：
+  - Agent 领取任务前检查同账号是否已有 `claimed` 或 `running` 任务。
+  - 同一 `account_alias` 下只允许一个任务执行。
+  - 如存在运行中任务，新任务保持 `pending` 或等待后端重新调度。
+  - 当前任务完成、失败或转人工后释放账号执行权。
+- 成功判断：
+  - 同账号不会并发打开多个 BigSeller 操作会话。
+  - 任务执行权状态可通过 `/api/rpa/*` 正常回写。
+- 失败判断：
+  - 同账号出现多个运行中任务。
+  - 任务异常退出但账号锁未释放。
+  - Agent 与后端任务状态不一致。
+- 截图节点：
+  - 不强制截图。
+  - 如检测到并发冲突，截取当前任务队列或错误页面占位。
+- 回写字段：
+  - `task_id`
+  - `account_alias`
+  - `lock_status`
+  - `status`
+  - `error_reason`
+  - `updated_at`
+- 人工接管条件：
+  - 账号锁长时间未释放。
+  - 后端状态与 Agent 本地状态冲突。
+  - 同账号任务发生重复执行风险。
+
+## 10. RPA 结果回写规则
+
+- 流程名称：RPA 结果回写规则
+- 输入字段：
+  - `task_id`
+  - `task_type`
+  - `business_type`
+  - `business_id`
+  - `status`
+  - `payload`
+  - `result`
+  - `screenshots`
+  - `step_logs`
+- 页面步骤：
+  - 每个关键步骤完成后记录步骤日志。
+  - 任务结束时汇总 `result`、截图、错误原因和状态。
+  - 通过后端 `/api/rpa/*` 回写任务结果。
+  - 回写成功后标记本地任务结束。
+- 成功判断：
+  - 后端确认接收任务结果。
+  - 任务状态更新为 `success`、`failed`、`manual_required` 或 `cancelled`。
+  - 业务对象可通过后端状态查看 RPA 结果。
+- 失败判断：
+  - 回写接口调用失败。
+  - 回写状态与任务实际状态不一致。
+  - 截图或日志元数据缺失。
+- 截图节点：
+  - 任务成功最终页面。
+  - 任务失败页面。
+  - 人工接管页面。
+  - 回写接口失败时的当前页面。
+- 回写字段：
+  - `task_id`
+  - `task_type`
+  - `business_type`
+  - `business_id`
+  - `status`
+  - `result`
+  - `error_reason`
+  - `retry_count`
+  - `screenshots`
+  - `step_logs`
+  - `started_at`
+  - `finished_at`
+- 人工接管条件：
+  - 回写失败后重试仍失败。
+  - 状态无法确定。
+  - 业务结果需要人工复核。
