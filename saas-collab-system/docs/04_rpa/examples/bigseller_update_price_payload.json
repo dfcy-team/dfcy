@@ -1,0 +1,13 @@
+{
+  "task_type": "BIGSELLER_UPDATE_PRICE",
+  "business_type": "pricing",
+  "business_id": "MOCK_PRICE_001",
+  "account_alias": "mock_bigseller_account",
+  "platform": "BigSeller",
+  "store": "Mock Store US",
+  "country": "US",
+  "sku": "MOCK-SKU-001",
+  "currency": "USD",
+  "target_price": 29.99,
+  "approved_price": 28.99
+}

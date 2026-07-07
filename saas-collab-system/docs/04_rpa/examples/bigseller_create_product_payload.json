@@ -1,0 +1,18 @@
+{
+  "task_type": "BIGSELLER_CREATE_PRODUCT",
+  "business_type": "product",
+  "business_id": "MOCK_PRODUCT_001",
+  "account_alias": "mock_bigseller_account",
+  "product": {
+    "product_code": "MOCK-PRODUCT-001",
+    "spu": "MOCK-SPU-001",
+    "sku": "MOCK-SKU-001",
+    "name": "Example Storage Bag",
+    "category": "Example Category",
+    "brand": "Example Brand",
+    "material": "Example Material",
+    "size": "M",
+    "selling_points": ["lightweight", "water resistant"],
+    "package_weight_kg": 1.2
+  }
+}

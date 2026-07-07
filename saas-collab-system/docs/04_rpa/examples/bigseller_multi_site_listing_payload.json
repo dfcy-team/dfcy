@@ -1,0 +1,19 @@
+{
+  "task_type": "BIGSELLER_MULTI_SITE_LISTING",
+  "business_type": "listing",
+  "business_id": "MOCK_LISTING_001",
+  "account_alias": "mock_bigseller_account",
+  "platform": "BigSeller",
+  "source_site_profile_id": "MOCK_SITE_PROFILE_SOURCE",
+  "target_sites": [
+    {
+      "country": "US",
+      "store": "Mock Store US",
+      "sku": "MOCK-SKU-001",
+      "localized_title": "Example Storage Bag",
+      "localized_keywords": ["storage", "travel", "outdoor"],
+      "localized_description": "Example localized description.",
+      "platform_category": "Example Platform Category"
+    }
+  ]
+}

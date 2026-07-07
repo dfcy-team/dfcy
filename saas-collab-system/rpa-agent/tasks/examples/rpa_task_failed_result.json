@@ -1,0 +1,21 @@
+{
+  "status": "failed",
+  "message": "Mock RPA task failed.",
+  "screenshots": [
+    {
+      "name": "failed-error-page",
+      "path": "screenshots/mock-task-failed-error-page.png"
+    }
+  ],
+  "page_url": "https://example.com/mock-bigseller/error",
+  "page_snapshot": {
+    "title": "Mock BigSeller Error Page",
+    "visible_text": "Example validation error."
+  },
+  "error_code": "MOCK_VALIDATION_ERROR",
+  "error_message": "Mock failure caused by example validation error.",
+  "data": {
+    "failed_step": "submit_form",
+    "retryable": true
+  }
+}

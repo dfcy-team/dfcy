@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "message": "Mock RPA task completed successfully.",
+  "screenshots": [
+    {
+      "name": "success-final-page",
+      "path": "screenshots/mock-task-success-final-page.png"
+    }
+  ],
+  "page_url": "https://example.com/mock-bigseller/success",
+  "page_snapshot": {
+    "title": "Mock BigSeller Success Page",
+    "visible_text": "Operation completed successfully."
+  },
+  "error_code": null,
+  "error_message": null,
+  "data": {
+    "external_id": "MOCK_EXTERNAL_ID_001",
+    "finished_at": "2026-07-07T10:30:00Z"
+  }
+}
