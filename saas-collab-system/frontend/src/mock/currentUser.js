@@ -1,0 +1,21 @@
+export const currentUser = {
+  user_id: 'mock-user-001',
+  username: 'demo_admin',
+  user_type: 'tenant_admin',
+  tenant_id: 'mock-tenant-001',
+  roles: ['tenant_admin'],
+  permissions: [
+    'dashboard:view',
+    'products:research:view',
+    'products:view',
+    'purchasing:view',
+    'suppliers:view',
+    'listings:view',
+    'pricing:view',
+    'rpa:view',
+    'integrations:view',
+    'finance:view',
+    'reports:view',
+    'audit:view',
+  ],
+}
