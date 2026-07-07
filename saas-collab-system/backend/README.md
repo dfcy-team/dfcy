@@ -2,12 +2,106 @@
 
 Django REST Framework backend for the SaaS collaboration system.
 
-## Development
+## Local Python Setup
 
-```bash
+From the project root:
+
+```powershell
+cd saas-collab-system/backend
 python -m venv .venv
+.\.venv\Scripts\activate
 pip install -r requirements.txt
 python manage.py check
 ```
 
-Configuration is read from environment variables. Use the project-level `.env.example` as a reference and do not commit a real `.env` file.
+On macOS/Linux, activate with:
+
+```bash
+source .venv/bin/activate
+```
+
+## Environment Variables
+
+Copy the project-level example file and edit local values:
+
+```powershell
+cd saas-collab-system
+copy .env.example .env
+```
+
+Do not commit `.env`. The example file contains placeholders only.
+
+## Database Migrations
+
+```powershell
+cd saas-collab-system/backend
+python manage.py makemigrations
+python manage.py migrate
+```
+
+## Pytest
+
+```powershell
+cd saas-collab-system/backend
+pytest
+```
+
+## Docker Compose
+
+From the project root:
+
+```powershell
+cd saas-collab-system
+docker compose config
+docker compose up -d mysql redis
+docker compose ps
+```
+
+To start the backend and workers after preparing `.env`:
+
+```powershell
+docker compose up -d backend celery celery-beat
+```
+
+## MySQL
+
+Local Docker Compose uses MySQL 8. Development variables are provided in `.env.example`:
+
+- `MYSQL_DATABASE`
+- `MYSQL_USER`
+- `MYSQL_PASSWORD`
+- `MYSQL_HOST`
+- `MYSQL_PORT`
+- `MYSQL_ROOT_PASSWORD`
+
+The Django settings currently read the matching `DB_*` variables, which are also included in `.env.example`.
+
+Production safety: MySQL must not be exposed to the public internet. Use private networking, firewall rules, and managed secrets.
+
+## Redis
+
+Redis is used for Celery broker/result backend:
+
+- `REDIS_URL`
+- `CELERY_BROKER_URL`
+- `CELERY_RESULT_BACKEND`
+
+Docker Compose keeps Redis on the internal Docker network. Production Redis must not be exposed to the public internet.
+
+## Celery
+
+Start a worker locally:
+
+```powershell
+cd saas-collab-system/backend
+celery -A config worker -l info --pool=solo
+```
+
+Start beat locally:
+
+```powershell
+cd saas-collab-system/backend
+celery -A config beat -l info
+```
+
+The `--pool=solo` option is recommended for Windows development.
