@@ -1,20 +1,20 @@
 from rest_framework.decorators import api_view
 from rest_framework.decorators import permission_classes
-from rest_framework.response import Response
 
+from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsRPAAgent
 
 
 @api_view(["GET"])
 def health(request):
-    return Response({"status": "ok", "service": "rpa"})
+    return success_response({"status": "ok", "service": "rpa"})
 
 
 def placeholder_response(action, task_id=None):
     data = {"status": "ok", "service": "rpa", "action": action}
     if task_id is not None:
         data["task_id"] = task_id
-    return Response(data)
+    return success_response(data)
 
 
 @api_view(["POST"])

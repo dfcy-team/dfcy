@@ -1,0 +1,78 @@
+# Environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Python / Django
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+db.sqlite3
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.cache/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Django generated files
+backend/media/
+backend/staticfiles/
+backend/.pytest_cache/
+
+# Node / Vue
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# RPA runtime files
+rpa-agent/screenshots/*
+!rpa-agent/screenshots/.gitkeep
+
+rpa-agent/logs/*
+!rpa-agent/logs/.gitkeep
+
+rpa-agent/tmp/
+rpa-agent/cache/
+rpa-agent/downloads/
+rpa-agent/*.log
+
+# Docker
+*.pid
+docker-compose.override.yml
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep placeholders
+!.gitkeep

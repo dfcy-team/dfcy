@@ -1,0 +1,18 @@
+{
+  "task_type": "BIGSELLER_READ_PAGE_PRICE",
+  "business_type": "pricing",
+  "business_id": "demo-business-read-price-001",
+  "payload": {
+    "task_id": "demo-rpa-task-005",
+    "tenant_id": "demo-tenant",
+    "store_code": "placeholder-store",
+    "sku": "DEMO-SKU-005",
+    "page_ref": "placeholder-price-page",
+    "readonly": true,
+    "forbidden_actions": [
+      "save",
+      "submit",
+      "update_price"
+    ]
+  }
+}

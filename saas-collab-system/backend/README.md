@@ -65,6 +65,8 @@ docker compose up -d backend celery celery-beat
 
 ## MySQL
 
+MySQL 8 is the standard database for this backend. MySQL is the final trusted business data store for tenant, account, permission, RPA task, API sync, audit, attachment, finance, and report data.
+
 Local Docker Compose uses MySQL 8. Development variables are provided in `.env.example`:
 
 - `MYSQL_DATABASE`
@@ -76,7 +78,12 @@ Local Docker Compose uses MySQL 8. Development variables are provided in `.env.e
 
 The Django settings currently read the matching `DB_*` variables, which are also included in `.env.example`.
 
-Production safety: MySQL must not be exposed to the public internet. Use private networking, firewall rules, and managed secrets.
+Production safety:
+
+- MySQL must not be exposed to the public internet.
+- Use private networking, firewall rules, and managed secrets.
+- SQLite is prohibited in staging and production.
+- If SQLite is ever used locally, it is only for temporary developer experiments and must not be used for staging, production, demos, shared QA, or trusted business data.
 
 ## Redis
 

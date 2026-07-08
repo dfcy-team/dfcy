@@ -42,13 +42,49 @@ def test_internal_user_can_login_and_access_me():
 
     assert me_response.status_code == 200
     assert me_response.json() == {
-        "user_id": user.id,
-        "username": "internal",
-        "email": "internal@example.com",
-        "user_type": CustomUser.UserType.INTERNAL,
-        "tenant_id": tenant.id,
-        "roles": ["admin"],
-        "permissions": ["accounts.view"],
+        "success": True,
+        "code": "OK",
+        "message": "success",
+        "data": {
+            "user_id": user.id,
+            "username": "internal",
+            "email": "internal@example.com",
+            "user_type": CustomUser.UserType.INTERNAL,
+            "tenant_id": tenant.id,
+            "roles": ["admin"],
+            "permissions": ["accounts.view"],
+        },
+    }
+
+
+@pytest.mark.django_db
+def test_me_success_response_uses_standard_shape():
+    tenant = Tenant.objects.create(name="Tenant", code="tenant")
+    user = CustomUser.objects.create_user(
+        username="internal-me",
+        email="internal-me@example.com",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.get("/api/internal/auth/me/")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "code": "OK",
+        "message": "success",
+        "data": {
+            "user_id": user.id,
+            "username": "internal-me",
+            "email": "internal-me@example.com",
+            "user_type": CustomUser.UserType.INTERNAL,
+            "tenant_id": tenant.id,
+            "roles": [],
+            "permissions": [],
+        },
     }
 
 
@@ -57,6 +93,8 @@ def test_me_requires_authentication():
     response = APIClient().get("/api/internal/auth/me/")
 
     assert response.status_code == 401
+    assert response.json()["success"] is False
+    assert response.json()["code"] == "AUTH_REQUIRED"
 
 
 @pytest.mark.django_db

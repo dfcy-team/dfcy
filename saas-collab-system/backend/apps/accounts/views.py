@@ -1,15 +1,16 @@
 from rest_framework.decorators import api_view
 from rest_framework.decorators import permission_classes
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
+
+from apps.common.responses import error_response, success_response
 
 from .serializers import CurrentUserSerializer, InternalTokenObtainPairSerializer
 
 
 def health_response(service):
-    return Response({"status": "ok", "service": service})
+    return success_response({"status": "ok", "service": service})
 
 
 @api_view(["GET"])
@@ -30,14 +31,24 @@ class InternalLoginView(TokenObtainPairView):
 @permission_classes([IsAuthenticated])
 def current_user(request):
     serializer = CurrentUserSerializer(request.user)
-    return Response(serializer.data)
+    return success_response(serializer.data)
 
 
 class ExternalLoginPlaceholderView(APIView):
     def post(self, request):
-        return Response({"status": "not_implemented", "service": "external-auth"}, status=501)
+        return error_response(
+            "NOT_IMPLEMENTED",
+            "external auth is not implemented in stage 0",
+            {"service": "external-auth"},
+            status=501,
+        )
 
 
 class RPATokenPlaceholderView(APIView):
     def post(self, request):
-        return Response({"status": "not_implemented", "service": "rpa-auth"}, status=501)
+        return error_response(
+            "NOT_IMPLEMENTED",
+            "rpa token auth is not implemented in stage 0",
+            {"service": "rpa-auth"},
+            status=501,
+        )

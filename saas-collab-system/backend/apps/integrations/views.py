@@ -1,9 +1,10 @@
 from rest_framework.decorators import api_view
-from rest_framework.response import Response
+
+from apps.common.responses import success_response
 
 
 def health_response(service):
-    return Response({"status": "ok", "service": service})
+    return success_response({"status": "ok", "service": service})
 
 
 @api_view(["GET"])

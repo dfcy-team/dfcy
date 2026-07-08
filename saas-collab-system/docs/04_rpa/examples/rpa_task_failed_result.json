@@ -1,0 +1,20 @@
+{
+  "task_id": "demo-rpa-task-007",
+  "status": "failed",
+  "message": "demo task failed",
+  "manual_required": true,
+  "manual_reason": "placeholder manual review required",
+  "last_success_step": "placeholder-login-check",
+  "failed_step": "placeholder-submit-step",
+  "screenshots": ["placeholder-screenshot-failed"],
+  "page_url": "placeholder-page-url",
+  "page_snapshot": {
+    "title": "Placeholder Failed Page",
+    "fields": {
+      "sku": "DEMO-SKU-007",
+      "remote_status": "placeholder_failed"
+    }
+  },
+  "error_code": "DEMO_STAGE0_ERROR",
+  "error_message": "Placeholder error message for stage0."
+}

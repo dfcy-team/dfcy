@@ -53,7 +53,12 @@ def test_baseline_api_health_route():
     response = APIClient().get("/api/internal/health/")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "internal"}
+    assert response.json() == {
+        "success": True,
+        "code": "OK",
+        "message": "success",
+        "data": {"status": "ok", "service": "internal"},
+    }
 
 
 @pytest.mark.django_db

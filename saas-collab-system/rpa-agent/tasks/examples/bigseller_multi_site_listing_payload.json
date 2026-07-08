@@ -1,0 +1,15 @@
+{
+  "task_type": "BIGSELLER_MULTI_SITE_LISTING",
+  "business_type": "listing",
+  "business_id": "demo-business-multi-site-001",
+  "payload": {
+    "task_id": "demo-rpa-task-003",
+    "tenant_id": "demo-tenant",
+    "store_code": "placeholder-store",
+    "source_site": "placeholder-source-site",
+    "target_sites": ["placeholder-target-site-a", "placeholder-target-site-b"],
+    "sku": "DEMO-SKU-003",
+    "title": "Demo Multi Site Listing Placeholder",
+    "local_keywords": ["placeholder-keyword"]
+  }
+}

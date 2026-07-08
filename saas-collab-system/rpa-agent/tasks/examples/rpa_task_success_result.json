@@ -1,0 +1,16 @@
+{
+  "task_id": "demo-rpa-task-001",
+  "status": "success",
+  "message": "demo task completed",
+  "screenshots": ["placeholder-screenshot-success"],
+  "page_url": "placeholder-page-url",
+  "page_snapshot": {
+    "title": "Placeholder Result Page",
+    "fields": {
+      "sku": "DEMO-SKU-001",
+      "remote_status": "placeholder_success"
+    }
+  },
+  "error_code": null,
+  "error_message": null
+}

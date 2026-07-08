@@ -11,3 +11,21 @@ if not SECRET_KEY:
 
 if not ALLOWED_HOSTS:
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must be set in production.")
+
+if DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3":
+    raise ImproperlyConfigured("SQLite is not allowed in production. Configure MySQL through DB_* environment variables.")
+
+required_database_env = {
+    "DB_ENGINE": DATABASES["default"].get("ENGINE"),
+    "DB_NAME": DATABASES["default"].get("NAME"),
+    "DB_USER": DATABASES["default"].get("USER"),
+    "DB_PASSWORD": DATABASES["default"].get("PASSWORD"),
+    "DB_HOST": DATABASES["default"].get("HOST"),
+    "DB_PORT": DATABASES["default"].get("PORT"),
+}
+
+missing_database_env = [name for name, value in required_database_env.items() if not value]
+if missing_database_env:
+    raise ImproperlyConfigured(
+        "Production MySQL configuration is incomplete. Missing: " + ", ".join(missing_database_env)
+    )
