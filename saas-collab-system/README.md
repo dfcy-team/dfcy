@@ -36,15 +36,29 @@ Production safety:
 - Use private networking, firewall rules, and managed secrets in production.
 - Do not store real API keys, tokens, passwords, or object storage credentials in source control.
 
-## Project Directory Rules
+## 项目目录规范
 
-The project root directory is `saas-collab-system/`. All new project files must be created inside this project root.
+本项目根目录固定为：
 
-- `backend/` is used for backend services, APIs, models, migrations, and backend tests.
-- `frontend/` is used for frontend application code.
-- `rpa-agent/` is used for the RPA Agent.
-- `docs/` is used for architecture, API, database, RPA, test, and release documentation.
+```text
+saas-collab-system/
+```
 
-Do not create project files outside `saas-collab-system/`.
+目录用途：
 
-Do not commit real secrets, tokens, account credentials, passwords, private keys, or production environment files.
+- `backend/` 后端 Django 服务、API、权限、RPA 接口、API 同步框架。
+- `frontend/` 前端 Vue3 后台、业务页面、Mock 数据。
+- `rpa-agent/` RPA Agent、BigSeller 操作步骤、任务样例、截图和日志目录。
+- `docs/` 阶段0文档、架构、数据库、API、RPA、测试、发布文档。
+- `docker-compose.yml` 用于本地开发环境编排。
+- `.env.example` 用于示例环境变量，不包含真实密钥。
+
+约束：
+
+1. 所有新增文件必须放在 `saas-collab-system/` 内。
+2. 禁止在项目根目录外创建项目文件。
+3. 禁止提交真实 `.env`。
+4. 禁止提交真实账号、密码、Token、API 密钥。
+5. RPA 不得直连数据库。
+6. 前端不承载真实权限判断。
+7. 阶段0只做目录、文档、Mock、占位和底座准备。

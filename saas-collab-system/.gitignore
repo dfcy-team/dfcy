@@ -1,6 +1,14 @@
-# =========================
+# Environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
 # Python / Django
-# =========================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -24,14 +32,12 @@ venv/
 env/
 ENV/
 
-# Django media/static generated files
+# Django generated files
 backend/media/
 backend/staticfiles/
 backend/.pytest_cache/
 
-# =========================
 # Node / Vue
-# =========================
 node_modules/
 frontend/node_modules/
 frontend/dist/
@@ -42,49 +48,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# =========================
-# Environment files
-# =========================
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.crt
-*.p12
-*.pfx
-
-# Logs and temporary files
-*.log
-logs/
-*.tmp
-*.temp
-*.bak
-*.swp
-*.swo
-
-# IDE and editor settings
-.idea/
-.vscode/
-*.code-workspace
-*.swp
-*.swo
-
-# System files
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Docker temporary files
-docker-data/
-.docker/
-*.pid
-docker-compose.override.yml
-
-
-# =========================
 # RPA runtime files
-# =========================
 rpa-agent/screenshots/*
 !rpa-agent/screenshots/.gitkeep
 
@@ -96,6 +60,19 @@ rpa-agent/cache/
 rpa-agent/downloads/
 rpa-agent/*.log
 
-# Keep repository placeholders and examples
+# Docker
+*.pid
+docker-compose.override.yml
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep placeholders
 !.gitkeep
-!.env.example
