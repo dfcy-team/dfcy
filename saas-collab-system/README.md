@@ -35,3 +35,16 @@ Production safety:
 - Do not expose MySQL or Redis to the public internet.
 - Use private networking, firewall rules, and managed secrets in production.
 - Do not store real API keys, tokens, passwords, or object storage credentials in source control.
+
+## Project Directory Rules
+
+The project root directory is `saas-collab-system/`. All new project files must be created inside this project root.
+
+- `backend/` is used for backend services, APIs, models, migrations, and backend tests.
+- `frontend/` is used for frontend application code.
+- `rpa-agent/` is used for the RPA Agent.
+- `docs/` is used for architecture, API, database, RPA, test, and release documentation.
+
+Do not create project files outside `saas-collab-system/`.
+
+Do not commit real secrets, tokens, account credentials, passwords, private keys, or production environment files.
