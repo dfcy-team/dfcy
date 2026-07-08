@@ -1,0 +1,12 @@
+{
+  "task_type": "BIGSELLER_COLLECT_LISTING_STATUS",
+  "business_type": "listing",
+  "business_id": "demo-business-collect-status-001",
+  "payload": {
+    "task_id": "demo-rpa-task-006",
+    "tenant_id": "demo-tenant",
+    "store_code": "placeholder-store",
+    "sku": "DEMO-SKU-006",
+    "page_ref": "placeholder-listing-status-page"
+  }
+}

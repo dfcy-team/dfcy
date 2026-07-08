@@ -1,0 +1,21 @@
+{
+  "task_type": "BIGSELLER_UPDATE_PRICE",
+  "business_type": "pricing",
+  "business_id": "demo-business-update-price-001",
+  "payload": {
+    "task_id": "demo-rpa-task-004",
+    "tenant_id": "demo-tenant",
+    "store_code": "placeholder-store",
+    "sku": "DEMO-SKU-004",
+    "currency": "USD",
+    "approval_id": "demo-approval-001",
+    "approval_status": "approved",
+    "approval_passed_at": "placeholder-approved-at",
+    "approved_by": "demo-user",
+    "approval_source": "backend-approved-task",
+    "approved_price": "0.00",
+    "price_change_reason": "demo reason",
+    "effective_scope": "placeholder-sku-scope",
+    "rpa_rule": "RPA only executes backend approved price task and does not decide price changes."
+  }
+}

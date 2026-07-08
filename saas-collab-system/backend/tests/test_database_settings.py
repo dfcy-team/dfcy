@@ -1,0 +1,69 @@
+import os
+import subprocess
+import sys
+
+
+def run_prod_settings_import(env_overrides):
+    env = os.environ.copy()
+    env.update(env_overrides)
+    for name in (
+        "DB_ENGINE",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+        "DB_HOST",
+        "DB_PORT",
+        "DJANGO_SECRET_KEY",
+        "DJANGO_ALLOWED_HOSTS",
+    ):
+        if name not in env_overrides:
+            env.pop(name, None)
+
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import config.settings.prod as prod; print(prod.DATABASES['default']['ENGINE'])",
+        ],
+        cwd=os.path.join(os.getcwd(), "backend"),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_prod_settings_reject_sqlite():
+    result = run_prod_settings_import(
+        {
+            "DJANGO_SECRET_KEY": "test-secret-key",
+            "DJANGO_ALLOWED_HOSTS": "example.test",
+            "DB_ENGINE": "django.db.backends.sqlite3",
+            "DB_NAME": "db.sqlite3",
+            "DB_USER": "unused",
+            "DB_PASSWORD": "unused",
+            "DB_HOST": "unused",
+            "DB_PORT": "0",
+        }
+    )
+
+    assert result.returncode != 0
+    assert "SQLite is not allowed in production" in result.stderr
+
+
+def test_prod_settings_accept_mysql_from_environment():
+    result = run_prod_settings_import(
+        {
+            "DJANGO_SECRET_KEY": "test-secret-key",
+            "DJANGO_ALLOWED_HOSTS": "example.test",
+            "DB_ENGINE": "django.db.backends.mysql",
+            "DB_NAME": "saas_collab_prod",
+            "DB_USER": "saas_collab_user",
+            "DB_PASSWORD": "change-me-placeholder",
+            "DB_HOST": "mysql",
+            "DB_PORT": "3306",
+        }
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "django.db.backends.mysql"

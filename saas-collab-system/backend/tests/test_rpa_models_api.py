@@ -115,7 +115,11 @@ def test_rpa_placeholder_api_requires_rpa_user_and_returns_placeholder(path, act
     response = client.post(path, data={}, format="json")
 
     assert response.status_code == 200
-    assert response.json()["action"] == action
+    assert response.json()["success"] is True
+    assert response.json()["code"] == "OK"
+    assert response.json()["message"] == "success"
+    assert response.json()["data"]["action"] == action
+    assert response.json()["data"]["service"] == "rpa"
 
 
 @pytest.mark.django_db

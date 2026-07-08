@@ -1,0 +1,15 @@
+{
+  "task_type": "BIGSELLER_UPLOAD_IMAGES",
+  "business_type": "listing",
+  "business_id": "demo-business-upload-images-001",
+  "payload": {
+    "task_id": "demo-rpa-task-002",
+    "tenant_id": "demo-tenant",
+    "store_code": "placeholder-store",
+    "sku": "DEMO-SKU-002",
+    "image_refs": [
+      "placeholder-image-ref-001",
+      "placeholder-image-ref-002"
+    ]
+  }
+}

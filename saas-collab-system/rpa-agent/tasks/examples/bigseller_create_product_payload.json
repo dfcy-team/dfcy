@@ -1,0 +1,16 @@
+{
+  "task_type": "BIGSELLER_CREATE_PRODUCT",
+  "business_type": "listing",
+  "business_id": "demo-business-create-product-001",
+  "payload": {
+    "task_id": "demo-rpa-task-001",
+    "tenant_id": "demo-tenant",
+    "store_code": "placeholder-store",
+    "product_code": "DEMO-PRODUCT-001",
+    "sku": "DEMO-SKU-001",
+    "title": "Demo Product Placeholder",
+    "category": "placeholder-category",
+    "description": "Placeholder product description for stage0.",
+    "image_refs": ["placeholder-image-ref-001"]
+  }
+}
