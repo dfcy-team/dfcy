@@ -183,6 +183,39 @@ def test_supplier_can_submit_feedback_and_shipment_without_finance_data():
 
 
 @pytest.mark.django_db
+def test_supplier_feedback_rejects_unsafe_status_and_over_quantity():
+    tenant = Tenant.objects.create(name="Tenant", code="tenant")
+    supplier_user = create_user(tenant, "supplier-invalid-feedback", CustomUser.UserType.EXTERNAL, supplier_id=1001)
+    task = SupplierTask.objects.create(
+        tenant=tenant,
+        supplier_id=1001,
+        task_no="TASK-INVALID-FEEDBACK",
+        sku_code="SKU-INVALID-FEEDBACK",
+        production_quantity=100,
+    )
+    client = authenticated_client(supplier_user)
+
+    unsafe_status_response = client.patch(
+        f"/api/external/supplier/tasks/{task.id}/feedback/",
+        data={"status": "cancelled"},
+        format="json",
+    )
+    over_quantity_response = client.patch(
+        f"/api/external/supplier/tasks/{task.id}/feedback/",
+        data={"completed_quantity": 101, "status": "partial"},
+        format="json",
+    )
+
+    assert unsafe_status_response.status_code == 400
+    assert unsafe_status_response.json()["code"] == "VALIDATION_ERROR"
+    assert over_quantity_response.status_code == 400
+    assert over_quantity_response.json()["code"] == "VALIDATION_ERROR"
+    task.refresh_from_db()
+    assert task.status == SupplierTask.Status.PENDING
+    assert task.completed_quantity == 0
+
+
+@pytest.mark.django_db
 def test_internal_user_cannot_use_external_supplier_api():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "internal-external-denied", CustomUser.UserType.INTERNAL)

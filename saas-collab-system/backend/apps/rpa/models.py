@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 from apps.tenants.models import Tenant
 
@@ -33,6 +34,13 @@ class RPAAgent(models.Model):
         DISABLED = "disabled", "Disabled"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="rpa_agents")
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="rpa_agent",
+    )
     name = models.CharField(max_length=100)
     token_hash = models.CharField(max_length=128)
     device_fingerprint = models.CharField(max_length=128, blank=True)

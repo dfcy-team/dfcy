@@ -103,7 +103,7 @@ def test_rpa_task_has_no_direct_product_or_finance_foreign_keys():
 def test_rpa_agent_can_claim_pending_task():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "rpa-claim", CustomUser.UserType.RPA)
-    agent = RPAAgent.objects.create(tenant=tenant, name="Agent", token_hash="hash")
+    agent = RPAAgent.objects.create(tenant=tenant, user=user, name="Agent", token_hash="hash")
     task = RPATask.objects.create(
         tenant=tenant,
         task_type="bigseller_price_check",
@@ -131,6 +131,7 @@ def test_rpa_agent_can_claim_pending_task():
 def test_rpa_claim_returns_empty_when_no_pending_task():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "rpa-empty", CustomUser.UserType.RPA)
+    RPAAgent.objects.create(tenant=tenant, user=user, name="Agent", token_hash="hash")
     client = APIClient()
     client.force_authenticate(user=user)
 
@@ -144,12 +145,14 @@ def test_rpa_claim_returns_empty_when_no_pending_task():
 def test_rpa_agent_can_post_heartbeat_logs_screenshots_complete_and_fail():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "rpa-actions", CustomUser.UserType.RPA)
+    agent = RPAAgent.objects.create(tenant=tenant, user=user, name="Agent", token_hash="hash")
     task = RPATask.objects.create(
         tenant=tenant,
         task_type="bigseller_page_check",
         business_type="listing",
         business_id="LISTING-2",
         status=RPATask.Status.CLAIMED,
+        claimed_by=agent,
         payload={"page": "placeholder"},
     )
     client = APIClient()
@@ -205,6 +208,7 @@ def test_rpa_agent_can_post_heartbeat_logs_screenshots_complete_and_fail():
         business_type="bigseller_account",
         business_id="ACCOUNT-1",
         status=RPATask.Status.RUNNING,
+        claimed_by=agent,
     )
     fail = client.post(
         f"/api/rpa/tasks/{failed_task.id}/fail/",
@@ -228,6 +232,79 @@ def test_rpa_agent_can_post_heartbeat_logs_screenshots_complete_and_fail():
     assert failed_task.result["manual_reason"] == "captcha"
     assert failed_task.result["failed_step"] == "login"
     assert failed_task.result["last_success_step"] == "open_login_page"
+
+
+@pytest.mark.django_db
+def test_rpa_user_without_bound_agent_cannot_claim_task():
+    tenant = Tenant.objects.create(name="Tenant", code="tenant")
+    user = create_user(tenant, "rpa-no-agent", CustomUser.UserType.RPA)
+    RPATask.objects.create(
+        tenant=tenant,
+        task_type="bigseller_check",
+        business_type="listing",
+        business_id="LISTING-NO-AGENT",
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.post("/api/rpa/tasks/claim/", data={}, format="json")
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "PERMISSION_DENIED"
+
+
+@pytest.mark.django_db
+def test_rpa_agent_cannot_operate_task_claimed_by_another_agent():
+    tenant = Tenant.objects.create(name="Tenant", code="tenant")
+    user_a = create_user(tenant, "rpa-agent-a", CustomUser.UserType.RPA)
+    user_b = create_user(tenant, "rpa-agent-b", CustomUser.UserType.RPA)
+    agent_a = RPAAgent.objects.create(tenant=tenant, user=user_a, name="Agent A", token_hash="hash-a")
+    RPAAgent.objects.create(tenant=tenant, user=user_b, name="Agent B", token_hash="hash-b")
+    task = RPATask.objects.create(
+        tenant=tenant,
+        task_type="bigseller_check",
+        business_type="listing",
+        business_id="LISTING-OTHER-AGENT",
+        status=RPATask.Status.RUNNING,
+        claimed_by=agent_a,
+    )
+    client = APIClient()
+    client.force_authenticate(user=user_b)
+
+    response = client.post(f"/api/rpa/tasks/{task.id}/complete/", data={"result": {"ok": True}}, format="json")
+
+    assert response.status_code == 403
+    task.refresh_from_db()
+    assert task.status == RPATask.Status.RUNNING
+    assert task.result == {}
+
+
+@pytest.mark.django_db
+def test_rpa_screenshots_reject_external_urls_in_phase1():
+    tenant = Tenant.objects.create(name="Tenant", code="tenant")
+    user = create_user(tenant, "rpa-screenshot-url", CustomUser.UserType.RPA)
+    agent = RPAAgent.objects.create(tenant=tenant, user=user, name="Agent", token_hash="hash")
+    task = RPATask.objects.create(
+        tenant=tenant,
+        task_type="bigseller_check",
+        business_type="listing",
+        business_id="LISTING-SCREENSHOT",
+        status=RPATask.Status.RUNNING,
+        claimed_by=agent,
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.post(
+        f"/api/rpa/tasks/{task.id}/screenshots/",
+        data={"screenshot_url": "https://example.test/screenshot.png"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    task.refresh_from_db()
+    assert task.screenshot_url == ""
 
 
 @pytest.mark.django_db

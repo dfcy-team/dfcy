@@ -39,9 +39,25 @@ class SupplierTaskSerializer(serializers.ModelSerializer):
 
 
 class SupplierTaskFeedbackSerializer(serializers.ModelSerializer):
+    ALLOWED_SUPPLIER_STATUSES = {
+        SupplierTask.Status.IN_PROGRESS,
+        SupplierTask.Status.PARTIAL,
+        SupplierTask.Status.EXCEPTION,
+    }
+
     class Meta:
         model = SupplierTask
         fields = ("completed_quantity", "status", "feedback_note", "exception_note")
+
+    def validate_status(self, value):
+        if value not in self.ALLOWED_SUPPLIER_STATUSES:
+            raise serializers.ValidationError("Supplier feedback status is not allowed.")
+        return value
+
+    def validate_completed_quantity(self, value):
+        if value > self.instance.production_quantity:
+            raise serializers.ValidationError("Completed quantity cannot exceed production quantity.")
+        return value
 
 
 class SupplierShipmentSerializer(serializers.ModelSerializer):

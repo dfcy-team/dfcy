@@ -2,6 +2,7 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsRPAAgent
@@ -13,15 +14,23 @@ def health(request):
     return success_response({"status": "ok", "service": "rpa"})
 
 
-def _get_task_for_rpa_user(request, task_id):
-    return get_object_or_404(RPATask, id=task_id, tenant=request.user.tenant)
-
-
 def _get_agent_for_user(request):
-    return RPAAgent.objects.filter(
+    agent = RPAAgent.objects.filter(
         tenant=request.user.tenant,
+        user=request.user,
         status=RPAAgent.Status.ACTIVE,
     ).first()
+    if agent is None:
+        raise PermissionDenied("Valid RPA agent binding is required.")
+    return agent
+
+
+def _get_task_for_rpa_agent(request, task_id):
+    agent = _get_agent_for_user(request)
+    task = get_object_or_404(RPATask, id=task_id, tenant=request.user.tenant)
+    if task.claimed_by_id != agent.id:
+        raise PermissionDenied("RPA task is not claimed by this agent.")
+    return task, agent
 
 
 def _task_payload(task):
@@ -40,6 +49,7 @@ def _task_payload(task):
 @permission_classes([IsRPAAgent])
 def claim_task(request):
     queue_key = request.data.get("queue_key")
+    agent = _get_agent_for_user(request)
     with transaction.atomic():
         tasks = RPATask.objects.select_for_update().filter(
             tenant=request.user.tenant,
@@ -53,7 +63,7 @@ def claim_task(request):
             return success_response({"task": None, "status": "empty"})
 
         task.status = RPATask.Status.CLAIMED
-        task.claimed_by = _get_agent_for_user(request)
+        task.claimed_by = agent
         task.claimed_at = timezone.now()
         task.save(update_fields=["status", "claimed_by", "claimed_at", "updated_at"])
 
@@ -63,8 +73,10 @@ def claim_task(request):
 @api_view(["POST"])
 @permission_classes([IsRPAAgent])
 def task_heartbeat(request, task_id):
-    task = _get_task_for_rpa_user(request, task_id)
+    task, agent = _get_task_for_rpa_agent(request, task_id)
     now = timezone.now()
+    agent.last_heartbeat_at = now
+    agent.save(update_fields=["last_heartbeat_at", "updated_at"])
     update_fields = ["updated_at"]
     if task.status in {RPATask.Status.CLAIMED, RPATask.Status.PENDING}:
         task.status = RPATask.Status.RUNNING
@@ -85,7 +97,7 @@ def task_heartbeat(request, task_id):
 @api_view(["POST"])
 @permission_classes([IsRPAAgent])
 def append_task_log(request, task_id):
-    task = _get_task_for_rpa_user(request, task_id)
+    task, _agent = _get_task_for_rpa_agent(request, task_id)
     status_value = request.data.get("status") or RPATaskStepLog.Status.RUNNING
     if status_value not in RPATaskStepLog.Status.values:
         status_value = RPATaskStepLog.Status.RUNNING
@@ -104,8 +116,10 @@ def append_task_log(request, task_id):
 @api_view(["POST"])
 @permission_classes([IsRPAAgent])
 def append_task_screenshot(request, task_id):
-    task = _get_task_for_rpa_user(request, task_id)
+    task, _agent = _get_task_for_rpa_agent(request, task_id)
     screenshot_url = request.data.get("screenshot_url") or request.data.get("screenshot_ref", "")
+    if screenshot_url.startswith(("http://", "https://")):
+        raise ValidationError({"screenshot_ref": "External screenshot URLs are not allowed in phase 1."})
     log = RPATaskStepLog.objects.create(
         tenant=task.tenant,
         task=task,
@@ -114,10 +128,6 @@ def append_task_screenshot(request, task_id):
         message=request.data.get("message", "screenshot placeholder recorded"),
         screenshot_url=screenshot_url,
     )
-    if screenshot_url.startswith(("http://", "https://")):
-        task.screenshot_url = screenshot_url
-        task.save(update_fields=["screenshot_url", "updated_at"])
-
     return success_response(
         {
             "task_id": task.id,
@@ -131,7 +141,7 @@ def append_task_screenshot(request, task_id):
 @api_view(["POST"])
 @permission_classes([IsRPAAgent])
 def complete_task(request, task_id):
-    task = _get_task_for_rpa_user(request, task_id)
+    task, _agent = _get_task_for_rpa_agent(request, task_id)
     task.status = RPATask.Status.SUCCESS
     task.result = {
         "message": request.data.get("message", ""),
@@ -156,7 +166,7 @@ def complete_task(request, task_id):
 @api_view(["POST"])
 @permission_classes([IsRPAAgent])
 def fail_task(request, task_id):
-    task = _get_task_for_rpa_user(request, task_id)
+    task, _agent = _get_task_for_rpa_agent(request, task_id)
     manual_required = bool(request.data.get("manual_required", False))
     requested_status = request.data.get("status")
     if manual_required:
