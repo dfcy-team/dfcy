@@ -3,9 +3,12 @@
     <header class="stage0-header">
       <div>
         <h1 class="page-title">{{ title }}</h1>
-        <p class="stage0-note">阶段0页面占位，仅展示 Mock 数据、搜索条件、按钮和字段；不连接真实后端，不执行真实业务提交。</p>
+        <p class="stage0-note">阶段1联调占位：Mock 模式展示本地数据，关闭 Mock 后尝试调用阶段1 API；不执行真实业务提交。</p>
       </div>
-      <el-tag type="info">API: {{ apiPath }}</el-tag>
+      <div class="stage0-tags">
+        <el-tag type="info">API: {{ apiPath }}</el-tag>
+        <el-tag :type="statusTagType">{{ dataStatus }}</el-tag>
+      </div>
     </header>
 
     <el-form class="stage0-search" inline>
@@ -25,9 +28,16 @@
     <div class="placeholder-grid">
       <div v-for="field in fields" :key="field" class="placeholder-card">
         <span class="field-label">{{ field }}</span>
-        <span class="field-value">Mock 字段占位</span>
+        <span class="field-value">{{ sampleValue(field) }}</span>
       </div>
     </div>
+
+    <el-card v-if="apiLoader" class="stage0-api-card" shadow="never">
+      <template #header>
+        <strong>API / Mock 返回预览</strong>
+      </template>
+      <pre>{{ responsePreview }}</pre>
+    </el-card>
 
     <div v-if="extraItems.length" class="stage0-extra">
       <span v-for="item in extraItems" :key="item">{{ item }}</span>
@@ -36,16 +46,60 @@
 </template>
 
 <script setup>
+import { computed, onMounted, ref } from 'vue';
+
 const props = defineProps({
   title: { type: String, required: true },
   apiPath: { type: String, default: 'pending' },
   fields: { type: Array, default: () => [] },
   searchFields: { type: Array, default: () => ['编号', '状态'] },
   actions: { type: Array, default: () => ['新增占位', '导出占位'] },
-  extraItems: { type: Array, default: () => [] }
+  extraItems: { type: Array, default: () => [] },
+  apiLoader: { type: Function, default: null }
 });
 
-const { title, apiPath, fields, searchFields, actions, extraItems } = props;
+const { title, apiPath, fields, searchFields, actions, extraItems, apiLoader } = props;
+const apiResponse = ref(null);
+const dataStatus = ref(apiLoader ? 'loading' : 'mock');
+
+const responseData = computed(() => apiResponse.value?.data || {});
+const responseItems = computed(() => {
+  const data = responseData.value;
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.items)) return data.items;
+  return data && Object.keys(data).length ? [data] : [];
+});
+const firstItem = computed(() => responseItems.value[0] || {});
+const responsePreview = computed(() => JSON.stringify(apiResponse.value || {}, null, 2));
+const statusTagType = computed(() => {
+  if (dataStatus.value === 'api') return 'success';
+  if (dataStatus.value === 'fallback') return 'warning';
+  if (dataStatus.value === 'error') return 'danger';
+  return 'info';
+});
+
+function sampleValue(field) {
+  const normalizedField = String(field).toLowerCase();
+  const matchKey = Object.keys(firstItem.value).find((key) => normalizedField.includes(key.toLowerCase()));
+  if (matchKey) return firstItem.value[matchKey] ?? 'Mock 字段占位';
+  return responseItems.value.length ? '接口字段待映射' : 'Mock 字段占位';
+}
+
+onMounted(async () => {
+  if (!apiLoader) return;
+  try {
+    apiResponse.value = await apiLoader();
+    dataStatus.value = apiResponse.value?.data?.api_status || apiResponse.value?.data?.status || 'api';
+  } catch (error) {
+    dataStatus.value = 'error';
+    apiResponse.value = {
+      success: false,
+      code: 'FRONTEND_API_ERROR',
+      message: error?.message || 'request failed',
+      data: {}
+    };
+  }
+});
 </script>
 
 <style scoped>
@@ -93,5 +147,24 @@ const { title, apiPath, fields, searchFields, actions, extraItems } = props;
   background: #fff;
   color: #334155;
   font-size: 12px;
+}
+
+.stage0-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.stage0-api-card {
+  border-radius: 8px;
+}
+
+.stage0-api-card pre {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>
