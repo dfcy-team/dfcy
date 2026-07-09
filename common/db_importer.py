@@ -74,6 +74,48 @@ PRODUCT_INT_FIELDS = {
 SKU_DECIMAL_FIELDS = {"gmv"}
 SKU_INT_FIELDS = {"orders", "items_sold"}
 
+_ZERO_SKU_ID = "__ZERO_SKU__"
+
+
+def _load_cache_payload(
+    *,
+    z_cache: Path | None = None,
+    local_cache: Path | None = None,
+    xlsx_path: Path | None = None,
+) -> tuple[list[str], list[list[Any]], bool]:
+    for cache_file in (z_cache, local_cache):
+        if cache_file and cache_file.exists():
+            payload = json.loads(cache_file.read_text(encoding="utf-8"))
+            return (
+                payload.get("headers", []) or [],
+                payload.get("rows", []) or [],
+                bool(payload.get("zero_data")),
+            )
+    headers, rows = _load_table_data(
+        z_cache=None,
+        local_cache=None,
+        xlsx_path=xlsx_path,
+    )
+    return headers, rows, False
+
+
+def _zero_sku_record(
+    *, data_time: str, shop_abbr: str, shop_name: str, site: str
+) -> dict[str, Any]:
+    return {
+        "data_time": data_time,
+        "shop_name": shop_name,
+        "shop_abbr": shop_abbr,
+        "site": site,
+        "sku_id": _ZERO_SKU_ID,
+        "product_id": _ZERO_SKU_ID,
+        "sku_name": "当日零SKU",
+        "status": "零数据",
+        "gmv": 0.0,
+        "orders": 0,
+        "items_sold": 0,
+    }
+
 
 def report_date(start: str, api_end: str) -> str:
     """统计日期 = API 区间的展示日（通常等于 start）。"""
@@ -322,18 +364,29 @@ def import_shop_analytics_to_db(
                 cache_dirs["SKU_JSON目录"]
                 / analytics_cache_filename(export_tag, "sku", start, api_end)
             )
-        headers, rows = _load_table_data(
+        headers, rows, sku_zero_data = _load_cache_payload(
             z_cache=z_sku_cache,
             local_cache=logs_shop / local_cache_filename("sku", start, api_end),
             xlsx_path=sku_xlsx,
         )
-        sku_records = _build_sku_rows(
-            headers, rows,
-            data_time=data_time,
-            shop_abbr=shop_key,
-            shop_name=shop_display,
-            site=site,
-        )
+        if rows:
+            sku_records = _build_sku_rows(
+                headers,
+                rows,
+                data_time=data_time,
+                shop_abbr=shop_key,
+                shop_name=shop_display,
+                site=site,
+            )
+        elif sku_zero_data:
+            sku_records = [
+                _zero_sku_record(
+                    data_time=data_time,
+                    shop_abbr=shop_key,
+                    shop_name=shop_display,
+                    site=site,
+                )
+            ]
         result["sku_rows"] = len(sku_records)
 
     if dry_run:
@@ -345,6 +398,11 @@ def import_shop_analytics_to_db(
     if not product_records and not sku_records:
         result["messages"].append(f"[跳过] {shop_key} 无 product/sku 数据")
         return result
+
+    if sku_records and sku_records[0].get("sku_id") == _ZERO_SKU_ID:
+        result["messages"].append(
+            f"[标记] {shop_key} {data_time} 当日零SKU（已写入占位行，查缺不再报缺失）"
+        )
 
     try:
         import pymysql

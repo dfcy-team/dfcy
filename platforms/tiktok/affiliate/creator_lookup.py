@@ -29,7 +29,12 @@ REGION_SHOP_KEYS = {
     "MY": f"{SHOP_PREFIX}MY",
 }
 DEFAULT_SHOP_KEY = REGION_SHOP_KEYS[DEFAULT_REGION]
-IM_LINK_TEMPLATE = "https://affiliate.tiktok.com/seller/im?creator_id={creator_id}"
+IM_LINK_TEMPLATE = "https://affiliate.tiktok.com/seller/im?creator_id={user_id}"
+DETAIL_LINK_TEMPLATE = (
+    "https://affiliate.tiktok.com/connection/creator/detail"
+    "?cid={affiliate_cid}&shop_region={region}"
+)
+CREATOR_SEARCH_PATH = "/affiliate_seller/202406/marketplace_creators/search"
 CREATOR_GET_PATH = "/affiliate_seller/202406/marketplace_creators/{creator_user_id}"
 TIKTOK_PROFILE_URL = "https://www.tiktok.com/@{username}"
 RATE_LIMIT_CODE = 36009002
@@ -99,8 +104,105 @@ def normalize_username(name: str) -> str:
     return s.lower()
 
 
-def build_im_link(creator_id: str) -> str:
-    return IM_LINK_TEMPLATE.format(creator_id=str(creator_id).strip())
+def build_im_link(user_id: str) -> str:
+    return IM_LINK_TEMPLATE.format(user_id=str(user_id).strip())
+
+
+def build_detail_link(affiliate_cid: str, region: str) -> str:
+    return DETAIL_LINK_TEMPLATE.format(
+        affiliate_cid=str(affiliate_cid).strip(),
+        region=str(region or DEFAULT_REGION).strip().upper(),
+    )
+
+
+def _extract_affiliate_cid(item: dict) -> str:
+    """联盟前台详情页 cid（oecuid）。Open API 202406 search 通常不返回该字段。"""
+    if not item:
+        return ""
+    candidates = (
+        "creator_oec_id",
+        "creator_oecuid",
+        "creator_oec_uid",
+        "oec_id",
+        "oecuid",
+        "cid",
+        "creator_id",
+        "creator_user_id",
+    )
+    for key in candidates:
+        val = item.get(key)
+        if isinstance(val, dict):
+            val = val.get("value") or val.get("id")
+        if val is not None and re.fullmatch(r"\d{10,25}", str(val).strip()):
+            return str(val).strip()
+    return ""
+
+
+def search_marketplace_creators(
+    client,
+    token,
+    cipher,
+    keyword: str,
+    *,
+    page_size: int = 20,
+) -> tuple[list[dict], str]:
+    """POST marketplace_creators/search；失败时返回 ([], 原因)。"""
+    last_err = ""
+    for wait in (0, *REQUEST_RETRY_WAIT):
+        if wait:
+            time.sleep(wait)
+        resp = client.post(
+            CREATOR_SEARCH_PATH,
+            token,
+            {"keyword": keyword},
+            {"shop_cipher": cipher, "page_size": page_size},
+        )
+        code = resp.get("code")
+        if code == RATE_LIMIT_CODE:
+            last_err = f"search 限流 code={code}"
+            continue
+        if not is_ok(resp):
+            last_err = f"search code={code} {str(resp.get('message', ''))[:120]}"
+            break
+        creators = (resp.get("data") or {}).get("creators") or []
+        return creators if isinstance(creators, list) else [], ""
+    return [], last_err or "search 失败"
+
+
+def lookup_affiliate_cid(
+    client,
+    token,
+    cipher,
+    username: str,
+    *,
+    user_id: str = "",
+) -> tuple[str, str]:
+    """尝试从 search 结果取联盟前台 cid；Open API 无字段时返回空 + 说明。"""
+    target = normalize_username(username)
+    creators, err = search_marketplace_creators(client, token, cipher, target)
+    if err and not creators:
+        return "", err
+
+    matched: dict | None = None
+    for item in creators:
+        if not isinstance(item, dict):
+            continue
+        if normalize_username(_extract_handle(item) or str(item.get("username") or "")) == target:
+            matched = item
+            break
+    if matched is None and len(creators) == 1:
+        matched = creators[0] if isinstance(creators[0], dict) else None
+
+    if matched:
+        cid = _extract_affiliate_cid(matched)
+        if cid and user_id and cid == user_id:
+            cid = ""
+        if cid:
+            return cid, ""
+
+    if creators:
+        return "", "search 成功但 Open API 响应无 affiliate_cid 字段（联盟前台 cid 未开放）"
+    return "", err or "search 无结果"
 
 
 def _parse_usernames(usernames) -> list[str]:
@@ -190,21 +292,32 @@ def get_affiliate_creator(client, token, cipher, creator_user_id: str) -> tuple[
     return {}, last_err or "联盟 API 查询失败"
 
 
-def search_creator_by_username(client, token, cipher, username) -> tuple[str, str, str]:
+def search_creator_by_username(client, token, cipher, username) -> tuple[str, str, str, str]:
+    """返回 (user_id, affiliate_cid, matched_handle, err)。"""
     target = normalize_username(username)
     user_id, err = fetch_tiktok_user_id(target)
     if not user_id:
-        return "", "", err or "未解析到 TikTok user_id"
+        return "", "", "", err or "未解析到 TikTok user_id"
 
     creator, err = get_affiliate_creator(client, token, cipher, user_id)
     if not creator:
-        return "", "", err or "联盟未找到该达人"
+        return "", "", "", err or "联盟未找到该达人"
 
     handle = _extract_handle(creator)
     if handle and handle != target:
-        return "", handle, f"handle 不匹配，期望 {target} 实际 {handle}"
+        return "", "", handle, f"handle 不匹配，期望 {target} 实际 {handle}"
 
-    return user_id, handle or target, ""
+    affiliate_cid = _extract_affiliate_cid(creator)
+    if affiliate_cid and affiliate_cid == user_id:
+        affiliate_cid = ""
+    if not affiliate_cid:
+        affiliate_cid, search_err = lookup_affiliate_cid(
+            client, token, cipher, target, user_id=user_id
+        )
+        if not affiliate_cid and search_err and "限流" in search_err:
+            return user_id, "", handle or target, search_err
+
+    return user_id, affiliate_cid, handle or target, ""
 
 
 def _init_client(shop_key: str):
@@ -236,7 +349,7 @@ def resolve_creators(
     region: str = DEFAULT_REGION,
     shop_key: str | None = None,
 ) -> list[dict]:
-    """用户名列表 -> creator_id 详情（含 region / shop_key / im_link）。"""
+    """用户名列表 -> user_id / affiliate_cid（含 region / shop_key / 链接）。"""
     names = _parse_usernames(usernames)
     if not names:
         return []
@@ -253,21 +366,35 @@ def resolve_creators(
             "username": name,
             "region": region_code,
             "shop_key": key,
-            "creator_id": "",
+            "user_id": "",
+            "affiliate_cid": "",
+            "creator_id": "",  # 兼容旧字段 = user_id
             "im_link": "",
+            "detail_link": "",
             "ok": False,
             "source": "none",
             "msg": "",
             "proxy": proxy,
         }
-        cid, matched_handle, err = search_creator_by_username(client, token, cipher, name)
-        if cid:
-            row["creator_id"] = cid
-            row["im_link"] = build_im_link(cid)
+        user_id, affiliate_cid, matched_handle, err = search_creator_by_username(
+            client, token, cipher, name
+        )
+        if user_id:
+            row["user_id"] = user_id
+            row["creator_id"] = user_id
+            row["im_link"] = build_im_link(user_id)
             row["ok"] = True
             row["source"] = "api"
+            if affiliate_cid:
+                row["affiliate_cid"] = affiliate_cid
+                row["detail_link"] = build_detail_link(affiliate_cid, region_code)
+            else:
+                row["msg"] = (
+                    "已得 user_id；affiliate_cid 需联盟前台链接或更高版本 Open API（当前 search 不返回 cid）"
+                )
             if matched_handle and matched_handle != name:
-                row["msg"] = f"匹配 handle={matched_handle}"
+                extra = f"匹配 handle={matched_handle}"
+                row["msg"] = f"{row['msg']}；{extra}" if row["msg"] else extra
         else:
             row["msg"] = err or "未找到达人"
         results.append(row)
@@ -275,15 +402,21 @@ def resolve_creators(
     return results
 
 
+def get_user_ids(
+    usernames,
+    region: str = DEFAULT_REGION,
+    shop_key: str | None = None,
+) -> list[str]:
+    return [r["user_id"] if r["ok"] else "" for r in resolve_creators(usernames, region=region, shop_key=shop_key)]
+
+
 def get_creator_ids(
     usernames,
     region: str = DEFAULT_REGION,
     shop_key: str | None = None,
 ) -> list[str]:
-    return [
-        r["creator_id"] if r["ok"] else ""
-        for r in resolve_creators(usernames, region=region, shop_key=shop_key)
-    ]
+    """兼容旧名：返回 TikTok user_id 列表（非联盟前台 cid）。"""
+    return get_user_ids(usernames, region=region, shop_key=shop_key)
 
 
 def get_im_links(

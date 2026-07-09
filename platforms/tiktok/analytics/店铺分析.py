@@ -54,7 +54,13 @@ FETCH_VIDEO_DETAIL = True
 
 # 加速：并发线程数（视频 330 条建议 4~6；SSL 经常断就改 2；1=最慢最稳）
 VIDEO_DETAIL_WORKERS = 5
-PRODUCT_DETAIL_WORKERS = 4
+_vw = os.environ.get("TTS_VIDEO_DETAIL_WORKERS", "").strip()
+if _vw.isdigit() and int(_vw) > 0:
+    VIDEO_DETAIL_WORKERS = int(_vw)
+PRODUCT_DETAIL_WORKERS = 2
+_pw = os.environ.get("TTS_PRODUCT_DETAIL_WORKERS", "").strip()
+if _pw.isdigit() and int(_pw) > 0:
+    PRODUCT_DETAIL_WORKERS = int(_pw)
 
 # 每条请求间隔秒（有并发时一般设 0；仍断网可改 0.1）
 VIDEO_DETAIL_SLEEP = 0
@@ -364,6 +370,16 @@ def fetch_get(
     return client.get(path, token, params)
 
 
+def _is_transient_api_error(resp: dict) -> bool:
+    if is_rate_limit_error(resp):
+        return True
+    code = str(resp.get("code", ""))
+    if code in ("36009007", "36009002", "20001"):
+        return True
+    msg = str(resp.get("message") or "").lower()
+    return "timeout" in msg or "timed out" in msg or "request timeout" in msg
+
+
 def fetch_all_list(
     client: TikTokShopClient,
     token: str,
@@ -385,8 +401,23 @@ def fetch_all_list(
         if page_token:
             extra["page_token"] = page_token
         r = fetch_get(client, token, path, start, end, extra=extra, page_size=page_size)
+        for attempt in range(3):
+            if is_ok(r) or not _is_transient_api_error(r):
+                break
+            wait = 3.0 * (2**attempt) + random.uniform(0, 1.5)
+            print(
+                f"\n[{section_key}] API code={r.get('code')}，"
+                f"{wait:.1f}s 后重试本页 ({attempt + 1}/3)..."
+            )
+            time.sleep(wait)
+            r = fetch_get(client, token, path, start, end, extra=extra, page_size=page_size)
         if not is_ok(r):
-            return merged, {"error": r, "pages": pages, "total_count": total_count}
+            return merged, {
+                "error": r,
+                "pages": pages,
+                "total_count": total_count,
+                "complete": False,
+            }
 
         data = r.get("data") or {}
         batch = extract_list(data, section_key)
@@ -397,7 +428,7 @@ def fetch_all_list(
         page_token = data.get("next_page_token") or ""
         if not page_token:
             break
-        time.sleep(0.25)
+        time.sleep(0.35)
 
     meta = {
         "pages": pages,
@@ -408,13 +439,106 @@ def fetch_all_list(
     return merged, meta
 
 
-_SKU_RETRY_WAITS = (5.0, 15.0, 30.0, 30.0, 30.0)
+_LIST_RETRY_WAITS = (3.0, 10.0, 20.0, 30.0, 60.0)
 
 
-def classify_sku_empty(meta: dict | None, product_row_count: int | None) -> str:
-    """区分限流空返回 vs 真无数据。返回 rate_limit_suspect | likely_no_data。"""
+def fetch_all_list_with_retry(
+    client: TikTokShopClient,
+    token: str,
+    section_key: str,
+    start: str,
+    end: str,
+    page_size: int = 100,
+    *,
+    label: str | None = None,
+) -> tuple[list[dict], dict]:
+    """整表翻页失败或未拉全时，退避后整表重拉。"""
+    display = label or section_key
+    last_items: list[dict] = []
+    last_meta: dict = {}
+    for attempt, wait in enumerate((0.0, *_LIST_RETRY_WAITS)):
+        if wait > 0:
+            print(
+                f"\n[{display}] 分页未完整或 API 失败，"
+                f"{wait:.0f}s 后整表重拉 ({attempt}/{len(_LIST_RETRY_WAITS)})..."
+            )
+            time.sleep(wait)
+        last_items, last_meta = fetch_all_list(
+            client, token, section_key, start, end, page_size=page_size
+        )
+        if not last_meta.get("error") and last_meta.get("complete", True):
+            return last_items, last_meta
+    return last_items, last_meta
+
+
+_SKU_RETRY_WAITS = (10.0, 30.0, 60.0, 60.0, 90.0, 90.0)
+
+
+def product_sales_from_snapshot(log_dir: Path, start: str, end: str) -> dict[str, float | int]:
+    """从产品缓存汇总 GMV/订单/Active 数，供 SKU 空列表时区分限流 vs 真无数据。"""
+    summary: dict[str, float | int] = {"gmv": 0.0, "orders": 0, "active_count": 0, "row_count": 0}
+    for path in (
+        log_dir / f"product_list_{start}_{end}.json",
+        log_dir / f".cache_product_list_{start}_{end}.json",
+    ):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        headers = data.get("headers") or []
+        rows = data.get("rows") or []
+        if not rows:
+            continue
+        id_idx = next((headers.index(k) for k in ("商品ID", "ID") if k in headers), None)
+        gmv_idx = headers.index("GMV") if "GMV" in headers else None
+        ord_idx = headers.index("订单数") if "订单数" in headers else None
+        status_idx = headers.index("状态") if "状态" in headers else None
+        if id_idx is None:
+            continue
+        gmv_sum = 0.0
+        ord_sum = 0
+        active = 0
+        for row in rows:
+            if len(row) <= id_idx:
+                continue
+            if gmv_idx is not None and len(row) > gmv_idx:
+                try:
+                    gmv_sum += float(row[gmv_idx] or 0)
+                except (TypeError, ValueError):
+                    pass
+            if ord_idx is not None and len(row) > ord_idx:
+                try:
+                    ord_sum += int(float(str(row[ord_idx] or 0).replace(",", "")))
+                except (TypeError, ValueError):
+                    pass
+            if status_idx is not None and len(row) > status_idx:
+                if str(row[status_idx] or "").strip().lower() == "active":
+                    active += 1
+        summary = {
+            "gmv": gmv_sum,
+            "orders": ord_sum,
+            "active_count": active,
+            "row_count": len(rows),
+        }
+        break
+    return summary
+
+
+def classify_sku_empty(
+    meta: dict | None,
+    *,
+    product_gmv: float = 0.0,
+    product_orders: int = 0,
+    has_product_snapshot: bool = True,
+) -> str:
+    """区分限流空返回 vs 真无数据。返回 rate_limit_suspect | likely_no_data。
+
+    原则：有成交却拉不到 SKU → 限流/异常；零成交日 SKU 为空 → 真无数据（即使有产品在架）。
+    """
     if not meta:
-        return "likely_no_data"
+        return "likely_no_data" if has_product_snapshot else "rate_limit_suspect"
     err = meta.get("error")
     if err and isinstance(err, dict) and is_rate_limit_error(err):
         return "rate_limit_suspect"
@@ -423,7 +547,9 @@ def classify_sku_empty(meta: dict | None, product_row_count: int | None) -> str:
         return "rate_limit_suspect"
     if not meta.get("complete", True):
         return "rate_limit_suspect"
-    if product_row_count is not None and product_row_count > 0:
+    if not has_product_snapshot:
+        return "rate_limit_suspect"
+    if product_orders > 0 or product_gmv > 0:
         return "rate_limit_suspect"
     return "likely_no_data"
 
@@ -435,7 +561,9 @@ def fetch_sku_list_with_retry(
     end: str,
     page_size: int,
     *,
-    product_row_count: int | None = None,
+    product_gmv: float = 0.0,
+    product_orders: int = 0,
+    has_product_snapshot: bool = True,
     retries: int = 5,
 ) -> tuple[list[dict], dict]:
     """SKU 表现 API 在批量任务中偶发空列表（code=0），空结果时加长退避重试。"""
@@ -443,13 +571,23 @@ def fetch_sku_list_with_retry(
     if meta.get("error") or skus:
         return skus, meta
 
-    empty_kind = classify_sku_empty(meta, product_row_count)
+    sales_ctx = {
+        "product_gmv": product_gmv,
+        "product_orders": product_orders,
+        "has_product_snapshot": has_product_snapshot,
+    }
+    empty_kind = classify_sku_empty(meta, **sales_ctx)
     waits = _SKU_RETRY_WAITS[: max(1, retries)]
+    if empty_kind == "likely_no_data":
+        waits = waits[:1]
     for attempt, wait in enumerate(waits):
         if empty_kind == "rate_limit_suspect":
-            hint = "疑似限流空返回（code=0 无 SKU，但产品有数据或分页未完成）"
+            hint = (
+                "疑似限流/异常空返回（code=0 无 SKU，但当日有成交或分页未完成）"
+                f" GMV={product_gmv:.2f} 订单={product_orders}"
+            )
         else:
-            hint = "空列表"
+            hint = f"零成交日空列表（GMV={product_gmv:.2f} 订单={product_orders}），确认性重试"
         print(f"\n[SKU表现] {hint}，{wait:.0f}s 后重试 ({attempt + 1}/{len(waits)})...")
         time.sleep(wait)
         skus2, meta2 = fetch_all_list(client, token, "sku_list", start, end, page_size=page_size)
@@ -459,27 +597,35 @@ def fetch_sku_list_with_retry(
             print(f"\n[SKU表现] 重试第 {attempt + 1} 次成功，共 {len(skus2)} 条")
             return skus2, meta2
         meta = meta2
-        empty_kind = classify_sku_empty(meta, product_row_count)
+        empty_kind = classify_sku_empty(meta, **sales_ctx)
 
-    final_kind = classify_sku_empty(meta, product_row_count)
+    final_kind = classify_sku_empty(meta, **sales_ctx)
     if not skus:
         tc = meta.get("total_count")
         if final_kind == "rate_limit_suspect":
             print(
-                f"\n[SKU表现] 警告: {len(waits)} 次重试后仍为空，判定为【限流空返回】"
+                f"\n[SKU表现] 警告: {len(waits)} 次重试后仍为空，判定为【限流/异常】"
                 + (f"（total_count={tc}）" if tc is not None else "")
-                + "；建议分阶段跑 SKU 或加大店间间隔"
+                + f"（GMV={product_gmv:.2f} 订单={product_orders}）"
+                + "；请分阶段跑 SKU 或加大店间间隔"
             )
+            meta = {**meta, "rate_limit_suspect": True}
         else:
-            print("\n[SKU表现] 判定为【真无数据】（code=0 且分页完整、无 total_count）")
+            print(
+                f"\n[SKU表现] 判定为【真无数据】（零成交日，GMV={product_gmv:.2f} 订单={product_orders}）"
+                + "，将写零数据标记"
+            )
     if not list_fetch_complete(meta) and not skus:
         tc = meta.get("total_count")
-        print(
-            f"\n[SKU表现] 警告: API 返回空列表且分页未完成"
-            + (f"（total_count={tc}）" if tc is not None else "")
-            + "，按 0 条处理"
-        )
-        meta = {**meta, "complete": True}
+        if final_kind == "rate_limit_suspect":
+            meta = {**meta, "rate_limit_suspect": True}
+        else:
+            print(
+                f"\n[SKU表现] 警告: API 返回空列表且分页未完成"
+                + (f"（total_count={tc}）" if tc is not None else "")
+                + "，按 0 条处理"
+            )
+            meta = {**meta, "complete": True}
     return skus, meta
 
 
@@ -941,7 +1087,10 @@ def build_sku_meta_map(catalog: dict[str, dict]) -> dict[str, dict]:
 
 
 def build_sku_excel_rows(
-    skus: list[dict], sku_meta: dict[str, dict] | None = None
+    skus: list[dict],
+    sku_meta: dict[str, dict] | None = None,
+    *,
+    product_by_id: dict[str, dict] | None = None,
 ) -> list[list]:
     rows: list[list] = []
     for s in skus:
@@ -951,6 +1100,14 @@ def build_sku_excel_rows(
         sid = str(s.get("id", ""))
         pid = str(s.get("product_id", ""))
         meta = (sku_meta or {}).get(sid, {})
+        if not meta.get("title") and product_by_id:
+            pm = product_by_id.get(pid, {})
+            meta = {
+                **meta,
+                "product_id": pid,
+                "title": pm.get("title", ""),
+                "status": pm.get("status", ""),
+            }
         if is_zhanfu_export():
             rows.append(
                 [
@@ -1400,6 +1557,54 @@ def load_catalog_titles_from_exports(log_dir: Path) -> dict[str, dict]:
                 status = str(row[status_idx] or "")
             out[pid] = {"id": pid, "title": title, "status": status}
     return out
+
+
+def load_product_snapshot_for_sku(
+    log_dir: Path, start: str, end: str
+) -> tuple[int | None, dict[str, dict]]:
+    """SKU 单独任务：复用当日 product_list 缓存，跳过目录 API（减轻 05:00 限流）。"""
+    product_by_id: dict[str, dict] = {}
+    row_count = 0
+    for path in (
+        log_dir / f"product_list_{start}_{end}.json",
+        log_dir / f".cache_product_list_{start}_{end}.json",
+    ):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        headers = data.get("headers") or []
+        rows = data.get("rows") or []
+        if not rows:
+            continue
+        id_idx = next((headers.index(k) for k in ("商品ID", "ID") if k in headers), None)
+        title_idx = headers.index("商品") if "商品" in headers else None
+        status_idx = headers.index("状态") if "状态" in headers else None
+        if id_idx is None:
+            continue
+        row_count = len(rows)
+        for row in rows:
+            if len(row) <= id_idx:
+                continue
+            pid = str(row[id_idx] or "")
+            if not pid:
+                continue
+            title = (
+                str(row[title_idx] or "").strip()
+                if title_idx is not None and len(row) > title_idx
+                else ""
+            )
+            status = (
+                str(row[status_idx] or "")
+                if status_idx is not None and len(row) > status_idx
+                else ""
+            )
+            product_by_id[pid] = {"id": pid, "title": title, "status": status}
+        if product_by_id:
+            return row_count, product_by_id
+    return (row_count or None), product_by_id
 
 
 def main_image_url_from_payload(p: dict) -> str:
@@ -2041,13 +2246,21 @@ def cache_path(stem: str, start: str, end: str) -> Path:
     return LOG_DIR / f".cache_{stem}_{start}_{end}.json"
 
 
-def save_rows_cache(stem: str, headers: list[str], rows: list[list], start: str, end: str) -> Path:
+def save_rows_cache(
+    stem: str,
+    headers: list[str],
+    rows: list[list],
+    start: str,
+    end: str,
+    *,
+    zero_data: bool = False,
+) -> Path:
     """缓存已拉全的表数据，Excel 失败时可 --only-export-excel 重导，无需再请求 API。"""
     p = cache_path(stem, start, end)
-    p.write_text(
-        json.dumps({"headers": headers, "rows": rows}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    payload: dict = {"headers": headers, "rows": rows}
+    if zero_data:
+        payload["zero_data"] = True
+    p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return p
 
 
@@ -2457,8 +2670,14 @@ def main() -> int:
         product_list_meta: dict = {}
         has_next = False
         if args["all_pages"]:
-            list_items, product_list_meta = fetch_all_list(
-                client, token, "product_list", start, end, page_size=args["size"]
+            list_items, product_list_meta = fetch_all_list_with_retry(
+                client,
+                token,
+                "product_list",
+                start,
+                end,
+                page_size=args["size"],
+                label="商品表现",
             )
             if product_list_meta.get("error"):
                 failed += 1
@@ -2475,8 +2694,14 @@ def main() -> int:
             if has_next:
                 print("  提示: 商品列表仍有下一页，导出 Excel 需加 --all")
 
-        rich_items, rich_meta = fetch_all_list(
-            client, token, "product_list_rich", start, end, page_size=100
+        rich_items, rich_meta = fetch_all_list_with_retry(
+            client,
+            token,
+            "product_list_rich",
+            start,
+            end,
+            page_size=100,
+            label="商品表现(分渠道)",
         )
         rich_map = {str(p.get("id")): p for p in rich_items}
         product_ids = [str(x.get("id")) for x in list_items if x.get("id")]
@@ -2565,16 +2790,27 @@ def main() -> int:
                 time.sleep(cooldown)
         sku_meta: dict[str, dict] = {}
         sku_product_count: int | None = None
+        product_by_id: dict[str, dict] = {}
         if want["product"]:
             sku_product_count = (
                 len(product_rows)
                 if product_rows
                 else (len(list_items) if list_items else None)
             )
+        elif is_zhanfu_export():
+            snap_count, product_by_id = load_product_snapshot_for_sku(LOG_DIR, start, end)
+            if snap_count and product_by_id:
+                sku_product_count = snap_count
+                print(
+                    f"\n[SKU表现] 复用当日产品导出（{snap_count} 条 / {len(product_by_id)} 个商品），"
+                    "跳过目录 API"
+                )
         if is_zhanfu_export():
             if catalog_for_sku is not None:
                 print("\nSKU 表复用产品步骤商品目录（跳过重复目录 API）")
                 sku_meta = build_sku_meta_map(catalog_for_sku)
+            elif product_by_id:
+                sku_meta = {}
             else:
                 print("\n正在拉取商品目录（SKU 表需要商品名/状态）...")
                 catalog_raw = fetch_product_catalog(client, token)
@@ -2590,6 +2826,8 @@ def main() -> int:
                         )
                         time.sleep(cooldown)
         sku_has_next = False
+        product_sales = product_sales_from_snapshot(LOG_DIR, start, end)
+        has_product_snapshot = int(product_sales.get("row_count") or 0) > 0
         if args["all_pages"]:
             skus, sku_list_meta = fetch_sku_list_with_retry(
                 client,
@@ -2597,7 +2835,9 @@ def main() -> int:
                 start,
                 end,
                 args["size"],
-                product_row_count=sku_product_count,
+                product_gmv=float(product_sales.get("gmv") or 0),
+                product_orders=int(product_sales.get("orders") or 0),
+                has_product_snapshot=has_product_snapshot,
             )
             out["sections"]["sku_list"] = {"data": {"skus": skus}, **sku_list_meta}
             if sku_list_meta.get("error"):
@@ -2619,12 +2859,16 @@ def main() -> int:
                 print("\n[SKU表现] 列表未拉全，不导出（请加 --all）")
                 failed += 1
             elif not sku_ok and not skus:
-                print("\n[SKU表现] 无数据（分页未完整，按 0 条处理，不影响产品导出）")
+                if sku_list_meta.get("rate_limit_suspect"):
+                    print("\n[SKU表现] 限流导致无数据，标记失败（请加大店间间隔后重跑 SKU）")
+                    failed += 1
+                else:
+                    print("\n[SKU表现] 无数据（分页未完整，按 0 条处理，不影响产品导出）")
             elif skus:
                 deliver_table(
                     "SKU表现",
                     active_headers("sku"),
-                    build_sku_excel_rows(skus, sku_meta),
+                    build_sku_excel_rows(skus, sku_meta, product_by_id=product_by_id or None),
                     start,
                     end,
                     "sku_list",
@@ -2632,8 +2876,19 @@ def main() -> int:
                     excel_paths,
                     json_paths,
                 )
+            elif sku_list_meta.get("rate_limit_suspect"):
+                print("\n[SKU表现] 限流导致无数据，标记失败（请加大店间间隔后重跑 SKU）")
+                failed += 1
             else:
-                print("\n[SKU表现] 无数据，不导出")
+                save_rows_cache(
+                    "sku_list",
+                    active_headers("sku"),
+                    [],
+                    start,
+                    end,
+                    zero_data=True,
+                )
+                print("\n[SKU表现] API 零数据（已写缓存标记，入库时写占位行）")
 
     # 商品/SKU 之后再拉视频详情
     video_direct_gmv: dict[str, float] = {}
@@ -2657,6 +2912,18 @@ def main() -> int:
             + (f"，从 202409 补全 {added} 条视频" if added else "")
             + f"；导出共 {len(videos)} 条"
         )
+
+    if want["video"] and not videos and (args["export_excel"] or args["save_tables"]):
+        if list_fetch_complete(video_list_meta):
+            headers = active_headers("video")
+            zp = cache_path("video_detail", start, end)
+            zp.write_text(
+                json.dumps({"headers": headers, "rows": [], "zero_data": True}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            print(f"\n[视频详情] API 零数据（已写缓存标记 {zp.name}）")
+        else:
+            print("\n[视频详情] 列表未拉全且无视频，不标记零数据")
 
     if want["video"] and videos:
         want_detail = (

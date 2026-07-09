@@ -69,14 +69,17 @@ def main(argv=None) -> int:
         print(json.dumps(results, ensure_ascii=False, indent=2))
     elif args.ids_only:
         for r in results:
-            print(r["creator_id"] if r["ok"] else "")
+            print(r["user_id"] if r["ok"] else "")
     else:
         if not args.ids_only:
             print(f"[网络] 代理: {proxy or '直连'}")
             print(f"[店铺] {shop} (region={args.region.upper()})")
+            print("说明: user_id=TikTok账号ID；affiliate_cid=联盟前台详情页cid（Open API 可能无）")
         for r in results:
             print(
-                f"{r['username']}\t{r['region']}\t{r['creator_id'] or '-'}\t"
+                f"{r['username']}\t{r['region']}\t"
+                f"user_id={r['user_id'] or '-'}\t"
+                f"affiliate_cid={r['affiliate_cid'] or '-'}\t"
                 f"{'OK' if r['ok'] else 'FAIL'}\t{r['msg']}"
             )
 
