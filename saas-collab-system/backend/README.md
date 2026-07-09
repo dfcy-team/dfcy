@@ -46,6 +46,15 @@ cd saas-collab-system/backend
 pytest
 ```
 
+## Phase 1 Test Reproducibility
+
+For the full Phase 1 local and CI command set, see:
+
+- `../docs/05_test/phase1_local_test_guide.md`
+- `../docs/06_release/phase1_ci_checklist.md`
+
+The guides include Windows PowerShell and bash commands for Python setup, dependency installation, Django checks, pytest, Docker Compose validation, MySQL/Redis local startup, frontend build references, RPA JSON validation, and basic security scans. Use placeholder `.env.example` values only; do not use real production `.env` files or connect to real external platforms.
+
 ## Docker Compose
 
 From the project root:
