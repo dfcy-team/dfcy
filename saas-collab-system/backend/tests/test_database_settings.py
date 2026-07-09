@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 def run_prod_settings_import(env_overrides):
@@ -25,7 +26,7 @@ def run_prod_settings_import(env_overrides):
             "-c",
             "import config.settings.prod as prod; print(prod.DATABASES['default']['ENGINE'])",
         ],
-        cwd=os.path.join(os.getcwd(), "backend"),
+        cwd=Path(__file__).resolve().parents[1],
         env=env,
         text=True,
         capture_output=True,

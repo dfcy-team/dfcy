@@ -43,6 +43,9 @@ INSTALLED_APPS = [
     "apps.integrations",
     "apps.audit",
     "apps.files",
+    "apps.products",
+    "apps.purchasing",
+    "apps.suppliers",
     "apps.common",
 ]
 

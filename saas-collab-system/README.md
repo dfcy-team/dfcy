@@ -26,6 +26,15 @@ Current stage focuses on the backend foundation:
 
 See `backend/README.md` for local Python, Docker Compose, MySQL, Redis, Celery, migrations, and pytest commands.
 
+## Phase 1 Reproducible Checks
+
+Phase 1 backend and CI verification docs:
+
+- `docs/05_test/phase1_local_test_guide.md`
+- `docs/06_release/phase1_ci_checklist.md`
+
+These docs cover Python setup, dependency install, Django checks, pytest, Docker Compose validation, MySQL/Redis local startup, frontend build references, RPA JSON validation, and safety scans. They use placeholders only and must not connect to real platforms or real `.env` files.
+
 ## Environment
 
 Copy `.env.example` to `.env` for local development and replace every `change-me-*` value. Never commit `.env`.
