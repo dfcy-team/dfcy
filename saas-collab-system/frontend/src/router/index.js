@@ -17,6 +17,11 @@ import SupplierTaskList from '../views/suppliers/SupplierTaskList.vue';
 import SupplierTaskDetail from '../views/suppliers/SupplierTaskDetail.vue';
 import SupplierShipmentList from '../views/suppliers/SupplierShipmentList.vue';
 import SupplierShipmentDetail from '../views/suppliers/SupplierShipmentDetail.vue';
+import SupplierPerformanceDashboard from '../views/suppliers/SupplierPerformanceDashboard.vue';
+import SupplierPerformanceList from '../views/suppliers/SupplierPerformanceList.vue';
+import SupplierPerformanceDetail from '../views/suppliers/SupplierPerformanceDetail.vue';
+import MySupplierPerformance from '../views/suppliers/MySupplierPerformance.vue';
+import MySupplierPerformanceHistory from '../views/suppliers/MySupplierPerformanceHistory.vue';
 import SiteProfileList from '../views/listings/SiteProfileList.vue';
 import SiteProfileDetail from '../views/listings/SiteProfileDetail.vue';
 import ListingTemplateList from '../views/listings/ListingTemplateList.vue';
@@ -63,6 +68,11 @@ const routes = [
       { path: 'suppliers/tasks/:id', component: SupplierTaskDetail },
       { path: 'suppliers/shipments', component: SupplierShipmentList },
       { path: 'suppliers/shipments/:id', component: SupplierShipmentDetail },
+      { path: 'suppliers/performance', component: SupplierPerformanceDashboard },
+      { path: 'suppliers/performance/list', component: SupplierPerformanceList },
+      { path: 'suppliers/performance/:supplierId', component: SupplierPerformanceDetail },
+      { path: 'suppliers/my-performance', component: MySupplierPerformance },
+      { path: 'suppliers/my-performance/history', component: MySupplierPerformanceHistory },
       { path: 'listings/sites', component: SiteProfileList },
       { path: 'listings/sites/:id', component: SiteProfileDetail },
       { path: 'listings/templates', component: ListingTemplateList },

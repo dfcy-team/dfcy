@@ -66,3 +66,9 @@ VITE_API_BASE_URL=http://localhost:8000
 - 新增 `/finance/statements`、`/finance/withdrawals`、`/finance/bank-receipts`、`/finance/reconciliation/matches`、`/finance/reconciliation/exceptions`。
 - 所有财务页面只使用 `/api/finance/*`。
 - 银行账号仅掩码展示，不接真实银行、支付或真实平台账单，不提供付款、转账或提现按钮。
+
+## 阶段2供应商绩效页面
+
+- 内部绩效页面使用 `/api/internal/suppliers/performance/*`。
+- 供应商自己的绩效页面使用 `/api/external/supplier/performance/*`，不得传入其他 `supplier_id`。
+- 供应商身份与 `tenant_id + supplier_id` 过滤以后端为准，前端不承载可信权限过滤。
