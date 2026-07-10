@@ -44,7 +44,7 @@ jobs:
       run:
         working-directory: saas-collab-system/backend
     env:
-      DB_NAME: ${{ runner.temp }}/phase2-ci.sqlite3
+      DB_NAME: /tmp/phase2-ci.sqlite3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
