@@ -51,6 +51,9 @@ const ReconciliationMatchList = () => import('../views/finance/ReconciliationMat
 const ReconciliationMatchDetail = () => import('../views/finance/ReconciliationMatchDetail.vue');
 const ReconciliationExceptionList = () => import('../views/finance/ReconciliationExceptionList.vue');
 const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
+const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
+const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
+const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -107,6 +110,9 @@ const routes = [
       { path: 'finance/reconciliation/matches/:id', component: ReconciliationMatchDetail },
       { path: 'finance/reconciliation/exceptions', component: ReconciliationExceptionList },
       { path: 'reports/basic', component: BasicReportIndex },
+      { path: 'settings/platform-risk', component: PlatformAccessRisk },
+      { path: 'settings/platform-readiness', component: PlatformIntegrationReadiness },
+      { path: 'settings/security-review', component: SecurityReviewChecklist },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

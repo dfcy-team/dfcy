@@ -7,6 +7,17 @@
 - `npm run build` succeeds after the split. The original main app chunk dropped from about `1,164.29 kB` to about `12.71 kB`.
 - A remaining non-blocking chunk warning is caused by the full `element-plus` vendor chunk, about `923.26 kB`. Future optimization can evaluate Element Plus on-demand imports or deeper manual chunks.
 
+## Phase 2 platform access risk placeholders
+
+- Added read-only routes:
+  - `/settings/platform-risk`
+  - `/settings/platform-readiness`
+  - `/settings/security-review`
+- These pages only use Mock placeholder data from `frontend/src/mock/platformRisk.js`.
+- They do not provide real Token, Cookie, Session, API Key, API Secret, account, password, bank, or payment configuration inputs.
+- They do not provide production connect buttons, real OAuth redirects, or real platform SDK calls.
+- Production access is shown as disabled until a dedicated security review is completed.
+
 阶段0前端工程占位，使用 Vue3 + Vite + vue-router + pinia + axios + Element Plus。
 
 ## 阶段0边界
