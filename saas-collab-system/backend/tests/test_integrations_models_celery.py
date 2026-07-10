@@ -8,6 +8,7 @@ from apps.integrations.models import (
     APISyncTask,
     PlatformChoices,
 )
+from apps.integrations.security import mask_secret, sanitize_payload
 from config.celery import app, debug_task
 from apps.tenants.models import Tenant
 
@@ -26,7 +27,46 @@ def test_api_integration_config_can_be_created_without_real_secrets():
 
     assert config.id is not None
     assert config.status == APIIntegrationConfig.Status.ACTIVE
+    assert config.environment == APIIntegrationConfig.Environment.MOCK
+    assert config.credential_status == APIIntegrationConfig.CredentialStatus.PLACEHOLDER
     assert "real" not in config.api_key_encrypted.lower()
+
+
+@pytest.mark.django_db
+def test_api_credentials_keep_custody_metadata_without_plaintext_secret():
+    tenant = Tenant.objects.create(name="Tenant", code="credential-tenant")
+    config = APIIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform=PlatformChoices.TIKTOK,
+        shop_code="shop-credential",
+        api_base_url="https://sandbox.example.test",
+        environment=APIIntegrationConfig.Environment.SANDBOX,
+        credential_ref="vault://example/tiktok/shop-credential",
+        api_key_encrypted="ciphertext-placeholder-key",
+        api_secret_encrypted="ciphertext-placeholder-secret",
+        credential_key_version="v1",
+        least_privilege_scope=["orders:read", "inventory:read"],
+    )
+
+    assert config.credential_ref.startswith("vault://example/")
+    assert config.api_secret_encrypted.startswith("ciphertext-placeholder")
+    assert "plain" not in config.api_secret_encrypted.lower()
+    assert "orders:read" in config.least_privilege_scope
+
+
+def test_integration_security_helpers_mask_sensitive_values():
+    payload = {
+        "shop": "demo-shop",
+        "api_key": "example-api-key",
+        "nested": {"refresh_token": "example-refresh-token", "page": 1},
+    }
+
+    assert mask_secret("abcd1234efgh") == "abcd***efgh"
+    assert sanitize_payload(payload) == {
+        "shop": "demo-shop",
+        "api_key": "***",
+        "nested": {"refresh_token": "***", "page": 1},
+    }
 
 
 @pytest.mark.django_db

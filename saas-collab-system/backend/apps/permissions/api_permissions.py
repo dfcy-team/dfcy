@@ -1,7 +1,7 @@
 from rest_framework.permissions import BasePermission
 
 from apps.accounts.models import CustomUser
-from apps.permissions.services import user_has_finance_access
+from apps.permissions.services import user_has_finance_access, user_has_integration_access
 
 
 class IsInternalUser(BasePermission):
@@ -26,4 +26,14 @@ class IsFinanceUser(BasePermission):
             and request.user.is_authenticated
             and request.user.user_type == CustomUser.UserType.INTERNAL
             and user_has_finance_access(request.user)
+        )
+
+
+class IsIntegrationAdmin(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.user_type == CustomUser.UserType.INTERNAL
+            and user_has_integration_access(request.user)
         )
