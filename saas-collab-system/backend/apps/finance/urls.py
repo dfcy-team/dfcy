@@ -1,8 +1,44 @@
 from django.urls import path
 
-from .views import health
+from .views import (
+    bank_receipt_collection,
+    confirm_reconciliation_match,
+    health,
+    import_demo_bank_receipt_view,
+    import_demo_statement_view,
+    import_demo_withdrawal_view,
+    reconciliation_exception_collection,
+    reconciliation_match_collection,
+    reject_reconciliation_match,
+    run_mock_reconciliation_view,
+    statement_collection,
+    withdrawal_collection,
+)
 
 
 urlpatterns = [
     path("health/", health, name="finance-health"),
+    path("statements/", statement_collection, name="finance-statement-collection"),
+    path("statements/import-demo/", import_demo_statement_view, name="finance-statement-import-demo"),
+    path("withdrawals/", withdrawal_collection, name="finance-withdrawal-collection"),
+    path("withdrawals/import-demo/", import_demo_withdrawal_view, name="finance-withdrawal-import-demo"),
+    path("bank-receipts/", bank_receipt_collection, name="finance-bank-receipt-collection"),
+    path("bank-receipts/import-demo/", import_demo_bank_receipt_view, name="finance-bank-receipt-import-demo"),
+    path("reconciliation/matches/", reconciliation_match_collection, name="finance-reconciliation-match-collection"),
+    path("reconciliation/run-mock/", run_mock_reconciliation_view, name="finance-reconciliation-run-mock"),
+    path(
+        "reconciliation/matches/<int:pk>/confirm/",
+        confirm_reconciliation_match,
+        name="finance-reconciliation-match-confirm",
+    ),
+    path(
+        "reconciliation/matches/<int:pk>/reject/",
+        reject_reconciliation_match,
+        name="finance-reconciliation-match-reject",
+    ),
+    path(
+        "reconciliation/exceptions/",
+        reconciliation_exception_collection,
+        name="finance-reconciliation-exception-collection",
+    ),
 ]
