@@ -18,6 +18,19 @@ class IsSupplierPerformanceViewer(BasePermission):
         )
 
 
+class IsSupplierPerformanceCalculator(BasePermission):
+    permission_code = "suppliers.performance.calculate"
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and user.user_type == CustomUser.UserType.INTERNAL
+            and check_user_permission(user, self.permission_code)
+        )
+
+
 def get_supplier_performance_scope(user):
     if getattr(user, "is_superuser", False):
         return None

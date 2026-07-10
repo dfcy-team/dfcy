@@ -32,46 +32,55 @@ def mask_account(account_hint="demo-account"):
 
 
 def import_demo_statement(tenant):
-    return PlatformStatement.objects.create(
+    statement, _ = PlatformStatement.objects.update_or_create(
         tenant=tenant,
-        platform="mock",
         statement_no=f"DEMO-STMT-{tenant.id}",
-        period_start="2026-01-01",
-        period_end="2026-01-31",
-        currency="USD",
-        gross_amount=Decimal("1000.00"),
-        fee_amount=Decimal("25.00"),
-        net_amount=Decimal("975.00"),
-        source_type=PlatformStatement.SourceType.DEMO,
+        defaults={
+            "platform": "mock",
+            "period_start": "2026-01-01",
+            "period_end": "2026-01-31",
+            "currency": "USD",
+            "gross_amount": Decimal("1000.00"),
+            "fee_amount": Decimal("25.00"),
+            "net_amount": Decimal("975.00"),
+            "source_type": PlatformStatement.SourceType.DEMO,
+        },
     )
+    return statement
 
 
 def import_demo_withdrawal(tenant):
     now = timezone.now()
-    return WithdrawalRecord.objects.create(
+    withdrawal, _ = WithdrawalRecord.objects.update_or_create(
         tenant=tenant,
-        platform="mock",
         withdrawal_no=f"DEMO-WD-{tenant.id}",
-        currency="USD",
-        requested_amount=Decimal("975.00"),
-        expected_amount=Decimal("975.00"),
-        requested_at=now,
-        completed_at=now,
-        status=WithdrawalRecord.Status.COMPLETED,
+        defaults={
+            "platform": "mock",
+            "currency": "USD",
+            "requested_amount": Decimal("975.00"),
+            "expected_amount": Decimal("975.00"),
+            "requested_at": now,
+            "completed_at": now,
+            "status": WithdrawalRecord.Status.COMPLETED,
+        },
     )
+    return withdrawal
 
 
 def import_demo_bank_receipt(tenant, amount=Decimal("975.00"), account_hint="demo-account"):
-    return BankReceiptImport.objects.create(
+    receipt, _ = BankReceiptImport.objects.update_or_create(
         tenant=tenant,
-        import_batch_no=f"DEMO-BANK-{tenant.id}",
-        masked_account=mask_account(account_hint),
-        currency="USD",
-        receipt_amount=amount,
-        receipt_date=timezone.now().date(),
         reference_no=f"DEMO-REF-{tenant.id}",
-        status=BankReceiptImport.Status.IMPORTED,
+        defaults={
+            "import_batch_no": f"DEMO-BANK-{tenant.id}",
+            "masked_account": mask_account(account_hint),
+            "currency": "USD",
+            "receipt_amount": amount,
+            "receipt_date": timezone.now().date(),
+            "status": BankReceiptImport.Status.IMPORTED,
+        },
     )
+    return receipt
 
 
 def run_mock_reconciliation(tenant):

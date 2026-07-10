@@ -21,13 +21,16 @@ def create_user(tenant, username, user_type, supplier_id=None):
     return user
 
 
-def grant_performance_access(user, scope_type=DataScope.ScopeType.ALL, config=None):
-    permission, _ = Permission.objects.get_or_create(
-        code="suppliers.performance.view",
-        defaults={"name": "View supplier performance", "module": "suppliers", "action": "view"},
-    )
+def grant_performance_access(user, scope_type=DataScope.ScopeType.ALL, config=None, permission_codes=None):
+    permission_codes = permission_codes or ("suppliers.performance.view", "suppliers.performance.calculate")
     role = Role.objects.create(tenant=user.tenant, name="Supplier performance", code="supplier-performance")
-    role.permissions.add(permission)
+    for permission_code in permission_codes:
+        action = permission_code.rsplit(".", 1)[-1]
+        permission, _ = Permission.objects.get_or_create(
+            code=permission_code,
+            defaults={"name": f"Supplier performance {action}", "module": "suppliers", "action": action},
+        )
+        role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
     DataScope.objects.create(
         tenant=user.tenant,
@@ -203,6 +206,26 @@ def test_internal_can_calculate_mock_and_view_supplier_history():
     assert calculate_response.json()["code"] == "OK"
     assert detail_response.status_code == 200
     assert len(detail_response.json()["data"]) == 1
+
+
+@pytest.mark.django_db
+def test_supplier_performance_view_permission_cannot_recalculate_snapshots():
+    tenant = Tenant.objects.create(name="Tenant", code="performance-view-only")
+    user = create_user(tenant, "performance-viewer", CustomUser.UserType.INTERNAL)
+    grant_performance_access(user, permission_codes=("suppliers.performance.view",))
+    snapshot = create_snapshot(tenant, 1001)
+    original_calculated_at = snapshot.calculated_at
+    client = client_for(user)
+
+    assert client.get("/api/internal/suppliers/performance/").status_code == 200
+    response = client.post(
+        "/api/internal/suppliers/performance/calculate-mock/",
+        {"supplier_id": 1001, "period_start": TODAY.isoformat(), "period_end": TODAY.isoformat()},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert SupplierPerformanceSnapshot.objects.get(pk=snapshot.pk).calculated_at == original_calculated_at
 
 
 @pytest.mark.django_db

@@ -7,7 +7,12 @@ from apps.permissions.api_permissions import IsExternalUser
 
 from .models import SupplierPerformanceSnapshot, SupplierShipment, SupplierTask
 from .performance_services import calculate_supplier_performance
-from .permissions import IsSupplierPerformanceViewer, can_access_supplier_performance, get_supplier_performance_scope
+from .permissions import (
+    IsSupplierPerformanceCalculator,
+    IsSupplierPerformanceViewer,
+    can_access_supplier_performance,
+    get_supplier_performance_scope,
+)
 from .serializers import (
     SupplierPerformanceCalculationSerializer,
     SupplierPerformanceSnapshotSerializer,
@@ -100,7 +105,7 @@ def internal_performance_detail(request, supplier_id):
 
 
 @api_view(["POST"])
-@permission_classes([IsSupplierPerformanceViewer])
+@permission_classes([IsSupplierPerformanceCalculator])
 def internal_performance_calculate_mock(request):
     serializer = SupplierPerformanceCalculationSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)

@@ -3,7 +3,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 
 from apps.common.responses import success_response
-from apps.permissions.api_permissions import IsIntegrationAdmin
+from apps.permissions.api_permissions import (
+    IsIntegrationCredentialRotator,
+    IsIntegrationManager,
+    IsIntegrationReadOrManage,
+    IsIntegrationRunner,
+    IsIntegrationViewer,
+)
 
 from .credential_service import mask_credentials, rotate_credentials
 from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
@@ -51,7 +57,7 @@ def _get_config_for_user(request, pk):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationReadOrManage])
 def integration_config_collection(request):
     if request.method == "GET":
         queryset = PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant)
@@ -76,7 +82,7 @@ def integration_config_collection(request):
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationReadOrManage])
 def integration_config_detail(request, pk):
     config = _get_config_for_user(request, pk)
     if request.method == "GET":
@@ -100,7 +106,7 @@ def integration_config_detail(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationCredentialRotator])
 def rotate_integration_credentials(request, pk):
     config = _get_config_for_user(request, pk)
     serializer = RotateCredentialsSerializer(data=request.data)
@@ -125,7 +131,7 @@ def rotate_integration_credentials(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationManager])
 def disable_integration_config(request, pk):
     config = _get_config_for_user(request, pk)
     config.status = PlatformIntegrationConfig.Status.DISABLED
@@ -135,7 +141,7 @@ def disable_integration_config(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationManager])
 def verify_integration_config(request, pk):
     config = _get_config_for_user(request, pk)
     if config.environment == PlatformIntegrationConfig.Environment.PRODUCTION:
@@ -151,7 +157,7 @@ def verify_integration_config(request, pk):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationReadOrManage])
 def sync_job_collection(request):
     if request.method == "GET":
         queryset = SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config")
@@ -164,21 +170,21 @@ def sync_job_collection(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationViewer])
 def sync_run_collection(request):
     queryset = SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job")
     return success_response(SyncRunSerializer(queryset, many=True).data)
 
 
 @api_view(["GET"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationViewer])
 def sync_run_detail(request, pk):
     sync_run = get_object_or_404(SyncRun, pk=pk, tenant=request.user.tenant)
     return success_response(SyncRunSerializer(sync_run).data)
 
 
 @api_view(["POST"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationRunner])
 def run_mock_sync_job(request, pk):
     sync_job = get_object_or_404(SyncJob, pk=pk, tenant=request.user.tenant)
     run, created = run_sync_job(sync_job, idempotency_key=request.data.get("idempotency_key"))
@@ -186,7 +192,7 @@ def run_mock_sync_job(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsIntegrationAdmin])
+@permission_classes([IsIntegrationManager])
 def disable_sync_job(request, pk):
     sync_job = get_object_or_404(SyncJob, pk=pk, tenant=request.user.tenant)
     sync_job.is_enabled = False

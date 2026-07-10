@@ -24,13 +24,25 @@ def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
 
 def grant_integration_access(user):
     role = Role.objects.create(tenant=user.tenant, name="Tech Admin", code=f"tech-admin-{user.id}")
+    for permission_code in ("integrations.view", "integrations.manage", "integrations.rotate", "integrations.run"):
+        action = permission_code.rsplit(".", 1)[-1]
+        permission, _created = Permission.objects.get_or_create(
+            code=permission_code,
+            defaults={
+                "name": f"Integrations {action}",
+                "module": "integrations",
+                "action": action,
+            },
+        )
+        role.permissions.add(permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+
+
+def grant_integration_view_only(user):
+    role = Role.objects.create(tenant=user.tenant, name="Integration Viewer", code=f"integration-viewer-{user.id}")
     permission, _created = Permission.objects.get_or_create(
-        code="integrations.manage",
-        defaults={
-            "name": "Manage integrations",
-            "module": "integrations",
-            "action": "manage",
-        },
+        code="integrations.view",
+        defaults={"name": "View integrations", "module": "integrations", "action": "view"},
     )
     role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
@@ -109,6 +121,36 @@ def test_external_rpa_and_plain_internal_cannot_access_sync_api():
     assert authenticated_client(internal).get("/api/internal/integrations/sync-jobs/").status_code == 403
     assert authenticated_client(external).get("/api/internal/integrations/sync-jobs/").status_code == 403
     assert authenticated_client(rpa).get("/api/internal/integrations/sync-jobs/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_integration_view_permission_cannot_create_run_or_disable_sync_jobs():
+    tenant = Tenant.objects.create(name="Tenant", code="sync-view-only")
+    user = create_user(tenant, "sync-viewer")
+    grant_integration_view_only(user)
+    job = create_sync_job(tenant, user)
+    client = authenticated_client(user)
+
+    assert client.get("/api/internal/integrations/sync-jobs/").status_code == 200
+    assert client.get("/api/internal/integrations/sync-runs/").status_code == 200
+    assert (
+        client.post(
+            "/api/internal/integrations/sync-jobs/",
+            {
+                "integration_config_id": job.integration_config_id,
+                "resource_type": "mock_record",
+                "schedule_type": "manual",
+            },
+            format="json",
+        ).status_code
+        == 403
+    )
+    assert client.post(f"/api/internal/integrations/sync-jobs/{job.id}/run-mock/", {}, format="json").status_code == 403
+    assert client.post(f"/api/internal/integrations/sync-jobs/{job.id}/disable/", {}, format="json").status_code == 403
+
+    job.refresh_from_db()
+    assert job.is_enabled is True
+    assert SyncRun.objects.filter(sync_job=job).count() == 0
 
 
 @pytest.mark.django_db

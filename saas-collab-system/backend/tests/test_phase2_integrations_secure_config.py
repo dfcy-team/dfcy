@@ -30,6 +30,20 @@ def grant_integration_access(user):
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
 
 
+def grant_integration_view_only(user):
+    role = Role.objects.create(tenant=user.tenant, name="Integration Viewer", code=f"integration-viewer-{user.id}")
+    permission, _created = Permission.objects.get_or_create(
+        code="integrations.view",
+        defaults={
+            "name": "View integrations",
+            "module": "integrations",
+            "action": "view",
+        },
+    )
+    role.permissions.add(permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+
+
 def authenticated_client(user):
     client = APIClient()
     client.force_authenticate(user=user)
@@ -89,6 +103,42 @@ def test_unauthorized_external_and_rpa_users_are_rejected():
     assert authenticated_client(internal).get("/api/internal/integrations/configs/").status_code == 403
     assert authenticated_client(external).get("/api/internal/integrations/configs/").status_code == 403
     assert authenticated_client(rpa).get("/api/internal/integrations/configs/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_integration_view_permission_cannot_create_update_rotate_or_disable():
+    tenant = Tenant.objects.create(name="Tenant", code="integration-view-only")
+    user = create_user(tenant, "integration-viewer")
+    grant_integration_view_only(user)
+    config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="mock",
+        account_alias="demo-view-only",
+        environment=PlatformIntegrationConfig.Environment.MOCK,
+        status=PlatformIntegrationConfig.Status.ACTIVE,
+        credential_key_version="test-v1",
+        credential_fingerprint="placeholder-fingerprint",
+        created_by=user,
+    )
+    client = authenticated_client(user)
+
+    assert client.get("/api/internal/integrations/configs/").status_code == 200
+    assert client.get(f"/api/internal/integrations/configs/{config.id}/").status_code == 200
+    assert client.post("/api/internal/integrations/configs/", config_payload(), format="json").status_code == 403
+    assert (
+        client.patch(
+            f"/api/internal/integrations/configs/{config.id}/",
+            {"account_alias": "unauthorized-change"},
+            format="json",
+        ).status_code
+        == 403
+    )
+    assert client.post(f"/api/internal/integrations/configs/{config.id}/rotate/", {}, format="json").status_code == 403
+    assert client.post(f"/api/internal/integrations/configs/{config.id}/disable/", {}, format="json").status_code == 403
+
+    config.refresh_from_db()
+    assert config.account_alias == "demo-view-only"
+    assert config.status == PlatformIntegrationConfig.Status.ACTIVE
 
 
 @pytest.mark.django_db

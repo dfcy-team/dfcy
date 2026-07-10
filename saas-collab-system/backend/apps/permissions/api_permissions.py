@@ -1,7 +1,12 @@
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from apps.accounts.models import CustomUser
-from apps.permissions.services import user_has_finance_access, user_has_integration_access
+from apps.permissions.services import (
+    user_has_finance_access,
+    user_has_finance_permission,
+    user_has_integration_access,
+    user_has_integration_permission,
+)
 
 
 class IsInternalUser(BasePermission):
@@ -37,3 +42,70 @@ class IsIntegrationAdmin(BasePermission):
             and request.user.user_type == CustomUser.UserType.INTERNAL
             and user_has_integration_access(request.user)
         )
+
+
+class FinanceActionPermission(BasePermission):
+    permission_code = None
+
+    def has_permission(self, request, view):
+        return bool(
+            self.permission_code
+            and request.user
+            and request.user.is_authenticated
+            and request.user.user_type == CustomUser.UserType.INTERNAL
+            and user_has_finance_permission(request.user, self.permission_code)
+        )
+
+
+class IsFinanceViewer(FinanceActionPermission):
+    permission_code = "finance.view"
+
+
+class IsFinanceImporter(FinanceActionPermission):
+    permission_code = "finance.import"
+
+
+class IsFinanceReconciler(FinanceActionPermission):
+    permission_code = "finance.reconcile"
+
+
+class IsFinanceExceptionHandler(FinanceActionPermission):
+    permission_code = "finance.exception.handle"
+
+
+class IntegrationActionPermission(BasePermission):
+    permission_code = None
+
+    def has_action_permission(self, request, permission_code):
+        return bool(
+            permission_code
+            and request.user
+            and request.user.is_authenticated
+            and request.user.user_type == CustomUser.UserType.INTERNAL
+            and user_has_integration_permission(request.user, permission_code)
+        )
+
+    def has_permission(self, request, view):
+        return self.has_action_permission(request, self.permission_code)
+
+
+class IsIntegrationViewer(IntegrationActionPermission):
+    permission_code = "integrations.view"
+
+
+class IsIntegrationManager(IntegrationActionPermission):
+    permission_code = "integrations.manage"
+
+
+class IsIntegrationCredentialRotator(IntegrationActionPermission):
+    permission_code = "integrations.rotate"
+
+
+class IsIntegrationRunner(IntegrationActionPermission):
+    permission_code = "integrations.run"
+
+
+class IsIntegrationReadOrManage(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        permission_code = "integrations.view" if request.method in SAFE_METHODS else "integrations.manage"
+        return self.has_action_permission(request, permission_code)

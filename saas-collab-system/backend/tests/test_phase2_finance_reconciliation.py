@@ -21,17 +21,20 @@ def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
     return CustomUser.objects.create_user(username=username, tenant=tenant, user_type=user_type)
 
 
-def grant_finance_access(user):
+def grant_finance_access(user, permission_codes=None):
     role = Role.objects.create(tenant=user.tenant, name="Finance Viewer", code=f"finance-viewer-{user.id}")
-    permission, _created = Permission.objects.get_or_create(
-        code="finance.reconcile",
-        defaults={
-            "name": "Reconcile finance data",
-            "module": "finance",
-            "action": "reconcile",
-        },
-    )
-    role.permissions.add(permission)
+    permission_codes = permission_codes or ("finance.view", "finance.import", "finance.reconcile")
+    for permission_code in permission_codes:
+        action = permission_code.rsplit(".", 1)[-1]
+        permission, _created = Permission.objects.get_or_create(
+            code=permission_code,
+            defaults={
+                "name": f"Finance {action}",
+                "module": "finance",
+                "action": action,
+            },
+        )
+        role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
 
 
@@ -71,6 +74,51 @@ def test_finance_user_can_import_and_list_demo_records():
     assert "demo-account-1234" not in str(receipt_response.json())
     assert list_response.status_code == 200
     assert len(list_response.json()["data"]) == 1
+
+
+@pytest.mark.django_db
+def test_finance_view_permission_cannot_import_or_reconcile():
+    tenant = Tenant.objects.create(name="Tenant", code="finance-view-only")
+    user = create_user(tenant, "finance-viewer")
+    grant_finance_access(user, permission_codes=("finance.view",))
+    seed_demo_finance_data(tenant)
+    client = authenticated_client(user)
+
+    assert client.get("/api/finance/statements/").status_code == 200
+    assert client.get("/api/finance/reconciliation/matches/").status_code == 200
+    assert client.post("/api/finance/statements/import-demo/", {}, format="json").status_code == 403
+    assert client.post("/api/finance/withdrawals/import-demo/", {}, format="json").status_code == 403
+    assert client.post("/api/finance/bank-receipts/import-demo/", {}, format="json").status_code == 403
+    assert client.post("/api/finance/reconciliation/run-mock/", {}, format="json").status_code == 403
+    assert client.post("/api/finance/reconciliation/matches/1/confirm/", {}, format="json").status_code == 403
+    assert client.post("/api/finance/reconciliation/matches/1/reject/", {}, format="json").status_code == 403
+
+    assert PlatformStatement.objects.filter(tenant=tenant).count() == 1
+    assert ReconciliationMatch.objects.filter(tenant=tenant).count() == 0
+
+
+@pytest.mark.django_db
+def test_demo_import_endpoints_are_idempotent():
+    tenant = Tenant.objects.create(name="Tenant", code="finance-idempotent-import")
+    user = create_user(tenant, "finance-importer")
+    grant_finance_access(user)
+    client = authenticated_client(user)
+
+    endpoints = (
+        ("/api/finance/statements/import-demo/", {}),
+        ("/api/finance/withdrawals/import-demo/", {}),
+        ("/api/finance/bank-receipts/import-demo/", {"account_hint": "demo-account-1234"}),
+    )
+    for endpoint, payload in endpoints:
+        first = client.post(endpoint, payload, format="json")
+        second = client.post(endpoint, payload, format="json")
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert first.json()["data"]["id"] == second.json()["data"]["id"]
+
+    assert PlatformStatement.objects.filter(tenant=tenant).count() == 1
+    assert WithdrawalRecord.objects.filter(tenant=tenant).count() == 1
+    assert BankReceiptImport.objects.filter(tenant=tenant).count() == 1
 
 
 @pytest.mark.django_db
