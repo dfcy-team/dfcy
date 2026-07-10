@@ -54,3 +54,9 @@ VITE_API_BASE_URL=http://localhost:8000
 - 新增 `/integrations/configs`、`/integrations/sync-jobs`、`/integrations/sync-runs` 等页面。
 - 页面只展示 Mock/Sandbox 或后端返回的脱敏状态，不展示明文 API Key、API Secret、Token、Cookie 或 Session。
 - 生产环境配置默认显示需专项安全评审，不提供真实平台连接测试或生产启用按钮。
+
+## 阶段2商品状态看板
+
+- 新增 `/products/status-dashboard`、`/products/status-recommendations`、`/products/status-transitions`。
+- API、RPA 回读和人工来源只生成状态建议，前端不自动确认商品状态。
+- 清仓、停售、归档等高风险状态必须显示人工确认和后端授权边界。

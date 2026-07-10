@@ -7,6 +7,10 @@ import ResearchDetail from '../views/products/ResearchDetail.vue';
 import ProductMasterList from '../views/products/ProductMasterList.vue';
 import ProductMasterDetail from '../views/products/ProductMasterDetail.vue';
 import ProductStatusList from '../views/products/ProductStatusList.vue';
+import ProductStatusDashboard from '../views/products/ProductStatusDashboard.vue';
+import ProductStatusRecommendationList from '../views/products/ProductStatusRecommendationList.vue';
+import ProductStatusRecommendationDetail from '../views/products/ProductStatusRecommendationDetail.vue';
+import ProductStatusTransitionHistory from '../views/products/ProductStatusTransitionHistory.vue';
 import PurchaseOrderList from '../views/purchasing/PurchaseOrderList.vue';
 import PurchaseOrderDetail from '../views/purchasing/PurchaseOrderDetail.vue';
 import SupplierTaskList from '../views/suppliers/SupplierTaskList.vue';
@@ -43,6 +47,10 @@ const routes = [
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
       { path: 'products/status', component: ProductStatusList },
+      { path: 'products/status-dashboard', component: ProductStatusDashboard },
+      { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
+      { path: 'products/status-recommendations/:id', component: ProductStatusRecommendationDetail },
+      { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'purchasing/orders', component: PurchaseOrderList },
       { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
       { path: 'suppliers/tasks', component: SupplierTaskList },
