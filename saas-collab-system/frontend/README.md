@@ -48,3 +48,9 @@ VITE_API_BASE_URL=http://localhost:8000
 
 - 阶段1构建若出现 Vite chunk size warning，暂不阻断交付。
 - 后续由架构复审决定是否引入路由懒加载、Element Plus 按需加载或 `manualChunks` 拆包。
+
+## 阶段2 API同步状态页
+
+- 新增 `/integrations/configs`、`/integrations/sync-jobs`、`/integrations/sync-runs` 等页面。
+- 页面只展示 Mock/Sandbox 或后端返回的脱敏状态，不展示明文 API Key、API Secret、Token、Cookie 或 Session。
+- 生产环境配置默认显示需专项安全评审，不提供真实平台连接测试或生产启用按钮。

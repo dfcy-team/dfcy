@@ -22,6 +22,11 @@ import RPATaskList from '../views/rpa/RPATaskList.vue';
 import RPATaskDetail from '../views/rpa/RPATaskDetail.vue';
 import APISyncTaskList from '../views/integrations/APISyncTaskList.vue';
 import APISyncLogList from '../views/integrations/APISyncLogList.vue';
+import IntegrationConfigList from '../views/integrations/IntegrationConfigList.vue';
+import IntegrationConfigDetail from '../views/integrations/IntegrationConfigDetail.vue';
+import SyncJobList from '../views/integrations/SyncJobList.vue';
+import SyncRunList from '../views/integrations/SyncRunList.vue';
+import SyncRunDetail from '../views/integrations/SyncRunDetail.vue';
 import OperationLogList from '../views/audit/OperationLogList.vue';
 import FinanceImportList from '../views/finance/FinanceImportList.vue';
 import BasicReportIndex from '../views/reports/BasicReportIndex.vue';
@@ -51,6 +56,11 @@ const routes = [
       { path: 'pricing/prices/:id', component: PriceDetail },
       { path: 'rpa/tasks', component: RPATaskList },
       { path: 'rpa/tasks/:id', component: RPATaskDetail },
+      { path: 'integrations/configs', component: IntegrationConfigList },
+      { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
+      { path: 'integrations/sync-jobs', component: SyncJobList },
+      { path: 'integrations/sync-runs', component: SyncRunList },
+      { path: 'integrations/sync-runs/:id', component: SyncRunDetail },
       { path: 'integrations/api-sync', component: APISyncTaskList },
       { path: 'integrations/api-sync/logs', component: APISyncLogList },
       { path: 'finance/imports', component: FinanceImportList },
