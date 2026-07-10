@@ -1,4 +1,6 @@
 import pytest
+from django.db import IntegrityError, transaction
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -9,7 +11,7 @@ from apps.products.models import (
     ProductStatusSnapshot,
     ProductStatusTransition,
 )
-from apps.products.status_services import create_status_recommendation
+from apps.products.status_services import confirm_recommendation, create_status_recommendation, reject_recommendation
 from apps.permissions.models import Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -296,3 +298,48 @@ def test_product_status_audit_reason_masks_credential_like_text():
     assert response.status_code == 200
     assert "demo-credential-value" not in str(response.json())
     assert transition.reason == "api_key=***"
+
+
+@pytest.mark.django_db
+def test_stale_confirmation_and_rejection_cannot_process_recommendation_twice():
+    tenant = Tenant.objects.create(name="Tenant", code="status-stale-concurrency")
+    user = create_user(tenant, "status-confirmer")
+    grant_status_permissions(user, "products.status.confirm")
+    spu = create_spu(tenant)
+    recommendation = create_recommendation(tenant, spu, ProductStatus.ACTIVE)
+    stale_confirm = ProductStatusRecommendation.objects.get(pk=recommendation.pk)
+    stale_reject = ProductStatusRecommendation.objects.get(pk=recommendation.pk)
+
+    transition = confirm_recommendation(stale_confirm, user, reason="first handler")
+    with pytest.raises(ValidationError, match="already been handled"):
+        reject_recommendation(stale_reject, user, reason="stale competing handler")
+
+    recommendation.refresh_from_db()
+    assert recommendation.status == ProductStatusRecommendation.Status.CONFIRMED
+    assert recommendation.confirmed_by == user
+    assert ProductStatusTransition.objects.filter(recommendation=recommendation).count() == 1
+    assert transition.trigger_type == ProductStatusTransition.TriggerType.MANUAL_CONFIRM
+
+
+@pytest.mark.django_db
+def test_database_constraint_allows_only_one_transition_per_recommendation():
+    tenant = Tenant.objects.create(name="Tenant", code="status-transition-unique")
+    user = create_user(tenant, "status-confirmer")
+    grant_status_permissions(user, "products.status.confirm")
+    spu = create_spu(tenant)
+    recommendation = create_recommendation(tenant, spu, ProductStatus.ACTIVE)
+    transition = confirm_recommendation(recommendation, user, reason="first handler")
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ProductStatusTransition.objects.create(
+            tenant=tenant,
+            spu=spu,
+            from_status=ProductStatus.NEW,
+            to_status=ProductStatus.ACTIVE,
+            trigger_type=ProductStatusTransition.TriggerType.MANUAL_CONFIRM,
+            recommendation=recommendation,
+            approved_by=user,
+            reason="duplicate handler",
+        )
+
+    assert ProductStatusTransition.objects.filter(recommendation=recommendation).get() == transition

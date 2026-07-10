@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -51,44 +52,98 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None):
     with transaction.atomic():
         sync_job.status = SyncJob.Status.RUNNING
         sync_job.last_run_at = now
-        sync_job.save(update_fields=["status", "last_run_at", "updated_at"])
+        sync_job.next_run_at = None
+        sync_job.save(update_fields=["status", "last_run_at", "next_run_at", "updated_at"])
 
+    counter_fields = ("fetched_count", "created_count", "updated_count", "skipped_count", "failed_count")
+    last_retry_error = ""
+    while True:
+        counters_before_attempt = {field: getattr(run, field) for field in counter_fields}
         try:
-            page = adapter.fetch_page(sync_job, cursor.cursor_value)
-            records = page.get("records", [])
-            for raw_record in records:
-                run.fetched_count += 1
-                normalized = adapter.normalize_record(raw_record)
-                if not adapter.validate_record(normalized):
-                    run.failed_count += 1
-                    continue
-                result = adapter.persist_record(sync_job, normalized)
-                if result.get("action") == "created":
-                    run.created_count += 1
-                elif result.get("action") == "updated":
-                    run.updated_count += 1
-                else:
-                    run.skipped_count += 1
+            with transaction.atomic():
+                page = adapter.fetch_page(sync_job, cursor.cursor_value)
+                records = page.get("records", [])
+                for raw_record in records:
+                    run.fetched_count += 1
+                    normalized = adapter.normalize_record(raw_record)
+                    if not adapter.validate_record(normalized):
+                        run.failed_count += 1
+                        continue
+                    result = adapter.persist_record(sync_job, normalized)
+                    if result.get("action") == "created":
+                        run.created_count += 1
+                    elif result.get("action") == "updated":
+                        run.updated_count += 1
+                    else:
+                        run.skipped_count += 1
 
-            cursor.cursor_value = adapter.get_next_cursor(page)
-            cursor.save(update_fields=["cursor_value", "updated_at"])
-            run.status = SyncRun.Status.SUCCESS
-            run.finished_at = timezone.now()
-            run.masked_log = sanitize_payload({"fetched": run.fetched_count, "sample": records[:1]})
-            sync_job.status = SyncJob.Status.IDLE
-            sync_job.save(update_fields=["status", "updated_at"])
-            run.save()
-            return run, True
+                cursor.cursor_value = adapter.get_next_cursor(page)
+                cursor.save(update_fields=["cursor_value", "updated_at"])
+                run.status = SyncRun.Status.SUCCESS
+                run.finished_at = timezone.now()
+                run.error_code = ""
+                run.masked_error_message = ""
+                run.masked_log = sanitize_payload(
+                    {
+                        "fetched": run.fetched_count,
+                        "sample": records[:1],
+                        "retry_count": run.retry_count,
+                        "last_retry_error": last_retry_error,
+                    }
+                )
+                sync_job.status = SyncJob.Status.IDLE
+                sync_job.next_run_at = None
+                sync_job.save(update_fields=["status", "next_run_at", "updated_at"])
+                run.save()
+                return run, True
         except Exception as exc:
-            run.retry_count += 1
-            run.error_code = exc.__class__.__name__
-            run.masked_error_message = sanitize_text(str(exc))
-            run.status = SyncRun.Status.FAILED if run.retry_count >= sync_job.max_retry_count else SyncRun.Status.FAILED
-            run.finished_at = timezone.now()
-            run.masked_log = sanitize_payload({"error": run.masked_error_message})
-            sync_job.status = SyncJob.Status.FAILED
-            sync_job.save(update_fields=["status", "updated_at"])
-            run.save()
+            for field, value in counters_before_attempt.items():
+                setattr(run, field, value)
+            last_retry_error = sanitize_text(str(exc))
+            if run.retry_count < sync_job.max_retry_count:
+                with transaction.atomic():
+                    delay_seconds = calculate_backoff_seconds(
+                        run.retry_count,
+                        base_seconds=sync_job.backoff_base_seconds,
+                    )
+                    run.retry_count += 1
+                    run.error_code = "RETRYABLE_ERROR"
+                    run.masked_error_message = last_retry_error
+                    run.masked_log = sanitize_payload(
+                        {
+                            "retry_count": run.retry_count,
+                            "retry_delay_seconds": delay_seconds,
+                            "error": last_retry_error,
+                        }
+                    )
+                    sync_job.next_run_at = timezone.now() + timedelta(seconds=delay_seconds)
+                    sync_job.save(update_fields=["next_run_at", "updated_at"])
+                    run.save(
+                        update_fields=[
+                            "retry_count",
+                            "error_code",
+                            "masked_error_message",
+                            "masked_log",
+                        ]
+                    )
+                continue
+
+            with transaction.atomic():
+                run.error_code = "MAX_RETRY_EXCEEDED"
+                run.masked_error_message = last_retry_error
+                run.status = SyncRun.Status.FAILED
+                run.failed_count += 1
+                run.finished_at = timezone.now()
+                run.masked_log = sanitize_payload(
+                    {
+                        "retry_count": run.retry_count,
+                        "error": last_retry_error,
+                    }
+                )
+                sync_job.status = SyncJob.Status.FAILED
+                sync_job.next_run_at = None
+                sync_job.save(update_fields=["status", "next_run_at", "updated_at"])
+                run.save()
             return run, True
 
 

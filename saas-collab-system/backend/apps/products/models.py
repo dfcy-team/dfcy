@@ -223,6 +223,12 @@ class ProductStatusTransition(models.Model):
 
     class Meta:
         ordering = ["tenant_id", "-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recommendation"],
+                name="uniq_product_status_transition_recommendation",
+            ),
+        ]
         indexes = [
             models.Index(fields=["tenant", "from_status", "to_status"], name="idx_product_transition_status"),
         ]

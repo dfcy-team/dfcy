@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
@@ -128,60 +128,86 @@ def _assert_internal_confirmer(user):
         raise PermissionDenied("Product status confirmation permission is required.")
 
 
+def _lock_recommendation_target(recommendation_id, tenant_id):
+    recommendation = (
+        ProductStatusRecommendation.objects.select_for_update()
+        .select_related("spu", "sku")
+        .get(pk=recommendation_id, tenant_id=tenant_id)
+    )
+    if recommendation.spu_id:
+        ProductSPU.objects.select_for_update().get(pk=recommendation.spu_id, tenant_id=tenant_id)
+    if recommendation.sku_id:
+        ProductSKU.objects.select_for_update().get(pk=recommendation.sku_id, tenant_id=tenant_id)
+    return recommendation
+
+
 def confirm_recommendation(recommendation, user, reason=""):
     _assert_internal_confirmer(user)
     if recommendation.tenant_id != user.tenant_id:
         raise PermissionDenied("Recommendation does not belong to current tenant.")
-    if recommendation.status != ProductStatusRecommendation.Status.PENDING:
-        raise ValidationError("Recommendation has already been handled.")
-
-    from_status = get_current_status(spu=recommendation.spu, sku=recommendation.sku)
-    to_status = recommendation.recommended_status
-    if to_status not in ALLOWED_TRANSITIONS.get(from_status, set()):
-        raise ValidationError("Illegal product status transition.")
-    if to_status in HIGH_RISK_STATUSES and not check_user_permission(user, "products.status.high_risk_confirm"):
-        raise PermissionDenied("High-risk product status requires authorized internal confirmation.")
-
     reason = mask_sensitive_text(reason)
-    with transaction.atomic():
-        recommendation.status = ProductStatusRecommendation.Status.CONFIRMED
-        recommendation.confirmed_by = user
-        recommendation.confirmed_at = timezone.now()
-        recommendation.save(update_fields=["status", "confirmed_by", "confirmed_at"])
-        transition = ProductStatusTransition.objects.create(
-            tenant=recommendation.tenant,
-            spu=recommendation.spu,
-            sku=recommendation.sku,
-            from_status=from_status,
-            to_status=to_status,
-            trigger_type=ProductStatusTransition.TriggerType.MANUAL_CONFIRM,
-            recommendation=recommendation,
-            approved_by=user,
-            reason=reason,
-        )
-    return transition
+    try:
+        with transaction.atomic():
+            locked = _lock_recommendation_target(recommendation.id, user.tenant_id)
+            if locked.status != ProductStatusRecommendation.Status.PENDING:
+                raise ValidationError("Recommendation has already been handled.")
+
+            from_status = get_current_status(spu=locked.spu, sku=locked.sku)
+            to_status = locked.recommended_status
+            if to_status not in ALLOWED_TRANSITIONS.get(from_status, set()):
+                raise ValidationError("Illegal product status transition.")
+            if to_status in HIGH_RISK_STATUSES and not check_user_permission(
+                user,
+                "products.status.high_risk_confirm",
+            ):
+                raise PermissionDenied("High-risk product status requires authorized internal confirmation.")
+
+            locked.status = ProductStatusRecommendation.Status.CONFIRMED
+            locked.confirmed_by = user
+            locked.confirmed_at = timezone.now()
+            locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+            return ProductStatusTransition.objects.create(
+                tenant=locked.tenant,
+                spu=locked.spu,
+                sku=locked.sku,
+                from_status=from_status,
+                to_status=to_status,
+                trigger_type=ProductStatusTransition.TriggerType.MANUAL_CONFIRM,
+                recommendation=locked,
+                approved_by=user,
+                reason=reason,
+            )
+    except IntegrityError as exc:
+        raise ValidationError("Recommendation has already been handled.") from exc
 
 
 def reject_recommendation(recommendation, user, reason=""):
     _assert_internal_confirmer(user)
     if recommendation.tenant_id != user.tenant_id:
         raise PermissionDenied("Recommendation does not belong to current tenant.")
-    if recommendation.status != ProductStatusRecommendation.Status.PENDING:
-        raise ValidationError("Recommendation has already been handled.")
     reason = mask_sensitive_text(reason)
-    recommendation.status = ProductStatusRecommendation.Status.REJECTED
-    recommendation.confirmed_by = user
-    recommendation.confirmed_at = timezone.now()
-    recommendation.save(update_fields=["status", "confirmed_by", "confirmed_at"])
-    ProductStatusTransition.objects.create(
-        tenant=recommendation.tenant,
-        spu=recommendation.spu,
-        sku=recommendation.sku,
-        from_status=get_current_status(spu=recommendation.spu, sku=recommendation.sku),
-        to_status=get_current_status(spu=recommendation.spu, sku=recommendation.sku),
-        trigger_type=ProductStatusTransition.TriggerType.MANUAL_REJECT,
-        recommendation=recommendation,
-        approved_by=user,
-        reason=reason,
-    )
-    return recommendation
+    try:
+        with transaction.atomic():
+            locked = _lock_recommendation_target(recommendation.id, user.tenant_id)
+            if locked.status != ProductStatusRecommendation.Status.PENDING:
+                raise ValidationError("Recommendation has already been handled.")
+
+            current_status = get_current_status(spu=locked.spu, sku=locked.sku)
+            locked.status = ProductStatusRecommendation.Status.REJECTED
+            locked.confirmed_by = user
+            locked.confirmed_at = timezone.now()
+            locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+            ProductStatusTransition.objects.create(
+                tenant=locked.tenant,
+                spu=locked.spu,
+                sku=locked.sku,
+                from_status=current_status,
+                to_status=current_status,
+                trigger_type=ProductStatusTransition.TriggerType.MANUAL_REJECT,
+                recommendation=locked,
+                approved_by=user,
+                reason=reason,
+            )
+            return locked
+    except IntegrityError as exc:
+        raise ValidationError("Recommendation has already been handled.") from exc

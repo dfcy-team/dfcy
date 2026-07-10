@@ -5,7 +5,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.integrations.adapters import DisabledProductionAdapter
+from apps.integrations.adapters import DisabledProductionAdapter, MockPlatformAdapter
 from apps.integrations.models import (
     PlatformIntegrationConfig,
     SyncCursor,
@@ -14,6 +14,7 @@ from apps.integrations.models import (
     WebhookEvent,
 )
 from apps.integrations.sync_services import calculate_backoff_seconds, record_retry_failure, record_webhook_event
+from apps.integrations.sync_services import run_sync_job
 from apps.permissions.models import Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -249,6 +250,72 @@ def test_finite_retry_and_max_retry_failure_are_recorded_without_waiting():
     assert run.error_code == "MAX_RETRY_EXCEEDED"
     assert run.retry_count == 2
     assert "not-a-real-secret" not in run.masked_error_message
+
+
+@pytest.mark.django_db
+def test_transient_sync_failures_retry_with_backoff_without_sleeping():
+    tenant = Tenant.objects.create(name="Tenant", code="sync-transient-retry")
+    user = create_user(tenant, "tech")
+    job = create_sync_job(tenant, user)
+    job.max_retry_count = 3
+    job.backoff_base_seconds = 2
+    job.save(update_fields=["max_retry_count", "backoff_base_seconds"])
+    adapter = MockPlatformAdapter()
+    original_fetch_page = adapter.fetch_page
+    attempts = []
+
+    def flaky_fetch_page(sync_job, cursor_value=None):
+        attempts.append(sync_job.next_run_at)
+        if len(attempts) <= 2:
+            raise RuntimeError("token=demo-transient-error")
+        return original_fetch_page(sync_job, cursor_value)
+
+    adapter.fetch_page = flaky_fetch_page
+    run, created = run_sync_job(job, adapter=adapter, idempotency_key="transient-retry")
+    job.refresh_from_db()
+
+    assert created is True
+    assert len(attempts) == 3
+    assert attempts[0] is None
+    assert attempts[1] is not None
+    assert attempts[2] is not None
+    assert attempts[2] > attempts[1]
+    assert run.status == SyncRun.Status.SUCCESS
+    assert run.retry_count == 2
+    assert run.error_code == ""
+    assert run.masked_error_message == ""
+    assert run.masked_log["retry_count"] == 2
+    assert "demo-transient-error" not in json.dumps(run.masked_log)
+    assert job.next_run_at is None
+
+
+@pytest.mark.django_db
+def test_sync_stops_after_configured_maximum_retries():
+    tenant = Tenant.objects.create(name="Tenant", code="sync-max-retry")
+    user = create_user(tenant, "tech")
+    job = create_sync_job(tenant, user)
+    job.max_retry_count = 2
+    job.save(update_fields=["max_retry_count"])
+    adapter = MockPlatformAdapter()
+    attempts = 0
+
+    def failing_fetch_page(sync_job, cursor_value=None):
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("api_secret=not-a-real-secret")
+
+    adapter.fetch_page = failing_fetch_page
+    run, created = run_sync_job(job, adapter=adapter, idempotency_key="max-retry")
+    job.refresh_from_db()
+
+    assert created is True
+    assert attempts == 3
+    assert run.status == SyncRun.Status.FAILED
+    assert run.retry_count == 2
+    assert run.error_code == "MAX_RETRY_EXCEEDED"
+    assert "not-a-real-secret" not in run.masked_error_message
+    assert job.status == SyncJob.Status.FAILED
+    assert job.next_run_at is None
 
 
 @pytest.mark.django_db
