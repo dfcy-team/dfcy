@@ -57,6 +57,11 @@
 | 同步执行记录详情 | `/integrations/sync-runs/:id` | `/api/internal/integrations/sync-runs/{id}/` | GET | `id` | `run_id`、`status`、`masked_error_message`、`quality_check_result` | `frontend/src/mock/integrations.js` | pending |
 | 操作日志列表 | `/audit/operations` | `/api/internal/audit/operation-logs/` | GET | `operator`、`module`、`action`、`object_id` | `items`、`status` | `frontend/src/mock/audit.js` | pending |
 | 财务导入入口 | `/finance/imports` | `/api/finance/imports/` | GET | `import_no`、`status` | `items`、`authorization` | `frontend/src/mock/finance.js` | pending |
+| 平台账单列表 | `/finance/statements` | `/api/finance/statements/` | GET | `platform`、`currency`、`status` | `platform`、`statement_no`、`currency`、`gross_amount`、`fee_amount`、`net_amount`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 取款记录列表 | `/finance/withdrawals` | `/api/finance/withdrawals/` | GET | `platform`、`status` | `withdrawal_no`、`requested_amount`、`expected_amount`、`completed_at`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 银行到账列表 | `/finance/bank-receipts` | `/api/finance/bank-receipts/` | GET | `currency`、`status` | `masked_account`、`receipt_amount`、`receipt_date`、`reference_no`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 对账匹配列表 | `/finance/reconciliation/matches` | `/api/finance/reconciliation/matches/` | GET | `status`、`match_type` | `match_type`、`matched_amount`、`difference_amount`、`confidence`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 对账异常列表 | `/finance/reconciliation/exceptions` | `/api/finance/reconciliation/exceptions/` | GET | `exception_type`、`status` | `exception_type`、`difference_amount`、`status`、`assigned_to`、`resolution_note` | `frontend/src/mock/financeReconciliation.js` | pending |
 | 基础报表首页 | `/reports/basic` | `/api/report/basic/` | GET | `report_name`、`date_range` | `items`、`metrics` | `frontend/src/mock/reports.js` | pending |
 
 ## RPA Agent执行接口边界

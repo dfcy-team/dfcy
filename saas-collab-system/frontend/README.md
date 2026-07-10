@@ -60,3 +60,9 @@ VITE_API_BASE_URL=http://localhost:8000
 - 新增 `/products/status-dashboard`、`/products/status-recommendations`、`/products/status-transitions`。
 - API、RPA 回读和人工来源只生成状态建议，前端不自动确认商品状态。
 - 清仓、停售、归档等高风险状态必须显示人工确认和后端授权边界。
+
+## 阶段2财务对账页面
+
+- 新增 `/finance/statements`、`/finance/withdrawals`、`/finance/bank-receipts`、`/finance/reconciliation/matches`、`/finance/reconciliation/exceptions`。
+- 所有财务页面只使用 `/api/finance/*`。
+- 银行账号仅掩码展示，不接真实银行、支付或真实平台账单，不提供付款、转账或提现按钮。

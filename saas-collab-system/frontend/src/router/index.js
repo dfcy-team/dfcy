@@ -33,6 +33,12 @@ import SyncRunList from '../views/integrations/SyncRunList.vue';
 import SyncRunDetail from '../views/integrations/SyncRunDetail.vue';
 import OperationLogList from '../views/audit/OperationLogList.vue';
 import FinanceImportList from '../views/finance/FinanceImportList.vue';
+import PlatformStatementList from '../views/finance/PlatformStatementList.vue';
+import WithdrawalRecordList from '../views/finance/WithdrawalRecordList.vue';
+import BankReceiptList from '../views/finance/BankReceiptList.vue';
+import ReconciliationMatchList from '../views/finance/ReconciliationMatchList.vue';
+import ReconciliationMatchDetail from '../views/finance/ReconciliationMatchDetail.vue';
+import ReconciliationExceptionList from '../views/finance/ReconciliationExceptionList.vue';
 import BasicReportIndex from '../views/reports/BasicReportIndex.vue';
 
 const routes = [
@@ -72,6 +78,12 @@ const routes = [
       { path: 'integrations/api-sync', component: APISyncTaskList },
       { path: 'integrations/api-sync/logs', component: APISyncLogList },
       { path: 'finance/imports', component: FinanceImportList },
+      { path: 'finance/statements', component: PlatformStatementList },
+      { path: 'finance/withdrawals', component: WithdrawalRecordList },
+      { path: 'finance/bank-receipts', component: BankReceiptList },
+      { path: 'finance/reconciliation/matches', component: ReconciliationMatchList },
+      { path: 'finance/reconciliation/matches/:id', component: ReconciliationMatchDetail },
+      { path: 'finance/reconciliation/exceptions', component: ReconciliationExceptionList },
       { path: 'reports/basic', component: BasicReportIndex },
       { path: 'audit/operations', component: OperationLogList }
     ]
