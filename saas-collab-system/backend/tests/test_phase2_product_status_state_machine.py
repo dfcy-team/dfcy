@@ -213,3 +213,22 @@ def test_external_and_rpa_cannot_access_internal_status_confirmation():
             format="json",
         )
         assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_product_status_audit_reason_masks_credential_like_text():
+    tenant = Tenant.objects.create(name="Tenant", code="status-audit-mask")
+    user = create_user(tenant, "status-audit-mask")
+    spu = create_spu(tenant)
+    recommendation = create_recommendation(tenant, spu, ProductStatus.ACTIVE)
+
+    response = authenticated_client(user).post(
+        f"/api/internal/products/status-recommendations/{recommendation.id}/confirm/",
+        {"reason": "api_key=demo-credential-value"},
+        format="json",
+    )
+
+    transition = ProductStatusTransition.objects.get(recommendation=recommendation)
+    assert response.status_code == 200
+    assert "demo-credential-value" not in str(response.json())
+    assert transition.reason == "api_key=***"

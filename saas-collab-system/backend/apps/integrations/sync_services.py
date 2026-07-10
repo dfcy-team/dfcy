@@ -24,7 +24,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None):
         raise ValidationError("Sync job is disabled.")
 
     adapter = adapter or get_adapter_for_config(sync_job.integration_config)
-    if not isinstance(adapter, MockPlatformAdapter):
+    if type(adapter) is not MockPlatformAdapter:
         raise ValidationError("Only mock synchronization can be executed by this endpoint in phase 2.")
 
     cursor, _created = SyncCursor.objects.get_or_create(

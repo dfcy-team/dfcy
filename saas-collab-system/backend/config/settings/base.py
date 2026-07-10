@@ -134,3 +134,9 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+
+# Safe default: production credential storage stays disabled unless a provider is explicitly configured.
+INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
+    "INTEGRATION_ENCRYPTION_PROVIDER",
+    "unconfigured-production",
+)

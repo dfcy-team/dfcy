@@ -1,6 +1,8 @@
 import json
 
 import pytest
+from django.test import override_settings
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -144,6 +146,12 @@ def test_test_provider_encrypts_decrypts_and_rotation_changes_key_version():
     assert rotate_response.json()["data"]["credential_key_version"] == "test-v2"
     assert "credential_ciphertext" not in rotate_response.json()["data"]
     assert IntegrationAuditLog.objects.filter(action="rotate_credentials").exists()
+
+
+def test_unconfigured_production_provider_rejects_credential_operations():
+    with override_settings(INTEGRATION_ENCRYPTION_PROVIDER="unconfigured-production"):
+        with pytest.raises(ValidationError, match="not configured"):
+            encrypt_credentials({"api_key": "not-a-real-secret"})
 
 
 @pytest.mark.django_db

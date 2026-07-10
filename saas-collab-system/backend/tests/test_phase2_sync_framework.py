@@ -191,6 +191,40 @@ def test_production_adapter_rejects_execution():
 
 
 @pytest.mark.django_db
+def test_run_mock_endpoint_rejects_sandbox_placeholder_adapter():
+    tenant = Tenant.objects.create(name="Tenant", code="sandbox-tenant")
+    user = create_user(tenant, "sandbox-tech")
+    grant_integration_access(user)
+    job = create_sync_job(
+        tenant,
+        user,
+        environment=PlatformIntegrationConfig.Environment.SANDBOX,
+        alias="sandbox-placeholder",
+    )
+
+    response = authenticated_client(user).post(
+        f"/api/internal/integrations/sync-jobs/{job.id}/run-mock/",
+        {"idempotency_key": "sandbox-must-not-run"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert SyncRun.objects.filter(sync_job=job).count() == 0
+
+
+@pytest.mark.django_db
+def test_retry_error_masks_generic_credential_assignment():
+    tenant = Tenant.objects.create(name="Tenant", code="masked-error-tenant")
+    user = create_user(tenant, "masked-error-tech")
+    job = create_sync_job(tenant, user)
+
+    run = record_retry_failure(job, "token=demo-credential-value failed", retry_count=1)
+
+    assert "demo-credential-value" not in run.masked_error_message
+    assert "token=***" in run.masked_error_message
+
+
+@pytest.mark.django_db
 def test_disabled_sync_job_cannot_run():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "tech")

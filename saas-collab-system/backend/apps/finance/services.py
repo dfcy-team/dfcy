@@ -3,6 +3,8 @@ from decimal import Decimal
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from apps.common.security import sanitize_sensitive_data
+
 from .models import (
     BankReceiptImport,
     FinanceAuditLog,
@@ -20,7 +22,7 @@ def write_finance_audit_log(tenant, actor, action, obj, detail=None):
         action=action,
         object_type=obj.__class__.__name__,
         object_id=str(obj.id),
-        masked_detail=detail or {},
+        masked_detail=sanitize_sensitive_data(detail or {}),
     )
 
 

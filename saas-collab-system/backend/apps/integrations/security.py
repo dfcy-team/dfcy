@@ -1,3 +1,6 @@
+from apps.common.security import mask_sensitive_text
+
+
 SENSITIVE_KEYS = {
     "authorization",
     "api_key",
@@ -48,4 +51,4 @@ def sanitize_text(value):
     text = str(value or "")
     for marker in SENSITIVE_TEXT_MARKERS:
         text = text.replace(marker, "***")
-    return text
+    return mask_sensitive_text(text)

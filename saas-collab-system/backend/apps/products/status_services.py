@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.accounts.models import CustomUser
+from apps.common.security import mask_sensitive_text
 
 from .models import (
     ProductSKU,
@@ -138,6 +139,7 @@ def confirm_recommendation(recommendation, user, reason=""):
     if to_status in HIGH_RISK_STATUSES and not (user.is_staff or getattr(user, "is_superuser", False)):
         raise PermissionDenied("High-risk product status requires authorized internal confirmation.")
 
+    reason = mask_sensitive_text(reason)
     with transaction.atomic():
         recommendation.status = ProductStatusRecommendation.Status.CONFIRMED
         recommendation.confirmed_by = user
@@ -163,6 +165,7 @@ def reject_recommendation(recommendation, user, reason=""):
         raise PermissionDenied("Recommendation does not belong to current tenant.")
     if recommendation.status != ProductStatusRecommendation.Status.PENDING:
         raise ValidationError("Recommendation has already been handled.")
+    reason = mask_sensitive_text(reason)
     recommendation.status = ProductStatusRecommendation.Status.REJECTED
     recommendation.confirmed_by = user
     recommendation.confirmed_at = timezone.now()

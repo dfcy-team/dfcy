@@ -199,3 +199,24 @@ def test_reject_match_records_audit_and_blocks_repeat_handling():
     assert reject_response.json()["data"]["status"] == ReconciliationMatch.Status.REJECTED
     assert repeat_response.status_code == 400
     assert FinanceAuditLog.objects.filter(action="reject_reconciliation_match").exists()
+
+
+@pytest.mark.django_db
+def test_finance_audit_masks_credential_like_rejection_reason():
+    tenant = Tenant.objects.create(name="Tenant", code="finance-audit-mask")
+    finance_user = create_user(tenant, "finance-audit-mask")
+    grant_finance_access(finance_user)
+    seed_demo_finance_data(tenant)
+    client = authenticated_client(finance_user)
+    match_id = client.post("/api/finance/reconciliation/run-mock/", {}, format="json").json()["data"]["id"]
+
+    response = client.post(
+        f"/api/finance/reconciliation/matches/{match_id}/reject/",
+        {"reason": "token=demo-credential-value"},
+        format="json",
+    )
+
+    audit = FinanceAuditLog.objects.get(action="reject_reconciliation_match")
+    assert response.status_code == 200
+    assert "demo-credential-value" not in str(audit.masked_detail)
+    assert audit.masked_detail["reason"] == "token=***"

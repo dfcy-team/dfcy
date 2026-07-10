@@ -75,8 +75,8 @@ class DisabledProductionAdapter(PlatformAdapter):
         self._reject()
 
 
-def get_adapter_for_config(config, force_mock=False):
-    if force_mock or config.environment == "mock":
+def get_adapter_for_config(config):
+    if config.environment == "mock":
         return MockPlatformAdapter()
     if config.environment == "sandbox":
         return SandboxPlaceholderAdapter()
