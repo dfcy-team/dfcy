@@ -16,7 +16,7 @@ export const successResponse = (data = {}) => ({
 });
 
 export const pendingResponse = (moduleName) => successResponse({
-  status: 'mock',
+  status: 'pending',
   module: moduleName,
   items: []
 });

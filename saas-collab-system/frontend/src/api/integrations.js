@@ -1,5 +1,16 @@
-import { getMockResponse } from './request';
+import { requestWithMockFallback } from './request';
 import { mockApiSyncLogs, mockApiSyncTasks } from '../mock/integrations';
 
-export const fetchApiSyncTasks = () => getMockResponse(mockApiSyncTasks, 'integrations.sync_tasks');
-export const fetchApiSyncLogs = () => getMockResponse(mockApiSyncLogs, 'integrations.sync_logs');
+export const fetchApiSyncTasks = () =>
+  requestWithMockFallback(
+    { method: 'get', url: '/api/internal/integrations/sync-tasks/' },
+    mockApiSyncTasks,
+    'integrations.sync_tasks'
+  );
+
+export const fetchApiSyncLogs = () =>
+  requestWithMockFallback(
+    { method: 'get', url: '/api/internal/integrations/sync-logs/' },
+    mockApiSyncLogs,
+    'integrations.sync_logs'
+  );
