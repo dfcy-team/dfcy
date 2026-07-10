@@ -1,5 +1,12 @@
 # frontend
 
+## Phase 2 frontend build observation
+
+- Route pages are lazy loaded in `frontend/src/router/index.js`.
+- Vite `manualChunks` splits `vue`, `element-plus`, and `axios` vendor bundles.
+- `npm run build` succeeds after the split. The original main app chunk dropped from about `1,164.29 kB` to about `12.71 kB`.
+- A remaining non-blocking chunk warning is caused by the full `element-plus` vendor chunk, about `923.26 kB`. Future optimization can evaluate Element Plus on-demand imports or deeper manual chunks.
+
 阶段0前端工程占位，使用 Vue3 + Vite + vue-router + pinia + axios + Element Plus。
 
 ## 阶段0边界
