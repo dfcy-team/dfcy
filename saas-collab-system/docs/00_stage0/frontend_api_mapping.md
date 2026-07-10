@@ -52,6 +52,11 @@
 | 价格列表 | `/pricing/prices` | `/api/internal/pricing/prices/` | GET | `sku`、`approval_status` | `items`、`status` | `frontend/src/mock/pricing.js` | pending |
 | RPA任务列表 | `/rpa/tasks` | `/api/internal/rpa/tasks/` | GET | `task_id`、`task_type`、`status`、`agent` | `task_id`、`task_type`、`business_type`、`business_id`、`status`、`agent`、`retry_count` | `frontend/src/mock/rpa.js` | pending |
 | RPA任务详情 | `/rpa/tasks/:id` | `/api/internal/rpa/tasks/{id}/` | GET | `id` | `task_id`、`payload`、`result`、`logs`、`screenshots`、`error_message`、`manual_required` | `frontend/src/mock/rpa.js` | pending |
+| RPA稳定性看板 | `/rpa/stability` | `/api/internal/rpa/tasks/` | GET | `status` | `status`、`count` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA尝试列表 | `/rpa/attempts` | `/api/internal/rpa/attempts/` | GET | `status`、`agent` | `task`、`attempt_no`、`agent`、`heartbeat_at`、`status`、`masked_error` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA人工接管队列 | `/rpa/manual-queue` | `/api/internal/rpa/manual-queue/` | GET | `status=manual_required` | `task`、`failed_step`、`last_success_step`、`masked_error`、`manual_required` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA账号锁 | `/rpa/account-locks` | `/api/internal/rpa/account-locks/` | GET | `platform`、`account_alias` | `platform`、`account_alias`、`lock_status`、`expires_at` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA页面签名异常 | `/rpa/page-signatures` | `/api/internal/rpa/page-signatures/` | GET | `platform`、`page_type` | `platform`、`page_type`、`signature_hash`、`detected_status` | `frontend/src/mock/rpaStability.js` | pending |
 | API同步任务列表 | `/integrations/api-sync` | `/api/internal/integrations/sync-tasks/` | GET | `task_no`、`platform`、`sync_type`、`status` | `items`、`status` | `frontend/src/mock/integrations.js` | pending |
 | API同步日志列表 | `/integrations/api-sync/logs` | `/api/internal/integrations/sync-logs/` | GET | `log_no`、`platform`、`sync_type`、`status` | `items`、`quality_check_result` | `frontend/src/mock/integrations.js` | pending |
 | 平台接入配置列表 | `/integrations/configs` | `/api/internal/integrations/configs/` | GET | `platform`、`status`、`environment` | `platform`、`account_alias`、`environment`、`status`、`credential_fingerprint`、`credential_key_version` | `frontend/src/mock/integrations.js` | pending |

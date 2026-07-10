@@ -29,6 +29,12 @@ import PriceList from '../views/pricing/PriceList.vue';
 import PriceDetail from '../views/pricing/PriceDetail.vue';
 import RPATaskList from '../views/rpa/RPATaskList.vue';
 import RPATaskDetail from '../views/rpa/RPATaskDetail.vue';
+import RPAStabilityDashboard from '../views/rpa/RPAStabilityDashboard.vue';
+import RPAAttemptList from '../views/rpa/RPAAttemptList.vue';
+import RPAAttemptDetail from '../views/rpa/RPAAttemptDetail.vue';
+import RPAManualQueue from '../views/rpa/RPAManualQueue.vue';
+import RPAAccountLockList from '../views/rpa/RPAAccountLockList.vue';
+import RPAPageSignatureAlertList from '../views/rpa/RPAPageSignatureAlertList.vue';
 import APISyncTaskList from '../views/integrations/APISyncTaskList.vue';
 import APISyncLogList from '../views/integrations/APISyncLogList.vue';
 import IntegrationConfigList from '../views/integrations/IntegrationConfigList.vue';
@@ -80,6 +86,12 @@ const routes = [
       { path: 'pricing/prices/:id', component: PriceDetail },
       { path: 'rpa/tasks', component: RPATaskList },
       { path: 'rpa/tasks/:id', component: RPATaskDetail },
+      { path: 'rpa/stability', component: RPAStabilityDashboard },
+      { path: 'rpa/attempts', component: RPAAttemptList },
+      { path: 'rpa/attempts/:id', component: RPAAttemptDetail },
+      { path: 'rpa/manual-queue', component: RPAManualQueue },
+      { path: 'rpa/account-locks', component: RPAAccountLockList },
+      { path: 'rpa/page-signatures', component: RPAPageSignatureAlertList },
       { path: 'integrations/configs', component: IntegrationConfigList },
       { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
       { path: 'integrations/sync-jobs', component: SyncJobList },

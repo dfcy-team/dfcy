@@ -72,3 +72,10 @@ VITE_API_BASE_URL=http://localhost:8000
 - 内部绩效页面使用 `/api/internal/suppliers/performance/*`。
 - 供应商自己的绩效页面使用 `/api/external/supplier/performance/*`，不得传入其他 `supplier_id`。
 - 供应商身份与 `tenant_id + supplier_id` 过滤以后端为准，前端不承载可信权限过滤。
+
+## 阶段2 RPA失败转人工页面
+
+- 新增 `/rpa/stability`、`/rpa/attempts`、`/rpa/manual-queue`、`/rpa/account-locks`、`/rpa/page-signatures`。
+- 页面是 internal 管理页面，只使用 `/api/internal/rpa/*` pending/mock 管理接口。
+- 不模拟 RPA Agent token，不调用 `/api/rpa/tasks/claim/`、heartbeat、logs、screenshots、complete、fail 等 Agent 执行动作。
+- evidence/screenshot 仅使用 demo 或 placeholder，不连接真实 BigSeller。
