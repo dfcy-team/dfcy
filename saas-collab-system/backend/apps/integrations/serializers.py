@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .credential_service import encrypt_credentials, mask_credentials
-from .models import IntegrationAuditLog, PlatformIntegrationConfig
+from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
 
 
 class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
@@ -78,4 +78,67 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = IntegrationAuditLog
         fields = ("id", "action", "actor_id", "result", "masked_detail", "created_at")
+        read_only_fields = fields
+
+
+class SyncJobSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    integration_config_id = serializers.IntegerField()
+
+    class Meta:
+        model = SyncJob
+        fields = (
+            "id",
+            "tenant_id",
+            "integration_config_id",
+            "resource_type",
+            "schedule_type",
+            "status",
+            "is_enabled",
+            "max_retry_count",
+            "backoff_base_seconds",
+            "last_run_at",
+            "next_run_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "tenant_id", "status", "last_run_at", "created_at", "updated_at")
+
+    def validate_integration_config_id(self, value):
+        request = self.context["request"]
+        if not PlatformIntegrationConfig.objects.filter(id=value, tenant=request.user.tenant).exists():
+            raise serializers.ValidationError("Integration config does not belong to current tenant.")
+        return value
+
+    def validate_max_retry_count(self, value):
+        if value > 5:
+            raise serializers.ValidationError("max_retry_count cannot exceed 5 in phase 2.")
+        return value
+
+
+class SyncRunSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    sync_job_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = SyncRun
+        fields = (
+            "id",
+            "tenant_id",
+            "sync_job_id",
+            "run_id",
+            "idempotency_key",
+            "status",
+            "started_at",
+            "finished_at",
+            "fetched_count",
+            "created_count",
+            "updated_count",
+            "skipped_count",
+            "failed_count",
+            "retry_count",
+            "error_code",
+            "masked_error_message",
+            "masked_log",
+        )
         read_only_fields = fields

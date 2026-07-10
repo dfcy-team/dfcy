@@ -82,6 +82,144 @@ class IntegrationAuditLog(models.Model):
         return f"{self.integration_config_id}:{self.action}:{self.result}"
 
 
+class SyncJob(models.Model):
+    class ResourceType(models.TextChoices):
+        SALES_ORDER = "sales_order", "Sales order"
+        INVENTORY = "inventory", "Inventory"
+        SETTLEMENT_BILL = "settlement_bill", "Settlement bill"
+        WITHDRAWAL = "withdrawal", "Withdrawal"
+        MOCK_RECORD = "mock_record", "Mock record"
+
+    class ScheduleType(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        INTERVAL = "interval", "Interval"
+        CRON = "cron", "Cron"
+
+    class Status(models.TextChoices):
+        IDLE = "idle", "Idle"
+        RUNNING = "running", "Running"
+        DISABLED = "disabled", "Disabled"
+        FAILED = "failed", "Failed"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_jobs")
+    integration_config = models.ForeignKey(
+        PlatformIntegrationConfig,
+        on_delete=models.PROTECT,
+        related_name="sync_jobs",
+    )
+    resource_type = models.CharField(max_length=40, choices=ResourceType.choices)
+    schedule_type = models.CharField(max_length=20, choices=ScheduleType.choices, default=ScheduleType.MANUAL)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.IDLE)
+    is_enabled = models.BooleanField(default=True)
+    max_retry_count = models.PositiveIntegerField(default=3)
+    backoff_base_seconds = models.PositiveIntegerField(default=1)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "resource_type", "id"]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_sync_job_tenant_status"),
+            models.Index(fields=["tenant", "resource_type"], name="idx_sync_job_tenant_resource"),
+        ]
+
+    def __str__(self):
+        return f"{self.integration_config_id}:{self.resource_type}:{self.status}"
+
+
+class SyncRun(models.Model):
+    class Status(models.TextChoices):
+        RUNNING = "running", "Running"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_runs")
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="runs")
+    run_id = models.CharField(max_length=80)
+    idempotency_key = models.CharField(max_length=160)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    fetched_count = models.PositiveIntegerField(default=0)
+    created_count = models.PositiveIntegerField(default=0)
+    updated_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    retry_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=80, blank=True)
+    masked_error_message = models.TextField(blank=True)
+    masked_log = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-started_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "idempotency_key"], name="uniq_sync_run_idempotency"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_sync_run_tenant_status"),
+            models.Index(fields=["run_id"], name="idx_sync_run_run_id"),
+        ]
+
+    def __str__(self):
+        return f"{self.run_id}:{self.status}"
+
+
+class SyncCursor(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_cursors")
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="cursors")
+    cursor_key = models.CharField(max_length=80)
+    cursor_value = models.CharField(max_length=255, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "sync_job_id", "cursor_key"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "sync_job", "cursor_key"], name="uniq_sync_cursor_key"),
+        ]
+
+    def __str__(self):
+        return f"{self.sync_job_id}:{self.cursor_key}"
+
+
+class WebhookEvent(models.Model):
+    class SignatureStatus(models.TextChoices):
+        MOCK_VALID = "mock_valid", "Mock valid"
+        INVALID = "invalid", "Invalid"
+        NOT_CONFIGURED = "not_configured", "Not configured"
+
+    class ProcessingStatus(models.TextChoices):
+        RECEIVED = "received", "Received"
+        PROCESSED = "processed", "Processed"
+        DUPLICATE = "duplicate", "Duplicate"
+        FAILED = "failed", "Failed"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="webhook_events")
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    event_id = models.CharField(max_length=120)
+    event_type = models.CharField(max_length=80)
+    signature_status = models.CharField(max_length=30, choices=SignatureStatus.choices)
+    processing_status = models.CharField(
+        max_length=30,
+        choices=ProcessingStatus.choices,
+        default=ProcessingStatus.RECEIVED,
+    )
+    payload_hash = models.CharField(max_length=64)
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-received_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "platform", "event_id"], name="uniq_webhook_event_per_tenant"),
+        ]
+
+    def __str__(self):
+        return f"{self.platform}:{self.event_id}:{self.processing_status}"
+
+
 class APIIntegrationConfig(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"

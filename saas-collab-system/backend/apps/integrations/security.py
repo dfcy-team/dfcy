@@ -11,6 +11,13 @@ SENSITIVE_KEYS = {
     "secret",
 }
 
+SENSITIVE_TEXT_MARKERS = (
+    "not-a-real-secret",
+    "placeholder-secret",
+    "placeholder-token",
+    "demo-secret",
+)
+
 
 def mask_secret(value):
     if not value:
@@ -35,3 +42,10 @@ def sanitize_payload(payload):
         else:
             sanitized[key] = sanitize_payload(value)
     return sanitized
+
+
+def sanitize_text(value):
+    text = str(value or "")
+    for marker in SENSITIVE_TEXT_MARKERS:
+        text = text.replace(marker, "***")
+    return text

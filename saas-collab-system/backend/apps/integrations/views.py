@@ -6,8 +6,14 @@ from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsIntegrationAdmin
 
 from .credential_service import mask_credentials, rotate_credentials
-from .models import IntegrationAuditLog, PlatformIntegrationConfig
-from .serializers import PlatformIntegrationConfigSerializer, RotateCredentialsSerializer
+from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
+from .serializers import (
+    PlatformIntegrationConfigSerializer,
+    RotateCredentialsSerializer,
+    SyncJobSerializer,
+    SyncRunSerializer,
+)
+from .sync_services import run_sync_job
 
 
 def health_response(service):
@@ -142,3 +148,48 @@ def verify_integration_config(request, pk):
         )
         raise ValidationError("Production connection verification is not allowed in phase 2.")
     return success_response({"status": "mock_only", "platform": config.platform})
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsIntegrationAdmin])
+def sync_job_collection(request):
+    if request.method == "GET":
+        queryset = SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config")
+        return success_response(SyncJobSerializer(queryset, many=True, context={"request": request}).data)
+
+    serializer = SyncJobSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    job = serializer.save(tenant=request.user.tenant)
+    return success_response(SyncJobSerializer(job, context={"request": request}).data, status=201)
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationAdmin])
+def sync_run_collection(request):
+    queryset = SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job")
+    return success_response(SyncRunSerializer(queryset, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationAdmin])
+def sync_run_detail(request, pk):
+    sync_run = get_object_or_404(SyncRun, pk=pk, tenant=request.user.tenant)
+    return success_response(SyncRunSerializer(sync_run).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationAdmin])
+def run_mock_sync_job(request, pk):
+    sync_job = get_object_or_404(SyncJob, pk=pk, tenant=request.user.tenant)
+    run, created = run_sync_job(sync_job, idempotency_key=request.data.get("idempotency_key"))
+    return success_response({"created": created, "run": SyncRunSerializer(run).data})
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationAdmin])
+def disable_sync_job(request, pk):
+    sync_job = get_object_or_404(SyncJob, pk=pk, tenant=request.user.tenant)
+    sync_job.is_enabled = False
+    sync_job.status = SyncJob.Status.DISABLED
+    sync_job.save(update_fields=["is_enabled", "status", "updated_at"])
+    return success_response(SyncJobSerializer(sync_job, context={"request": request}).data)
