@@ -6,6 +6,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.accounts.models import CustomUser
 from apps.common.security import mask_sensitive_text
+from apps.permissions.services import check_user_permission
 
 from .models import (
     ProductSKU,
@@ -123,6 +124,8 @@ def _assert_internal_confirmer(user):
         raise PermissionDenied("Authentication required.")
     if user.user_type != CustomUser.UserType.INTERNAL:
         raise PermissionDenied("Only internal users can confirm product status.")
+    if not check_user_permission(user, "products.status.confirm"):
+        raise PermissionDenied("Product status confirmation permission is required.")
 
 
 def confirm_recommendation(recommendation, user, reason=""):
@@ -136,7 +139,7 @@ def confirm_recommendation(recommendation, user, reason=""):
     to_status = recommendation.recommended_status
     if to_status not in ALLOWED_TRANSITIONS.get(from_status, set()):
         raise ValidationError("Illegal product status transition.")
-    if to_status in HIGH_RISK_STATUSES and not (user.is_staff or getattr(user, "is_superuser", False)):
+    if to_status in HIGH_RISK_STATUSES and not check_user_permission(user, "products.status.high_risk_confirm"):
         raise PermissionDenied("High-risk product status requires authorized internal confirmation.")
 
     reason = mask_sensitive_text(reason)

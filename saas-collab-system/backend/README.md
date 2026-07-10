@@ -39,6 +39,18 @@ python manage.py makemigrations
 python manage.py migrate
 ```
 
+Migrations seed the canonical application permission catalog. Validate it in CI or after deployment with:
+
+```powershell
+python manage.py sync_permissions --check
+```
+
+To repair missing or stale permission metadata without changing role assignments:
+
+```powershell
+python manage.py sync_permissions
+```
+
 ## Pytest
 
 ```powershell

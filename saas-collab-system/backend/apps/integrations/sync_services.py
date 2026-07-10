@@ -34,20 +34,21 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None):
         defaults={"cursor_value": ""},
     )
     idempotency_key = idempotency_key or f"{sync_job.id}:{cursor.cursor_value or 'initial'}"
-    existing = SyncRun.objects.filter(tenant=sync_job.tenant, idempotency_key=idempotency_key).first()
-    if existing:
-        return existing, False
-
     now = timezone.now()
+    run, created = SyncRun.objects.get_or_create(
+        tenant=sync_job.tenant,
+        sync_job=sync_job,
+        idempotency_key=idempotency_key,
+        defaults={
+            "run_id": _run_id(),
+            "status": SyncRun.Status.RUNNING,
+            "started_at": now,
+        },
+    )
+    if not created:
+        return run, False
+
     with transaction.atomic():
-        run = SyncRun.objects.create(
-            tenant=sync_job.tenant,
-            sync_job=sync_job,
-            run_id=_run_id(),
-            idempotency_key=idempotency_key,
-            status=SyncRun.Status.RUNNING,
-            started_at=now,
-        )
         sync_job.status = SyncJob.Status.RUNNING
         sync_job.last_run_at = now
         sync_job.save(update_fields=["status", "last_run_at", "updated_at"])

@@ -10,6 +10,7 @@ from apps.products.models import (
     ProductStatusTransition,
 )
 from apps.products.status_services import create_status_recommendation
+from apps.permissions.models import Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
@@ -26,6 +27,18 @@ def authenticated_client(user):
     client = APIClient()
     client.force_authenticate(user=user)
     return client
+
+
+def grant_status_permissions(user, *permission_codes):
+    role = Role.objects.create(
+        tenant=user.tenant,
+        name=f"Product status {user.username}",
+        code=f"product-status-{user.id}",
+    )
+    for permission_code in permission_codes:
+        permission = Permission.objects.get(code=permission_code)
+        role.permissions.add(permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
 
 
 def create_spu(tenant, code="SPU-STATUS"):
@@ -50,6 +63,7 @@ def test_status_recommendation_api_filters_by_tenant():
     tenant_a = Tenant.objects.create(name="Tenant A", code="tenant-a")
     tenant_b = Tenant.objects.create(name="Tenant B", code="tenant-b")
     user_a = create_user(tenant_a, "internal-a")
+    grant_status_permissions(user_a, "products.status.view")
     spu_a = create_spu(tenant_a, "SPU-A")
     spu_b = create_spu(tenant_b, "SPU-B")
     create_recommendation(tenant_a, spu_a, ProductStatus.ACTIVE)
@@ -92,6 +106,7 @@ def test_api_and_rpa_sources_only_create_pending_recommendations():
 def test_evaluate_mock_uses_demo_metrics_and_creates_recommendation():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "internal")
+    grant_status_permissions(user, "products.status.evaluate")
     spu = create_spu(tenant)
 
     response = authenticated_client(user).post(
@@ -107,13 +122,19 @@ def test_evaluate_mock_uses_demo_metrics_and_creates_recommendation():
 
 
 @pytest.mark.django_db
-def test_plain_internal_cannot_confirm_high_risk_status_but_staff_can():
+def test_high_risk_confirmation_requires_business_permission_not_staff_flag():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
-    plain_user = create_user(tenant, "plain")
-    staff_user = create_user(tenant, "staff", is_staff=True)
+    staff_without_high_risk_permission = create_user(tenant, "staff", is_staff=True)
+    authorized_user = create_user(tenant, "authorized")
+    grant_status_permissions(staff_without_high_risk_permission, "products.status.confirm")
+    grant_status_permissions(
+        authorized_user,
+        "products.status.confirm",
+        "products.status.high_risk_confirm",
+    )
     spu = create_spu(tenant)
     active = create_recommendation(tenant, spu, ProductStatus.ACTIVE, source=ProductStatusSnapshot.Source.MANUAL)
-    authenticated_client(staff_user).post(
+    authenticated_client(staff_without_high_risk_permission).post(
         f"/api/internal/products/status-recommendations/{active.id}/confirm/",
         {"reason": "activate demo product"},
         format="json",
@@ -125,27 +146,68 @@ def test_plain_internal_cannot_confirm_high_risk_status_but_staff_can():
         source=ProductStatusSnapshot.Source.MANUAL,
     )
 
-    plain_response = authenticated_client(plain_user).post(
+    staff_response = authenticated_client(staff_without_high_risk_permission).post(
         f"/api/internal/products/status-recommendations/{risky.id}/confirm/",
         {"reason": "not authorized"},
         format="json",
     )
-    staff_response = authenticated_client(staff_user).post(
+    authorized_response = authenticated_client(authorized_user).post(
         f"/api/internal/products/status-recommendations/{risky.id}/confirm/",
         {"reason": "authorized high-risk confirmation"},
         format="json",
     )
 
-    assert plain_response.status_code == 403
-    assert staff_response.status_code == 200
-    assert staff_response.json()["data"]["to_status"] == ProductStatus.STOPPED
+    assert staff_response.status_code == 403
+    assert authorized_response.status_code == 200
+    assert authorized_response.json()["data"]["to_status"] == ProductStatus.STOPPED
     assert ProductStatusTransition.objects.filter(to_status=ProductStatus.STOPPED).exists()
+
+
+@pytest.mark.django_db
+def test_plain_internal_cannot_view_evaluate_confirm_or_reject_product_status():
+    tenant = Tenant.objects.create(name="Tenant", code="product-status-no-permission")
+    user = create_user(tenant, "plain-internal")
+    spu = create_spu(tenant)
+    recommendation = create_recommendation(tenant, spu, ProductStatus.ACTIVE)
+    client = authenticated_client(user)
+
+    assert client.get("/api/internal/products/status-recommendations/").status_code == 403
+    assert (
+        client.post(
+            "/api/internal/products/status/evaluate-mock/",
+            {"spu": spu.id, "metrics": {"sales_30d": 10, "stock_days": 20}},
+            format="json",
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/api/internal/products/status-recommendations/{recommendation.id}/confirm/",
+            {},
+            format="json",
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/api/internal/products/status-recommendations/{recommendation.id}/reject/",
+            {},
+            format="json",
+        ).status_code
+        == 403
+    )
+    assert ProductStatusTransition.objects.count() == 0
 
 
 @pytest.mark.django_db
 def test_illegal_transition_is_rejected_and_duplicate_confirm_is_rejected():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     staff_user = create_user(tenant, "staff", is_staff=True)
+    grant_status_permissions(
+        staff_user,
+        "products.status.confirm",
+        "products.status.high_risk_confirm",
+    )
     spu = create_spu(tenant)
     illegal = create_recommendation(
         tenant,
@@ -182,6 +244,7 @@ def test_illegal_transition_is_rejected_and_duplicate_confirm_is_rejected():
 def test_reject_creates_audit_transition_without_status_change():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "internal")
+    grant_status_permissions(user, "products.status.confirm")
     spu = create_spu(tenant)
     recommendation = create_recommendation(tenant, spu, ProductStatus.ACTIVE)
 
@@ -219,6 +282,7 @@ def test_external_and_rpa_cannot_access_internal_status_confirmation():
 def test_product_status_audit_reason_masks_credential_like_text():
     tenant = Tenant.objects.create(name="Tenant", code="status-audit-mask")
     user = create_user(tenant, "status-audit-mask")
+    grant_status_permissions(user, "products.status.confirm")
     spu = create_spu(tenant)
     recommendation = create_recommendation(tenant, spu, ProductStatus.ACTIVE)
 

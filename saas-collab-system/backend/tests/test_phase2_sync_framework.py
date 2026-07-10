@@ -204,6 +204,36 @@ def test_idempotency_prevents_duplicate_sync_runs():
 
 
 @pytest.mark.django_db
+def test_idempotency_key_is_scoped_to_each_sync_job():
+    tenant = Tenant.objects.create(name="Tenant", code="sync-job-idempotency-scope")
+    user = create_user(tenant, "tech")
+    grant_integration_access(user)
+    first_job = create_sync_job(tenant, user, alias="mock-shop-a")
+    second_job = create_sync_job(tenant, user, alias="mock-shop-b")
+    client = authenticated_client(user)
+
+    first = client.post(
+        f"/api/internal/integrations/sync-jobs/{first_job.id}/run-mock/",
+        {"idempotency_key": "shared-key"},
+        format="json",
+    )
+    second = client.post(
+        f"/api/internal/integrations/sync-jobs/{second_job.id}/run-mock/",
+        {"idempotency_key": "shared-key"},
+        format="json",
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["data"]["created"] is True
+    assert second.json()["data"]["created"] is True
+    assert first.json()["data"]["run"]["id"] != second.json()["data"]["run"]["id"]
+    assert SyncRun.objects.filter(tenant=tenant, idempotency_key="shared-key").count() == 2
+    assert SyncRun.objects.filter(sync_job=first_job, idempotency_key="shared-key").count() == 1
+    assert SyncRun.objects.filter(sync_job=second_job, idempotency_key="shared-key").count() == 1
+
+
+@pytest.mark.django_db
 def test_finite_retry_and_max_retry_failure_are_recorded_without_waiting():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "tech")

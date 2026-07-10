@@ -156,7 +156,10 @@ class SyncRun(models.Model):
     class Meta:
         ordering = ["-started_at", "-id"]
         constraints = [
-            models.UniqueConstraint(fields=["tenant", "idempotency_key"], name="uniq_sync_run_idempotency"),
+            models.UniqueConstraint(
+                fields=["tenant", "sync_job", "idempotency_key"],
+                name="uniq_sync_run_job_idempotency",
+            ),
         ]
         indexes = [
             models.Index(fields=["tenant", "status"], name="idx_sync_run_tenant_status"),
