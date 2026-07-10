@@ -66,3 +66,40 @@ class SupplierShipment(models.Model):
 
     def __str__(self):
         return self.shipment_no
+
+
+class SupplierPerformanceSnapshot(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="supplier_performance_snapshots")
+    supplier_id = models.BigIntegerField()
+    period_start = models.DateField()
+    period_end = models.DateField()
+    total_tasks = models.PositiveIntegerField(default=0)
+    on_time_tasks = models.PositiveIntegerField(default=0)
+    overdue_tasks = models.PositiveIntegerField(default=0)
+    exception_tasks = models.PositiveIntegerField(default=0)
+    total_shipments = models.PositiveIntegerField(default=0)
+    accurate_shipments = models.PositiveIntegerField(default=0)
+    feedback_on_time_count = models.PositiveIntegerField(default=0)
+    on_time_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    overdue_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    exception_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    shipment_accuracy_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    feedback_timeliness_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    total_score = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    calculated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "supplier_id", "-period_end"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "supplier_id", "period_start", "period_end"],
+                name="uniq_supplier_performance_period",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(period_start__lte=models.F("period_end")),
+                name="supplier_performance_valid_period",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.supplier_id}:{self.period_start}:{self.period_end}"
