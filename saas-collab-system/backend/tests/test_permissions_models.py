@@ -62,12 +62,7 @@ def test_permission_helpers_use_user_tenant_roles():
     )
     role = Role.objects.create(tenant=tenant, name="Reporter", code="reporter")
     other_role = Role.objects.create(tenant=other_tenant, name="Reporter", code="reporter")
-    permission = Permission.objects.create(
-        code="reports.view",
-        name="View reports",
-        module="reports",
-        action="view",
-    )
+    permission = Permission.objects.get(code="reports.view")
     role.permissions.add(permission)
     other_role.permissions.add(permission)
     UserRole.objects.create(tenant=tenant, user=user, role=role)

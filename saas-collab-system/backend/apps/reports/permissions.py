@@ -28,6 +28,14 @@ class IsAnalyticsCalculator(AnalyticsActionPermission):
     permission_code = "analytics.calculate"
 
 
+class IsReportViewer(AnalyticsActionPermission):
+    permission_code = "reports.view"
+
+
+class IsReportExporter(AnalyticsActionPermission):
+    permission_code = "reports.export"
+
+
 def get_analytics_dimension_scopes(user):
     if getattr(user, "is_superuser", False):
         return None

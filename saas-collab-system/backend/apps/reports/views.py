@@ -9,6 +9,8 @@ from .models import MetricAggregate, MetricDefinition
 from .permissions import (
     IsAnalyticsCalculator,
     IsAnalyticsViewer,
+    IsReportExporter,
+    IsReportViewer,
     can_access_analytics_dimensions,
     filter_analytics_aggregates,
     filter_authorized_metric_definitions,
@@ -19,8 +21,12 @@ from .serializers import (
     MetricAggregationRequestSerializer,
     MetricDefinitionSerializer,
     MetricDefinitionQuerySerializer,
+    ReportExportCreateSerializer,
+    ReportExportQuerySerializer,
+    ReportExportRequestSerializer,
 )
 from .services import aggregate_metric
+from .export_services import create_export_request, log_export_view, report_catalog_for_user, visible_export_requests
 
 
 @api_view(["GET"])
@@ -140,3 +146,41 @@ def aggregate_mock(request):
         dimensions=dimensions,
     )
     return success_response(MetricAggregateSerializer(aggregate).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsReportViewer])
+def report_catalog(request):
+    return success_response(report_catalog_for_user(request.user))
+
+
+@api_view(["GET", "POST"])
+def report_export_collection(request):
+    permission = IsReportViewer() if request.method == "GET" else IsReportExporter()
+    if not permission.has_permission(request, report_export_collection):
+        raise PermissionDenied("Report permission is required.")
+    if request.method == "POST":
+        serializer = ReportExportCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        export_request = create_export_request(user=request.user, **serializer.validated_data)
+        return success_response(ReportExportRequestSerializer(export_request).data, status=201)
+    serializer = ReportExportQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    query = serializer.validated_data
+    queryset = visible_export_requests(request.user).select_related("requested_by").prefetch_related("audit_logs")
+    for field in ("report_type", "status"):
+        if query.get(field):
+            queryset = queryset.filter(**{field: query[field]})
+    return success_response(_paginated_data(queryset, ReportExportRequestSerializer, query))
+
+
+@api_view(["GET"])
+@permission_classes([IsReportViewer])
+def report_export_detail(request, pk):
+    export_request = get_object_or_404(
+        visible_export_requests(request.user).select_related("requested_by").prefetch_related("audit_logs"),
+        pk=pk,
+    )
+    log_export_view(export_request=export_request, actor=request.user)
+    export_request.refresh_from_db()
+    return success_response(ReportExportRequestSerializer(export_request).data)

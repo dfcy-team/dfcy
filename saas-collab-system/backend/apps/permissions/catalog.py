@@ -1,5 +1,19 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "reports.view",
+        "name": "View report catalog and exports",
+        "module": "reports",
+        "action": "view",
+        "description": "View tenant and data-scope filtered report metadata.",
+    },
+    {
+        "code": "reports.export",
+        "name": "Request report exports",
+        "module": "reports",
+        "action": "export",
+        "description": "Create audited placeholder report export requests.",
+    },
+    {
         "code": "config.view",
         "name": "View configuration",
         "module": "config",

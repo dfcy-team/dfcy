@@ -1,10 +1,11 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import Count, Sum
 from rest_framework.decorators import api_view
 from rest_framework.decorators import permission_classes
 
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsFinanceImporter, IsFinanceReconciler, IsFinanceUser, IsFinanceViewer
-from .models import BankReceiptImport, PlatformStatement, ReconciliationException, ReconciliationMatch, WithdrawalRecord
+from .models import BankReceiptImport, FinanceAuditLog, PlatformStatement, ReconciliationException, ReconciliationMatch, WithdrawalRecord
 from .serializers import (
     BankReceiptImportSerializer,
     PlatformStatementSerializer,
@@ -122,3 +123,58 @@ def reject_reconciliation_match(request, pk):
 def reconciliation_exception_collection(request):
     queryset = ReconciliationException.objects.filter(tenant=request.user.tenant)
     return success_response(ReconciliationExceptionSerializer(queryset, many=True).data)
+
+
+def _audit_analytics_view(request, action):
+    FinanceAuditLog.objects.create(
+        tenant=request.user.tenant,
+        actor=request.user,
+        action=action,
+        object_type="FinanceAnalytics",
+        object_id="aggregate",
+        masked_detail={"mode": "read_only", "sensitive_fields": "masked"},
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsFinanceViewer])
+def finance_analytics_overview(request):
+    rows = list(
+        PlatformStatement.objects.filter(tenant=request.user.tenant)
+        .values("currency")
+        .annotate(
+            statement_count=Count("id"),
+            gross_amount=Sum("gross_amount"),
+            fee_amount=Sum("fee_amount"),
+            net_amount=Sum("net_amount"),
+        )
+        .order_by("currency")
+    )
+    _audit_analytics_view(request, "view_finance_analytics_overview")
+    return success_response({"currencies": rows, "account_details": "***", "read_only": True})
+
+
+@api_view(["GET"])
+@permission_classes([IsFinanceViewer])
+def finance_analytics_reconciliation(request):
+    rows = list(
+        ReconciliationMatch.objects.filter(tenant=request.user.tenant)
+        .values("status")
+        .annotate(match_count=Count("id"), total_difference=Sum("difference_amount"))
+        .order_by("status")
+    )
+    _audit_analytics_view(request, "view_finance_analytics_reconciliation")
+    return success_response({"statuses": rows, "read_only": True, "fund_action_available": False})
+
+
+@api_view(["GET"])
+@permission_classes([IsFinanceViewer])
+def finance_analytics_exceptions(request):
+    rows = list(
+        ReconciliationException.objects.filter(tenant=request.user.tenant)
+        .values("exception_type", "status")
+        .annotate(exception_count=Count("id"), total_difference=Sum("difference_amount"))
+        .order_by("exception_type", "status")
+    )
+    _audit_analytics_view(request, "view_finance_analytics_exceptions")
+    return success_response({"exceptions": rows, "read_only": True, "account_details": "***"})

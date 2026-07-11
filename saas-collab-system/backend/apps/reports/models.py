@@ -1,6 +1,7 @@
 import hashlib
 import json
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -406,3 +407,105 @@ class MetricAggregateLineage(models.Model):
 
     def __str__(self):
         return f"{self.aggregate_id}:{self.source_table}:{self.source_batch}"
+
+
+class ReportExportRequestQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Report exports require the audited export service.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Report exports require the audited export service.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Report exports require the audited export service.")
+
+
+class ReportExportRequest(models.Model):
+    class ReportType(models.TextChoices):
+        ANALYTICS_SUMMARY = "analytics_summary", "Analytics summary"
+        INVENTORY_ALERTS = "inventory_alerts", "Inventory alerts"
+        REPLENISHMENT = "replenishment", "Replenishment recommendations"
+        LIFECYCLE = "lifecycle", "Lifecycle reviews"
+        BUSINESS_ALERTS = "business_alerts", "Business alerts"
+        FINANCE_SUMMARY = "finance_summary", "Finance summary"
+
+    class Status(models.TextChoices):
+        COMPLETED = "completed", "Completed placeholder"
+        REJECTED = "rejected", "Rejected"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="report_export_requests")
+    report_type = models.CharField(max_length=40, choices=ReportType.choices)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="report_export_requests",
+    )
+    data_scope = models.JSONField(default=list, blank=True)
+    filters = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    row_count = models.PositiveIntegerField(default=0)
+    masked_file_reference = models.CharField(max_length=240, blank=True)
+    rejection_reason = models.CharField(max_length=200, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    objects = ReportExportRequestQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["tenant_id", "-requested_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "requested_by", "status"], name="idx_report_export_owner"),
+            models.Index(fields=["tenant", "report_type", "requested_at"], name="idx_report_export_type"),
+        ]
+
+    def clean(self):
+        if self.requested_by_id and self.requested_by.tenant_id != self.tenant_id:
+            raise ValidationError("Report export requester must belong to the same tenant.")
+        if self.masked_file_reference and not self.masked_file_reference.startswith("placeholder://"):
+            raise ValidationError("Only placeholder export references are allowed in phase 3.")
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, "_export_service_write", False):
+            raise ValidationError("Report exports require the audited export service.")
+        self.full_clean()
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            self._export_service_write = False
+
+
+class ReportExportAuditLogQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Report export audit logs are immutable.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Report export audit logs are immutable.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Report export audit logs require the export service.")
+
+
+class ReportExportAuditLog(models.Model):
+    class Action(models.TextChoices):
+        REQUEST = "request", "Request"
+        VIEW = "view", "View"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="report_export_audit_logs")
+    export_request = models.ForeignKey(ReportExportRequest, on_delete=models.CASCADE, related_name="audit_logs")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="report_export_audit_logs")
+    action = models.CharField(max_length=20, choices=Action.choices)
+    result = models.CharField(max_length=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = ReportExportAuditLogQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["tenant_id", "export_request_id", "created_at", "id"]
+        indexes = [models.Index(fields=["tenant", "export_request", "action"], name="idx_report_export_audit")]
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, "_export_service_write", False):
+            raise ValidationError("Report export audit logs require the export service.")
+        self.full_clean()
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            self._export_service_write = False

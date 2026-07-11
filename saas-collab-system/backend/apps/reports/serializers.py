@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import MetricAggregate, MetricDefinition
+from .models import MetricAggregate, MetricDefinition, ReportExportRequest
 
 
 class MetricDefinitionSerializer(serializers.ModelSerializer):
@@ -95,3 +95,28 @@ class MetricAggregateQuerySerializer(PaginationQuerySerializer):
         if period_start and period_end and period_start >= period_end:
             raise serializers.ValidationError({"period_end": "Must be later than period_start."})
         return attrs
+
+
+class ReportExportRequestSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    requested_by_id = serializers.IntegerField(source="requested_by.id", read_only=True)
+    audit_count = serializers.IntegerField(source="audit_logs.count", read_only=True)
+
+    class Meta:
+        model = ReportExportRequest
+        fields = (
+            "id", "tenant_id", "report_type", "requested_by_id", "data_scope", "filters",
+            "status", "row_count", "masked_file_reference", "rejection_reason", "requested_at",
+            "finished_at", "audit_count",
+        )
+        read_only_fields = fields
+
+
+class ReportExportCreateSerializer(serializers.Serializer):
+    report_type = serializers.ChoiceField(choices=ReportExportRequest.ReportType.choices)
+    filters = serializers.JSONField(required=False, default=dict)
+
+
+class ReportExportQuerySerializer(PaginationQuerySerializer):
+    report_type = serializers.ChoiceField(choices=ReportExportRequest.ReportType.choices, required=False)
+    status = serializers.ChoiceField(choices=ReportExportRequest.Status.choices, required=False)
