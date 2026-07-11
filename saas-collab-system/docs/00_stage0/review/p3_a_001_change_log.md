@@ -31,7 +31,8 @@
 - 不支持钻取维度的指标允许使用空 `allowed_dimensions`。
 - 聚合快照禁止通过 `bulk_create` 绕过 tenant 和正式质量校验。
 - 聚合快照的普通 create/save/update 与 bulk 写入均被禁止，只允许聚合服务持久化。
-- 聚合记录来源 ID 水位并排除水位后的新增数据，不再锁定完整日/周/月事实范围。
+- 聚合开始时重新锁定并校验数据库中的最新 active 口径，陈旧 ORM 对象和已停用口径不能继续生成正式聚合。
+- 聚合通过一次受 `100000` 条安全上限保护的查询固化来源快照，再统一计算数值、质量和血缘；避免多次查询期间既有事实更新造成结果不一致，也不锁定完整日/周/月事实范围。
 
 ## 4. 接口与权限
 
@@ -55,9 +56,8 @@
 
 ## 6. 测试结果
 
-- P3-A-001 定向测试：`20 passed`。
-- P3-A-001 与权限目录定向测试：`22 passed`。
-- 全量 pytest：`170 passed`。
+- P3-A-001 定向测试：`22 passed`。
+- 全量 pytest：`172 passed`。
 - Django check：通过，`0 issues`。
 - 迁移一致性：通过，`No changes detected`。
 - 全新临时数据库迁移：通过，包含 `reports.0001_initial`、`reports.0002_metricaggregatelineage_and_more` 和 `permissions.0003_seed_analytics_permissions`。

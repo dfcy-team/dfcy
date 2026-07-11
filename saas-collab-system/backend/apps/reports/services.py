@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max, Min, Q, Sum
 from django.utils import timezone
 
 from apps.audit.services import write_operation_log
@@ -19,6 +18,7 @@ MAX_AGGREGATION_WINDOWS = {
 }
 MAX_LINEAGE_VALUES = 100
 LINEAGE_BATCH_SIZE = 1000
+MAX_AGGREGATION_POINTS = 100000
 
 
 def _definition_audit_data(definition):
@@ -192,8 +192,31 @@ def aggregate_metric(
 ):
     if metric_definition.tenant_id != tenant.id:
         raise ValidationError("Metric definition is outside the requested tenant.")
-    if metric_definition.status != MetricDefinition.Status.ACTIVE:
+
+    stored_definition = MetricDefinition.objects.filter(
+        pk=metric_definition.pk,
+        tenant=tenant,
+    ).values("metric_code").first()
+    if stored_definition is None:
+        raise ValidationError("Metric definition does not exist in the requested tenant.")
+    definition_versions = list(
+        MetricDefinition.objects.select_for_update()
+        .filter(tenant=tenant, metric_code=stored_definition["metric_code"])
+        .order_by("-version", "-id")
+    )
+    current_definition = next(
+        (definition for definition in definition_versions if definition.pk == metric_definition.pk),
+        None,
+    )
+    latest_definition = definition_versions[0] if definition_versions else None
+    if (
+        current_definition is None
+        or current_definition.status != MetricDefinition.Status.ACTIVE
+        or latest_definition is None
+        or current_definition.pk != latest_definition.pk
+    ):
         raise ValidationError("Only active metric definitions can be aggregated.")
+    metric_definition = current_definition
     if granularity not in MAX_AGGREGATION_WINDOWS:
         raise ValidationError("Unsupported aggregation granularity.")
     if granularity not in metric_definition.supported_granularities:
@@ -217,42 +240,60 @@ def aggregate_metric(
     )
     for key, value in dimensions.items():
         base_points = base_points.filter(**{f"dimensions__{key}": value})
-    source_watermark_id = base_points.aggregate(value=Max("id"))["value"]
-    if source_watermark_id is not None:
-        base_points = base_points.filter(id__lte=source_watermark_id)
-
-    fresh_points = base_points.filter(models_valid_at(refreshed_at))
-    valid_points = fresh_points.filter(
-        quality_status=MetricDataPoint.QualityStatus.PASSED,
-        numeric_value__isnull=False,
+    point_rows = list(
+        base_points.order_by("id").values(
+            "id",
+            "occurred_at",
+            "numeric_value",
+            "quality_status",
+            "expires_at",
+            "source_table",
+            "source_batch",
+            "calculation_task",
+        )[: MAX_AGGREGATION_POINTS + 1]
     )
-    missing_points = fresh_points.filter(quality_status=MetricDataPoint.QualityStatus.MISSING)
-    valid_count = valid_points.count()
-    missing_count = missing_points.count()
-    total_count = base_points.count()
-    fresh_count = fresh_points.count()
+    if len(point_rows) > MAX_AGGREGATION_POINTS:
+        raise ValidationError(
+            f"Aggregation source exceeds the {MAX_AGGREGATION_POINTS} point safety limit."
+        )
+
+    source_watermark_id = point_rows[-1]["id"] if point_rows else None
+    fresh_points = [
+        point
+        for point in point_rows
+        if point["expires_at"] is None or point["expires_at"] > refreshed_at
+    ]
+    valid_points = [
+        point
+        for point in fresh_points
+        if point["quality_status"] == MetricDataPoint.QualityStatus.PASSED
+        and point["numeric_value"] is not None
+    ]
+    missing_points = [
+        point
+        for point in fresh_points
+        if point["quality_status"] == MetricDataPoint.QualityStatus.MISSING
+    ]
+    valid_count = len(valid_points)
+    missing_count = len(missing_points)
+    total_count = len(point_rows)
+    fresh_count = len(fresh_points)
     expired_count = total_count - fresh_count
-    failed_count = fresh_points.exclude(
-        Q(quality_status=MetricDataPoint.QualityStatus.PASSED, numeric_value__isnull=False)
-        | Q(quality_status=MetricDataPoint.QualityStatus.MISSING)
-    ).count()
+    failed_count = fresh_count - valid_count - missing_count
     zero_fill = metric_definition.missing_data_policy == MetricDefinition.MissingDataPolicy.ZERO_FILL
     accepted_points = valid_points
     zero_filled_count = 0
     if zero_fill:
-        accepted_points = fresh_points.filter(
-            Q(quality_status=MetricDataPoint.QualityStatus.PASSED, numeric_value__isnull=False)
-            | Q(quality_status=MetricDataPoint.QualityStatus.MISSING)
-        )
+        accepted_points = valid_points + missing_points
         zero_filled_count = missing_count
     accepted_count = valid_count + zero_filled_count
     excluded_count = total_count - accepted_count
 
     if metric_definition.aggregation_method == MetricDefinition.AggregationMethod.LATEST:
-        latest_point = (
-            accepted_points.order_by("-occurred_at", "-id")
-            .values("quality_status", "numeric_value")
-            .first()
+        latest_point = max(
+            accepted_points,
+            key=lambda point: (point["occurred_at"], point["id"]),
+            default=None,
         )
         numeric_value = None
         if latest_point:
@@ -264,13 +305,13 @@ def aggregate_metric(
     elif metric_definition.aggregation_method == MetricDefinition.AggregationMethod.COUNT:
         numeric_value = Decimal(valid_count)
     elif metric_definition.aggregation_method == MetricDefinition.AggregationMethod.AVERAGE:
-        value_sum = valid_points.aggregate(result=Sum("numeric_value"))["result"] or Decimal(0)
+        value_sum = sum((point["numeric_value"] for point in valid_points), Decimal(0))
         denominator = accepted_count if zero_fill else valid_count
         numeric_value = value_sum / denominator if denominator else None
     else:
-        numeric_value = valid_points.aggregate(result=Sum("numeric_value"))["result"]
-        if numeric_value is None and accepted_count:
-            numeric_value = Decimal(0)
+        numeric_value = sum((point["numeric_value"] for point in valid_points), Decimal(0))
+        if not accepted_count:
+            numeric_value = None
     if numeric_value is not None and not isinstance(numeric_value, Decimal):
         numeric_value = Decimal(numeric_value)
 
@@ -300,22 +341,23 @@ def aggregate_metric(
         "source_watermark_id": source_watermark_id,
     }
 
-    source_table_values = accepted_points.values_list("source_table", flat=True).order_by("source_table").distinct()
-    source_batch_values = accepted_points.values_list("source_batch", flat=True).order_by("source_batch").distinct()
-    calculation_task_values = (
-        accepted_points.exclude(calculation_task="")
-        .values_list("calculation_task", flat=True)
-        .order_by("calculation_task")
-        .distinct()
+    source_table_values = sorted({point["source_table"] for point in accepted_points})
+    source_batch_values = sorted({point["source_batch"] for point in accepted_points})
+    calculation_task_values = sorted(
+        {point["calculation_task"] for point in accepted_points if point["calculation_task"]}
     )
-    id_bounds = accepted_points.aggregate(first_data_point_id=Min("id"), last_data_point_id=Max("id"))
+    accepted_ids = [point["id"] for point in accepted_points]
+    id_bounds = {
+        "first_data_point_id": min(accepted_ids, default=None),
+        "last_data_point_id": max(accepted_ids, default=None),
+    }
     source_lineage = {
-        "source_tables": list(source_table_values[:MAX_LINEAGE_VALUES]),
-        "source_table_count": source_table_values.count(),
-        "source_batches": list(source_batch_values[:MAX_LINEAGE_VALUES]),
-        "source_batch_count": source_batch_values.count(),
-        "calculation_tasks": list(calculation_task_values[:MAX_LINEAGE_VALUES]),
-        "calculation_task_count": calculation_task_values.count(),
+        "source_tables": source_table_values[:MAX_LINEAGE_VALUES],
+        "source_table_count": len(source_table_values),
+        "source_batches": source_batch_values[:MAX_LINEAGE_VALUES],
+        "source_batch_count": len(source_batch_values),
+        "calculation_tasks": calculation_task_values[:MAX_LINEAGE_VALUES],
+        "calculation_task_count": len(calculation_task_values),
         "data_point_count": accepted_count,
         "source_watermark_id": source_watermark_id,
         **id_bounds,
@@ -346,21 +388,24 @@ def aggregate_metric(
     aggregate.save()
     aggregate.lineage_records.all().delete()
     lineage_buffer = []
-    lineage_values = (
-        accepted_points.order_by("source_table", "source_batch", "calculation_task")
-        .values(
-            "source_table",
-            "source_batch",
-            "calculation_task",
-        )
-        .distinct()
+    lineage_values = sorted(
+        {
+            (
+                point["source_table"],
+                point["source_batch"],
+                point["calculation_task"],
+            )
+            for point in accepted_points
+        }
     )
-    for lineage in lineage_values.iterator(chunk_size=LINEAGE_BATCH_SIZE):
+    for source_table, source_batch, calculation_task in lineage_values:
         lineage_buffer.append(
             MetricAggregateLineage(
                 tenant=tenant,
                 aggregate=aggregate,
-                **lineage,
+                source_table=source_table,
+                source_batch=source_batch,
+                calculation_task=calculation_task,
             )
         )
         if len(lineage_buffer) == LINEAGE_BATCH_SIZE:
@@ -369,9 +414,3 @@ def aggregate_metric(
     if lineage_buffer:
         MetricAggregateLineage.objects.bulk_create(lineage_buffer, batch_size=LINEAGE_BATCH_SIZE)
     return aggregate
-
-
-def models_valid_at(at_time):
-    from django.db.models import Q
-
-    return Q(expires_at__isnull=True) | Q(expires_at__gt=at_time)

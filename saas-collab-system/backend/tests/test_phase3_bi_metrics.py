@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -10,7 +11,13 @@ from apps.accounts.models import CustomUser
 from apps.audit.models import OperationLog
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.services import check_user_permission
-from apps.reports.models import MetricAggregate, MetricAggregateLineage, MetricDataPoint, MetricDefinition
+from apps.reports.models import (
+    MetricAggregate,
+    MetricAggregateLineage,
+    MetricDataPoint,
+    MetricDataPointQuerySet,
+    MetricDefinition,
+)
 from apps.reports.services import (
     MAX_LINEAGE_VALUES,
     aggregate_metric,
@@ -185,6 +192,35 @@ def test_metric_version_chain_has_one_active_latest_version():
     assert audit.before_data["definition"]["version"] == 1
     assert audit.after_data["definition"]["version"] == 2
     assert audit.after_data["reason"] == "Update the formula."
+
+
+@pytest.mark.django_db
+def test_stale_definition_object_cannot_aggregate_after_new_version_is_created():
+    tenant = Tenant.objects.create(name="Tenant", code="bi-stale-aggregate")
+    actor = create_user(tenant, "stale-aggregate-actor")
+    grant_analytics_permission(actor, "analytics.manage")
+    definition = create_definition(tenant, actor=actor)
+    now = timezone.now()
+    create_point(definition, "stale-version-point", Decimal("10"), now)
+
+    create_metric_definition_version(
+        definition,
+        actor=actor,
+        reason="Replace the stale aggregation definition.",
+        formula="version two formula",
+    )
+
+    assert definition.status == MetricDefinition.Status.ACTIVE
+    assert MetricDefinition.objects.get(pk=definition.pk).status == MetricDefinition.Status.INACTIVE
+    with pytest.raises(ValidationError, match="Only active metric definitions"):
+        aggregate_metric(
+            tenant=tenant,
+            metric_definition=definition,
+            period_start=now - timedelta(hours=1),
+            period_end=now + timedelta(hours=1),
+            granularity=MetricAggregate.Granularity.DAY,
+        )
+    assert MetricAggregate.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -369,6 +405,43 @@ def test_aggregation_excludes_cross_tenant_failed_missing_and_expired_points():
         "first_data_point_id": expected_ids[0],
         "last_data_point_id": expected_ids[-1],
     }
+    assert aggregate.lineage_records.count() == 1
+
+
+@pytest.mark.django_db
+def test_aggregation_uses_one_materialized_source_snapshot():
+    tenant = Tenant.objects.create(name="Tenant", code="bi-source-snapshot")
+    definition = create_definition(tenant)
+    now = timezone.now()
+    point = create_point(definition, "snapshot-point", Decimal("10"), now)
+    original_iter = MetricDataPointQuerySet.__iter__
+    mutation = {"done": False}
+
+    def materialize_then_mutate(queryset):
+        rows = list(original_iter(queryset))
+        if not mutation["done"]:
+            mutation["done"] = True
+            MetricDataPoint.objects.filter(pk=point.pk).update(
+                quality_status=MetricDataPoint.QualityStatus.FAILED,
+                numeric_value=None,
+            )
+        return iter(rows)
+
+    with patch.object(MetricDataPointQuerySet, "__iter__", materialize_then_mutate):
+        aggregate = aggregate_metric(
+            tenant=tenant,
+            metric_definition=definition,
+            period_start=now - timedelta(hours=1),
+            period_end=now + timedelta(hours=1),
+            granularity=MetricAggregate.Granularity.DAY,
+        )
+
+    point.refresh_from_db()
+    assert point.quality_status == MetricDataPoint.QualityStatus.FAILED
+    assert aggregate.numeric_value == Decimal("10")
+    assert aggregate.valid_point_count == 1
+    assert aggregate.quality_status == MetricAggregate.QualityStatus.PASSED
+    assert aggregate.is_formal is True
     assert aggregate.lineage_records.count() == 1
 
 
