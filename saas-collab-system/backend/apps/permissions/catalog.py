@@ -1,5 +1,33 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "products.lifecycle.view",
+        "name": "View product lifecycle reviews",
+        "module": "products",
+        "action": "lifecycle.view",
+        "description": "View tenant and data-scope filtered lifecycle reviews and decisions.",
+    },
+    {
+        "code": "products.lifecycle.evaluate",
+        "name": "Evaluate product lifecycle",
+        "module": "products",
+        "action": "lifecycle.evaluate",
+        "description": "Generate mock product lifecycle recommendations.",
+    },
+    {
+        "code": "products.lifecycle.confirm",
+        "name": "Confirm product lifecycle reviews",
+        "module": "products",
+        "action": "lifecycle.confirm",
+        "description": "Confirm or reject standard lifecycle recommendations.",
+    },
+    {
+        "code": "products.lifecycle.high_risk_confirm",
+        "name": "Confirm high-risk lifecycle reviews",
+        "module": "products",
+        "action": "lifecycle.high_risk_confirm",
+        "description": "Confirm clearance, stopped, or archived lifecycle recommendations.",
+    },
+    {
         "code": "replenishment.view",
         "name": "View replenishment recommendations",
         "module": "replenishment",

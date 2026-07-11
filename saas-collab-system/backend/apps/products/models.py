@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.tenants.models import Tenant
@@ -235,3 +236,163 @@ class ProductStatusTransition(models.Model):
 
     def __str__(self):
         return f"{self.from_status}->{self.to_status}"
+
+
+class ProductLifecycleStage(models.TextChoices):
+    NEW_OBSERVATION = "new_observation", "New observation"
+    GROWTH = "growth", "Growth"
+    STABLE = "stable", "Stable"
+    SLOW_MOVING_OBSERVATION = "slow_moving_observation", "Slow moving observation"
+    CLEARANCE_CANDIDATE = "clearance_candidate", "Clearance candidate"
+    CLEARANCE = "clearance", "Clearance"
+    STOPPED = "stopped", "Stopped"
+    ARCHIVED = "archived", "Archived"
+
+
+class ProductLifecycleReviewQuerySet(models.QuerySet):
+    REVIEW_FIELDS = {"status", "reviewed_by", "reviewed_by_id", "reviewed_at"}
+    IMMUTABLE_FIELDS = {
+        "tenant", "tenant_id", "spu", "spu_id", "sku", "sku_id", "current_stage",
+        "recommended_stage", "review_period_start", "review_period_end", "reason_code",
+        "reason_detail", "confidence", "source_metrics", "source_type", "rule_version",
+        "dedup_key",
+    }
+
+    def update(self, **kwargs):
+        if set(kwargs) & self.REVIEW_FIELDS:
+            raise ValidationError("Lifecycle decisions require the audited decision service.")
+        if set(kwargs) & self.IMMUTABLE_FIELDS:
+            raise ValidationError("Lifecycle review evidence is immutable.")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if set(fields) & self.REVIEW_FIELDS:
+            raise ValidationError("Lifecycle decisions require the audited decision service.")
+        if set(fields) & self.IMMUTABLE_FIELDS:
+            raise ValidationError("Lifecycle review evidence is immutable.")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+
+class ProductLifecycleReview(models.Model):
+    class Status(models.TextChoices):
+        SUGGESTED = "suggested", "Suggested"
+        CONFIRMED = "confirmed", "Confirmed"
+        REJECTED = "rejected", "Rejected"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_lifecycle_reviews")
+    spu = models.ForeignKey(ProductSPU, on_delete=models.PROTECT, related_name="lifecycle_reviews", null=True, blank=True)
+    sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, related_name="lifecycle_reviews", null=True, blank=True)
+    current_stage = models.CharField(max_length=40, choices=ProductLifecycleStage.choices)
+    recommended_stage = models.CharField(max_length=40, choices=ProductLifecycleStage.choices)
+    review_period_start = models.DateField()
+    review_period_end = models.DateField()
+    reason_code = models.CharField(max_length=80)
+    reason_detail = models.TextField()
+    confidence = models.DecimalField(max_digits=5, decimal_places=4)
+    source_metrics = models.JSONField(default=dict)
+    source_type = models.CharField(
+        max_length=30,
+        choices=(("mock", "Mock"), ("api", "API"), ("rpa_readback", "RPA readback"), ("manual", "Manual")),
+        default="mock",
+    )
+    rule_version = models.CharField(max_length=40, default="lifecycle-v1")
+    dedup_key = models.CharField(max_length=64)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SUGGESTED)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="reviewed_product_lifecycle_reviews",
+        null=True,
+        blank=True,
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    objects = ProductLifecycleReviewQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["tenant_id", "-review_period_end", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "dedup_key"], name="uniq_lifecycle_review_dedup"),
+            models.CheckConstraint(condition=models.Q(spu__isnull=False) | models.Q(sku__isnull=False), name="lifecycle_review_has_product"),
+            models.CheckConstraint(condition=models.Q(review_period_start__lte=models.F("review_period_end")), name="lifecycle_review_valid_period"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status", "review_period_end"], name="idx_lifecycle_review_status"),
+            models.Index(fields=["tenant", "sku", "recommended_stage"], name="idx_lifecycle_review_sku"),
+        ]
+
+    def clean(self):
+        if self.spu_id and self.spu.tenant_id != self.tenant_id:
+            raise ValidationError("Lifecycle review and SPU must belong to the same tenant.")
+        if self.sku_id and self.sku.tenant_id != self.tenant_id:
+            raise ValidationError("Lifecycle review and SKU must belong to the same tenant.")
+        if self.sku_id and self.spu_id and self.sku.spu_id != self.spu_id:
+            raise ValidationError("Lifecycle review SKU must belong to the supplied SPU.")
+        if self.current_stage == self.recommended_stage:
+            raise ValidationError("Lifecycle recommendation must propose a stage change.")
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            evidence_fields = ProductLifecycleReviewQuerySet.IMMUTABLE_FIELDS - {"tenant", "spu", "sku"}
+            current = type(self).objects.filter(pk=self.pk).values(
+                "status", "reviewed_by_id", "reviewed_at", *evidence_fields
+            ).first()
+            if current and any(current[field] != getattr(self, field) for field in evidence_fields):
+                raise ValidationError("Lifecycle review evidence is immutable.")
+            if current and any(
+                current[field] != getattr(self, field)
+                for field in ("status", "reviewed_by_id", "reviewed_at")
+            ) and not getattr(self, "_decision_service_write", False):
+                raise ValidationError("Lifecycle decisions require the audited decision service.")
+        self.full_clean()
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            self._decision_service_write = False
+
+
+class ProductLifecycleDecisionQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Lifecycle decisions are immutable and require the audited decision service.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Lifecycle decisions are immutable and require the audited decision service.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Lifecycle decisions require the audited decision service.")
+
+
+class ProductLifecycleDecision(models.Model):
+    class Decision(models.TextChoices):
+        CONFIRM = "confirm", "Confirm"
+        REJECT = "reject", "Reject"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_lifecycle_decisions")
+    review = models.OneToOneField(ProductLifecycleReview, on_delete=models.PROTECT, related_name="decision_record")
+    decision = models.CharField(max_length=20, choices=Decision.choices)
+    from_stage = models.CharField(max_length=40, choices=ProductLifecycleStage.choices)
+    to_stage = models.CharField(max_length=40, choices=ProductLifecycleStage.choices)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="product_lifecycle_decisions")
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = ProductLifecycleDecisionQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["tenant_id", "-created_at", "-id"]
+        indexes = [models.Index(fields=["tenant", "to_stage", "created_at"], name="idx_lifecycle_decision_stage")]
+
+    def clean(self):
+        if self.review_id and self.review.tenant_id != self.tenant_id:
+            raise ValidationError("Lifecycle decision and review must belong to the same tenant.")
+        if self.actor_id and (self.actor.tenant_id != self.tenant_id or self.actor.user_type != "internal"):
+            raise ValidationError("Lifecycle decision actor must be an internal user in the same tenant.")
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, "_decision_service_write", False):
+            raise ValidationError("Lifecycle decisions require the audited decision service.")
+        self.full_clean()
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            self._decision_service_write = False
