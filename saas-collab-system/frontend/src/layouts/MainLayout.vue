@@ -1,6 +1,6 @@
 <template>
   <el-container class="app-shell">
-    <el-aside width="240px" class="app-sidebar">
+    <el-aside width="240px" class="app-sidebar desktop-sidebar">
       <div class="brand">SaaS 协同系统</div>
       <el-menu router :default-active="$route.path" class="menu">
         <template v-for="item in menuItems" :key="item.path || item.label">
@@ -14,22 +14,39 @@
     </el-aside>
     <el-container>
       <el-header class="app-header">
-        <span>阶段0 Mock 环境</span>
+        <div class="header-context">
+          <el-button class="mobile-menu-button" text aria-label="打开导航菜单" @click="mobileMenuOpen = true">☰</el-button>
+          <span>阶段3 Mock / API 切换环境</span>
+        </div>
         <span>{{ auth.currentUser.username }} / {{ auth.currentUser.user_type }}</span>
       </el-header>
       <el-main class="app-main">
         <router-view />
       </el-main>
     </el-container>
+    <el-drawer v-model="mobileMenuOpen" direction="ltr" size="280px" :with-header="false" class="mobile-nav-drawer">
+      <div class="brand">SaaS 协同系统</div>
+      <el-menu router :default-active="$route.path" class="menu" @select="mobileMenuOpen = false">
+        <template v-for="item in menuItems" :key="item.path || item.label">
+          <el-sub-menu v-if="item.children" :index="`mobile-${item.label}`">
+            <template #title>{{ item.label }}</template>
+            <el-menu-item v-for="child in item.children" :key="child.path" :index="child.path">{{ child.label }}</el-menu-item>
+          </el-sub-menu>
+          <el-menu-item v-else :index="item.path">{{ item.label }}</el-menu-item>
+        </template>
+      </el-menu>
+    </el-drawer>
   </el-container>
 </template>
 
 <script setup>
+import { ref } from 'vue';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
+const mobileMenuOpen = ref(false);
 
-// 菜单仅用于阶段0展示占位，不代表真实授权结果。
+// 菜单只负责导航展示，不代表真实授权结果；权限以后端返回为准。
 const menuItems = [
   { path: '/', label: '首页' },
   {
@@ -113,7 +130,47 @@ const menuItems = [
   background: #fff;
 }
 
+.header-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-menu-button {
+  display: none;
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+  font-size: 20px;
+}
+
 .app-main {
   padding: 20px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+:deep(.mobile-nav-drawer .el-drawer__body) {
+  padding: 0;
+}
+
+@media (max-width: 900px) {
+  .desktop-sidebar {
+    display: none;
+  }
+
+  .mobile-menu-button {
+    display: inline-flex;
+  }
+
+  .app-header {
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .app-main {
+    width: 100%;
+    padding: 14px;
+  }
 }
 </style>
