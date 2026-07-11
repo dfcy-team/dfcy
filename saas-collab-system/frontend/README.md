@@ -1,5 +1,23 @@
 # frontend
 
+## Phase 2 frontend build observation
+
+- Route pages are lazy loaded in `frontend/src/router/index.js`.
+- Vite `manualChunks` splits `vue`, `element-plus`, and `axios` vendor bundles.
+- `npm run build` succeeds after the split. The original main app chunk dropped from about `1,164.29 kB` to about `12.71 kB`.
+- A remaining non-blocking chunk warning is caused by the full `element-plus` vendor chunk, about `923.26 kB`. Future optimization can evaluate Element Plus on-demand imports or deeper manual chunks.
+
+## Phase 2 platform access risk placeholders
+
+- Added read-only routes:
+  - `/settings/platform-risk`
+  - `/settings/platform-readiness`
+  - `/settings/security-review`
+- These pages only use Mock placeholder data from `frontend/src/mock/platformRisk.js`.
+- They do not provide real Token, Cookie, Session, API Key, API Secret, account, password, bank, or payment configuration inputs.
+- They do not provide production connect buttons, real OAuth redirects, or real platform SDK calls.
+- Production access is shown as disabled until a dedicated security review is completed.
+
 阶段0前端工程占位，使用 Vue3 + Vite + vue-router + pinia + axios + Element Plus。
 
 ## 阶段0边界
@@ -48,3 +66,34 @@ VITE_API_BASE_URL=http://localhost:8000
 
 - 阶段1构建若出现 Vite chunk size warning，暂不阻断交付。
 - 后续由架构复审决定是否引入路由懒加载、Element Plus 按需加载或 `manualChunks` 拆包。
+
+## 阶段2 API同步状态页
+
+- 新增 `/integrations/configs`、`/integrations/sync-jobs`、`/integrations/sync-runs` 等页面。
+- 页面只展示 Mock/Sandbox 或后端返回的脱敏状态，不展示明文 API Key、API Secret、Token、Cookie 或 Session。
+- 生产环境配置默认显示需专项安全评审，不提供真实平台连接测试或生产启用按钮。
+
+## 阶段2商品状态看板
+
+- 新增 `/products/status-dashboard`、`/products/status-recommendations`、`/products/status-transitions`。
+- API、RPA 回读和人工来源只生成状态建议，前端不自动确认商品状态。
+- 清仓、停售、归档等高风险状态必须显示人工确认和后端授权边界。
+
+## 阶段2财务对账页面
+
+- 新增 `/finance/statements`、`/finance/withdrawals`、`/finance/bank-receipts`、`/finance/reconciliation/matches`、`/finance/reconciliation/exceptions`。
+- 所有财务页面只使用 `/api/finance/*`。
+- 银行账号仅掩码展示，不接真实银行、支付或真实平台账单，不提供付款、转账或提现按钮。
+
+## 阶段2供应商绩效页面
+
+- 内部绩效页面使用 `/api/internal/suppliers/performance/*`。
+- 供应商自己的绩效页面使用 `/api/external/supplier/performance/*`，不得传入其他 `supplier_id`。
+- 供应商身份与 `tenant_id + supplier_id` 过滤以后端为准，前端不承载可信权限过滤。
+
+## 阶段2 RPA失败转人工页面
+
+- 新增 `/rpa/stability`、`/rpa/attempts`、`/rpa/manual-queue`、`/rpa/account-locks`、`/rpa/page-signatures`。
+- 页面是 internal 管理页面，只使用 `/api/internal/rpa/*` pending/mock 管理接口。
+- 不模拟 RPA Agent token，不调用 `/api/rpa/tasks/claim/`、heartbeat、logs、screenshots、complete、fail 等 Agent 执行动作。
+- evidence/screenshot 仅使用 demo 或 placeholder，不连接真实 BigSeller。
