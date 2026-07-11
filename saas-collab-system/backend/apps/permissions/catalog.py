@@ -1,5 +1,26 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "analytics.view",
+        "name": "View analytics",
+        "module": "analytics",
+        "action": "view",
+        "description": "View tenant-scoped metric definitions and read-only BI aggregates.",
+    },
+    {
+        "code": "analytics.calculate",
+        "name": "Calculate analytics",
+        "module": "analytics",
+        "action": "calculate",
+        "description": "Run tenant-scoped mock BI metric aggregation.",
+    },
+    {
+        "code": "analytics.manage",
+        "name": "Manage analytics definitions",
+        "module": "analytics",
+        "action": "manage",
+        "description": "Create audited versions of tenant-scoped analytics metric definitions.",
+    },
+    {
         "code": "finance.view",
         "name": "View finance data",
         "module": "finance",
