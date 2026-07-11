@@ -55,3 +55,29 @@ def filter_inventory_alerts(user, queryset):
             scope_filter &= Q(warehouse_code__in=warehouse_codes)
         allowed |= scope_filter
     return queryset.filter(allowed)
+
+
+def filter_business_alerts(user, queryset):
+    queryset = queryset.filter(tenant=user.tenant)
+    if user.is_superuser:
+        return queryset
+    scopes = get_user_data_scope(user)
+    if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
+        return queryset
+    allowed = Q(pk__in=[])
+    for scope in scopes:
+        if scope["scope_type"] == DataScope.ScopeType.OWN:
+            allowed |= Q(assigned_to=user)
+        elif scope["scope_type"] == DataScope.ScopeType.CUSTOM:
+            config = scope.get("config") or {}
+            business_types = config.get("business_types", [])
+            business_ids = [str(value) for value in config.get("business_ids", [])]
+            if not business_types and not business_ids:
+                continue
+            scope_filter = Q()
+            if business_types:
+                scope_filter &= Q(business_type__in=business_types)
+            if business_ids:
+                scope_filter &= Q(business_id__in=business_ids)
+            allowed |= scope_filter
+    return queryset.filter(allowed)
