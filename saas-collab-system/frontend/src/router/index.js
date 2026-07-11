@@ -57,6 +57,7 @@ const BankReceiptList = () => import('../views/finance/BankReceiptList.vue');
 const ReconciliationMatchList = () => import('../views/finance/ReconciliationMatchList.vue');
 const ReconciliationMatchDetail = () => import('../views/finance/ReconciliationMatchDetail.vue');
 const ReconciliationExceptionList = () => import('../views/finance/ReconciliationExceptionList.vue');
+const FinanceAnalyticsOverview = () => import('../views/finance/FinanceAnalyticsOverview.vue');
 const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
@@ -125,6 +126,7 @@ const routes = [
       { path: 'finance/reconciliation/matches', component: ReconciliationMatchList },
       { path: 'finance/reconciliation/matches/:id', component: ReconciliationMatchDetail },
       { path: 'finance/reconciliation/exceptions', component: ReconciliationExceptionList },
+      { path: 'finance/analytics', component: FinanceAnalyticsOverview },
       { path: 'reports/basic', component: BasicReportIndex },
       { path: 'settings/platform-risk', component: PlatformAccessRisk },
       { path: 'settings/platform-readiness', component: PlatformIntegrationReadiness },

@@ -57,7 +57,14 @@ const menuItems = [
   { path: '/pricing/prices', label: '价格中心' },
   { path: '/rpa/tasks', label: 'RPA任务' },
   { path: '/integrations/api-sync', label: 'API同步' },
-  { path: '/finance/imports', label: '财务入口' },
+  {
+    label: '财务中心',
+    children: [
+      { path: '/finance/analytics', label: '财务分析' },
+      { path: '/finance/statements', label: '平台账单' },
+      { path: '/finance/reconciliation/matches', label: '对账差异' }
+    ]
+  },
   { path: '/reports/basic', label: 'BI报表' },
   {
     label: '系统治理',
