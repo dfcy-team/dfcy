@@ -85,3 +85,40 @@ RPA Agent 执行接口只能由 Agent 访问，前端管理后台页面不得直
 - `/api/rpa/tasks/{id}/fail/`
 
 RPA Agent 不访问 `/api/finance/*`，不访问 `/admin/`，不直连数据库。
+## P2-B-R1 API Integration Summary
+
+- Latest `origin/main`: `51535c246b430064b782c4078591253506b16c17`.
+- Development A backend merge is present in `main`: PR #5 `feature/phase2-a-api-status-finance`.
+- Detailed Phase 2 frontend contract: `docs/03_api/phase2_frontend_api_contract.md`.
+- Path fixes made after backend merge:
+  - `/api/internal/integrations/sync-tasks/` -> `/api/internal/integrations/sync-jobs/`.
+  - `/api/internal/integrations/sync-logs/` -> `/api/internal/integrations/sync-runs/`.
+  - `GET /api/finance/reconciliation/matches/{id}/` is not provided by backend Phase 2; the detail page now uses `GET /api/finance/reconciliation/matches/` collection data.
+- Connected contract paths:
+  - `/api/internal/integrations/configs/`
+  - `/api/internal/integrations/configs/{id}/`
+  - `/api/internal/integrations/sync-jobs/`
+  - `/api/internal/integrations/sync-jobs/{id}/run-mock/`
+  - `/api/internal/integrations/sync-jobs/{id}/disable/`
+  - `/api/internal/integrations/sync-runs/`
+  - `/api/internal/integrations/sync-runs/{id}/`
+  - `/api/internal/products/status-recommendations/`
+  - `/api/internal/products/status-recommendations/{id}/`
+  - `/api/internal/products/status-recommendations/{id}/confirm/`
+  - `/api/internal/products/status-recommendations/{id}/reject/`
+  - `/api/internal/products/status-transitions/`
+  - `/api/internal/products/status/evaluate-mock/`
+  - `/api/finance/statements/`
+  - `/api/finance/withdrawals/`
+  - `/api/finance/bank-receipts/`
+  - `/api/finance/reconciliation/matches/`
+  - `/api/finance/reconciliation/run-mock/`
+  - `/api/finance/reconciliation/matches/{id}/confirm/`
+  - `/api/finance/reconciliation/matches/{id}/reject/`
+  - `/api/finance/reconciliation/exceptions/`
+  - `/api/internal/suppliers/performance/`
+  - `/api/internal/suppliers/performance/{supplier_id}/`
+  - `/api/internal/suppliers/performance/calculate-mock/`
+  - `/api/external/supplier/performance/`
+  - `/api/external/supplier/performance/history/`
+- RPA internal management query APIs are still not provided in latest `main`; frontend keeps pending/mock fallback and must not call `/api/rpa/*` Agent execution endpoints.

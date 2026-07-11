@@ -18,7 +18,17 @@ export const mockBankReceipts = () => successResponse({
   items: [{ masked_account: '**** **** **** 1234', currency: 'USD', receipt_amount: '918.00', receipt_date: '2026-07-10', reference_no: 'MOCK-REF-001', status: 'unmatched' }]
 });
 
-const match = { id: 1, match_type: 'amount_date_rule', matched_amount: '918.00', difference_amount: '2.00', confidence: 0.81, status: 'review_required', reviewed_by: '', reviewed_at: '' };
+const match = {
+  id: 1,
+  match_type: 'amount_date_rule',
+  matched_amount: '918.00',
+  difference_amount: '2.00',
+  confidence: 0.81,
+  status: 'review_required',
+  reviewed_by_id: '',
+  reviewed_by: '',
+  reviewed_at: ''
+};
 
 export const mockReconciliationMatches = () => successResponse({
   status: 'mock',

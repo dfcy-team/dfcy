@@ -60,14 +60,14 @@ export const disableSyncJob = (id = 1) =>
 
 export const fetchApiSyncTasks = () =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/integrations/sync-tasks/' },
+    { method: 'get', url: '/api/internal/integrations/sync-jobs/' },
     mockApiSyncTasks,
-    'integrations.sync_tasks'
+    'integrations.sync_jobs'
   );
 
 export const fetchApiSyncLogs = () =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/integrations/sync-logs/' },
+    { method: 'get', url: '/api/internal/integrations/sync-runs/' },
     mockApiSyncLogs,
-    'integrations.sync_logs'
+    'integrations.sync_runs'
   );

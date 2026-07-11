@@ -26,7 +26,7 @@ export const fetchReconciliationMatches = () =>
 
 export const fetchReconciliationMatchDetail = (id = 1) =>
   requestWithMockFallback(
-    { method: 'get', url: `/api/finance/reconciliation/matches/${id}/` },
+    { method: 'get', url: '/api/finance/reconciliation/matches/', params: { id } },
     mockReconciliationMatchDetail,
     'finance.reconciliation.matches.detail'
   );
@@ -36,4 +36,25 @@ export const fetchReconciliationExceptions = () =>
     { method: 'get', url: '/api/finance/reconciliation/exceptions/' },
     mockReconciliationExceptions,
     'finance.reconciliation.exceptions'
+  );
+
+export const runReconciliationMock = () =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/finance/reconciliation/run-mock/' },
+    mockReconciliationMatchDetail,
+    'finance.reconciliation.run_mock'
+  );
+
+export const confirmReconciliationMatch = (id = 1) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/finance/reconciliation/matches/${id}/confirm/` },
+    mockReconciliationMatchDetail,
+    'finance.reconciliation.matches.confirm'
+  );
+
+export const rejectReconciliationMatch = (id = 1) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/finance/reconciliation/matches/${id}/reject/` },
+    mockReconciliationMatchDetail,
+    'finance.reconciliation.matches.reject'
   );

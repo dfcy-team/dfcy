@@ -20,8 +20,18 @@
       </el-form-item>
     </el-form>
 
-    <div v-if="actions.length" class="phase2-actions">
+    <div v-if="actions.length || actionConfigs.length" class="phase2-actions">
       <el-button v-for="action in actions" :key="action" disabled>{{ action }}</el-button>
+      <el-button
+        v-for="action in actionConfigs"
+        :key="action.label"
+        :type="action.type || 'default'"
+        :disabled="action.disabled"
+        :loading="actionLoading === action.label"
+        @click="runAction(action)"
+      >
+        {{ action.label }}
+      </el-button>
     </div>
 
     <el-alert v-if="message" :title="message" :type="dataStatus === 'error' ? 'error' : 'warning'" show-icon :closable="false" />
@@ -52,6 +62,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -63,12 +74,14 @@ const props = defineProps({
   detailFields: { type: Array, default: () => [] },
   filters: { type: Array, default: () => [] },
   actions: { type: Array, default: () => [] },
+  actionConfigs: { type: Array, default: () => [] },
   emptyText: { type: String, default: '暂无数据' }
 });
 
 const rows = ref([]);
 const detail = ref({});
 const loading = ref(false);
+const actionLoading = ref('');
 const dataStatus = ref('loading');
 const message = ref('');
 
@@ -120,7 +133,7 @@ function statusType(value) {
   }[value] || 'info';
 }
 
-onMounted(async () => {
+async function loadData() {
   loading.value = true;
   try {
     const response = await props.loader();
@@ -135,7 +148,30 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
-});
+}
+
+async function runAction(action) {
+  if (typeof action.handler !== 'function') return;
+  try {
+    if (action.confirmMessage) {
+      await ElMessageBox.confirm(action.confirmMessage, action.confirmTitle || '确认操作', {
+        type: action.confirmType || 'warning'
+      });
+    }
+    actionLoading.value = action.label;
+    const response = await action.handler({ rows: rows.value, detail: detail.value });
+    if (!response?.success) throw new Error(response?.message || '操作失败');
+    ElMessage.success(response.message || '操作已提交');
+    await loadData();
+  } catch (error) {
+    if (error === 'cancel') return;
+    ElMessage.error(error?.message || '操作失败');
+  } finally {
+    actionLoading.value = '';
+  }
+}
+
+onMounted(loadData);
 </script>
 
 <style scoped>
