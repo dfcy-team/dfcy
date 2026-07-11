@@ -133,3 +133,9 @@ celery -A config beat -l info
 ```
 
 The `--pool=solo` option is recommended for Windows development.
+
+## Phase 2 Mock Sync Retries
+
+The phase 2 synchronization service is mock-only. It serializes runs per `SyncJob`, refreshes cursor and run state after a rolled-back attempt, and applies finite exponential-backoff retries.
+
+`run_sync_job()` uses a real sleep strategy by default. Tests inject a no-wait strategy so retry timing is verified without slowing the suite. A future real-platform adapter must move this boundary to Celery countdown/ETA scheduling before it can be enabled.

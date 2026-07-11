@@ -2,6 +2,7 @@ import hashlib
 import json
 import uuid
 from datetime import timedelta
+from time import sleep as default_retry_wait
 
 from django.db import transaction
 from django.utils import timezone
@@ -20,45 +21,64 @@ def _run_id():
     return uuid.uuid4().hex
 
 
-def run_sync_job(sync_job, adapter=None, idempotency_key=None):
-    if not sync_job.is_enabled or sync_job.status == SyncJob.Status.DISABLED:
-        raise ValidationError("Sync job is disabled.")
-
+def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
+    retry_wait = retry_wait or default_retry_wait
     adapter = adapter or get_adapter_for_config(sync_job.integration_config)
     if type(adapter) is not MockPlatformAdapter:
         raise ValidationError("Only mock synchronization can be executed by this endpoint in phase 2.")
 
-    cursor, _created = SyncCursor.objects.get_or_create(
-        tenant=sync_job.tenant,
-        sync_job=sync_job,
-        cursor_key="default",
-        defaults={"cursor_value": ""},
-    )
-    idempotency_key = idempotency_key or f"{sync_job.id}:{cursor.cursor_value or 'initial'}"
     now = timezone.now()
-    run, created = SyncRun.objects.get_or_create(
-        tenant=sync_job.tenant,
-        sync_job=sync_job,
-        idempotency_key=idempotency_key,
-        defaults={
-            "run_id": _run_id(),
-            "status": SyncRun.Status.RUNNING,
-            "started_at": now,
-        },
-    )
-    if not created:
-        return run, False
-
     with transaction.atomic():
-        sync_job.status = SyncJob.Status.RUNNING
-        sync_job.last_run_at = now
-        sync_job.next_run_at = None
-        sync_job.save(update_fields=["status", "last_run_at", "next_run_at", "updated_at"])
+        locked_job = (
+            SyncJob.objects.select_for_update()
+            .select_related("integration_config", "tenant")
+            .get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
+        )
+        if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
+            raise ValidationError("Sync job is disabled.")
 
-    counter_fields = ("fetched_count", "created_count", "updated_count", "skipped_count", "failed_count")
+        cursor, _created = SyncCursor.objects.get_or_create(
+            tenant=locked_job.tenant,
+            sync_job=locked_job,
+            cursor_key="default",
+            defaults={"cursor_value": ""},
+        )
+        idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
+        existing = SyncRun.objects.filter(
+            tenant=locked_job.tenant,
+            sync_job=locked_job,
+            idempotency_key=idempotency_key,
+        ).first()
+        if existing:
+            return existing, False
+
+        acquired = SyncJob.objects.filter(
+            pk=locked_job.pk,
+            is_enabled=True,
+            status__in=(SyncJob.Status.IDLE, SyncJob.Status.FAILED),
+        ).update(
+            status=SyncJob.Status.RUNNING,
+            last_run_at=now,
+            next_run_at=None,
+            updated_at=now,
+        )
+        if not acquired:
+            raise ValidationError("Sync job already has an active run.")
+
+        run = SyncRun.objects.create(
+            tenant=locked_job.tenant,
+            sync_job=locked_job,
+            run_id=_run_id(),
+            idempotency_key=idempotency_key,
+            status=SyncRun.Status.RUNNING,
+            started_at=now,
+        )
+        locked_job.refresh_from_db()
+
+    sync_job = locked_job
+
     last_retry_error = ""
     while True:
-        counters_before_attempt = {field: getattr(run, field) for field in counter_fields}
         try:
             with transaction.atomic():
                 page = adapter.fetch_page(sync_job, cursor.cursor_value)
@@ -97,8 +117,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None):
                 run.save()
                 return run, True
         except Exception as exc:
-            for field, value in counters_before_attempt.items():
-                setattr(run, field, value)
+            cursor.refresh_from_db()
+            run.refresh_from_db()
+            sync_job.refresh_from_db()
             last_retry_error = sanitize_text(str(exc))
             if run.retry_count < sync_job.max_retry_count:
                 with transaction.atomic():
@@ -126,6 +147,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None):
                             "masked_log",
                         ]
                     )
+                retry_wait(delay_seconds)
+                cursor.refresh_from_db()
+                run.refresh_from_db()
+                sync_job.refresh_from_db()
                 continue
 
             with transaction.atomic():

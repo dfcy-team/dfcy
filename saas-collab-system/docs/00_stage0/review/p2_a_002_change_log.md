@@ -5,6 +5,7 @@
 - Added tenant-scoped sync job, sync run, sync cursor, and webhook event models.
 - Added platform adapter protocol with mock, sandbox placeholder, and disabled production adapters.
 - Added sync service helpers for idempotency, cursor paging, finite retry records, backoff calculation, masked logs, and mock webhook event de-duplication.
+- Added rollback-safe cursor refresh, injectable retry waiting, and per-`SyncJob` execution locking for different idempotency keys.
 - Added internal sync job and sync run APIs.
 
 ## Interfaces
@@ -23,10 +24,11 @@
 - `DisabledProductionAdapter` rejects execution.
 - No real platform HTTP request, SDK, webhook secret, credential, order, or finance data was added.
 - Logs use sanitized payloads and do not print credentials or full payloads.
+- Retry waiting defaults to real exponential-backoff sleeps; tests use an injected no-wait strategy. Real-platform scheduling remains disabled and must use Celery countdown/ETA before activation.
 
 ## Verification
 
 - `python manage.py check`: passed, 0 issues.
-- `pytest tests/test_phase2_sync_framework.py tests/test_phase2_integrations_secure_config.py tests/test_integrations_models_celery.py`: passed, 20 tests.
-- Full backend `pytest`: passed, 96 tests.
+- `pytest tests/test_phase2_sync_framework.py`: passed, 16 tests.
+- Full backend `pytest`: passed, 148 tests.
 - `python manage.py makemigrations --check --dry-run`: passed, no changes detected.

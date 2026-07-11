@@ -263,6 +263,7 @@ def test_transient_sync_failures_retry_with_backoff_without_sleeping():
     adapter = MockPlatformAdapter()
     original_fetch_page = adapter.fetch_page
     attempts = []
+    retry_delays = []
 
     def flaky_fetch_page(sync_job, cursor_value=None):
         attempts.append(sync_job.next_run_at)
@@ -271,7 +272,12 @@ def test_transient_sync_failures_retry_with_backoff_without_sleeping():
         return original_fetch_page(sync_job, cursor_value)
 
     adapter.fetch_page = flaky_fetch_page
-    run, created = run_sync_job(job, adapter=adapter, idempotency_key="transient-retry")
+    run, created = run_sync_job(
+        job,
+        adapter=adapter,
+        idempotency_key="transient-retry",
+        retry_wait=retry_delays.append,
+    )
     job.refresh_from_db()
 
     assert created is True
@@ -280,6 +286,7 @@ def test_transient_sync_failures_retry_with_backoff_without_sleeping():
     assert attempts[1] is not None
     assert attempts[2] is not None
     assert attempts[2] > attempts[1]
+    assert retry_delays == [2, 4]
     assert run.status == SyncRun.Status.SUCCESS
     assert run.retry_count == 2
     assert run.error_code == ""
@@ -298,6 +305,7 @@ def test_sync_stops_after_configured_maximum_retries():
     job.save(update_fields=["max_retry_count"])
     adapter = MockPlatformAdapter()
     attempts = 0
+    retry_delays = []
 
     def failing_fetch_page(sync_job, cursor_value=None):
         nonlocal attempts
@@ -305,17 +313,92 @@ def test_sync_stops_after_configured_maximum_retries():
         raise RuntimeError("api_secret=not-a-real-secret")
 
     adapter.fetch_page = failing_fetch_page
-    run, created = run_sync_job(job, adapter=adapter, idempotency_key="max-retry")
+    run, created = run_sync_job(
+        job,
+        adapter=adapter,
+        idempotency_key="max-retry",
+        retry_wait=retry_delays.append,
+    )
     job.refresh_from_db()
 
     assert created is True
     assert attempts == 3
+    assert retry_delays == [1, 2]
     assert run.status == SyncRun.Status.FAILED
     assert run.retry_count == 2
     assert run.error_code == "MAX_RETRY_EXCEEDED"
     assert "not-a-real-secret" not in run.masked_error_message
     assert job.status == SyncJob.Status.FAILED
     assert job.next_run_at is None
+
+
+@pytest.mark.django_db
+def test_retry_refreshes_cursor_after_transaction_rollback(monkeypatch):
+    tenant = Tenant.objects.create(name="Tenant", code="sync-cursor-rollback")
+    user = create_user(tenant, "tech")
+    job = create_sync_job(tenant, user)
+    job.max_retry_count = 1
+    job.save(update_fields=["max_retry_count"])
+    adapter = MockPlatformAdapter()
+    requested_cursors = []
+    original_fetch_page = adapter.fetch_page
+    original_run_save = SyncRun.save
+    injected_failure = False
+
+    def capture_cursor(sync_job, cursor_value=None):
+        requested_cursors.append(cursor_value or "")
+        return original_fetch_page(sync_job, cursor_value)
+
+    def fail_once_after_cursor_save(run, *args, **kwargs):
+        nonlocal injected_failure
+        if run.status == SyncRun.Status.SUCCESS and not injected_failure:
+            injected_failure = True
+            raise RuntimeError("demo failure after cursor save")
+        return original_run_save(run, *args, **kwargs)
+
+    adapter.fetch_page = capture_cursor
+    monkeypatch.setattr(SyncRun, "save", fail_once_after_cursor_save)
+
+    run, created = run_sync_job(
+        job,
+        adapter=adapter,
+        idempotency_key="cursor-rollback",
+        retry_wait=lambda _delay: None,
+    )
+
+    assert created is True
+    assert requested_cursors == ["", ""]
+    assert run.status == SyncRun.Status.SUCCESS
+    assert run.retry_count == 1
+    assert run.fetched_count == 2
+    assert run.skipped_count == 2
+    assert SyncCursor.objects.get(sync_job=job, cursor_key="default").cursor_value == "done"
+
+
+@pytest.mark.django_db
+def test_sync_job_rejects_different_idempotency_key_while_run_is_active():
+    tenant = Tenant.objects.create(name="Tenant", code="sync-active-run")
+    user = create_user(tenant, "tech")
+    job = create_sync_job(tenant, user)
+    job.status = SyncJob.Status.RUNNING
+    job.save(update_fields=["status"])
+    active_run = SyncRun.objects.create(
+        tenant=tenant,
+        sync_job=job,
+        run_id="active-demo-run",
+        idempotency_key="active-key",
+        status=SyncRun.Status.RUNNING,
+    )
+
+    with pytest.raises(ValidationError, match="active run"):
+        run_sync_job(
+            job,
+            adapter=MockPlatformAdapter(),
+            idempotency_key="different-key",
+            retry_wait=lambda _delay: None,
+        )
+
+    assert SyncRun.objects.filter(sync_job=job).get() == active_run
 
 
 @pytest.mark.django_db
