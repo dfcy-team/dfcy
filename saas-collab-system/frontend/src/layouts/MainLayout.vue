@@ -45,7 +45,8 @@ const menuItems = [
       { path: '/inventory/alerts', label: '库存预警' },
       { path: '/inventory/replenishment', label: '补货建议' },
       { path: '/lifecycle/reviews', label: '生命周期复盘' },
-      { path: '/lifecycle/history', label: '复盘历史' }
+      { path: '/lifecycle/history', label: '复盘历史' },
+      { path: '/alerts/business', label: '经营预警' }
     ]
   },
   { path: '/products/research', label: '新品市调' },
