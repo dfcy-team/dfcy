@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.integrations.adapters import DisabledProductionAdapter, MockPlatformAdapter
+from apps.integrations import sync_services
 from apps.integrations.models import (
     PlatformIntegrationConfig,
     SyncCursor,
@@ -453,7 +454,7 @@ def test_expired_sync_job_lease_fails_old_run_and_allows_recovery():
         tenant=tenant,
         sync_job=job,
         run_id="stale-demo-run",
-        idempotency_key="stale-key",
+        idempotency_key=f"{job.id}:initial",
         status=SyncRun.Status.RUNNING,
         started_at=stale_at,
     )
@@ -461,7 +462,6 @@ def test_expired_sync_job_lease_fails_old_run_and_allows_recovery():
     recovered_run, created = run_sync_job(
         job,
         adapter=MockPlatformAdapter(),
-        idempotency_key="recovery-key",
         retry_wait=lambda _delay: None,
     )
     stale_run.refresh_from_db()
@@ -472,11 +472,40 @@ def test_expired_sync_job_lease_fails_old_run_and_allows_recovery():
     assert stale_run.error_code == "LEASE_EXPIRED"
     assert stale_run.finished_at is not None
     assert recovered_run.status == SyncRun.Status.SUCCESS
+    assert recovered_run.idempotency_key.startswith(f"{job.id}:initial:recovery:")
     assert SyncRun.objects.filter(sync_job=job).count() == 2
     assert job.status == SyncJob.Status.IDLE
     assert job.lock_token == ""
     assert job.lock_expires_at is None
     assert job.lock_heartbeat_at is not None
+
+
+@pytest.mark.django_db
+def test_lost_lease_fences_old_run_before_cursor_and_success_commit(monkeypatch):
+    tenant = Tenant.objects.create(name="Tenant", code="sync-lost-lease-fence")
+    user = create_user(tenant, "tech")
+    job = create_sync_job(tenant, user)
+
+    def reject_old_owner(sync_job, run):
+        raise sync_services.SyncLeaseLost("demo lease takeover")
+
+    monkeypatch.setattr(sync_services, "_lock_owned_sync_job", reject_old_owner)
+
+    with pytest.raises(ValidationError, match="lease was lost"):
+        run_sync_job(
+            job,
+            adapter=MockPlatformAdapter(),
+            idempotency_key="lost-lease",
+            retry_wait=lambda _delay: None,
+        )
+
+    run = SyncRun.objects.get(sync_job=job, idempotency_key="lost-lease")
+    job.refresh_from_db()
+    assert run.status == SyncRun.Status.CANCELLED
+    assert run.error_code == "LEASE_LOST"
+    assert SyncCursor.objects.get(sync_job=job, cursor_key="default").cursor_value == ""
+    assert job.status == SyncJob.Status.RUNNING
+    assert job.lock_token == run.run_id
 
 
 @pytest.mark.django_db

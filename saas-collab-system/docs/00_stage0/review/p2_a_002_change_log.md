@@ -7,6 +7,7 @@
 - Added sync service helpers for idempotency, cursor paging, finite retry records, backoff calculation, masked logs, and mock webhook event de-duplication.
 - Added rollback-safe cursor refresh, injectable retry waiting, and per-`SyncJob` execution locking for different idempotency keys.
 - Added renewable run leases and heartbeat metadata; expired or legacy stuck runs are failed with `LEASE_EXPIRED` before recovery.
+- Added recovery attempt keys for implicit idempotency and fencing-token checks before cursor, success, or failure commits.
 - Added internal sync job and sync run APIs.
 
 ## Interfaces
@@ -31,6 +32,6 @@
 ## Verification
 
 - `python manage.py check`: passed, 0 issues.
-- `pytest tests/test_phase2_sync_framework.py`: passed, 18 tests.
-- Full backend `pytest`: passed, 150 tests.
+- `pytest tests/test_phase2_sync_framework.py`: passed, 19 tests.
+- Full backend `pytest`: passed, 151 tests.
 - `python manage.py makemigrations --check --dry-run`: passed, no changes detected.

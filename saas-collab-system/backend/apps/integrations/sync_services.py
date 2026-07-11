@@ -15,6 +15,10 @@ from .models import SyncCursor, SyncJob, SyncRun, WebhookEvent
 from .security import sanitize_payload, sanitize_text
 
 
+class SyncLeaseLost(Exception):
+    pass
+
+
 def calculate_backoff_seconds(retry_count, base_seconds=1, max_seconds=30):
     return min(max_seconds, base_seconds * (2**retry_count))
 
@@ -38,7 +42,9 @@ def _has_expired_lease(sync_job, now):
 
 
 def _recover_expired_lease(sync_job, now):
-    SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING).update(
+    stale_runs = SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING)
+    stale_run_ids = set(stale_runs.values_list("id", flat=True))
+    stale_runs.update(
         status=SyncRun.Status.FAILED,
         finished_at=now,
         failed_count=F("failed_count") + 1,
@@ -59,6 +65,7 @@ def _recover_expired_lease(sync_job, now):
             "updated_at",
         ]
     )
+    return stale_run_ids
 
 
 def _renew_lease(sync_job, run, not_before=None):
@@ -75,9 +82,39 @@ def _renew_lease(sync_job, run, not_before=None):
         updated_at=now,
     )
     if not renewed:
-        raise ValidationError("Sync job run lease was lost.")
+        raise SyncLeaseLost("Sync job run lease was lost.")
     sync_job.lock_expires_at = expires_at
     sync_job.lock_heartbeat_at = now
+
+
+def _lock_owned_sync_job(sync_job, run):
+    locked_job = SyncJob.objects.select_for_update().get(pk=sync_job.pk)
+    if (
+        locked_job.status != SyncJob.Status.RUNNING
+        or not locked_job.is_enabled
+        or locked_job.lock_token != run.run_id
+        or not locked_job.lock_expires_at
+        or locked_job.lock_expires_at <= timezone.now()
+    ):
+        raise SyncLeaseLost("Sync job run lease was lost.")
+    return locked_job
+
+
+def _mark_run_lease_lost(run):
+    now = timezone.now()
+    SyncRun.objects.filter(pk=run.pk, status=SyncRun.Status.RUNNING).update(
+        status=SyncRun.Status.CANCELLED,
+        finished_at=now,
+        error_code="LEASE_LOST",
+        masked_error_message="Sync run stopped because its lease was lost.",
+        masked_log={"error": "lease_lost"},
+    )
+    run.refresh_from_db()
+
+
+def _raise_lease_lost(run, exc):
+    _mark_run_lease_lost(run)
+    raise ValidationError("Sync job run lease was lost.") from exc
 
 
 def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
@@ -96,8 +133,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("Sync job is disabled.")
 
+        recovered_run_ids = set()
         if _has_expired_lease(locked_job, now):
-            _recover_expired_lease(locked_job, now)
+            recovered_run_ids = _recover_expired_lease(locked_job, now)
 
         cursor, _created = SyncCursor.objects.get_or_create(
             tenant=locked_job.tenant,
@@ -105,12 +143,16 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
             cursor_key="default",
             defaults={"cursor_value": ""},
         )
+        supplied_idempotency_key = idempotency_key
         idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
         existing = SyncRun.objects.filter(
             tenant=locked_job.tenant,
             sync_job=locked_job,
             idempotency_key=idempotency_key,
         ).first()
+        if existing and existing.id in recovered_run_ids and supplied_idempotency_key is None:
+            idempotency_key = f"{idempotency_key}:recovery:{_run_id()[:12]}"
+            existing = None
         if existing:
             return existing, False
 
@@ -167,6 +209,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                         run.skipped_count += 1
 
                 cursor.cursor_value = adapter.get_next_cursor(page)
+                owned_job = _lock_owned_sync_job(sync_job, run)
                 cursor.save(update_fields=["cursor_value", "updated_at"])
                 run.status = SyncRun.Status.SUCCESS
                 run.finished_at = timezone.now()
@@ -180,12 +223,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                         "last_retry_error": last_retry_error,
                     }
                 )
-                sync_job.status = SyncJob.Status.IDLE
-                sync_job.next_run_at = None
-                sync_job.lock_token = ""
-                sync_job.lock_expires_at = None
-                sync_job.lock_heartbeat_at = timezone.now()
-                sync_job.save(
+                owned_job.status = SyncJob.Status.IDLE
+                owned_job.next_run_at = None
+                owned_job.lock_token = ""
+                owned_job.lock_expires_at = None
+                owned_job.lock_heartbeat_at = timezone.now()
+                owned_job.save(
                     update_fields=[
                         "status",
                         "next_run_at",
@@ -196,73 +239,90 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                     ]
                 )
                 run.save()
+                sync_job = owned_job
                 return run, True
+        except SyncLeaseLost as exc:
+            _raise_lease_lost(run, exc)
         except Exception as exc:
             cursor.refresh_from_db()
             run.refresh_from_db()
             sync_job.refresh_from_db()
+            if (
+                run.status != SyncRun.Status.RUNNING
+                or sync_job.status != SyncJob.Status.RUNNING
+                or sync_job.lock_token != run.run_id
+            ):
+                _raise_lease_lost(run, SyncLeaseLost("Sync job run lease was lost."))
             last_retry_error = sanitize_text(str(exc))
             if run.retry_count < sync_job.max_retry_count:
-                with transaction.atomic():
-                    delay_seconds = calculate_backoff_seconds(
-                        run.retry_count,
-                        base_seconds=sync_job.backoff_base_seconds,
-                    )
-                    run.retry_count += 1
-                    run.error_code = "RETRYABLE_ERROR"
-                    run.masked_error_message = last_retry_error
-                    run.masked_log = sanitize_payload(
-                        {
-                            "retry_count": run.retry_count,
-                            "retry_delay_seconds": delay_seconds,
-                            "error": last_retry_error,
-                        }
-                    )
-                    sync_job.next_run_at = timezone.now() + timedelta(seconds=delay_seconds)
-                    _renew_lease(sync_job, run, not_before=sync_job.next_run_at)
-                    sync_job.save(update_fields=["next_run_at", "updated_at"])
-                    run.save(
-                        update_fields=[
-                            "retry_count",
-                            "error_code",
-                            "masked_error_message",
-                            "masked_log",
-                        ]
-                    )
+                try:
+                    with transaction.atomic():
+                        delay_seconds = calculate_backoff_seconds(
+                            run.retry_count,
+                            base_seconds=sync_job.backoff_base_seconds,
+                        )
+                        run.retry_count += 1
+                        run.error_code = "RETRYABLE_ERROR"
+                        run.masked_error_message = last_retry_error
+                        run.masked_log = sanitize_payload(
+                            {
+                                "retry_count": run.retry_count,
+                                "retry_delay_seconds": delay_seconds,
+                                "error": last_retry_error,
+                            }
+                        )
+                        sync_job.next_run_at = timezone.now() + timedelta(seconds=delay_seconds)
+                        _renew_lease(sync_job, run, not_before=sync_job.next_run_at)
+                        sync_job.save(update_fields=["next_run_at", "updated_at"])
+                        run.save(
+                            update_fields=[
+                                "retry_count",
+                                "error_code",
+                                "masked_error_message",
+                                "masked_log",
+                            ]
+                        )
+                except SyncLeaseLost as lease_exc:
+                    _raise_lease_lost(run, lease_exc)
                 retry_wait(delay_seconds)
                 cursor.refresh_from_db()
                 run.refresh_from_db()
                 sync_job.refresh_from_db()
                 continue
 
-            with transaction.atomic():
-                run.error_code = "MAX_RETRY_EXCEEDED"
-                run.masked_error_message = last_retry_error
-                run.status = SyncRun.Status.FAILED
-                run.failed_count += 1
-                run.finished_at = timezone.now()
-                run.masked_log = sanitize_payload(
-                    {
-                        "retry_count": run.retry_count,
-                        "error": last_retry_error,
-                    }
-                )
-                sync_job.status = SyncJob.Status.FAILED
-                sync_job.next_run_at = None
-                sync_job.lock_token = ""
-                sync_job.lock_expires_at = None
-                sync_job.lock_heartbeat_at = timezone.now()
-                sync_job.save(
-                    update_fields=[
-                        "status",
-                        "next_run_at",
-                        "lock_token",
-                        "lock_expires_at",
-                        "lock_heartbeat_at",
-                        "updated_at",
-                    ]
-                )
-                run.save()
+            try:
+                with transaction.atomic():
+                    owned_job = _lock_owned_sync_job(sync_job, run)
+                    run.error_code = "MAX_RETRY_EXCEEDED"
+                    run.masked_error_message = last_retry_error
+                    run.status = SyncRun.Status.FAILED
+                    run.failed_count += 1
+                    run.finished_at = timezone.now()
+                    run.masked_log = sanitize_payload(
+                        {
+                            "retry_count": run.retry_count,
+                            "error": last_retry_error,
+                        }
+                    )
+                    owned_job.status = SyncJob.Status.FAILED
+                    owned_job.next_run_at = None
+                    owned_job.lock_token = ""
+                    owned_job.lock_expires_at = None
+                    owned_job.lock_heartbeat_at = timezone.now()
+                    owned_job.save(
+                        update_fields=[
+                            "status",
+                            "next_run_at",
+                            "lock_token",
+                            "lock_expires_at",
+                            "lock_heartbeat_at",
+                            "updated_at",
+                        ]
+                    )
+                    run.save()
+                    sync_job = owned_job
+            except SyncLeaseLost as lease_exc:
+                _raise_lease_lost(run, lease_exc)
             return run, True
 
 
