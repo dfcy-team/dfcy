@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 const MainLayout = () => import('../layouts/MainLayout.vue');
 const Login = () => import('../views/auth/Login.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
+const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
+const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
@@ -62,6 +64,8 @@ const routes = [
     component: MainLayout,
     children: [
       { path: '', component: Dashboard },
+      { path: 'analytics/sales', component: SalesAnalysis },
+      { path: 'analytics/inventory', component: InventoryAnalysis },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },

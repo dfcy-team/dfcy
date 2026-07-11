@@ -3,9 +3,13 @@
     <el-aside width="240px" class="app-sidebar">
       <div class="brand">SaaS 协同系统</div>
       <el-menu router :default-active="$route.path" class="menu">
-        <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
-          <span>{{ item.label }}</span>
-        </el-menu-item>
+        <template v-for="item in menuItems" :key="item.path || item.label">
+          <el-sub-menu v-if="item.children" :index="item.label">
+            <template #title>{{ item.label }}</template>
+            <el-menu-item v-for="child in item.children" :key="child.path" :index="child.path">{{ child.label }}</el-menu-item>
+          </el-sub-menu>
+          <el-menu-item v-else :index="item.path">{{ item.label }}</el-menu-item>
+        </template>
       </el-menu>
     </el-aside>
     <el-container>
@@ -28,6 +32,13 @@ const auth = useAuthStore();
 // 菜单仅用于阶段0展示占位，不代表真实授权结果。
 const menuItems = [
   { path: '/', label: '首页' },
+  {
+    label: '经营分析',
+    children: [
+      { path: '/analytics/sales', label: '销售分析' },
+      { path: '/analytics/inventory', label: '库存分析' }
+    ]
+  },
   { path: '/products/research', label: '新品市调' },
   { path: '/products/master', label: '商品主数据' },
   { path: '/purchasing/orders', label: '采购供应链' },
