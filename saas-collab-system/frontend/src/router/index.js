@@ -61,6 +61,8 @@ const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
+const ConfigCenterList = () => import('../views/settings/ConfigCenterList.vue');
+const ConfigVersionHistory = () => import('../views/settings/ConfigVersionHistory.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -127,6 +129,8 @@ const routes = [
       { path: 'settings/platform-risk', component: PlatformAccessRisk },
       { path: 'settings/platform-readiness', component: PlatformIntegrationReadiness },
       { path: 'settings/security-review', component: SecurityReviewChecklist },
+      { path: 'settings/config-center', component: ConfigCenterList },
+      { path: 'settings/config-versions', component: ConfigVersionHistory },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

@@ -59,6 +59,13 @@ const menuItems = [
   { path: '/integrations/api-sync', label: 'API同步' },
   { path: '/finance/imports', label: '财务入口' },
   { path: '/reports/basic', label: 'BI报表' },
+  {
+    label: '系统治理',
+    children: [
+      { path: '/settings/config-center', label: '配置中心' },
+      { path: '/settings/config-versions', label: '配置版本' }
+    ]
+  },
   { path: '/audit/operations', label: '日志审计' }
 ];
 </script>
