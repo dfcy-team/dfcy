@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import SupplierShipment, SupplierTask
+from .models import SupplierPerformanceSnapshot, SupplierShipment, SupplierTask
 
 
 class SupplierTaskSerializer(serializers.ModelSerializer):
@@ -83,3 +83,43 @@ class SupplierShipmentSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "tenant_id", "supplier_id", "status", "created_at", "updated_at")
+
+
+class SupplierPerformanceSnapshotSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+
+    class Meta:
+        model = SupplierPerformanceSnapshot
+        fields = (
+            "id",
+            "tenant_id",
+            "supplier_id",
+            "period_start",
+            "period_end",
+            "total_tasks",
+            "on_time_tasks",
+            "overdue_tasks",
+            "exception_tasks",
+            "total_shipments",
+            "accurate_shipments",
+            "feedback_on_time_count",
+            "on_time_rate",
+            "overdue_rate",
+            "exception_rate",
+            "shipment_accuracy_rate",
+            "feedback_timeliness_rate",
+            "total_score",
+            "calculated_at",
+        )
+        read_only_fields = fields
+
+
+class SupplierPerformanceCalculationSerializer(serializers.Serializer):
+    supplier_id = serializers.IntegerField(min_value=1)
+    period_start = serializers.DateField()
+    period_end = serializers.DateField()
+
+    def validate(self, attrs):
+        if attrs["period_start"] > attrs["period_end"]:
+            raise serializers.ValidationError("period_start must not be after period_end")
+        return attrs

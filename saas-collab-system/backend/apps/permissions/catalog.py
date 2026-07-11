@@ -1,0 +1,111 @@
+PERMISSION_DEFINITIONS = (
+    {
+        "code": "finance.view",
+        "name": "View finance data",
+        "module": "finance",
+        "action": "view",
+        "description": "View finance statements, withdrawals, receipts, matches, and exceptions.",
+    },
+    {
+        "code": "finance.export",
+        "name": "Export finance data",
+        "module": "finance",
+        "action": "export",
+        "description": "Export authorized finance data.",
+    },
+    {
+        "code": "finance.import",
+        "name": "Import finance data",
+        "module": "finance",
+        "action": "import",
+        "description": "Import authorized finance data, including phase 2 demo fixtures.",
+    },
+    {
+        "code": "finance.reconcile",
+        "name": "Reconcile finance data",
+        "module": "finance",
+        "action": "reconcile",
+        "description": "Run and review finance reconciliation suggestions.",
+    },
+    {
+        "code": "finance.exception.handle",
+        "name": "Handle finance exceptions",
+        "module": "finance",
+        "action": "exception.handle",
+        "description": "Handle finance reconciliation exceptions.",
+    },
+    {
+        "code": "integrations.view",
+        "name": "View integrations",
+        "module": "integrations",
+        "action": "view",
+        "description": "View integration configuration metadata and synchronization runs.",
+    },
+    {
+        "code": "integrations.manage",
+        "name": "Manage integrations",
+        "module": "integrations",
+        "action": "manage",
+        "description": "Create, update, verify, or disable integration configurations and jobs.",
+    },
+    {
+        "code": "integrations.rotate",
+        "name": "Rotate integration credentials",
+        "module": "integrations",
+        "action": "rotate",
+        "description": "Rotate encrypted integration credentials.",
+    },
+    {
+        "code": "integrations.run",
+        "name": "Run integration synchronization",
+        "module": "integrations",
+        "action": "run",
+        "description": "Run phase 2 mock integration synchronization jobs.",
+    },
+    {
+        "code": "suppliers.performance.view",
+        "name": "View supplier performance",
+        "module": "suppliers",
+        "action": "performance.view",
+        "description": "View supplier performance within the assigned data scope.",
+    },
+    {
+        "code": "suppliers.performance.calculate",
+        "name": "Calculate supplier performance",
+        "module": "suppliers",
+        "action": "performance.calculate",
+        "description": "Calculate phase 2 mock supplier performance snapshots.",
+    },
+    {
+        "code": "products.status.view",
+        "name": "View product status",
+        "module": "products",
+        "action": "status.view",
+        "description": "View product status recommendations and transitions.",
+    },
+    {
+        "code": "products.status.evaluate",
+        "name": "Evaluate product status",
+        "module": "products",
+        "action": "status.evaluate",
+        "description": "Generate product status recommendations from phase 2 mock metrics.",
+    },
+    {
+        "code": "products.status.confirm",
+        "name": "Confirm product status",
+        "module": "products",
+        "action": "status.confirm",
+        "description": "Confirm or reject standard product status recommendations.",
+    },
+    {
+        "code": "products.status.high_risk_confirm",
+        "name": "Confirm high-risk product status",
+        "module": "products",
+        "action": "status.high_risk_confirm",
+        "description": "Confirm clearance, stopped, or archived product status recommendations.",
+    },
+)
+
+
+def permission_defaults(definition):
+    return {key: value for key, value in definition.items() if key != "code"}
