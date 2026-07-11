@@ -32,6 +32,10 @@
 | 商品主数据详情 | `/products/master/:id` | `/api/internal/products/spus/{id}/`、`/api/internal/products/skus/` | GET | `id` | `spu_code`、`product_name`、`category`、`lifecycle_status`、`sales_status`、`is_code_frozen`、`sku_code`、`size`、`material`、`selling_points`、`package_weight`、`package_volume` | `frontend/src/mock/products.js` | mock |
 | 商品编码冻结 | `/products/master/:id` | `/api/internal/products/spus/{id}/freeze-code/` | POST | `id` | `spu_code`、`is_code_frozen` | `frontend/src/mock/products.js` | mock |
 | 商品状态列表 | `/products/status` | `/api/internal/products/spus/` | GET | `lifecycle_status`、`sales_status` | `spu_code`、`product_name`、`lifecycle_status`、`sales_status`、`is_code_frozen` | `frontend/src/mock/products.js` | mock |
+| 商品状态看板 | `/products/status-dashboard` | `/api/internal/products/status-recommendations/` | GET | `date_range`、`source_type` | `status_name`、`count` | `frontend/src/mock/productStatus.js` | pending |
+| 商品状态建议列表 | `/products/status-recommendations` | `/api/internal/products/status-recommendations/` | GET | `current_status`、`suggested_status`、`source_type` | `spu_code`、`sku_code`、`current_status`、`suggested_status`、`reason_code`、`confidence`、`source_type` | `frontend/src/mock/productStatus.js` | pending |
+| 商品状态建议详情 | `/products/status-recommendations/:id` | `/api/internal/products/status-recommendations/{id}/` | GET | `id` | `reason_detail`、`evidence`、`confirmed_by`、`confirmed_at` | `frontend/src/mock/productStatus.js` | pending |
+| 商品状态流转历史 | `/products/status-transitions` | `/api/internal/products/status-transitions/` | GET | `spu_code`、`sku_code`、`source_type` | `from_status`、`to_status`、`source_type`、`reason_code`、`changed_at` | `frontend/src/mock/productStatus.js` | pending |
 | 采购订单列表 | `/purchasing/orders` | `/api/internal/purchasing/orders/` | GET | `po_no`、`sku_code`、`supplier_id`、`status`、`approval_status` | `po_no`、`sku_code`、`supplier_id`、`quantity`、`unit_price`、`delivery_date`、`payment_terms`、`status`、`approval_status` | `frontend/src/mock/purchasing.js` | mock |
 | 采购订单详情 | `/purchasing/orders/:id` | `/api/internal/purchasing/orders/{id}/` | GET | `id` | `po_no`、`sku_code`、`supplier_id`、`quantity`、`unit_price`、`delivery_date`、`payment_terms`、`status`、`approval_status` | `frontend/src/mock/purchasing.js` | mock |
 | 供应商任务列表 | `/suppliers/tasks` | `/api/external/supplier/tasks/` | GET | `task_no`、`status`、`is_overdue` | `task_no`、`supplier_id`、`sku_code`、`production_quantity`、`completed_quantity`、`expected_ship_date`、`status`、`is_overdue` | `frontend/src/mock/suppliers.js` | mock |
@@ -39,15 +43,34 @@
 | 供应商任务回填 | `/suppliers/tasks/:id` | `/api/external/supplier/tasks/{id}/feedback/` | POST | `completed_quantity`、`status`、`feedback_note`、`exception_note` | `task_no`、`completed_quantity`、`status` | `frontend/src/mock/suppliers.js` | mock |
 | 供应商出货列表 | `/suppliers/shipments` | `/api/external/supplier/shipments/` | GET | `shipment_no`、`status` | `shipment_no`、`supplier_id`、`sku_code`、`ship_quantity`、`carton_count`、`weight`、`volume`、`status` | `frontend/src/mock/suppliers.js` | mock |
 | 供应商出货详情 | `/suppliers/shipments/:id` | `/api/external/supplier/shipments/{id}/` | GET | `id` | `shipment_no`、`supplier_id`、`sku_code`、`ship_quantity`、`carton_count`、`weight`、`volume`、`shipping_mark`、`tracking_no`、`attachment_placeholder`、`status` | `frontend/src/mock/suppliers.js` | mock |
+| 内部供应商绩效看板 | `/suppliers/performance` | `/api/internal/suppliers/performance/` | GET | `period`、`supplier_id` | `total_tasks`、`on_time_rate`、`overdue_rate`、`exception_rate`、`total_score` | `frontend/src/mock/supplierPerformance.js` | pending |
+| 内部供应商绩效详情 | `/suppliers/performance/:supplierId` | `/api/internal/suppliers/performance/{supplier_id}/` | GET | `supplier_id` | `total_tasks`、`total_shipments`、`shipment_accuracy_rate`、`feedback_timeliness_rate`、`total_score` | `frontend/src/mock/supplierPerformance.js` | pending |
+| 我的供应商绩效 | `/suppliers/my-performance` | `/api/external/supplier/performance/` | GET | 后端身份范围 | `total_tasks`、`on_time_rate`、`overdue_rate`、`exception_rate`、`total_score` | `frontend/src/mock/supplierPerformance.js` | pending |
+| 我的供应商绩效历史 | `/suppliers/my-performance/history` | `/api/external/supplier/performance/history/` | GET | 后端身份范围、`period` | `period`、`total_tasks`、`on_time_rate`、`total_score` | `frontend/src/mock/supplierPerformance.js` | pending |
 | 多国家刊登资料列表 | `/listings/sites` | `/api/internal/listings/sites/` | GET | `sku`、`platform`、`country`、`listing_status` | `items`、`status` | `frontend/src/mock/listings.js` | pending |
 | 刊登模板列表 | `/listings/templates` | `/api/internal/listings/templates/` | GET | `platform`、`country`、`category` | `items`、`status` | `frontend/src/mock/listings.js` | pending |
 | 价格列表 | `/pricing/prices` | `/api/internal/pricing/prices/` | GET | `sku`、`approval_status` | `items`、`status` | `frontend/src/mock/pricing.js` | pending |
 | RPA任务列表 | `/rpa/tasks` | `/api/internal/rpa/tasks/` | GET | `task_id`、`task_type`、`status`、`agent` | `task_id`、`task_type`、`business_type`、`business_id`、`status`、`agent`、`retry_count` | `frontend/src/mock/rpa.js` | pending |
 | RPA任务详情 | `/rpa/tasks/:id` | `/api/internal/rpa/tasks/{id}/` | GET | `id` | `task_id`、`payload`、`result`、`logs`、`screenshots`、`error_message`、`manual_required` | `frontend/src/mock/rpa.js` | pending |
+| RPA稳定性看板 | `/rpa/stability` | `/api/internal/rpa/tasks/` | GET | `status` | `status`、`count` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA尝试列表 | `/rpa/attempts` | `/api/internal/rpa/attempts/` | GET | `status`、`agent` | `task`、`attempt_no`、`agent`、`heartbeat_at`、`status`、`masked_error` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA人工接管队列 | `/rpa/manual-queue` | `/api/internal/rpa/manual-queue/` | GET | `status=manual_required` | `task`、`failed_step`、`last_success_step`、`masked_error`、`manual_required` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA账号锁 | `/rpa/account-locks` | `/api/internal/rpa/account-locks/` | GET | `platform`、`account_alias` | `platform`、`account_alias`、`lock_status`、`expires_at` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA页面签名异常 | `/rpa/page-signatures` | `/api/internal/rpa/page-signatures/` | GET | `platform`、`page_type` | `platform`、`page_type`、`signature_hash`、`detected_status` | `frontend/src/mock/rpaStability.js` | pending |
 | API同步任务列表 | `/integrations/api-sync` | `/api/internal/integrations/sync-tasks/` | GET | `task_no`、`platform`、`sync_type`、`status` | `items`、`status` | `frontend/src/mock/integrations.js` | pending |
 | API同步日志列表 | `/integrations/api-sync/logs` | `/api/internal/integrations/sync-logs/` | GET | `log_no`、`platform`、`sync_type`、`status` | `items`、`quality_check_result` | `frontend/src/mock/integrations.js` | pending |
+| 平台接入配置列表 | `/integrations/configs` | `/api/internal/integrations/configs/` | GET | `platform`、`status`、`environment` | `platform`、`account_alias`、`environment`、`status`、`credential_fingerprint`、`credential_key_version` | `frontend/src/mock/integrations.js` | pending |
+| 平台接入配置详情 | `/integrations/configs/:id` | `/api/internal/integrations/configs/{id}/` | GET | `id` | `platform`、`account_alias`、`environment`、`status`、`credential_fingerprint`、`credential_key_version` | `frontend/src/mock/integrations.js` | pending |
+| 同步任务列表 | `/integrations/sync-jobs` | `/api/internal/integrations/sync-jobs/` | GET | `resource_type`、`status`、`schedule_type` | `resource_type`、`schedule_type`、`status`、`is_enabled`、`last_run_at`、`next_run_at` | `frontend/src/mock/integrations.js` | pending |
+| 同步执行记录列表 | `/integrations/sync-runs` | `/api/internal/integrations/sync-runs/` | GET | `platform`、`resource_type`、`status` | `run_id`、`status`、`fetched_count`、`failed_count`、`retry_count`、`masked_error_message` | `frontend/src/mock/integrations.js` | pending |
+| 同步执行记录详情 | `/integrations/sync-runs/:id` | `/api/internal/integrations/sync-runs/{id}/` | GET | `id` | `run_id`、`status`、`masked_error_message`、`quality_check_result` | `frontend/src/mock/integrations.js` | pending |
 | 操作日志列表 | `/audit/operations` | `/api/internal/audit/operation-logs/` | GET | `operator`、`module`、`action`、`object_id` | `items`、`status` | `frontend/src/mock/audit.js` | pending |
 | 财务导入入口 | `/finance/imports` | `/api/finance/imports/` | GET | `import_no`、`status` | `items`、`authorization` | `frontend/src/mock/finance.js` | pending |
+| 平台账单列表 | `/finance/statements` | `/api/finance/statements/` | GET | `platform`、`currency`、`status` | `platform`、`statement_no`、`currency`、`gross_amount`、`fee_amount`、`net_amount`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 取款记录列表 | `/finance/withdrawals` | `/api/finance/withdrawals/` | GET | `platform`、`status` | `withdrawal_no`、`requested_amount`、`expected_amount`、`completed_at`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 银行到账列表 | `/finance/bank-receipts` | `/api/finance/bank-receipts/` | GET | `currency`、`status` | `masked_account`、`receipt_amount`、`receipt_date`、`reference_no`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 对账匹配列表 | `/finance/reconciliation/matches` | `/api/finance/reconciliation/matches/` | GET | `status`、`match_type` | `match_type`、`matched_amount`、`difference_amount`、`confidence`、`status` | `frontend/src/mock/financeReconciliation.js` | pending |
+| 对账异常列表 | `/finance/reconciliation/exceptions` | `/api/finance/reconciliation/exceptions/` | GET | `exception_type`、`status` | `exception_type`、`difference_amount`、`status`、`assigned_to`、`resolution_note` | `frontend/src/mock/financeReconciliation.js` | pending |
 | 基础报表首页 | `/reports/basic` | `/api/report/basic/` | GET | `report_name`、`date_range` | `items`、`metrics` | `frontend/src/mock/reports.js` | pending |
 
 ## RPA Agent执行接口边界
@@ -62,3 +85,40 @@ RPA Agent 执行接口只能由 Agent 访问，前端管理后台页面不得直
 - `/api/rpa/tasks/{id}/fail/`
 
 RPA Agent 不访问 `/api/finance/*`，不访问 `/admin/`，不直连数据库。
+## P2-B-R1 API Integration Summary
+
+- Latest `origin/main`: `51535c246b430064b782c4078591253506b16c17`.
+- Development A backend merge is present in `main`: PR #5 `feature/phase2-a-api-status-finance`.
+- Detailed Phase 2 frontend contract: `docs/03_api/phase2_frontend_api_contract.md`.
+- Path fixes made after backend merge:
+  - `/api/internal/integrations/sync-tasks/` -> `/api/internal/integrations/sync-jobs/`.
+  - `/api/internal/integrations/sync-logs/` -> `/api/internal/integrations/sync-runs/`.
+  - `GET /api/finance/reconciliation/matches/{id}/` is not provided by backend Phase 2; the detail page now uses `GET /api/finance/reconciliation/matches/` collection data.
+- Connected contract paths:
+  - `/api/internal/integrations/configs/`
+  - `/api/internal/integrations/configs/{id}/`
+  - `/api/internal/integrations/sync-jobs/`
+  - `/api/internal/integrations/sync-jobs/{id}/run-mock/`
+  - `/api/internal/integrations/sync-jobs/{id}/disable/`
+  - `/api/internal/integrations/sync-runs/`
+  - `/api/internal/integrations/sync-runs/{id}/`
+  - `/api/internal/products/status-recommendations/`
+  - `/api/internal/products/status-recommendations/{id}/`
+  - `/api/internal/products/status-recommendations/{id}/confirm/`
+  - `/api/internal/products/status-recommendations/{id}/reject/`
+  - `/api/internal/products/status-transitions/`
+  - `/api/internal/products/status/evaluate-mock/`
+  - `/api/finance/statements/`
+  - `/api/finance/withdrawals/`
+  - `/api/finance/bank-receipts/`
+  - `/api/finance/reconciliation/matches/`
+  - `/api/finance/reconciliation/run-mock/`
+  - `/api/finance/reconciliation/matches/{id}/confirm/`
+  - `/api/finance/reconciliation/matches/{id}/reject/`
+  - `/api/finance/reconciliation/exceptions/`
+  - `/api/internal/suppliers/performance/`
+  - `/api/internal/suppliers/performance/{supplier_id}/`
+  - `/api/internal/suppliers/performance/calculate-mock/`
+  - `/api/external/supplier/performance/`
+  - `/api/external/supplier/performance/history/`
+- RPA internal management query APIs are still not provided in latest `main`; frontend keeps pending/mock fallback and must not call `/api/rpa/*` Agent execution endpoints.

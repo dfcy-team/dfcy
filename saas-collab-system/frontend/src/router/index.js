@@ -1,30 +1,59 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import MainLayout from '../layouts/MainLayout.vue';
-import Login from '../views/auth/Login.vue';
-import Dashboard from '../views/dashboard/Index.vue';
-import ResearchList from '../views/products/ResearchList.vue';
-import ResearchDetail from '../views/products/ResearchDetail.vue';
-import ProductMasterList from '../views/products/ProductMasterList.vue';
-import ProductMasterDetail from '../views/products/ProductMasterDetail.vue';
-import ProductStatusList from '../views/products/ProductStatusList.vue';
-import PurchaseOrderList from '../views/purchasing/PurchaseOrderList.vue';
-import PurchaseOrderDetail from '../views/purchasing/PurchaseOrderDetail.vue';
-import SupplierTaskList from '../views/suppliers/SupplierTaskList.vue';
-import SupplierTaskDetail from '../views/suppliers/SupplierTaskDetail.vue';
-import SupplierShipmentList from '../views/suppliers/SupplierShipmentList.vue';
-import SupplierShipmentDetail from '../views/suppliers/SupplierShipmentDetail.vue';
-import SiteProfileList from '../views/listings/SiteProfileList.vue';
-import SiteProfileDetail from '../views/listings/SiteProfileDetail.vue';
-import ListingTemplateList from '../views/listings/ListingTemplateList.vue';
-import PriceList from '../views/pricing/PriceList.vue';
-import PriceDetail from '../views/pricing/PriceDetail.vue';
-import RPATaskList from '../views/rpa/RPATaskList.vue';
-import RPATaskDetail from '../views/rpa/RPATaskDetail.vue';
-import APISyncTaskList from '../views/integrations/APISyncTaskList.vue';
-import APISyncLogList from '../views/integrations/APISyncLogList.vue';
-import OperationLogList from '../views/audit/OperationLogList.vue';
-import FinanceImportList from '../views/finance/FinanceImportList.vue';
-import BasicReportIndex from '../views/reports/BasicReportIndex.vue';
+const MainLayout = () => import('../layouts/MainLayout.vue');
+const Login = () => import('../views/auth/Login.vue');
+const Dashboard = () => import('../views/dashboard/Index.vue');
+const ResearchList = () => import('../views/products/ResearchList.vue');
+const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
+const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
+const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
+const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
+const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
+const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
+const ProductStatusRecommendationDetail = () => import('../views/products/ProductStatusRecommendationDetail.vue');
+const ProductStatusTransitionHistory = () => import('../views/products/ProductStatusTransitionHistory.vue');
+const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
+const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
+const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
+const SupplierTaskDetail = () => import('../views/suppliers/SupplierTaskDetail.vue');
+const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentList.vue');
+const SupplierShipmentDetail = () => import('../views/suppliers/SupplierShipmentDetail.vue');
+const SupplierPerformanceDashboard = () => import('../views/suppliers/SupplierPerformanceDashboard.vue');
+const SupplierPerformanceList = () => import('../views/suppliers/SupplierPerformanceList.vue');
+const SupplierPerformanceDetail = () => import('../views/suppliers/SupplierPerformanceDetail.vue');
+const MySupplierPerformance = () => import('../views/suppliers/MySupplierPerformance.vue');
+const MySupplierPerformanceHistory = () => import('../views/suppliers/MySupplierPerformanceHistory.vue');
+const SiteProfileList = () => import('../views/listings/SiteProfileList.vue');
+const SiteProfileDetail = () => import('../views/listings/SiteProfileDetail.vue');
+const ListingTemplateList = () => import('../views/listings/ListingTemplateList.vue');
+const PriceList = () => import('../views/pricing/PriceList.vue');
+const PriceDetail = () => import('../views/pricing/PriceDetail.vue');
+const RPATaskList = () => import('../views/rpa/RPATaskList.vue');
+const RPATaskDetail = () => import('../views/rpa/RPATaskDetail.vue');
+const RPAStabilityDashboard = () => import('../views/rpa/RPAStabilityDashboard.vue');
+const RPAAttemptList = () => import('../views/rpa/RPAAttemptList.vue');
+const RPAAttemptDetail = () => import('../views/rpa/RPAAttemptDetail.vue');
+const RPAManualQueue = () => import('../views/rpa/RPAManualQueue.vue');
+const RPAAccountLockList = () => import('../views/rpa/RPAAccountLockList.vue');
+const RPAPageSignatureAlertList = () => import('../views/rpa/RPAPageSignatureAlertList.vue');
+const APISyncTaskList = () => import('../views/integrations/APISyncTaskList.vue');
+const APISyncLogList = () => import('../views/integrations/APISyncLogList.vue');
+const IntegrationConfigList = () => import('../views/integrations/IntegrationConfigList.vue');
+const IntegrationConfigDetail = () => import('../views/integrations/IntegrationConfigDetail.vue');
+const SyncJobList = () => import('../views/integrations/SyncJobList.vue');
+const SyncRunList = () => import('../views/integrations/SyncRunList.vue');
+const SyncRunDetail = () => import('../views/integrations/SyncRunDetail.vue');
+const OperationLogList = () => import('../views/audit/OperationLogList.vue');
+const FinanceImportList = () => import('../views/finance/FinanceImportList.vue');
+const PlatformStatementList = () => import('../views/finance/PlatformStatementList.vue');
+const WithdrawalRecordList = () => import('../views/finance/WithdrawalRecordList.vue');
+const BankReceiptList = () => import('../views/finance/BankReceiptList.vue');
+const ReconciliationMatchList = () => import('../views/finance/ReconciliationMatchList.vue');
+const ReconciliationMatchDetail = () => import('../views/finance/ReconciliationMatchDetail.vue');
+const ReconciliationExceptionList = () => import('../views/finance/ReconciliationExceptionList.vue');
+const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
+const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
+const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
+const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -38,12 +67,21 @@ const routes = [
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
       { path: 'products/status', component: ProductStatusList },
+      { path: 'products/status-dashboard', component: ProductStatusDashboard },
+      { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
+      { path: 'products/status-recommendations/:id', component: ProductStatusRecommendationDetail },
+      { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'purchasing/orders', component: PurchaseOrderList },
       { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
       { path: 'suppliers/tasks', component: SupplierTaskList },
       { path: 'suppliers/tasks/:id', component: SupplierTaskDetail },
       { path: 'suppliers/shipments', component: SupplierShipmentList },
       { path: 'suppliers/shipments/:id', component: SupplierShipmentDetail },
+      { path: 'suppliers/performance', component: SupplierPerformanceDashboard },
+      { path: 'suppliers/performance/list', component: SupplierPerformanceList },
+      { path: 'suppliers/performance/:supplierId', component: SupplierPerformanceDetail },
+      { path: 'suppliers/my-performance', component: MySupplierPerformance },
+      { path: 'suppliers/my-performance/history', component: MySupplierPerformanceHistory },
       { path: 'listings/sites', component: SiteProfileList },
       { path: 'listings/sites/:id', component: SiteProfileDetail },
       { path: 'listings/templates', component: ListingTemplateList },
@@ -51,10 +89,30 @@ const routes = [
       { path: 'pricing/prices/:id', component: PriceDetail },
       { path: 'rpa/tasks', component: RPATaskList },
       { path: 'rpa/tasks/:id', component: RPATaskDetail },
+      { path: 'rpa/stability', component: RPAStabilityDashboard },
+      { path: 'rpa/attempts', component: RPAAttemptList },
+      { path: 'rpa/attempts/:id', component: RPAAttemptDetail },
+      { path: 'rpa/manual-queue', component: RPAManualQueue },
+      { path: 'rpa/account-locks', component: RPAAccountLockList },
+      { path: 'rpa/page-signatures', component: RPAPageSignatureAlertList },
+      { path: 'integrations/configs', component: IntegrationConfigList },
+      { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
+      { path: 'integrations/sync-jobs', component: SyncJobList },
+      { path: 'integrations/sync-runs', component: SyncRunList },
+      { path: 'integrations/sync-runs/:id', component: SyncRunDetail },
       { path: 'integrations/api-sync', component: APISyncTaskList },
       { path: 'integrations/api-sync/logs', component: APISyncLogList },
       { path: 'finance/imports', component: FinanceImportList },
+      { path: 'finance/statements', component: PlatformStatementList },
+      { path: 'finance/withdrawals', component: WithdrawalRecordList },
+      { path: 'finance/bank-receipts', component: BankReceiptList },
+      { path: 'finance/reconciliation/matches', component: ReconciliationMatchList },
+      { path: 'finance/reconciliation/matches/:id', component: ReconciliationMatchDetail },
+      { path: 'finance/reconciliation/exceptions', component: ReconciliationExceptionList },
       { path: 'reports/basic', component: BasicReportIndex },
+      { path: 'settings/platform-risk', component: PlatformAccessRisk },
+      { path: 'settings/platform-readiness', component: PlatformIntegrationReadiness },
+      { path: 'settings/security-review', component: SecurityReviewChecklist },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }
