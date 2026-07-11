@@ -59,6 +59,7 @@ const ReconciliationMatchDetail = () => import('../views/finance/ReconciliationM
 const ReconciliationExceptionList = () => import('../views/finance/ReconciliationExceptionList.vue');
 const FinanceAnalyticsOverview = () => import('../views/finance/FinanceAnalyticsOverview.vue');
 const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
+const ReportExportCenter = () => import('../views/reports/ReportExportCenter.vue');
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
@@ -128,6 +129,7 @@ const routes = [
       { path: 'finance/reconciliation/exceptions', component: ReconciliationExceptionList },
       { path: 'finance/analytics', component: FinanceAnalyticsOverview },
       { path: 'reports/basic', component: BasicReportIndex },
+      { path: 'reports/exports', component: ReportExportCenter },
       { path: 'settings/platform-risk', component: PlatformAccessRisk },
       { path: 'settings/platform-readiness', component: PlatformIntegrationReadiness },
       { path: 'settings/security-review', component: SecurityReviewChecklist },

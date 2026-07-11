@@ -65,7 +65,13 @@ const menuItems = [
       { path: '/finance/reconciliation/matches', label: '对账差异' }
     ]
   },
-  { path: '/reports/basic', label: 'BI报表' },
+  {
+    label: '报表中心',
+    children: [
+      { path: '/reports/basic', label: '基础报表' },
+      { path: '/reports/exports', label: '报表导出' }
+    ]
+  },
   {
     label: '系统治理',
     children: [
