@@ -10,7 +10,7 @@
 
 ## 2. 分支与基线
 
-分支包含阶段3规划基线，相对 `origin/main` 领先 9 个提交、落后 0 个提交。当前 HEAD 与本次审核期间实际执行 `npm ci`、`npm run build` 和 `npm test` 时的提交一致。
+分支包含阶段3规划基线，相对 `origin/main` 领先 9 个提交、落后 0 个提交。重新执行审核时，当前 HEAD 仍与此前审核提交一致；本次已在新的独立 worktree 再次实际执行 `npm ci`、`npm run build` 和 `npm test`。
 
 ## 3. 修改范围
 
@@ -52,9 +52,9 @@
 
 | 项目 | 结果 |
 |---|---|
-| `npm ci` | 已执行，通过，0 vulnerabilities |
-| `npm run build` | 已执行，通过，1856 个模块完成构建 |
-| `npm test` | 已执行，2 个测试文件、29 项测试全部通过 |
+| `npm ci` | 本次重新执行，通过，0 vulnerabilities |
+| `npm run build` | 本次重新执行，通过，1856 个模块完成构建 |
+| `npm test` | 本次重新执行，2 个测试文件、29 项测试全部通过 |
 | 路由加载 | 阶段3页面均使用动态 import 懒加载 |
 | chunk 结果 | 未出现 Vite 大 chunk 阻断 warning；构建产物已拆分 |
 | 构建产物 | `dist/`、`node_modules/`、npm 缓存未跟踪 |
@@ -71,7 +71,7 @@
 
 ## 14. 安全扫描
 
-对 `origin/main...origin/feature/phase3-b-bi-alerts-dashboard` 的新增前端差异执行高风险端点与凭据模式扫描：未发现真实密码、Token、Cookie、Session、API Key/API Secret、私钥、真实平台连接、真实订单/供应商/财务/银行数据或真实 RPA 执行。`package-lock.json` 中的 npm registry URL 和 Mock 中的 `example.invalid` 占位 URL 不构成真实平台配置。
+本次重新对 `origin/main...origin/feature/phase3-b-bi-alerts-dashboard` 的新增前端差异执行高风险端点与凭据模式扫描，并执行 merge-tree 预检：无冲突，未发现真实密码、Token、Cookie、Session、API Key/API Secret、私钥、真实平台连接、真实订单/供应商/财务/银行数据、真实 RPA 执行或受跟踪的 `dist/node_modules` 构建产物。`package-lock.json` 中的 npm registry URL 和 Mock 中的 `example.invalid` 占位 URL 不构成真实平台配置。
 
 ## 15. P0
 
