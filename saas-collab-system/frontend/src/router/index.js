@@ -4,6 +4,8 @@ const Login = () => import('../views/auth/Login.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
 const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
+const InventoryAlertList = () => import('../views/inventory/InventoryAlertList.vue');
+const ReplenishmentSuggestionList = () => import('../views/inventory/ReplenishmentSuggestionList.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
@@ -66,6 +68,8 @@ const routes = [
       { path: '', component: Dashboard },
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
+      { path: 'inventory/alerts', component: InventoryAlertList },
+      { path: 'inventory/replenishment', component: ReplenishmentSuggestionList },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },

@@ -39,6 +39,13 @@ const menuItems = [
       { path: '/analytics/inventory', label: '库存分析' }
     ]
   },
+  {
+    label: '经营决策',
+    children: [
+      { path: '/inventory/alerts', label: '库存预警' },
+      { path: '/inventory/replenishment', label: '补货建议' }
+    ]
+  },
   { path: '/products/research', label: '新品市调' },
   { path: '/products/master', label: '商品主数据' },
   { path: '/purchasing/orders', label: '采购供应链' },
