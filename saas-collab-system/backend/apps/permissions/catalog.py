@@ -1,5 +1,26 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "replenishment.view",
+        "name": "View replenishment recommendations",
+        "module": "replenishment",
+        "action": "view",
+        "description": "View tenant and data-scope filtered replenishment recommendations.",
+    },
+    {
+        "code": "replenishment.evaluate",
+        "name": "Evaluate replenishment recommendations",
+        "module": "replenishment",
+        "action": "evaluate",
+        "description": "Generate mock replenishment recommendations without creating purchase orders.",
+    },
+    {
+        "code": "replenishment.review",
+        "name": "Review replenishment recommendations",
+        "module": "replenishment",
+        "action": "review",
+        "description": "Accept or reject recommendations without executing procurement.",
+    },
+    {
         "code": "alerts.view",
         "name": "View operational alerts",
         "module": "alerts",

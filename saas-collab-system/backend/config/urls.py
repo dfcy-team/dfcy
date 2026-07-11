@@ -9,6 +9,7 @@ urlpatterns = [
     path("api/internal/integrations/", include("apps.integrations.urls_internal")),
     path("api/internal/analytics/", include("apps.reports.urls_internal")),
     path("api/internal/alerts/", include("apps.alerts.urls")),
+    path("api/internal/replenishment/", include("apps.replenishment.urls")),
     path("api/internal/products/", include("apps.products.urls")),
     path("api/internal/purchasing/", include("apps.purchasing.urls")),
     path("api/internal/suppliers/", include("apps.suppliers.urls_internal")),

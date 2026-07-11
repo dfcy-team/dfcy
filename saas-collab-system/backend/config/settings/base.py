@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "apps.finance",
     "apps.reports",
     "apps.alerts",
+    "apps.replenishment",
     "apps.common",
 ]
 
