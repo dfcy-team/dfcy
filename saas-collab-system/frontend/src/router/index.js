@@ -6,6 +6,8 @@ const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
 const InventoryAlertList = () => import('../views/inventory/InventoryAlertList.vue');
 const ReplenishmentSuggestionList = () => import('../views/inventory/ReplenishmentSuggestionList.vue');
+const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList.vue');
+const LifecycleReviewHistory = () => import('../views/lifecycle/LifecycleReviewHistory.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
@@ -70,6 +72,8 @@ const routes = [
       { path: 'analytics/inventory', component: InventoryAnalysis },
       { path: 'inventory/alerts', component: InventoryAlertList },
       { path: 'inventory/replenishment', component: ReplenishmentSuggestionList },
+      { path: 'lifecycle/reviews', component: LifecycleReviewList },
+      { path: 'lifecycle/history', component: LifecycleReviewHistory },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },

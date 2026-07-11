@@ -43,7 +43,9 @@ const menuItems = [
     label: '经营决策',
     children: [
       { path: '/inventory/alerts', label: '库存预警' },
-      { path: '/inventory/replenishment', label: '补货建议' }
+      { path: '/inventory/replenishment', label: '补货建议' },
+      { path: '/lifecycle/reviews', label: '生命周期复盘' },
+      { path: '/lifecycle/history', label: '复盘历史' }
     ]
   },
   { path: '/products/research', label: '新品市调' },
