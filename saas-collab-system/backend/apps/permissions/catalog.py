@@ -1,5 +1,40 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "config.view",
+        "name": "View configuration",
+        "module": "config",
+        "action": "view",
+        "description": "View authorized tenant configuration metadata and masked values.",
+    },
+    {
+        "code": "config.manage",
+        "name": "Manage tenant configuration",
+        "module": "config",
+        "action": "manage",
+        "description": "Create versioned tenant configuration values.",
+    },
+    {
+        "code": "config.approve",
+        "name": "Approve configuration",
+        "module": "config",
+        "action": "approve",
+        "description": "Approve configuration versions with creator/approver separation.",
+    },
+    {
+        "code": "config.rollback",
+        "name": "Rollback configuration",
+        "module": "config",
+        "action": "rollback",
+        "description": "Create a new configuration version from authorized history.",
+    },
+    {
+        "code": "config.system.manage",
+        "name": "Manage system configuration",
+        "module": "config",
+        "action": "system.manage",
+        "description": "Access restricted system-scope configuration versions.",
+    },
+    {
         "code": "products.lifecycle.view",
         "name": "View product lifecycle reviews",
         "module": "products",
