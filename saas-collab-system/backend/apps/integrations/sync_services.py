@@ -4,7 +4,9 @@ import uuid
 from datetime import timedelta
 from time import sleep as default_retry_wait
 
+from django.conf import settings
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -13,12 +15,69 @@ from .models import SyncCursor, SyncJob, SyncRun, WebhookEvent
 from .security import sanitize_payload, sanitize_text
 
 
-def calculate_backoff_seconds(retry_count, base_seconds=1, max_seconds=300):
+def calculate_backoff_seconds(retry_count, base_seconds=1, max_seconds=30):
     return min(max_seconds, base_seconds * (2**retry_count))
 
 
 def _run_id():
     return uuid.uuid4().hex
+
+
+def _lease_duration():
+    return timedelta(seconds=settings.SYNC_JOB_LEASE_SECONDS)
+
+
+def _has_expired_lease(sync_job, now):
+    if sync_job.status != SyncJob.Status.RUNNING:
+        return False
+    if sync_job.lock_expires_at:
+        return sync_job.lock_expires_at <= now
+    if sync_job.last_run_at:
+        return sync_job.last_run_at <= now - _lease_duration()
+    return True
+
+
+def _recover_expired_lease(sync_job, now):
+    SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING).update(
+        status=SyncRun.Status.FAILED,
+        finished_at=now,
+        failed_count=F("failed_count") + 1,
+        error_code="LEASE_EXPIRED",
+        masked_error_message="Sync run lease expired before completion.",
+        masked_log={"error": "lease_expired"},
+    )
+    sync_job.status = SyncJob.Status.FAILED
+    sync_job.lock_token = ""
+    sync_job.lock_expires_at = None
+    sync_job.lock_heartbeat_at = now
+    sync_job.save(
+        update_fields=[
+            "status",
+            "lock_token",
+            "lock_expires_at",
+            "lock_heartbeat_at",
+            "updated_at",
+        ]
+    )
+
+
+def _renew_lease(sync_job, run, not_before=None):
+    now = timezone.now()
+    lease_anchor = max(now, not_before) if not_before else now
+    expires_at = lease_anchor + _lease_duration()
+    renewed = SyncJob.objects.filter(
+        pk=sync_job.pk,
+        status=SyncJob.Status.RUNNING,
+        lock_token=run.run_id,
+    ).update(
+        lock_expires_at=expires_at,
+        lock_heartbeat_at=now,
+        updated_at=now,
+    )
+    if not renewed:
+        raise ValidationError("Sync job run lease was lost.")
+    sync_job.lock_expires_at = expires_at
+    sync_job.lock_heartbeat_at = now
 
 
 def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
@@ -37,6 +96,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("Sync job is disabled.")
 
+        if _has_expired_lease(locked_job, now):
+            _recover_expired_lease(locked_job, now)
+
         cursor, _created = SyncCursor.objects.get_or_create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
@@ -52,6 +114,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         if existing:
             return existing, False
 
+        run_id = _run_id()
+        lease_expires_at = now + _lease_duration()
         acquired = SyncJob.objects.filter(
             pk=locked_job.pk,
             is_enabled=True,
@@ -60,6 +124,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
             status=SyncJob.Status.RUNNING,
             last_run_at=now,
             next_run_at=None,
+            lock_token=run_id,
+            lock_acquired_at=now,
+            lock_expires_at=lease_expires_at,
+            lock_heartbeat_at=now,
             updated_at=now,
         )
         if not acquired:
@@ -68,7 +136,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         run = SyncRun.objects.create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
-            run_id=_run_id(),
+            run_id=run_id,
             idempotency_key=idempotency_key,
             status=SyncRun.Status.RUNNING,
             started_at=now,
@@ -80,6 +148,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
     last_retry_error = ""
     while True:
         try:
+            _renew_lease(sync_job, run)
             with transaction.atomic():
                 page = adapter.fetch_page(sync_job, cursor.cursor_value)
                 records = page.get("records", [])
@@ -113,7 +182,19 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                 )
                 sync_job.status = SyncJob.Status.IDLE
                 sync_job.next_run_at = None
-                sync_job.save(update_fields=["status", "next_run_at", "updated_at"])
+                sync_job.lock_token = ""
+                sync_job.lock_expires_at = None
+                sync_job.lock_heartbeat_at = timezone.now()
+                sync_job.save(
+                    update_fields=[
+                        "status",
+                        "next_run_at",
+                        "lock_token",
+                        "lock_expires_at",
+                        "lock_heartbeat_at",
+                        "updated_at",
+                    ]
+                )
                 run.save()
                 return run, True
         except Exception as exc:
@@ -138,6 +219,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                         }
                     )
                     sync_job.next_run_at = timezone.now() + timedelta(seconds=delay_seconds)
+                    _renew_lease(sync_job, run, not_before=sync_job.next_run_at)
                     sync_job.save(update_fields=["next_run_at", "updated_at"])
                     run.save(
                         update_fields=[
@@ -167,7 +249,19 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                 )
                 sync_job.status = SyncJob.Status.FAILED
                 sync_job.next_run_at = None
-                sync_job.save(update_fields=["status", "next_run_at", "updated_at"])
+                sync_job.lock_token = ""
+                sync_job.lock_expires_at = None
+                sync_job.lock_heartbeat_at = timezone.now()
+                sync_job.save(
+                    update_fields=[
+                        "status",
+                        "next_run_at",
+                        "lock_token",
+                        "lock_expires_at",
+                        "lock_heartbeat_at",
+                        "updated_at",
+                    ]
+                )
                 run.save()
             return run, True
 

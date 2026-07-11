@@ -134,6 +134,7 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
 
 # Safe default: production credential storage stays disabled unless a provider is explicitly configured.
 INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(

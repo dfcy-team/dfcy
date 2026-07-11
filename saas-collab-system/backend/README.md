@@ -138,4 +138,6 @@ The `--pool=solo` option is recommended for Windows development.
 
 The phase 2 synchronization service is mock-only. It serializes runs per `SyncJob`, refreshes cursor and run state after a rolled-back attempt, and applies finite exponential-backoff retries.
 
-`run_sync_job()` uses a real sleep strategy by default. Tests inject a no-wait strategy so retry timing is verified without slowing the suite. A future real-platform adapter must move this boundary to Celery countdown/ETA scheduling before it can be enabled.
+Each run holds a renewable database lease. `SYNC_JOB_LEASE_SECONDS` defaults to 900 seconds and is clamped to 60-3600 seconds. A new run can recover an expired lease by marking the abandoned run `FAILED` with `LEASE_EXPIRED`; active leases still reject concurrent runs.
+
+`run_sync_job()` uses a real sleep strategy by default. Tests inject a no-wait strategy so retry timing is verified without slowing the suite. Phase 2 limits the base delay to 1-5 seconds and each calculated delay to 30 seconds. A future real-platform adapter must move this boundary to Celery countdown/ETA scheduling before it can be enabled.

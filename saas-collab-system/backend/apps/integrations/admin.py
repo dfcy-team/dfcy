@@ -31,7 +31,15 @@ class IntegrationAuditLogAdmin(admin.ModelAdmin):
 
 @admin.register(SyncJob)
 class SyncJobAdmin(admin.ModelAdmin):
-    list_display = ("tenant", "integration_config", "resource_type", "schedule_type", "status", "is_enabled")
+    list_display = (
+        "tenant",
+        "integration_config",
+        "resource_type",
+        "schedule_type",
+        "status",
+        "is_enabled",
+        "lock_expires_at",
+    )
     list_filter = ("resource_type", "schedule_type", "status", "is_enabled", "tenant")
     search_fields = ("integration_config__account_alias", "tenant__code")
 

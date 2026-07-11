@@ -1,6 +1,8 @@
 import json
+from datetime import timedelta
 
 import pytest
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
@@ -109,6 +111,28 @@ def test_sync_job_api_uses_tenant_scope_and_standard_response():
     other_response = authenticated_client(other_user).get("/api/internal/integrations/sync-jobs/")
     assert other_response.status_code == 200
     assert other_response.json()["data"] == []
+
+
+@pytest.mark.django_db
+def test_sync_job_api_limits_backoff_base_seconds():
+    tenant = Tenant.objects.create(name="Tenant", code="sync-backoff-limit")
+    user = create_user(tenant, "tech")
+    grant_integration_access(user)
+    config = create_config(tenant, user)
+
+    response = authenticated_client(user).post(
+        "/api/internal/integrations/sync-jobs/",
+        {
+            "integration_config_id": config.id,
+            "resource_type": "mock_record",
+            "schedule_type": "manual",
+            "backoff_base_seconds": 6,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["success"] is False
 
 
 @pytest.mark.django_db
@@ -380,8 +404,23 @@ def test_sync_job_rejects_different_idempotency_key_while_run_is_active():
     tenant = Tenant.objects.create(name="Tenant", code="sync-active-run")
     user = create_user(tenant, "tech")
     job = create_sync_job(tenant, user)
+    now = timezone.now()
     job.status = SyncJob.Status.RUNNING
-    job.save(update_fields=["status"])
+    job.last_run_at = now
+    job.lock_token = "active-demo-run"
+    job.lock_acquired_at = now
+    job.lock_expires_at = now + timedelta(minutes=10)
+    job.lock_heartbeat_at = now
+    job.save(
+        update_fields=[
+            "status",
+            "last_run_at",
+            "lock_token",
+            "lock_acquired_at",
+            "lock_expires_at",
+            "lock_heartbeat_at",
+        ]
+    )
     active_run = SyncRun.objects.create(
         tenant=tenant,
         sync_job=job,
@@ -399,6 +438,45 @@ def test_sync_job_rejects_different_idempotency_key_while_run_is_active():
         )
 
     assert SyncRun.objects.filter(sync_job=job).get() == active_run
+
+
+@pytest.mark.django_db
+def test_expired_sync_job_lease_fails_old_run_and_allows_recovery():
+    tenant = Tenant.objects.create(name="Tenant", code="sync-expired-lease")
+    user = create_user(tenant, "tech")
+    job = create_sync_job(tenant, user)
+    stale_at = timezone.now() - timedelta(hours=24)
+    job.status = SyncJob.Status.RUNNING
+    job.last_run_at = stale_at
+    job.save(update_fields=["status", "last_run_at"])
+    stale_run = SyncRun.objects.create(
+        tenant=tenant,
+        sync_job=job,
+        run_id="stale-demo-run",
+        idempotency_key="stale-key",
+        status=SyncRun.Status.RUNNING,
+        started_at=stale_at,
+    )
+
+    recovered_run, created = run_sync_job(
+        job,
+        adapter=MockPlatformAdapter(),
+        idempotency_key="recovery-key",
+        retry_wait=lambda _delay: None,
+    )
+    stale_run.refresh_from_db()
+    job.refresh_from_db()
+
+    assert created is True
+    assert stale_run.status == SyncRun.Status.FAILED
+    assert stale_run.error_code == "LEASE_EXPIRED"
+    assert stale_run.finished_at is not None
+    assert recovered_run.status == SyncRun.Status.SUCCESS
+    assert SyncRun.objects.filter(sync_job=job).count() == 2
+    assert job.status == SyncJob.Status.IDLE
+    assert job.lock_token == ""
+    assert job.lock_expires_at is None
+    assert job.lock_heartbeat_at is not None
 
 
 @pytest.mark.django_db

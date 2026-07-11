@@ -99,10 +99,22 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "backoff_base_seconds",
             "last_run_at",
             "next_run_at",
+            "lock_expires_at",
+            "lock_heartbeat_at",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "tenant_id", "status", "last_run_at", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "tenant_id",
+            "status",
+            "last_run_at",
+            "next_run_at",
+            "lock_expires_at",
+            "lock_heartbeat_at",
+            "created_at",
+            "updated_at",
+        )
 
     def validate_integration_config_id(self, value):
         request = self.context["request"]
@@ -113,6 +125,11 @@ class SyncJobSerializer(serializers.ModelSerializer):
     def validate_max_retry_count(self, value):
         if value > 5:
             raise serializers.ValidationError("max_retry_count cannot exceed 5 in phase 2.")
+        return value
+
+    def validate_backoff_base_seconds(self, value):
+        if not 1 <= value <= 5:
+            raise serializers.ValidationError("backoff_base_seconds must be between 1 and 5 in phase 2.")
         return value
 
 

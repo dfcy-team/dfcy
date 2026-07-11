@@ -115,6 +115,10 @@ class SyncJob(models.Model):
     backoff_base_seconds = models.PositiveIntegerField(default=1)
     last_run_at = models.DateTimeField(null=True, blank=True)
     next_run_at = models.DateTimeField(null=True, blank=True)
+    lock_token = models.CharField(max_length=80, blank=True)
+    lock_acquired_at = models.DateTimeField(null=True, blank=True)
+    lock_expires_at = models.DateTimeField(null=True, blank=True)
+    lock_heartbeat_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
