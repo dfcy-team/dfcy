@@ -1,0 +1,161 @@
+from rest_framework import serializers
+
+from .credential_service import encrypt_credentials, mask_credentials
+from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
+
+
+class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
+    credential_mask = serializers.SerializerMethodField()
+    credentials = serializers.DictField(write_only=True, required=False)
+
+    class Meta:
+        model = PlatformIntegrationConfig
+        fields = (
+            "id",
+            "tenant_id",
+            "platform",
+            "account_alias",
+            "environment",
+            "status",
+            "credential_key_version",
+            "credential_fingerprint",
+            "credential_mask",
+            "last_verified_at",
+            "created_by_id",
+            "created_at",
+            "updated_at",
+            "credentials",
+        )
+        read_only_fields = (
+            "id",
+            "tenant_id",
+            "credential_fingerprint",
+            "credential_mask",
+            "last_verified_at",
+            "created_by_id",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_credential_mask(self, obj):
+        return {"fingerprint": obj.credential_fingerprint, "key_version": obj.credential_key_version}
+
+    def validate(self, attrs):
+        environment = attrs.get("environment", getattr(self.instance, "environment", None))
+        status = attrs.get("status", getattr(self.instance, "status", PlatformIntegrationConfig.Status.DISABLED))
+        if (
+            environment == PlatformIntegrationConfig.Environment.PRODUCTION
+            and status == PlatformIntegrationConfig.Status.ACTIVE
+        ):
+            raise serializers.ValidationError(
+                {"status": "Production configs can only be disabled or pending review in phase 2."}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        credentials = validated_data.pop("credentials", {})
+        key_version = validated_data.get("credential_key_version") or "test-v1"
+        if credentials:
+            ciphertext, fingerprint = encrypt_credentials(credentials, key_version=key_version)
+            validated_data["credential_ciphertext"] = ciphertext
+            validated_data["credential_fingerprint"] = fingerprint
+            validated_data["credential_key_version"] = key_version
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop("credentials", None)
+        return super().update(instance, validated_data)
+
+
+class RotateCredentialsSerializer(serializers.Serializer):
+    credentials = serializers.DictField()
+    credential_key_version = serializers.CharField(max_length=40)
+
+
+class IntegrationAuditLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IntegrationAuditLog
+        fields = ("id", "action", "actor_id", "result", "masked_detail", "created_at")
+        read_only_fields = fields
+
+
+class SyncJobSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    integration_config_id = serializers.IntegerField()
+
+    class Meta:
+        model = SyncJob
+        fields = (
+            "id",
+            "tenant_id",
+            "integration_config_id",
+            "resource_type",
+            "schedule_type",
+            "status",
+            "is_enabled",
+            "max_retry_count",
+            "backoff_base_seconds",
+            "last_run_at",
+            "next_run_at",
+            "lock_expires_at",
+            "lock_heartbeat_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "tenant_id",
+            "status",
+            "last_run_at",
+            "next_run_at",
+            "lock_expires_at",
+            "lock_heartbeat_at",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_integration_config_id(self, value):
+        request = self.context["request"]
+        if not PlatformIntegrationConfig.objects.filter(id=value, tenant=request.user.tenant).exists():
+            raise serializers.ValidationError("Integration config does not belong to current tenant.")
+        return value
+
+    def validate_max_retry_count(self, value):
+        if value > 5:
+            raise serializers.ValidationError("max_retry_count cannot exceed 5 in phase 2.")
+        return value
+
+    def validate_backoff_base_seconds(self, value):
+        if not 1 <= value <= 5:
+            raise serializers.ValidationError("backoff_base_seconds must be between 1 and 5 in phase 2.")
+        return value
+
+
+class SyncRunSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    sync_job_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = SyncRun
+        fields = (
+            "id",
+            "tenant_id",
+            "sync_job_id",
+            "run_id",
+            "idempotency_key",
+            "status",
+            "started_at",
+            "finished_at",
+            "fetched_count",
+            "created_count",
+            "updated_count",
+            "skipped_count",
+            "failed_count",
+            "retry_count",
+            "error_code",
+            "masked_error_message",
+            "masked_log",
+        )
+        read_only_fields = fields

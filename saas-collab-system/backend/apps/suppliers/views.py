@@ -5,8 +5,21 @@ from rest_framework.exceptions import PermissionDenied
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsExternalUser
 
-from .models import SupplierShipment, SupplierTask
-from .serializers import SupplierShipmentSerializer, SupplierTaskFeedbackSerializer, SupplierTaskSerializer
+from .models import SupplierPerformanceSnapshot, SupplierShipment, SupplierTask
+from .performance_services import calculate_supplier_performance
+from .permissions import (
+    IsSupplierPerformanceCalculator,
+    IsSupplierPerformanceViewer,
+    can_access_supplier_performance,
+    get_supplier_performance_scope,
+)
+from .serializers import (
+    SupplierPerformanceCalculationSerializer,
+    SupplierPerformanceSnapshotSerializer,
+    SupplierShipmentSerializer,
+    SupplierTaskFeedbackSerializer,
+    SupplierTaskSerializer,
+)
 
 
 def _supplier_id_for_user(request):
@@ -14,6 +27,9 @@ def _supplier_id_for_user(request):
     supplier_id = getattr(profile, "supplier_id", None)
     if supplier_id is None:
         raise PermissionDenied("Supplier identity is required.")
+    requested_supplier_id = request.query_params.get("supplier_id")
+    if requested_supplier_id is not None and requested_supplier_id != str(supplier_id):
+        raise PermissionDenied("Suppliers can only access their own performance data.")
     return supplier_id
 
 
@@ -64,3 +80,62 @@ def supplier_shipment_detail(request, pk):
     supplier_id = _supplier_id_for_user(request)
     shipment = get_object_or_404(SupplierShipment, pk=pk, tenant=request.user.tenant, supplier_id=supplier_id)
     return success_response(SupplierShipmentSerializer(shipment).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsSupplierPerformanceViewer])
+def internal_performance_collection(request):
+    queryset = SupplierPerformanceSnapshot.objects.filter(tenant=request.user.tenant)
+    allowed_supplier_ids = get_supplier_performance_scope(request.user)
+    if allowed_supplier_ids is not None:
+        queryset = queryset.filter(supplier_id__in=allowed_supplier_ids)
+    return success_response(SupplierPerformanceSnapshotSerializer(queryset, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsSupplierPerformanceViewer])
+def internal_performance_detail(request, supplier_id):
+    if not can_access_supplier_performance(request.user, supplier_id):
+        raise PermissionDenied("Supplier performance is outside the authorized data scope.")
+    queryset = SupplierPerformanceSnapshot.objects.filter(
+        tenant=request.user.tenant,
+        supplier_id=supplier_id,
+    )
+    return success_response(SupplierPerformanceSnapshotSerializer(queryset, many=True).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsSupplierPerformanceCalculator])
+def internal_performance_calculate_mock(request):
+    serializer = SupplierPerformanceCalculationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    if not can_access_supplier_performance(request.user, serializer.validated_data["supplier_id"]):
+        raise PermissionDenied("Supplier performance is outside the authorized data scope.")
+    snapshot = calculate_supplier_performance(
+        tenant=request.user.tenant,
+        **serializer.validated_data,
+    )
+    return success_response(SupplierPerformanceSnapshotSerializer(snapshot).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsExternalUser])
+def external_supplier_performance(request):
+    supplier_id = _supplier_id_for_user(request)
+    snapshot = SupplierPerformanceSnapshot.objects.filter(
+        tenant=request.user.tenant,
+        supplier_id=supplier_id,
+    ).first()
+    data = SupplierPerformanceSnapshotSerializer(snapshot).data if snapshot else {}
+    return success_response(data)
+
+
+@api_view(["GET"])
+@permission_classes([IsExternalUser])
+def external_supplier_performance_history(request):
+    supplier_id = _supplier_id_for_user(request)
+    queryset = SupplierPerformanceSnapshot.objects.filter(
+        tenant=request.user.tenant,
+        supplier_id=supplier_id,
+    )
+    return success_response(SupplierPerformanceSnapshotSerializer(queryset, many=True).data)

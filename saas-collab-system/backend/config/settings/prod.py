@@ -1,4 +1,6 @@
 """Production settings."""
+import os
+
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F401,F403
@@ -29,3 +31,10 @@ if missing_database_env:
     raise ImproperlyConfigured(
         "Production MySQL configuration is incomplete. Missing: " + ", ".join(missing_database_env)
     )
+
+INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
+    "INTEGRATION_ENCRYPTION_PROVIDER",
+    "unconfigured-production",
+)
+if INTEGRATION_ENCRYPTION_PROVIDER == "test-only":
+    raise ImproperlyConfigured("The test-only integration encryption provider is forbidden in production.")

@@ -147,3 +147,116 @@ class RPATaskStepLog(models.Model):
 
     def __str__(self):
         return f"{self.task_id}:{self.step_name}"
+
+
+class RPATaskAttempt(models.Model):
+    class Status(models.TextChoices):
+        CLAIMED = "claimed", "Claimed"
+        RUNNING = "running", "Running"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+        RETRYING = "retrying", "Retrying"
+        MANUAL_REQUIRED = "manual_required", "Manual required"
+        CANCELLED = "cancelled", "Cancelled"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="rpa_task_attempts")
+    task = models.ForeignKey(RPATask, on_delete=models.CASCADE, related_name="attempts")
+    attempt_no = models.PositiveIntegerField()
+    agent = models.ForeignKey(RPAAgent, on_delete=models.PROTECT, related_name="task_attempts")
+    started_at = models.DateTimeField()
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.CLAIMED)
+    failed_step = models.CharField(max_length=120, blank=True)
+    last_success_step = models.CharField(max_length=120, blank=True)
+    masked_error = models.TextField(blank=True)
+    manual_required = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["task_id", "attempt_no"]
+        constraints = [
+            models.UniqueConstraint(fields=["task", "attempt_no"], name="uniq_rpa_task_attempt_no"),
+        ]
+
+    def __str__(self):
+        return f"{self.task_id}:{self.attempt_no}"
+
+
+class RPAEvidence(models.Model):
+    class EvidenceType(models.TextChoices):
+        SCREENSHOT = "screenshot", "Screenshot"
+        PAGE_SNAPSHOT = "page_snapshot", "Page snapshot"
+        LOG_REFERENCE = "log_reference", "Log reference"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="rpa_evidence")
+    task = models.ForeignKey(RPATask, on_delete=models.CASCADE, related_name="evidence")
+    attempt = models.ForeignKey(
+        RPATaskAttempt,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="evidence",
+    )
+    evidence_type = models.CharField(max_length=30, choices=EvidenceType.choices)
+    placeholder_url = models.CharField(max_length=255)
+    payload_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(placeholder_url__startswith="demo")
+                    | models.Q(placeholder_url__startswith="example")
+                    | models.Q(placeholder_url__startswith="local-placeholder")
+                ),
+                name="rpa_evidence_placeholder_only",
+            ),
+        ]
+
+
+class RPAAccountLock(models.Model):
+    class LockStatus(models.TextChoices):
+        HELD = "held", "Held"
+        RELEASED = "released", "Released"
+        EXPIRED = "expired", "Expired"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="rpa_account_locks")
+    platform = models.CharField(max_length=40)
+    account_alias = models.CharField(max_length=120)
+    task = models.ForeignKey(RPATask, on_delete=models.CASCADE, related_name="account_locks")
+    lock_status = models.CharField(max_length=20, choices=LockStatus.choices, default=LockStatus.HELD)
+    acquired_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    released_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["tenant_id", "platform", "account_alias", "-acquired_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "platform", "account_alias"],
+                condition=models.Q(lock_status="held"),
+                name="uniq_held_rpa_platform_account",
+            ),
+        ]
+
+
+class RPAPageSignature(models.Model):
+    class DetectedStatus(models.TextChoices):
+        STABLE = "stable", "Stable"
+        CHANGED = "changed", "Changed"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="rpa_page_signatures")
+    platform = models.CharField(max_length=40)
+    page_type = models.CharField(max_length=80)
+    signature_hash = models.CharField(max_length=128)
+    detected_status = models.CharField(
+        max_length=20,
+        choices=DetectedStatus.choices,
+        default=DetectedStatus.STABLE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["tenant_id", "platform", "page_type", "-created_at"]
