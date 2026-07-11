@@ -1,5 +1,26 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "alerts.view",
+        "name": "View operational alerts",
+        "module": "alerts",
+        "action": "view",
+        "description": "View tenant and data-scope filtered operational alerts.",
+    },
+    {
+        "code": "alerts.evaluate",
+        "name": "Evaluate operational alerts",
+        "module": "alerts",
+        "action": "evaluate",
+        "description": "Run mock tenant-scoped inventory alert evaluations.",
+    },
+    {
+        "code": "alerts.manage",
+        "name": "Manage operational alerts",
+        "module": "alerts",
+        "action": "manage",
+        "description": "Assign, silence, handle, and close tenant-scoped operational alerts.",
+    },
+    {
         "code": "analytics.view",
         "name": "View analytics",
         "module": "analytics",
