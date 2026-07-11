@@ -103,3 +103,135 @@ class ProductSKU(models.Model):
 
     def __str__(self):
         return self.sku_code
+
+
+class ProductStatus(models.TextChoices):
+    NEW = "new", "New"
+    ACTIVE = "active", "Active"
+    SLOW_MOVING = "slow_moving", "Slow moving"
+    CLEARANCE_CANDIDATE = "clearance_candidate", "Clearance candidate"
+    CLEARANCE = "clearance", "Clearance"
+    STOPPED = "stopped", "Stopped"
+    ARCHIVED = "archived", "Archived"
+
+
+class ProductStatusSnapshot(models.Model):
+    class Source(models.TextChoices):
+        API = "api", "API"
+        RPA_READBACK = "rpa_readback", "RPA readback"
+        MANUAL = "manual", "Manual"
+        SYSTEM_RULE = "system_rule", "System rule"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_status_snapshots")
+    spu = models.ForeignKey(ProductSPU, on_delete=models.CASCADE, related_name="status_snapshots", null=True, blank=True)
+    sku = models.ForeignKey(ProductSKU, on_delete=models.CASCADE, related_name="status_snapshots", null=True, blank=True)
+    source = models.CharField(max_length=30, choices=Source.choices)
+    source_reference = models.CharField(max_length=120, blank=True)
+    metrics_payload = models.JSONField(default=dict, blank=True)
+    calculated_status = models.CharField(max_length=40, choices=ProductStatus.choices)
+    calculated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["tenant_id", "-calculated_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "source"], name="idx_product_snapshot_source"),
+            models.Index(fields=["tenant", "calculated_status"], name="idx_product_snapshot_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.calculated_status}:{self.source}"
+
+
+class ProductStatusRecommendation(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        REJECTED = "rejected", "Rejected"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_status_recommendations")
+    spu = models.ForeignKey(
+        ProductSPU,
+        on_delete=models.CASCADE,
+        related_name="status_recommendations",
+        null=True,
+        blank=True,
+    )
+    sku = models.ForeignKey(
+        ProductSKU,
+        on_delete=models.CASCADE,
+        related_name="status_recommendations",
+        null=True,
+        blank=True,
+    )
+    recommended_status = models.CharField(max_length=40, choices=ProductStatus.choices)
+    reason_code = models.CharField(max_length=80)
+    reason_detail = models.TextField(blank=True)
+    confidence = models.DecimalField(max_digits=5, decimal_places=4, default=0)
+    source_snapshot = models.ForeignKey(
+        ProductStatusSnapshot,
+        on_delete=models.PROTECT,
+        related_name="recommendations",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="confirmed_product_status_recommendations",
+        null=True,
+        blank=True,
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["tenant_id", "-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_product_reco_status"),
+            models.Index(fields=["tenant", "recommended_status"], name="idx_product_reco_target"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.recommended_status}:{self.status}"
+
+
+class ProductStatusTransition(models.Model):
+    class TriggerType(models.TextChoices):
+        MANUAL_CONFIRM = "manual_confirm", "Manual confirm"
+        MANUAL_REJECT = "manual_reject", "Manual reject"
+        SYSTEM_RULE = "system_rule", "System rule"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_status_transitions")
+    spu = models.ForeignKey(ProductSPU, on_delete=models.CASCADE, related_name="status_transitions", null=True, blank=True)
+    sku = models.ForeignKey(ProductSKU, on_delete=models.CASCADE, related_name="status_transitions", null=True, blank=True)
+    from_status = models.CharField(max_length=40, choices=ProductStatus.choices)
+    to_status = models.CharField(max_length=40, choices=ProductStatus.choices)
+    trigger_type = models.CharField(max_length=30, choices=TriggerType.choices)
+    recommendation = models.ForeignKey(
+        ProductStatusRecommendation,
+        on_delete=models.PROTECT,
+        related_name="transitions",
+        null=True,
+        blank=True,
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="approved_product_status_transitions",
+    )
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["tenant_id", "-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recommendation"],
+                name="uniq_product_status_transition_recommendation",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "from_status", "to_status"], name="idx_product_transition_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.from_status}->{self.to_status}"

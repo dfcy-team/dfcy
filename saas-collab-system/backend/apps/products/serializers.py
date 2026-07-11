@@ -1,6 +1,13 @@
 from rest_framework import serializers
 
-from .models import ProductResearch, ProductSKU, ProductSPU
+from .models import (
+    ProductResearch,
+    ProductSKU,
+    ProductSPU,
+    ProductStatusRecommendation,
+    ProductStatusSnapshot,
+    ProductStatusTransition,
+)
 
 
 class ProductResearchSerializer(serializers.ModelSerializer):
@@ -85,3 +92,69 @@ class ProductSKUSerializer(serializers.ModelSerializer):
         if instance and instance.is_code_frozen and "sku_code" in attrs and attrs["sku_code"] != instance.sku_code:
             raise serializers.ValidationError({"sku_code": "Code is frozen and cannot be changed."})
         return attrs
+
+
+class ProductStatusSnapshotSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+
+    class Meta:
+        model = ProductStatusSnapshot
+        fields = (
+            "id",
+            "tenant_id",
+            "spu",
+            "sku",
+            "source",
+            "source_reference",
+            "metrics_payload",
+            "calculated_status",
+            "calculated_at",
+        )
+        read_only_fields = fields
+
+
+class ProductStatusRecommendationSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    source_snapshot = ProductStatusSnapshotSerializer(read_only=True)
+    confirmed_by_id = serializers.IntegerField(source="confirmed_by.id", read_only=True)
+
+    class Meta:
+        model = ProductStatusRecommendation
+        fields = (
+            "id",
+            "tenant_id",
+            "spu",
+            "sku",
+            "recommended_status",
+            "reason_code",
+            "reason_detail",
+            "confidence",
+            "source_snapshot",
+            "status",
+            "created_at",
+            "confirmed_by_id",
+            "confirmed_at",
+        )
+        read_only_fields = fields
+
+
+class ProductStatusTransitionSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    approved_by_id = serializers.IntegerField(source="approved_by.id", read_only=True)
+
+    class Meta:
+        model = ProductStatusTransition
+        fields = (
+            "id",
+            "tenant_id",
+            "spu",
+            "sku",
+            "from_status",
+            "to_status",
+            "trigger_type",
+            "recommendation",
+            "approved_by_id",
+            "reason",
+            "created_at",
+        )
+        read_only_fields = fields
