@@ -1,9 +1,10 @@
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.decorators import api_view, permission_classes
 
 from apps.accounts.models import CustomUser
+from apps.common.data_scope import custom_scope_allows, custom_scope_allows_product
 from apps.common.responses import success_response
 from apps.products.models import ProductSKU, ProductSPU
 
@@ -84,6 +85,13 @@ def inventory_alert_evaluate_mock(request):
     spu_id = values.pop("spu_id", None)
     sku = get_object_or_404(ProductSKU, pk=sku_id, tenant=request.user.tenant) if sku_id else None
     spu = get_object_or_404(ProductSPU, pk=spu_id, tenant=request.user.tenant) if spu_id else None
+    if not custom_scope_allows_product(
+        request.user,
+        sku=sku,
+        spu=spu,
+        extra_constraints={"warehouse_codes": values.get("warehouse_code", "")},
+    ):
+        raise PermissionDenied("Inventory alert target is outside the authorized data scope.")
     alert, created = evaluate_inventory_alert(tenant=request.user.tenant, rule=rule, sku=sku, spu=spu, **values)
     data = {"alert": InventoryAlertSerializer(alert).data if alert else None, "created": created, "mode": "mock"}
     return success_response(data, status=201 if created else 200)
@@ -176,6 +184,14 @@ def business_alert_evaluate_mock(request):
     serializer.is_valid(raise_exception=True)
     values = serializer.validated_data
     rule = get_object_or_404(BusinessAlertRule, pk=values.pop("rule_id"), tenant=request.user.tenant)
+    if not custom_scope_allows(
+        request.user,
+        {
+            "business_types": values["business_type"],
+            "business_ids": values["business_id"],
+        },
+    ):
+        raise PermissionDenied("Business alert target is outside the authorized data scope.")
     alert, created = evaluate_business_alert(tenant=request.user.tenant, rule=rule, **values)
     return success_response(
         {"alert": BusinessAlertSerializer(alert).data if alert else None, "created": created, "mode": "mock"},

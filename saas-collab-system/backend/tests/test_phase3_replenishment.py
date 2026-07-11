@@ -167,7 +167,7 @@ def test_replenishment_api_tenant_scope_and_action_permissions():
     evaluator = create_user(tenant, "evaluator")
     reviewer = create_user(tenant, "reviewer-api")
     grant(viewer, "replenishment.view", DataScope.ScopeType.CUSTOM, {"sku_ids": [sku.id]})
-    grant(evaluator, "replenishment.evaluate")
+    grant(evaluator, "replenishment.evaluate", DataScope.ScopeType.CUSTOM, {"sku_ids": [sku.id]})
     grant(reviewer, "replenishment.review")
 
     response = client_for(viewer).get("/api/internal/replenishment/recommendations/")
@@ -180,6 +180,13 @@ def test_replenishment_api_tenant_scope_and_action_permissions():
     }
     assert client_for(viewer).post("/api/internal/replenishment/evaluate-mock/", payload, format="json").status_code == 403
     assert client_for(evaluator).post("/api/internal/replenishment/evaluate-mock/", payload, format="json").status_code == 201
+    before_count = ReplenishmentRecommendation.objects.count()
+    assert client_for(evaluator).post(
+        "/api/internal/replenishment/evaluate-mock/",
+        {**payload, "sku_id": hidden_sku.id, "available_stock": "12.0000"},
+        format="json",
+    ).status_code == 403
+    assert ReplenishmentRecommendation.objects.count() == before_count
     assert client_for(reviewer).post(
         f"/api/internal/replenishment/recommendations/{visible.id}/accept/",
         {"reason": "Reviewed only"}, format="json",

@@ -203,7 +203,7 @@ def test_lifecycle_api_tenant_scope_and_permissions():
     evaluator = create_user(tenant, "evaluator")
     confirmer = create_user(tenant, "confirmer")
     grant(viewer, "products.lifecycle.view", DataScope.ScopeType.CUSTOM, {"sku_ids": [sku.id]})
-    grant(evaluator, "products.lifecycle.evaluate")
+    grant(evaluator, "products.lifecycle.evaluate", DataScope.ScopeType.CUSTOM, {"sku_ids": [sku.id]})
     grant(confirmer, "products.lifecycle.confirm")
 
     response = client_for(viewer).get("/api/internal/lifecycle/reviews/")
@@ -222,6 +222,13 @@ def test_lifecycle_api_tenant_scope_and_permissions():
     }
     assert client_for(viewer).post("/api/internal/lifecycle/evaluate-mock/", payload, format="json").status_code == 403
     assert client_for(evaluator).post("/api/internal/lifecycle/evaluate-mock/", payload, format="json").status_code == 201
+    before_count = ProductLifecycleReview.objects.count()
+    assert client_for(evaluator).post(
+        "/api/internal/lifecycle/evaluate-mock/",
+        {**payload, "sku_id": hidden_sku.id},
+        format="json",
+    ).status_code == 403
+    assert ProductLifecycleReview.objects.count() == before_count
     assert client_for(confirmer).post(
         f"/api/internal/lifecycle/reviews/{visible.id}/confirm/", {"reason": "Reviewed"}, format="json"
     ).status_code == 200

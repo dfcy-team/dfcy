@@ -174,7 +174,12 @@ def test_inventory_alert_api_tenant_data_scope_and_action_permissions():
         DataScope.ScopeType.CUSTOM,
         {"sku_ids": [sku.id], "warehouse_codes": ["DEMO-WH"]},
     )
-    grant(evaluator, "alerts.evaluate")
+    grant(
+        evaluator,
+        "alerts.evaluate",
+        DataScope.ScopeType.CUSTOM,
+        {"sku_ids": [sku.id], "warehouse_codes": ["DEMO-WH"]},
+    )
     grant(manager, "alerts.manage")
     payload = {
         "rule_id": rule.id, "sku_id": sku.id, "warehouse_code": "DEMO-WH",
@@ -187,6 +192,12 @@ def test_inventory_alert_api_tenant_data_scope_and_action_permissions():
     assert response.json()["data"]["pagination"]["total"] == 1
     assert client_for(viewer).post("/api/internal/alerts/inventory/evaluate-mock/", payload, format="json").status_code == 403
     assert client_for(evaluator).post("/api/internal/alerts/inventory/evaluate-mock/", payload, format="json").status_code == 200
+    before_count = InventoryAlert.objects.count()
+    blocked_payload = {**payload, "sku_id": hidden_sku.id, "warehouse_code": "HIDDEN"}
+    assert client_for(evaluator).post(
+        "/api/internal/alerts/inventory/evaluate-mock/", blocked_payload, format="json"
+    ).status_code == 403
+    assert InventoryAlert.objects.count() == before_count
     assert client_for(manager).post(
         f"/api/internal/alerts/inventory/{visible.id}/close/", {"reason": "Reviewed"}, format="json"
     ).status_code == 200

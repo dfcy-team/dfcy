@@ -1,8 +1,9 @@
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied
 
+from apps.common.data_scope import custom_scope_allows_product
 from apps.common.responses import success_response
 from apps.products.models import ProductSKU, ProductSPU
 
@@ -59,6 +60,8 @@ def evaluate_mock(request):
     spu_id = values.pop("spu_id", None)
     sku = get_object_or_404(ProductSKU, pk=sku_id, tenant=request.user.tenant) if sku_id else None
     spu = get_object_or_404(ProductSPU, pk=spu_id, tenant=request.user.tenant) if spu_id else None
+    if not custom_scope_allows_product(request.user, sku=sku, spu=spu):
+        raise PermissionDenied("Replenishment target is outside the authorized data scope.")
     recommendation = evaluate_replenishment(tenant=request.user.tenant, sku=sku, spu=spu, **values)
     return success_response({"recommendation": ReplenishmentRecommendationSerializer(recommendation).data, "mode": "mock"}, status=201)
 

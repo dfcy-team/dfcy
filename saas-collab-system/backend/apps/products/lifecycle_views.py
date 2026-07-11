@@ -1,8 +1,9 @@
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied
 
+from apps.common.data_scope import custom_scope_allows_product
 from apps.common.responses import success_response
 
 from .lifecycle_services import decide_lifecycle_review, evaluate_lifecycle_review
@@ -69,6 +70,8 @@ def evaluate_mock(request):
     sku_id = values.pop("sku_id", None)
     spu = get_object_or_404(ProductSPU, pk=spu_id, tenant=request.user.tenant) if spu_id else None
     sku = get_object_or_404(ProductSKU, pk=sku_id, tenant=request.user.tenant) if sku_id else None
+    if not custom_scope_allows_product(request.user, sku=sku, spu=spu):
+        raise PermissionDenied("Lifecycle target is outside the authorized data scope.")
     review = evaluate_lifecycle_review(
         tenant=request.user.tenant,
         spu=spu,

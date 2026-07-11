@@ -207,7 +207,12 @@ def test_business_alert_api_tenant_scope_permissions_and_masking():
     evaluator = create_user(tenant, "evaluator")
     manager = create_user(tenant, "manager-api")
     grant(viewer, "alerts.view", DataScope.ScopeType.CUSTOM, {"business_ids": ["visible"]})
-    grant(evaluator, "alerts.evaluate")
+    grant(
+        evaluator,
+        "alerts.evaluate",
+        DataScope.ScopeType.CUSTOM,
+        {"business_types": ["demo_product"], "business_ids": ["api"]},
+    )
     grant(manager, "alerts.manage")
 
     response = client_for(viewer).get("/api/internal/alerts/business/")
@@ -220,6 +225,13 @@ def test_business_alert_api_tenant_scope_permissions_and_masking():
     }
     assert client_for(viewer).post("/api/internal/alerts/business/evaluate-mock/", payload, format="json").status_code == 403
     assert client_for(evaluator).post("/api/internal/alerts/business/evaluate-mock/", payload, format="json").status_code == 201
+    before_count = BusinessAlert.objects.count()
+    assert client_for(evaluator).post(
+        "/api/internal/alerts/business/evaluate-mock/",
+        {**payload, "business_id": "hidden"},
+        format="json",
+    ).status_code == 403
+    assert BusinessAlert.objects.count() == before_count
     assert client_for(manager).post(
         f"/api/internal/alerts/business/{visible.id}/close/", {"note": "Reviewed"}, format="json"
     ).status_code == 200
