@@ -1,5 +1,7 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404
 from rest_framework import exceptions, status
+from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
 from .error_codes import ErrorCode
@@ -15,7 +17,23 @@ ERROR_CODE_BY_EXCEPTION = {
 }
 
 
+class BusinessRuleViolation(exceptions.APIException):
+    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    default_detail = "Business rule validation failed."
+    default_code = ErrorCode.BUSINESS_RULE_VIOLATION
+
+
+class StateConflict(exceptions.APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "The requested operation conflicts with the current state."
+    default_code = ErrorCode.STATE_CONFLICT
+
+
 def _get_error_code(exc, response):
+    if isinstance(exc, BusinessRuleViolation):
+        return ErrorCode.BUSINESS_RULE_VIOLATION
+    if isinstance(exc, StateConflict):
+        return ErrorCode.STATE_CONFLICT
     for exception_class, code in ERROR_CODE_BY_EXCEPTION.items():
         if isinstance(exc, exception_class):
             return code
@@ -31,6 +49,10 @@ def _get_error_code(exc, response):
         return ErrorCode.NOT_FOUND
     if response.status_code == status.HTTP_400_BAD_REQUEST:
         return ErrorCode.VALIDATION_ERROR
+    if response.status_code == status.HTTP_409_CONFLICT:
+        return ErrorCode.STATE_CONFLICT
+    if response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
+        return ErrorCode.BUSINESS_RULE_VIOLATION
     if response.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         return ErrorCode.INTERNAL_ERROR
     return ErrorCode.INTERNAL_ERROR
@@ -48,6 +70,18 @@ def _get_message(response):
 
 
 def custom_exception_handler(exc, context):
+    if isinstance(exc, DjangoValidationError):
+        original_data = getattr(exc, "message_dict", None) or {"detail": exc.messages}
+        return Response(
+            {
+                "success": False,
+                "code": ErrorCode.BUSINESS_RULE_VIOLATION,
+                "message": "Business rule validation failed.",
+                "data": original_data,
+            },
+            status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
     response = exception_handler(exc, context)
     if response is None:
         return response

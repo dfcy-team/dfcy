@@ -13,11 +13,17 @@ from .views import (
     run_mock_reconciliation_view,
     statement_collection,
     withdrawal_collection,
+    finance_analytics_exceptions,
+    finance_analytics_overview,
+    finance_analytics_reconciliation,
 )
 
 
 urlpatterns = [
     path("health/", health, name="finance-health"),
+    path("analytics/overview/", finance_analytics_overview, name="finance-analytics-overview"),
+    path("analytics/reconciliation/", finance_analytics_reconciliation, name="finance-analytics-reconciliation"),
+    path("analytics/exceptions/", finance_analytics_exceptions, name="finance-analytics-exceptions"),
     path("statements/", statement_collection, name="finance-statement-collection"),
     path("statements/import-demo/", import_demo_statement_view, name="finance-statement-import-demo"),
     path("withdrawals/", withdrawal_collection, name="finance-withdrawal-collection"),

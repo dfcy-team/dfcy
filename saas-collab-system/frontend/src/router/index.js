@@ -2,6 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router';
 const MainLayout = () => import('../layouts/MainLayout.vue');
 const Login = () => import('../views/auth/Login.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
+const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
+const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
+const InventoryAlertList = () => import('../views/inventory/InventoryAlertList.vue');
+const ReplenishmentSuggestionList = () => import('../views/inventory/ReplenishmentSuggestionList.vue');
+const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList.vue');
+const LifecycleReviewHistory = () => import('../views/lifecycle/LifecycleReviewHistory.vue');
+const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
@@ -50,10 +57,14 @@ const BankReceiptList = () => import('../views/finance/BankReceiptList.vue');
 const ReconciliationMatchList = () => import('../views/finance/ReconciliationMatchList.vue');
 const ReconciliationMatchDetail = () => import('../views/finance/ReconciliationMatchDetail.vue');
 const ReconciliationExceptionList = () => import('../views/finance/ReconciliationExceptionList.vue');
+const FinanceAnalyticsOverview = () => import('../views/finance/FinanceAnalyticsOverview.vue');
 const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
+const ReportExportCenter = () => import('../views/reports/ReportExportCenter.vue');
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
+const ConfigCenterList = () => import('../views/settings/ConfigCenterList.vue');
+const ConfigVersionHistory = () => import('../views/settings/ConfigVersionHistory.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -62,6 +73,13 @@ const routes = [
     component: MainLayout,
     children: [
       { path: '', component: Dashboard },
+      { path: 'analytics/sales', component: SalesAnalysis },
+      { path: 'analytics/inventory', component: InventoryAnalysis },
+      { path: 'inventory/alerts', component: InventoryAlertList },
+      { path: 'inventory/replenishment', component: ReplenishmentSuggestionList },
+      { path: 'lifecycle/reviews', component: LifecycleReviewList },
+      { path: 'lifecycle/history', component: LifecycleReviewHistory },
+      { path: 'alerts/business', component: BusinessAlertList },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },
@@ -109,10 +127,14 @@ const routes = [
       { path: 'finance/reconciliation/matches', component: ReconciliationMatchList },
       { path: 'finance/reconciliation/matches/:id', component: ReconciliationMatchDetail },
       { path: 'finance/reconciliation/exceptions', component: ReconciliationExceptionList },
+      { path: 'finance/analytics', component: FinanceAnalyticsOverview },
       { path: 'reports/basic', component: BasicReportIndex },
+      { path: 'reports/exports', component: ReportExportCenter },
       { path: 'settings/platform-risk', component: PlatformAccessRisk },
       { path: 'settings/platform-readiness', component: PlatformIntegrationReadiness },
       { path: 'settings/security-review', component: SecurityReviewChecklist },
+      { path: 'settings/config-center', component: ConfigCenterList },
+      { path: 'settings/config-versions', component: ConfigVersionHistory },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

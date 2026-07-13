@@ -47,6 +47,10 @@ INSTALLED_APPS = [
     "apps.purchasing",
     "apps.suppliers",
     "apps.finance",
+    "apps.reports",
+    "apps.alerts",
+    "apps.replenishment",
+    "apps.configcenter",
     "apps.common",
 ]
 
