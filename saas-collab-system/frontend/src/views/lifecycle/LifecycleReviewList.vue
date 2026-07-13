@@ -16,23 +16,24 @@
 
 <script setup>
 import Phase3DecisionPage from '../../components/Phase3DecisionPage.vue';
-import { fetchLifecycleReviews } from '../../api/lifecycle';
+import { confirmLifecycleReview, fetchLifecycleReviews, rejectLifecycleReview } from '../../api/lifecycle';
 
 const filters = [
   { key: 'suggested_stage', label: '建议阶段', options: [{ label: '滞销观察期', value: 'slow_observation' }, { label: '清仓候选', value: 'clearance_candidate' }, { label: '停售', value: 'stopped' }, { label: '归档', value: 'archived' }] },
   { key: 'period', label: '复盘周期', options: [{ label: '周', value: 'week' }, { label: '月', value: 'month' }] }
 ];
 const columns = [
-  { prop: 'review_id', label: '复盘编号', width: 150 }, { prop: 'spu_code', label: 'SPU', width: 140 }, { prop: 'product_name', label: '商品', width: 160 },
+  { prop: 'id', label: '复盘编号', width: 150 }, { prop: 'spu', label: 'SPU', width: 140 },
   { prop: 'current_stage', label: '当前阶段', width: 130 }, { prop: 'suggested_stage', label: '建议阶段', width: 130 },
   { prop: 'confidence', label: '置信度', type: 'confidence', width: 150 }, { prop: 'rule_version', label: '规则版本', width: 130 }, { prop: 'status', label: '状态', type: 'status' }
 ];
 const rowActions = [
   { label: '查看证据', mode: 'detail' },
-  { label: '人工确认', confirmMessage: '清仓、停售、归档等建议属于高风险决策。当前操作仅为流程占位，不会改变商品状态。', message: '生命周期确认接口尚未提供，当前保持 pending。' }
+  { label: '人工确认建议', confirmMessage: '后端会校验授权和高风险权限；该操作只记录生命周期决策，不会直接改价、下架或改变商品状态。', execute: (row) => confirmLifecycleReview(row.id, { reason: 'Human lifecycle review confirmed.' }) },
+  { label: '人工拒绝建议', type: 'danger', confirmMessage: '该操作仅记录人工决策，不会触发任何商品自动化动作。', execute: (row) => rejectLifecycleReview(row.id, { reason: 'Human lifecycle review rejected.' }) }
 ];
 const detailFields = [
-  { prop: 'review_id', label: '复盘编号' }, { prop: 'reason', label: '建议原因' }, { prop: 'review_period', label: '复盘周期' },
-  { prop: 'rule_version', label: '规则版本' }, { prop: 'evidence', label: '分析证据', type: 'json' }
+  { prop: 'id', label: '复盘编号' }, { prop: 'reason_detail', label: '建议原因' }, { prop: 'review_period_start', label: '复盘开始' },
+  { prop: 'review_period_end', label: '复盘结束' }, { prop: 'source_metrics', label: '分析证据', type: 'json' }
 ];
 </script>

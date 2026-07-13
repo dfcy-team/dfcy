@@ -106,6 +106,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import { formatApiError } from '../api/request';
 
 const props = defineProps({
   eyebrow: { type: String, default: 'Phase 3' },
@@ -189,7 +190,15 @@ async function loadData() {
   errorMessage.value = '';
   try {
     const response = await props.loader({ ...query });
-    if (!response?.success) throw new Error(response?.message || '加载失败');
+    if (!response?.success) {
+      apiStatus.value = 'pending';
+      errorMessage.value = formatApiError(response);
+      quality.value = {};
+      metrics.value = [];
+      trend.value = [];
+      items.value = [];
+      return;
+    }
     const data = response.data || {};
     apiStatus.value = data.api_status || data.status || 'mock';
     quality.value = data.quality || {};
@@ -199,7 +208,7 @@ async function loadData() {
     if (data.api_status === 'fallback') errorMessage.value = response.message || data.api_error || '接口异常，已显示 Mock 数据';
   } catch (error) {
     apiStatus.value = 'pending';
-    errorMessage.value = error?.message || '加载失败';
+    errorMessage.value = formatApiError(error?.response || { message: error?.message });
     quality.value = {};
     metrics.value = [];
     trend.value = [];

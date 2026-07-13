@@ -4,7 +4,7 @@
     title="生命周期复盘历史"
     subtitle="追踪复盘建议、人工结论和审计证据。"
     boundary-note="历史记录仅用于审计展示，不提供商品状态回滚或自动执行入口。"
-    :loader="fetchLifecycleHistory"
+    :loader="fetchLifecycleDecisions"
     :filters="filters"
     :columns="columns"
     :row-actions="rowActions"
@@ -16,7 +16,7 @@
 
 <script setup>
 import Phase3DecisionPage from '../../components/Phase3DecisionPage.vue';
-import { fetchLifecycleHistory } from '../../api/lifecycle';
+import { fetchLifecycleDecisions } from '../../api/lifecycle';
 
 const filters = [
   { key: 'decision', label: '结论', options: [{ label: '已确认', value: 'confirmed' }, { label: '已拒绝', value: 'rejected' }] },

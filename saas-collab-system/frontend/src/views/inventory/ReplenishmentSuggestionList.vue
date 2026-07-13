@@ -4,7 +4,7 @@
     title="补货建议"
     subtitle="复核建议数量、日期、置信度与计算原因。"
     boundary-note="确认按钮仅为人工流程占位，不会生成采购订单、通知供应商或触发 RPA。"
-    :loader="fetchReplenishmentSuggestions"
+    :loader="fetchReplenishmentRecommendations"
     :filters="filters"
     :columns="columns"
     :row-actions="rowActions"
@@ -16,22 +16,23 @@
 
 <script setup>
 import Phase3DecisionPage from '../../components/Phase3DecisionPage.vue';
-import { fetchReplenishmentSuggestions } from '../../api/replenishment';
+import { acceptReplenishmentRecommendation, fetchReplenishmentRecommendations, rejectReplenishmentRecommendation } from '../../api/replenishment';
 
 const filters = [
   { key: 'status', label: '状态', options: [{ label: '待复核', value: 'pending' }, { label: '已确认', value: 'confirmed' }] },
   { key: 'confidence', label: '置信度', options: [{ label: '高', value: 'high' }, { label: '中', value: 'medium' }, { label: '低', value: 'low' }] }
 ];
 const columns = [
-  { prop: 'suggestion_id', label: '建议编号', width: 150 }, { prop: 'sku_code', label: 'SKU', width: 140 }, { prop: 'warehouse', label: '仓库', width: 140 },
+  { prop: 'id', label: '建议编号', width: 150 }, { prop: 'sku', label: 'SKU', width: 140 },
   { prop: 'suggested_quantity', label: '建议数量' }, { prop: 'suggested_date', label: '建议日期', width: 130 },
   { prop: 'confidence', label: '置信度', type: 'confidence', width: 150 }, { prop: 'reason', label: '原因', width: 220 }, { prop: 'status', label: '状态', type: 'status' }
 ];
 const rowActions = [
   { label: '查看证据', mode: 'detail' },
-  { label: '人工确认', confirmMessage: '该操作仅记录阶段3占位提示，不会创建采购订单。', message: '人工确认接口尚未提供，当前保持 pending。' }
+  { label: '人工接受建议', confirmMessage: '仅记录人工审核结果，不会创建采购订单、通知供应商或触发 RPA。', execute: (row) => acceptReplenishmentRecommendation(row.id, { reason: 'Human review accepted recommendation.' }) },
+  { label: '人工拒绝建议', type: 'danger', confirmMessage: '仅记录人工审核结果，不会触发任何采购或自动化动作。', execute: (row) => rejectReplenishmentRecommendation(row.id, { reason: 'Human review rejected recommendation.' }) }
 ];
 const detailFields = [
-  { prop: 'suggestion_id', label: '建议编号' }, { prop: 'reason', label: '建议原因' }, { prop: 'confidence', label: '置信度' }, { prop: 'evidence', label: '计算证据', type: 'json' }
+  { prop: 'id', label: '建议编号' }, { prop: 'reason_detail', label: '建议原因' }, { prop: 'confidence', label: '置信度' }, { prop: 'source_summary', label: '计算证据', type: 'json' }
 ];
 </script>

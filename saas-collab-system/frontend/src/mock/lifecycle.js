@@ -20,7 +20,7 @@ export const mockLifecycleReviews = () => successResponse({
   ]
 });
 
-export const mockLifecycleHistory = () => successResponse({
+export const mockLifecycleDecisions = () => successResponse({
   status: 'mock', api_status: 'mock',
   summary: [
     { label: '本月复盘', value: 38 }, { label: '已确认', value: 12 }, { label: '已拒绝', value: 4 }, { label: '保持观察', value: 22 }

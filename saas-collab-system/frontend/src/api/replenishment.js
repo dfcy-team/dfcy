@@ -1,16 +1,14 @@
-import { requestWithMockFallback } from './request';
-import { mockInventoryAlerts, mockReplenishmentSuggestions } from '../mock/replenishment';
+import { requestApi, requestWithMockFallback } from './request';
+import { mockReplenishmentRecommendations } from '../mock/replenishment';
 
-export const fetchInventoryAlerts = (params = {}) =>
-  requestWithMockFallback(
-    { method: 'get', url: '/api/internal/alerts/inventory/', params },
-    mockInventoryAlerts,
-    'replenishment.alerts'
-  );
-
-export const fetchReplenishmentSuggestions = (params = {}) =>
+export const fetchReplenishmentRecommendations = (params = {}) =>
   requestWithMockFallback(
     { method: 'get', url: '/api/internal/replenishment/recommendations/', params },
-    mockReplenishmentSuggestions,
-    'replenishment.suggestions'
+    mockReplenishmentRecommendations,
+    'replenishment.recommendations'
   );
+
+export const fetchReplenishmentRecommendation = (id) => requestApi({ method: 'get', url: `/api/internal/replenishment/recommendations/${id}/` });
+export const evaluateReplenishmentMock = (payload) => requestApi({ method: 'post', url: '/api/internal/replenishment/evaluate-mock/', data: payload });
+export const acceptReplenishmentRecommendation = (id, payload) => requestApi({ method: 'post', url: `/api/internal/replenishment/recommendations/${id}/accept/`, data: payload });
+export const rejectReplenishmentRecommendation = (id, payload) => requestApi({ method: 'post', url: `/api/internal/replenishment/recommendations/${id}/reject/`, data: payload });

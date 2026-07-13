@@ -20,7 +20,7 @@ export const mockInventoryAlerts = () => successResponse({
   ]
 });
 
-export const mockReplenishmentSuggestions = () => successResponse({
+export const mockReplenishmentRecommendations = () => successResponse({
   status: 'mock', api_status: 'mock',
   summary: [
     { label: '待复核建议', value: 8 }, { label: '高置信度', value: 5 }, { label: '需补充数据', value: 2 }, { label: '已人工确认', value: 0 }

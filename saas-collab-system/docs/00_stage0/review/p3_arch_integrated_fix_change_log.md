@@ -17,6 +17,9 @@ This controlled integration branch preserves the Development A and Development B
 - Updated shared Phase 3 pages to parse `data.results` while retaining Mock fallback support.
 - Added endpoint and frontend static contract coverage.
 - Added Phase 3 error-contract handling: malformed request validation remains `400`, authentication and authorization remain `401` and `403`, hidden resources remain `404`, repeated state actions return `409`, and business-rule validation returns `422`.
+- Aligned frontend API modules with the final analytics, alerts, replenishment, lifecycle, configuration, finance analytics, and report-export resources.
+- Preserved real API error envelopes instead of presenting authorization, visibility, conflict, or business-rule failures as Mock data; only verified successful API responses are marked `connected`.
+- Kept Mock, pending, and fallback data out of human action submissions. Replenishment and lifecycle actions only submit human review records after a verified backend list response.
 
 ## Safety Confirmation
 
@@ -35,3 +38,5 @@ This controlled integration branch preserves the Development A and Development B
 The full backend suite (245 tests), migration consistency check, Docker Compose parse, frontend tests (31), and frontend production build completed successfully. The standalone `check_phase3_data_quality` command was not run against a migrated local database because this machine's temporary SQLite file has no Phase 3 tables; no local migration or business data was created to manufacture evidence. The Docker parse used no local `.env`, so Compose emitted expected blank-placeholder warnings and did not connect to any service.
 
 The backend error-contract regression set covers the six required HTTP outcomes (`400`, `401`, `403`, `404`, `409`, and `422`) and validates the unified error envelope.
+
+Frontend validation completed with 33 Vitest assertions and a production Vite build. The build emitted the existing non-blocking Rollup `#__PURE__` placement warnings from a dependency; no output assets were tracked.

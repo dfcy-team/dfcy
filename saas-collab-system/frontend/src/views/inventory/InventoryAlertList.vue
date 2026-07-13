@@ -16,7 +16,7 @@
 
 <script setup>
 import Phase3DecisionPage from '../../components/Phase3DecisionPage.vue';
-import { fetchInventoryAlerts } from '../../api/replenishment';
+import { fetchInventoryAlerts } from '../../api/alerts';
 
 const filters = [
   { key: 'alert_type', label: '类型', options: [{ label: '缺货', value: 'stockout' }, { label: '超储', value: 'overstock' }] },

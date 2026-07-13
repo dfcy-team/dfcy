@@ -62,6 +62,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { formatApiError } from '../api/request';
 
 const props = defineProps({
   eyebrow: { type: String, default: 'Phase 3' }, title: { type: String, required: true }, subtitle: { type: String, default: '' },
@@ -94,6 +95,20 @@ async function handleAction(action, row) {
     try { await ElMessageBox.confirm(action.confirmMessage, action.confirmTitle || '人工确认提示', { type: 'warning' }); }
     catch (error) { if (error === 'cancel' || error === 'close') return; }
   }
+  if (apiStatus.value !== 'connected') {
+    ElMessage.info('当前数据不是已验证的后端联调结果，操作保持 pending，不会发送业务写入请求。');
+    return;
+  }
+  if (typeof action.execute === 'function') {
+    const response = await action.execute(row);
+    if (!response?.success) {
+      ElMessage.error(formatApiError(response));
+      return;
+    }
+    ElMessage.success(action.successMessage || '操作已提交，结果以服务端审计记录为准。');
+    await loadData();
+    return;
+  }
   ElMessage.info(action.message || '该操作为阶段3占位，不会触发真实业务执行。');
 }
 
@@ -102,14 +117,20 @@ async function loadData() {
   errorMessage.value = '';
   try {
     const response = await props.loader({ ...query });
-    if (!response?.success) throw new Error(response?.message || '加载失败');
+    if (!response?.success) {
+      apiStatus.value = 'pending';
+      summary.value = [];
+      items.value = [];
+      errorMessage.value = formatApiError(response);
+      return;
+    }
     const data = response.data || {};
     apiStatus.value = data.api_status || data.status || 'mock';
     summary.value = Array.isArray(data.summary) ? data.summary : [];
     items.value = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
     if (data.api_status === 'fallback') errorMessage.value = response.message || data.api_error || '接口异常，已显示 Mock 数据';
   } catch (error) {
-    apiStatus.value = 'pending'; summary.value = []; items.value = []; errorMessage.value = error?.message || '加载失败';
+    apiStatus.value = 'pending'; summary.value = []; items.value = []; errorMessage.value = formatApiError(error?.response || { message: error?.message });
   } finally { loading.value = false; }
 }
 

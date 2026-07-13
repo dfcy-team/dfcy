@@ -19,16 +19,30 @@ describe('Phase 3 API and safety boundaries', () => {
 
   it('uses the frozen Phase 3 resource names', () => {
     expect(read('src/api/alerts.js')).toContain('/api/internal/alerts/business/');
-    expect(read('src/api/replenishment.js')).toContain('/api/internal/alerts/inventory/');
+    expect(read('src/api/alerts.js')).toContain('/api/internal/alerts/inventory/');
     expect(read('src/api/replenishment.js')).toContain('/api/internal/replenishment/recommendations/');
     expect(read('src/api/lifecycle.js')).toContain('/api/internal/lifecycle/decisions/');
     expect(read('src/api/configCenter.js')).toContain('/api/internal/config/definitions/');
     expect(read('src/api/configCenter.js')).toContain('/api/internal/config/values/');
+    expect(read('src/api/configCenter.js')).toContain('/api/internal/config/change-logs/');
+    expect(read('src/api/analytics.js')).toContain('/api/internal/analytics/metrics/');
+    expect(read('src/api/analytics.js')).toContain('/api/internal/analytics/aggregates/');
+    expect(read('src/api/financeAnalytics.js')).toContain('/api/finance/analytics/reconciliation/');
+    expect(read('src/api/reportExports.js')).toContain('/api/report/catalog/');
   });
 
   it('parses the frozen collection response before falling back to mock items', () => {
     expect(read('src/components/Phase3AnalyticsPage.vue')).toContain('Array.isArray(data.results)');
     expect(read('src/components/Phase3DecisionPage.vue')).toContain('Array.isArray(data.results)');
+  });
+
+  it('preserves API errors instead of silently presenting them as connected mock data', () => {
+    const source = read('src/api/request.js');
+    expect(source).toContain('normalizeApiError');
+    expect(source).toContain('formatApiError');
+    expect(source).toContain("api_status: data.api_status || apiStatus");
+    expect(source).toContain("401: '登录状态无效或已过期'");
+    expect(source).toContain("422: '业务规则或字段校验未通过'");
   });
 
   it('does not add high-risk execution endpoints', () => {
