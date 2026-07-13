@@ -10,7 +10,7 @@
 
 ## 2. 分支与整改状态
 
-分支包含阶段3规划基线，领先 `origin/main` 12 个提交、落后 0 个提交。原 P3-A-002 至 P3-A-008 的后端实现、迁移、测试、质量命令和 CI 配置均已推送；PR #12 仍保持 Draft，未被合并。
+分支包含阶段3规划基线，领先 `origin/main` 12 个提交、落后 0 个提交。原 P3-A-002 至 P3-A-008 的后端实现、迁移、测试、质量命令和 CI 配置均已推送；PR #12 仍保持 Draft，未被合并。2026-07-13 已对同一远端 HEAD 重新执行本报告第 10 节的本地核验，结果保持一致。
 
 ## 3. 原P1关闭复审
 
@@ -73,11 +73,11 @@
 
 | 项目 | 结果 |
 |---|---|
-| `python manage.py check` | 通过 |
-| `python manage.py makemigrations --check --dry-run` | 通过，无迁移漂移 |
-| `python manage.py migrate --noinput` | 在独立临时 SQLite 数据库通过 |
-| `python manage.py check_phase3_data_quality` | 迁移后通过 |
-| `pytest -q` | 244 通过 |
+| `python manage.py check` | 2026-07-13 重新执行，通过 |
+| `python manage.py makemigrations --check --dry-run` | 2026-07-13 重新执行，通过，无迁移漂移 |
+| `python manage.py migrate --noinput` | 2026-07-13 在独立临时 SQLite 数据库通过 |
+| `python manage.py check_phase3_data_quality` | 2026-07-13 迁移后通过 |
+| `pytest -q` | 2026-07-13 重新执行，244 通过 |
 | 远端 CI | 安全守卫、Django/pytest、阶段3质量门禁、前端构建、Docker、RPA 文档检查均 SUCCESS |
 | 合并预检 | `git merge-tree --write-tree` 无冲突 |
 | 初次质量命令 | 空临时数据库未迁移时因缺表失败；迁移后通过，不构成代码失败 |
