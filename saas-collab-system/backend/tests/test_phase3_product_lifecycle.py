@@ -208,7 +208,7 @@ def test_lifecycle_api_tenant_scope_and_permissions():
 
     response = client_for(viewer).get("/api/internal/lifecycle/reviews/")
     assert response.status_code == 200
-    assert [item["id"] for item in response.json()["data"]["items"]] == [visible.id]
+    assert [item["id"] for item in response.json()["data"]["results"]] == [visible.id]
     payload = {
         "sku_id": sku.id,
         "current_stage": ProductLifecycleStage.NEW_OBSERVATION,

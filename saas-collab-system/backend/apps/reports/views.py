@@ -1,9 +1,8 @@
-from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import PermissionDenied
 
-from apps.common.responses import success_response
+from apps.common.responses import paginated_data, success_response
 
 from .models import MetricAggregate, MetricDefinition
 from .permissions import (
@@ -34,19 +33,66 @@ def health(request):
     return success_response({"status": "ok", "service": "report"})
 
 
-def _paginated_data(queryset, serializer_class, query):
-    paginator = Paginator(queryset, query["page_size"])
-    if query["page"] > paginator.num_pages:
-        raise NotFound("Requested page does not exist.")
-    page = paginator.page(query["page"])
+def _paginated_data(request, queryset, serializer_class, query):
+    return paginated_data(
+        request,
+        queryset,
+        serializer_class,
+        page=query["page"],
+        page_size=query["page_size"],
+    )
+
+
+def _authorized_aggregate_queryset(request, query):
+    queryset = MetricAggregate.objects.filter(tenant=request.user.tenant).select_related("metric_definition")
+    authorized_definitions = filter_authorized_metric_definitions(
+        request.user,
+        MetricDefinition.objects.filter(tenant=request.user.tenant),
+    )
+    queryset = queryset.filter(metric_definition__in=authorized_definitions)
+    if query.get("metric_code"):
+        queryset = queryset.filter(metric_definition__metric_code=query["metric_code"])
+    if query.get("granularity"):
+        queryset = queryset.filter(granularity=query["granularity"])
+    if query.get("period_start"):
+        queryset = queryset.filter(period_end__gt=query["period_start"])
+    if query.get("period_end"):
+        queryset = queryset.filter(period_start__lt=query["period_end"])
+    if not query["include_non_formal"]:
+        queryset = queryset.filter(is_formal=True)
+    return filter_analytics_aggregates(request.user, queryset).order_by("-refreshed_at", "-id")
+
+
+def _dashboard_payload(request, dashboard_type):
+    query_serializer = MetricAggregateQuerySerializer(data=request.query_params)
+    query_serializer.is_valid(raise_exception=True)
+    query = query_serializer.validated_data
+    collection = _paginated_data(
+        request,
+        _authorized_aggregate_queryset(request, query),
+        MetricAggregateSerializer,
+        query,
+    )
+    metric_rows = collection["results"]
+    passed_count = sum(row["quality_status"] == MetricAggregate.QualityStatus.PASSED for row in metric_rows)
+    quality_score = round((passed_count / len(metric_rows)) * 100) if metric_rows else 0
     return {
-        "items": serializer_class(page.object_list, many=True).data,
-        "pagination": {
-            "page": page.number,
-            "page_size": query["page_size"],
-            "total": paginator.count,
-            "total_pages": paginator.num_pages,
-        },
+        **collection,
+        "api_status": "connected",
+        "dashboard_type": dashboard_type,
+        "quality": {"status": "good" if quality_score >= 95 else "warning", "score": quality_score},
+        "metrics": [
+            {
+                "code": row["metric_code"],
+                "label": row["metric_code"],
+                "value": row["numeric_value"],
+                "unit": "",
+                "change": None,
+                "change_direction": "unknown",
+            }
+            for row in metric_rows
+        ],
+        "trend": [],
     }
 
 
@@ -61,7 +107,7 @@ def metric_definition_collection(request):
     if metric_code:
         queryset = queryset.filter(metric_code=metric_code)
     queryset = filter_authorized_metric_definitions(request.user, queryset)
-    return success_response(_paginated_data(queryset, MetricDefinitionSerializer, query))
+    return success_response(_paginated_data(request, queryset, MetricDefinitionSerializer, query))
 
 
 @api_view(["GET"])
@@ -81,26 +127,9 @@ def metric_aggregate_collection(request):
     query_serializer = MetricAggregateQuerySerializer(data=request.query_params)
     query_serializer.is_valid(raise_exception=True)
     query = query_serializer.validated_data
-    queryset = MetricAggregate.objects.filter(tenant=request.user.tenant).select_related("metric_definition")
-    authorized_definitions = filter_authorized_metric_definitions(
-        request.user,
-        MetricDefinition.objects.filter(tenant=request.user.tenant),
+    return success_response(
+        _paginated_data(request, _authorized_aggregate_queryset(request, query), MetricAggregateSerializer, query)
     )
-    queryset = queryset.filter(metric_definition__in=authorized_definitions)
-    metric_code = query.get("metric_code")
-    granularity = query.get("granularity")
-    if metric_code:
-        queryset = queryset.filter(metric_definition__metric_code=metric_code)
-    if granularity:
-        queryset = queryset.filter(granularity=granularity)
-    if query.get("period_start"):
-        queryset = queryset.filter(period_end__gt=query["period_start"])
-    if query.get("period_end"):
-        queryset = queryset.filter(period_start__lt=query["period_end"])
-    if not query["include_non_formal"]:
-        queryset = queryset.filter(is_formal=True)
-    queryset = filter_analytics_aggregates(request.user, queryset)
-    return success_response(_paginated_data(queryset, MetricAggregateSerializer, query))
 
 
 @api_view(["GET"])
@@ -149,6 +178,24 @@ def aggregate_mock(request):
 
 
 @api_view(["GET"])
+@permission_classes([IsAnalyticsViewer])
+def analytics_overview(request):
+    return success_response(_dashboard_payload(request, "overview"))
+
+
+@api_view(["GET"])
+@permission_classes([IsAnalyticsViewer])
+def analytics_sales(request):
+    return success_response(_dashboard_payload(request, "sales"))
+
+
+@api_view(["GET"])
+@permission_classes([IsAnalyticsViewer])
+def analytics_inventory(request):
+    return success_response(_dashboard_payload(request, "inventory"))
+
+
+@api_view(["GET"])
 @permission_classes([IsReportViewer])
 def report_catalog(request):
     return success_response(report_catalog_for_user(request.user))
@@ -171,7 +218,7 @@ def report_export_collection(request):
     for field in ("report_type", "status"):
         if query.get(field):
             queryset = queryset.filter(**{field: query[field]})
-    return success_response(_paginated_data(queryset, ReportExportRequestSerializer, query))
+    return success_response(_paginated_data(request, queryset, ReportExportRequestSerializer, query))
 
 
 @api_view(["GET"])

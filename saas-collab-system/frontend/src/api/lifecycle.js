@@ -10,7 +10,7 @@ export const fetchLifecycleReviews = (params = {}) =>
 
 export const fetchLifecycleHistory = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/lifecycle/history/', params },
+    { method: 'get', url: '/api/internal/lifecycle/decisions/', params },
     mockLifecycleHistory,
     'lifecycle.history'
   );

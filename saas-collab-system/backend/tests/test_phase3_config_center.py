@@ -137,8 +137,8 @@ def test_sensitive_config_is_placeholder_only_and_masked_in_api():
 
     response = client_for(viewer).get("/api/internal/config/values/")
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["id"] == version.id
-    assert response.json()["data"]["items"][0]["value"] == "***"
+    assert response.json()["data"]["results"][0]["id"] == version.id
+    assert response.json()["data"]["results"][0]["value"] == "***"
     assert "placeholder" not in str(ConfigChangeLog.objects.get().masked_detail)
 
 
@@ -193,8 +193,8 @@ def test_system_config_requires_system_permission_and_is_visible_only_to_system_
         create_config_version(definition=item, actor=manager, value=3, effective_at=timezone.now())
     version = create_config_version(definition=item, actor=system_manager, value=3, effective_at=timezone.now())
     assert version.tenant is None
-    assert client_for(viewer).get("/api/internal/config/values/").json()["data"]["items"] == []
-    assert client_for(system_manager).get("/api/internal/config/values/").json()["data"]["items"][0]["scope_key"] == "system"
+    assert client_for(viewer).get("/api/internal/config/values/").json()["data"]["results"] == []
+    assert client_for(system_manager).get("/api/internal/config/values/").json()["data"]["results"][0]["scope_key"] == "system"
 
 
 @pytest.mark.django_db
@@ -212,7 +212,7 @@ def test_config_api_tenant_isolation_and_action_permissions():
     create_config_version(definition=item, actor=other_manager, value=9, effective_at=timezone.now())
 
     response = client_for(viewer).get("/api/internal/config/values/")
-    assert [row["id"] for row in response.json()["data"]["items"]] == [own.id]
+    assert [row["id"] for row in response.json()["data"]["results"]] == [own.id]
     payload = {"config_key": item.config_key, "value": 10, "effective_at": str(timezone.now())}
     assert client_for(viewer).post("/api/internal/config/values/", payload, format="json").status_code == 403
     assert client_for(manager).post("/api/internal/config/values/", payload, format="json").status_code == 201

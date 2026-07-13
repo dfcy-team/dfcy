@@ -599,7 +599,7 @@ def test_quality_failure_is_recorded_but_not_exposed_as_formal_aggregate():
     assert aggregate.quality_status == MetricAggregate.QualityStatus.NO_VALID_DATA
     assert aggregate.is_formal is False
     assert response.status_code == 200
-    assert response.json()["data"]["items"] == []
+    assert response.json()["data"]["results"] == []
     with pytest.raises(ValidationError):
         MetricAggregate.objects.filter(pk=aggregate.pk).update(is_formal=True)
 
@@ -619,14 +619,13 @@ def test_analytics_api_enforces_tenant_permission_type_and_standard_response():
     response = authenticated_client(viewer).get("/api/internal/analytics/metrics/")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "success": True,
-        "code": "OK",
-        "message": "success",
-        "data": {
-            "items": [MetricDefinitionSerializerForTest(visible)],
-            "pagination": {"page": 1, "page_size": 50, "total": 1, "total_pages": 1},
-        },
+    assert response.json()["success"] is True
+    assert response.json()["code"] == "OK"
+    assert response.json()["data"] == {
+        "count": 1,
+        "next": None,
+        "previous": None,
+        "results": [MetricDefinitionSerializerForTest(visible)],
     }
     assert APIClient().get("/api/internal/analytics/metrics/").status_code == 401
     assert authenticated_client(plain_internal).get("/api/internal/analytics/metrics/").status_code == 403
@@ -684,8 +683,8 @@ def test_finance_metric_requires_independent_finance_permission():
     analytics_response = authenticated_client(analytics_viewer).get("/api/internal/analytics/metrics/")
     finance_response = authenticated_client(finance_viewer).get("/api/internal/analytics/metrics/")
 
-    assert [item["metric_code"] for item in analytics_response.json()["data"]["items"]] == ["BI_SALES_AMOUNT"]
-    assert {item["metric_code"] for item in finance_response.json()["data"]["items"]} == {
+    assert [item["metric_code"] for item in analytics_response.json()["data"]["results"]] == ["BI_SALES_AMOUNT"]
+    assert {item["metric_code"] for item in finance_response.json()["data"]["results"]} == {
         "BI_SALES_AMOUNT",
         "BI_FINANCE_DIFFERENCE",
     }
@@ -763,8 +762,53 @@ def test_aggregate_list_applies_tenant_and_custom_dimension_scope():
     response = authenticated_client(viewer).get("/api/internal/analytics/aggregates/")
 
     assert response.status_code == 200
-    assert len(response.json()["data"]["items"]) == 1
-    assert response.json()["data"]["items"][0]["dimensions"]["platform"] == "mock"
+    assert len(response.json()["data"]["results"]) == 1
+    assert response.json()["data"]["results"][0]["dimensions"]["platform"] == "mock"
+
+
+@pytest.mark.django_db
+def test_dashboard_aggregate_endpoints_apply_tenant_scope_and_standard_collection_shape():
+    tenant = Tenant.objects.create(name="Dashboard tenant", code="bi-dashboard-a")
+    other_tenant = Tenant.objects.create(name="Other dashboard tenant", code="bi-dashboard-b")
+    viewer = create_user(tenant, "dashboard-viewer")
+    external = create_user(tenant, "dashboard-external", CustomUser.UserType.EXTERNAL)
+    grant_analytics_permission(viewer, "analytics.view")
+    definition = create_definition(tenant)
+    other_definition = create_definition(other_tenant)
+    now = timezone.now()
+    create_point(definition, "dashboard-owner", Decimal("10"), now)
+    create_point(other_definition, "dashboard-other", Decimal("20"), now)
+    aggregate_metric(
+        tenant=tenant,
+        metric_definition=definition,
+        period_start=now - timedelta(hours=1),
+        period_end=now + timedelta(hours=1),
+        granularity=MetricAggregate.Granularity.DAY,
+    )
+    aggregate_metric(
+        tenant=other_tenant,
+        metric_definition=other_definition,
+        period_start=now - timedelta(hours=1),
+        period_end=now + timedelta(hours=1),
+        granularity=MetricAggregate.Granularity.DAY,
+    )
+
+    for path, dashboard_type in (
+        ("/api/internal/analytics/overview/", "overview"),
+        ("/api/internal/analytics/sales/", "sales"),
+        ("/api/internal/analytics/inventory/", "inventory"),
+    ):
+        response = authenticated_client(viewer).get(path)
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["dashboard_type"] == dashboard_type
+        assert data["api_status"] == "connected"
+        assert data["count"] == 1
+        assert len(data["results"]) == 1
+        assert data["results"][0]["tenant_id"] == tenant.id
+        assert data["metrics"][0]["code"] == definition.metric_code
+
+    assert authenticated_client(external).get("/api/internal/analytics/overview/").status_code == 403
     assert "credential" not in str(response.json()).lower()
 
 

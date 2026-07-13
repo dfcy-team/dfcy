@@ -106,7 +106,7 @@ async function loadData() {
     const data = response.data || {};
     apiStatus.value = data.api_status || data.status || 'mock';
     summary.value = Array.isArray(data.summary) ? data.summary : [];
-    items.value = Array.isArray(data.items) ? data.items : [];
+    items.value = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
     if (data.api_status === 'fallback') errorMessage.value = response.message || data.api_error || '接口异常，已显示 Mock 数据';
   } catch (error) {
     apiStatus.value = 'pending'; summary.value = []; items.value = []; errorMessage.value = error?.message || '加载失败';

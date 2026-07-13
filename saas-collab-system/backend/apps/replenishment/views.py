@@ -1,10 +1,9 @@
-from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import PermissionDenied
 
 from apps.common.data_scope import custom_scope_allows_product
-from apps.common.responses import success_response
+from apps.common.responses import paginated_data, success_response
 from apps.products.models import ProductSKU, ProductSPU
 
 from .models import ReplenishmentRecommendation
@@ -34,14 +33,15 @@ def recommendation_list(request):
     queryset = _queryset(request)
     if query.get("status"):
         queryset = queryset.filter(status=query["status"])
-    paginator = Paginator(queryset, query["page_size"])
-    if query["page"] > paginator.num_pages:
-        raise NotFound("Requested page does not exist.")
-    page = paginator.page(query["page"])
-    return success_response({
-        "items": ReplenishmentRecommendationSerializer(page.object_list, many=True).data,
-        "pagination": {"page": page.number, "page_size": query["page_size"], "total": paginator.count, "total_pages": paginator.num_pages},
-    })
+    return success_response(
+        paginated_data(
+            request,
+            queryset,
+            ReplenishmentRecommendationSerializer,
+            page=query["page"],
+            page_size=query["page_size"],
+        )
+    )
 
 
 @api_view(["GET"])

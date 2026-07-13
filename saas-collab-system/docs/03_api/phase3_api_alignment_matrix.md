@@ -2,22 +2,22 @@
 
 | Module | Development A Current Path | Development B Current Path | Final Path | Backend Change | Frontend Change | Permission | Status |
 |---|---|---|---|---|---|---|---|
-| analytics overview | none | `/analytics/overview/` | `/analytics/overview/` | add tenant/data-scope aggregate endpoint | none | internal, analytics.view, data scope | backend_change_required |
-| analytics sales | none | `/analytics/sales/` | `/analytics/sales/` | add tenant/data-scope aggregate endpoint | none | internal, analytics.view, data scope | backend_change_required |
-| analytics inventory | none | `/analytics/inventory/` | `/analytics/inventory/` | add tenant/data-scope aggregate endpoint | none | internal, analytics.view, data scope | backend_change_required |
+| analytics overview | `/analytics/overview/` | `/analytics/overview/` | `/analytics/overview/` | none | none | internal, analytics.view, data scope | aligned |
+| analytics sales | `/analytics/sales/` | `/analytics/sales/` | `/analytics/sales/` | none | none | internal, analytics.view, data scope | aligned |
+| analytics inventory | `/analytics/inventory/` | `/analytics/inventory/` | `/analytics/inventory/` | none | none | internal, analytics.view, data scope | aligned |
 | analytics metrics | `/analytics/metrics/` | unused | `/analytics/metrics/` | standard list pagination | use metric configuration API | internal, analytics.view | both_change_required |
 | analytics aggregates | `/analytics/aggregates/` | unused | `/analytics/aggregates/` | standard list pagination | use detail API where required | internal, analytics.view, metric permission, data scope | both_change_required |
 | aggregate mock | `/analytics/aggregate-mock/` | unused | same | none | add only for authorized mock workflow | analytics.calculate, data scope | frontend_change_required |
-| inventory alerts | `/alerts/inventory/` | `/replenishment/alerts/` | `/alerts/inventory/` | standard list pagination | replace path | alerts.view, data scope | both_change_required |
-| business alerts | `/alerts/business/` | `/alerts/` | `/alerts/business/` | standard list pagination | replace path | alerts.view, data scope | both_change_required |
+| inventory alerts | `/alerts/inventory/` | `/alerts/inventory/` | `/alerts/inventory/` | none | none | alerts.view, data scope | aligned |
+| business alerts | `/alerts/business/` | `/alerts/business/` | `/alerts/business/` | none | none | alerts.view, data scope | aligned |
 | alert actions | inventory/business action paths | unused | evaluate-mock, assign, silence, close on each resource | none | add permitted actions and error handling | evaluator or manager | frontend_change_required |
-| replenishment recommendations | `/replenishment/recommendations/` | `/replenishment/suggestions/` | `/replenishment/recommendations/` | standard list pagination | replace path | replenishment.view, product scope | both_change_required |
+| replenishment recommendations | `/replenishment/recommendations/` | `/replenishment/recommendations/` | `/replenishment/recommendations/` | none | none | replenishment.view, product scope | aligned |
 | replenishment actions | detail, evaluate-mock, accept, reject | unused | same | none | add permitted actions | evaluator or reviewer | frontend_change_required |
 | lifecycle reviews | `/lifecycle/reviews/` | same | same | standard list pagination | none | lifecycle.view, product scope | backend_change_required |
-| lifecycle decisions | `/lifecycle/decisions/` | `/lifecycle/history/` | `/lifecycle/decisions/` | standard list pagination | replace path | lifecycle.view, product scope | both_change_required |
+| lifecycle decisions | `/lifecycle/decisions/` | `/lifecycle/decisions/` | `/lifecycle/decisions/` | none | none | lifecycle.view, product scope | aligned |
 | lifecycle actions | evaluate-mock, confirm, reject | unused | same | none | add permitted actions | evaluator or confirmer | frontend_change_required |
-| config definitions | `/config/definitions/` | `/config/items/` | `/config/definitions/` | none | replace path | config.view | frontend_change_required |
-| config values | `/config/values/` | `/config/versions/` | `/config/values/` | standard list pagination | replace path | config.view/manage | both_change_required |
+| config definitions | `/config/definitions/` | `/config/definitions/` | `/config/definitions/` | none | none | config.view | aligned |
+| config values | `/config/values/` | `/config/values/` | `/config/values/` | none | none | config.view/manage | aligned |
 | config logs/actions | change-logs, approve, rollback | unused | same | standard list pagination | add permitted actions | viewer, approver, rollback manager | both_change_required |
 | finance analytics | `/finance/analytics/overview/` | same | same | none | none | finance.view | aligned |
 | finance reconciliation | `/finance/analytics/reconciliation/` | unused | same | none | add when page uses it | finance.view | frontend_change_required |

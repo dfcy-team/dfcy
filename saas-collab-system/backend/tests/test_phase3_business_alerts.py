@@ -217,8 +217,8 @@ def test_business_alert_api_tenant_scope_permissions_and_masking():
 
     response = client_for(viewer).get("/api/internal/alerts/business/")
     assert response.status_code == 200
-    assert [item["id"] for item in response.json()["data"]["items"]] == [visible.id]
-    assert response.json()["data"]["items"][0]["detail"]["token"] == "***"
+    assert [item["id"] for item in response.json()["data"]["results"]] == [visible.id]
+    assert response.json()["data"]["results"][0]["detail"]["token"] == "***"
     payload = {
         "rule_id": rule.id, "business_type": "demo_product", "business_id": "api",
         "metric_value": "3.0000", "title": "Demo", "detail": {"mode": "mock"},

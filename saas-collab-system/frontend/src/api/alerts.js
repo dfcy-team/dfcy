@@ -3,7 +3,7 @@ import { mockBusinessAlerts } from '../mock/alerts';
 
 export const fetchBusinessAlerts = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/alerts/', params },
+    { method: 'get', url: '/api/internal/alerts/business/', params },
     mockBusinessAlerts,
     'alerts.business'
   );

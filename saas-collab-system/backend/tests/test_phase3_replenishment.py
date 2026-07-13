@@ -172,7 +172,7 @@ def test_replenishment_api_tenant_scope_and_action_permissions():
 
     response = client_for(viewer).get("/api/internal/replenishment/recommendations/")
     assert response.status_code == 200
-    assert [item["id"] for item in response.json()["data"]["items"]] == [visible.id]
+    assert [item["id"] for item in response.json()["data"]["results"]] == [visible.id]
     payload = {
         "sku_id": sku.id, "available_stock": "10.0000", "in_transit_stock": "5.0000",
         "average_daily_sales": "2.0000", "safety_stock_days": 7,

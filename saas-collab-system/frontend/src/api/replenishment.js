@@ -3,14 +3,14 @@ import { mockInventoryAlerts, mockReplenishmentSuggestions } from '../mock/reple
 
 export const fetchInventoryAlerts = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/replenishment/alerts/', params },
+    { method: 'get', url: '/api/internal/alerts/inventory/', params },
     mockInventoryAlerts,
     'replenishment.alerts'
   );
 
 export const fetchReplenishmentSuggestions = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/replenishment/suggestions/', params },
+    { method: 'get', url: '/api/internal/replenishment/recommendations/', params },
     mockReplenishmentSuggestions,
     'replenishment.suggestions'
   );

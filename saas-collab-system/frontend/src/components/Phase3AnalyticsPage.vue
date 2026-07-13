@@ -195,7 +195,7 @@ async function loadData() {
     quality.value = data.quality || {};
     metrics.value = Array.isArray(data.metrics) ? data.metrics : [];
     trend.value = Array.isArray(data.trend) ? data.trend : [];
-    items.value = Array.isArray(data.items) ? data.items : [];
+    items.value = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
     if (data.api_status === 'fallback') errorMessage.value = response.message || data.api_error || '接口异常，已显示 Mock 数据';
   } catch (error) {
     apiStatus.value = 'pending';

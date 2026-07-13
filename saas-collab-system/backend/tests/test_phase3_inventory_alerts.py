@@ -188,8 +188,8 @@ def test_inventory_alert_api_tenant_data_scope_and_action_permissions():
 
     response = client_for(viewer).get("/api/internal/alerts/inventory/")
     assert response.status_code == 200
-    assert [item["id"] for item in response.json()["data"]["items"]] == [visible.id]
-    assert response.json()["data"]["pagination"]["total"] == 1
+    assert [item["id"] for item in response.json()["data"]["results"]] == [visible.id]
+    assert response.json()["data"]["count"] == 1
     assert client_for(viewer).post("/api/internal/alerts/inventory/evaluate-mock/", payload, format="json").status_code == 403
     assert client_for(evaluator).post("/api/internal/alerts/inventory/evaluate-mock/", payload, format="json").status_code == 200
     before_count = InventoryAlert.objects.count()

@@ -1,10 +1,9 @@
-from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import PermissionDenied
 
 from apps.common.data_scope import custom_scope_allows_product
-from apps.common.responses import success_response
+from apps.common.responses import paginated_data, success_response
 
 from .lifecycle_services import decide_lifecycle_review, evaluate_lifecycle_review
 from .models import ProductLifecycleDecision, ProductLifecycleReview, ProductSKU, ProductSPU
@@ -25,20 +24,8 @@ def _reviews(request):
     )
 
 
-def _paginate(queryset, serializer_class, query):
-    paginator = Paginator(queryset, query["page_size"])
-    if query["page"] > paginator.num_pages:
-        raise NotFound("Requested page does not exist.")
-    page = paginator.page(query["page"])
-    return {
-        "items": serializer_class(page.object_list, many=True).data,
-        "pagination": {
-            "page": page.number,
-            "page_size": query["page_size"],
-            "total": paginator.count,
-            "total_pages": paginator.num_pages,
-        },
-    }
+def _paginate(request, queryset, serializer_class, query):
+    return paginated_data(request, queryset, serializer_class, page=query["page"], page_size=query["page_size"])
 
 
 @api_view(["GET"])
@@ -51,7 +38,7 @@ def review_list(request):
     for field in ("status", "recommended_stage"):
         if query.get(field):
             queryset = queryset.filter(**{field: query[field]})
-    return success_response(_paginate(queryset, ProductLifecycleReviewSerializer, query))
+    return success_response(_paginate(request, queryset, ProductLifecycleReviewSerializer, query))
 
 
 @api_view(["GET"])
@@ -118,4 +105,4 @@ def decision_list(request):
         tenant=request.user.tenant,
         review_id__in=allowed_reviews,
     ).select_related("review", "actor")
-    return success_response(_paginate(queryset, ProductLifecycleDecisionSerializer, query))
+    return success_response(_paginate(request, queryset, ProductLifecycleDecisionSerializer, query))

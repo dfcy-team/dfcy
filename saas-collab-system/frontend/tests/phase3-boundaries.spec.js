@@ -17,6 +17,20 @@ describe('Phase 3 API and safety boundaries', () => {
     expect(source).not.toMatch(/\/api\/(internal|external|finance|rpa)\//);
   });
 
+  it('uses the frozen Phase 3 resource names', () => {
+    expect(read('src/api/alerts.js')).toContain('/api/internal/alerts/business/');
+    expect(read('src/api/replenishment.js')).toContain('/api/internal/alerts/inventory/');
+    expect(read('src/api/replenishment.js')).toContain('/api/internal/replenishment/recommendations/');
+    expect(read('src/api/lifecycle.js')).toContain('/api/internal/lifecycle/decisions/');
+    expect(read('src/api/configCenter.js')).toContain('/api/internal/config/definitions/');
+    expect(read('src/api/configCenter.js')).toContain('/api/internal/config/values/');
+  });
+
+  it('parses the frozen collection response before falling back to mock items', () => {
+    expect(read('src/components/Phase3AnalyticsPage.vue')).toContain('Array.isArray(data.results)');
+    expect(read('src/components/Phase3DecisionPage.vue')).toContain('Array.isArray(data.results)');
+  });
+
   it('does not add high-risk execution endpoints', () => {
     const files = [
       'src/api/analytics.js', 'src/api/replenishment.js', 'src/api/lifecycle.js',

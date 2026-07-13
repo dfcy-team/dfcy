@@ -1,9 +1,7 @@
-from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import NotFound
 
-from apps.common.responses import success_response
+from apps.common.responses import paginated_data, success_response
 from apps.permissions.services import check_user_permission
 
 from .models import ConfigChangeLog, SystemConfigDefinition, TenantConfigVersion
@@ -19,20 +17,8 @@ from .serializers import (
 from .services import approve_config_version, create_config_version, filter_visible_versions, rollback_config_version
 
 
-def _paginate(queryset, serializer_class, query):
-    paginator = Paginator(queryset, query["page_size"])
-    if query["page"] > paginator.num_pages:
-        raise NotFound("Requested page does not exist.")
-    page = paginator.page(query["page"])
-    return {
-        "items": serializer_class(page.object_list, many=True).data,
-        "pagination": {
-            "page": page.number,
-            "page_size": query["page_size"],
-            "total": paginator.count,
-            "total_pages": paginator.num_pages,
-        },
-    }
+def _paginate(request, queryset, serializer_class, query):
+    return paginated_data(request, queryset, serializer_class, page=query["page"], page_size=query["page_size"])
 
 
 @api_view(["GET"])
@@ -74,7 +60,7 @@ def config_values(request):
     for field in ("config_key", "status"):
         if query.get(field):
             queryset = queryset.filter(**{field: query[field]})
-    return success_response(_paginate(queryset, TenantConfigVersionSerializer, query))
+    return success_response(_paginate(request, queryset, TenantConfigVersionSerializer, query))
 
 
 @api_view(["POST"])
@@ -109,4 +95,4 @@ def change_log_list(request):
         queryset = ConfigChangeLog.objects.filter(tenant=request.user.tenant) | ConfigChangeLog.objects.filter(scope_key="system")
     if query.get("config_key"):
         queryset = queryset.filter(config_key=query["config_key"])
-    return success_response(_paginate(queryset, ConfigChangeLogSerializer, query))
+    return success_response(_paginate(request, queryset, ConfigChangeLogSerializer, query))
