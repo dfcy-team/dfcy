@@ -44,7 +44,7 @@ cd saas-collab-system/deploy/pilot/database
 cp env.pilot.example .env.pilot
 chmod 600 .env.pilot
 # 从密钥托管系统填入唯一的 MYSQL_PASSWORD、MYSQL_ROOT_PASSWORD、REDIS_PASSWORD。
-./install-db.sh
+sh ./install-db.sh
 ```
 
 核验：
@@ -68,7 +68,7 @@ cd saas-collab-system/deploy/pilot/application
 cp env.pilot.example .env.pilot
 chmod 600 .env.pilot
 # 填入同一试点 MySQL/Redis 凭据与唯一 Django SECRET_KEY。
-./install-app.sh
+sh ./install-app.sh
 ```
 
 脚本依次执行 Compose 配置检查、镜像构建、`python manage.py migrate --noinput`，再启动 backend、Celery worker 和 Celery beat。Django 生产设置会拒绝 SQLite、缺失的 `DJANGO_SECRET_KEY`、缺失的 `DJANGO_ALLOWED_HOSTS` 以及 `test-only` 加密提供方。
