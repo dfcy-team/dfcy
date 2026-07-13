@@ -2,6 +2,25 @@
 
 本清单用于阶段1前端页面、Mock fallback 和后端接口边界对齐。未真实联调的接口不得标记为 `connected`。
 
+## 阶段3前端页面映射
+
+阶段3开发A接口尚未合并，以下新增页面均使用 Mock fallback，路径状态不得标记为 `connected`。
+
+| 页面名称 | 页面路径 | 需要的API | 请求方式 | Mock文件位置 | 当前状态 |
+|---|---|---|---|---|---|
+| 经营总览 | `/` | `/api/internal/analytics/overview/` | GET | `frontend/src/mock/analytics.js` | mock |
+| 销售分析 | `/analytics/sales` | `/api/internal/analytics/sales/` | GET | `frontend/src/mock/analytics.js` | mock |
+| 库存分析 | `/analytics/inventory` | `/api/internal/analytics/inventory/` | GET | `frontend/src/mock/analytics.js` | mock |
+| 库存预警 | `/inventory/alerts` | `/api/internal/replenishment/alerts/` | GET | `frontend/src/mock/replenishment.js` | mock |
+| 补货建议 | `/inventory/replenishment` | `/api/internal/replenishment/suggestions/` | GET | `frontend/src/mock/replenishment.js` | mock |
+| 生命周期复盘 | `/lifecycle/reviews` | `/api/internal/lifecycle/reviews/` | GET | `frontend/src/mock/lifecycle.js` | mock |
+| 生命周期历史 | `/lifecycle/history` | `/api/internal/lifecycle/history/` | GET | `frontend/src/mock/lifecycle.js` | mock |
+| 经营预警 | `/alerts/business` | `/api/internal/alerts/` | GET | `frontend/src/mock/alerts.js` | mock |
+| 配置中心 | `/settings/config-center` | `/api/internal/config/items/` | GET | `frontend/src/mock/configCenter.js` | mock |
+| 配置版本 | `/settings/config-versions` | `/api/internal/config/versions/` | GET | `frontend/src/mock/configCenter.js` | mock |
+| 财务经营分析 | `/finance/analytics` | `/api/finance/analytics/overview/` | GET | `frontend/src/mock/financeAnalytics.js` | mock |
+| 报表导出 | `/reports/exports` | `/api/report/exports/` | GET | `frontend/src/mock/reportExports.js` | mock |
+
 ## 接口路径边界
 
 - 内部后台页面使用 `/api/internal/*`。

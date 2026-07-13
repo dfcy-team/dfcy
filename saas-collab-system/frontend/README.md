@@ -1,5 +1,25 @@
 # frontend
 
+## Phase 3 analytics and decision pages
+
+- Added business overview, sales and inventory analytics, inventory alerts, replenishment suggestions, lifecycle reviews, business alerts, configuration governance, read-only finance analytics, and report export audit guidance.
+- All new Phase 3 APIs remain `mock`/`pending` until Development A routes are merged and runtime permission contracts are verified.
+- Replenishment never creates purchase orders; lifecycle pages never change product status; alerts never trigger real RPA; finance analytics has no payment, transfer, or withdrawal actions.
+- Configuration pages do not expose real credential inputs. Report export requests are placeholders and require backend permission, data-scope, masking, and audit validation.
+
+## Phase 3 build and test
+
+```bash
+npm install
+npm test
+npm run build
+```
+
+- Vitest covers the unified response envelope, Phase 3 Mock contracts, route registration, API partitions, high-risk endpoint exclusions, and shared loading/accessibility markers.
+- Element Plus components are resolved on demand by Vite instead of registering the full plugin in `main.js`.
+- The largest JavaScript chunk is about `108.98 kB`; the previous `923.28 kB` Element Plus chunk and `500 kB` warning are removed.
+- Desktop browser smoke checks pass. The application includes a `900px` mobile navigation breakpoint; a real narrow viewport retest remains a release observation because the in-app viewport override did not apply during verification.
+
 ## Phase 2 frontend build observation
 
 - Route pages are lazy loaded in `frontend/src/router/index.js`.
