@@ -187,10 +187,17 @@ def test_replenishment_api_tenant_scope_and_action_permissions():
         format="json",
     ).status_code == 403
     assert ReplenishmentRecommendation.objects.count() == before_count
-    assert client_for(reviewer).post(
+    accepted = client_for(reviewer).post(
         f"/api/internal/replenishment/recommendations/{visible.id}/accept/",
         {"reason": "Reviewed only"}, format="json",
-    ).status_code == 200
+    )
+    assert accepted.status_code == 200
+    duplicate = client_for(reviewer).post(
+        f"/api/internal/replenishment/recommendations/{visible.id}/accept/",
+        {"reason": "Duplicate review"}, format="json",
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "STATE_CONFLICT"
     assert PurchaseOrder.objects.count() == 0
 
 

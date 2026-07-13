@@ -219,6 +219,28 @@ def test_config_api_tenant_isolation_and_action_permissions():
 
 
 @pytest.mark.django_db
+def test_config_api_returns_422_for_sensitive_value_rule_failure():
+    tenant = Tenant.objects.create(name="Tenant", code="config-api-business-rule")
+    manager = create_user(tenant, "config-business-rule-manager")
+    grant(manager, "config.manage")
+    item = definition(key="restricted.api_reference", value_type="json", sensitive=True)
+
+    response = client_for(manager).post(
+        "/api/internal/config/values/",
+        {
+            "config_key": item.config_key,
+            "value": {"reference": "real://not-allowed"},
+            "effective_at": str(timezone.now()),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 422
+    assert response.json()["success"] is False
+    assert response.json()["code"] == "BUSINESS_RULE_VIOLATION"
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize("user_type", [CustomUser.UserType.EXTERNAL, CustomUser.UserType.RPA])
 def test_config_api_rejects_external_and_rpa(user_type):
     tenant = Tenant.objects.create(name="Tenant", code=f"config-deny-{user_type}")

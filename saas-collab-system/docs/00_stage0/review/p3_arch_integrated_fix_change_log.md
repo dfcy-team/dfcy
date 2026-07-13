@@ -16,6 +16,7 @@ This controlled integration branch preserves the Development A and Development B
 - Updated frontend calls to the final alerts, replenishment, lifecycle, and configuration resource names.
 - Updated shared Phase 3 pages to parse `data.results` while retaining Mock fallback support.
 - Added endpoint and frontend static contract coverage.
+- Added Phase 3 error-contract handling: malformed request validation remains `400`, authentication and authorization remain `401` and `403`, hidden resources remain `404`, repeated state actions return `409`, and business-rule validation returns `422`.
 
 ## Safety Confirmation
 
@@ -32,3 +33,5 @@ This controlled integration branch preserves the Development A and Development B
 - `npm run build`
 
 The full backend suite (245 tests), migration consistency check, Docker Compose parse, frontend tests (31), and frontend production build completed successfully. The standalone `check_phase3_data_quality` command was not run against a migrated local database because this machine's temporary SQLite file has no Phase 3 tables; no local migration or business data was created to manufacture evidence. The Docker parse used no local `.env`, so Compose emitted expected blank-placeholder warnings and did not connect to any service.
+
+The backend error-contract regression set covers the six required HTTP outcomes (`400`, `401`, `403`, `404`, `409`, and `422`) and validates the unified error envelope.

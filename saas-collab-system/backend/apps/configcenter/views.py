@@ -1,7 +1,9 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 
 from apps.common.responses import paginated_data, success_response
+from apps.common.exceptions import BusinessRuleViolation, StateConflict
 from apps.permissions.services import check_user_permission
 
 from .models import ConfigChangeLog, SystemConfigDefinition, TenantConfigVersion
@@ -46,12 +48,15 @@ def config_values(request):
         serializer = ConfigVersionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         definition = get_object_or_404(SystemConfigDefinition, config_key=serializer.validated_data["config_key"])
-        version = create_config_version(
-            definition=definition,
-            actor=request.user,
-            value=serializer.validated_data["value"],
-            effective_at=serializer.validated_data["effective_at"],
-        )
+        try:
+            version = create_config_version(
+                definition=definition,
+                actor=request.user,
+                value=serializer.validated_data["value"],
+                effective_at=serializer.validated_data["effective_at"],
+            )
+        except DjangoValidationError as exc:
+            raise BusinessRuleViolation(str(exc)) from exc
         return success_response(TenantConfigVersionSerializer(version).data, status=201)
     query_serializer = ConfigQuerySerializer(data=request.query_params)
     query_serializer.is_valid(raise_exception=True)
@@ -67,7 +72,11 @@ def config_values(request):
 @permission_classes([IsConfigApprover])
 def approve_value(request, pk):
     version = get_object_or_404(TenantConfigVersion.objects.select_related("definition"), pk=pk)
-    return success_response(TenantConfigVersionSerializer(approve_config_version(version=version, actor=request.user)).data)
+    try:
+        version = approve_config_version(version=version, actor=request.user)
+    except DjangoValidationError as exc:
+        raise StateConflict(str(exc)) from exc
+    return success_response(TenantConfigVersionSerializer(version).data)
 
 
 @api_view(["POST"])

@@ -1,8 +1,10 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 
 from apps.common.data_scope import custom_scope_allows_product
+from apps.common.exceptions import StateConflict
 from apps.common.responses import paginated_data, success_response
 
 from .lifecycle_services import decide_lifecycle_review, evaluate_lifecycle_review
@@ -73,12 +75,15 @@ def _decide(request, pk, decision):
     serializer = ProductLifecycleDecisionRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     review = get_object_or_404(_reviews(request), pk=pk)
-    record = decide_lifecycle_review(
-        review=review,
-        actor=request.user,
-        decision=decision,
-        reason=serializer.validated_data["reason"],
-    )
+    try:
+        record = decide_lifecycle_review(
+            review=review,
+            actor=request.user,
+            decision=decision,
+            reason=serializer.validated_data["reason"],
+        )
+    except DjangoValidationError as exc:
+        raise StateConflict(str(exc)) from exc
     return success_response(ProductLifecycleDecisionSerializer(record).data)
 
 

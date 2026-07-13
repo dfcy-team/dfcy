@@ -229,9 +229,15 @@ def test_lifecycle_api_tenant_scope_and_permissions():
         format="json",
     ).status_code == 403
     assert ProductLifecycleReview.objects.count() == before_count
-    assert client_for(confirmer).post(
+    confirmed = client_for(confirmer).post(
         f"/api/internal/lifecycle/reviews/{visible.id}/confirm/", {"reason": "Reviewed"}, format="json"
-    ).status_code == 200
+    )
+    assert confirmed.status_code == 200
+    duplicate = client_for(confirmer).post(
+        f"/api/internal/lifecycle/reviews/{visible.id}/confirm/", {"reason": "Duplicate"}, format="json"
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "STATE_CONFLICT"
 
 
 @pytest.mark.django_db
