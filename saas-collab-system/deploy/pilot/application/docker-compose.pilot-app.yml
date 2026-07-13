@@ -1,0 +1,54 @@
+services:
+  migrate:
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
+    env_file:
+      - ${PILOT_ENV_FILE:-.env.pilot}
+    command: python manage.py migrate --noinput
+    restart: "no"
+    networks:
+      - pilot-internal
+
+  backend:
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
+    env_file:
+      - ${PILOT_ENV_FILE:-.env.pilot}
+    command: >-
+      gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-60}
+      --access-logfile - --error-logfile -
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PILOT_APP_PORT:-8000}:8000"
+    networks:
+      - pilot-internal
+
+  celery:
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
+    env_file:
+      - ${PILOT_ENV_FILE:-.env.pilot}
+    command: celery -A config worker --loglevel=info
+    restart: unless-stopped
+    networks:
+      - pilot-internal
+
+  celery-beat:
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
+    env_file:
+      - ${PILOT_ENV_FILE:-.env.pilot}
+    command: celery -A config beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - pilot-internal
+
+networks:
+  pilot-internal:
+    external: true
+    name: saas-pilot-network
