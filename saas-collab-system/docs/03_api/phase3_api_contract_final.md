@@ -28,7 +28,11 @@ Development A changes existing `items/pagination` list wrappers to this structur
 
 ### Analytics
 
-No `/overview/`, `/sales/`, or `/inventory/` backend endpoint is added. The dashboard, sales, and inventory views compose permitted metrics and aggregates:
+Dashboard aggregation is performed by the backend, not by frontend composition. The final analytics APIs are:
+
+- `GET /api/internal/analytics/overview/`
+- `GET /api/internal/analytics/sales/`
+- `GET /api/internal/analytics/inventory/`
 
 - `GET /api/internal/analytics/metrics/`
 - `GET /api/internal/analytics/metrics/{id}/`
@@ -36,7 +40,7 @@ No `/overview/`, `/sales/`, or `/inventory/` backend endpoint is added. The dash
 - `GET /api/internal/analytics/aggregates/{id}/`
 - `POST /api/internal/analytics/aggregate-mock/`
 
-The frontend queries metric code, time range, granularity, and permitted dimensions. Backend metric permission, tenant, and data scope apply; finance metrics additionally require `finance.view`. `aggregate-mock` only creates mock aggregation output.
+`overview`、`sales` and `inventory` are frontend dashboard aggregation endpoints. Backend applies tenant, metric permission, and data scope before aggregation; finance metrics additionally require `finance.view`. `metrics` and `aggregates` remain configuration/detail resources. `aggregate-mock` only creates mock aggregation output.
 
 ### Alerts
 

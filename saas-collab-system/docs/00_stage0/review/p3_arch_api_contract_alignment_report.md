@@ -7,7 +7,7 @@ This report compares `origin/main`, Development A commit `638cfb4`, and Developm
 ## Decisions
 
 1. Backend resource naming with existing permission tests is authoritative.
-2. Analytics dashboards compose metrics and aggregates rather than adding duplicate overview, sales, or inventory endpoints.
+2. Analytics dashboards use backend-owned overview, sales, and inventory aggregation endpoints; metrics and aggregates remain configuration/detail resources.
 3. Alerts split inventory and business; replenishment uses recommendations; lifecycle history uses decisions; config uses definitions, values, and change-logs.
 4. Finance remains under `/api/finance/*` and report exports under `/api/report/*`.
 5. All collection responses move to `count`, `next`, `previous`, and `results` inside the standard response envelope.
