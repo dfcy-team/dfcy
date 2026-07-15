@@ -2,7 +2,7 @@
 
 ## 1. 适用范围与安全边界
 
-本说明用于受控内网的阶段3生产试点准备，基线为 `v0.4-phase3-complete`。它只部署 MySQL、Redis、Django 和 Celery 基础能力，不接入真实 BigSeller、Shopee、TikTok/TK、银行、支付或其他生产平台。
+本说明用于受控内网的阶段3生产试点准备，基线为 `v0.4-phase3-complete` 加已审核的试点安装包。推荐拓扑为数据库主机运行原生 MySQL 8.4，应用主机通过 Docker 运行 Redis、Django、Celery 和前端 Nginx；不接入真实 BigSeller、Shopee、TikTok/TK、银行、支付或其他生产平台。
 
 禁止事项：
 
@@ -17,61 +17,55 @@
 
 | 端 | 文件 | 用途 |
 |---|---|---|
-| 数据库端 | `deploy/pilot/database/docker-compose.pilot-db.yml` | MySQL 8.4、Redis 和私有 Docker 网络 |
-| 数据库端 | `deploy/pilot/database/env.pilot.example` | 数据库和 Redis 占位变量 |
-| 数据库端 | `deploy/pilot/database/install-db.sh` | 数据库端配置检查与启动脚本 |
-| 应用层 | `deploy/pilot/application/docker-compose.pilot-app.yml` | Django、Celery、Celery beat 与迁移任务 |
+| 数据库端 | Ubuntu/MySQL 原生服务 | 独立数据库虚拟机上的 MySQL 8.4 |
+| 数据库端（可选） | `deploy/pilot/database/` | 仅供单机 Docker 试验，不用于当前两机部署 |
+| 应用层 | `deploy/pilot/application/docker-compose.pilot-app.yml` | Redis、Django、Celery、前端 Nginx 与迁移任务 |
 | 应用层 | `deploy/pilot/application/env.pilot.example` | Django、MySQL、Redis 的占位变量 |
 | 应用层 | `deploy/pilot/application/install-app.sh` | 应用构建、迁移与启动脚本 |
+| 应用层 | `deploy/pilot/application/Dockerfile.frontend` | Vue 构建与 Nginx 运行镜像 |
 
 所有脚本均使用受控主机上的 `.env.pilot`。示例文件只能用于复制结构，示例值不能用于试点启动。
 
 ## 3. 试点前置条件
 
-1. Linux 试点主机已安装 Docker Engine 和 Docker Compose v2。
-2. 主机仅在私有网络中可访问，管理员访问采用受控 VPN、堡垒机或同等方案。
-3. MySQL 和 Redis 无公网端口映射；应用模板也仅绑定 `127.0.0.1:8000`。
+1. 数据库主机已安装 MySQL 8.4；应用主机已安装 Docker Engine 和 Docker Compose v2。
+2. 两台主机仅在 VMware 私有/NAT 网络中互通，数据库 IP 已固定。
+3. MySQL 3306 仅允许应用主机 IP；Redis 不映射宿主机端口；Django 8000 仅绑定回环地址。
 4. 已由批准的密钥托管系统生成 Django、MySQL、Redis 的独立试点凭据。
 5. 试点数据库备份位置、保留周期、恢复责任人与回滚窗口已记录。
 6. 不在试点环境配置任何真实平台凭据或真实平台回调。
 
-## 4. 数据库端安装
+## 4. 数据库端准备
 
-在受控试点主机中，将仓库检出到受控路径后执行：
-
-```bash
-cd saas-collab-system/deploy/pilot/database
-cp env.pilot.example .env.pilot
-chmod 600 .env.pilot
-# 从密钥托管系统填入唯一的 MYSQL_PASSWORD、MYSQL_ROOT_PASSWORD、REDIS_PASSWORD。
-sh ./install-db.sh
-```
-
-核验：
+在数据库主机确认服务、监听和业务账户：
 
 ```bash
-docker compose --env-file .env.pilot -f docker-compose.pilot-db.yml ps
-docker compose --env-file .env.pilot -f docker-compose.pilot-db.yml exec mysql \
-  mysqladmin ping -h localhost -u root -p"$MYSQL_ROOT_PASSWORD"
-docker compose --env-file .env.pilot -f docker-compose.pilot-db.yml exec redis \
-  redis-cli -a "$REDIS_PASSWORD" ping
+sudo systemctl status mysql --no-pager
+sudo ss -lntp | grep 3306
+mysql -uroot -p -e "SHOW DATABASES;"
 ```
 
-预期 MySQL 显示 healthy，Redis 返回 `PONG`。数据库只加入 `saas-pilot-network` 私有网络，未配置宿主机端口。
+应用主机执行连接核验，密码仅在交互提示中输入：
+
+```bash
+mysql -h DATABASE_HOST_IP -P 3306 -u saas_collab_pilot_user -p saas_collab_pilot
+```
+
+数据库账户只授权给应用主机 IP，不允许 root 远程登录，也不允许公网访问 3306。
 
 ## 5. 应用层安装
 
-数据库端健康后，在同一受控 Docker 主机执行：
+数据库端健康后，在应用主机执行：
 
 ```bash
 cd saas-collab-system/deploy/pilot/application
 cp env.pilot.example .env.pilot
 chmod 600 .env.pilot
-# 填入同一试点 MySQL/Redis 凭据与唯一 Django SECRET_KEY。
+# 填入数据库主机 IP、MySQL 应用账户、唯一 Django/Redis 密钥和应用主机 IP。
 sh ./install-app.sh
 ```
 
-脚本依次执行 Compose 配置检查、镜像构建、`python manage.py migrate --noinput`，再启动 backend、Celery worker 和 Celery beat。Django 生产设置会拒绝 SQLite、缺失的 `DJANGO_SECRET_KEY`、缺失的 `DJANGO_ALLOWED_HOSTS` 以及 `test-only` 加密提供方。
+脚本拒绝保留 `change-me` 占位值，依次执行 Compose 配置检查、后端和前端镜像构建、启动 Redis、数据库迁移，再启动 backend、Celery worker/beat 和前端 Nginx。Django 生产设置会拒绝 SQLite、缺失的 `DJANGO_SECRET_KEY`、缺失的 `DJANGO_ALLOWED_HOSTS` 以及 `test-only` 加密提供方。
 
 核验：
 
@@ -79,9 +73,10 @@ sh ./install-app.sh
 docker compose --env-file .env.pilot -f docker-compose.pilot-app.yml ps
 docker compose --env-file .env.pilot -f docker-compose.pilot-app.yml logs --tail=100 backend
 curl --fail http://127.0.0.1:8000/api/health/
+curl --fail http://127.0.0.1:8080/
 ```
 
-应用模板使用 Gunicorn，且仅绑定回环地址。外部访问前必须单独配置并审核反向代理、TLS、受控域名、健康检查与日志采集；不得直接将 8000 端口公开。
+应用模板使用 Gunicorn，后端仅绑定回环地址；前端 Nginx 默认绑定应用主机 `8080`，供受控内网试点访问。公网域名、TLS 和外部访问仍须单独评审。
 
 ## 6. 安装后验收
 
@@ -109,14 +104,7 @@ cd saas-collab-system/deploy/pilot/application
 docker compose --env-file .env.pilot -f docker-compose.pilot-app.yml down
 ```
 
-停止数据库服务不会自动删除卷：
-
-```bash
-cd saas-collab-system/deploy/pilot/database
-docker compose --env-file .env.pilot -f docker-compose.pilot-db.yml down
-```
-
-不得使用 `down -v` 删除试点数据卷，除非完成批准的备份和销毁流程。
+当前两机部署的 MySQL 是数据库主机上的原生服务，不随应用 Compose 停止。不得使用 `down -v` 删除 Redis 数据卷，除非完成批准的备份和销毁流程。
 
 ## 8. 试点放行边界
 

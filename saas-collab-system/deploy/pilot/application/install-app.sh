@@ -10,13 +10,16 @@ if [ ! -f "$env_file" ]; then
   exit 1
 fi
 
-docker network inspect saas-pilot-network >/dev/null 2>&1 || {
-  echo "Missing Docker network saas-pilot-network. Install the database stack first." >&2
+if grep -Eq 'change-me|example\.internal' "$env_file"; then
+  echo "Placeholder values remain in $env_file. Set host addresses and approved secrets before installation." >&2
   exit 1
-}
+fi
+
+chmod 600 "$env_file"
 
 docker compose --env-file "$env_file" -f "$compose_file" config --quiet
-docker compose --env-file "$env_file" -f "$compose_file" build
+docker compose --env-file "$env_file" -f "$compose_file" build backend frontend
+docker compose --env-file "$env_file" -f "$compose_file" up -d redis
 docker compose --env-file "$env_file" -f "$compose_file" run --rm migrate
-docker compose --env-file "$env_file" -f "$compose_file" up -d backend celery celery-beat
+docker compose --env-file "$env_file" -f "$compose_file" up -d backend celery celery-beat frontend
 docker compose --env-file "$env_file" -f "$compose_file" ps

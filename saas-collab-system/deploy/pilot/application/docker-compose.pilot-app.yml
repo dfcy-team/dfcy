@@ -1,19 +1,49 @@
 services:
+  redis:
+    image: redis:7-alpine
+    env_file:
+      - ${PILOT_ENV_FILE:-.env.pilot}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - redis-data:/data
+    networks:
+      - pilot-internal
+
   migrate:
     image: saas-collab-backend:pilot
     build:
       context: ../../../backend
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,redis}
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: python manage.py migrate --noinput
     restart: "no"
     networks:
       - pilot-internal
+    depends_on:
+      redis:
+        condition: service_healthy
 
   backend:
     image: saas-collab-backend:pilot
     build:
       context: ../../../backend
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,redis}
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: >-
@@ -25,6 +55,9 @@ services:
       - "127.0.0.1:${PILOT_APP_PORT:-8000}:8000"
     networks:
       - pilot-internal
+    depends_on:
+      redis:
+        condition: service_healthy
 
   celery:
     image: saas-collab-backend:pilot
@@ -36,6 +69,9 @@ services:
     restart: unless-stopped
     networks:
       - pilot-internal
+    depends_on:
+      redis:
+        condition: service_healthy
 
   celery-beat:
     image: saas-collab-backend:pilot
@@ -47,8 +83,32 @@ services:
     restart: unless-stopped
     networks:
       - pilot-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: saas-collab-frontend:pilot
+    build:
+      context: ../../..
+      dockerfile: deploy/pilot/application/Dockerfile.frontend
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,backend,redis}
+        VITE_API_BASE_URL: ""
+        VITE_USE_MOCK: "false"
+    restart: unless-stopped
+    ports:
+      - "${PILOT_HTTP_PORT:-8080}:80"
+    depends_on:
+      - backend
+    networks:
+      - pilot-internal
 
 networks:
   pilot-internal:
-    external: true
     name: saas-pilot-network
+
+volumes:
+  redis-data:
