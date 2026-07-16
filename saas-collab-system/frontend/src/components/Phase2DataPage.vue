@@ -101,6 +101,7 @@ const visibleActionConfigs = computed(() => props.actionConfigs.filter((action) 
 
 function getRows(data) {
   if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.results)) return data.results;
   if (Array.isArray(data?.items)) return data.items;
   return [];
 }

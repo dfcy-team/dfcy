@@ -59,7 +59,10 @@ export const mockRpaTasks = () => successResponse({
   module: 'rpa.tasks.pending',
   statuses: rpaStatuses,
   task_types: rpaTaskTypes,
-  items: [task]
+  count: 1,
+  next: null,
+  previous: null,
+  results: [task]
 });
 
 export const mockRpaTaskDetail = () => successResponse({

@@ -34,10 +34,13 @@ export const menuItems = [
     label: 'RPA协同',
     internal: true,
     children: [
-      { path: '/rpa/tasks', label: '任务中心', internal: true },
-      { path: '/rpa/attempts', label: '运行记录', internal: true },
-      { path: '/rpa/manual-queue', label: '人工队列', internal: true },
-      { path: '/rpa/stability', label: '稳定性', internal: true }
+      { path: '/rpa/tasks', label: '任务中心', permissions: ['rpa.tasks.view'] },
+      { path: '/rpa/runs', label: '运行记录', permissions: ['rpa.tasks.view'] },
+      { path: '/rpa/devices', label: '设备管理', permissions: ['rpa.devices.view'] },
+      { path: '/rpa/manual-queue', label: '人工队列', permissions: ['rpa.tasks.view'] },
+      { path: '/rpa/stability', label: '稳定性', permissions: ['rpa.stability.view'] },
+      { path: '/rpa/account-locks', label: '账号串行锁', permissions: ['rpa.stability.view'] },
+      { path: '/rpa/page-signatures', label: '页面签名', permissions: ['rpa.stability.view'] }
     ]
   },
   {
@@ -121,12 +124,14 @@ export const routeCapabilities = [
   { path: '/listings/sites', userTypes: ['internal'] },
   { path: '/listings/templates', userTypes: ['internal'] },
   { path: '/pricing/prices', userTypes: ['internal'] },
-  { path: '/rpa/tasks', userTypes: ['internal'] },
-  { path: '/rpa/stability', userTypes: ['internal'] },
-  { path: '/rpa/attempts', userTypes: ['internal'] },
-  { path: '/rpa/manual-queue', userTypes: ['internal'] },
-  { path: '/rpa/account-locks', userTypes: ['internal'] },
-  { path: '/rpa/page-signatures', userTypes: ['internal'] },
+  { path: '/rpa/tasks', permissions: ['rpa.tasks.view'], userTypes: ['internal'] },
+  { path: '/rpa/runs', permissions: ['rpa.tasks.view'], userTypes: ['internal'] },
+  { path: '/rpa/attempts', permissions: ['rpa.tasks.view'], userTypes: ['internal'] },
+  { path: '/rpa/devices', permissions: ['rpa.devices.view'], userTypes: ['internal'] },
+  { path: '/rpa/manual-queue', permissions: ['rpa.tasks.view'], userTypes: ['internal'] },
+  { path: '/rpa/stability', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
+  { path: '/rpa/account-locks', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
+  { path: '/rpa/page-signatures', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/integrations/configs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-jobs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-runs', permissions: ['integrations.view'], userTypes: ['internal'] },

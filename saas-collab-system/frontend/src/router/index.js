@@ -44,6 +44,8 @@ const RPAStabilityDashboard = () => import('../views/rpa/RPAStabilityDashboard.v
 const RPAAttemptList = () => import('../views/rpa/RPAAttemptList.vue');
 const RPAAttemptDetail = () => import('../views/rpa/RPAAttemptDetail.vue');
 const RPAManualQueue = () => import('../views/rpa/RPAManualQueue.vue');
+const RPADeviceList = () => import('../views/rpa/RPADeviceList.vue');
+const RPADeviceDetail = () => import('../views/rpa/RPADeviceDetail.vue');
 const RPAAccountLockList = () => import('../views/rpa/RPAAccountLockList.vue');
 const RPAPageSignatureAlertList = () => import('../views/rpa/RPAPageSignatureAlertList.vue');
 const APISyncTaskList = () => import('../views/integrations/APISyncTaskList.vue');
@@ -121,8 +123,12 @@ const routes = [
       { path: 'rpa/tasks', component: RPATaskList },
       { path: 'rpa/tasks/:id', component: RPATaskDetail },
       { path: 'rpa/stability', component: RPAStabilityDashboard },
-      { path: 'rpa/attempts', component: RPAAttemptList },
-      { path: 'rpa/attempts/:id', component: RPAAttemptDetail },
+      { path: 'rpa/runs', component: RPAAttemptList },
+      { path: 'rpa/runs/:id', component: RPAAttemptDetail },
+      { path: 'rpa/attempts', redirect: '/rpa/runs' },
+      { path: 'rpa/attempts/:id', redirect: (to) => `/rpa/runs/${to.params.id}` },
+      { path: 'rpa/devices', component: RPADeviceList },
+      { path: 'rpa/devices/:id', component: RPADeviceDetail },
       { path: 'rpa/manual-queue', component: RPAManualQueue },
       { path: 'rpa/account-locks', component: RPAAccountLockList },
       { path: 'rpa/page-signatures', component: RPAPageSignatureAlertList },

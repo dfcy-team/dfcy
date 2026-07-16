@@ -33,6 +33,11 @@ class RPAAgent(models.Model):
         INACTIVE = "inactive", "Inactive"
         DISABLED = "disabled", "Disabled"
 
+    class ExecutionMode(models.TextChoices):
+        MOCK = "mock", "Mock"
+        DRY_RUN = "dry_run", "Dry run"
+        PRODUCTION_DISABLED = "production_disabled", "Production disabled"
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="rpa_agents")
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -46,6 +51,11 @@ class RPAAgent(models.Model):
     device_fingerprint = models.CharField(max_length=128, blank=True)
     ip_whitelist = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    execution_mode = models.CharField(
+        max_length=30,
+        choices=ExecutionMode.choices,
+        default=ExecutionMode.DRY_RUN,
+    )
     last_heartbeat_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -111,6 +121,15 @@ class RPATask(models.Model):
         related_name="claimed_tasks",
     )
     claimed_at = models.DateTimeField(null=True, blank=True)
+    manual_assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_rpa_manual_tasks",
+    )
+    manual_reason = models.TextField(blank=True)
+    manual_assigned_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

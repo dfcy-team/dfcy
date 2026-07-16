@@ -39,7 +39,7 @@
 - 财务页面使用 `/api/finance/*`。
 - 报表页面使用 `/api/report/*`。
 - RPA前端管理后台页面不直接使用 RPA Agent 执行接口。
-- 若后端尚未实现 `/api/internal/rpa/tasks/` 管理查询接口，RPA前端管理页面状态标记为 `pending`，并保留 Mock fallback。
+- UI-P3 已实现 `/api/internal/rpa/*` 管理查询；关闭 Mock 后实际成功才标记 `connected`，网络回退标记 `degraded`。
 - 不允许把 `/admin/` 当业务接口。
 - 供应商页面不得访问 `/api/internal/*`。
 - RPA管理页面不得访问 `/api/finance/*`。
@@ -80,13 +80,15 @@
 | 多国家刊登资料列表 | `/listings/sites` | `/api/internal/listings/sites/` | GET | `sku`、`platform`、`country`、`listing_status` | `items`、`status` | `frontend/src/mock/listings.js` | pending |
 | 刊登模板列表 | `/listings/templates` | `/api/internal/listings/templates/` | GET | `platform`、`country`、`category` | `items`、`status` | `frontend/src/mock/listings.js` | pending |
 | 价格列表 | `/pricing/prices` | `/api/internal/pricing/prices/` | GET | `sku`、`approval_status` | `items`、`status` | `frontend/src/mock/pricing.js` | pending |
-| RPA任务列表 | `/rpa/tasks` | `/api/internal/rpa/tasks/` | GET | `task_id`、`task_type`、`status`、`agent` | `task_id`、`task_type`、`business_type`、`business_id`、`status`、`agent`、`retry_count` | `frontend/src/mock/rpa.js` | pending |
-| RPA任务详情 | `/rpa/tasks/:id` | `/api/internal/rpa/tasks/{id}/` | GET | `id` | `task_id`、`payload`、`result`、`logs`、`screenshots`、`error_message`、`manual_required` | `frontend/src/mock/rpa.js` | pending |
-| RPA稳定性看板 | `/rpa/stability` | `/api/internal/rpa/tasks/` | GET | `status` | `status`、`count` | `frontend/src/mock/rpaStability.js` | pending |
-| RPA尝试列表 | `/rpa/attempts` | `/api/internal/rpa/attempts/` | GET | `status`、`agent` | `task`、`attempt_no`、`agent`、`heartbeat_at`、`status`、`masked_error` | `frontend/src/mock/rpaStability.js` | pending |
-| RPA人工接管队列 | `/rpa/manual-queue` | `/api/internal/rpa/manual-queue/` | GET | `status=manual_required` | `task`、`failed_step`、`last_success_step`、`masked_error`、`manual_required` | `frontend/src/mock/rpaStability.js` | pending |
-| RPA账号锁 | `/rpa/account-locks` | `/api/internal/rpa/account-locks/` | GET | `platform`、`account_alias` | `platform`、`account_alias`、`lock_status`、`expires_at` | `frontend/src/mock/rpaStability.js` | pending |
-| RPA页面签名异常 | `/rpa/page-signatures` | `/api/internal/rpa/page-signatures/` | GET | `platform`、`page_type` | `platform`、`page_type`、`signature_hash`、`detected_status` | `frontend/src/mock/rpaStability.js` | pending |
+| RPA任务列表 | `/rpa/tasks` | `/api/internal/rpa/tasks/` | GET | `page`、`page_size`、`status`、`task_type` | `count`、`results[].task_id/task_type/status/agent/retry_count` | `frontend/src/mock/rpa.js` | connected |
+| RPA任务详情 | `/rpa/tasks/:id` | `/api/internal/rpa/tasks/{id}/` | GET | `id` | `task_id`、`payload`、`result`、`logs`、`screenshots`、`error_message` | `frontend/src/mock/rpa.js` | connected |
+| RPA运行列表 | `/rpa/runs` | `/api/internal/rpa/runs/` | GET | `page`、`page_size`、`status` | `task_code`、`attempt_no`、`agent`、`heartbeat_at`、`status`、`masked_error` | `frontend/src/mock/rpaStability.js` | connected |
+| RPA设备列表 | `/rpa/devices` | `/api/internal/rpa/devices/` | GET | `page`、`page_size` | `name`、`execution_mode`、`availability`、`fingerprint_masked` | `frontend/src/mock/rpaStability.js` | connected |
+| RPA设备dry-run | `/rpa/devices` | `/api/internal/rpa/devices/{id}/dry-run/` | POST | `id` | `status=dry_run`、`checks` | `frontend/src/mock/rpaStability.js` | connected |
+| RPA稳定性看板 | `/rpa/stability` | `/api/internal/rpa/stability/` | GET | 无 | `task_states`、`run_states`、`manual_required` | `frontend/src/mock/rpaStability.js` | connected |
+| RPA人工接管队列 | `/rpa/manual-queue` | `/api/internal/rpa/manual-queue/` | GET | `page`、`page_size` | `task_id`、`manual_assignee`、`manual_reason`、`status` | `frontend/src/mock/rpaStability.js` | connected |
+| RPA账号锁 | `/rpa/account-locks` | `/api/internal/rpa/account-locks/` | GET | `page`、`page_size` | `platform`、`account_alias`、`lock_status`、`expires_at` | `frontend/src/mock/rpaStability.js` | connected |
+| RPA页面签名异常 | `/rpa/page-signatures` | `/api/internal/rpa/page-signatures/` | GET | `page`、`page_size` | `platform`、`page_type`、`signature_hash_masked`、`detected_status` | `frontend/src/mock/rpaStability.js` | connected |
 | API同步任务列表 | `/integrations/api-sync` | `/api/internal/integrations/sync-tasks/` | GET | `task_no`、`platform`、`sync_type`、`status` | `items`、`status` | `frontend/src/mock/integrations.js` | pending |
 | API同步日志列表 | `/integrations/api-sync/logs` | `/api/internal/integrations/sync-logs/` | GET | `log_no`、`platform`、`sync_type`、`status` | `items`、`quality_check_result` | `frontend/src/mock/integrations.js` | pending |
 | 平台接入配置列表 | `/integrations/configs` | `/api/internal/integrations/configs/` | GET | `platform`、`status`、`environment` | `platform`、`account_alias`、`environment`、`status`、`credential_fingerprint`、`credential_key_version` | `frontend/src/mock/integrations.js` | pending |
