@@ -23,7 +23,7 @@
         <div class="header-user">
           <el-tag :type="useMock ? 'warning' : 'success'" effect="plain">{{ environmentLabel }}</el-tag>
           <div class="header-user__identity">
-            <strong>{{ auth.currentUser?.username }}</strong>
+            <strong :title="auth.currentUser?.username">{{ auth.currentUser?.username }}</strong>
             <span>租户 {{ auth.currentUser?.tenant_id }} · {{ roleLabel }}</span>
           </div>
           <el-button text @click="handleLogout">退出</el-button>
@@ -141,6 +141,7 @@ const AppMenu = defineComponent({
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .header-user__identity {
@@ -149,7 +150,13 @@ const AppMenu = defineComponent({
   min-width: 132px;
 }
 
-.header-user__identity strong { color: #172033; font-size: 13px; }
+.header-user__identity strong {
+  overflow: hidden;
+  color: #172033;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .header-user__identity span { color: #718096; font-size: 11px; }
 .mobile-menu-button { display: none; width: 36px; min-width: 36px; padding: 0; font-size: 20px; }
 .app-main { min-width: 0; padding: 20px; overflow-x: auto; }
@@ -161,6 +168,8 @@ const AppMenu = defineComponent({
   .app-main { width: 100%; padding: 14px; }
   .header-user .el-tag,
   .header-user__identity span { display: none; }
-  .header-user__identity { min-width: 0; }
+  .header-user { gap: 6px; }
+  .header-user__identity { width: 76px; min-width: 0; }
+  .header-user .el-button { min-width: 36px; padding: 4px; }
 }
 </style>

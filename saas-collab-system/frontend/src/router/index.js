@@ -69,6 +69,14 @@ const PlatformIntegrationReadiness = () => import('../views/settings/PlatformInt
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
 const ConfigCenterList = () => import('../views/settings/ConfigCenterList.vue');
 const ConfigVersionHistory = () => import('../views/settings/ConfigVersionHistory.vue');
+const DepartmentDirectory = () => import('../views/system/DepartmentDirectory.vue');
+const UserDirectory = () => import('../views/system/UserDirectory.vue');
+const RolePermissionMatrix = () => import('../views/system/RolePermissionMatrix.vue');
+const SecurityOperations = () => import('../views/system/SecurityOperations.vue');
+const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.vue');
+const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
+const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
+const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -140,6 +148,14 @@ const routes = [
       { path: 'settings/security-review', component: SecurityReviewChecklist },
       { path: 'settings/config-center', component: ConfigCenterList },
       { path: 'settings/config-versions', component: ConfigVersionHistory },
+      { path: 'system/departments', component: DepartmentDirectory },
+      { path: 'system/users', component: UserDirectory },
+      { path: 'system/roles', component: RolePermissionMatrix },
+      { path: 'system/security-operations', component: SecurityOperations },
+      { path: 'master-data/platforms', component: PlatformMasterList },
+      { path: 'master-data/stores', component: StoreMasterList },
+      { path: 'master-data/warehouses', component: WarehouseMasterList },
+      { path: 'master-data/suppliers', component: SupplierMasterList },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

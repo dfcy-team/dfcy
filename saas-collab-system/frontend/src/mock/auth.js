@@ -7,7 +7,14 @@ export const mockAuthUser = {
   tenant_id: 'mock-tenant-001',
   is_superuser: false,
   roles: ['stage0_viewer'],
-  permissions: ['mock.view'],
+  permissions: [
+    'mock.view',
+    'system.organization.view', 'system.organization.manage',
+    'system.users.view', 'system.users.manage',
+    'system.roles.view', 'system.roles.manage',
+    'masterdata.view', 'masterdata.manage',
+    'security.operations.view'
+  ],
   data_scope: []
 };
 

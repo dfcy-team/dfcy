@@ -71,8 +71,22 @@ export const menuItems = [
     ]
   },
   {
+    label: '基础档案',
+    permissions: ['masterdata.view'],
+    children: [
+      { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
+      { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
+      { path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
+      { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] }
+    ]
+  },
+  {
     label: '系统治理',
     children: [
+      { path: '/system/departments', label: '组织架构', permissions: ['system.organization.view'] },
+      { path: '/system/users', label: '用户目录', permissions: ['system.users.view'] },
+      { path: '/system/roles', label: '角色权限', permissions: ['system.roles.view'] },
+      { path: '/system/security-operations', label: '安全运维', permissions: ['security.operations.view'] },
       { path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
       { path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
       { path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
@@ -131,6 +145,14 @@ export const routeCapabilities = [
   { path: '/settings/security-review', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/settings/config-center', permissions: ['config.view'], userTypes: ['internal'] },
   { path: '/settings/config-versions', permissions: ['config.view'], userTypes: ['internal'] },
+  { path: '/system/departments', permissions: ['system.organization.view'], userTypes: ['internal'] },
+  { path: '/system/users', permissions: ['system.users.view'], userTypes: ['internal'] },
+  { path: '/system/roles', permissions: ['system.roles.view'], userTypes: ['internal'] },
+  { path: '/system/security-operations', permissions: ['security.operations.view'], userTypes: ['internal'] },
+  { path: '/master-data/platforms', permissions: ['masterdata.view'], userTypes: ['internal'] },
+  { path: '/master-data/stores', permissions: ['masterdata.view'], userTypes: ['internal'] },
+  { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
+  { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/audit/operations', userTypes: ['internal'] }
 ];
 
