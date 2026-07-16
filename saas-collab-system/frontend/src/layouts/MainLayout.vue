@@ -1,109 +1,112 @@
 <template>
   <el-container class="app-shell">
-    <el-aside width="240px" class="app-sidebar desktop-sidebar">
-      <div class="brand">SaaS 协同系统</div>
-      <el-menu router :default-active="$route.path" class="menu">
-        <template v-for="item in menuItems" :key="item.path || item.label">
-          <el-sub-menu v-if="item.children" :index="item.label">
-            <template #title>{{ item.label }}</template>
-            <el-menu-item v-for="child in item.children" :key="child.path" :index="child.path">{{ child.label }}</el-menu-item>
-          </el-sub-menu>
-          <el-menu-item v-else :index="item.path">{{ item.label }}</el-menu-item>
-        </template>
-      </el-menu>
+    <el-aside width="248px" class="app-sidebar desktop-sidebar">
+      <div class="brand">
+        <strong>SaaS 协同系统</strong>
+        <span>{{ environmentLabel }}</span>
+      </div>
+      <AppMenu :items="visibleMenuItems" />
     </el-aside>
-    <el-container>
+
+    <el-container class="app-workspace">
       <el-header class="app-header">
         <div class="header-context">
-          <el-button class="mobile-menu-button" text aria-label="打开导航菜单" @click="mobileMenuOpen = true">☰</el-button>
-          <span>阶段3 Mock / API 切换环境</span>
+          <el-button class="mobile-menu-button" text aria-label="打开导航菜单" @click="mobileMenuOpen = true">
+            ☰
+          </el-button>
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item>工作台</el-breadcrumb-item>
+            <el-breadcrumb-item v-if="currentLabel && $route.path !== '/'">{{ currentLabel }}</el-breadcrumb-item>
+          </el-breadcrumb>
         </div>
-        <span>{{ auth.currentUser.username }} / {{ auth.currentUser.user_type }}</span>
+
+        <div class="header-user">
+          <el-tag :type="useMock ? 'warning' : 'success'" effect="plain">{{ environmentLabel }}</el-tag>
+          <div class="header-user__identity">
+            <strong>{{ auth.currentUser?.username }}</strong>
+            <span>租户 {{ auth.currentUser?.tenant_id }} · {{ roleLabel }}</span>
+          </div>
+          <el-button text @click="handleLogout">退出</el-button>
+        </div>
       </el-header>
+
       <el-main class="app-main">
         <router-view />
       </el-main>
     </el-container>
-    <el-drawer v-model="mobileMenuOpen" direction="ltr" size="280px" :with-header="false" class="mobile-nav-drawer">
-      <div class="brand">SaaS 协同系统</div>
-      <el-menu router :default-active="$route.path" class="menu" @select="mobileMenuOpen = false">
-        <template v-for="item in menuItems" :key="item.path || item.label">
-          <el-sub-menu v-if="item.children" :index="`mobile-${item.label}`">
-            <template #title>{{ item.label }}</template>
-            <el-menu-item v-for="child in item.children" :key="child.path" :index="child.path">{{ child.label }}</el-menu-item>
-          </el-sub-menu>
-          <el-menu-item v-else :index="item.path">{{ item.label }}</el-menu-item>
-        </template>
-      </el-menu>
+
+    <el-drawer v-model="mobileMenuOpen" direction="ltr" size="288px" :with-header="false">
+      <div class="brand">
+        <strong>SaaS 协同系统</strong>
+        <span>{{ environmentLabel }}</span>
+      </div>
+      <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
     </el-drawer>
   </el-container>
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { computed, defineComponent, h, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElMenu, ElMenuItem, ElSubMenu } from 'element-plus';
+import 'element-plus/theme-chalk/el-container.css';
+import 'element-plus/theme-chalk/el-aside.css';
+import 'element-plus/theme-chalk/el-header.css';
+import 'element-plus/theme-chalk/el-main.css';
+import 'element-plus/theme-chalk/el-menu.css';
+import 'element-plus/theme-chalk/el-menu-item.css';
+import 'element-plus/theme-chalk/el-sub-menu.css';
+import 'element-plus/theme-chalk/el-drawer.css';
+import 'element-plus/theme-chalk/el-breadcrumb.css';
+import 'element-plus/theme-chalk/el-tag.css';
+import 'element-plus/theme-chalk/el-button.css';
 import { useAuthStore } from '../stores/auth';
+import { useMock } from '../api/request';
+import { filterMenuItems, findMenuLabel } from '../router/menu';
 
 const auth = useAuthStore();
+const route = useRoute();
+const router = useRouter();
 const mobileMenuOpen = ref(false);
 
-// 菜单只负责导航展示，不代表真实授权结果；权限以后端返回为准。
-const menuItems = [
-  { path: '/', label: '首页' },
-  {
-    label: '经营分析',
-    children: [
-      { path: '/analytics/sales', label: '销售分析' },
-      { path: '/analytics/inventory', label: '库存分析' }
-    ]
-  },
-  {
-    label: '经营决策',
-    children: [
-      { path: '/inventory/alerts', label: '库存预警' },
-      { path: '/inventory/replenishment', label: '补货建议' },
-      { path: '/lifecycle/reviews', label: '生命周期复盘' },
-      { path: '/lifecycle/history', label: '复盘历史' },
-      { path: '/alerts/business', label: '经营预警' }
-    ]
-  },
-  { path: '/products/research', label: '新品市调' },
-  { path: '/products/master', label: '商品主数据' },
-  { path: '/purchasing/orders', label: '采购供应链' },
-  { path: '/suppliers/tasks', label: '供应商协同' },
-  { path: '/listings/sites', label: '多国家刊登' },
-  { path: '/pricing/prices', label: '价格中心' },
-  { path: '/rpa/tasks', label: 'RPA任务' },
-  { path: '/integrations/api-sync', label: 'API同步' },
-  {
-    label: '财务中心',
-    children: [
-      { path: '/finance/analytics', label: '财务分析' },
-      { path: '/finance/statements', label: '平台账单' },
-      { path: '/finance/reconciliation/matches', label: '对账差异' }
-    ]
-  },
-  {
-    label: '报表中心',
-    children: [
-      { path: '/reports/basic', label: '基础报表' },
-      { path: '/reports/exports', label: '报表导出' }
-    ]
-  },
-  {
-    label: '系统治理',
-    children: [
-      { path: '/settings/config-center', label: '配置中心' },
-      { path: '/settings/config-versions', label: '配置版本' }
-    ]
-  },
-  { path: '/audit/operations', label: '日志审计' }
-];
+const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
+const currentLabel = computed(() => findMenuLabel(route.path, visibleMenuItems.value));
+const environmentLabel = computed(() => (useMock ? 'Mock' : 'Pilot API'));
+const roleLabel = computed(() => {
+  if (auth.currentUser?.is_superuser) return '超级管理员';
+  return auth.currentUser?.roles?.join(' / ') || auth.currentUser?.user_type || '用户';
+});
+
+function handleLogout() {
+  auth.logout();
+  router.replace('/login');
+}
+
+const AppMenu = defineComponent({
+  props: { items: { type: Array, required: true } },
+  emits: ['select'],
+  setup(props, { emit }) {
+    const renderItem = (item) => {
+      if (item.children) {
+        return h(
+          ElSubMenu,
+          { index: item.label },
+          {
+            title: () => item.label,
+            default: () => item.children.map(renderItem)
+          }
+        );
+      }
+      return h(ElMenuItem, { index: item.path, onClick: () => emit('select') }, () => item.label);
+    };
+    return () => h(ElMenu, { router: true, defaultActive: route.path, class: 'menu' }, () => props.items.map(renderItem));
+  }
+});
 </script>
 
 <style scoped>
-.app-shell {
-  min-height: 100vh;
-}
+.app-shell { min-height: 100vh; }
+.app-workspace { min-width: 0; }
 
 .app-sidebar {
   border-right: 1px solid #d9e2ec;
@@ -111,66 +114,53 @@ const menuItems = [
 }
 
 .brand {
-  height: 56px;
-  padding: 18px 20px;
-  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 64px;
+  padding: 0 20px;
   border-bottom: 1px solid #d9e2ec;
 }
 
-.menu {
-  border-right: 0;
-}
+.brand strong { color: #172033; font-size: 16px; }
+.brand span { margin-top: 3px; color: #718096; font-size: 11px; }
+.menu { border-right: 0; }
 
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  height: 64px;
+  padding: 0 20px;
   border-bottom: 1px solid #d9e2ec;
   background: #fff;
 }
 
-.header-context {
+.header-context,
+.header-user {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
-.mobile-menu-button {
-  display: none;
-  width: 36px;
-  min-width: 36px;
-  padding: 0;
-  font-size: 20px;
+.header-user__identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
 }
 
-.app-main {
-  padding: 20px;
-  min-width: 0;
-  overflow-x: auto;
-}
-
-:deep(.mobile-nav-drawer .el-drawer__body) {
-  padding: 0;
-}
+.header-user__identity strong { color: #172033; font-size: 13px; }
+.header-user__identity span { color: #718096; font-size: 11px; }
+.mobile-menu-button { display: none; width: 36px; min-width: 36px; padding: 0; font-size: 20px; }
+.app-main { min-width: 0; padding: 20px; overflow-x: auto; }
 
 @media (max-width: 900px) {
-  .desktop-sidebar {
-    display: none;
-  }
-
-  .mobile-menu-button {
-    display: inline-flex;
-  }
-
-  .app-header {
-    padding: 0 12px;
-    font-size: 12px;
-  }
-
-  .app-main {
-    width: 100%;
-    padding: 14px;
-  }
+  .desktop-sidebar { display: none; }
+  .mobile-menu-button { display: inline-flex; }
+  .app-header { padding: 0 12px; }
+  .app-main { width: 100%; padding: 14px; }
+  .header-user .el-tag,
+  .header-user__identity span { display: none; }
+  .header-user__identity { min-width: 0; }
 }
 </style>

@@ -30,8 +30,8 @@ const columns = [
 ];
 const rowActions = [
   { label: '处理记录', mode: 'detail' },
-  { label: '确认处理', confirmMessage: '当前仅展示处理流程占位，不会触发预警关联的真实业务动作。', message: '预警处理接口尚未提供，当前保持 pending。' },
-  { label: '关闭', confirmMessage: '关闭需填写处理说明和证据。当前仅展示审计要求，不会提交。', message: '预警关闭接口尚未提供，当前保持 pending。', type: 'danger' }
+  { label: '确认处理', permission: 'alerts.manage', confirmMessage: '当前仅展示处理流程占位，不会触发预警关联的真实业务动作。', message: '预警处理接口尚未提供，当前保持 pending。' },
+  { label: '关闭', permission: 'alerts.manage', confirmMessage: '关闭需填写处理说明和证据。当前仅展示审计要求，不会提交。', message: '预警关闭接口尚未提供，当前保持 pending。', type: 'danger' }
 ];
 const detailFields = [
   { prop: 'alert_id', label: '预警编号' }, { prop: 'reason', label: '触发原因' }, { prop: 'rule_version', label: '规则版本' },

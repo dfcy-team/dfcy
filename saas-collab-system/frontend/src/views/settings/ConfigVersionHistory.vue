@@ -29,7 +29,7 @@ const columns = [
 ];
 const rowActions = [
   { label: '审计记录', mode: 'detail' },
-  { label: '回滚', confirmMessage: '当前仅展示回滚流程，不会改变任何配置。', message: '配置回滚接口尚未提供，当前保持 pending。', type: 'danger' }
+  { label: '回滚', permission: 'config.rollback', confirmMessage: '当前仅展示回滚流程，不会改变任何配置。', message: '配置回滚接口尚未提供，当前保持 pending。', type: 'danger' }
 ];
 const detailFields = [
   { prop: 'id', label: '日志编号' }, { prop: 'from_version', label: '来源版本' }, { prop: 'to_version', label: '目标版本' }, { prop: 'masked_detail', label: '脱敏审计信息', type: 'json' }

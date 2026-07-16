@@ -29,8 +29,8 @@ const columns = [
 ];
 const rowActions = [
   { label: '查看证据', mode: 'detail' },
-  { label: '人工确认建议', confirmMessage: '后端会校验授权和高风险权限；该操作只记录生命周期决策，不会直接改价、下架或改变商品状态。', execute: (row) => confirmLifecycleReview(row.id, { reason: 'Human lifecycle review confirmed.' }) },
-  { label: '人工拒绝建议', type: 'danger', confirmMessage: '该操作仅记录人工决策，不会触发任何商品自动化动作。', execute: (row) => rejectLifecycleReview(row.id, { reason: 'Human lifecycle review rejected.' }) }
+  { label: '人工确认建议', permission: 'products.lifecycle.confirm', confirmMessage: '后端会校验授权和高风险权限；该操作只记录生命周期决策，不会直接改价、下架或改变商品状态。', execute: (row) => confirmLifecycleReview(row.id, { reason: 'Human lifecycle review confirmed.' }) },
+  { label: '人工拒绝建议', permission: 'products.lifecycle.confirm', type: 'danger', confirmMessage: '该操作仅记录人工决策，不会触发任何商品自动化动作。', execute: (row) => rejectLifecycleReview(row.id, { reason: 'Human lifecycle review rejected.' }) }
 ];
 const detailFields = [
   { prop: 'id', label: '复盘编号' }, { prop: 'reason_detail', label: '建议原因' }, { prop: 'review_period_start', label: '复盘开始' },

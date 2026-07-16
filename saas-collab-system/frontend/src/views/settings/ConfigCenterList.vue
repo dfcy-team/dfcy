@@ -29,7 +29,7 @@ const columns = [
 ];
 const rowActions = [
   { label: '治理信息', mode: 'detail' },
-  { label: '提交审批', confirmMessage: '当前只展示配置审批流程，不会提交真实配置变更。', message: '配置审批接口尚未提供，当前保持 pending。' }
+  { label: '提交审批', permission: 'config.manage', confirmMessage: '当前只展示配置审批流程，不会提交真实配置变更。', message: '配置审批接口尚未提供，当前保持 pending。' }
 ];
 const detailFields = [
   { prop: 'config_key', label: '配置键' }, { prop: 'default_value', label: '默认值摘要' }, { prop: 'is_sensitive', label: '敏感配置' }, { prop: 'description', label: '说明' }

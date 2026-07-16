@@ -1,5 +1,11 @@
 import axios from 'axios';
 import { pendingResponse } from '../mock';
+import {
+  clearAuthSession,
+  getAccessToken,
+  getRefreshToken,
+  updateAccessToken
+} from '../utils/authSession';
 
 export const useMock = import.meta.env.VITE_USE_MOCK !== 'false';
 
@@ -7,6 +13,13 @@ const request = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '',
   timeout: 10000
 });
+
+let refreshPromise = null;
+let authenticationExpiredHandler = null;
+
+export function onAuthenticationExpired(handler) {
+  authenticationExpiredHandler = handler;
+}
 
 export function normalizeApiResponse(payload) {
   if (
@@ -28,7 +41,52 @@ export function normalizeApiResponse(payload) {
   };
 }
 
-request.interceptors.response.use((response) => normalizeApiResponse(response.data));
+request.interceptors.request.use((config) => {
+  const access = getAccessToken();
+  if (access && !config.skipAuth) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${access}`;
+  }
+  return config;
+});
+
+request.interceptors.response.use(
+  (response) => normalizeApiResponse(response.data),
+  async (error) => {
+    const original = error?.config;
+    const isAuthenticationRequest = /\/api\/internal\/auth\/(login|refresh)\//.test(original?.url || '');
+    const refresh = getRefreshToken();
+
+    if (error?.response?.status === 401 && original && !original._authRetried && !isAuthenticationRequest && refresh) {
+      original._authRetried = true;
+      refreshPromise ||= axios
+        .post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/internal/auth/refresh/`, { refresh })
+        .then((response) => response.data?.access || response.data?.data?.access)
+        .finally(() => {
+          refreshPromise = null;
+        });
+
+      try {
+        const access = await refreshPromise;
+        if (!access) throw new Error('Refresh response did not include an access token.');
+        updateAccessToken(access);
+        original.headers = original.headers || {};
+        original.headers.Authorization = `Bearer ${access}`;
+        return request(original);
+      } catch (refreshError) {
+        clearAuthSession();
+        authenticationExpiredHandler?.();
+        return Promise.reject(refreshError);
+      }
+    }
+
+    if (error?.response?.status === 401 && !isAuthenticationRequest) {
+      clearAuthSession();
+      authenticationExpiredHandler?.();
+    }
+    return Promise.reject(error);
+  }
+);
 
 function withApiStatus(response, apiStatus) {
   const data = response?.data;

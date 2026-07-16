@@ -1,6 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
+import { pinia } from '../stores';
+import { canAccessPath } from './menu';
 const MainLayout = () => import('../layouts/MainLayout.vue');
 const Login = () => import('../views/auth/Login.vue');
+const Forbidden = () => import('../views/auth/Forbidden.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
 const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
@@ -73,6 +77,7 @@ const routes = [
     component: MainLayout,
     children: [
       { path: '', component: Dashboard },
+      { path: 'forbidden', component: Forbidden },
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
       { path: 'inventory/alerts', component: InventoryAlertList },
@@ -145,10 +150,19 @@ const router = createRouter({
   routes
 });
 
-router.beforeEach((to) => {
-  // 阶段0路由守卫仅占位，不做真实权限判断；真实权限以后端 /api/internal/auth/me/ 返回为准。
+router.beforeEach(async (to) => {
+  const auth = useAuthStore(pinia);
+  await auth.initialize();
+
   if (to.meta.public) {
+    if (to.path === '/login' && auth.isAuthenticated) return '/';
     return true;
+  }
+  if (!auth.isAuthenticated) {
+    return { path: '/login', query: { redirect: to.fullPath } };
+  }
+  if (to.path !== '/forbidden' && !canAccessPath(auth.currentUser, to.path)) {
+    return '/forbidden';
   }
   return true;
 });

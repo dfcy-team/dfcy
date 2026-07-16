@@ -29,8 +29,8 @@ const columns = [
 ];
 const rowActions = [
   { label: '查看证据', mode: 'detail' },
-  { label: '人工接受建议', confirmMessage: '仅记录人工审核结果，不会创建采购订单、通知供应商或触发 RPA。', execute: (row) => acceptReplenishmentRecommendation(row.id, { reason: 'Human review accepted recommendation.' }) },
-  { label: '人工拒绝建议', type: 'danger', confirmMessage: '仅记录人工审核结果，不会触发任何采购或自动化动作。', execute: (row) => rejectReplenishmentRecommendation(row.id, { reason: 'Human review rejected recommendation.' }) }
+  { label: '人工接受建议', permission: 'replenishment.review', confirmMessage: '仅记录人工审核结果，不会创建采购订单、通知供应商或触发 RPA。', execute: (row) => acceptReplenishmentRecommendation(row.id, { reason: 'Human review accepted recommendation.' }) },
+  { label: '人工拒绝建议', permission: 'replenishment.review', type: 'danger', confirmMessage: '仅记录人工审核结果，不会触发任何采购或自动化动作。', execute: (row) => rejectReplenishmentRecommendation(row.id, { reason: 'Human review rejected recommendation.' }) }
 ];
 const detailFields = [
   { prop: 'id', label: '建议编号' }, { prop: 'reason_detail', label: '建议原因' }, { prop: 'confidence', label: '置信度' }, { prop: 'source_summary', label: '计算证据', type: 'json' }

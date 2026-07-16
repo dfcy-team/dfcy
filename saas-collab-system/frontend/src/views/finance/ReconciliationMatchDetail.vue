@@ -36,12 +36,14 @@ const fields = [
 const actionConfigs = [
   {
     label: '确认匹配',
+    permission: 'finance.reconcile',
     type: 'primary',
     confirmMessage: '确认对账匹配属于财务高风险操作，必须以后端财务权限为准。',
     handler: () => confirmReconciliationMatch(route.params.id || 1)
   },
   {
     label: '拒绝匹配',
+    permission: 'finance.reconcile',
     confirmMessage: '拒绝对账匹配将调用后端财务 reject 接口。',
     handler: () => rejectReconciliationMatch(route.params.id || 1)
   }
