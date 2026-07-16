@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "apps.alerts",
     "apps.replenishment",
     "apps.configcenter",
+    "apps.masterdata",
     "apps.common",
 ]
 

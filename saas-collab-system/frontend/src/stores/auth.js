@@ -2,17 +2,9 @@ import { defineStore } from 'pinia';
 import { getCurrentUser, login } from '../api/auth';
 import { useMock } from '../api/request';
 import { clearAuthSession, readAuthSession, writeAuthSession } from '../utils/authSession';
+import { mockAuthUser } from '../mock/auth';
 
-export const mockCurrentUser = {
-  user_id: 'mock-user-001',
-  username: 'stage0_internal_user',
-  user_type: 'internal',
-  tenant_id: 'mock-tenant-001',
-  is_superuser: false,
-  roles: ['stage0_viewer'],
-  permissions: ['mock.view'],
-  data_scope: []
-};
+export const mockCurrentUser = mockAuthUser;
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({

@@ -36,6 +36,32 @@ def check_user_permission(user, permission_code):
     return Permission.objects.filter(code=permission_code, roles__id__in=role_ids).exists()
 
 
+def get_permission_data_scopes(user, permission_code):
+    """Return scopes from active roles that actually grant one permission."""
+    if not user or not getattr(user, "is_active", False) or not permission_code:
+        return []
+
+    if getattr(user, "is_superuser", False):
+        return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
+
+    role_ids = UserRole.objects.filter(
+        tenant=user.tenant,
+        user=user,
+        role__status=Role.Status.ACTIVE,
+        role__permissions__code=permission_code,
+    ).values("role_id")
+
+    return list(
+        DataScope.objects.filter(
+            tenant=user.tenant,
+            role_id__in=role_ids,
+            role__status=Role.Status.ACTIVE,
+        )
+        .distinct()
+        .values("scope_type", "config", "role_id")
+    )
+
+
 def user_has_finance_access(user):
     if not user or not getattr(user, "is_active", False):
         return False

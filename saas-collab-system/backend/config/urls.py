@@ -12,6 +12,7 @@ urlpatterns = [
     path("api/internal/replenishment/", include("apps.replenishment.urls")),
     path("api/internal/lifecycle/", include("apps.products.urls_lifecycle")),
     path("api/internal/config/", include("apps.configcenter.urls")),
+    path("api/internal/master-data/", include("apps.masterdata.urls")),
     path("api/internal/products/", include("apps.products.urls")),
     path("api/internal/purchasing/", include("apps.purchasing.urls")),
     path("api/internal/suppliers/", include("apps.suppliers.urls_internal")),

@@ -64,6 +64,10 @@ const capabilityType = computed(() => capabilityTypes[props.capability] || 'info
   font-weight: 700;
 }
 
+.app-page__heading {
+  min-width: 0;
+}
+
 .app-page h1 {
   margin: 0;
   color: #172033;
@@ -74,6 +78,8 @@ const capabilityType = computed(() => capabilityTypes[props.capability] || 'info
 .app-page__heading p {
   margin: 8px 0 0;
   color: #64748b;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .app-page__actions {
@@ -90,6 +96,10 @@ const capabilityType = computed(() => capabilityTypes[props.capability] || 'info
   .app-page__header {
     flex-direction: column;
     gap: 12px;
+  }
+
+  .app-page__heading {
+    width: 100%;
   }
 
   .app-page h1 {
