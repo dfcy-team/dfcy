@@ -28,11 +28,13 @@ const columns = [
 const actionConfigs = [
   {
     label: 'run-mock',
+    permission: 'integrations.run',
     type: 'primary',
     handler: ({ rows }) => runSyncJobMock(rows[0]?.id || 1)
   },
   {
     label: 'disable',
+    permission: 'integrations.manage',
     confirmMessage: '仅禁用阶段2同步任务，不连接真实平台。',
     handler: ({ rows }) => disableSyncJob(rows[0]?.id || 1)
   }

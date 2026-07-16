@@ -51,8 +51,10 @@ def test_internal_user_can_login_and_access_me():
             "email": "internal@example.com",
             "user_type": CustomUser.UserType.INTERNAL,
             "tenant_id": tenant.id,
+            "is_superuser": False,
             "roles": ["admin"],
             "permissions": ["accounts.view"],
+            "data_scope": [],
         },
     }
 
@@ -82,10 +84,34 @@ def test_me_success_response_uses_standard_shape():
             "email": "internal-me@example.com",
             "user_type": CustomUser.UserType.INTERNAL,
             "tenant_id": tenant.id,
+            "is_superuser": False,
             "roles": [],
             "permissions": [],
+            "data_scope": [],
         },
     }
+
+
+@pytest.mark.django_db
+def test_me_exposes_trusted_superuser_and_all_scope():
+    tenant = Tenant.objects.create(name="Tenant", code="superuser-tenant")
+    user = CustomUser.objects.create_superuser(
+        username="root",
+        email="root@example.com",
+        password="test-password",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.get("/api/internal/auth/me/")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["is_superuser"] is True
+    assert response.json()["data"]["data_scope"] == [
+        {"scope_type": "all", "config": {"all": True}, "role_id": None}
+    ]
 
 
 @pytest.mark.django_db

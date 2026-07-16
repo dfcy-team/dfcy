@@ -2,6 +2,17 @@
 
 本清单用于阶段1前端页面、Mock fallback 和后端接口边界对齐。未真实联调的接口不得标记为 `connected`。
 
+## UI-P1认证与工作台映射
+
+| 页面/能力 | 页面路径 | API | 方法 | 返回/用途 | 当前状态 |
+|---|---|---|---|---|---|
+| 内部登录 | `/login` | `/api/internal/auth/login/` | POST | `access`、`refresh`；仅内部用户 | pending（代码完成，待Pilot复验） |
+| Token刷新 | 全局请求层 | `/api/internal/auth/refresh/` | POST | 新`access`；并发请求共享一次刷新 | pending（代码完成，待Pilot复验） |
+| 当前用户 | 全局会话 | `/api/internal/auth/me/` | GET | 用户、tenant、superuser、roles、permissions、data_scope | pending（代码完成，待Pilot复验） |
+| 角色工作台 | `/` | 后续聚合合同 | GET | 当前只展示可信会话上下文和授权入口，不显示虚构业务数量 | pending |
+
+生产模式不得在认证API网络失败时回退为Mock身份；菜单只消费`/auth/me/`的可信授权上下文，直接访问仍由后端权限拒绝。
+
 ## 阶段3前端页面映射
 
 阶段3开发A接口尚未合并，以下新增页面均使用 Mock fallback，路径状态不得标记为 `connected`。
@@ -43,7 +54,7 @@
 
 | 页面名称 | 页面路径 | 需要的API | 请求方式 | 请求参数 | 返回字段 | Mock文件位置 | 当前状态 |
 |---|---|---|---|---|---|---|---|
-| 登录页 | `/login` | `/api/internal/auth/login/` | POST | `username`、`password` 占位 | `success`、`code`、`message`、`data.user` | `frontend/src/mock/auth.js` | mock |
+| 登录页 | `/login` | `/api/internal/auth/login/`、`/api/internal/auth/me/` | POST、GET | `username`、`password` | `access`、`refresh`、用户、tenant、roles、permissions、data_scope | `frontend/src/mock/auth.js` | pending（待Pilot复验） |
 | 首页 | `/` | `/api/internal/dashboard/summary/` | GET | `tenant_id`、`date_range` | `summary` | `frontend/src/mock/reports.js` | pending |
 | 新品市调列表 | `/products/research` | `/api/internal/products/research/` | GET | `research_no`、`product_name`、`platform`、`approval_status` | `research_no`、`product_name`、`platform`、`competitor_url`、`estimated_sales`、`estimated_gross_margin`、`risk_points`、`approval_status` | `frontend/src/mock/products.js` | mock |
 | 新品市调详情 | `/products/research/:id` | `/api/internal/products/research/{id}/` | GET | `id` | `research_no`、`product_name`、`platform`、`competitor_url`、`estimated_sales`、`estimated_gross_margin`、`risk_points`、`approval_status` | `frontend/src/mock/products.js` | mock |
@@ -104,6 +115,35 @@ RPA Agent 执行接口只能由 Agent 访问，前端管理后台页面不得直
 - `/api/rpa/tasks/{id}/fail/`
 
 RPA Agent 不访问 `/api/finance/*`，不访问 `/admin/`，不直连数据库。
+
+## UI-P1 路由与动作权限合同
+
+### 路由合同
+
+- 所有非公开前端路由必须在 `frontend/src/router/menu.js` 的 `routeCapabilities` 中登记。
+- 未登记路由默认拒绝并进入统一403页面，不得因不在菜单中而默认放行。
+- 详情路由继承最长匹配的资源路径合同。
+- `internal`、`external` 和后端 action permission 同时参与判定；前端判定仅改善体验，后端仍是最终安全边界。
+- 财务导入使用 `finance.import`，财务查询使用 `finance.view`，对账写操作使用 `finance.reconcile`，不得以 `finance.view` 代替动作权限。
+- 供应商任务和出货页面仅允许 `external`；内部商品、采购、治理、RPA管理页面仅允许 `internal`。
+
+### 动作合同
+
+| 页面动作 | 后端权限码 | 无权时行为 |
+|---|---|---|
+| 补货建议接受/拒绝 | `replenishment.review` | 隐藏且点击处理器二次拒绝 |
+| 生命周期建议确认/拒绝 | `products.lifecycle.confirm` | 隐藏且点击处理器二次拒绝；高风险权限仍由后端追加校验 |
+| 经营预警处理/关闭 | `alerts.manage` | 隐藏且不发送请求 |
+| 配置提交审批 | `config.manage` | 隐藏且不发送请求 |
+| 配置回滚 | `config.rollback` | 隐藏且不发送请求 |
+| 报表申请导出 | `reports.export` | 隐藏且不发送请求 |
+| 财务Mock对账、确认、拒绝 | `finance.reconcile` | 隐藏且不发送请求 |
+| 商品状态确认/拒绝 | `products.status.confirm` | 隐藏且点击处理器二次拒绝 |
+| API同步run-mock | `integrations.run` | 隐藏且不发送请求 |
+| API同步disable | `integrations.manage` | 隐藏且不发送请求 |
+
+通用动作组件通过认证store的 `hasPermission()` 消费后端返回权限码。动作可显式配置为“无权时禁用并展示原因”，默认采用隐藏策略；无论展示策略如何，点击处理器都会再次校验权限。
+
 ## P2-B-R1 API Integration Summary
 
 - Latest `origin/main`: `51535c246b430064b782c4078591253506b16c17`.

@@ -37,9 +37,17 @@
             <span v-else>{{ formatValue(row[column.prop]) }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="rowActions.length" label="操作" :width="Math.max(150, rowActions.length * 92)" fixed="right">
+        <el-table-column v-if="visibleRowActions.length" label="操作" :width="Math.max(150, visibleRowActions.length * 92)" fixed="right">
           <template #default="{ row }">
-            <el-button v-for="action in rowActions" :key="action.label" link :type="action.type || 'primary'" @click="handleAction(action, row)">
+            <el-button
+              v-for="action in visibleRowActions"
+              :key="action.label"
+              link
+              :type="action.type || 'primary'"
+              :disabled="actionAccess(action).disabled"
+              :title="actionAccess(action).reason"
+              @click="handleAction(action, row)"
+            >
               {{ action.label }}
             </el-button>
           </template>
@@ -63,6 +71,8 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { formatApiError } from '../api/request';
+import { useAuthStore } from '../stores/auth';
+import { getActionAccess } from '../utils/actionAccess';
 
 const props = defineProps({
   eyebrow: { type: String, default: 'Phase 3' }, title: { type: String, required: true }, subtitle: { type: String, default: '' },
@@ -72,6 +82,7 @@ const props = defineProps({
 });
 
 const query = reactive({});
+const auth = useAuthStore();
 const loading = ref(false);
 const errorMessage = ref('');
 const apiStatus = ref('mock');
@@ -80,6 +91,8 @@ const items = ref([]);
 const selectedRow = ref({});
 const drawerVisible = ref(false);
 const statusLabel = computed(() => ({ connected: 'API 已连接', fallback: 'API 异常 · Mock 回退', pending: 'API 待联调', mock: 'Mock 数据' }[apiStatus.value] || apiStatus.value));
+const actionAccess = (action) => getActionAccess(auth, action);
+const visibleRowActions = computed(() => props.rowActions.filter((action) => actionAccess(action).visible));
 
 function initializeFilters() { props.filters.forEach((filter) => { query[filter.key] = ''; }); }
 function resetFilters() { initializeFilters(); loadData(); }
@@ -89,6 +102,11 @@ function tagType(value) {
 }
 
 async function handleAction(action, row) {
+  const access = actionAccess(action);
+  if (!access.allowed) {
+    ElMessage.warning(access.reason);
+    return;
+  }
   selectedRow.value = row;
   if (action.mode === 'detail') { drawerVisible.value = true; return; }
   if (action.confirmMessage) {

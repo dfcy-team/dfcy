@@ -27,6 +27,7 @@ const columns = [
 const actionConfigs = [
   {
     label: 'run-mock',
+    permission: 'finance.reconcile',
     type: 'primary',
     confirmMessage: '仅运行后端 Mock 对账，不接入真实银行或支付平台。',
     handler: () => runReconciliationMock()

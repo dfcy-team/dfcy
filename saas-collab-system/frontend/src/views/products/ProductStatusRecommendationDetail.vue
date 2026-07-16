@@ -39,12 +39,14 @@ const fields = [
 const actionConfigs = [
   {
     label: '确认建议',
+    permission: 'products.status.confirm',
     type: 'primary',
     confirmMessage: '确认商品状态建议属于高风险动作，必须以后端权限校验为准。',
     handler: () => confirmProductStatusRecommendation(route.params.id || 1)
   },
   {
     label: '拒绝建议',
+    permission: 'products.status.confirm',
     confirmMessage: '拒绝商品状态建议将调用后端 reject 接口。',
     handler: () => rejectProductStatusRecommendation(route.params.id || 1)
   }

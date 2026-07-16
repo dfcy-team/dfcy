@@ -5,9 +5,10 @@ export const mockAuthUser = {
   username: 'stage0_internal_user',
   user_type: 'internal',
   tenant_id: 'mock-tenant-001',
+  is_superuser: false,
   roles: ['stage0_viewer'],
   permissions: ['mock.view'],
-  data_scope: 'tenant'
+  data_scope: []
 };
 
 export const mockLogin = () => successResponse({

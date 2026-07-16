@@ -20,13 +20,14 @@
       </el-form-item>
     </el-form>
 
-    <div v-if="actions.length || actionConfigs.length" class="phase2-actions">
+    <div v-if="actions.length || visibleActionConfigs.length" class="phase2-actions">
       <el-button v-for="action in actions" :key="action" disabled>{{ action }}</el-button>
       <el-button
-        v-for="action in actionConfigs"
+        v-for="action in visibleActionConfigs"
         :key="action.label"
         :type="action.type || 'default'"
-        :disabled="action.disabled"
+        :disabled="actionAccess(action).disabled"
+        :title="actionAccess(action).reason"
         :loading="actionLoading === action.label"
         @click="runAction(action)"
       >
@@ -63,6 +64,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useAuthStore } from '../stores/auth';
+import { getActionAccess } from '../utils/actionAccess';
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -79,6 +82,7 @@ const props = defineProps({
 });
 
 const rows = ref([]);
+const auth = useAuthStore();
 const detail = ref({});
 const loading = ref(false);
 const actionLoading = ref('');
@@ -92,6 +96,8 @@ const tagType = computed(() => {
   return 'info';
 });
 const isEmpty = computed(() => (props.mode === 'list' ? rows.value.length === 0 : Object.keys(detail.value).length === 0));
+const actionAccess = (action) => getActionAccess(auth, action);
+const visibleActionConfigs = computed(() => props.actionConfigs.filter((action) => actionAccess(action).visible));
 
 function getRows(data) {
   if (Array.isArray(data)) return data;
@@ -151,6 +157,11 @@ async function loadData() {
 }
 
 async function runAction(action) {
+  const access = actionAccess(action);
+  if (!access.allowed) {
+    ElMessage.warning(access.reason);
+    return;
+  }
   if (typeof action.handler !== 'function') return;
   try {
     if (action.confirmMessage) {

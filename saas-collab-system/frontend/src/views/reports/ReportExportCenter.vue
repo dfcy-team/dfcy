@@ -30,7 +30,7 @@ const columns = [
 ];
 const rowActions = [
   { label: '审计记录', mode: 'detail' },
-  { label: '申请导出', confirmMessage: '导出需要后端重新校验权限、数据范围和敏感字段策略。当前操作不会生成文件。', message: '报表导出接口尚未提供，当前保持 pending。' }
+  { label: '申请导出', permission: 'reports.export', confirmMessage: '导出需要后端重新校验权限、数据范围和敏感字段策略。当前操作不会生成文件。', message: '报表导出接口尚未提供，当前保持 pending。' }
 ];
 const detailFields = [
   { prop: 'report_code', label: '报表编码' }, { prop: 'data_scope', label: '数据范围' }, { prop: 'export_policy', label: '导出策略' },
