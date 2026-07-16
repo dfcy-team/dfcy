@@ -1,10 +1,28 @@
-<template><Phase2DataPage title="RPA任务尝试" note="GET /api/internal/rpa/attempts/" risk-note="错误信息已脱敏，截图仅为 placeholder evidence。" :loader="fetchRpaAttempts" :columns="columns" :filters="['状态','Agent']" empty-text="暂无任务尝试" /></template>
+<template>
+  <RPAResourcePage
+    title="RPA运行记录"
+    note="GET /api/internal/rpa/runs/"
+    boundary-note="运行状态与任务状态分别展示；错误和证据引用均已脱敏。"
+    :loader="fetchRpaRuns"
+    :columns="columns"
+    :filters="filters"
+    :row-actions="actions"
+    empty-text="暂无运行记录"
+  />
+</template>
+
 <script setup>
-import Phase2DataPage from '../../components/Phase2DataPage.vue';
-import { fetchRpaAttempts } from '../../api/rpaStability';
+import { useRouter } from 'vue-router';
+import RPAResourcePage from '../../components/RPAResourcePage.vue';
+import { fetchRpaRuns } from '../../api/rpaStability';
+
+const router = useRouter();
 const columns = [
-  { prop: 'task', label: '任务' }, { prop: 'attempt_no', label: '次数' }, { prop: 'agent', label: 'Agent' },
-  { prop: 'heartbeat_at', label: '心跳' }, { prop: 'status', label: '状态', type: 'status' }, { prop: 'failed_step', label: '失败步骤' },
-  { prop: 'last_success_step', label: '最后成功步骤' }, { prop: 'masked_error', label: '脱敏错误' }
+  { prop: 'task_code', label: '任务编号' }, { prop: 'attempt_no', label: '运行次数', width: 100 },
+  { prop: 'agent', label: '设备' }, { prop: 'status', label: '运行状态', type: 'status' },
+  { prop: 'heartbeat_at', label: '最近心跳', width: 180 }, { prop: 'failed_step', label: '失败步骤' },
+  { prop: 'last_success_step', label: '最后成功步骤' }, { prop: 'masked_error', label: '脱敏错误', width: 220 }
 ];
+const filters = [{ key: 'status', label: '状态', options: ['claimed', 'running', 'success', 'failed', 'retrying', 'manual_required', 'cancelled'] }];
+const actions = [{ label: '详情', permission: 'rpa.tasks.view', handler: (row) => router.push(`/rpa/runs/${row.id}`) }];
 </script>

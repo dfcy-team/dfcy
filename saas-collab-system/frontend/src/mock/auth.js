@@ -13,7 +13,10 @@ export const mockAuthUser = {
     'system.users.view', 'system.users.manage',
     'system.roles.view', 'system.roles.manage',
     'masterdata.view', 'masterdata.manage',
-    'security.operations.view'
+    'security.operations.view',
+    'rpa.tasks.view', 'rpa.tasks.manage',
+    'rpa.devices.view', 'rpa.devices.dry_run',
+    'rpa.stability.view'
   ],
   data_scope: []
 };

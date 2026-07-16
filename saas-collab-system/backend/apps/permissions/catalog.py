@@ -1,5 +1,40 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "rpa.tasks.view",
+        "name": "View RPA tasks and runs",
+        "module": "rpa",
+        "action": "tasks.view",
+        "description": "View tenant and data-scope filtered RPA task and run metadata.",
+    },
+    {
+        "code": "rpa.tasks.manage",
+        "name": "Manage RPA manual queue",
+        "module": "rpa",
+        "action": "tasks.manage",
+        "description": "Assign manual review and authorize mock-only retries without executing platform actions.",
+    },
+    {
+        "code": "rpa.devices.view",
+        "name": "View RPA devices",
+        "module": "rpa",
+        "action": "devices.view",
+        "description": "View masked tenant and data-scope filtered RPA device metadata.",
+    },
+    {
+        "code": "rpa.devices.dry_run",
+        "name": "Run RPA device dry-run checks",
+        "module": "rpa",
+        "action": "devices.dry_run",
+        "description": "Run audited local checks that never connect to a real platform or execute browser automation.",
+    },
+    {
+        "code": "rpa.stability.view",
+        "name": "View RPA stability evidence",
+        "module": "rpa",
+        "action": "stability.view",
+        "description": "View account locks, masked page signatures, and task/run state summaries.",
+    },
+    {
         "code": "reports.view",
         "name": "View report catalog and exports",
         "module": "reports",

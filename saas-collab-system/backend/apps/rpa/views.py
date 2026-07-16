@@ -35,6 +35,7 @@ def _get_agent_for_user(request):
         tenant=request.user.tenant,
         user=request.user,
         status=RPAAgent.Status.ACTIVE,
+        execution_mode__in=(RPAAgent.ExecutionMode.MOCK, RPAAgent.ExecutionMode.DRY_RUN),
     ).first()
     if agent is None:
         raise PermissionDenied("Valid RPA agent binding is required.")

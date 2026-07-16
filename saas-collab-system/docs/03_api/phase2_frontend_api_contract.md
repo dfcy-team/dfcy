@@ -66,11 +66,14 @@ All finance pages only use `/api/finance/*`.
 
 | Capability | Method | Frontend Path | Backend Source | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| RPA management task list | GET | `/api/internal/rpa/tasks/` | not present in latest main | pending | Keep mock fallback. |
-| RPA attempts | GET | `/api/internal/rpa/attempts/` | not present in latest main | pending | Keep mock fallback. |
-| Manual queue | GET | `/api/internal/rpa/manual-queue/` | not present in latest main | pending | Keep mock fallback. |
-| Account locks | GET | `/api/internal/rpa/account-locks/` | not present in latest main | pending | Keep mock fallback. |
-| Page signatures | GET | `/api/internal/rpa/page-signatures/` | not present in latest main | pending | Keep mock fallback. |
+| RPA management task list/detail | GET | `/api/internal/rpa/tasks/` | `backend/apps/rpa/urls_internal.py` | connected | UI-P3 permission and data_scope filtered. |
+| RPA runs | GET | `/api/internal/rpa/runs/` | `backend/apps/rpa/urls_internal.py` | connected | Canonical run resource; task/run state is separate. |
+| RPA devices | GET | `/api/internal/rpa/devices/` | `backend/apps/rpa/urls_internal.py` | connected | Token and complete fingerprint never returned. |
+| Device dry-run | POST | `/api/internal/rpa/devices/{id}/dry-run/` | `backend/apps/rpa/urls_internal.py` | connected | Local audit check only; no browser or platform. |
+| Manual queue | GET | `/api/internal/rpa/manual-queue/` | `backend/apps/rpa/urls_internal.py` | connected | Assign/retry requires `rpa.tasks.manage`. |
+| Account locks | GET | `/api/internal/rpa/account-locks/` | `backend/apps/rpa/urls_internal.py` | connected | Read-only. |
+| Page signatures | GET | `/api/internal/rpa/page-signatures/` | `backend/apps/rpa/urls_internal.py` | connected | Hash is masked. |
+| Stability summary | GET | `/api/internal/rpa/stability/` | `backend/apps/rpa/urls_internal.py` | connected | Separate task/run state totals. |
 
 Frontend RPA management pages must not call these Agent execution endpoints:
 

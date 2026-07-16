@@ -1,6 +1,8 @@
 import { requestWithMockFallback } from './request';
 import {
   mockRpaAccountLocks,
+  mockRpaDeviceDetail,
+  mockRpaDevices,
   mockRpaAttemptDetail,
   mockRpaAttempts,
   mockRpaManualQueue,
@@ -9,25 +11,31 @@ import {
 } from '../mock/rpaStability';
 
 export const fetchRpaStabilityDashboard = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/tasks/' }, mockRpaStabilityDashboard, 'rpa.stability.dashboard');
+  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/stability/' }, mockRpaStabilityDashboard, 'rpa.stability.dashboard');
 
-export const fetchRpaAttempts = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/attempts/' }, mockRpaAttempts, 'rpa.attempts');
+export const fetchRpaRuns = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/runs/', params }, mockRpaAttempts, 'rpa.runs');
 
-export const fetchRpaAttemptDetail = (id = 1) =>
-  requestWithMockFallback({ method: 'get', url: `/api/internal/rpa/attempts/${id}/` }, mockRpaAttemptDetail, 'rpa.attempts.detail');
+export const fetchRpaRunDetail = (id = 1) =>
+  requestWithMockFallback({ method: 'get', url: `/api/internal/rpa/runs/${id}/` }, mockRpaAttemptDetail, 'rpa.runs.detail');
 
-export const fetchRpaManualQueue = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/manual-queue/' }, mockRpaManualQueue, 'rpa.manual_queue');
+export const fetchRpaManualQueue = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/manual-queue/', params }, mockRpaManualQueue, 'rpa.manual_queue');
 
-export const fetchRpaAccountLocks = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/account-locks/' }, mockRpaAccountLocks, 'rpa.account_locks');
+export const fetchRpaAccountLocks = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/account-locks/', params }, mockRpaAccountLocks, 'rpa.account_locks');
 
-export const fetchRpaPageSignatures = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/page-signatures/' }, mockRpaPageSignatures, 'rpa.page_signatures');
+export const fetchRpaPageSignatures = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/page-signatures/', params }, mockRpaPageSignatures, 'rpa.page_signatures');
 
-export const assignRpaManual = (id = 1) =>
-  requestWithMockFallback({ method: 'post', url: `/api/internal/rpa/tasks/${id}/assign-manual/` }, mockRpaManualQueue, 'rpa.assign_manual');
+export const fetchRpaDevices = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/rpa/devices/', params }, mockRpaDevices, 'rpa.devices');
 
-export const retryRpaMock = (id = 1) =>
-  requestWithMockFallback({ method: 'post', url: `/api/internal/rpa/tasks/${id}/retry-mock/` }, mockRpaAttempts, 'rpa.retry_mock');
+export const fetchRpaDeviceDetail = (id = 1) =>
+  requestWithMockFallback({ method: 'get', url: `/api/internal/rpa/devices/${id}/` }, mockRpaDeviceDetail, 'rpa.devices.detail');
+
+export const runRpaDeviceDryRun = (id = 1) =>
+  requestWithMockFallback({ method: 'post', url: `/api/internal/rpa/devices/${id}/dry-run/` }, mockRpaDeviceDetail, 'rpa.devices.dry_run');
+
+export const fetchRpaAttempts = fetchRpaRuns;
+export const fetchRpaAttemptDetail = fetchRpaRunDetail;
