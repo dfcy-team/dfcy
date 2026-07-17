@@ -42,6 +42,7 @@ class SupplierTaskFeedbackSerializer(serializers.ModelSerializer):
     ALLOWED_SUPPLIER_STATUSES = {
         SupplierTask.Status.IN_PROGRESS,
         SupplierTask.Status.PARTIAL,
+        SupplierTask.Status.COMPLETED,
         SupplierTask.Status.EXCEPTION,
     }
 
@@ -58,6 +59,15 @@ class SupplierTaskFeedbackSerializer(serializers.ModelSerializer):
         if value > self.instance.production_quantity:
             raise serializers.ValidationError("Completed quantity cannot exceed production quantity.")
         return value
+
+    def validate(self, attrs):
+        status = attrs.get("status", self.instance.status)
+        completed_quantity = attrs.get("completed_quantity", self.instance.completed_quantity)
+        if status == SupplierTask.Status.COMPLETED and completed_quantity != self.instance.production_quantity:
+            raise serializers.ValidationError(
+                {"completed_quantity": "Completed quantity must equal production quantity when status is completed."}
+            )
+        return attrs
 
 
 class SupplierShipmentSerializer(serializers.ModelSerializer):

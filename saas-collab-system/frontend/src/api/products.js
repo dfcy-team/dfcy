@@ -9,20 +9,20 @@ import {
   mockResearchList
 } from '../mock/products';
 
-export const fetchResearchList = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/products/research/' }, mockResearchList, 'products.research');
+export const fetchResearchList = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/research/', params }, mockResearchList, 'products.research');
 
 export const fetchResearchDetail = (id = 1) =>
   requestWithMockFallback({ method: 'get', url: `/api/internal/products/research/${id}/` }, mockResearchDetail, 'products.research.detail');
 
-export const fetchProductMasterList = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/products/spus/' }, mockProductMasterList, 'products.spus');
+export const fetchProductMasterList = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/spus/', params }, mockProductMasterList, 'products.spus');
 
 export const fetchProductMasterDetail = (id = 1) =>
   requestWithMockFallback({ method: 'get', url: `/api/internal/products/spus/${id}/` }, mockProductMasterDetail, 'products.spus.detail');
 
-export const fetchProductSkuList = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/products/skus/' }, mockProductSkuList, 'products.skus');
+export const fetchProductSkuList = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/skus/', params }, mockProductSkuList, 'products.skus');
 
 export const freezeProductCode = (id = 1) =>
   requestWithMockFallback(
@@ -31,5 +31,5 @@ export const freezeProductCode = (id = 1) =>
     'products.spus.freeze_code'
   );
 
-export const fetchProductStatusList = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/products/spus/' }, mockProductStatusList, 'products.status');
+export const fetchProductStatusList = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/spus/', params }, mockProductStatusList, 'products.status');

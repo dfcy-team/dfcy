@@ -14,6 +14,8 @@ from .models import (
 
 
 class ProductResearchSerializer(serializers.ModelSerializer):
+    CONTROLLED_UPDATE_FIELDS = {"approval_status"}
+
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
 
@@ -34,10 +36,28 @@ class ProductResearchSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "tenant_id", "created_by_id", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "tenant_id",
+            "approval_status",
+            "created_by_id",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate(self, attrs):
+        if self.instance is not None:
+            attempted = self.CONTROLLED_UPDATE_FIELDS.intersection(self.initial_data)
+            if attempted:
+                raise serializers.ValidationError(
+                    {field: "This status can only be changed through an authorized workflow action." for field in attempted}
+                )
+        return attrs
 
 
 class ProductSPUSerializer(serializers.ModelSerializer):
+    CONTROLLED_UPDATE_FIELDS = {"lifecycle_status", "sales_status"}
+
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
 
     class Meta:
@@ -54,10 +74,24 @@ class ProductSPUSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "tenant_id", "is_code_frozen", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "tenant_id",
+            "lifecycle_status",
+            "sales_status",
+            "is_code_frozen",
+            "created_at",
+            "updated_at",
+        )
 
     def validate(self, attrs):
         instance = self.instance
+        if instance is not None:
+            attempted = self.CONTROLLED_UPDATE_FIELDS.intersection(self.initial_data)
+            if attempted:
+                raise serializers.ValidationError(
+                    {field: "This status can only be changed through an authorized workflow action." for field in attempted}
+                )
         if instance and instance.is_code_frozen and "spu_code" in attrs and attrs["spu_code"] != instance.spu_code:
             raise serializers.ValidationError({"spu_code": "Code is frozen and cannot be changed."})
         return attrs

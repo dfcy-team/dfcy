@@ -3,6 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser, ExternalUserProfile
 from apps.purchasing.models import PurchaseOrder
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.suppliers.models import SupplierShipment, SupplierTask
 from apps.tenants.models import Tenant
 
@@ -20,6 +21,11 @@ def create_user(tenant, username, user_type, supplier_id=None):
             supplier_id=supplier_id,
             company_name=f"Supplier {supplier_id}",
         )
+    elif user_type == CustomUser.UserType.INTERNAL:
+        role = Role.objects.create(tenant=tenant, code=f"{username}-purchase-role", name="Purchase role")
+        role.permissions.add(*Permission.objects.filter(code__in=["purchasing.orders.view", "purchasing.orders.manage"]))
+        UserRole.objects.create(tenant=tenant, user=user, role=role)
+        DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
     return user
 
 
@@ -45,8 +51,8 @@ def test_internal_user_can_manage_purchase_orders_with_unified_response():
             "unit_price": "12.50",
             "delivery_date": "2026-08-01",
             "payment_terms": "Net 30 placeholder",
-            "status": "draft",
-            "approval_status": "draft",
+            "status": "confirmed",
+            "approval_status": "approved",
         },
         format="json",
     )
@@ -54,7 +60,12 @@ def test_internal_user_can_manage_purchase_orders_with_unified_response():
     detail_response = client.get(f"/api/internal/purchasing/orders/{order_id}/")
     patch_response = client.patch(
         f"/api/internal/purchasing/orders/{order_id}/",
-        data={"status": "confirmed"},
+        data={"quantity": 60},
+        format="json",
+    )
+    controlled_status_response = client.patch(
+        f"/api/internal/purchasing/orders/{order_id}/",
+        data={"status": "confirmed", "approval_status": "approved"},
         format="json",
     )
 
@@ -64,10 +75,17 @@ def test_internal_user_can_manage_purchase_orders_with_unified_response():
     assert create_response.json()["message"] == "success"
     assert create_response.json()["data"]["tenant_id"] == tenant.id
     assert create_response.json()["data"]["created_by_id"] == user.id
+    assert create_response.json()["data"]["status"] == PurchaseOrder.Status.DRAFT
+    assert create_response.json()["data"]["approval_status"] == PurchaseOrder.ApprovalStatus.DRAFT
     assert detail_response.status_code == 200
     assert detail_response.json()["data"]["po_no"] == "PO-001"
     assert patch_response.status_code == 200
-    assert patch_response.json()["data"]["status"] == "confirmed"
+    assert patch_response.json()["data"]["quantity"] == 60
+    assert controlled_status_response.status_code == 400
+    assert controlled_status_response.json()["code"] == "VALIDATION_ERROR"
+    order = PurchaseOrder.objects.get(pk=order_id)
+    assert order.status == PurchaseOrder.Status.DRAFT
+    assert order.approval_status == PurchaseOrder.ApprovalStatus.DRAFT
 
 
 @pytest.mark.django_db
@@ -125,11 +143,11 @@ def test_supplier_can_only_see_own_tasks_and_shipments():
     other_shipment_response = client.get(f"/api/external/supplier/shipments/{other_shipment.id}/")
 
     assert tasks_response.status_code == 200
-    assert [item["task_no"] for item in tasks_response.json()["data"]] == ["TASK-OWN"]
+    assert [item["task_no"] for item in tasks_response.json()["data"]["results"]] == ["TASK-OWN"]
     assert own_task_response.status_code == 200
     assert other_task_response.status_code == 404
     assert shipments_response.status_code == 200
-    assert [item["shipment_no"] for item in shipments_response.json()["data"]] == ["SHIP-OWN"]
+    assert [item["shipment_no"] for item in shipments_response.json()["data"]["results"]] == ["SHIP-OWN"]
     assert own_shipment_response.status_code == 200
     assert other_shipment_response.status_code == 404
 
@@ -216,6 +234,42 @@ def test_supplier_feedback_rejects_unsafe_status_and_over_quantity():
 
 
 @pytest.mark.django_db
+def test_supplier_can_complete_task_only_when_completed_quantity_matches_production_quantity():
+    tenant = Tenant.objects.create(name="Tenant", code="tenant-supplier-completion")
+    supplier_user = create_user(
+        tenant,
+        "supplier-completion",
+        CustomUser.UserType.EXTERNAL,
+        supplier_id=1001,
+    )
+    task = SupplierTask.objects.create(
+        tenant=tenant,
+        supplier_id=1001,
+        task_no="TASK-COMPLETION",
+        sku_code="SKU-COMPLETION",
+        production_quantity=100,
+    )
+    client = authenticated_client(supplier_user)
+
+    invalid_response = client.patch(
+        f"/api/external/supplier/tasks/{task.id}/feedback/",
+        data={"completed_quantity": 99, "status": "completed"},
+        format="json",
+    )
+    valid_response = client.patch(
+        f"/api/external/supplier/tasks/{task.id}/feedback/",
+        data={"completed_quantity": 100, "status": "completed"},
+        format="json",
+    )
+
+    assert invalid_response.status_code == 400
+    assert invalid_response.json()["code"] == "VALIDATION_ERROR"
+    assert valid_response.status_code == 200
+    assert valid_response.json()["data"]["completed_quantity"] == 100
+    assert valid_response.json()["data"]["status"] == SupplierTask.Status.COMPLETED
+
+
+@pytest.mark.django_db
 def test_internal_user_cannot_use_external_supplier_api():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "internal-external-denied", CustomUser.UserType.INTERNAL)
@@ -279,6 +333,6 @@ def test_purchase_and_supplier_apis_are_tenant_isolated():
     hidden_task_response = supplier_client.get(f"/api/external/supplier/tasks/{hidden_task.id}/")
 
     assert po_list_response.status_code == 200
-    assert [item["po_no"] for item in po_list_response.json()["data"]] == ["PO-A"]
+    assert [item["po_no"] for item in po_list_response.json()["data"]["results"]] == ["PO-A"]
     assert hidden_po_response.status_code == 404
     assert hidden_task_response.status_code == 404

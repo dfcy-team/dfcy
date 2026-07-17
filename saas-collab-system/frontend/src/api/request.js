@@ -135,6 +135,11 @@ export function getMockResponse(mockHandler, moduleName) {
   return normalizeApiResponse(pendingResponse(moduleName));
 }
 
+export function requestPendingOrMock(mockHandler, moduleName) {
+  if (useMock) return getMockResponse(mockHandler, moduleName);
+  return normalizeApiResponse(pendingResponse(moduleName));
+}
+
 export async function requestWithMockFallback(config, mockHandler, moduleName) {
   if (useMock) {
     return getMockResponse(mockHandler, moduleName);

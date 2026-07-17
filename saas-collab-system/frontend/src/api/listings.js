@@ -1,11 +1,11 @@
-import { requestWithMockFallback } from './request';
+import { requestPendingOrMock } from './request';
 import { mockListingTemplates, mockSiteProfiles } from '../mock/listings';
 
 export const fetchSiteProfiles = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/listings/sites/' }, mockSiteProfiles, 'listings.sites');
+  requestPendingOrMock(mockSiteProfiles, 'listings.sites');
 
 export const fetchSiteProfileDetail = (id = 1) =>
-  requestWithMockFallback({ method: 'get', url: `/api/internal/listings/sites/${id}/` }, mockSiteProfiles, 'listings.sites.detail');
+  requestPendingOrMock(mockSiteProfiles, `listings.sites.detail:${id}`);
 
 export const fetchListingTemplates = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/internal/listings/templates/' }, mockListingTemplates, 'listings.templates');
+  requestPendingOrMock(mockListingTemplates, 'listings.templates');
