@@ -26,9 +26,13 @@ const filters = [
 ];
 
 const columns = [
-  { prop: 'sku_code', label: 'SKU', width: 140 }, { prop: 'product_name', label: '商品', width: 180 },
-  { prop: 'warehouse', label: '仓库', width: 140 }, { prop: 'available_stock', label: '可售库存' },
-  { prop: 'in_transit_stock', label: '在途库存' }, { prop: 'cover_days', label: '覆盖天数' },
-  { prop: 'risk_level', label: '风险', type: 'status' }
+  { prop: 'metric_code', label: '指标编码', width: 170 },
+  { prop: 'metric_name', label: '指标名称', width: 170 },
+  { prop: 'value', label: '指标值' },
+  { prop: 'unit', label: '单位' },
+  { prop: 'sku_id', label: 'SKU' },
+  { prop: 'warehouse_id', label: '仓库' },
+  { prop: 'quality_status', label: '质量', type: 'status' },
+  { prop: 'updated_at', label: '更新时间', width: 180 }
 ];
 </script>

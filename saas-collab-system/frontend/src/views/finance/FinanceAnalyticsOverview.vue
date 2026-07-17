@@ -24,8 +24,15 @@ const filters = [
   { key: 'currency', label: '币种', options: [{ label: 'CNY', value: 'CNY' }, { label: 'USD', value: 'USD' }, { label: 'EUR', value: 'EUR' }] }
 ];
 const columns = [
-  { prop: 'period', label: '期间' }, { prop: 'currency', label: '币种' }, { prop: 'statement_summary', label: '账单汇总', width: 140 },
-  { prop: 'receipt_summary', label: '到账汇总', width: 140 }, { prop: 'difference_summary', label: '差异汇总', width: 140 },
-  { prop: 'exception_count', label: '异常数' }, { prop: 'account_mask', label: '账号掩码', width: 130 }, { prop: 'quality_status', label: '质量', type: 'status' }
+  { prop: 'period_start', label: '开始日期' },
+  { prop: 'period_end', label: '结束日期' },
+  { prop: 'platform', label: '平台' },
+  { prop: 'currency', label: '币种' },
+  { prop: 'statement_amount', label: '账单金额', width: 140 },
+  { prop: 'receipt_amount', label: '到账金额', width: 140 },
+  { prop: 'difference_amount', label: '差异金额', width: 140 },
+  { prop: 'exception_count', label: '异常数' },
+  { prop: 'account_mask', label: '账号掩码', width: 130 },
+  { prop: 'quality_status', label: '质量', type: 'status' }
 ];
 </script>

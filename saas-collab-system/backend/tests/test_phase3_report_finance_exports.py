@@ -57,8 +57,19 @@ def test_report_export_uses_tenant_data_scope_placeholder_and_audit():
     create_recommendation(tenant, hidden_sku)
     create_recommendation(other, other_sku)
     exporter = create_user(tenant, "exporter")
-    grant(exporter, "reports.view", DataScope.ScopeType.CUSTOM, {"sku_ids": [visible_sku.id]})
-    grant(exporter, "reports.export", DataScope.ScopeType.CUSTOM, {"sku_ids": [visible_sku.id]})
+    grant(
+        exporter,
+        "reports.view",
+        DataScope.ScopeType.CUSTOM,
+        {"report_types": ["replenishment"]},
+    )
+    grant(
+        exporter,
+        "reports.export",
+        DataScope.ScopeType.CUSTOM,
+        {"report_types": ["replenishment"]},
+    )
+    grant(exporter, "replenishment.view", DataScope.ScopeType.CUSTOM, {"sku_ids": [visible_sku.id]})
 
     export = create_export_request(
         user=exporter,
@@ -83,6 +94,7 @@ def test_report_export_large_result_is_rejected_without_file():
     exporter = create_user(tenant, "limit-exporter")
     grant(exporter, "reports.view")
     grant(exporter, "reports.export")
+    grant(exporter, "replenishment.view")
 
     with patch("apps.reports.export_services.MAX_EXPORT_ROWS", 1):
         export = create_export_request(
@@ -107,6 +119,7 @@ def test_report_export_detail_is_owner_scoped_and_view_is_audited():
     for user in (owner, other_user):
         grant(user, "reports.view")
     grant(owner, "reports.export")
+    grant(owner, "replenishment.view")
     export = create_export_request(
         user=owner,
         report_type=ReportExportRequest.ReportType.REPLENISHMENT,
@@ -126,6 +139,7 @@ def test_report_filters_reject_sensitive_values_and_direct_persistence():
     exporter = create_user(tenant, "guard-exporter")
     grant(exporter, "reports.view")
     grant(exporter, "reports.export")
+    grant(exporter, "replenishment.view")
     with pytest.raises(ValidationError, match="Sensitive credentials"):
         create_export_request(
             user=exporter,
@@ -172,12 +186,62 @@ def test_finance_analytics_are_tenant_scoped_masked_and_read_only():
     exceptions = client_for(finance_user).get("/api/finance/analytics/exceptions/")
 
     assert overview.status_code == 200
-    assert overview.json()["data"]["currencies"][0]["gross_amount"] == 100.0
-    assert overview.json()["data"]["account_details"] == "***"
+    assert overview.json()["data"]["results"][0]["statement_amount"] == 100.0
+    assert overview.json()["data"]["results"][0]["account_mask"] == "***"
+    assert overview.json()["data"]["read_only"] is True
     assert reconciliation.json()["data"]["fund_action_available"] is False
-    assert exceptions.json()["data"]["account_details"] == "***"
+    assert exceptions.json()["data"]["fund_action_available"] is False
     assert list(PlatformStatement.objects.values_list("id", "status")) == before
     assert FinanceAuditLog.objects.filter(tenant=tenant, object_type="FinanceAnalytics").count() == 3
+
+
+@pytest.mark.django_db
+def test_finance_analytics_applies_exact_platform_and_currency_scope():
+    tenant = Tenant.objects.create(name="Tenant", code="finance-exact-scope")
+    finance_user = create_user(tenant, "finance-scoped-user")
+    grant(
+        finance_user,
+        "finance.view",
+        DataScope.ScopeType.CUSTOM,
+        {"platforms": ["mock"], "currencies": ["USD"]},
+    )
+    for currency, amount in (("USD", "100.00"), ("EUR", "900.00")):
+        PlatformStatement.objects.create(
+            tenant=tenant,
+            platform="mock",
+            statement_no=f"DEMO-{currency}",
+            period_start="2026-01-01",
+            period_end="2026-01-31",
+            currency=currency,
+            gross_amount=Decimal(amount),
+            fee_amount=Decimal("0.00"),
+            net_amount=Decimal(amount),
+        )
+    response = client_for(finance_user).get("/api/finance/analytics/overview/")
+    assert response.status_code == 200
+    assert response.json()["data"]["count"] == 1
+    assert response.json()["data"]["results"][0]["currency"] == "USD"
+
+
+@pytest.mark.django_db
+def test_report_view_export_and_download_scopes_are_independent():
+    tenant = Tenant.objects.create(name="Tenant", code="report-exact-actions")
+    sku = create_sku(tenant, "REPORT-ACTION")
+    create_recommendation(tenant, sku)
+    user = create_user(tenant, "report-action-user")
+    grant(user, "reports.view", DataScope.ScopeType.CUSTOM, {"report_types": ["replenishment"]})
+    grant(user, "reports.export", DataScope.ScopeType.CUSTOM, {"report_types": ["finance_summary"]})
+    grant(user, "reports.download", DataScope.ScopeType.CUSTOM, {"report_types": ["finance_summary"]})
+    grant(user, "replenishment.view", DataScope.ScopeType.CUSTOM, {"sku_ids": [sku.id]})
+    catalog = client_for(user).get("/api/report/catalog/")
+    assert [item["report_type"] for item in catalog.json()["data"]] == ["replenishment"]
+    denied = client_for(user).post(
+        "/api/report/exports/",
+        {"report_type": "replenishment", "filters": {}},
+        format="json",
+    )
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"
 
 
 @pytest.mark.django_db

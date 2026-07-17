@@ -1,9 +1,10 @@
-from django.db.models import Q
 from rest_framework.permissions import BasePermission
 
 from apps.accounts.models import CustomUser
-from apps.permissions.models import DataScope
-from apps.permissions.services import check_user_permission, get_user_data_scope
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
+from apps.permissions.ui_p6_scopes import analytics_dimension_configs, filter_analytics_queryset
 
 
 class AnalyticsActionPermission(BasePermission):
@@ -11,13 +12,18 @@ class AnalyticsActionPermission(BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        return bool(
+        allowed = bool(
             self.permission_code
             and user
             and user.is_authenticated
             and user.user_type == CustomUser.UserType.INTERNAL
             and check_user_permission(user, self.permission_code)
         )
+        if not allowed:
+            return False
+        if not get_permission_data_scopes(user, self.permission_code):
+            raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
+        return True
 
 
 class IsAnalyticsViewer(AnalyticsActionPermission):
@@ -40,41 +46,16 @@ class IsReportDownloader(AnalyticsActionPermission):
     permission_code = "reports.download"
 
 
-def get_analytics_dimension_scopes(user):
-    if getattr(user, "is_superuser", False):
-        return None
-
-    scopes = get_user_data_scope(user)
-    if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
-        return None
-
-    dimension_scopes = []
-    for scope in scopes:
-        if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
-            continue
-        configured_scopes = scope.get("config", {}).get("analytics_dimensions", [])
-        dimension_scopes.extend(value for value in configured_scopes if isinstance(value, dict) and value)
-    return dimension_scopes
+def get_analytics_dimension_scopes(user, permission_code="analytics.view"):
+    return analytics_dimension_configs(user, permission_code)
 
 
-def filter_analytics_aggregates(user, queryset):
-    dimension_scopes = get_analytics_dimension_scopes(user)
-    if dimension_scopes is None:
-        return queryset
-    if not dimension_scopes:
-        return queryset.none()
-
-    allowed = Q()
-    for dimensions in dimension_scopes:
-        condition = Q()
-        for key, value in dimensions.items():
-            condition &= Q(**{f"dimensions__{key}": value})
-        allowed |= condition
-    return queryset.filter(allowed)
+def filter_analytics_aggregates(user, queryset, permission_code="analytics.view"):
+    return filter_analytics_queryset(user, queryset, permission_code)
 
 
-def can_access_analytics_dimensions(user, dimensions):
-    dimension_scopes = get_analytics_dimension_scopes(user)
+def can_access_analytics_dimensions(user, dimensions, permission_code="analytics.calculate"):
+    dimension_scopes = get_analytics_dimension_scopes(user, permission_code)
     if dimension_scopes is None:
         return True
     return any(all(dimensions.get(key) == value for key, value in scope.items()) for scope in dimension_scopes)

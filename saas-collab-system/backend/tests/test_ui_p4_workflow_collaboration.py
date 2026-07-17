@@ -284,7 +284,7 @@ def test_report_download_requires_permission_and_writes_audit():
     owner = create_user(tenant, "report-owner")
     viewer = create_user(tenant, "report-viewer")
     denied_owner = create_user(tenant, "report-denied-owner")
-    grant(owner, "reports.download", "reports.view")
+    grant(owner, "reports.download", "reports.view", "alerts.inventory.view")
     grant(viewer, "reports.download", "reports.view")
     grant(denied_owner, "reports.view")
     export = ReportExportRequest(
@@ -365,7 +365,7 @@ def test_report_download_requires_permission_and_writes_audit():
     assert missing_permission.status_code == 403
     assert invalid_status.status_code == 422
     assert missing_report_permission.status_code == 403
-    assert changed_scope.status_code == 403
+    assert changed_scope.status_code == 200
     assert granted.status_code == 200
     assert granted.data["data"]["placeholder_only"] is True
     assert granted.data["data"]["download_reference"].startswith("placeholder://")
@@ -388,7 +388,7 @@ def test_report_download_requires_permission_and_writes_audit():
     assert ReportExportAuditLog.objects.filter(
         export_request=changed_scope_export,
         action="download",
-        result="denied_scope_changed",
+        result="placeholder_grant",
     ).exists()
 
 

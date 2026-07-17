@@ -5,6 +5,18 @@ from .models import MetricAggregate, MetricDefinition, ReportExportRequest
 
 class MetricDefinitionSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    metric_name = serializers.CharField(source="name", read_only=True)
+    unit = serializers.SerializerMethodField()
+    default_granularity = serializers.SerializerMethodField()
+    metric_version = serializers.IntegerField(source="version", read_only=True)
+    source_type = serializers.JSONField(source="source_tables", read_only=True)
+    is_sensitive = serializers.BooleanField(source="contains_sensitive_data", read_only=True)
+
+    def get_unit(self, obj):
+        return ""
+
+    def get_default_granularity(self, obj):
+        return obj.supported_granularities[0] if obj.supported_granularities else None
 
     class Meta:
         model = MetricDefinition
@@ -12,6 +24,12 @@ class MetricDefinitionSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "metric_code",
+            "metric_name",
+            "unit",
+            "default_granularity",
+            "metric_version",
+            "source_type",
+            "is_sensitive",
             "name",
             "description",
             "formula",
@@ -35,6 +53,19 @@ class MetricDefinitionSerializer(serializers.ModelSerializer):
 class MetricAggregateSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     metric_code = serializers.CharField(source="metric_definition.metric_code", read_only=True)
+    metric_name = serializers.CharField(source="metric_definition.name", read_only=True)
+    value = serializers.DecimalField(source="numeric_value", max_digits=20, decimal_places=4, read_only=True)
+    unit = serializers.SerializerMethodField()
+    metric_version = serializers.IntegerField(source="definition_version", read_only=True)
+    updated_at = serializers.DateTimeField(source="refreshed_at", read_only=True)
+    is_missing = serializers.SerializerMethodField()
+    source_summary = serializers.JSONField(source="source_lineage", read_only=True)
+
+    def get_unit(self, obj):
+        return ""
+
+    def get_is_missing(self, obj):
+        return obj.quality_status == MetricAggregate.QualityStatus.NO_VALID_DATA
 
     class Meta:
         model = MetricAggregate
@@ -42,6 +73,13 @@ class MetricAggregateSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "metric_code",
+            "metric_name",
+            "value",
+            "unit",
+            "metric_version",
+            "updated_at",
+            "is_missing",
+            "source_summary",
             "definition_version",
             "granularity",
             "period_start",
@@ -73,13 +111,22 @@ class MetricAggregationRequestSerializer(serializers.Serializer):
         return attrs
 
 
-class PaginationQuerySerializer(serializers.Serializer):
+class StrictQuerySerializer(serializers.Serializer):
+    def to_internal_value(self, data):
+        unknown = set(data.keys()) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown query parameter." for key in sorted(unknown)})
+        return super().to_internal_value(data)
+
+
+class PaginationQuerySerializer(StrictQuerySerializer):
     page = serializers.IntegerField(min_value=1, default=1)
-    page_size = serializers.IntegerField(min_value=1, max_value=100, default=50)
+    page_size = serializers.IntegerField(min_value=1, max_value=100, default=20)
 
 
 class MetricDefinitionQuerySerializer(PaginationQuerySerializer):
     metric_code = serializers.CharField(max_length=80, required=False)
+    is_active = serializers.BooleanField(required=False)
 
 
 class MetricAggregateQuerySerializer(PaginationQuerySerializer):
@@ -88,6 +135,12 @@ class MetricAggregateQuerySerializer(PaginationQuerySerializer):
     period_start = serializers.DateTimeField(required=False)
     period_end = serializers.DateTimeField(required=False)
     include_non_formal = serializers.BooleanField(default=False)
+    platform = serializers.CharField(max_length=40, required=False)
+    store_id = serializers.CharField(max_length=80, required=False)
+    country = serializers.CharField(max_length=20, required=False)
+    product_id = serializers.CharField(max_length=80, required=False)
+    sku_id = serializers.CharField(max_length=80, required=False)
+    warehouse_id = serializers.CharField(max_length=80, required=False)
 
     def validate(self, attrs):
         period_start = attrs.get("period_start")

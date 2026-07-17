@@ -1,8 +1,18 @@
 import { requestApi, requestWithMockFallback } from './request';
 import { mockBusinessOverview, mockInventoryAnalysis, mockSalesAnalysis } from '../mock/analytics';
+import { buildAnalyticsQuery, normalizeAnalyticsResponse } from './uiP6Adapters';
+
+const analyticsRequest = async (config, mockHandler, moduleName) =>
+  normalizeAnalyticsResponse(
+    await requestWithMockFallback(
+      { ...config, params: buildAnalyticsQuery(config.params) },
+      mockHandler,
+      moduleName
+    )
+  );
 
 export const fetchBusinessOverview = (params = {}) =>
-  requestWithMockFallback(
+  analyticsRequest(
     { method: 'get', url: '/api/internal/analytics/overview/', params },
     mockBusinessOverview,
     'analytics.overview'
@@ -15,14 +25,14 @@ export const fetchMetricAggregate = (id) => requestApi({ method: 'get', url: `/a
 export const runAggregateMock = (payload) => requestApi({ method: 'post', url: '/api/internal/analytics/aggregate-mock/', data: payload });
 
 export const fetchSalesAnalysis = (params = {}) =>
-  requestWithMockFallback(
+  analyticsRequest(
     { method: 'get', url: '/api/internal/analytics/sales/', params },
     mockSalesAnalysis,
     'analytics.sales'
   );
 
 export const fetchInventoryAnalysis = (params = {}) =>
-  requestWithMockFallback(
+  analyticsRequest(
     { method: 'get', url: '/api/internal/analytics/inventory/', params },
     mockInventoryAnalysis,
     'analytics.inventory'

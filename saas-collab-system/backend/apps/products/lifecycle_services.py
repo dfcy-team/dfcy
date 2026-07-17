@@ -10,6 +10,7 @@ from rest_framework.exceptions import PermissionDenied
 from apps.audit.services import write_operation_log
 from apps.common.security import mask_sensitive_text
 from apps.permissions.services import check_user_permission
+from apps.permissions.ui_p6_scopes import lifecycle_target_allowed
 
 from .models import (
     ProductLifecycleDecision,
@@ -160,6 +161,13 @@ def decide_lifecycle_review(*, review, actor, decision, reason):
             actor, "products.lifecycle.high_risk_confirm"
         ):
             raise PermissionDenied("High-risk lifecycle confirmation permission is required.")
+        if review.recommended_stage in HIGH_RISK_STAGES and not lifecycle_target_allowed(
+            actor,
+            "products.lifecycle.high_risk_confirm",
+            spu_id=review.spu_id,
+            sku_id=review.sku_id,
+        ):
+            raise PermissionDenied("Lifecycle target is outside the high-risk confirmation data scope.")
         to_stage = review.recommended_stage
         review.status = ProductLifecycleReview.Status.CONFIRMED
     elif decision == ProductLifecycleDecision.Decision.REJECT:

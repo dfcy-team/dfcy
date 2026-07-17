@@ -1,6 +1,8 @@
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from apps.accounts.models import CustomUser
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied
 from apps.permissions.services import (
     check_user_permission,
     get_permission_data_scopes,
@@ -69,13 +71,18 @@ class FinanceActionPermission(BasePermission):
     permission_code = None
 
     def has_permission(self, request, view):
-        return bool(
+        allowed = bool(
             self.permission_code
             and request.user
             and request.user.is_authenticated
             and request.user.user_type == CustomUser.UserType.INTERNAL
             and user_has_finance_permission(request.user, self.permission_code)
         )
+        if not allowed:
+            return False
+        if not get_permission_data_scopes(request.user, self.permission_code):
+            raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
+        return True
 
 
 class IsFinanceViewer(FinanceActionPermission):
@@ -98,13 +105,18 @@ class IntegrationActionPermission(BasePermission):
     permission_code = None
 
     def has_action_permission(self, request, permission_code):
-        return bool(
+        allowed = bool(
             permission_code
             and request.user
             and request.user.is_authenticated
             and request.user.user_type == CustomUser.UserType.INTERNAL
             and user_has_integration_permission(request.user, permission_code)
         )
+        if not allowed:
+            return False
+        if not get_permission_data_scopes(request.user, permission_code):
+            raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
+        return True
 
     def has_permission(self, request, view):
         return self.has_action_permission(request, self.permission_code)

@@ -728,6 +728,7 @@ def test_calculator_can_run_mock_aggregation_within_custom_data_scope_only():
     assert allowed.status_code == 200
     assert allowed.json()["data"]["numeric_value"] == "10.0000"
     assert denied.status_code == 403
+    assert denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"
 
 
 @pytest.mark.django_db
@@ -764,6 +765,56 @@ def test_aggregate_list_applies_tenant_and_custom_dimension_scope():
     assert response.status_code == 200
     assert len(response.json()["data"]["results"]) == 1
     assert response.json()["data"]["results"][0]["dimensions"]["platform"] == "mock"
+
+
+@pytest.mark.django_db
+def test_analytics_exact_scope_errors_and_scoped_detail_not_found():
+    tenant = Tenant.objects.create(name="Tenant", code="bi-scope-errors")
+    viewer = create_user(tenant, "scope-error-viewer")
+    role = Role.objects.create(tenant=tenant, name="View without scope", code="view-without-scope")
+    role.permissions.add(Permission.objects.get(code="analytics.view"))
+    UserRole.objects.create(tenant=tenant, user=viewer, role=role)
+    missing_scope = authenticated_client(viewer).get("/api/internal/analytics/aggregates/")
+    assert missing_scope.status_code == 403
+    assert missing_scope.json()["code"] == "DATA_SCOPE_MISSING"
+
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.OWN, config={})
+    unsupported_scope = authenticated_client(viewer).get("/api/internal/analytics/aggregates/")
+    assert unsupported_scope.status_code == 403
+    assert unsupported_scope.json()["code"] == "DATA_SCOPE_UNSUPPORTED"
+
+    DataScope.objects.filter(role=role).delete()
+    DataScope.objects.create(
+        tenant=tenant,
+        role=role,
+        scope_type=DataScope.ScopeType.CUSTOM,
+        config={"analytics_dimensions": [{"platform": "mock"}]},
+    )
+    definition = create_definition(tenant)
+    now = timezone.now()
+    create_point(definition, "hidden", 10, now, dimensions={"platform": "other"})
+    aggregate = aggregate_metric(
+        tenant=tenant,
+        metric_definition=definition,
+        period_start=now - timedelta(hours=1),
+        period_end=now + timedelta(hours=1),
+        granularity=MetricAggregate.Granularity.DAY,
+        dimensions={"platform": "other"},
+    )
+    detail = authenticated_client(viewer).get(f"/api/internal/analytics/aggregates/{aggregate.id}/")
+    assert detail.status_code == 404
+    assert detail.json()["code"] == "RESOURCE_NOT_FOUND"
+
+
+@pytest.mark.django_db
+def test_analytics_dashboard_rejects_endpoint_specific_unknown_query_parameters():
+    tenant = Tenant.objects.create(name="Tenant", code="bi-strict-query")
+    viewer = create_user(tenant, "strict-query-viewer")
+    grant_analytics_permission(viewer, "analytics.view")
+    client = authenticated_client(viewer)
+    assert client.get("/api/internal/analytics/overview/?warehouse_id=demo").status_code == 400
+    assert client.get("/api/internal/analytics/sales/?warehouse_id=demo").status_code == 400
+    assert client.get("/api/internal/analytics/inventory/?risk_level=high").status_code == 400
 
 
 @pytest.mark.django_db

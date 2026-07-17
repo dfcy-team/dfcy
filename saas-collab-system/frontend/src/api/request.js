@@ -21,23 +21,30 @@ export function onAuthenticationExpired(handler) {
   authenticationExpiredHandler = handler;
 }
 
-export function normalizeApiResponse(payload) {
-  if (
+export function isApiEnvelope(payload) {
+  return Boolean(
     payload &&
-    typeof payload === 'object' &&
-    'success' in payload &&
-    'code' in payload &&
-    'message' in payload &&
-    'data' in payload
-  ) {
+      typeof payload === 'object' &&
+      !Array.isArray(payload) &&
+      typeof payload.success === 'boolean' &&
+      typeof payload.code === 'string' &&
+      payload.code.length > 0 &&
+      typeof payload.message === 'string' &&
+      'data' in payload
+  );
+}
+
+export function normalizeApiResponse(payload) {
+  if (isApiEnvelope(payload)) {
     return payload;
   }
 
   return {
-    success: true,
-    code: 'OK',
-    message: 'success',
-    data: payload ?? {}
+    success: false,
+    code: 'INVALID_API_RESPONSE',
+    message: 'API response does not match the required envelope.',
+    data: null,
+    protocol_error: true
   };
 }
 
@@ -88,7 +95,8 @@ request.interceptors.response.use(
   }
 );
 
-function withApiStatus(response, apiStatus) {
+export function withApiStatus(response, apiStatus) {
+  if (response?.success !== true) return response;
   const data = response?.data;
   if (!data || typeof data !== 'object' || Array.isArray(data)) return response;
   return { ...response, data: { ...data, api_status: data.api_status || apiStatus } };
@@ -96,7 +104,7 @@ function withApiStatus(response, apiStatus) {
 
 export function normalizeApiError(error) {
   const payload = error?.response?.data;
-  if (payload && typeof payload === 'object' && 'success' in payload) {
+  if (isApiEnvelope(payload)) {
     return { ...normalizeApiResponse(payload), http_status: error.response.status };
   }
   return {
@@ -168,7 +176,7 @@ export async function requestWithMockFallback(config, mockHandler, moduleName) {
       message: error?.response?.data?.message || error?.message || 'API request failed, fallback to mock data',
       data: {
         ...fallbackData,
-        api_status: 'fallback',
+        api_status: 'degraded',
         api_error: error?.response?.data?.message || error?.message || 'request failed'
       }
     };

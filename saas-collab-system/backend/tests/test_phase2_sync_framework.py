@@ -17,7 +17,7 @@ from apps.integrations.models import (
 )
 from apps.integrations.sync_services import calculate_backoff_seconds, record_retry_failure, record_webhook_event
 from apps.integrations.sync_services import run_sync_job
-from apps.permissions.models import Permission, Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
@@ -39,6 +39,7 @@ def grant_integration_access(user):
         )
         role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
 def grant_integration_view_only(user):
@@ -49,6 +50,7 @@ def grant_integration_view_only(user):
     )
     role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
 def authenticated_client(user):
