@@ -2,6 +2,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import paginated_data, success_response
 
 from .models import ApprovalRequest, BusinessException, CollaborationEvent
@@ -80,7 +82,10 @@ def approval_mock_create(request):
     serializer.is_valid(raise_exception=True)
     approval_type = serializer.validated_data["approval_type"]
     if not scope_allows_value(request.user, "workflow.approvals.submit", "approval_types", approval_type):
-        raise PermissionDenied("Approval type is outside the authorized data scope.")
+        raise DataScopeDenied(
+            "Approval type is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
     approval, created = create_mock_approval(user=request.user, **serializer.validated_data)
     return success_response({"created": created, "approval": ApprovalRequestSerializer(approval).data}, status=201 if created else 200)
 
@@ -88,11 +93,11 @@ def approval_mock_create(request):
 @api_view(["GET"])
 @permission_classes([IsApprovalViewer])
 def approval_detail(request, pk):
-    return success_response(ApprovalRequestSerializer(get_object_or_404(visible_approvals(request.user), pk=pk)).data)
+    return success_response(ApprovalRequestSerializer(get_scoped_object_or_404(visible_approvals(request.user), pk=pk)).data)
 
 
 def _approval_action(request, pk, action, permission_code):
-    approval = get_object_or_404(visible_approvals(request.user, permission_code), pk=pk)
+    approval = get_scoped_object_or_404(visible_approvals(request.user, permission_code), pk=pk)
     serializer = DecisionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     approval = review_approval(approval=approval, actor=request.user, action=action, note=serializer.validated_data.get("note", ""))

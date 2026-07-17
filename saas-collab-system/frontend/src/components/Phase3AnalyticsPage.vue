@@ -98,6 +98,16 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-pagination
+          v-if="total > pageSize"
+          class="analytics-pagination"
+          background
+          layout="prev, pager, next, total"
+          :current-page="currentPage"
+          :page-size="pageSize"
+          :total="total"
+          @current-change="changePage"
+        />
         <el-empty v-if="!loading && !errorMessage && !items.length" :description="emptyText" />
       </section>
     </div>
@@ -132,14 +142,18 @@ const quality = ref({});
 const metrics = ref([]);
 const trend = ref([]);
 const items = ref([]);
+const total = ref(0);
+const currentPage = ref(1);
+const pageSize = 20;
 
 const apiStatusLabel = computed(() => ({
   connected: 'API 已连接',
   fallback: 'API 异常 · Mock 回退',
+  degraded: 'API 异常 · 降级数据',
   pending: 'API 待联调',
   mock: 'Mock 数据'
 }[apiStatus.value] || apiStatus.value));
-const statusTagType = computed(() => ({ connected: 'success', fallback: 'warning', pending: 'info', mock: 'info' }[apiStatus.value] || 'info'));
+const statusTagType = computed(() => ({ connected: 'success', degraded: 'warning', fallback: 'warning', pending: 'info', mock: 'info' }[apiStatus.value] || 'info'));
 const qualityProgressStatus = computed(() => {
   if ((quality.value.score || 0) >= 95) return 'success';
   if ((quality.value.score || 0) < 80) return 'exception';
@@ -151,10 +165,16 @@ function initializeFilters() {
   props.filters.forEach((filter) => {
     query[filter.key] = filter.defaultValue ?? (filter.type === 'daterange' ? [] : '');
   });
+  currentPage.value = 1;
 }
 
 function resetFilters() {
   initializeFilters();
+  loadData();
+}
+
+function changePage(page) {
+  currentPage.value = page;
   loadData();
 }
 
@@ -189,7 +209,7 @@ async function loadData() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const response = await props.loader({ ...query });
+    const response = await props.loader({ ...query, page: currentPage.value, page_size: pageSize });
     if (!response?.success) {
       apiStatus.value = 'pending';
       errorMessage.value = formatApiError(response);
@@ -197,6 +217,7 @@ async function loadData() {
       metrics.value = [];
       trend.value = [];
       items.value = [];
+      total.value = 0;
       return;
     }
     const data = response.data || {};
@@ -205,7 +226,8 @@ async function loadData() {
     metrics.value = Array.isArray(data.metrics) ? data.metrics : [];
     trend.value = Array.isArray(data.trend) ? data.trend : [];
     items.value = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
-    if (data.api_status === 'fallback') errorMessage.value = response.message || data.api_error || '接口异常，已显示 Mock 数据';
+    total.value = Number(data.count ?? items.value.length);
+    if (['fallback', 'degraded'].includes(data.api_status)) errorMessage.value = response.message || data.api_error || '接口异常，已显示降级数据';
   } catch (error) {
     apiStatus.value = 'pending';
     errorMessage.value = formatApiError(error?.response || { message: error?.message });
@@ -213,6 +235,7 @@ async function loadData() {
     metrics.value = [];
     trend.value = [];
     items.value = [];
+    total.value = 0;
   } finally {
     loading.value = false;
   }
@@ -260,6 +283,7 @@ onMounted(loadData);
 .bar-track i { position: absolute; right: 0; bottom: 0; left: 0; border-radius: 3px 3px 0 0; background: #2563eb; }
 .table-panel :deep(.el-table) { width: 100%; }
 .table-panel :deep(.el-empty) { display: none; }
+.analytics-pagination { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 1050px) {
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quality-rail { grid-template-columns: 130px 1fr; }

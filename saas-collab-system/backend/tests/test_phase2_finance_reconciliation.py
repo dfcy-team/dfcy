@@ -13,7 +13,7 @@ from apps.finance.models import (
     WithdrawalRecord,
 )
 from apps.finance.services import import_demo_bank_receipt, import_demo_statement, import_demo_withdrawal
-from apps.permissions.models import Permission, Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
@@ -36,6 +36,7 @@ def grant_finance_access(user, permission_codes=None):
         )
         role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
 def authenticated_client(user):

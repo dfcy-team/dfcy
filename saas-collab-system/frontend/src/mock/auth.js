@@ -23,6 +23,10 @@ export const mockAuthUser = {
     'workflow.approvals.view', 'workflow.approvals.submit', 'workflow.approvals.review', 'workflow.approvals.withdraw',
     'workflow.exceptions.view', 'workflow.exceptions.manage',
     'workflow.collaboration.view', 'workflow.collaboration.confirm',
+    'analytics.view', 'analytics.calculate',
+    'finance.view',
+    'products.lifecycle.view', 'products.lifecycle.evaluate',
+    'integrations.view', 'integrations.manage', 'integrations.run',
     'reports.view', 'reports.export', 'reports.download'
   ],
   data_scope: []

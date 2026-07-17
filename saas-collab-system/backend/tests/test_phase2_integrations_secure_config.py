@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.integrations.credential_service import decrypt_credentials, encrypt_credentials
 from apps.integrations.models import IntegrationAuditLog, PlatformIntegrationConfig
-from apps.permissions.models import Permission, Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
@@ -18,16 +18,19 @@ def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
 
 def grant_integration_access(user):
     role = Role.objects.create(tenant=user.tenant, name="Tech Admin", code="tech_admin")
-    permission, _created = Permission.objects.get_or_create(
-        code="integrations.manage",
-        defaults={
-            "name": "Manage integrations",
-            "module": "integrations",
-            "action": "manage",
-        },
-    )
-    role.permissions.add(permission)
+    for permission_code in ("integrations.view", "integrations.manage", "integrations.rotate", "integrations.run"):
+        action = permission_code.rsplit(".", 1)[-1]
+        permission, _created = Permission.objects.get_or_create(
+            code=permission_code,
+            defaults={
+                "name": f"Integrations {action}",
+                "module": "integrations",
+                "action": action,
+            },
+        )
+        role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
 def grant_integration_view_only(user):
@@ -42,6 +45,23 @@ def grant_integration_view_only(user):
     )
     role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+
+
+def grant_integration_permission(user, permission_code, scope_config):
+    role = Role.objects.create(
+        tenant=user.tenant,
+        name=f"{permission_code} scoped",
+        code=f"{permission_code}-{user.id}",
+    )
+    role.permissions.add(Permission.objects.get(code=permission_code))
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(
+        tenant=user.tenant,
+        role=role,
+        scope_type=DataScope.ScopeType.CUSTOM,
+        config=scope_config,
+    )
 
 
 def authenticated_client(user):
@@ -90,6 +110,75 @@ def test_integration_config_crud_uses_tenant_scope_and_standard_response():
 
     assert list_response.status_code == 200
     assert list_response.json()["data"] == []
+
+
+@pytest.mark.django_db
+def test_integration_exact_permission_scope_filters_details_and_request_bodies():
+    tenant = Tenant.objects.create(name="Tenant", code="integration-exact-scope")
+    user = create_user(tenant, "integration-scoped")
+    grant_integration_permission(user, "integrations.view", {"platforms": ["mock"]})
+    grant_integration_permission(user, "integrations.manage", {"platforms": ["mock"]})
+    visible = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="mock",
+        account_alias="demo-visible",
+        environment=PlatformIntegrationConfig.Environment.MOCK,
+        status=PlatformIntegrationConfig.Status.ACTIVE,
+        created_by=user,
+    )
+    hidden = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="other",
+        account_alias="demo-hidden",
+        environment=PlatformIntegrationConfig.Environment.MOCK,
+        status=PlatformIntegrationConfig.Status.ACTIVE,
+        created_by=user,
+    )
+    client = authenticated_client(user)
+    listing = client.get("/api/internal/integrations/configs/")
+    assert [item["id"] for item in listing.json()["data"]] == [visible.id]
+    detail = client.get(f"/api/internal/integrations/configs/{hidden.id}/")
+    assert detail.status_code == 404
+    assert detail.json()["code"] == "RESOURCE_NOT_FOUND"
+    payload = config_payload(account_alias="demo-forbidden")
+    payload["platform"] = "other"
+    denied = client.post("/api/internal/integrations/configs/", payload, format="json")
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"
+
+    patch_denied = client.patch(
+        f"/api/internal/integrations/configs/{visible.id}/",
+        {"platform": "other"},
+        format="json",
+    )
+    assert patch_denied.status_code == 403
+    assert patch_denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"
+    visible.refresh_from_db()
+    assert visible.platform == "mock"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "scope_config",
+    (
+        {"platforms": ["mock"], "unexpected": ["value"]},
+        {"integration_config_ids": ["not-an-id"]},
+        {"platforms": [""]},
+    ),
+)
+def test_integration_scope_rejects_unknown_keys_and_invalid_values(scope_config):
+    tenant = Tenant.objects.create(name="Tenant", code=f"invalid-integration-scope-{len(str(scope_config))}")
+    user = create_user(tenant, f"invalid-integration-scope-{len(str(scope_config))}")
+    grant_integration_permission(user, "integrations.manage", scope_config)
+
+    response = authenticated_client(user).post(
+        "/api/internal/integrations/configs/",
+        config_payload(account_alias="invalid-scope-probe"),
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "DATA_SCOPE_INVALID"
 
 
 @pytest.mark.django_db

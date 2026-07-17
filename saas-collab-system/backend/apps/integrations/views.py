@@ -1,7 +1,9 @@
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import success_response
 from apps.workflows.models import CollaborationEvent
 from apps.workflows.serializers import CollaborationEventSerializer
@@ -12,6 +14,12 @@ from apps.permissions.api_permissions import (
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
     IsIntegrationViewer,
+)
+from apps.permissions.ui_p6_scopes import (
+    filter_integration_configs,
+    filter_sync_jobs,
+    filter_sync_runs,
+    integration_values_allowed,
 )
 
 from .credential_service import mask_credentials, rotate_credentials
@@ -86,20 +94,38 @@ def _write_audit_log(config, actor, action, result=IntegrationAuditLog.Result.SU
     )
 
 
-def _get_config_for_user(request, pk):
-    return get_object_or_404(PlatformIntegrationConfig, pk=pk, tenant=request.user.tenant)
+def _get_config_for_user(request, pk, permission_code):
+    queryset = filter_integration_configs(
+        request.user,
+        PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+        permission_code,
+    )
+    return get_scoped_object_or_404(queryset, pk=pk)
 
 
 @api_view(["GET", "POST"])
 @permission_classes([IsIntegrationReadOrManage])
 def integration_config_collection(request):
     if request.method == "GET":
-        queryset = PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant)
+        queryset = filter_integration_configs(
+            request.user,
+            PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+            "integrations.view",
+        )
         serializer = PlatformIntegrationConfigSerializer(queryset, many=True)
         return success_response(serializer.data)
 
     serializer = PlatformIntegrationConfigSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    if not integration_values_allowed(
+        request.user,
+        "integrations.manage",
+        platform=serializer.validated_data["platform"],
+    ):
+        raise DataScopeDenied(
+            "Integration configuration is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
     config = serializer.save(tenant=request.user.tenant, created_by=request.user)
     _write_audit_log(
         config,
@@ -118,12 +144,24 @@ def integration_config_collection(request):
 @api_view(["GET", "PATCH"])
 @permission_classes([IsIntegrationReadOrManage])
 def integration_config_detail(request, pk):
-    config = _get_config_for_user(request, pk)
+    permission_code = "integrations.view" if request.method == "GET" else "integrations.manage"
+    config = _get_config_for_user(request, pk, permission_code)
     if request.method == "GET":
         return success_response(PlatformIntegrationConfigSerializer(config).data)
 
     serializer = PlatformIntegrationConfigSerializer(config, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
+    candidate_platform = serializer.validated_data.get("platform", config.platform)
+    if not integration_values_allowed(
+        request.user,
+        "integrations.manage",
+        platform=candidate_platform,
+        config_id=config.id,
+    ):
+        raise DataScopeDenied(
+            "Integration configuration update is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
     config = serializer.save()
     _write_audit_log(
         config,
@@ -142,7 +180,7 @@ def integration_config_detail(request, pk):
 @api_view(["POST"])
 @permission_classes([IsIntegrationCredentialRotator])
 def rotate_integration_credentials(request, pk):
-    config = _get_config_for_user(request, pk)
+    config = _get_config_for_user(request, pk, "integrations.rotate")
     serializer = RotateCredentialsSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     rotate_credentials(
@@ -167,7 +205,7 @@ def rotate_integration_credentials(request, pk):
 @api_view(["POST"])
 @permission_classes([IsIntegrationManager])
 def disable_integration_config(request, pk):
-    config = _get_config_for_user(request, pk)
+    config = _get_config_for_user(request, pk, "integrations.manage")
     config.status = PlatformIntegrationConfig.Status.DISABLED
     config.save(update_fields=["status", "updated_at"])
     _write_audit_log(config, request.user, "disable", detail={"status": config.status})
@@ -177,7 +215,7 @@ def disable_integration_config(request, pk):
 @api_view(["POST"])
 @permission_classes([IsIntegrationManager])
 def verify_integration_config(request, pk):
-    config = _get_config_for_user(request, pk)
+    config = _get_config_for_user(request, pk, "integrations.manage")
     if config.environment == PlatformIntegrationConfig.Environment.PRODUCTION:
         _write_audit_log(
             config,
@@ -194,11 +232,30 @@ def verify_integration_config(request, pk):
 @permission_classes([IsIntegrationReadOrManage])
 def sync_job_collection(request):
     if request.method == "GET":
-        queryset = SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config")
+        queryset = filter_sync_jobs(
+            request.user,
+            SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config"),
+            "integrations.view",
+        )
         return success_response(SyncJobSerializer(queryset, many=True, context={"request": request}).data)
 
     serializer = SyncJobSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)
+    integration_config = PlatformIntegrationConfig.objects.get(
+        tenant=request.user.tenant,
+        pk=serializer.validated_data["integration_config_id"],
+    )
+    if not integration_values_allowed(
+        request.user,
+        "integrations.manage",
+        platform=integration_config.platform,
+        config_id=integration_config.id,
+        resource_type=serializer.validated_data["resource_type"],
+    ):
+        raise DataScopeDenied(
+            "Sync job is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
     job = serializer.save(tenant=request.user.tenant)
     return success_response(SyncJobSerializer(job, context={"request": request}).data, status=201)
 
@@ -206,21 +263,37 @@ def sync_job_collection(request):
 @api_view(["GET"])
 @permission_classes([IsIntegrationViewer])
 def sync_run_collection(request):
-    queryset = SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job")
+    queryset = filter_sync_runs(
+        request.user,
+        SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config"),
+        "integrations.view",
+    )
     return success_response(SyncRunSerializer(queryset, many=True).data)
 
 
 @api_view(["GET"])
 @permission_classes([IsIntegrationViewer])
 def sync_run_detail(request, pk):
-    sync_run = get_object_or_404(SyncRun, pk=pk, tenant=request.user.tenant)
+    queryset = filter_sync_runs(
+        request.user,
+        SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config"),
+        "integrations.view",
+    )
+    sync_run = get_scoped_object_or_404(queryset, pk=pk)
     return success_response(SyncRunSerializer(sync_run).data)
 
 
 @api_view(["POST"])
 @permission_classes([IsIntegrationRunner])
 def run_mock_sync_job(request, pk):
-    sync_job = get_object_or_404(SyncJob, pk=pk, tenant=request.user.tenant)
+    sync_job = get_scoped_object_or_404(
+        filter_sync_jobs(
+            request.user,
+            SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config"),
+            "integrations.run",
+        ),
+        pk=pk,
+    )
     run, created = run_sync_job(sync_job, idempotency_key=request.data.get("idempotency_key"))
     return success_response({"created": created, "run": SyncRunSerializer(run).data})
 
@@ -228,7 +301,14 @@ def run_mock_sync_job(request, pk):
 @api_view(["POST"])
 @permission_classes([IsIntegrationManager])
 def disable_sync_job(request, pk):
-    sync_job = get_object_or_404(SyncJob, pk=pk, tenant=request.user.tenant)
+    sync_job = get_scoped_object_or_404(
+        filter_sync_jobs(
+            request.user,
+            SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config"),
+            "integrations.manage",
+        ),
+        pk=pk,
+    )
     sync_job.is_enabled = False
     sync_job.status = SyncJob.Status.DISABLED
     sync_job.save(update_fields=["is_enabled", "status", "updated_at"])

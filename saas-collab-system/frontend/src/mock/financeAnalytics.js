@@ -13,9 +13,14 @@ export const mockFinanceAnalyticsOverview = () => successResponse({
     { label: '02月', value: 62 }, { label: '03月', value: 68 }, { label: '04月', value: 71 },
     { label: '05月', value: 73 }, { label: '06月', value: 78 }, { label: '07月', value: 81 }
   ],
-  items: [
-    { period: '2026-07', currency: 'CNY', statement_summary: '***,320', receipt_summary: '***,860', difference_summary: '12,460', exception_count: 8, account_mask: '**** 4821', quality_status: 'good' },
-    { period: '2026-06', currency: 'USD', statement_summary: '***,180', receipt_summary: '***,120', difference_summary: '2,060', exception_count: 3, account_mask: '**** 1937', quality_status: 'good' },
-    { period: '2026-05', currency: 'EUR', statement_summary: '***,740', receipt_summary: '***,510', difference_summary: 'N/A', exception_count: 0, account_mask: '**** 7054', quality_status: 'warning' }
-  ]
+  count: 3,
+  next: null,
+  previous: null,
+  results: [
+    { period_start: '2026-07-01', period_end: '2026-07-31', platform: 'demo', currency: 'CNY', statement_amount: '***,320', receipt_amount: '***,860', difference_amount: '12,460', exception_count: 8, account_mask: '**** 4821', quality_status: 'good' },
+    { period_start: '2026-06-01', period_end: '2026-06-30', platform: 'demo', currency: 'USD', statement_amount: '***,180', receipt_amount: '***,120', difference_amount: '2,060', exception_count: 3, account_mask: '**** 1937', quality_status: 'good' },
+    { period_start: '2026-05-01', period_end: '2026-05-31', platform: 'demo', currency: 'EUR', statement_amount: '***,740', receipt_amount: '***,510', difference_amount: null, exception_count: 0, account_mask: '**** 7054', quality_status: 'warning' }
+  ],
+  read_only: true,
+  fund_action_available: false
 });

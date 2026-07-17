@@ -27,9 +27,14 @@ const filters = [
 ];
 
 const columns = [
-  { prop: 'country', label: '国家' }, { prop: 'platform', label: '平台' }, { prop: 'store', label: '店铺', width: 150 },
-  { prop: 'product', label: '商品', width: 150 }, { prop: 'sales_amount', label: '销售额' },
-  { prop: 'order_count', label: '订单量' }, { prop: 'units_sold', label: '销量' },
-  { prop: 'quality_status', label: '质量', type: 'status' }
+  { prop: 'metric_code', label: '指标编码', width: 170 },
+  { prop: 'metric_name', label: '指标名称', width: 170 },
+  { prop: 'value', label: '指标值' },
+  { prop: 'unit', label: '单位' },
+  { prop: 'platform', label: '平台' },
+  { prop: 'store_id', label: '店铺' },
+  { prop: 'country', label: '国家' },
+  { prop: 'quality_status', label: '质量', type: 'status' },
+  { prop: 'updated_at', label: '更新时间', width: 180 }
 ];
 </script>

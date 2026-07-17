@@ -3,9 +3,10 @@ from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 
-from apps.common.data_scope import custom_scope_allows_product
-from apps.common.exceptions import StateConflict
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied, StateConflict, get_scoped_object_or_404
 from apps.common.responses import paginated_data, success_response
+from apps.permissions.ui_p6_scopes import lifecycle_target_allowed
 
 from .lifecycle_services import decide_lifecycle_review, evaluate_lifecycle_review
 from .models import ProductLifecycleDecision, ProductLifecycleReview, ProductSKU, ProductSPU
@@ -19,10 +20,11 @@ from .serializers import (
 )
 
 
-def _reviews(request):
+def _reviews(request, permission_code="products.lifecycle.view"):
     return filter_lifecycle_reviews(
         request.user,
         ProductLifecycleReview.objects.select_related("spu", "sku", "reviewed_by"),
+        permission_code,
     )
 
 
@@ -46,7 +48,7 @@ def review_list(request):
 @api_view(["GET"])
 @permission_classes([IsLifecycleViewer])
 def review_detail(request, pk):
-    return success_response(ProductLifecycleReviewSerializer(get_object_or_404(_reviews(request), pk=pk)).data)
+    return success_response(ProductLifecycleReviewSerializer(get_scoped_object_or_404(_reviews(request), pk=pk)).data)
 
 
 @api_view(["POST"])
@@ -59,8 +61,16 @@ def evaluate_mock(request):
     sku_id = values.pop("sku_id", None)
     spu = get_object_or_404(ProductSPU, pk=spu_id, tenant=request.user.tenant) if spu_id else None
     sku = get_object_or_404(ProductSKU, pk=sku_id, tenant=request.user.tenant) if sku_id else None
-    if not custom_scope_allows_product(request.user, sku=sku, spu=spu):
-        raise PermissionDenied("Lifecycle target is outside the authorized data scope.")
+    if not lifecycle_target_allowed(
+        request.user,
+        "products.lifecycle.evaluate",
+        sku_id=getattr(sku, "id", None),
+        spu_id=getattr(spu or (sku.spu if sku else None), "id", None),
+    ):
+        raise DataScopeDenied(
+            "Lifecycle target is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
     review = evaluate_lifecycle_review(
         tenant=request.user.tenant,
         spu=spu,
@@ -74,7 +84,7 @@ def evaluate_mock(request):
 def _decide(request, pk, decision):
     serializer = ProductLifecycleDecisionRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    review = get_object_or_404(_reviews(request), pk=pk)
+    review = get_scoped_object_or_404(_reviews(request, "products.lifecycle.confirm"), pk=pk)
     try:
         record = decide_lifecycle_review(
             review=review,

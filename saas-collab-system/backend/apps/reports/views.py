@@ -1,11 +1,13 @@
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import paginated_data, success_response
 from apps.permissions.api_permissions import IsInternalUser
 
-from .models import MetricAggregate, MetricDefinition
+from .models import MetricAggregate, MetricDefinition, ReportExportRequest
 from .permissions import (
     IsAnalyticsCalculator,
     IsAnalyticsViewer,
@@ -67,10 +69,22 @@ def _authorized_aggregate_queryset(request, query):
         queryset = queryset.filter(period_start__lt=query["period_end"])
     if not query["include_non_formal"]:
         queryset = queryset.filter(is_formal=True)
+    for dimension in ("platform", "store_id", "country", "product_id", "sku_id", "warehouse_id"):
+        if query.get(dimension) is not None:
+            queryset = queryset.filter(**{f"dimensions__{dimension}": query[dimension]})
     return filter_analytics_aggregates(request.user, queryset).order_by("-refreshed_at", "-id")
 
 
 def _dashboard_payload(request, dashboard_type):
+    common_parameters = {"page", "page_size", "period_start", "period_end", "granularity", "metric_code"}
+    dimension_parameters = {
+        "overview": {"platform", "store_id", "country"},
+        "sales": {"platform", "store_id", "country", "product_id", "sku_id"},
+        "inventory": {"platform", "store_id", "country", "product_id", "sku_id", "warehouse_id"},
+    }[dashboard_type]
+    unknown = set(request.query_params) - common_parameters - dimension_parameters
+    if unknown:
+        raise ValidationError({key: "Unknown query parameter." for key in sorted(unknown)})
     query_serializer = MetricAggregateQuerySerializer(data=request.query_params)
     query_serializer.is_valid(raise_exception=True)
     query = query_serializer.validated_data
@@ -83,17 +97,34 @@ def _dashboard_payload(request, dashboard_type):
     metric_rows = collection["results"]
     passed_count = sum(row["quality_status"] == MetricAggregate.QualityStatus.PASSED for row in metric_rows)
     quality_score = round((passed_count / len(metric_rows)) * 100) if metric_rows else 0
-    return {
+    metric_version = max((row["metric_version"] for row in metric_rows), default=None)
+    refreshed_at = max((row["updated_at"] for row in metric_rows), default=None)
+    missing_fields = sorted({row["metric_code"] for row in metric_rows if row["is_missing"]})
+    source_summary = []
+    for row in metric_rows:
+        for source in row["source_summary"]:
+            if source not in source_summary:
+                source_summary.append(source)
+    payload = {
         **collection,
         "api_status": "connected",
         "dashboard_type": dashboard_type,
-        "quality": {"status": "good" if quality_score >= 95 else "warning", "score": quality_score},
+        "quality": {
+            "status": "good" if quality_score >= 95 else "warning",
+            "score": quality_score,
+            "metric_version": metric_version,
+            "refreshed_at": refreshed_at,
+            "missing_fields": missing_fields,
+            "source_summary": source_summary,
+        },
         "metrics": [
             {
                 "code": row["metric_code"],
-                "label": row["metric_code"],
-                "value": row["numeric_value"],
-                "unit": "",
+                "metric_code": row["metric_code"],
+                "label": row["metric_name"],
+                "metric_name": row["metric_name"],
+                "value": row["value"],
+                "unit": row["unit"],
                 "change": None,
                 "change_direction": "unknown",
             }
@@ -101,6 +132,11 @@ def _dashboard_payload(request, dashboard_type):
         ],
         "trend": [],
     }
+    if dashboard_type == "sales":
+        payload["attribution_scope"] = sorted(dimension_parameters)
+    if dashboard_type == "inventory":
+        payload["inventory_scope"] = sorted(dimension_parameters)
+    return payload
 
 
 @api_view(["GET"])
@@ -113,6 +149,8 @@ def metric_definition_collection(request):
     metric_code = query.get("metric_code")
     if metric_code:
         queryset = queryset.filter(metric_code=metric_code)
+    if "is_active" in request.query_params:
+        queryset = queryset.filter(status="active" if query["is_active"] else "inactive")
     queryset = filter_authorized_metric_definitions(request.user, queryset)
     return success_response(_paginated_data(request, queryset, MetricDefinitionSerializer, query))
 
@@ -124,7 +162,7 @@ def metric_definition_detail(request, pk):
         request.user,
         MetricDefinition.objects.filter(tenant=request.user.tenant),
     )
-    definition = get_object_or_404(queryset, pk=pk)
+    definition = get_scoped_object_or_404(queryset, pk=pk)
     return success_response(MetricDefinitionSerializer(definition).data)
 
 
@@ -150,7 +188,7 @@ def metric_aggregate_detail(request, pk):
     queryset = queryset.filter(metric_definition__in=authorized_definitions)
     if request.query_params.get("include_non_formal", "").lower() not in {"1", "true", "yes"}:
         queryset = queryset.filter(is_formal=True)
-    aggregate = get_object_or_404(filter_analytics_aggregates(request.user, queryset), pk=pk)
+    aggregate = get_scoped_object_or_404(filter_analytics_aggregates(request.user, queryset), pk=pk)
     return success_response(MetricAggregateSerializer(aggregate).data)
 
 
@@ -161,7 +199,10 @@ def aggregate_mock(request):
     serializer.is_valid(raise_exception=True)
     dimensions = serializer.validated_data["dimensions"]
     if not can_access_analytics_dimensions(request.user, dimensions):
-        raise PermissionDenied("Analytics dimensions are outside the authorized data scope.")
+        raise DataScopeDenied(
+            "Analytics dimensions are outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
 
     definition = get_object_or_404(
         filter_authorized_metric_definitions(
@@ -231,7 +272,7 @@ def report_export_collection(request):
 @api_view(["GET"])
 @permission_classes([IsReportViewer])
 def report_export_detail(request, pk):
-    export_request = get_object_or_404(
+    export_request = get_scoped_object_or_404(
         visible_export_requests(request.user).select_related("requested_by").prefetch_related("audit_logs"),
         pk=pk,
     )
@@ -243,8 +284,11 @@ def report_export_detail(request, pk):
 @api_view(["POST"])
 @permission_classes([IsInternalUser])
 def report_export_download(request, pk):
-    export_request = get_object_or_404(
-        visible_export_requests(request.user).select_related("requested_by"),
+    queryset = ReportExportRequest.objects.filter(tenant=request.user.tenant)
+    if not request.user.is_superuser:
+        queryset = queryset.filter(requested_by=request.user)
+    export_request = get_scoped_object_or_404(
+        queryset.select_related("requested_by"),
         pk=pk,
     )
     return success_response(create_download_grant(export_request=export_request, actor=request.user))

@@ -23,6 +23,27 @@ export const fetchIntegrationConfigDetail = (id = 1) =>
     'integrations.configs.detail'
   );
 
+export const updateIntegrationConfig = (id, payload) =>
+  requestWithMockFallback(
+    { method: 'patch', url: `/api/internal/integrations/configs/${id}/`, data: payload },
+    mockIntegrationConfigDetail,
+    'integrations.configs.update'
+  );
+
+export const disableIntegrationConfig = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/disable/`, data: {} },
+    mockIntegrationConfigDetail,
+    'integrations.configs.disable'
+  );
+
+export const verifyIntegrationConfig = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/verify/`, data: {} },
+    mockIntegrationConfigDetail,
+    'integrations.configs.verify'
+  );
+
 export const fetchSyncJobs = () =>
   requestWithMockFallback(
     { method: 'get', url: '/api/internal/integrations/sync-jobs/' },

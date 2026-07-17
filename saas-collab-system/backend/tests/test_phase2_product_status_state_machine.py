@@ -12,7 +12,7 @@ from apps.products.models import (
     ProductStatusTransition,
 )
 from apps.products.status_services import confirm_recommendation, create_status_recommendation, reject_recommendation
-from apps.permissions.models import Permission, Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
@@ -41,6 +41,7 @@ def grant_status_permissions(user, *permission_codes):
         permission = Permission.objects.get(code=permission_code)
         role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
 def create_spu(tenant, code="SPU-STATUS"):

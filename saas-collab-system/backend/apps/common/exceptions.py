@@ -29,7 +29,28 @@ class StateConflict(exceptions.APIException):
     default_code = ErrorCode.STATE_CONFLICT
 
 
+class DataScopeDenied(exceptions.PermissionDenied):
+    error_code = ErrorCode.DATA_SCOPE_FORBIDDEN
+
+    def __init__(self, detail=None, *, error_code=None):
+        self.error_code = error_code or self.error_code
+        super().__init__(detail=detail, code=self.error_code)
+
+
+class ScopedResourceNotFound(exceptions.NotFound):
+    error_code = ErrorCode.RESOURCE_NOT_FOUND
+
+
+def get_scoped_object_or_404(queryset, **lookup):
+    try:
+        return queryset.get(**lookup)
+    except queryset.model.DoesNotExist as exc:
+        raise ScopedResourceNotFound("Resource does not exist in the authorized data scope.") from exc
+
+
 def _get_error_code(exc, response):
+    if getattr(exc, "error_code", None):
+        return exc.error_code
     if isinstance(exc, BusinessRuleViolation):
         return ErrorCode.BUSINESS_RULE_VIOLATION
     if isinstance(exc, StateConflict):

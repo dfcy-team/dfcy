@@ -24,7 +24,11 @@ const phase3Routes = [
 describe('Phase 3 frontend contracts', () => {
   it('keeps the unified response envelope', () => {
     expect(normalizeApiResponse({ answer: 42 })).toEqual({
-      success: true, code: 'OK', message: 'success', data: { answer: 42 }
+      success: false,
+      code: 'INVALID_API_RESPONSE',
+      message: 'API response does not match the required envelope.',
+      data: null,
+      protocol_error: true
     });
   });
 

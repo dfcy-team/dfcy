@@ -6,12 +6,14 @@ const MainLayout = () => import('../layouts/MainLayout.vue');
 const Login = () => import('../views/auth/Login.vue');
 const Forbidden = () => import('../views/auth/Forbidden.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
+const BusinessOverview = () => import('../views/analytics/BusinessOverview.vue');
 const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
 const InventoryAlertList = () => import('../views/inventory/InventoryAlertList.vue');
 const ReplenishmentSuggestionList = () => import('../views/inventory/ReplenishmentSuggestionList.vue');
 const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList.vue');
 const LifecycleReviewHistory = () => import('../views/lifecycle/LifecycleReviewHistory.vue');
+const ClearanceRequestList = () => import('../views/lifecycle/ClearanceRequestList.vue');
 const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
@@ -93,12 +95,14 @@ const routes = [
     children: [
       { path: '', component: Dashboard },
       { path: 'forbidden', component: Forbidden },
+      { path: 'analytics/overview', component: BusinessOverview },
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
       { path: 'inventory/alerts', component: InventoryAlertList },
       { path: 'inventory/replenishment', component: ReplenishmentSuggestionList },
       { path: 'lifecycle/reviews', component: LifecycleReviewList },
       { path: 'lifecycle/history', component: LifecycleReviewHistory },
+      { path: 'lifecycle/clearance-requests', component: ClearanceRequestList },
       { path: 'alerts/business', component: BusinessAlertList },
       { path: 'workflow/approvals', component: ApprovalList },
       { path: 'workflow/approvals/:id', component: ApprovalDetail },

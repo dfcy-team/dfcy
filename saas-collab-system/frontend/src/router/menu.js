@@ -4,6 +4,7 @@ export const menuItems = [
     label: '经营分析',
     permissions: ['analytics.view'],
     children: [
+      { path: '/analytics/overview', label: '经营总览', permissions: ['analytics.view'] },
       { path: '/analytics/sales', label: '销售分析', permissions: ['analytics.view'] },
       { path: '/analytics/inventory', label: '库存分析', permissions: ['analytics.view'] }
     ]
@@ -15,6 +16,7 @@ export const menuItems = [
       { path: '/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] },
       { path: '/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
       { path: '/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
+      { path: '/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
       { path: '/alerts/business', label: '经营预警', permissions: ['alerts.view'] }
     ]
   },
@@ -111,12 +113,14 @@ export const menuItems = [
 export const routeCapabilities = [
   { path: '/', exact: true, userTypes: ['internal', 'external'] },
   { path: '/forbidden', exact: true },
+  { path: '/analytics/overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/inventory/replenishment', permissions: ['replenishment.view'], userTypes: ['internal'] },
   { path: '/lifecycle/reviews', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
   { path: '/lifecycle/history', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
+  { path: '/lifecycle/clearance-requests', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
   { path: '/alerts/business', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/workflow/approvals', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
   { path: '/workflow/exceptions', permissions: ['workflow.exceptions.view'], userTypes: ['internal'] },
