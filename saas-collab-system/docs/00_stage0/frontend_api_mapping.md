@@ -1,5 +1,21 @@
 # 阶段1前后端接口对接清单
 
+## UI-P4 审批、报告、异常与协同
+
+| 页面 | 页面路径 | API | 方法 | Mock位置 | 当前状态 |
+|---|---|---|---|---|---|
+| 审批中心 | `/workflow/approvals` | `/api/internal/workflow/approvals/` | GET | `frontend/src/mock/workflow.js` | connected/mock切换 |
+| 审批详情 | `/workflow/approvals/{id}` | `/api/internal/workflow/approvals/{id}/` | GET | `frontend/src/mock/workflow.js` | connected/mock切换 |
+| 审批动作 | 同审批详情 | `approve/`、`reject/`、`withdraw/` | POST | 不执行Mock写入 | connected |
+| 异常中心 | `/workflow/exceptions` | `/api/internal/workflow/exceptions/` | GET | `frontend/src/mock/workflow.js` | connected/mock切换 |
+| 异常详情 | `/workflow/exceptions/{id}` | `/api/internal/workflow/exceptions/{id}/` | GET | `frontend/src/mock/workflow.js` | connected/mock切换 |
+| 异常动作 | 同异常详情 | `assign/`、`resolve/`、`close/` | POST | 不执行Mock写入 | connected |
+| 协同回填 | `/workflow/collaboration-events` | `/api/internal/workflow/collaboration-events/` | GET | `frontend/src/mock/workflow.js` | connected/mock切换 |
+| 协同确认 | 同协同回填 | `confirm/`、`reject/` | POST | 不执行Mock写入 | connected |
+| 报表下载审计 | `/reports/exports` | `/api/report/exports/{id}/download/` | POST | 不生成文件 | connected |
+
+UI-P4全部真实写动作必须由后端permission-specific data_scope与状态机校验。飞书/微信回调仅为Mock合同，不标记真实平台connected。
+
 本清单用于阶段1前端页面、Mock fallback 和后端接口边界对齐。未真实联调的接口不得标记为 `connected`。
 
 ## UI-P1认证与工作台映射

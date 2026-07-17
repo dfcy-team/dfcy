@@ -36,6 +36,10 @@ class IsReportExporter(AnalyticsActionPermission):
     permission_code = "reports.export"
 
 
+class IsReportDownloader(AnalyticsActionPermission):
+    permission_code = "reports.download"
+
+
 def get_analytics_dimension_scopes(user):
     if getattr(user, "is_superuser", False):
         return None

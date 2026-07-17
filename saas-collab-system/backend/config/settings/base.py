@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "apps.replenishment",
     "apps.configcenter",
     "apps.masterdata",
+    "apps.workflows",
     "apps.common",
 ]
 
@@ -140,6 +141,10 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
+
+# UI-P4 collaboration remains mock-only until a separate production security review.
+UI_P4_COLLABORATION_MODE = os.getenv("UI_P4_COLLABORATION_MODE", "mock")
+UI_P4_MOCK_WEBHOOK_SECRET = os.getenv("UI_P4_MOCK_WEBHOOK_SECRET", "not-a-real-ui-p4-secret")
 
 # Safe default: production credential storage stays disabled unless a provider is explicitly configured.
 INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(

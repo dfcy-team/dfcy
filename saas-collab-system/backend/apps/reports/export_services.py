@@ -1,3 +1,5 @@
+import json
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -78,6 +80,14 @@ REPORT_FILTERS = {
 }
 
 
+def _scope_snapshot(user):
+    snapshot = [
+        {"scope_type": item["scope_type"], "config": sanitize_sensitive_data(item.get("config") or {})}
+        for item in get_user_data_scope(user)
+    ]
+    return sorted(snapshot, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
+
+
 def report_catalog_for_user(user):
     return [
         {"report_type": report_type, **metadata, "mode": "placeholder_export"}
@@ -132,6 +142,11 @@ def _write_audit(export_request, actor, action, result):
     return log
 
 
+def _reject_download(export_request, actor, result, exception):
+    _write_audit(export_request, actor, ReportExportAuditLog.Action.DOWNLOAD, result)
+    raise exception
+
+
 @transaction.atomic
 def create_export_request(*, user, report_type, filters):
     if not user or not user.is_active or user.user_type != "internal" or not check_user_permission(user, "reports.export"):
@@ -144,11 +159,7 @@ def create_export_request(*, user, report_type, filters):
     sanitized_filters = sanitize_sensitive_data(filters or {})
     if sanitized_filters != (filters or {}):
         raise ValidationError("Sensitive credentials are not allowed in report filters.")
-    scopes = get_user_data_scope(user)
-    scope_snapshot = [
-        {"scope_type": item["scope_type"], "config": sanitize_sensitive_data(item.get("config") or {})}
-        for item in scopes
-    ]
+    scope_snapshot = _scope_snapshot(user)
     queryset = _apply_filters(_source_queryset(user, report_type), report_type, sanitized_filters)
     limited_count = queryset.values_list("pk", flat=True)[: MAX_EXPORT_ROWS + 1].count()
     rejected = limited_count > MAX_EXPORT_ROWS
@@ -190,3 +201,47 @@ def log_export_view(*, export_request, actor):
     if not actor.is_superuser and export_request.requested_by_id != actor.id:
         raise PermissionDenied("Export request belongs to another data scope.")
     return _write_audit(export_request, actor, ReportExportAuditLog.Action.VIEW, "metadata_only")
+
+
+def create_download_grant(*, export_request, actor):
+    if export_request.tenant_id != actor.tenant_id:
+        raise PermissionDenied("Export request is outside the current tenant.")
+    if not actor.is_superuser and export_request.requested_by_id != actor.id:
+        raise PermissionDenied("Export request belongs to another data scope.")
+    if not check_user_permission(actor, "reports.download"):
+        _reject_download(
+            export_request,
+            actor,
+            "denied_permission",
+            PermissionDenied("Report download permission is required."),
+        )
+    if export_request.status != ReportExportRequest.Status.COMPLETED:
+        _reject_download(
+            export_request,
+            actor,
+            "rejected_status",
+            ValidationError("Only completed placeholder exports can be downloaded."),
+        )
+    metadata = REPORT_CATALOG[export_request.report_type]
+    if not check_user_permission(actor, metadata["required_permission"]):
+        _reject_download(
+            export_request,
+            actor,
+            "denied_report_permission",
+            PermissionDenied("The selected report type requires additional permission."),
+        )
+    current_scope = _scope_snapshot(actor)
+    if current_scope != export_request.data_scope:
+        _reject_download(
+            export_request,
+            actor,
+            "denied_scope_changed",
+            PermissionDenied("The current data scope differs from the audited export request scope."),
+        )
+    audit = _write_audit(export_request, actor, ReportExportAuditLog.Action.DOWNLOAD, "placeholder_grant")
+    return {
+        "download_reference": f"{export_request.masked_file_reference}?audit={audit.id}",
+        "audit_id": audit.id,
+        "expires_in_seconds": 300,
+        "placeholder_only": True,
+    }

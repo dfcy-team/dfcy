@@ -38,3 +38,6 @@ INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
 )
 if INTEGRATION_ENCRYPTION_PROVIDER == "test-only":
     raise ImproperlyConfigured("The test-only integration encryption provider is forbidden in production.")
+
+# UI-P4 only defines a mock callback contract. Production enablement requires a separate review.
+UI_P4_COLLABORATION_MODE = "disabled"

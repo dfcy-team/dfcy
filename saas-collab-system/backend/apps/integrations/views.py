@@ -1,8 +1,11 @@
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import ValidationError
 
 from apps.common.responses import success_response
+from apps.workflows.models import CollaborationEvent
+from apps.workflows.serializers import CollaborationEventSerializer
+from apps.workflows.services import receive_mock_collaboration_event
 from apps.permissions.api_permissions import (
     IsIntegrationCredentialRotator,
     IsIntegrationManager,
@@ -39,6 +42,37 @@ def wechat_health(request):
 @api_view(["GET"])
 def feishu_health(request):
     return health_response("feishu")
+
+
+def _mock_collaboration_callback(request, channel):
+    event, created = receive_mock_collaboration_event(
+        channel=channel,
+        headers=request.headers,
+        payload=request.data,
+    )
+    return success_response(
+        {
+            "created": created,
+            "duplicate": not created,
+            "event": CollaborationEventSerializer(event).data,
+            "business_write": False,
+        },
+        status=201 if created else 200,
+    )
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([])
+def wechat_mock_callback(request):
+    return _mock_collaboration_callback(request, CollaborationEvent.Channel.WECHAT)
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([])
+def feishu_mock_callback(request):
+    return _mock_collaboration_callback(request, CollaborationEvent.Channel.FEISHU)
 
 
 def _write_audit_log(config, actor, action, result=IntegrationAuditLog.Result.SUCCESS, detail=None):

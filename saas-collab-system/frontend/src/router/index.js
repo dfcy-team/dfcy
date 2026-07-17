@@ -79,6 +79,11 @@ const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
+const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
+const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
+const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
+const ExceptionDetail = () => import('../views/workflow/ExceptionDetail.vue');
+const CollaborationEventList = () => import('../views/workflow/CollaborationEventList.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -95,6 +100,11 @@ const routes = [
       { path: 'lifecycle/reviews', component: LifecycleReviewList },
       { path: 'lifecycle/history', component: LifecycleReviewHistory },
       { path: 'alerts/business', component: BusinessAlertList },
+      { path: 'workflow/approvals', component: ApprovalList },
+      { path: 'workflow/approvals/:id', component: ApprovalDetail },
+      { path: 'workflow/exceptions', component: ExceptionList },
+      { path: 'workflow/exceptions/:id', component: ExceptionDetail },
+      { path: 'workflow/collaboration-events', component: CollaborationEventList },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },

@@ -1,39 +1,25 @@
 <template>
-  <Phase3DecisionPage
-    eyebrow="报表治理"
-    title="报表导出"
-    subtitle="查看导出范围、敏感字段规则和审计记录。"
-    boundary-note="导出必须由后端校验 data_scope 和独立导出权限，并记录审计；财务字段默认聚合或脱敏。当前申请按钮不会生成真实文件。"
-    :loader="fetchReportExports"
-    :filters="filters"
-    :columns="columns"
-    :row-actions="rowActions"
-    :detail-fields="detailFields"
-    table-title="可申请报表"
-    table-note="下载文件应遵守保留周期并避免在终端或日志输出敏感内容"
-  />
+  <RPAResourcePage title="报表导出与下载审计" note="查看本人授权范围内的占位导出和下载审计。"
+    boundary-note="下载必须由后端重新校验tenant、data_scope、报表权限和敏感字段策略；当前只签发短期placeholder引用，不生成真实文件。"
+    :loader="fetchReportExports" :columns="columns" :filters="filters" :row-actions="actions" empty-text="暂无导出申请" />
 </template>
 
 <script setup>
-import Phase3DecisionPage from '../../components/Phase3DecisionPage.vue';
-import { fetchReportExports } from '../../api/reportExports';
+import RPAResourcePage from '../../components/RPAResourcePage.vue';
+import { createReportExport, downloadReportExport, fetchReportExports } from '../../api/reportExports';
 
 const filters = [
-  { key: 'audit_status', label: '审计状态', options: [{ label: '待授权', value: 'pending' }, { label: '已批准', value: 'approved' }, { label: '已拒绝', value: 'rejected' }] },
-  { key: 'sensitive', label: '敏感数据', options: [{ label: '包含', value: 'true' }, { label: '不包含', value: 'false' }] }
+  { key: 'report_type', label: '报表类型', options: ['analytics_summary', 'inventory_alerts', 'replenishment', 'lifecycle', 'business_alerts', 'finance_summary'] },
+  { key: 'status', label: '状态', options: ['completed', 'rejected'] }
 ];
 const columns = [
-  { prop: 'report_code', label: '报表编码', width: 170 }, { prop: 'report_name', label: '报表名称', width: 160 },
-  { prop: 'data_scope', label: '数据范围', width: 210 }, { prop: 'sensitive_fields', label: '敏感字段', width: 170 },
-  { prop: 'export_policy', label: '导出策略', width: 220 }, { prop: 'retention_days', label: '保留天数' },
-  { prop: 'last_export_at', label: '最近导出', width: 160 }, { prop: 'audit_status', label: '审计状态', type: 'status' }
+  { prop: 'id', label: '导出编号' }, { prop: 'report_type', label: '报表类型', width: 190 },
+  { prop: 'status', label: '状态', type: 'status' }, { prop: 'row_count', label: '行数' },
+  { prop: 'audit_count', label: '审计次数' }, { prop: 'masked_file_reference', label: '脱敏引用', width: 260 },
+  { prop: 'requested_at', label: '申请时间', width: 180 }
 ];
-const rowActions = [
-  { label: '审计记录', mode: 'detail' },
-  { label: '申请导出', permission: 'reports.export', confirmMessage: '导出需要后端重新校验权限、数据范围和敏感字段策略。当前操作不会生成文件。', message: '报表导出接口尚未提供，当前保持 pending。' }
-];
-const detailFields = [
-  { prop: 'report_code', label: '报表编码' }, { prop: 'data_scope', label: '数据范围' }, { prop: 'export_policy', label: '导出策略' },
-  { prop: 'retention_days', label: '保留天数' }, { prop: 'audit', label: '审计详情', type: 'json' }
+const actions = [
+  { label: '再次申请', permission: 'reports.export', confirmMessage: '后端将按当前权限和data_scope重新生成占位导出申请。', handler: (row) => createReportExport({ report_type: row.report_type, filters: {} }) },
+  { label: '申请下载', permission: 'reports.download', disabled: (row) => row.status !== 'completed', confirmMessage: '后端将重新校验权限并记录下载审计；不会返回真实文件。', handler: (row) => downloadReportExport(row.id) }
 ];
 </script>
