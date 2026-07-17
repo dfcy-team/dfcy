@@ -47,6 +47,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { fetchResearchDetail } from '../../api/products';
+import { apiState, detailData } from '../../utils/businessResponse';
 
 const route = useRoute();
 const detail = ref({});
@@ -55,11 +56,6 @@ const status = ref('loading');
 const message = ref('');
 
 const tagType = computed(() => (status.value === 'error' ? 'danger' : status.value === 'fallback' ? 'warning' : 'info'));
-
-function getDetail(data) {
-  if (Array.isArray(data?.items)) return data.items[0] || {};
-  return data || {};
-}
 
 function formatList(value) {
   return Array.isArray(value) ? value.join(', ') : value || '-';
@@ -70,8 +66,8 @@ onMounted(async () => {
   try {
     const response = await fetchResearchDetail(route.params.id || 1);
     if (!response.success) throw new Error(response.message || '新品市调详情接口失败');
-    detail.value = getDetail(response.data);
-    status.value = response.data?.api_status || response.data?.status || 'api';
+    detail.value = detailData(response.data);
+    status.value = apiState(response.data);
     if (response.data?.api_status === 'fallback') message.value = response.message;
   } catch (error) {
     status.value = 'error';

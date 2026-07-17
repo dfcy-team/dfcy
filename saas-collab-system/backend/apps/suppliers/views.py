@@ -2,7 +2,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 
-from apps.common.responses import success_response
+from apps.common.query import pagination_query
+from apps.common.responses import paginated_data, success_response
 from apps.permissions.api_permissions import IsExternalUser
 
 from .models import SupplierPerformanceSnapshot, SupplierShipment, SupplierTask
@@ -38,7 +39,11 @@ def _supplier_id_for_user(request):
 def supplier_task_collection(request):
     supplier_id = _supplier_id_for_user(request)
     queryset = SupplierTask.objects.filter(tenant=request.user.tenant, supplier_id=supplier_id)
-    return success_response(SupplierTaskSerializer(queryset, many=True).data)
+    status = request.query_params.get("status", "").strip()
+    if status:
+        queryset = queryset.filter(status=status)
+    page, page_size = pagination_query(request)
+    return success_response(paginated_data(request, queryset, SupplierTaskSerializer, page=page, page_size=page_size))
 
 
 @api_view(["GET"])
@@ -66,7 +71,13 @@ def supplier_shipment_collection(request):
     supplier_id = _supplier_id_for_user(request)
     if request.method == "GET":
         queryset = SupplierShipment.objects.filter(tenant=request.user.tenant, supplier_id=supplier_id)
-        return success_response(SupplierShipmentSerializer(queryset, many=True).data)
+        status = request.query_params.get("status", "").strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        page, page_size = pagination_query(request)
+        return success_response(
+            paginated_data(request, queryset, SupplierShipmentSerializer, page=page, page_size=page_size)
+        )
 
     serializer = SupplierShipmentSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)

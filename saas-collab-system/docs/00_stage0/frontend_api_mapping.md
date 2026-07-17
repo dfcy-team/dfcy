@@ -1,5 +1,24 @@
 # 阶段1前后端接口对接清单
 
+## UI-P5 业务主链路状态覆盖（2026-07-17）
+
+本节为 UI-P5 的现行口径；如与阶段0旧表冲突，以本节和 `docs/03_api/ui_p5_business_mainflow_contract.md` 为准。
+
+| 页面 | 路径 | API | 方法 | 权限/身份 | 状态 |
+|---|---|---|---|---|---|
+| 新品市调 | `/products/research` | `/api/internal/products/research/` | GET | `products.research.view` + data_scope | connected |
+| 商品主数据 | `/products/master` | `/api/internal/products/spus/`、`/api/internal/products/skus/` | GET | `products.master.view` + data_scope | connected |
+| 商品编码冻结 | `/products/master/:id` | `/api/internal/products/spus/{id}/freeze-code/` | POST | `products.master.freeze` + data_scope | connected |
+| 采购订单 | `/purchasing/orders` | `/api/internal/purchasing/orders/` | GET | `purchasing.orders.view` + data_scope | connected |
+| 供应商任务 | `/suppliers/tasks` | `/api/external/supplier/tasks/` | GET | external + 当前 tenant/supplier | connected |
+| 供应商任务回填 | `/suppliers/tasks/:id` | `/api/external/supplier/tasks/{id}/feedback/` | PATCH | external + 当前 tenant/supplier | connected |
+| 供应商出货 | `/suppliers/shipments` | `/api/external/supplier/shipments/` | GET/POST | external + 当前 tenant/supplier | connected |
+| 多国家刊登 | `/listings/*` | 尚未冻结后端路径 | - | internal 展示占位 | pending/mock |
+| 价格中心 | `/pricing/*` | 尚未冻结后端路径 | - | internal 展示占位 | pending/mock |
+| 销售订单 | 尚无页面 | 尚无后端路径 | - | 待阶段任务拆分 | pending |
+
+所有 connected 列表统一解析 `data.count/next/previous/results`；Mock 使用 `data.items`。刊登与价格在 `VITE_USE_MOCK=false` 时返回受控 pending 数据，不发送不存在的后端请求。
+
 ## UI-P4 审批、报告、异常与协同
 
 | 页面 | 页面路径 | API | 方法 | Mock位置 | 当前状态 |

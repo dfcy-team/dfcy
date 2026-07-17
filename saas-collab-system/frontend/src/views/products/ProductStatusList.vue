@@ -32,6 +32,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { fetchProductStatusList } from '../../api/products';
+import { apiState, collectionRows } from '../../utils/businessResponse';
 
 const rows = ref([]);
 const loading = ref(false);
@@ -45,19 +46,13 @@ const summary = computed(() => [
   { label: '已下架', count: rows.value.filter((item) => item.sales_status === 'stopped').length, type: 'danger' }
 ]);
 
-function getRows(data) {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.items)) return data.items;
-  return [];
-}
-
 onMounted(async () => {
   loading.value = true;
   try {
     const response = await fetchProductStatusList();
     if (!response.success) throw new Error(response.message || '商品状态接口失败');
-    rows.value = getRows(response.data);
-    status.value = response.data?.api_status || response.data?.status || 'api';
+    rows.value = collectionRows(response.data);
+    status.value = apiState(response.data);
     if (response.data?.api_status === 'fallback') message.value = response.message;
   } catch (error) {
     status.value = 'error';

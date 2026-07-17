@@ -1,9 +1,2 @@
-<template>
-  <Stage0Placeholder title="价格列表" api-path="pending: pricing.prices.list" :fields="fields" :search-fields="['商品编码', 'SKU', '审批状态']" :actions="['提交价格审批按钮占位', '清仓价占位']" />
-</template>
-
-<script setup>
-import Stage0Placeholder from '../_Stage0Placeholder.vue';
-
-const fields = ['采购成本', '物流成本', '平台佣金', '汇率', '目标毛利', '建议价', '审批价', '清仓价占位', '页面价', '提交价格审批按钮占位'];
-</script>
+<template><ControlledPendingPage title="价格中心" contract="pending: pricing.prices（后端接口未实现）" :loader="fetchPrices" :fields="fields" :actions="['提交价格审批（禁用）','应用清仓价（禁用）']"/></template>
+<script setup>import ControlledPendingPage from '../_ControlledPendingPage.vue';import{fetchPrices}from'../../api/pricing';const fields=[{prop:'sku',label:'SKU'},{prop:'currency',label:'币种'},{prop:'suggested_price',label:'建议价'},{prop:'approval_status',label:'审批状态'}];</script>

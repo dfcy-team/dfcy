@@ -1,78 +1,16 @@
 <template>
-  <section class="fix-page">
-    <header class="fix-header">
-      <div>
-        <h1 class="page-title">供应商任务详情</h1>
-        <p>API: GET /api/external/supplier/tasks/{id}/；POST /api/external/supplier/tasks/{id}/feedback/</p>
-      </div>
-      <el-tag :type="tagType">{{ status }}</el-tag>
-    </header>
-
-    <el-alert title="供应商只能查看和回填当前供应商自己的任务，真实过滤以后端 tenant_id + supplier_id 为准。" type="info" show-icon :closable="false" />
-    <el-alert v-if="message" :title="message" :type="status === 'error' ? 'error' : 'warning'" show-icon :closable="false" />
-
-    <el-card v-loading="loading" shadow="never">
-      <template #header>生产任务信息</template>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="任务编号">{{ detail.task_no || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="供应商ID">{{ detail.supplier_id || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="SKU">{{ detail.sku_code || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="生产数量">{{ detail.production_quantity || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="已完成数量">{{ detail.completed_quantity || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="预计出货日期">{{ detail.expected_ship_date || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ detail.status || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="是否逾期">{{ detail.is_overdue ? '是' : '否' }}</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-
-    <el-card shadow="never">
-      <template #header>feedback form placeholder</template>
-      <el-form label-width="120px">
-        <el-form-item label="回填进度"><el-input :model-value="detail.completed_quantity" disabled /></el-form-item>
-        <el-form-item label="回填说明"><el-input :model-value="detail.feedback_note" disabled /></el-form-item>
-        <el-form-item label="异常说明"><el-input :model-value="detail.exception_note" disabled /></el-form-item>
-      </el-form>
-      <el-button disabled>提交回填占位</el-button>
-    </el-card>
+  <section class="detail-page">
+    <header class="page-header"><div><p class="eyebrow">UI-P5 · 供应商协同</p><h1 class="page-title">生产任务详情</h1><p>仅允许当前供应商回填进度和异常，不可更改采购或财务信息。</p></div><el-tag :type="stateTagType(state)">{{state}}</el-tag></header>
+    <el-alert v-if="message" :title="message" :type="state==='error'?'error':'success'" show-icon :closable="false"/>
+    <el-card v-loading="loading" shadow="never"><template #header>任务信息</template><el-descriptions :column="2" border><el-descriptions-item label="任务编号">{{detail.task_no||'-'}}</el-descriptions-item><el-descriptions-item label="SKU">{{detail.sku_code||'-'}}</el-descriptions-item><el-descriptions-item label="生产数量">{{detail.production_quantity??'-'}}</el-descriptions-item><el-descriptions-item label="已完成">{{detail.completed_quantity??0}}</el-descriptions-item><el-descriptions-item label="预计出货">{{detail.expected_ship_date||'-'}}</el-descriptions-item><el-descriptions-item label="状态">{{detail.status||'-'}}</el-descriptions-item></el-descriptions></el-card>
+    <el-card shadow="never"><template #header>进度回填</template><el-form :model="form" label-width="110px"><el-form-item label="已完成数量"><el-input-number v-model="form.completed_quantity" :min="0" :max="detail.production_quantity||0"/></el-form-item><el-form-item label="任务状态"><el-select v-model="form.status" style="width:180px"><el-option label="生产中" value="in_progress"/><el-option label="部分完成" value="partial"/><el-option label="已完成" value="completed"/><el-option label="异常" value="exception"/></el-select></el-form-item><el-form-item label="回填说明"><el-input v-model="form.feedback_note" type="textarea" :rows="3" maxlength="500" show-word-limit/></el-form-item><el-form-item label="异常说明"><el-input v-model="form.exception_note" type="textarea" :rows="3" maxlength="500" show-word-limit/></el-form-item><el-form-item><el-button type="primary" :loading="saving" :disabled="!detail.id" @click="submit">提交回填</el-button></el-form-item></el-form></el-card>
   </section>
 </template>
-
 <script setup>
-import { computed, onMounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
-import { fetchSupplierTaskDetail } from '../../api/suppliers';
-
-const route = useRoute();
-const detail = ref({});
-const loading = ref(false);
-const status = ref('loading');
-const message = ref('');
-const tagType = computed(() => (status.value === 'error' ? 'danger' : status.value === 'fallback' ? 'warning' : 'info'));
-
-function getDetail(data) {
-  if (Array.isArray(data?.items)) return data.items[0] || {};
-  return data || {};
-}
-
-onMounted(async () => {
-  loading.value = true;
-  try {
-    const response = await fetchSupplierTaskDetail(route.params.id || 1);
-    if (!response.success) throw new Error(response.message || '供应商任务详情接口失败');
-    detail.value = getDetail(response.data);
-    status.value = response.data?.api_status || response.data?.status || 'api';
-    if (response.data?.api_status === 'fallback') message.value = response.message;
-  } catch (error) {
-    status.value = 'error';
-    message.value = error?.message || '供应商任务详情请求失败';
-  } finally {
-    loading.value = false;
-  }
-});
+import{onMounted,reactive,ref}from'vue';import{useRoute}from'vue-router';import{fetchSupplierTaskDetail,submitSupplierTaskFeedback}from'../../api/suppliers';import{apiState,detailData,stateTagType}from'../../utils/businessResponse';
+const route=useRoute();const detail=ref({}),loading=ref(false),saving=ref(false),state=ref('loading'),message=ref('');const form=reactive({completed_quantity:0,status:'in_progress',feedback_note:'',exception_note:''});function apply(data){detail.value=detailData(data);form.completed_quantity=detail.value.completed_quantity||0;form.status=['in_progress','partial','completed','exception'].includes(detail.value.status)?detail.value.status:'in_progress';form.feedback_note=detail.value.feedback_note||'';form.exception_note=detail.value.exception_note||''}
+async function load(){loading.value=true;const response=await fetchSupplierTaskDetail(route.params.id||1);if(response.success){apply(response.data);state.value=apiState(response.data)}else{state.value='error';message.value=response.message}loading.value=false}
+async function submit(){saving.value=true;message.value='';const response=await submitSupplierTaskFeedback(detail.value.id,{...form});if(response.success){apply(response.data);state.value=apiState(response.data);message.value='回填已保存'}else{state.value='error';message.value=response.message}saving.value=false}
+onMounted(load);
 </script>
-
-<style scoped>
-.fix-page { display: grid; gap: 16px; }
-.fix-header { display: flex; justify-content: space-between; gap: 16px; }
-.fix-header p { margin: -8px 0 0; color: #64748b; font-size: 13px; }
-</style>
+<style scoped>.detail-page{display:grid;gap:16px}.page-header{display:flex;justify-content:space-between;gap:16px}.page-header p{margin:4px 0 0;color:#64748b}.eyebrow{font-size:12px;font-weight:700;color:#0f766e!important}</style>

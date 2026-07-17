@@ -1,68 +1,15 @@
 <template>
-  <section class="fix-page">
-    <header class="fix-header">
-      <div>
-        <h1 class="page-title">供应商任务列表</h1>
-        <p>API: GET /api/external/supplier/tasks/</p>
-      </div>
-      <el-tag :type="tagType">{{ status }}</el-tag>
-    </header>
-
-    <el-alert title="供应商只能查看和回填当前供应商自己的任务，真实过滤以后端 tenant_id + supplier_id 为准。" type="info" show-icon :closable="false" />
-    <el-alert v-if="message" :title="message" :type="status === 'error' ? 'error' : 'warning'" show-icon :closable="false" />
-
-    <el-table v-loading="loading" :data="rows" border empty-text="暂无供应商任务">
-      <el-table-column prop="task_no" label="任务编号" min-width="170" />
-      <el-table-column prop="supplier_id" label="供应商ID" min-width="110" />
-      <el-table-column prop="sku_code" label="SKU" min-width="140" />
-      <el-table-column prop="production_quantity" label="生产数量" min-width="110" />
-      <el-table-column prop="completed_quantity" label="已完成数量" min-width="120" />
-      <el-table-column prop="expected_ship_date" label="预计出货日期" min-width="140" />
-      <el-table-column prop="status" label="状态" min-width="120" />
-      <el-table-column label="是否逾期" min-width="100">
-        <template #default="{ row }">{{ row.is_overdue ? '是' : '否' }}</template>
-      </el-table-column>
-    </el-table>
-
-    <el-empty v-if="!loading && !message && rows.length === 0" description="暂无供应商任务" />
+  <section class="business-page">
+    <header class="page-header"><div><p class="eyebrow">UI-P5 · 供应商协同</p><h1 class="page-title">我的生产任务</h1><p>供应商身份由后端会话确定，页面不接受 supplier_id 覆盖。</p></div><el-tag :type="stateTagType(state)">{{ state }}</el-tag></header>
+    <el-alert title="仅返回当前 tenant_id + supplier_id 的任务；不展示采购价格、付款条件或财务数据。" type="info" show-icon :closable="false"/>
+    <el-form class="filters" inline><el-form-item label="状态"><el-select v-model="statusFilter" clearable style="width:160px"><el-option label="待处理" value="pending"/><el-option label="生产中" value="in_progress"/><el-option label="部分完成" value="partial"/><el-option label="已完成" value="completed"/><el-option label="异常" value="exception"/></el-select></el-form-item><el-form-item><el-button type="primary" @click="search">查询</el-button><el-button @click="reset">重置</el-button></el-form-item></el-form>
+    <el-alert v-if="message" :title="message" :type="state==='error'?'error':'warning'" show-icon :closable="false"/>
+    <el-table v-loading="loading" :data="rows" border empty-text="当前供应商暂无任务"><el-table-column prop="task_no" label="任务编号" min-width="170"/><el-table-column prop="sku_code" label="SKU" min-width="140"/><el-table-column prop="production_quantity" label="生产数量" min-width="110"/><el-table-column prop="completed_quantity" label="已完成" min-width="100"/><el-table-column prop="expected_ship_date" label="预计出货" min-width="130"/><el-table-column prop="status" label="状态" min-width="110"/><el-table-column label="逾期" width="80"><template #default="{row}">{{row.is_overdue?'是':'否'}}</template></el-table-column><el-table-column label="操作" width="90"><template #default="{row}"><router-link :to="`/suppliers/tasks/${row.id}`">查看</router-link></template></el-table-column></el-table>
+    <footer class="pager"><span>共 {{total}} 条</span><el-pagination v-model:current-page="page" :page-size="20" layout="prev, pager, next" :total="total" @current-change="load"/></footer>
   </section>
 </template>
-
 <script setup>
-import { computed, onMounted, ref } from 'vue';
-import { fetchSupplierTasks } from '../../api/suppliers';
-
-const rows = ref([]);
-const loading = ref(false);
-const status = ref('loading');
-const message = ref('');
-const tagType = computed(() => (status.value === 'error' ? 'danger' : status.value === 'fallback' ? 'warning' : 'info'));
-
-function getRows(data) {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.items)) return data.items;
-  return [];
-}
-
-onMounted(async () => {
-  loading.value = true;
-  try {
-    const response = await fetchSupplierTasks();
-    if (!response.success) throw new Error(response.message || '供应商任务接口失败');
-    rows.value = getRows(response.data);
-    status.value = response.data?.api_status || response.data?.status || 'api';
-    if (response.data?.api_status === 'fallback') message.value = response.message;
-  } catch (error) {
-    status.value = 'error';
-    message.value = error?.message || '供应商任务请求失败';
-  } finally {
-    loading.value = false;
-  }
-});
+import{onMounted,ref}from'vue';import{fetchSupplierTasks}from'../../api/suppliers';import{apiState,collectionRows,collectionTotal,stateTagType}from'../../utils/businessResponse';
+const rows=ref([]),total=ref(0),page=ref(1),statusFilter=ref(''),loading=ref(false),state=ref('loading'),message=ref('');async function load(){loading.value=true;message.value='';const response=await fetchSupplierTasks({status:statusFilter.value,page:page.value,page_size:20});if(response.success){rows.value=collectionRows(response.data);total.value=collectionTotal(response.data);state.value=apiState(response.data)}else{rows.value=[];total.value=0;state.value='error';message.value=response.message}loading.value=false}function search(){page.value=1;load()}function reset(){statusFilter.value='';search()}onMounted(load);
 </script>
-
-<style scoped>
-.fix-page { display: grid; gap: 16px; }
-.fix-header { display: flex; justify-content: space-between; gap: 16px; }
-.fix-header p { margin: -8px 0 0; color: #64748b; font-size: 13px; }
-</style>
+<style scoped>.business-page{display:grid;gap:16px}.page-header,.pager{display:flex;align-items:center;justify-content:space-between;gap:16px}.page-header p{margin:4px 0 0;color:#64748b}.eyebrow{font-size:12px;font-weight:700;color:#0f766e!important}.filters{padding:12px;border:1px solid #d9e2ec;border-radius:8px;background:#fff}.pager{color:#64748b;font-size:13px}</style>

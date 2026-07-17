@@ -3,15 +3,27 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.products.models import ProductResearch, ProductSKU, ProductSPU
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
 def create_user(tenant, username, user_type):
-    return CustomUser.objects.create_user(
+    user = CustomUser.objects.create_user(
         username=username,
         tenant=tenant,
         user_type=user_type,
     )
+    if user_type == CustomUser.UserType.INTERNAL:
+        role = Role.objects.create(tenant=tenant, code=f"{username}-product-role", name="Product role")
+        role.permissions.add(
+            *Permission.objects.filter(code__in=[
+                "products.research.view", "products.research.manage",
+                "products.master.view", "products.master.manage", "products.master.freeze",
+            ])
+        )
+        UserRole.objects.create(tenant=tenant, user=user, role=role)
+        DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+    return user
 
 
 def authenticated_client(user):
@@ -49,7 +61,8 @@ def test_internal_user_can_create_and_list_product_research_with_unified_respons
     assert create_response.json()["data"]["tenant_id"] == tenant.id
     assert create_response.json()["data"]["created_by_id"] == user.id
     assert list_response.status_code == 200
-    assert len(list_response.json()["data"]) == 1
+    assert list_response.json()["data"]["count"] == 1
+    assert len(list_response.json()["data"]["results"]) == 1
 
 
 @pytest.mark.django_db
@@ -145,10 +158,10 @@ def test_product_api_filters_by_tenant():
     hidden_spu_response = client.get("/api/internal/products/spus/")
 
     assert list_response.status_code == 200
-    assert [item["research_no"] for item in list_response.json()["data"]] == ["RS-A"]
+    assert [item["research_no"] for item in list_response.json()["data"]["results"]] == ["RS-A"]
     assert hidden_detail_response.status_code == 404
     assert hidden_spu_response.status_code == 200
-    assert hidden_spu_response.json()["data"] == []
+    assert hidden_spu_response.json()["data"]["results"] == []
 
 
 @pytest.mark.django_db
