@@ -19,6 +19,14 @@ export const menuItems = [
     ]
   },
   {
+    label: '流程协同',
+    children: [
+      { path: '/workflow/approvals', label: '审批中心', permissions: ['workflow.approvals.view'] },
+      { path: '/workflow/exceptions', label: '异常中心', permissions: ['workflow.exceptions.view'] },
+      { path: '/workflow/collaboration-events', label: '协同回填', permissions: ['workflow.collaboration.view'] }
+    ]
+  },
+  {
     label: '业务协同',
     internal: true,
     children: [
@@ -110,6 +118,9 @@ export const routeCapabilities = [
   { path: '/lifecycle/reviews', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
   { path: '/lifecycle/history', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
   { path: '/alerts/business', permissions: ['alerts.view'], userTypes: ['internal'] },
+  { path: '/workflow/approvals', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
+  { path: '/workflow/exceptions', permissions: ['workflow.exceptions.view'], userTypes: ['internal'] },
+  { path: '/workflow/collaboration-events', permissions: ['workflow.collaboration.view'], userTypes: ['internal'] },
   { path: '/products/research', userTypes: ['internal'] },
   { path: '/products/master', userTypes: ['internal'] },
   { path: '/products/status-dashboard', permissions: ['products.status.view'], userTypes: ['internal'] },

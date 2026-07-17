@@ -419,6 +419,9 @@ class ReportExportRequestQuerySet(models.QuerySet):
     def bulk_create(self, objs, **kwargs):
         raise ValidationError("Report exports require the audited export service.")
 
+    def delete(self):
+        raise ValidationError("Report export requests are immutable audit roots.")
+
 
 class ReportExportRequest(models.Model):
     class ReportType(models.TextChoices):
@@ -472,6 +475,9 @@ class ReportExportRequest(models.Model):
         finally:
             self._export_service_write = False
 
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Report export requests are immutable audit roots.")
+
 
 class ReportExportAuditLogQuerySet(models.QuerySet):
     def update(self, **kwargs):
@@ -483,14 +489,18 @@ class ReportExportAuditLogQuerySet(models.QuerySet):
     def bulk_create(self, objs, **kwargs):
         raise ValidationError("Report export audit logs require the export service.")
 
+    def delete(self):
+        raise ValidationError("Report export audit logs are immutable.")
+
 
 class ReportExportAuditLog(models.Model):
     class Action(models.TextChoices):
         REQUEST = "request", "Request"
         VIEW = "view", "View"
+        DOWNLOAD = "download", "Download"
 
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="report_export_audit_logs")
-    export_request = models.ForeignKey(ReportExportRequest, on_delete=models.CASCADE, related_name="audit_logs")
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="report_export_audit_logs")
+    export_request = models.ForeignKey(ReportExportRequest, on_delete=models.PROTECT, related_name="audit_logs")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="report_export_audit_logs")
     action = models.CharField(max_length=20, choices=Action.choices)
     result = models.CharField(max_length=40)
@@ -502,10 +512,16 @@ class ReportExportAuditLog(models.Model):
         indexes = [models.Index(fields=["tenant", "export_request", "action"], name="idx_report_export_audit")]
 
     def save(self, *args, **kwargs):
+        if not self._state.adding or (self.pk is not None and type(self).objects.filter(pk=self.pk).exists()):
+            raise ValidationError("Report export audit logs are immutable.")
         if not getattr(self, "_export_service_write", False):
             raise ValidationError("Report export audit logs require the export service.")
+        kwargs["force_insert"] = True
         self.full_clean()
         try:
             super().save(*args, **kwargs)
         finally:
             self._export_service_write = False
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Report export audit logs are immutable.")

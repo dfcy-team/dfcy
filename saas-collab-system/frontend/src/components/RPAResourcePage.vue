@@ -65,6 +65,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
 
@@ -83,6 +84,7 @@ const props = defineProps({
 });
 
 const auth = useAuthStore();
+const router = useRouter();
 const rows = ref([]);
 const total = ref(0);
 const page = ref(1);
@@ -152,6 +154,10 @@ function resetFilters() {
 async function runAction(action, row) {
   const access = rowActionAccess(action, row);
   if (!access.allowed) return ElMessage.warning(access.reason);
+  if (action.route) {
+    await router.push(typeof action.route === 'function' ? action.route(row) : action.route);
+    return;
+  }
   try {
     if (action.confirmMessage) {
       await ElMessageBox.confirm(

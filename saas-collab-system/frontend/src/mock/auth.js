@@ -16,7 +16,11 @@ export const mockAuthUser = {
     'security.operations.view',
     'rpa.tasks.view', 'rpa.tasks.manage',
     'rpa.devices.view', 'rpa.devices.dry_run',
-    'rpa.stability.view'
+    'rpa.stability.view',
+    'workflow.approvals.view', 'workflow.approvals.submit', 'workflow.approvals.review', 'workflow.approvals.withdraw',
+    'workflow.exceptions.view', 'workflow.exceptions.manage',
+    'workflow.collaboration.view', 'workflow.collaboration.confirm',
+    'reports.view', 'reports.export', 'reports.download'
   ],
   data_scope: []
 };

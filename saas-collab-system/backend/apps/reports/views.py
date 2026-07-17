@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 
 from apps.common.responses import paginated_data, success_response
+from apps.permissions.api_permissions import IsInternalUser
 
 from .models import MetricAggregate, MetricDefinition
 from .permissions import (
@@ -25,7 +26,13 @@ from .serializers import (
     ReportExportRequestSerializer,
 )
 from .services import aggregate_metric
-from .export_services import create_export_request, log_export_view, report_catalog_for_user, visible_export_requests
+from .export_services import (
+    create_download_grant,
+    create_export_request,
+    log_export_view,
+    report_catalog_for_user,
+    visible_export_requests,
+)
 
 
 @api_view(["GET"])
@@ -231,3 +238,13 @@ def report_export_detail(request, pk):
     log_export_view(export_request=export_request, actor=request.user)
     export_request.refresh_from_db()
     return success_response(ReportExportRequestSerializer(export_request).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsInternalUser])
+def report_export_download(request, pk):
+    export_request = get_object_or_404(
+        visible_export_requests(request.user).select_related("requested_by"),
+        pk=pk,
+    )
+    return success_response(create_download_grant(export_request=export_request, actor=request.user))
