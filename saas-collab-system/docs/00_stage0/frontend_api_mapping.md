@@ -1,5 +1,32 @@
 # 阶段1前后端接口对接清单
 
+## UI-P7 治理与受控试点合同（2026-07-17）
+
+本节为 UI-P7 现行口径，详细合同见 `docs/03_api/ui_p7_governance_pilot_contract.md`。合同冻结时能力均为 `pending`；完成 handler、页面和自动化证据后，固定检查更新为 `mock`，其余受控记录能力更新为 `sandbox`。真实认证浏览器 E2E 通过前不得标记 `connected`。
+
+| 页面名称 | 页面路径 | API | 权限 | 状态 |
+|---|---|---|---|---|
+| API治理目录 | `/governance/api-contracts` | `GET /api/internal/governance/api-contracts/` | `governance.api.view` | sandbox |
+| API合同详情 | `/governance/api-contracts/:id` | `GET /api/internal/governance/api-contracts/{id}/` | `governance.api.view` | sandbox |
+| API合同Mock检查 | `/governance/api-contracts` | `POST /api/internal/governance/api-contracts/check-mock/` | `governance.api.check` | mock |
+| 智能体治理占位 | `/governance/assistants` | `GET /api/internal/governance/assistants/` | `governance.assistants.view` | sandbox |
+| 智能体占位详情 | `/governance/assistants/:id` | `GET /api/internal/governance/assistants/{id}/` | `governance.assistants.view` | sandbox |
+| 智能体Mock评估 | `/governance/assistants/:id` | `POST /api/internal/governance/assistants/{id}/evaluate-mock/` | `governance.assistants.evaluate` | mock |
+| 试点就绪 | `/pilot/readiness` | `GET /api/internal/pilot/readiness/` | `pilot.readiness.view` | sandbox |
+| 双主机拓扑 | `/pilot/topology` | `GET /api/internal/pilot/topology/` | `pilot.topology.view` | sandbox |
+| 拓扑Mock检查 | `/pilot/topology` | `POST /api/internal/pilot/topology/verify-mock/` | `pilot.topology.verify` | mock |
+| 备份恢复计划 | `/pilot/recovery` | `GET/POST /api/internal/pilot/recovery-plans/`、`GET {id}/` | `pilot.recovery.view/plan` | sandbox |
+| 恢复审批与排期 | `/pilot/recovery` | `POST recovery-plans/{id}/submit-review/`、`approve/`、`reject/`、`schedule/`、`cancel/` | `pilot.recovery.plan/review` | sandbox |
+| 恢复演练记录 | `/pilot/recovery` | `POST recovery-plans/{id}/start/`、`resume/`；`GET recovery-drills/`、`POST recovery-drills/{id}/record-result/` | `pilot.recovery.view/record` | sandbox |
+| 灰度发布计划 | `/pilot/releases` | `GET/POST /api/internal/pilot/release-plans/`、`GET {id}/` | `pilot.release.view/plan` | sandbox |
+| 发布审批与排期 | `/pilot/releases` | `POST release-plans/{id}/submit-review/`、`approve/`、`reject/`、`schedule/`、`cancel/` | `pilot.release.plan/review` | sandbox |
+| 发布结果记录 | `/pilot/releases` | `POST release-plans/{id}/start/`、`resume/`、`record-result/` | `pilot.release.record` | sandbox |
+| 回滚批准与记录 | `/pilot/releases` | `POST release-plans/{id}/approve-rollback/`、`resume-rollback/`、`record-rollback/` | `pilot.release.rollback` | sandbox |
+| 容量摘要 | `/pilot/capacity` | `GET /api/internal/pilot/capacity/summary/` | `pilot.capacity.view` | sandbox |
+| 容量观测 | `/pilot/capacity` | `GET /api/internal/pilot/capacity/observations/` | `pilot.capacity.view` | sandbox |
+
+UI-P7 页面只登记计划、审批、结果和脱敏证据，不直接执行 shell、Docker、SQL、备份、恢复、部署或回滚。智能体占位不接入真实模型，不使用网络工具，不写业务数据。真实平台和高风险自动化继续禁止。
+
 ## UI-P6 API接入与分析复盘合同（2026-07-17）
 
 本节为 UI-P6 现行冻结口径；详细合同见 `docs/03_api/ui_p6_api_analysis_contract.md`。后端路径存在不等于 UI 联调已经完成，本阶段实施和验收前统一标记 `pending`；仅 Mock 动作标记 `mock`。
@@ -243,3 +270,22 @@ UI-P2 接口代码已完成，当前保留 Mock/API 切换；只有在受控 Pil
 | 供应商档案 | `/master-data/suppliers` | `/api/internal/master-data/suppliers/`、`/api/internal/master-data/suppliers/{id}/status/` | GET、POST | `masterdata.view/manage` | `frontend/src/mock/masterData.js` | pending（代码完成） |
 
 UI-P2 所有页面仅允许 `internal` 用户；联系方式必须脱敏，安全运维只显示凭据别名、指纹、版本和引用状态。前端动作权限不替代后端 tenant、data scope 与 Permission 校验。
+
+## UI-P7 治理与受控试点实施映射
+
+UI-P7 已完成代码、Mock/dry-run 和自动化测试。固定检查端点标记为 `mock`；查询、计划、审批及外部执行结果记录端点标记为 `sandbox`。在受控试点环境完成真实认证浏览器 E2E 前，不得标记为 `connected`。
+
+| 页面 | 页面路径 | API | 权限 | Mock位置 | 当前状态 |
+|---|---|---|---|---|---|
+| API合同目录/详情 | `/governance/api-contracts` | `GET /api/internal/governance/api-contracts/`、`GET /api/internal/governance/api-contracts/{id}/` | `governance.api.view` | `frontend/src/mock/governance.js` | sandbox |
+| API合同固定检查 | `/governance/api-contracts` | `POST /api/internal/governance/api-contracts/check-mock/` | `governance.api.check` | `frontend/src/mock/governance.js` | mock |
+| 助手治理目录/详情 | `/governance/assistants` | `GET /api/internal/governance/assistants/`、`GET /api/internal/governance/assistants/{id}/` | `governance.assistants.view` | `frontend/src/mock/governance.js` | sandbox |
+| 助手固定评估 | `/governance/assistants` | `POST /api/internal/governance/assistants/{id}/evaluate-mock/` | `governance.assistants.evaluate` | `frontend/src/mock/governance.js` | mock |
+| 试点准入 | `/pilot/readiness` | `GET /api/internal/pilot/readiness/` | `pilot.readiness.view` | `frontend/src/mock/pilot.js` | sandbox |
+| 部署拓扑 | `/pilot/topology` | `GET /api/internal/pilot/topology/` | `pilot.topology.view` | `frontend/src/mock/pilot.js` | sandbox |
+| 拓扑固定校验 | `/pilot/topology` | `POST /api/internal/pilot/topology/verify-mock/` | `pilot.topology.verify` | `frontend/src/mock/pilot.js` | mock |
+| 容量观察 | `/pilot/capacity` | `GET /api/internal/pilot/capacity/summary/`、`GET /api/internal/pilot/capacity/observations/` | `pilot.capacity.view` | `frontend/src/mock/pilot.js` | sandbox |
+| 恢复计划与演练 | `/pilot/recovery` | `/api/internal/pilot/recovery-plans/*`、`/api/internal/pilot/recovery-drills/*` | `pilot.recovery.view/plan/review/record` | `frontend/src/mock/pilot.js` | sandbox |
+| 发布与回滚记录 | `/pilot/releases` | `/api/internal/pilot/release-plans/*` | `pilot.release.view/plan/review/record/rollback` | `frontend/src/mock/pilot.js` | sandbox |
+
+受控边界：恢复、发布、回滚的 `start`、`resume` 和 `record-result` 只记录外部人工执行事实，不执行 Shell、Docker、SQL、网络、备份恢复或部署命令；页面不调用 `/api/rpa/*`、`/api/finance/*` 或 `/admin/`。

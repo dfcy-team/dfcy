@@ -53,6 +53,8 @@ INSTALLED_APPS = [
     "apps.configcenter",
     "apps.masterdata",
     "apps.workflows",
+    "apps.governance",
+    "apps.pilot",
     "apps.common",
 ]
 

@@ -27,7 +27,13 @@ export const mockAuthUser = {
     'finance.view',
     'products.lifecycle.view', 'products.lifecycle.evaluate',
     'integrations.view', 'integrations.manage', 'integrations.run',
-    'reports.view', 'reports.export', 'reports.download'
+    'reports.view', 'reports.export', 'reports.download',
+    'governance.api.view', 'governance.api.check',
+    'governance.assistants.view', 'governance.assistants.evaluate',
+    'pilot.readiness.view', 'pilot.topology.view', 'pilot.topology.verify',
+    'pilot.recovery.view', 'pilot.recovery.plan', 'pilot.recovery.review', 'pilot.recovery.record',
+    'pilot.release.view', 'pilot.release.plan', 'pilot.release.review', 'pilot.release.record', 'pilot.release.rollback',
+    'pilot.capacity.view'
   ],
   data_scope: []
 };

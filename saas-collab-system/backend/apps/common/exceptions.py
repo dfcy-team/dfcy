@@ -41,6 +41,15 @@ class ScopedResourceNotFound(exceptions.NotFound):
     error_code = ErrorCode.RESOURCE_NOT_FOUND
 
 
+class ContractViolation(exceptions.APIException):
+    """UI contract error with an exact status/code and no response data payload."""
+
+    def __init__(self, detail, *, error_code, status_code):
+        self.status_code = status_code
+        self.error_code = error_code
+        super().__init__(detail=detail, code=error_code)
+
+
 def get_scoped_object_or_404(queryset, **lookup):
     try:
         return queryset.get(**lookup)

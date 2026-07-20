@@ -15,6 +15,8 @@ urlpatterns = [
     path("api/internal/master-data/", include("apps.masterdata.urls")),
     path("api/internal/rpa/", include("apps.rpa.urls_internal")),
     path("api/internal/workflow/", include("apps.workflows.urls")),
+    path("api/internal/governance/", include("apps.governance.urls")),
+    path("api/internal/pilot/", include("apps.pilot.urls")),
     path("api/internal/products/", include("apps.products.urls")),
     path("api/internal/purchasing/", include("apps.purchasing.urls")),
     path("api/internal/suppliers/", include("apps.suppliers.urls_internal")),

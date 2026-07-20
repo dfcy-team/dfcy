@@ -5,7 +5,7 @@ export function statusFromApiResponse(response, online = true) {
   return {
     401: 'unauthenticated',
     403: 'forbidden',
-    404: 'empty',
+    404: 'not_found',
     409: 'conflict',
     422: 'invalid'
   }[response?.http_status] || 'error';
