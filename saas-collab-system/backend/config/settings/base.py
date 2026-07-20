@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -134,6 +135,7 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)

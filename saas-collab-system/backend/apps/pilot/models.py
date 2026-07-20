@@ -16,6 +16,40 @@ class PilotEnvironment(models.Model):
         ordering = ["code"]
 
 
+class PilotTargetAlias(models.Model):
+    """Tenant-owned allow-list entry for controlled verification targets."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="pilot_target_aliases")
+    environment = models.ForeignKey(PilotEnvironment, on_delete=models.PROTECT, related_name="target_aliases")
+    alias = models.SlugField(max_length=64)
+    status = models.CharField(max_length=20, default="controlled")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "environment_id", "alias"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "environment", "alias"], name="uniq_pilot_target_alias"),
+        ]
+
+
+class PilotEvidenceReference(models.Model):
+    """Tenant-owned registry entry for masked, internal evidence references."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="pilot_evidence_references")
+    environment = models.ForeignKey(PilotEnvironment, on_delete=models.PROTECT, related_name="evidence_references")
+    reference = models.CharField(max_length=200)
+    status = models.CharField(max_length=20, default="controlled")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "environment_id", "reference"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "environment", "reference"], name="uniq_pilot_evidence_ref"),
+        ]
+
+
 class ReadinessGate(models.Model):
     class Status(models.TextChoices):
         NOT_STARTED = "not_started", "Not started"
@@ -237,6 +271,184 @@ class ReleasePlan(ProtectedStateModel):
         constraints = [models.UniqueConstraint(fields=["tenant", "idempotency_key_hash"], name="uniq_release_plan_idempotency")]
 
 
+class UIP8WorkflowModel(ProtectedStateModel):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="+")
+    environment = models.ForeignKey(PilotEnvironment, on_delete=models.PROTECT, related_name="+")
+    code = models.CharField(max_length=80)
+    status = models.CharField(max_length=30, default="draft")
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    review_reason = models.CharField(max_length=1000, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    version = models.PositiveIntegerField(default=1)
+    idempotency_key_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and not getattr(self, "_pilot_state_service_write", False):
+            raise ValidationError("UI-P8 workflow records must be created through the controlled service.")
+        super().save(*args, **kwargs)
+
+
+class SecurityReview(UIP8WorkflowModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        SUBMITTED = "submitted", "Submitted"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+
+    class ReviewType(models.TextChoices):
+        PLATFORM_ACCESS = "platform_access", "Platform access"
+        CREDENTIAL_CUSTODY = "credential_custody", "Credential custody"
+        NETWORK_BOUNDARY = "network_boundary", "Network boundary"
+        DATA_PRIVACY = "data_privacy", "Data privacy"
+        RUNNER_SECURITY = "runner_security", "Runner security"
+        FINANCE_BOUNDARY = "finance_boundary", "Finance boundary"
+
+    PROTECTED_WORKFLOW_FIELDS = {
+        "tenant_id", "environment_id", "code", "review_type", "scope_summary", "risk_level",
+        "finance_scope", "evidence_refs", "expires_at", "expired_at", "status", "creator_id",
+        "owner_id", "reviewer_id", "review_reason", "reviewed_at", "version", "idempotency_key_hash",
+    }
+    review_type = models.CharField(max_length=30, choices=ReviewType.choices)
+    scope_summary = models.CharField(max_length=1000)
+    risk_level = models.CharField(max_length=10, choices=((value, value.title()) for value in ("low", "medium", "high", "critical")))
+    finance_scope = models.JSONField(null=True, blank=True)
+    evidence_refs = models.JSONField(default=list)
+    expires_at = models.DateTimeField()
+    expired_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uniq_p8_security_code"),
+            models.UniqueConstraint(fields=["tenant", "idempotency_key_hash"], name="uniq_p8_security_idem"),
+        ]
+
+
+class VerificationRun(UIP8WorkflowModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        SUBMITTED = "submitted", "Submitted"
+        APPROVED = "approved", "Approved"
+        PASSED = "passed", "Passed"
+        FAILED = "failed", "Failed"
+        MANUAL_REQUIRED = "manual_required", "Manual required"
+        CANCELLED = "cancelled", "Cancelled"
+
+    PROTECTED_WORKFLOW_FIELDS = {
+        "tenant_id", "environment_id", "code", "category", "target_alias", "data_class",
+        "planned_start_at", "planned_end_at", "success_criteria", "evidence_refs", "status",
+        "result_summary", "started_at", "finished_at", "error_code", "error_message", "creator_id",
+        "owner_id", "reviewer_id", "recorder_id", "review_reason", "reviewed_at", "version",
+        "idempotency_key_hash",
+    }
+    category = models.CharField(max_length=30)
+    target_alias = models.SlugField(max_length=64)
+    data_class = models.CharField(max_length=20)
+    planned_start_at = models.DateTimeField()
+    planned_end_at = models.DateTimeField()
+    success_criteria = models.JSONField(default=list)
+    evidence_refs = models.JSONField(default=list)
+    result_summary = models.CharField(max_length=1000, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.CharField(max_length=1000, blank=True)
+    recorder = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uniq_p8_verification_code"),
+            models.UniqueConstraint(fields=["tenant", "idempotency_key_hash"], name="uniq_p8_verification_idem"),
+        ]
+
+
+class PerformanceRun(UIP8WorkflowModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        SUBMITTED = "submitted", "Submitted"
+        APPROVED = "approved", "Approved"
+        PASSED = "passed", "Passed"
+        FAILED = "failed", "Failed"
+        MANUAL_REQUIRED = "manual_required", "Manual required"
+        CANCELLED = "cancelled", "Cancelled"
+
+    PROTECTED_WORKFLOW_FIELDS = {
+        "tenant_id", "environment_id", "code", "scenario", "workload_profile", "max_rps",
+        "concurrency", "duration_seconds", "thresholds", "evidence_refs", "status", "p50_ms",
+        "p95_ms", "error_rate", "cpu_percent", "memory_percent", "result_summary", "creator_id",
+        "owner_id", "reviewer_id", "recorder_id", "review_reason", "reviewed_at", "version",
+        "idempotency_key_hash",
+    }
+    scenario = models.CharField(max_length=200)
+    workload_profile = models.CharField(max_length=20)
+    max_rps = models.PositiveIntegerField()
+    concurrency = models.PositiveIntegerField()
+    duration_seconds = models.PositiveIntegerField()
+    thresholds = models.JSONField(default=dict)
+    evidence_refs = models.JSONField(default=list)
+    p50_ms = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    p95_ms = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    error_rate = models.DecimalField(max_digits=8, decimal_places=6, null=True, blank=True)
+    cpu_percent = models.DecimalField(max_digits=7, decimal_places=3, null=True, blank=True)
+    memory_percent = models.DecimalField(max_digits=7, decimal_places=3, null=True, blank=True)
+    result_summary = models.CharField(max_length=1000, blank=True)
+    recorder = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uniq_p8_performance_code"),
+            models.UniqueConstraint(fields=["tenant", "idempotency_key_hash"], name="uniq_p8_performance_idem"),
+        ]
+
+
+class EntryDecision(UIP8WorkflowModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        SUBMITTED = "submitted", "Submitted"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+
+    PROTECTED_WORKFLOW_FIELDS = {
+        "tenant_id", "environment_id", "code", "decision", "scope_summary", "security_review_ids",
+        "verification_run_ids", "performance_run_ids", "recovery_plan_ids", "release_plan_ids",
+        "expires_at", "expired_at", "status", "evidence_snapshot", "evidence_hash", "blockers",
+        "warnings", "contract_version", "creator_id", "owner_id", "reviewer_id", "review_reason",
+        "reviewed_at", "version", "idempotency_key_hash",
+    }
+    decision = models.CharField(max_length=10, choices=(("go", "Go"), ("no_go", "No go")))
+    scope_summary = models.CharField(max_length=1000)
+    security_review_ids = models.JSONField(default=list)
+    verification_run_ids = models.JSONField(default=list)
+    performance_run_ids = models.JSONField(default=list)
+    recovery_plan_ids = models.JSONField(default=list)
+    release_plan_ids = models.JSONField(default=list)
+    expires_at = models.DateTimeField()
+    expired_at = models.DateTimeField(null=True, blank=True)
+    evidence_snapshot = models.JSONField(null=True, blank=True)
+    evidence_hash = models.CharField(max_length=64, blank=True)
+    blockers = models.JSONField(default=list)
+    warnings = models.JSONField(default=list)
+    contract_version = models.CharField(max_length=40, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uniq_p8_entry_code"),
+            models.UniqueConstraint(fields=["tenant", "idempotency_key_hash"], name="uniq_p8_entry_idem"),
+        ]
+
+
 class PilotAuditEventQuerySet(models.QuerySet):
     def update(self, **kwargs):
         raise ValidationError("Pilot audit events are immutable.")
@@ -259,7 +471,8 @@ class PilotAuditEvent(models.Model):
     objects = PilotAuditEventQuerySet.as_manager()
 
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="pilot_audit_events")
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pilot_audit_events")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="pilot_audit_events")
+    actor_type = models.CharField(max_length=20, default="user")
     recovery_plan = models.ForeignKey(RecoveryPlan, on_delete=models.PROTECT, null=True, blank=True, related_name="audit_events")
     release_plan = models.ForeignKey(ReleasePlan, on_delete=models.PROTECT, null=True, blank=True, related_name="audit_events")
     object_type = models.CharField(max_length=40)

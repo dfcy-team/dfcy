@@ -1,5 +1,5 @@
 import { requestWithMockFallback, withApiStatus } from './request';
-import { mockCapacityObservations, mockCapacitySummary, mockCreateRecoveryPlan, mockCreateReleasePlan, mockReadiness, mockRecoveryAction, mockRecoveryDrills, mockRecoveryPlan, mockRecoveryPlans, mockRecoveryResult, mockReleaseAction, mockReleasePlan, mockReleasePlans, mockTopology, mockTopologyVerify } from '../mock/pilot';
+import { mockCapacityObservations, mockCapacitySummary, mockCreateRecoveryPlan, mockCreateReleasePlan, mockP8Action, mockP8Create, mockP8Detail, mockP8List, mockP8Patch, mockPilotControlRoom, mockReadiness, mockRecoveryAction, mockRecoveryDrills, mockRecoveryPlan, mockRecoveryPlans, mockRecoveryResult, mockReleaseAction, mockReleasePlan, mockReleasePlans, mockTopology, mockTopologyVerify } from '../mock/pilot';
 
 const sandbox = async (request) => {
   const response = withApiStatus(await request, 'sandbox');
@@ -24,3 +24,18 @@ export const fetchReleasePlans = (params = {}) => sandbox(requestWithMockFallbac
 export const fetchReleasePlan = (id) => sandbox(requestWithMockFallback({ method: 'get', url: `/api/internal/pilot/release-plans/${id}/` }, mockReleasePlan, 'pilot.release.detail'));
 export const createReleasePlan = (payload) => action('/api/internal/pilot/release-plans/', payload, mockCreateReleasePlan, 'pilot.release.create');
 export const runReleaseAction = (id, actionName, payload) => action(`/api/internal/pilot/release-plans/${id}/${actionName}/`, payload, () => mockReleaseAction(id, actionName, payload), `pilot.release.${actionName}`);
+
+const p8Paths = { security: 'security-reviews', verification: 'verification-runs', performance: 'performance-runs', entry: 'entry-decisions' };
+const p8Pending = async (promise) => {
+  const response = await promise;
+  if (response?.success && response.data?.api_status === 'connected') response.data.api_status = 'pending';
+  return response;
+};
+const p8Action = (kind, id, actionName, payload) => p8Pending(requestWithMockFallback({ method: 'post', url: `/api/internal/pilot/${p8Paths[kind]}/${id}/${actionName}/`, data: payload, headers: { 'Idempotency-Key': `ui-p8-${Date.now()}-${Math.random().toString(16).slice(2)}` } }, () => mockP8Action(kind, id, actionName, payload), `pilot.${kind}.${actionName}`));
+
+export const fetchPilotControlRoom = (params) => p8Pending(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/control-room/', params }, mockPilotControlRoom, 'pilot.control'));
+export const fetchP8Resources = (kind, params = {}) => p8Pending(requestWithMockFallback({ method: 'get', url: `/api/internal/pilot/${p8Paths[kind]}/`, params }, () => mockP8List(kind), `pilot.${kind}`));
+export const fetchP8Resource = (kind, id) => p8Pending(requestWithMockFallback({ method: 'get', url: `/api/internal/pilot/${p8Paths[kind]}/${id}/` }, () => mockP8Detail(kind, id), `pilot.${kind}.detail`));
+export const createP8Resource = (kind, payload) => p8Pending(requestWithMockFallback({ method: 'post', url: `/api/internal/pilot/${p8Paths[kind]}/`, data: payload, headers: { 'Idempotency-Key': `ui-p8-create-${Date.now()}-${Math.random().toString(16).slice(2)}` } }, () => mockP8Create(kind, payload), `pilot.${kind}.create`));
+export const patchP8Resource = (kind, id, payload) => p8Pending(requestWithMockFallback({ method: 'patch', url: `/api/internal/pilot/${p8Paths[kind]}/${id}/`, data: payload }, () => mockP8Patch(kind, id, payload), `pilot.${kind}.patch`));
+export const runP8Action = p8Action;

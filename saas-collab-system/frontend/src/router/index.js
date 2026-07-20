@@ -91,6 +91,11 @@ const PilotReadiness = () => import('../views/pilot/ReadinessDashboard.vue');
 const PilotTopology = () => import('../views/pilot/TopologyOverview.vue');
 const PilotWorkflow = () => import('../views/pilot/PilotWorkflow.vue');
 const PilotCapacity = () => import('../views/pilot/CapacityDashboard.vue');
+const PilotControlRoom = () => import('../views/pilot/ControlRoom.vue');
+const PilotSecurityReviews = () => import('../views/pilot/SecurityReviewWorkspace.vue');
+const PilotVerificationRuns = () => import('../views/pilot/VerificationRunWorkspace.vue');
+const PilotPerformanceRuns = () => import('../views/pilot/PerformanceRunWorkspace.vue');
+const PilotEntryDecisions = () => import('../views/pilot/EntryDecisionWorkspace.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -123,6 +128,15 @@ const routes = [
       { path: 'pilot/recovery', component: PilotWorkflow, props: { kind: 'recovery' } },
       { path: 'pilot/releases', component: PilotWorkflow, props: { kind: 'release' } },
       { path: 'pilot/capacity', component: PilotCapacity },
+      { path: 'pilot/control-room', component: PilotControlRoom },
+      { path: 'pilot/security-reviews', component: PilotSecurityReviews },
+      { path: 'pilot/security-reviews/:id', component: PilotSecurityReviews },
+      { path: 'pilot/verification-runs', component: PilotVerificationRuns },
+      { path: 'pilot/verification-runs/:id', component: PilotVerificationRuns },
+      { path: 'pilot/performance-runs', component: PilotPerformanceRuns },
+      { path: 'pilot/performance-runs/:id', component: PilotPerformanceRuns },
+      { path: 'pilot/entry-decisions', component: PilotEntryDecisions },
+      { path: 'pilot/entry-decisions/:id', component: PilotEntryDecisions },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },

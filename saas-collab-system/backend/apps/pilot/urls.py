@@ -15,9 +15,33 @@ from .views import (
     TopologyVerifyMockView,
     TopologyView,
 )
+from .ui_p8_views import ControlRoomView, ResourceActionView, ResourceCollectionView, ResourceDetailView
 
 
 urlpatterns = [
+    path("control-room/", ControlRoomView.as_view(), name="pilot-control-room"),
+    path("security-reviews/", ResourceCollectionView.as_view(resource="security"), name="pilot-security-reviews"),
+    path("security-reviews/<int:pk>/", ResourceDetailView.as_view(resource="security"), name="pilot-security-review-detail"),
+    path("security-reviews/<int:pk>/submit/", ResourceActionView.as_view(resource="security", action_name="submit"), name="pilot-security-review-submit"),
+    path("security-reviews/<int:pk>/approve/", ResourceActionView.as_view(resource="security", action_name="approve"), name="pilot-security-review-approve"),
+    path("security-reviews/<int:pk>/reject/", ResourceActionView.as_view(resource="security", action_name="reject"), name="pilot-security-review-reject"),
+    path("verification-runs/", ResourceCollectionView.as_view(resource="verification"), name="pilot-verification-runs"),
+    path("verification-runs/<int:pk>/", ResourceDetailView.as_view(resource="verification"), name="pilot-verification-run-detail"),
+    path("verification-runs/<int:pk>/submit/", ResourceActionView.as_view(resource="verification", action_name="submit"), name="pilot-verification-submit"),
+    path("verification-runs/<int:pk>/approve/", ResourceActionView.as_view(resource="verification", action_name="approve"), name="pilot-verification-approve"),
+    path("verification-runs/<int:pk>/record-result/", ResourceActionView.as_view(resource="verification", action_name="record-result"), name="pilot-verification-result"),
+    path("verification-runs/<int:pk>/cancel/", ResourceActionView.as_view(resource="verification", action_name="cancel"), name="pilot-verification-cancel"),
+    path("performance-runs/", ResourceCollectionView.as_view(resource="performance"), name="pilot-performance-runs"),
+    path("performance-runs/<int:pk>/", ResourceDetailView.as_view(resource="performance"), name="pilot-performance-run-detail"),
+    path("performance-runs/<int:pk>/submit/", ResourceActionView.as_view(resource="performance", action_name="submit"), name="pilot-performance-submit"),
+    path("performance-runs/<int:pk>/approve/", ResourceActionView.as_view(resource="performance", action_name="approve"), name="pilot-performance-approve"),
+    path("performance-runs/<int:pk>/record-result/", ResourceActionView.as_view(resource="performance", action_name="record-result"), name="pilot-performance-result"),
+    path("performance-runs/<int:pk>/cancel/", ResourceActionView.as_view(resource="performance", action_name="cancel"), name="pilot-performance-cancel"),
+    path("entry-decisions/", ResourceCollectionView.as_view(resource="entry"), name="pilot-entry-decisions"),
+    path("entry-decisions/<int:pk>/", ResourceDetailView.as_view(resource="entry"), name="pilot-entry-decision-detail"),
+    path("entry-decisions/<int:pk>/submit/", ResourceActionView.as_view(resource="entry", action_name="submit"), name="pilot-entry-submit"),
+    path("entry-decisions/<int:pk>/approve/", ResourceActionView.as_view(resource="entry", action_name="approve"), name="pilot-entry-approve"),
+    path("entry-decisions/<int:pk>/reject/", ResourceActionView.as_view(resource="entry", action_name="reject"), name="pilot-entry-reject"),
     path("readiness/", ReadinessView.as_view(), name="pilot-readiness"),
     path("topology/", TopologyView.as_view(), name="pilot-topology"),
     path("topology/verify-mock/", TopologyVerifyMockView.as_view(), name="pilot-topology-verify-mock"),

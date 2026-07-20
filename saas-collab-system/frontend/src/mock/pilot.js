@@ -81,6 +81,48 @@ export const mockCapacitySummary = () => successResponse({ environment_id: 'cont
   { id: 1, environment_id: 'controlled-pilot', service_name: 'backend', metric_code: 'cpu_percent', value: 31.5, unit: '%', threshold: 70, status: 'normal', source: 'fixed_demo', observed_at: '2026-07-17T00:00:00Z', expires_at: '2026-07-17T00:15:00Z', is_missing: false },
   { id: 2, environment_id: 'controlled-pilot', service_name: 'worker', metric_code: 'queue_depth', value: 96, unit: 'items', threshold: 90, status: 'critical', source: 'fixed_demo', observed_at: '2026-07-17T00:00:00Z', expires_at: '2026-07-17T00:15:00Z', is_missing: false }
 ] });
+
+const future = (days = 7) => new Date(Date.now() + days * 86400000).toISOString();
+const now = () => new Date().toISOString();
+const p8Collections = {
+  security: [{ id: 1, code: 'SEC-DEMO-001', review_type: 'network_boundary', environment: 'pilot', scope_summary: 'Demo masked network boundary review', risk_level: 'medium', owner_id: 1, finance_scope: null, evidence_refs: ['demo-security-evidence'], expires_at: future(30), status: 'draft', creator_id: 1, reviewer_id: null, version: 1, audit_ref: 'pilot-audit:pending', created_at: now(), updated_at: now() }],
+  verification: [{ id: 1, code: 'VER-DEMO-001', category: 'browser_e2e', environment: 'pilot', target_alias: 'demo-app', data_class: 'synthetic', planned_start_at: future(1), planned_end_at: future(2), success_criteria: ['Demo login flow renders'], evidence_refs: ['demo-verification-evidence'], status: 'draft', result_summary: '', creator_id: 1, reviewer_id: null, recorder_id: null, version: 1, audit_ref: 'pilot-audit:pending', created_at: now(), updated_at: now() }],
+  performance: [{ id: 1, code: 'PERF-DEMO-001', scenario: 'Synthetic dashboard read workload', environment: 'pilot', workload_profile: 'synthetic', max_rps: 20, concurrency: 5, duration_seconds: 60, thresholds: { p95_ms_max: 800, error_rate_max: 0.01, cpu_percent_max: 80, memory_percent_max: 80 }, evidence_refs: ['demo-performance-evidence'], status: 'draft', creator_id: 1, reviewer_id: null, recorder_id: null, version: 1, audit_ref: 'pilot-audit:pending', created_at: now(), updated_at: now() }],
+  entry: [{ id: 1, code: 'ENTRY-DEMO-001', environment: 'pilot', decision: 'no_go', scope_summary: 'Demo pilot entry decision only', security_review_ids: [1], verification_run_ids: [1], performance_run_ids: [1], recovery_plan_ids: [1], release_plan_ids: [1], expires_at: future(14), status: 'draft', blockers: [{ code: 'DEMO_PENDING', message: 'Demo evidence remains pending.' }], warnings: [], creator_id: 1, reviewer_id: null, version: 1, audit_ref: 'pilot-audit:pending', created_at: now(), updated_at: now() }]
+};
+
+const p8Page = (rows) => successResponse({ count: rows.length, next: null, previous: null, results: rows.map((row) => ({ ...row })), api_status: 'mock' });
+export const mockPilotControlRoom = () => successResponse({ environment: 'pilot', capability_status: 'sandbox', readiness_status: 'blocked', readiness_score: 25, gate_summary: [{ code: 'security', name: '专项安全准入', status: 'pending', source_type: 'security_review', source_id: 1 }], blockers: [{ code: 'DEMO_PENDING', message: 'Mock 证据不可用于生产准入。', source_type: 'mock', source_id: null }], warnings: [], evidence_counts: { security_reviews: 1, verification_runs: 1, performance_runs: 1, recovery_plans: 1, release_plans: 1 }, stale_sources: [], contract_version: 'UI-P8-R3', refreshed_at: now(), api_status: 'mock' });
+export const mockP8List = (kind) => p8Page(p8Collections[kind] || []);
+export const mockP8Detail = (kind, id) => {
+  const row = (p8Collections[kind] || []).find((item) => item.id === Number(id));
+  return row ? successResponse({ ...row, api_status: 'mock' }) : { success: false, code: 'NOT_FOUND', message: 'Demo resource not found.', data: null, http_status: 404 };
+};
+export const mockP8Create = (kind, payload) => {
+  const rows = p8Collections[kind];
+  const item = { ...payload, id: Math.max(0, ...rows.map(({ id }) => id)) + 1, code: `${kind.toUpperCase()}-DEMO-${rows.length + 1}`, owner_id: 1, creator_id: 1, reviewer_id: null, recorder_id: null, status: 'draft', version: 1, audit_ref: 'pilot-audit:pending', created_at: now(), updated_at: now(), api_status: 'mock' };
+  rows.unshift(item);
+  return successResponse({ ...item });
+};
+export const mockP8Patch = (kind, id, payload) => {
+  const row = (p8Collections[kind] || []).find((item) => item.id === Number(id));
+  if (!row) return { success: false, code: 'NOT_FOUND', message: 'Demo resource not found.', data: null, http_status: 404 };
+  if (row.status !== 'draft' || Number(payload.version) !== Number(row.version)) {
+    return { success: false, code: 'STATE_CONFLICT', message: 'Demo draft changed; refresh before retrying.', data: null, http_status: 409 };
+  }
+  Object.assign(row, payload, { version: row.version + 1, updated_at: now() });
+  return successResponse({ ...row, api_status: 'mock' });
+};
+export const mockP8Action = (kind, id, actionName, payload) => {
+  const row = (p8Collections[kind] || []).find((item) => item.id === Number(id));
+  if (!row) return { success: false, code: 'NOT_FOUND', message: 'Demo resource not found.', data: null, http_status: 404 };
+  const transitions = { submit: 'submitted', approve: 'approved', reject: 'rejected', cancel: 'cancelled' };
+  row.status = transitions[actionName] || (payload.result || (payload.result_mode === 'manual_required' ? 'manual_required' : 'passed'));
+  row.version += 1;
+  row.updated_at = now();
+  if (actionName === 'record-result') row.result_summary = payload.result_summary;
+  return successResponse({ ...row, api_status: 'mock' });
+};
 export const mockCapacityObservations = (params = {}) => {
   const metrics = mockCapacitySummary().data.metrics.filter((item) => !params.status || item.status === params.status);
   return successResponse(page(metrics));
