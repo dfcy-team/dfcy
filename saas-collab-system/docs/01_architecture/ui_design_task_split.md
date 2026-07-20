@@ -5,7 +5,7 @@
 - UI-ARCH-001 冻结角色、菜单、页面、API、权限和状态合同。
 - UI-ARCH-002 审核前端与后端的 tenant、data_scope、字段脱敏和导出边界。
 - UI-ARCH-003 审核 API、RPA、人工三种执行方式及失败回退。
-- UI-ARCH-004 为 UI-P0 至 UI-P7 执行 G0 至 G5 阶段门禁。
+- UI-ARCH-004 为 UI-P0 至 UI-P8 执行 G0 至 G5 阶段门禁。
 - UI-ARCH-005 维护 P0/P1/P2 清单、责任人、验收标准和复审结论。
 - UI-ARCH-006 审核真实平台、Webhook、机器身份、凭据引用和网络分区。
 - UI-ARCH-007 审核测试证据，不使用开发变更日志代替实际验证结果。

@@ -522,6 +522,37 @@ PERMISSION_DEFINITIONS = (
         "code": "pilot.capacity.view", "name": "View pilot capacity", "module": "pilot",
         "action": "capacity.view", "description": "View tenant and scope filtered capacity observations.",
     },
+    {
+        "code": "pilot.control.view", "name": "View pilot control room", "module": "pilot",
+        "action": "control.view", "description": "View masked production-pilot readiness evidence.",
+    },
+    {
+        "code": "pilot.security_review.view", "name": "View pilot security reviews", "module": "pilot",
+        "action": "security_review.view", "description": "View scoped security review evidence.",
+    },
+    {
+        "code": "pilot.security_review.plan", "name": "Plan pilot security reviews", "module": "pilot",
+        "action": "security_review.plan", "description": "Create and submit scoped security reviews.",
+    },
+    {
+        "code": "pilot.security_review.review", "name": "Review pilot security reviews", "module": "pilot",
+        "action": "security_review.review", "description": "Approve or reject security reviews with separation of duties.",
+    },
+    *(
+        {
+            "code": f"pilot.{resource}.{action}",
+            "name": f"{action.title()} pilot {resource.replace('_', ' ')}",
+            "module": "pilot",
+            "action": f"{resource}.{action}",
+            "description": f"{action.title()} scoped pilot {resource.replace('_', ' ')} records without external execution.",
+        }
+        for resource, actions in (
+            ("verification", ("view", "plan", "review", "record", "cancel")),
+            ("performance", ("view", "plan", "review", "record", "cancel")),
+            ("entry", ("view", "plan", "review")),
+        )
+        for action in actions
+    ),
 )
 
 
