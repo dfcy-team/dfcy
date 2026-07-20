@@ -1,4 +1,6 @@
 from datetime import date
+
+from django.utils import timezone
 from decimal import Decimal
 
 import pytest
@@ -11,7 +13,7 @@ from apps.suppliers.performance_services import calculate_supplier_performance
 from apps.tenants.models import Tenant
 
 
-TODAY = date.today()
+TODAY = timezone.localdate()
 
 
 def create_user(tenant, username, user_type, supplier_id=None):

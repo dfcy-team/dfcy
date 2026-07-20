@@ -105,6 +105,18 @@ export const menuItems = [
       { path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
       { path: '/audit/operations', label: '日志审计', internal: true }
     ]
+  },
+  {
+    label: '治理与试点',
+    children: [
+      { path: '/governance/api-contracts', label: 'API 合同', permissions: ['governance.api.view'] },
+      { path: '/governance/assistants', label: '助手治理', permissions: ['governance.assistants.view'] },
+      { path: '/pilot/readiness', label: '试点准入', permissions: ['pilot.readiness.view'] },
+      { path: '/pilot/topology', label: '部署拓扑', permissions: ['pilot.topology.view'] },
+      { path: '/pilot/recovery', label: '恢复演练', permissions: ['pilot.recovery.view'] },
+      { path: '/pilot/releases', label: '发布记录', permissions: ['pilot.release.view'] },
+      { path: '/pilot/capacity', label: '容量观察', permissions: ['pilot.capacity.view'] }
+    ]
   }
 ];
 
@@ -173,7 +185,14 @@ export const routeCapabilities = [
   { path: '/master-data/stores', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
-  { path: '/audit/operations', userTypes: ['internal'] }
+  { path: '/audit/operations', userTypes: ['internal'] },
+  { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
+  { path: '/governance/assistants', permissions: ['governance.assistants.view'], userTypes: ['internal'] },
+  { path: '/pilot/readiness', permissions: ['pilot.readiness.view'], userTypes: ['internal'] },
+  { path: '/pilot/topology', permissions: ['pilot.topology.view'], userTypes: ['internal'] },
+  { path: '/pilot/recovery', permissions: ['pilot.recovery.view'], userTypes: ['internal'] },
+  { path: '/pilot/releases', permissions: ['pilot.release.view'], userTypes: ['internal'] },
+  { path: '/pilot/capacity', permissions: ['pilot.capacity.view'], userTypes: ['internal'] }
 ];
 
 function matchesPath(contract, path) {

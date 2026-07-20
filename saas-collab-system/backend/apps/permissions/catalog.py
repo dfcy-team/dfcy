@@ -454,6 +454,74 @@ PERMISSION_DEFINITIONS = (
         "action": "operations.view",
         "description": "View masked credential metadata and tenant operation audit summaries.",
     },
+    {
+        "code": "governance.api.view", "name": "View API contracts", "module": "governance",
+        "action": "api.view", "description": "View tenant and data-scope filtered API contracts.",
+    },
+    {
+        "code": "governance.api.check", "name": "Check API contracts", "module": "governance",
+        "action": "api.check", "description": "Run fixed dry-run API contract checks without business writes.",
+    },
+    {
+        "code": "governance.assistants.view", "name": "View assistant governance", "module": "governance",
+        "action": "assistants.view", "description": "View assistant capability and safety definitions.",
+    },
+    {
+        "code": "governance.assistants.evaluate", "name": "Evaluate assistant definitions", "module": "governance",
+        "action": "assistants.evaluate", "description": "Run fixed assistant governance dry-runs without tool execution.",
+    },
+    {
+        "code": "pilot.readiness.view", "name": "View pilot readiness", "module": "pilot",
+        "action": "readiness.view", "description": "View controlled pilot readiness evidence.",
+    },
+    {
+        "code": "pilot.topology.view", "name": "View pilot topology", "module": "pilot",
+        "action": "topology.view", "description": "View masked controlled-pilot topology metadata.",
+    },
+    {
+        "code": "pilot.topology.verify", "name": "Verify pilot topology", "module": "pilot",
+        "action": "topology.verify", "description": "Run fixed topology dry-run validation without remote execution.",
+    },
+    {
+        "code": "pilot.recovery.view", "name": "View recovery plans", "module": "pilot",
+        "action": "recovery.view", "description": "View authorized recovery plans and drill evidence.",
+    },
+    {
+        "code": "pilot.recovery.plan", "name": "Plan recovery drills", "module": "pilot",
+        "action": "recovery.plan", "description": "Create and submit recovery plans without executing infrastructure commands.",
+    },
+    {
+        "code": "pilot.recovery.review", "name": "Review recovery plans", "module": "pilot",
+        "action": "recovery.review", "description": "Approve or reject recovery plans with separation of duties.",
+    },
+    {
+        "code": "pilot.recovery.record", "name": "Record recovery evidence", "module": "pilot",
+        "action": "recovery.record", "description": "Record externally performed recovery drill outcomes.",
+    },
+    {
+        "code": "pilot.release.view", "name": "View release plans", "module": "pilot",
+        "action": "release.view", "description": "View authorized controlled-pilot release plans.",
+    },
+    {
+        "code": "pilot.release.plan", "name": "Plan pilot releases", "module": "pilot",
+        "action": "release.plan", "description": "Create release plans without performing deployment.",
+    },
+    {
+        "code": "pilot.release.review", "name": "Review pilot releases", "module": "pilot",
+        "action": "release.review", "description": "Approve or reject controlled-pilot release plans.",
+    },
+    {
+        "code": "pilot.release.record", "name": "Record release evidence", "module": "pilot",
+        "action": "release.record", "description": "Record externally performed release outcomes.",
+    },
+    {
+        "code": "pilot.release.rollback", "name": "Review and record rollback", "module": "pilot",
+        "action": "release.rollback", "description": "Approve and record externally performed rollback outcomes.",
+    },
+    {
+        "code": "pilot.capacity.view", "name": "View pilot capacity", "module": "pilot",
+        "action": "capacity.view", "description": "View tenant and scope filtered capacity observations.",
+    },
 )
 
 

@@ -185,7 +185,7 @@ describe('UI-P1 action permission convergence', () => {
 describe('UI-P1 complete page states', () => {
   it.each([
     [{ success: false, http_status: 403 }, true, 'forbidden'],
-    [{ success: false, http_status: 404 }, true, 'empty'],
+    [{ success: false, http_status: 404 }, true, 'not_found'],
     [{ success: false, http_status: 409 }, true, 'conflict'],
     [{ success: false, http_status: 422 }, true, 'invalid'],
     [{ success: true, data: { partial: true } }, true, 'partial'],
