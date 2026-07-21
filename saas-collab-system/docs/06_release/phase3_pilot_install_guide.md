@@ -11,7 +11,7 @@
 - 不启用自动采购、自动清仓、停售、归档、改价、真实 RPA 或资金操作。
 - 不使用 SQLite 作为试点数据库。
 
-真实平台接入、凭据托管、生产域名/TLS、反向代理、外网访问和高风险自动化均须另行评审。
+真实平台接入、生产域名、外网访问和高风险自动化均须另行评审。受控试点本身必须启用 TLS、HTTPS 重定向、安全 Cookie 和 HSTS；试点证书及私钥须由批准的凭据托管流程下发，不得进入 Git。
 
 ## 2. 安装包
 
@@ -31,7 +31,7 @@
 1. 数据库主机已安装 MySQL 8.4；应用主机已安装 Docker Engine 和 Docker Compose v2。
 2. 两台主机仅在 VMware 私有/NAT 网络中互通，数据库 IP 已固定。
 3. MySQL 3306 仅允许应用主机 IP；Redis 不映射宿主机端口；Django 8000 仅绑定回环地址。
-4. 已由批准的密钥托管系统生成 Django、MySQL、Redis 的独立试点凭据。
+4. 已由批准的密钥托管系统生成 Django、MySQL、Redis 的独立试点凭据，并下发匹配试点主机名的 TLS 证书与私钥。
 5. 试点数据库备份位置、保留周期、恢复责任人与回滚窗口已记录。
 6. 不在试点环境配置任何真实平台凭据或真实平台回调。
 
@@ -51,7 +51,7 @@ mysql -uroot -p -e "SHOW DATABASES;"
 mysql -h DATABASE_HOST_IP -P 3306 -u saas_collab_pilot_user -p saas_collab_pilot
 ```
 
-数据库账户只授权给应用主机 IP，不允许 root 远程登录，也不允许公网访问 3306。
+数据库账户只授权给应用主机 IP，不允许 root 远程登录，也不允许公网访问 3306。生产应用账户不得拥有 `CREATE DATABASE`；MySQL 测试应使用隔离的短期测试库与测试账户，不能复用或提权生产应用账户。
 
 ## 5. 应用层安装
 
@@ -61,7 +61,7 @@ mysql -h DATABASE_HOST_IP -P 3306 -u saas_collab_pilot_user -p saas_collab_pilot
 cd saas-collab-system/deploy/pilot/application
 cp env.pilot.example .env.pilot
 chmod 600 .env.pilot
-# 填入数据库主机 IP、MySQL 应用账户、唯一 Django/Redis 密钥和应用主机 IP。
+# 填入数据库主机 IP、MySQL 应用账户、唯一 Django/Redis 密钥、应用主机名以及 TLS 证书/私钥绝对路径。
 sh ./install-app.sh
 ```
 
@@ -72,11 +72,12 @@ sh ./install-app.sh
 ```bash
 docker compose --env-file .env.pilot -f docker-compose.pilot-app.yml ps
 docker compose --env-file .env.pilot -f docker-compose.pilot-app.yml logs --tail=100 backend
-curl --fail http://127.0.0.1:8000/api/health/
-curl --fail http://127.0.0.1:8080/
+curl --fail -H 'Host: localhost' http://127.0.0.1:8000/api/internal/health/
+curl --head http://127.0.0.1:8080/
+curl --fail --cacert /ABSOLUTE/PATH/TO/CA_OR_CERT.pem https://127.0.0.1:8443/
 ```
 
-应用模板使用 Gunicorn，后端仅绑定回环地址；前端 Nginx 默认绑定应用主机 `8080`，供受控内网试点访问。公网域名、TLS 和外部访问仍须单独评审。
+应用模板使用 Gunicorn，后端仅绑定回环地址；前端 Nginx 的 `8080` 只返回 `308` HTTPS 重定向，`8443` 提供 TLS 服务。正式核验必须使用受信任证书和配置的试点主机名，不应使用 `curl -k` 作为验收证据。公网域名和外部访问仍须单独评审。
 
 ## 6. 安装后验收
 
@@ -91,7 +92,16 @@ docker compose --env-file .env.pilot -f deploy/pilot/application/docker-compose.
   run --rm backend python manage.py sync_permissions --check
 ```
 
-6. 记录安装时间、操作者、镜像摘要、数据库备份位置和验证结果。
+7. 执行生产安全配置检查，结果必须为无问题：
+
+```bash
+docker compose --env-file .env.pilot -f deploy/pilot/application/docker-compose.pilot-app.yml \
+  run --rm backend python manage.py check --deploy
+```
+
+8. 在 MySQL 8.4 核验 `rpa_rpaaccountlock` 的 `held_lock_key` 生成列和 `uniq_held_rpa_platform_account` 唯一索引已存在；同一 tenant、platform、account_alias 同时只能存在一条 held 锁，released/expired 历史记录可保留。
+
+9. 记录安装时间、操作者、镜像摘要、证书指纹与有效期、数据库备份位置和验证结果。
 
 ## 7. 备份、回滚与停止
 

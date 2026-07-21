@@ -99,8 +99,15 @@ services:
         VITE_API_BASE_URL: ""
         VITE_USE_MOCK: "false"
     restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_FILTER: PILOT_HTTPS_PORT
+      PILOT_HTTPS_PORT: ${PILOT_HTTPS_PORT:-8443}
     ports:
       - "${PILOT_HTTP_PORT:-8080}:80"
+      - "${PILOT_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ${PILOT_TLS_CERT_PATH:?Set PILOT_TLS_CERT_PATH in .env.pilot}:/etc/nginx/tls/tls.crt:ro
+      - ${PILOT_TLS_KEY_PATH:?Set PILOT_TLS_KEY_PATH in .env.pilot}:/etc/nginx/tls/tls.key:ro
     depends_on:
       - backend
     networks:

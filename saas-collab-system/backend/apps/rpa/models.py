@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.db.models.functions import Concat
 
 from apps.tenants.models import Tenant
 
@@ -246,6 +247,19 @@ class RPAAccountLock(models.Model):
     account_alias = models.CharField(max_length=120)
     task = models.ForeignKey(RPATask, on_delete=models.CASCADE, related_name="account_locks")
     lock_status = models.CharField(max_length=20, choices=LockStatus.choices, default=LockStatus.HELD)
+    held_lock_key = models.GeneratedField(
+        expression=models.Case(
+            models.When(
+                lock_status=LockStatus.HELD,
+                then=Concat("platform", models.Value("\x1f"), "account_alias"),
+            ),
+            default=models.Value(None),
+            output_field=models.CharField(max_length=161),
+        ),
+        output_field=models.CharField(max_length=161),
+        db_persist=True,
+        null=True,
+    )
     acquired_at = models.DateTimeField()
     expires_at = models.DateTimeField()
     released_at = models.DateTimeField(null=True, blank=True)
@@ -254,8 +268,7 @@ class RPAAccountLock(models.Model):
         ordering = ["tenant_id", "platform", "account_alias", "-acquired_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "platform", "account_alias"],
-                condition=models.Q(lock_status="held"),
+                fields=["tenant", "held_lock_key"],
                 name="uniq_held_rpa_platform_account",
             ),
         ]

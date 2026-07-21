@@ -89,3 +89,12 @@
 - 无 P0 但存在 P1：CONDITIONAL_PASS。
 - 无 P0/P1：PASS，可完成 UI-P8 收尾。
 - UI-P8 PASS 不自动允许真实平台接入、生产发布或高风险自动化。
+
+## 10. 试点整改追加验收
+
+- [ ] 前端 Docker 构建在测试阶段显式使用 Mock，在生产构建阶段显式关闭 Mock，测试与构建环境互不污染。
+- [ ] MySQL 8.4 已创建 `held_lock_key` 生成列和 `uniq_held_rpa_platform_account` 唯一索引，并通过并发持锁、释放后重建回归测试。
+- [ ] `python manage.py check --deploy` 无安全告警。
+- [ ] HTTP 只返回 HTTPS 重定向，HTTPS 提供有效证书并返回 HSTS。
+- [ ] session 与 CSRF Cookie 均启用 Secure，反向代理只通过可信 `X-Forwarded-Proto=https` 表示安全请求。
+- [ ] 生产应用数据库账户无建库权限；MySQL 测试使用隔离测试库和短期测试账户。

@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import pytest
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -112,6 +113,58 @@ def test_expired_account_lock_is_released_and_tenant_isolated():
     assert expired_lock.lock_status == RPAAccountLock.LockStatus.EXPIRED
     assert replacement.tenant == tenant_a
     assert other_tenant_lock.tenant == tenant_b
+
+
+@pytest.mark.django_db
+def test_database_enforces_one_held_lock_per_tenant_platform_account():
+    tenant = Tenant.objects.create(name="Tenant", code="rpa-db-lock")
+    first = create_task(
+        tenant,
+        "LOCK-1",
+        payload={"platform": "mock", "account_alias": "demo-account"},
+    )
+    second = create_task(
+        tenant,
+        "LOCK-2",
+        payload={"platform": "mock", "account_alias": "demo-account"},
+    )
+    now = timezone.now()
+    first_lock = RPAAccountLock.objects.create(
+        tenant=tenant,
+        platform="mock",
+        account_alias="demo-account",
+        task=first,
+        acquired_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+
+    first_lock.refresh_from_db()
+    assert first_lock.held_lock_key == "mock\x1fdemo-account"
+    with pytest.raises(IntegrityError), transaction.atomic():
+        RPAAccountLock.objects.create(
+            tenant=tenant,
+            platform="mock",
+            account_alias="demo-account",
+            task=second,
+            acquired_at=now,
+            expires_at=now + timedelta(minutes=5),
+        )
+
+    first_lock.lock_status = RPAAccountLock.LockStatus.RELEASED
+    first_lock.released_at = now
+    first_lock.save(update_fields=["lock_status", "released_at"])
+    first_lock.refresh_from_db()
+    replacement = RPAAccountLock.objects.create(
+        tenant=tenant,
+        platform="mock",
+        account_alias="demo-account",
+        task=second,
+        acquired_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+
+    assert first_lock.held_lock_key is None
+    assert replacement.held_lock_key == "mock\x1fdemo-account"
 
 
 @pytest.mark.django_db
