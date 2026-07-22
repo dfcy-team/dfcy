@@ -10,7 +10,20 @@
 
     <el-alert v-if="riskNote" :title="riskNote" type="warning" show-icon :closable="false" />
 
-    <el-form v-if="filters.length" class="phase2-filter" inline>
+    <el-form v-if="filterConfigs.length" class="phase2-filter" inline @submit.prevent="applyFilters">
+      <el-form-item v-for="filter in filterConfigs" :key="filter.key" :label="filter.label">
+        <el-select v-if="filter.options" v-model="query[filter.key]" clearable placeholder="全部">
+          <el-option v-for="option in filter.options" :key="option.value" :label="option.label" :value="option.value" />
+        </el-select>
+        <el-input v-else v-model="query[filter.key]" clearable :placeholder="filter.placeholder || '请输入'" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" native-type="submit" :loading="loading">筛选</el-button>
+        <el-button @click="resetFilters">重置</el-button>
+      </el-form-item>
+    </el-form>
+
+    <el-form v-else-if="filters.length" class="phase2-filter" inline>
       <el-form-item v-for="filter in filters" :key="filter" :label="filter">
         <el-input placeholder="筛选占位" disabled />
       </el-form-item>
@@ -44,7 +57,33 @@
           <span v-else>{{ formatValue(row[column.prop]) }}</span>
         </template>
       </el-table-column>
+      <el-table-column v-if="visibleRowActionConfigs.length" label="操作" :min-width="Math.max(130, visibleRowActionConfigs.length * 110)" fixed="right">
+        <template #default="{ row }">
+          <el-button
+            v-for="action in visibleRowActionConfigs"
+            :key="action.label"
+            link
+            :type="action.type || 'primary'"
+            :disabled="actionAccess(action).disabled"
+            :title="actionAccess(action).reason"
+            @click="runAction(action, row)"
+          >
+            {{ action.label }}
+          </el-button>
+        </template>
+      </el-table-column>
     </el-table>
+
+    <el-pagination
+      v-if="mode === 'list' && total > 0"
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="total"
+      :page-sizes="[10, 20, 50, 100]"
+      layout="total, sizes, prev, pager, next"
+      @current-change="loadData"
+      @size-change="changePageSize"
+    />
 
     <el-card v-else v-loading="loading" shadow="never">
       <template #header>详情</template>
@@ -62,7 +101,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
@@ -76,28 +115,54 @@ const props = defineProps({
   columns: { type: Array, default: () => [] },
   detailFields: { type: Array, default: () => [] },
   filters: { type: Array, default: () => [] },
+  filterConfigs: { type: Array, default: () => [] },
   actions: { type: Array, default: () => [] },
   actionConfigs: { type: Array, default: () => [] },
+  rowActionConfigs: { type: Array, default: () => [] },
   emptyText: { type: String, default: '暂无数据' }
 });
 
 const rows = ref([]);
+const query = reactive({});
 const auth = useAuthStore();
 const detail = ref({});
 const loading = ref(false);
 const actionLoading = ref('');
 const dataStatus = ref('loading');
 const message = ref('');
+const page = ref(1);
+const pageSize = ref(20);
+const total = ref(0);
 
 const tagType = computed(() => {
   if (dataStatus.value === 'error') return 'danger';
-  if (dataStatus.value === 'fallback') return 'warning';
+  if (['fallback', 'degraded'].includes(dataStatus.value)) return 'warning';
   if (dataStatus.value === 'connected') return 'success';
   return 'info';
 });
 const isEmpty = computed(() => (props.mode === 'list' ? rows.value.length === 0 : Object.keys(detail.value).length === 0));
 const actionAccess = (action) => getActionAccess(auth, action);
 const visibleActionConfigs = computed(() => props.actionConfigs.filter((action) => actionAccess(action).visible));
+const visibleRowActionConfigs = computed(() => props.rowActionConfigs.filter((action) => actionAccess(action).visible));
+
+function initializeFilters() {
+  props.filterConfigs.forEach((filter) => { query[filter.key] = ''; });
+}
+
+function applyFilters() {
+  page.value = 1;
+  loadData();
+}
+
+function resetFilters() {
+  initializeFilters();
+  applyFilters();
+}
+
+function changePageSize() {
+  page.value = 1;
+  loadData();
+}
 
 function getRows(data) {
   if (Array.isArray(data)) return data;
@@ -142,13 +207,19 @@ function statusType(value) {
 
 async function loadData() {
   loading.value = true;
+  message.value = '';
   try {
-    const response = await props.loader();
+    const response = await props.loader({
+      ...query,
+      page: page.value,
+      page_size: pageSize.value
+    });
     if (!response.success) throw new Error(response.message || '接口返回失败');
     rows.value = getRows(response.data);
     detail.value = getDetail(response.data);
+    total.value = Number(response.data?.count ?? rows.value.length);
     dataStatus.value = response.data?.api_status || response.data?.status || 'mock';
-    if (response.data?.api_status === 'fallback') message.value = response.message;
+    if (['fallback', 'degraded'].includes(response.data?.api_status)) message.value = response.message;
   } catch (error) {
     dataStatus.value = 'error';
     message.value = error?.message || '请求失败';
@@ -157,13 +228,17 @@ async function loadData() {
   }
 }
 
-async function runAction(action) {
+async function runAction(action, row = null) {
   const access = actionAccess(action);
   if (!access.allowed) {
     ElMessage.warning(access.reason);
     return;
   }
   if (typeof action.handler !== 'function') return;
+  if (dataStatus.value !== 'connected' && action.allowMock !== true) {
+    ElMessage.info('当前不是已验证的后端联调数据，操作保持 pending，不发送业务写入请求。');
+    return;
+  }
   try {
     if (action.confirmMessage) {
       await ElMessageBox.confirm(action.confirmMessage, action.confirmTitle || '确认操作', {
@@ -171,7 +246,7 @@ async function runAction(action) {
       });
     }
     actionLoading.value = action.label;
-    const response = await action.handler({ rows: rows.value, detail: detail.value });
+    const response = await action.handler({ row, rows: rows.value, detail: detail.value });
     if (!response?.success) throw new Error(response?.message || '操作失败');
     ElMessage.success(response.message || '操作已提交');
     await loadData();
@@ -183,6 +258,7 @@ async function runAction(action) {
   }
 }
 
+initializeFilters();
 onMounted(loadData);
 </script>
 

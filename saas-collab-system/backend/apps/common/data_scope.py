@@ -1,12 +1,16 @@
 from apps.permissions.models import DataScope
-from apps.permissions.services import get_user_data_scope
+from apps.permissions.services import get_permission_data_scopes, get_user_data_scope
 
 
-def custom_scope_allows(user, constraints):
+def custom_scope_allows(user, constraints, *, permission_code=None):
     """Return whether one user scope permits all configured target dimensions."""
     if getattr(user, "is_superuser", False):
         return True
-    scopes = get_user_data_scope(user)
+    scopes = (
+        get_permission_data_scopes(user, permission_code)
+        if permission_code
+        else get_user_data_scope(user)
+    )
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return True
 
@@ -31,11 +35,11 @@ def custom_scope_allows(user, constraints):
     return False
 
 
-def custom_scope_allows_product(user, *, sku=None, spu=None, extra_constraints=None):
+def custom_scope_allows_product(user, *, sku=None, spu=None, extra_constraints=None, permission_code=None):
     resolved_spu = spu or (sku.spu if sku else None)
     constraints = {
         "sku_ids": getattr(sku, "id", None),
         "spu_ids": getattr(resolved_spu, "id", None),
     }
     constraints.update(extra_constraints or {})
-    return custom_scope_allows(user, constraints)
+    return custom_scope_allows(user, constraints, permission_code=permission_code)

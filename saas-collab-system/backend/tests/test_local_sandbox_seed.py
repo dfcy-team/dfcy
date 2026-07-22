@@ -9,7 +9,7 @@ from django.test import override_settings
 
 from apps.accounts.models import CustomUser
 from apps.common.management.commands.seed_local_sandbox import Command as SeedLocalSandboxCommand
-from apps.finance.models import ReconciliationException, ReconciliationMatch
+from apps.finance.models import PlatformStatement, ReconciliationException, ReconciliationMatch
 from apps.permissions.models import Role
 from apps.permissions.services import check_user_permission
 from apps.products.models import ProductSKU
@@ -95,11 +95,14 @@ def test_integration_seed_is_idempotent_and_keeps_finance_permission_separate():
             )
 
     assert Tenant.objects.filter(code__in=("local-sandbox-a", "local-sandbox-b")).count() == 2
-    assert ProductSKU.objects.filter(sku_code__startswith="LOCAL-SKU-").count() == 2
+    assert ProductSKU.objects.filter(sku_code__startswith="LOCAL-SKU-").count() == 6
     assert PurchaseOrder.objects.filter(po_no__startswith="LOCAL-PO-").count() == 2
     assert SupplierTask.objects.filter(task_no__startswith="LOCAL-TASK-").count() == 2
-    assert ReconciliationMatch.objects.filter(tenant__code="local-sandbox-a").count() == 1
+    assert ReconciliationMatch.objects.filter(tenant__code="local-sandbox-a").count() == 2
     assert ReconciliationException.objects.filter(tenant__code="local-sandbox-a").count() == 1
+    statements = PlatformStatement.objects.filter(tenant__code="local-sandbox-a")
+    assert set(statements.values_list("currency", flat=True)) == {"USD", "EUR"}
+    assert statements.values("platform").distinct().count() == 2
 
     operator = CustomUser.objects.get(username="local_internal_operator")
     finance = CustomUser.objects.get(username="local_finance_reviewer")

@@ -40,11 +40,14 @@
 | 库存预警 | `/api/internal/alerts/inventory/*` | `alerts.view/evaluate/manage` | 已实现 |
 | 补货建议 | `/api/internal/replenishment/recommendations/*`、`evaluate-mock/` | `replenishment.view/evaluate/review` | 已实现；仅建议 |
 | 财务分析 | `GET /api/finance/analytics/{overview,reconciliation,exceptions}/` | `finance.view` | 已实现，需独立财务联调 |
-| 财务数据 | `/api/finance/{statements,withdrawals,bank-receipts}/*` | `finance.view`、`finance.import` | 仅 demo/synthetic 导入 |
-| 对账建议 | `/api/finance/reconciliation/*` | `finance.view`、`finance.reconcile`、`finance.exception.handle` | 不执行资金操作 |
+| 财务数据 | `GET /api/finance/{statements,withdrawals,bank-receipts}/`、`POST .../import-demo/` | `finance.view`、`finance.import` | 列表统一分页；仅 demo/synthetic 导入 |
+| 对账建议 | `GET /api/finance/reconciliation/matches/`、`GET .../matches/{id}/`、`POST .../run-mock/`、`POST .../matches/{id}/{confirm,reject}/` | `finance.view`、`finance.reconcile` | run-mock使用幂等键；不执行资金操作 |
+| 对账异常 | `GET /api/finance/reconciliation/exceptions/`、`POST .../exceptions/{id}/resolve/` | `finance.view`、`finance.exception.handle` | resolve只记录人工结论和审计 |
 | 报表 | `/api/report/{catalog,exports}/*` | `reports.view`、`reports.export`、`reports.download` | 脱敏并审计 |
 
 `analytics.view/calculate` 的 CUSTOM scope 使用 `analytics_dimensions`，只允许 `platform`、`store_id`、`country`、`product_id`、`sku_id`、`warehouse_id`。`finance.view` 使用 `platforms` 和大写 ISO 4217 `currencies`，每个 action permission 独立求值，不能继承 view scope。
+
+财务集合统一返回 `count/next/previous/results`。重复确认、拒绝或异常处理返回 `409 STATE_CONFLICT`；对账 `run-mock` 使用 `Idempotency-Key`，服务端对缺失键采用合成来源快照派生键。银行账号只返回掩码。以上写操作均不付款、不转账、不提现。
 
 本期如需新增库存流水或销售明细端点，必须先更新本合同和总接口映射，初始状态为 `pending`；不得为了页面方便在前端跨 tenant 或跨权限拼接数据。
 

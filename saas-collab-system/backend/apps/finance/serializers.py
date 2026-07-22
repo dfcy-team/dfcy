@@ -32,6 +32,48 @@ class FinanceAnalyticsQuerySerializer(serializers.Serializer):
         return attrs
 
 
+class FinanceCollectionQuerySerializer(serializers.Serializer):
+    page = serializers.IntegerField(min_value=1, default=1)
+    page_size = serializers.IntegerField(min_value=1, max_value=100, default=20)
+    platform = serializers.CharField(max_length=40, required=False)
+    currency = serializers.CharField(max_length=3, required=False)
+    status = serializers.CharField(max_length=40, required=False)
+
+    def to_internal_value(self, data):
+        unknown = set(data.keys()) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown query parameter." for key in sorted(unknown)})
+        return super().to_internal_value(data)
+
+    def validate_currency(self, value):
+        return value.upper()
+
+
+class FinanceDemoImportSerializer(serializers.Serializer):
+    platform = serializers.CharField(max_length=40, default="mock")
+    currency = serializers.RegexField(r"^[A-Za-z]{3}$", default="USD")
+    account_hint = serializers.CharField(max_length=80, default="demo-account", write_only=True)
+
+    def validate_currency(self, value):
+        return value.upper()
+
+
+class FinanceReconciliationRunSerializer(serializers.Serializer):
+    platform = serializers.CharField(max_length=40, default="mock")
+    currency = serializers.RegexField(r"^[A-Za-z]{3}$", default="USD")
+
+    def validate_currency(self, value):
+        return value.upper()
+
+
+class ReconciliationDecisionSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+
+
+class ReconciliationExceptionResolutionSerializer(serializers.Serializer):
+    resolution_note = serializers.CharField(max_length=1000, trim_whitespace=True)
+
+
 class PlatformStatementSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
 

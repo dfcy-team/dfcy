@@ -223,10 +223,10 @@ def filter_sync_runs(user, queryset, permission_code):
     return queryset.filter(allowed).distinct()
 
 
-def filter_finance_queryset(user, queryset, permission_code, *, platform_field="platform", currency_field="currency"):
+def _finance_scope_configs(user, permission_code):
     configs = permission_scope_configs(user, permission_code, {"platforms", "currencies"})
     if configs is None:
-        return queryset
+        return None
     for config in configs:
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Finance data scope contains an invalid platform.")
@@ -234,6 +234,24 @@ def filter_finance_queryset(user, queryset, permission_code, *, platform_field="
             _validate_non_empty_string_values(config["currencies"], "Finance data scope contains an invalid currency.")
             if any(not re.fullmatch(r"[A-Z]{3}", value) for value in config["currencies"]):
                 _invalid_scope("Finance data scope currencies must use uppercase ISO 4217 codes.")
+    return configs
+
+
+def finance_values_allowed(user, permission_code, *, platform, currency):
+    configs = _finance_scope_configs(user, permission_code)
+    if configs is None:
+        return True
+    return any(
+        ("platforms" not in config or platform in set(config["platforms"]))
+        and ("currencies" not in config or currency in set(config["currencies"]))
+        for config in configs
+    )
+
+
+def filter_finance_queryset(user, queryset, permission_code, *, platform_field="platform", currency_field="currency"):
+    configs = _finance_scope_configs(user, permission_code)
+    if configs is None:
+        return queryset
     allowed = Q(pk__in=[])
     for config in configs:
         condition = Q()

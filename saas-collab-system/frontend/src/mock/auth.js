@@ -24,6 +24,8 @@ export const mockAuthUser = {
     'workflow.exceptions.view', 'workflow.exceptions.manage',
     'workflow.collaboration.view', 'workflow.collaboration.confirm',
     'analytics.view', 'analytics.calculate',
+    'alerts.view',
+    'replenishment.view',
     'finance.view',
     'products.lifecycle.view', 'products.lifecycle.evaluate',
     'integrations.view', 'integrations.manage', 'integrations.run',
