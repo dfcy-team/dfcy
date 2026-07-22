@@ -42,7 +42,6 @@ class Command(BaseCommand):
             action="store_true",
             help="Required acknowledgement that the target is a disposable local Sandbox.",
         )
-        parser.add_argument("--test-mode", action="store_true", help="Reserved for the automated test suite.")
 
     def handle(self, *args, **options):
         self._validate_environment(options)
@@ -80,14 +79,12 @@ class Command(BaseCommand):
         if os.getenv("SANDBOX_ALLOW_HIGH_RISK_AUTOMATION", "false").lower() != "false":
             raise CommandError("High-risk automation must remain disabled.")
 
-        test_mode = options["test_mode"] and bool(os.getenv("PYTEST_CURRENT_TEST"))
         database_name = str(connection.settings_dict.get("NAME") or "")
         database_host = str(connection.settings_dict.get("HOST") or "")
-        if not test_mode:
-            if not database_name.startswith("saas_collab_local_"):
-                raise CommandError("Database name must start with saas_collab_local_.")
-            if database_host not in {"mysql", "localhost", "127.0.0.1"}:
-                raise CommandError("Database host is not approved for Local Sandbox seeding.")
+        if not database_name.startswith("saas_collab_local_"):
+            raise CommandError("Database name must start with saas_collab_local_.")
+        if database_host not in {"mysql", "localhost", "127.0.0.1"}:
+            raise CommandError("Database host is not approved for Local Sandbox seeding.")
 
     def _seed_core(self, password):
         tenant_a, _ = Tenant.objects.update_or_create(

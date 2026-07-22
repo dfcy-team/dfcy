@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('init', 'start', 'verify', 'status', 'stop', 'reset', 'verify-rc', 'start-rc')]
+    [ValidateSet('init', 'start', 'verify', 'status', 'stop', 'reset', 'verify-rc', 'contract', 'start-rc')]
     [string]$Action = 'start',
 
     [ValidateSet('core', 'sales-inventory-finance-reconciliation', 'creator-management', 'procurement', 'integration')]
@@ -161,6 +161,21 @@ function Test-ReleaseCandidateContract {
     Write-Output 'LOCAL_SANDBOX_RC_VERIFY=PASS'
 }
 
+function Test-LocalSandboxContract {
+    Initialize-LocalEnvironment
+    foreach ($profile in @('core', 'sales-inventory-finance-reconciliation', 'creator-management', 'procurement', 'integration')) {
+        $env:LOCAL_SANDBOX_MODULE = $profile
+        Invoke-LocalCompose @('--profile', $profile, 'config', '--quiet')
+    }
+    & python (Join-Path $ScriptRoot 'validate_contract.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Local Sandbox static contract validation failed.' }
+    Invoke-RcCompose @('--profile', 'release-candidate', 'config', '--quiet')
+    if (Select-String -LiteralPath $RcCompose -Pattern '^\s*build\s*:') {
+        throw 'Release-candidate Compose must not contain build.'
+    }
+    Write-Output 'LOCAL_SANDBOX_ONE_CLICK_CONTRACT=PASS profiles=all'
+}
+
 Assert-Docker
 switch ($Action) {
     'init' { Initialize-LocalEnvironment }
@@ -175,6 +190,7 @@ switch ($Action) {
         Start-LocalSandbox
     }
     'verify-rc' { Test-ReleaseCandidateContract }
+    'contract' { Test-LocalSandboxContract }
     'start-rc' {
         Test-ReleaseCandidateContract
         Invoke-RcCompose @('--profile', 'release-candidate', 'up', '-d')

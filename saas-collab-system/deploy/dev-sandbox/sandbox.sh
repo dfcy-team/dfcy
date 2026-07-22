@@ -124,6 +124,21 @@ verify_rc() {
   echo "LOCAL_SANDBOX_RC_VERIFY=PASS"
 }
 
+verify_contract() {
+  init_env
+  for sandbox_profile in core sales-inventory-finance-reconciliation creator-management procurement integration; do
+    export LOCAL_SANDBOX_MODULE=$sandbox_profile
+    compose --profile "$sandbox_profile" config --quiet
+  done
+  python "$SCRIPT_DIR/validate_contract.py"
+  rc_compose --profile release-candidate config --quiet
+  if grep -Eq '^[[:space:]]*build[[:space:]]*:' "$RC_COMPOSE"; then
+    echo "Release-candidate Compose must not contain build" >&2
+    exit 1
+  fi
+  echo "LOCAL_SANDBOX_ONE_CLICK_CONTRACT=PASS profiles=all"
+}
+
 command -v docker >/dev/null 2>&1 || { echo "Docker CLI is required" >&2; exit 1; }
 docker compose version >/dev/null
 
@@ -139,6 +154,7 @@ case "$ACTION" in
       compose --profile "$PROFILE" down --volumes --remove-orphans
     start_local ;;
   verify-rc) verify_rc ;;
+  contract) verify_contract ;;
   start-rc)
     verify_rc
     rc_compose --profile release-candidate up -d

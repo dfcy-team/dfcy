@@ -19,11 +19,8 @@ def parse_env(path):
     return values
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env-file", default=".env.local")
-    args = parser.parse_args()
-    env_path = Path(args.env_file).resolve()
+def validate_env_file(env_path):
+    env_path = Path(env_path).resolve()
     values = parse_env(env_path)
 
     git_sha = values.get("LOCAL_SANDBOX_APPROVED_GIT_SHA", "")
@@ -56,6 +53,14 @@ def main():
     for manifest_key, env_key in manifest_keys.items():
         if manifest.get(manifest_key) != values[env_key]:
             raise SystemExit(f"{env_key} does not match the artifact manifest.")
+    return git_sha
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env-file", default=".env.local")
+    args = parser.parse_args()
+    git_sha = validate_env_file(args.env_file)
     print(f"LOCAL_SANDBOX_RC_CONTRACT=PASS git_sha={git_sha}")
 
 
