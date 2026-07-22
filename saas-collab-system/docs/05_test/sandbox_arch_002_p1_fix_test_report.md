@@ -2,7 +2,7 @@
 
 ## 测试结论
 
-本机已完成可执行的定向测试，结果为 `PASS`。远程 CI 结果需在整改提交推送后独立核验。
+本机定向与全量测试结果为 `PASS`。PR #34 首次整改 HEAD 的 11/11 远程检查成功，其中 Local Sandbox 专用门禁用时 45s。
 
 ## 执行记录
 
@@ -19,9 +19,11 @@
 | PowerShell 一键合同 | `sandbox.ps1 -Action contract` | PASS，五个 profile |
 | Shell 一键合同 | `sandbox.sh contract integration` | PASS，五个 profile |
 | PowerShell 语法 | PowerShell Parser | PASS |
+| GitHub Local Sandbox 专用门禁 | `Profiles, fixtures, seed guards, RC, and one-click scripts` | PASS，45s |
+| PR #34 全部远程检查 | Phase 2、Phase 3 与 Local Sandbox 工作流 | PASS，11/11 |
 
 ## 未执行项
 
 - 宿主机 Python 缺少 pytest，未直接在宿主机执行 pytest。
 - 该项已在包含项目依赖的 Docker 后端环境实际执行，不使用伪造结果。
-- GitHub Actions 专用门禁待推送后执行。
+- 无其他未执行的 P1 定向检查；最终文档提交推送后仍需确认新 HEAD 的远程 CI。

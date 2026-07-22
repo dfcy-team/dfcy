@@ -37,7 +37,7 @@
 | Django check / migration 一致性 | PASS，0 issues / no changes |
 | Docker 后端全量 pytest | PASS，`405 passed in 24.15s` |
 | 宿主机 pytest | 未执行，宿主机 Python 未安装 pytest；已在项目 Docker 后端环境实际执行 |
-| 远程 Local Sandbox CI | 待本整改提交推送后核验 |
+| 远程 Local Sandbox CI | PASS，专用门禁用时 45s，PR #34 共 11/11 检查成功 |
 
 ## 5. 安全确认
 
@@ -50,5 +50,5 @@
 ## 6. 待复审
 
 - 固定 PR #34 整改后 HEAD。
-- 等待新增 Local Sandbox CI 门禁成功。
+- 新增 Local Sandbox CI 门禁已成功，R2 需核对固定 HEAD 上的最终运行结果。
 - 执行独立 `SANDBOX-ARCH-002-R2`，确认两项 P1 正式关闭。
