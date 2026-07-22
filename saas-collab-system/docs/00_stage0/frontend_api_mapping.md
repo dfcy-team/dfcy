@@ -307,3 +307,20 @@ UI-P8 复用 `/pilot/readiness`、`/pilot/topology`、`/pilot/capacity`、`/pilo
 UI-P8 创建类 POST 按 exact plan permission 的 `pilot_environments` scope 授权；详情和 action 按各 exact permission 的资源 ID scope 授权。准入决策引用安全评审、验证、性能、恢复和发布资源时逐类重新校验对应 view permission 和 scope；`finance_boundary` 同时要求 `finance.view`。submit、approve、reject、record-result 和 cancel 的请求、响应及合法状态以 `docs/03_api/ui_p8_production_pilot_security_contract.md` 为唯一合同，不得由通配路径自行推断。
 
 UI-P8 列表统一支持 `page`、`page_size`、`environment`、`status` 及合同声明的资源筛选字段；草稿 PATCH 必须携带 `version`。验证目标别名与证据引用必须先登记到当前 tenant 和环境的受控注册表。准入批准会重新读取证据并与提交时不可变快照比较；证据状态、版本、摘要或有效期变化均返回 `409`。`403/409/422` 失败尝试写入脱敏、不可变审计事件。
+
+## 模块化开发节点映射
+
+本节与 `docs/03_api/module_development_api_contract.md` 一致。开发A复用现有阶段3资源；开发B达人正式接口在实现、JWT联调和CI完成前统一为 `pending`，现有 Local Sandbox 达人路由保持 `mock`。
+
+| 模块/页面 | 页面路径 | API | 权限 | Mock位置 | 当前状态 |
+|---|---|---|---|---|---|
+| 销售与库存总览 | `/analytics/overview`、`/analytics/sales`、`/analytics/inventory` | `GET /api/internal/analytics/{overview,sales,inventory}/` | `analytics.view` | `deploy/dev-sandbox/fixtures/sales-inventory-finance-reconciliation.json` | pending（待模块JWT复验） |
+| 库存预警 | `/alerts/inventory` | `/api/internal/alerts/inventory/*` | `alerts.view/evaluate/manage` | 同上 | pending（待模块JWT复验） |
+| 补货建议 | `/replenishment/recommendations` | `/api/internal/replenishment/recommendations/*`、`evaluate-mock/` | `replenishment.view/evaluate/review` | 同上 | pending；evaluate为mock |
+| 财务对账 | `/finance/reconciliation/*`、`/finance/analytics` | `/api/finance/analytics/*`、`/api/finance/reconciliation/*` | `finance.view/reconcile/exception.handle` | 同上 | pending（待独立财务权限复验） |
+| 达人档案 | `/creators/profiles`、`/creators/profiles/{id}` | `GET/POST /api/internal/creators/profiles/`、`GET/PATCH .../{id}/`、状态action | `creator.view/manage` | `deploy/dev-sandbox/fixtures/creator-management.json` | pending；fallback为mock |
+| 达人合作 | `/creators/collaborations`、`/creators/collaborations/{id}` | `/api/internal/creators/collaborations/*`、审核action | `creator.collaboration.view/manage/review` | 同上 | pending；fallback为mock |
+| 达人任务 | `/creators/tasks` | `/api/internal/creators/tasks/*` | `creator.task.view/manage` | 同上 | pending |
+| 达人效果复盘 | `/creators/performance` | `GET /api/internal/creators/performance/` | `creator.performance.view` | 同上 | pending |
+
+达人模块不得访问 `/api/finance/*`、`/admin/` 或 `/api/rpa/*` Agent执行端点。销售库存权限不能替代财务权限；补货建议不得自动创建采购订单。只有统一响应、分页、401/403/404/409/422、tenant、permission-specific `data_scope` 和action permission均有实际联调证据后，相关条目才可改为 `connected`。
