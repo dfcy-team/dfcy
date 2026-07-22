@@ -10,3 +10,9 @@
 生产应用账户只拥有业务库运行所需权限，不授予 `CREATE DATABASE`。需要在 MySQL 上执行 Django 测试时，应创建独立、短期的测试库和测试账户，测试后按审批流程销毁，不能扩大生产应用账户权限。
 
 本安装包不启用真实平台接入、真实 RPA、自动采购、自动改价、自动清仓、自动资金操作。
+
+## Sandbox 同摘要晋级
+
+Pilot 不在目标主机执行后端或前端构建，也不接受 `:pilot` 等可变标签。`application/.env.pilot` 必须填写 Sandbox 制品清单中的固定 Git SHA、后端/前端 `@sha256` 镜像、审批清单路径和 `verification_status=pass` 的 Sandbox E2E 证据路径。两份 JSON 均须位于受控绝对路径、不是符号链接且权限为 `0400` 或 `0600`。
+
+`application/install-app.sh` 会逐项核验制品清单哈希、Git SHA、OCI revision、镜像摘要和迁移摘要；任一不一致即停止。只有通过 Sandbox JWT/API、运行网络及独立网络隔离验收的同一制品才可申请进入受控 Pilot。

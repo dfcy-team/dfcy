@@ -1,0 +1,22 @@
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+ARG VITE_API_BASE_URL=""
+ARG VITE_USE_MOCK="false"
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_USE_MOCK=${VITE_USE_MOCK}
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN VITE_USE_MOCK=true npm run test
+RUN VITE_USE_MOCK=false npm run build
+
+FROM nginx:1.30.3-alpine3.23
+
+COPY deploy/sandbox/application/nginx.conf /etc/nginx/templates/default.conf.template
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80 443

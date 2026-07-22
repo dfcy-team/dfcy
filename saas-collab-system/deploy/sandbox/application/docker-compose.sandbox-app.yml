@@ -1,0 +1,106 @@
+services:
+  redis:
+    image: ${SANDBOX_REDIS_IMAGE:?Set an immutable Redis image reference in .env.sandbox}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - sandbox-redis-data:/data
+    networks:
+      - sandbox-internal
+
+  migrate:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: python manage.py migrate --noinput
+    restart: "no"
+    networks:
+      - sandbox-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  backend:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: >-
+      gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-60}
+      --access-logfile - --error-logfile -
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SANDBOX_APP_PORT:-8100}:8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/api/internal/health/', headers={'Host':'localhost'}); raise SystemExit(0 if urllib.request.urlopen(r, timeout=5).status == 200 else 1)"
+      interval: 15s
+      timeout: 8s
+      retries: 12
+      start_period: 30s
+    networks:
+      - sandbox-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  celery:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: celery -A config worker --loglevel=info
+    restart: unless-stopped
+    networks:
+      - sandbox-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: celery -A config beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - sandbox-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: ${SANDBOX_FRONTEND_IMAGE:?Set the immutable frontend image from the approved CI manifest}
+    restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_FILTER: SANDBOX_HTTPS_PORT
+      SANDBOX_HTTPS_PORT: ${SANDBOX_HTTPS_PORT:-8543}
+    ports:
+      - "${SANDBOX_HTTP_PORT:-8180}:80"
+      - "${SANDBOX_HTTPS_PORT:-8543}:443"
+    volumes:
+      - ${SANDBOX_TLS_CERT_PATH:?Set SANDBOX_TLS_CERT_PATH in .env.sandbox}:/etc/nginx/tls/tls.crt:ro
+      - ${SANDBOX_TLS_KEY_PATH:?Set SANDBOX_TLS_KEY_PATH in .env.sandbox}:/etc/nginx/tls/tls.key:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - sandbox-internal
+
+networks:
+  sandbox-internal:
+    name: saas-sandbox-network
+
+volumes:
+  sandbox-redis-data:
+    name: saas-sandbox-redis-data
