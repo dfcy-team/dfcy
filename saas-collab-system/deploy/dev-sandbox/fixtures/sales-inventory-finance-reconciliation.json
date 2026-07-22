@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "module": "sales-inventory-finance-reconciliation",
+  "status": "mock",
+  "routes": {
+    "/mock/sales-inventory-finance-reconciliation/overview/": {
+      "success": true,
+      "code": "OK",
+      "message": "success",
+      "data": {
+        "sales_amount": "12500.00",
+        "available_stock": 120,
+        "reconciliation_status": "suggested",
+        "difference_amount": "-10.00",
+        "currency": "USD",
+        "source": "synthetic"
+      }
+    },
+    "/mock/sales-inventory-finance-reconciliation/items/": {
+      "success": true,
+      "code": "OK",
+      "message": "success",
+      "data": {
+        "count": 1,
+        "next": null,
+        "previous": null,
+        "results": [
+          {
+            "sku_code": "LOCAL-SKU-A",
+            "available_stock": 120,
+            "average_daily_sales": "8.00",
+            "coverage_days": "15.00",
+            "reconciliation_status": "suggested"
+          }
+        ]
+      }
+    }
+  }
+}

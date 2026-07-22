@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "module": "creator-management",
+  "status": "mock",
+  "routes": {
+    "/mock/creator-management/creators/": {
+      "success": true,
+      "code": "OK",
+      "message": "success",
+      "data": {
+        "count": 2,
+        "next": null,
+        "previous": null,
+        "results": [
+          {
+            "creator_id": "demo-creator-001",
+            "display_name": "Synthetic Creator One",
+            "platform": "mock",
+            "country": "US",
+            "status": "candidate"
+          },
+          {
+            "creator_id": "demo-creator-002",
+            "display_name": "Synthetic Creator Two",
+            "platform": "mock",
+            "country": "GB",
+            "status": "active"
+          }
+        ]
+      }
+    },
+    "/mock/creator-management/collaborations/": {
+      "success": true,
+      "code": "OK",
+      "message": "success",
+      "data": {
+        "count": 1,
+        "next": null,
+        "previous": null,
+        "results": [
+          {
+            "collaboration_id": "demo-collaboration-001",
+            "creator_id": "demo-creator-001",
+            "product_code": "LOCAL-SPU-A",
+            "status": "proposal",
+            "result_source": "synthetic"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,83 @@
+name: saas-collab-local-rc
+
+services:
+  mysql:
+    image: ${LOCAL_SANDBOX_MYSQL_IMAGE:?Set an approved MySQL image digest}
+    profiles: [release-candidate]
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - local-rc-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: ${LOCAL_SANDBOX_REDIS_IMAGE:?Set an approved Redis image digest}
+    profiles: [release-candidate]
+    expose: ["6379"]
+    volumes:
+      - local-rc-redis-data:/data
+
+  backend:
+    image: ${LOCAL_SANDBOX_BACKEND_IMAGE:?Set the CI backend image digest}
+    profiles: [release-candidate]
+    command:
+      - sh
+      - -c
+      - python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      CORS_ALLOWED_ORIGINS: http://localhost:${LOCAL_SANDBOX_RC_FRONTEND_PORT:-4173}
+      DB_ENGINE: django.db.backends.mysql
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      INTEGRATION_ENCRYPTION_PROVIDER: test-only
+      LOCAL_SANDBOX_ENVIRONMENT: local-sandbox
+      SANDBOX_ALLOW_REAL_PLATFORM: "false"
+      SANDBOX_ALLOW_HIGH_RISK_AUTOMATION: "false"
+    ports:
+      - "127.0.0.1:${LOCAL_SANDBOX_RC_BACKEND_PORT:-8001}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; request=urllib.request.Request('http://127.0.0.1:8000/api/internal/health/', headers={'Host':'localhost'}); raise SystemExit(0 if urllib.request.urlopen(request, timeout=3).status == 200 else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  frontend:
+    image: ${LOCAL_SANDBOX_FRONTEND_IMAGE:?Set the CI frontend image digest}
+    profiles: [release-candidate]
+    ports:
+      - "127.0.0.1:${LOCAL_SANDBOX_RC_FRONTEND_PORT:-4173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  local-rc-mysql-data:
+  local-rc-redis-data:
