@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "module": "procurement",
+  "status": "mock",
+  "routes": {
+    "/mock/procurement/orders/": {
+      "success": true,
+      "code": "OK",
+      "message": "success",
+      "data": {
+        "count": 1,
+        "next": null,
+        "previous": null,
+        "results": [
+          {
+            "po_no": "LOCAL-PO-A",
+            "sku_code": "LOCAL-SKU-A",
+            "supplier_id": 1001,
+            "quantity": 100,
+            "status": "draft",
+            "approval_status": "draft"
+          }
+        ]
+      }
+    },
+    "/mock/procurement/supplier-tasks/": {
+      "success": true,
+      "code": "OK",
+      "message": "success",
+      "data": {
+        "count": 1,
+        "next": null,
+        "previous": null,
+        "results": [
+          {
+            "task_no": "LOCAL-TASK-A",
+            "supplier_id": 1001,
+            "production_quantity": 100,
+            "completed_quantity": 60,
+            "status": "in_progress"
+          }
+        ]
+      }
+    }
+  }
+}
