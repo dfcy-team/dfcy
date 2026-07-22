@@ -1,5 +1,7 @@
 # SANDBOX-ARCH-001 上线准入门禁
 
+> 状态说明：本门禁保留为独立基础设施 Sandbox 到 Pilot 的严格路径。当前默认发布流程使用 `sandbox_arch_002_production_release_gate.md`；真实平台、高风险自动化、生产凭据和资金操作仍必须专项评审。
+
 ## 1. 适用范围
 
 本门禁控制应用制品从 CI 进入 Sandbox、从 Sandbox 进入受控 Pilot，以及后续申请 Production 的流程。“上线”包括系统发布和任何可能影响真实商品、订单、供应商、财务、平台或 RPA 的能力启用。
