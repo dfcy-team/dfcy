@@ -1,5 +1,7 @@
 # SANDBOX-ARCH-001 沙箱环境合同
 
+> 状态说明：本合同保留为独立基础设施 Sandbox 的严格参考。当前默认交付链路已由 `sandbox_arch_002_local_module_delivery.md` 取代；不得混用两套合同的 PASS 证据或以新合同降低 tenant、权限、密钥、不可变制品和高风险动作底线。
+
 ## 1. 目标
 
 Sandbox 是开发验证与受控 Pilot 之间的独立环境，用于完成真实前后端联调、权限和 tenant 隔离、浏览器 E2E、故障注入、备份恢复及发布回滚验证。Sandbox 不承载生产业务，不连接真实平台，不执行高风险自动化。

@@ -1,5 +1,7 @@
 # SANDBOX-ARCH-001 沙箱验收清单
 
+> 状态说明：本清单仅适用于独立基础设施 Sandbox 严格模式。当前模块化 Local Sandbox 使用 `sandbox_arch_002_lean_acceptance_checklist.md`；Production 发布仍必须遵守 SANDBOX-ARCH-002 的不可变制品、备份、回滚和安全底线。
+
 ## 1. 基线与部署
 
 - [ ] 部署来源为受保护 `main` 或审批后的 release candidate。
