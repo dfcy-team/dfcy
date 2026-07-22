@@ -8,11 +8,11 @@
       "code": "OK",
       "message": "success",
       "data": {
-        "sales_amount": "12500.00",
-        "available_stock": 120,
-        "reconciliation_status": "suggested",
-        "difference_amount": "-10.00",
-        "currency": "USD",
+        "tenant_count": 2,
+        "platforms": ["demo-platform-a", "demo-platform-b"],
+        "currencies": ["USD", "EUR"],
+        "inventory_cases": ["normal", "stockout", "overstock"],
+        "reconciliation_cases": ["matched", "difference"],
         "source": "synthetic"
       }
     },
@@ -21,17 +21,32 @@
       "code": "OK",
       "message": "success",
       "data": {
-        "count": 1,
+        "count": 6,
         "next": null,
         "previous": null,
         "results": [
-          {
-            "sku_code": "LOCAL-SKU-A",
-            "available_stock": 120,
-            "average_daily_sales": "8.00",
-            "coverage_days": "15.00",
-            "reconciliation_status": "suggested"
-          }
+          {"tenant_code": "local-sandbox-a", "sku_code": "LOCAL-SKU-A-NORMAL", "platform": "demo-platform-a", "available_stock": 120, "average_daily_sales": "8.00", "coverage_days": "15.00", "inventory_case": "normal"},
+          {"tenant_code": "local-sandbox-a", "sku_code": "LOCAL-SKU-A-STOCKOUT", "platform": "demo-platform-a", "available_stock": 0, "average_daily_sales": "6.00", "coverage_days": "0.00", "inventory_case": "stockout"},
+          {"tenant_code": "local-sandbox-a", "sku_code": "LOCAL-SKU-A-OVERSTOCK", "platform": "demo-platform-a", "available_stock": 500, "average_daily_sales": "1.00", "coverage_days": "500.00", "inventory_case": "overstock"},
+          {"tenant_code": "local-sandbox-b", "sku_code": "LOCAL-SKU-B-NORMAL", "platform": "demo-platform-b", "available_stock": 120, "average_daily_sales": "8.00", "coverage_days": "15.00", "inventory_case": "normal"},
+          {"tenant_code": "local-sandbox-b", "sku_code": "LOCAL-SKU-B-STOCKOUT", "platform": "demo-platform-b", "available_stock": 0, "average_daily_sales": "6.00", "coverage_days": "0.00", "inventory_case": "stockout"},
+          {"tenant_code": "local-sandbox-b", "sku_code": "LOCAL-SKU-B-OVERSTOCK", "platform": "demo-platform-b", "available_stock": 500, "average_daily_sales": "1.00", "coverage_days": "500.00", "inventory_case": "overstock"}
+        ]
+      }
+    },
+    "/mock/sales-inventory-finance-reconciliation/reconciliation/": {
+      "success": true,
+      "code": "OK",
+      "message": "success",
+      "data": {
+        "count": 4,
+        "next": null,
+        "previous": null,
+        "results": [
+          {"tenant_code": "local-sandbox-a", "platform": "demo-platform-a-usd", "currency": "USD", "status": "suggested", "difference_amount": "0.00", "account_mask": "****1234"},
+          {"tenant_code": "local-sandbox-a", "platform": "demo-platform-a-eur", "currency": "EUR", "status": "suggested", "difference_amount": "-10.00", "account_mask": "****1234"},
+          {"tenant_code": "local-sandbox-b", "platform": "demo-platform-b-usd", "currency": "USD", "status": "suggested", "difference_amount": "0.00", "account_mask": "****1234"},
+          {"tenant_code": "local-sandbox-b", "platform": "demo-platform-b-eur", "currency": "EUR", "status": "suggested", "difference_amount": "-10.00", "account_mask": "****1234"}
         ]
       }
     }

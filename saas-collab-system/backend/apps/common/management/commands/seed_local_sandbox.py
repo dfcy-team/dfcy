@@ -201,49 +201,65 @@ class Command(BaseCommand):
 
     def _seed_sales_inventory_finance(self, context):
         for suffix, tenant in (("A", context["tenant_a"]), ("B", context["tenant_b"])):
-            spu, _ = ProductSPU.objects.update_or_create(
-                tenant=tenant,
-                spu_code=f"LOCAL-SPU-{suffix}",
-                defaults={
-                    "product_name": f"Synthetic Product {suffix}",
-                    "category": "local-demo",
-                    "lifecycle_status": ProductSPU.LifecycleStatus.ACTIVE,
-                    "sales_status": ProductSPU.SalesStatus.ON_SALE,
-                },
+            stock_cases = (
+                ("NORMAL", 120, 8, ProductStatus.ACTIVE),
+                ("STOCKOUT", 0, 6, ProductStatus.SLOW_MOVING),
+                ("OVERSTOCK", 500, 1, ProductStatus.ACTIVE),
             )
-            sku, _ = ProductSKU.objects.update_or_create(
-                tenant=tenant,
-                sku_code=f"LOCAL-SKU-{suffix}",
-                defaults={
-                    "spu": spu,
-                    "size": "demo-size",
-                    "material": "synthetic-material",
-                    "selling_points": ["synthetic", "local-only"],
-                    "package_weight": Decimal("1.250"),
-                },
-            )
-            ProductStatusSnapshot.objects.update_or_create(
-                tenant=tenant,
-                sku=sku,
-                source_reference=f"local-sandbox-{suffix.lower()}",
-                defaults={
-                    "spu": spu,
-                    "source": ProductStatusSnapshot.Source.MANUAL,
-                    "metrics_payload": {
-                        "available_stock": 120 if suffix == "A" else 40,
-                        "average_daily_sales": 8,
-                        "source": "synthetic",
+            for case, available_stock, average_daily_sales, product_status in stock_cases:
+                spu, _ = ProductSPU.objects.update_or_create(
+                    tenant=tenant,
+                    spu_code=f"LOCAL-SPU-{suffix}-{case}",
+                    defaults={
+                        "product_name": f"Synthetic Product {suffix} {case.title()}",
+                        "category": "local-demo",
+                        "lifecycle_status": ProductSPU.LifecycleStatus.ACTIVE,
+                        "sales_status": ProductSPU.SalesStatus.ON_SALE,
                     },
-                    "calculated_status": ProductStatus.ACTIVE,
-                },
-            )
+                )
+                sku, _ = ProductSKU.objects.update_or_create(
+                    tenant=tenant,
+                    sku_code=f"LOCAL-SKU-{suffix}-{case}",
+                    defaults={
+                        "spu": spu,
+                        "size": "demo-size",
+                        "material": "synthetic-material",
+                        "selling_points": ["synthetic", "local-only"],
+                        "package_weight": Decimal("1.250"),
+                    },
+                )
+                ProductStatusSnapshot.objects.update_or_create(
+                    tenant=tenant,
+                    sku=sku,
+                    source_reference=f"local-sandbox-{suffix.lower()}-{case.lower()}",
+                    defaults={
+                        "spu": spu,
+                        "source": ProductStatusSnapshot.Source.MANUAL,
+                        "metrics_payload": {
+                            "available_stock": available_stock,
+                            "average_daily_sales": average_daily_sales,
+                            "inventory_case": case.lower(),
+                            "source": "synthetic",
+                        },
+                        "calculated_status": product_status,
+                    },
+                )
 
-        tenant = context["tenant_a"]
-        import_demo_statement(tenant)
-        import_demo_withdrawal(tenant)
-        import_demo_bank_receipt(tenant, amount=Decimal("965.00"), account_hint="local-demo-1234")
-        if not ReconciliationMatch.objects.filter(tenant=tenant).exists():
-            run_mock_reconciliation(tenant)
+            finance_cases = (
+                (f"demo-platform-{suffix.lower()}-usd", "USD", Decimal("975.00")),
+                (f"demo-platform-{suffix.lower()}-eur", "EUR", Decimal("965.00")),
+            )
+            for platform, currency, receipt_amount in finance_cases:
+                import_demo_statement(tenant, platform=platform, currency=currency)
+                import_demo_withdrawal(tenant, platform=platform, currency=currency)
+                import_demo_bank_receipt(
+                    tenant,
+                    amount=receipt_amount,
+                    account_hint=f"local-demo-{suffix.lower()}-1234",
+                    platform=platform,
+                    currency=currency,
+                )
+                run_mock_reconciliation(tenant, platform=platform, currency=currency)
 
     def _seed_creator_management(self, context):
         role = Role.objects.get(tenant=context["tenant_a"], code="creator_mock_viewer")

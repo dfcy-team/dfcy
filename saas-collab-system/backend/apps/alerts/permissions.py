@@ -2,8 +2,10 @@ from django.db.models import Q
 from rest_framework.permissions import BasePermission
 
 from apps.accounts.models import CustomUser
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied
 from apps.permissions.models import DataScope
-from apps.permissions.services import check_user_permission, get_user_data_scope
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 
 class AlertActionPermission(BasePermission):
@@ -11,13 +13,16 @@ class AlertActionPermission(BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        return bool(
+        allowed = bool(
             self.permission_code
             and user
             and user.is_authenticated
             and user.user_type == CustomUser.UserType.INTERNAL
             and check_user_permission(user, self.permission_code)
         )
+        if allowed and not get_permission_data_scopes(user, self.permission_code):
+            raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
+        return allowed
 
 
 class IsAlertViewer(AlertActionPermission):
@@ -32,11 +37,11 @@ class IsAlertManager(AlertActionPermission):
     permission_code = "alerts.manage"
 
 
-def filter_inventory_alerts(user, queryset):
+def filter_inventory_alerts(user, queryset, permission_code="alerts.view"):
     queryset = queryset.filter(tenant=user.tenant)
     if user.is_superuser:
         return queryset
-    scopes = get_user_data_scope(user)
+    scopes = get_permission_data_scopes(user, permission_code)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return queryset
     allowed = Q(pk__in=[])
@@ -57,11 +62,11 @@ def filter_inventory_alerts(user, queryset):
     return queryset.filter(allowed)
 
 
-def filter_business_alerts(user, queryset):
+def filter_business_alerts(user, queryset, permission_code="alerts.view"):
     queryset = queryset.filter(tenant=user.tenant)
     if user.is_superuser:
         return queryset
-    scopes = get_user_data_scope(user)
+    scopes = get_permission_data_scopes(user, permission_code)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return queryset
     allowed = Q(pk__in=[])

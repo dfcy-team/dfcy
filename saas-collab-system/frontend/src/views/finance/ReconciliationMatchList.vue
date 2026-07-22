@@ -5,6 +5,7 @@
     risk-note="自动匹配只产生建议，最终确认或拒绝必须走后端财务授权接口。"
     :loader="fetchReconciliationMatches"
     :columns="columns"
+    :filter-configs="filters"
     :action-configs="actionConfigs"
     empty-text="暂无匹配记录"
   />
@@ -22,6 +23,12 @@ const columns = [
   { prop: 'status', label: '状态', type: 'status' },
   { prop: 'reviewed_by_id', label: '复核人' },
   { prop: 'reviewed_at', label: '复核时间' }
+];
+
+const filters = [
+  { key: 'platform', label: '平台', placeholder: 'demo-platform' },
+  { key: 'currency', label: '币种', placeholder: 'USD' },
+  { key: 'status', label: '状态', options: [{ label: '待复核', value: 'suggested' }, { label: '已确认', value: 'confirmed' }, { label: '已拒绝', value: 'rejected' }] }
 ];
 
 const actionConfigs = [

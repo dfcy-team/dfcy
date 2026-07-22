@@ -167,6 +167,7 @@ def test_replenishment_api_tenant_scope_and_action_permissions():
     evaluator = create_user(tenant, "evaluator")
     reviewer = create_user(tenant, "reviewer-api")
     grant(viewer, "replenishment.view", DataScope.ScopeType.CUSTOM, {"sku_ids": [sku.id]})
+    grant(viewer, "analytics.view")
     grant(evaluator, "replenishment.evaluate", DataScope.ScopeType.CUSTOM, {"sku_ids": [sku.id]})
     grant(reviewer, "replenishment.review")
 

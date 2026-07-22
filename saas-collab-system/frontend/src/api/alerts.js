@@ -1,5 +1,5 @@
 import { requestApi, requestWithMockFallback } from './request';
-import { mockBusinessAlerts } from '../mock/alerts';
+import { mockBusinessAlerts, mockInventoryAlerts } from '../mock/alerts';
 
 export const fetchBusinessAlerts = (params = {}) =>
   requestWithMockFallback(
@@ -14,7 +14,12 @@ export const assignBusinessAlert = (id, payload) => requestApi({ method: 'post',
 export const silenceBusinessAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/business/${id}/silence/`, data: payload });
 export const closeBusinessAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/business/${id}/close/`, data: payload });
 
-export const fetchInventoryAlerts = (params = {}) => requestApi({ method: 'get', url: '/api/internal/alerts/inventory/', params });
+export const fetchInventoryAlerts = (params = {}) =>
+  requestWithMockFallback(
+    { method: 'get', url: '/api/internal/alerts/inventory/', params },
+    mockInventoryAlerts,
+    'alerts.inventory'
+  );
 export const fetchInventoryAlert = (id) => requestApi({ method: 'get', url: `/api/internal/alerts/inventory/${id}/` });
 export const evaluateInventoryAlertsMock = (payload) => requestApi({ method: 'post', url: '/api/internal/alerts/inventory/evaluate-mock/', data: payload });
 export const assignInventoryAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/inventory/${id}/assign/`, data: payload });

@@ -186,4 +186,9 @@ export async function requestWithMockFallback(config, mockHandler, moduleName) {
 export const getMockOrRequest = (moduleName, config, mockHandler) =>
   requestWithMockFallback(config, mockHandler, moduleName);
 
+export function createIdempotencyKey(prefix = 'request') {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? `${prefix}-${uuid}` : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default request;
