@@ -1,0 +1,36 @@
+services:
+  mysql:
+    image: ${SANDBOX_MYSQL_IMAGE:?Set an immutable MySQL 8.4 image reference in .env.sandbox}
+    restart: unless-stopped
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    ports:
+      - "${SANDBOX_DB_BIND_IP:?Set the private Sandbox database host IP}:${SANDBOX_DB_PORT:-3307}:3306"
+    volumes:
+      - sandbox-mysql-data:/var/lib/mysql
+    networks:
+      - sandbox-db-internal
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+volumes:
+  sandbox-mysql-data:
+    name: saas-sandbox-mysql-data
+
+networks:
+  sandbox-db-internal:
+    name: saas-sandbox-db-network
+    driver: bridge
