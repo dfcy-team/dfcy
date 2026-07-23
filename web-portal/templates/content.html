@@ -1,134 +1,158 @@
-{% extends "base.html" %}
-{% block title %}视频上传 · 鼎峰TK内容管家{% endblock %}
+{% extends "content_base.html" %}
+{% block title %}Create and share | Dingfeng Creator Studio{% endblock %}
 {% block content %}
-<section class="page-header">
-  <h1>鼎峰TK内容管家</h1>
-  <p class="lead">TikTok Content Posting API — 授权后上传视频到 TikTok 收件箱（草稿）或直接发布。</p>
+<section class="studio-intro">
+  <div>
+    <span class="eyebrow">CREATOR PUBLISHING WORKSPACE</span>
+    <h1>Publish your original video with full control.</h1>
+    <p>
+      Connect your own TikTok account, review the video and publishing settings,
+      then choose to send a draft to TikTok or publish directly.
+    </p>
+  </div>
+  <ol class="flow-steps" aria-label="Publishing steps">
+    <li class="{{ 'done' if token.authorized else 'current' }}"><b>1</b><span>Connect</span></li>
+    <li class="{{ 'current' if token.authorized else '' }}"><b>2</b><span>Review</span></li>
+    <li><b>3</b><span>Publish</span></li>
+  </ol>
 </section>
 
-{% if token.authorized %}
-<div class="card ok">
-  <h2>✓ 已授权，可直接上传</h2>
-  <p>当前账号已连接 TikTok，<strong>无需重复授权</strong>。选视频后点「上传草稿」即可。</p>
-  <p class="muted" style="margin:0;">演示期间请勿点「重新授权」，否则会误报 Secret 错误（旧 token 仍有效）。</p>
+{% if auth_error %}
+<div class="notice error" role="alert">
+  <strong>We could not connect your account.</strong>
+  <span>{{ auth_error }}</span>
 </div>
 {% elif auth_ok %}
-<div class="card ok">
-  <h2>授权成功</h2>
-  <p>已保存 TikTok 用户 token，可以上传视频。</p>
-</div>
-{% elif auth_error %}
-<div class="card alert">
-  <h2>授权失败</h2>
-  <p>{{ auth_error }}</p>
-  {% if 'Client key or secret' in auth_error or 'invalid_client' in auth_error %}
-  <p class="muted" style="margin-top:10px;">
-    若 Secret 已在服务器配置好，多半是<strong>重复点了授权</strong>或 code 已过期。
-    展开下方「凭据配置」核对；只有 Portal Reset 了 Secret 才需更新。
-  </p>
-  {% endif %}
+<div class="notice success" role="status">
+  <strong>TikTok account connected.</strong>
+  <span>Confirm the account below before selecting a video.</span>
 </div>
 {% endif %}
 
-{% if not token.authorized or not credentials_ok %}
-<div class="card">
-  <h2>凭据配置</h2>
-  {% if credentials_ok %}
-  <p class="ok" style="margin:0 0 12px;">
-    Client Secret 已保存在服务器（<code>视频上传/app.env</code>），<strong>日常授权无需重复填写</strong>。
-    只有 Portal 里点了 Reset Client Secret 之后才需要更新下方输入框。
-  </p>
-  <details>
-    <summary class="muted" style="cursor:pointer;">需要更新 Secret 时展开</summary>
-    <ol class="muted" style="margin:12px 0 12px 1.2em;">
-      <li>打开 <a href="https://developers.tiktok.com/app/7647705750139127826/sandbox/7648797885961848833" target="_blank" rel="noopener">沙盒 Portal</a></li>
-      <li>证书区域点 <strong>Reset Client Secret</strong></li>
-      <li>复制新的客户机密（32 位，不是 Client Key）</li>
-      <li>粘贴到下方 → 保存 → 再点「连接 TikTok」</li>
-    </ol>
-    <form id="form-secret" class="form-grid">
-      <label class="span2">Client Secret（客户机密）
-        <input type="password" name="secret" placeholder="仅在 Reset 后粘贴新 Secret" autocomplete="off"/>
-      </label>
-      <button type="submit" class="btn span2">保存 Secret 并验证</button>
-    </form>
-    <div id="secret-result" class="muted" style="margin-top:8px;"></div>
-  </details>
-  {% else %}
-  <p class="alert" style="margin:0 0 12px;">
-    服务器上的 Client Secret 与 TikTok Portal 不一致，或尚未配置。请按下列步骤 Reset 后粘贴新 Secret。
-  </p>
-  <ol class="muted" style="margin:0 0 12px 1.2em;">
-    <li>打开 <a href="https://developers.tiktok.com/app/7647705750139127826/sandbox/7648797885961848833" target="_blank" rel="noopener">沙盒 Portal</a></li>
-    <li>证书区域点 <strong>Reset Client Secret</strong>（重置客户机密）</li>
-    <li>点眼睛图标，复制<strong>新的</strong>客户机密（32 位，不是 Client Key）</li>
-    <li>粘贴到下方 → 保存 → 点「连接 TikTok」重新授权</li>
-  </ol>
-  <form id="form-secret" class="form-grid">
-    <label class="span2">Client Secret（客户机密）
-      <input type="password" name="secret" placeholder="Reset 后粘贴新 Secret，不要填 Client Key" autocomplete="off"/>
-    </label>
-    <button type="submit" class="btn primary span2">保存 Secret 并验证</button>
-  </form>
-  <div id="secret-result" class="muted" style="margin-top:8px;"></div>
-  {% endif %}
-</div>
-{% endif %}
-
-<div class="grid two">
-  <div class="card">
-    <h2>① TikTok 授权</h2>
-    {% if token.authorized %}
-    <ul class="kv">
-      <li><span>状态</span><span class="badge ok">已授权</span></li>
-      <li><span>Open ID</span><code>{{ token.open_id }}</code></li>
-      <li><span>Scope</span><code>{{ token.scope }}</code></li>
-    </ul>
-    <details style="margin-top:12px;">
-      <summary class="muted" style="cursor:pointer;">需要换账号时再重新授权</summary>
-      <p style="margin:8px 0;">
-        <a class="btn" href="{{ url_for('content_authorize') }}">重新授权</a>
-      </p>
-    </details>
-    {% else %}
-    <p class="muted">尚未授权，请先连接 TikTok 账号。</p>
-    <p style="margin-top:12px;">
-      <a class="btn primary" href="{{ url_for('content_authorize') }}">连接 TikTok</a>
-    </p>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <h2>② 上传视频</h2>
-    <form id="form-upload" class="form-grid" enctype="multipart/form-data">
-      <label class="span2">视频文件 (mp4)
-        <input type="file" name="video" accept="video/mp4,video/*" required/>
-      </label>
-      <label class="span2">标题（直接发布时填写，草稿可留空）
-        <input type="text" name="title" placeholder="视频标题"/>
-      </label>
-      <div class="span2 upload-actions">
-        <button type="button" id="btn-upload-draft" class="btn primary" {% if not token.authorized %}disabled{% endif %}>
-          上传草稿（收件箱）
-        </button>
-        <button type="button" id="btn-upload-direct" class="btn" {% if not token.authorized %}disabled{% endif %}>
-          直接发布
-        </button>
+<section class="publisher-shell" data-authorized="{{ 'true' if token.authorized else 'false' }}">
+  <div class="preview-pane">
+    <div class="pane-heading">
+      <div>
+        <span class="section-label">VIDEO PREVIEW</span>
+        <h2>Your content</h2>
       </div>
-    </form>
-    <div id="upload-result" class="muted" style="margin-top:12px;"></div>
+      <span id="video-meta" class="quiet">No video selected</span>
+    </div>
+    <div class="video-stage" id="video-stage">
+      <video id="video-preview" controls playsinline hidden></video>
+      <div class="video-empty" id="video-empty">
+        <span class="upload-symbol">+</span>
+        <strong>Select an original video</strong>
+        <span>MP4, MOV or WebM · up to your account duration limit</span>
+      </div>
+    </div>
+    <label class="file-picker" for="video-file">
+      <span>Choose video</span>
+      <input id="video-file" form="form-upload" type="file" name="video"
+             accept="video/mp4,video/quicktime,video/webm,video/*" required/>
+    </label>
+    <p class="content-note">
+      Upload only content you created or have permission to use. Dingfeng does
+      not add watermarks, logos or preset promotional text to your video.
+    </p>
   </div>
-</div>
 
-<div class="card">
-  <h2>说明</h2>
-  <ul>
-    <li><strong>草稿</strong>：视频进入 TikTok App 收件箱，可在 App 内编辑后发布（需 <code>video.upload</code>）。</li>
-    <li><strong>直接发布</strong>：自动发布到账号（沙盒默认仅自己可见，需 <code>video.publish</code>）。</li>
-    <li>Client Key: <code>{{ client_key }}</code></li>
-    <li>回调地址: <code>{{ redirect_uri }}</code>（请在 Portal 添加此 URI）</li>
-  </ul>
-</div>
+  <div class="settings-pane">
+    <div class="account-block">
+      <div>
+        <span class="section-label">DESTINATION ACCOUNT</span>
+        {% if token.authorized %}
+        <div id="creator-loading" class="creator-loading">Checking the connected TikTok creator...</div>
+        <div id="creator-card" class="creator-card" hidden>
+          <img id="creator-avatar" alt="Connected creator avatar"/>
+          <div><strong id="creator-nickname"></strong><span id="creator-username"></span></div>
+          <span class="connected-dot">Connected</span>
+        </div>
+        <div id="creator-error" class="inline-error" hidden></div>
+        {% else %}
+        <p>Connect TikTok to confirm exactly which creator account will receive this video.</p>
+        {% endif %}
+      </div>
+      {% if token.authorized %}
+      <button type="button" id="btn-disconnect" class="text-button">Disconnect</button>
+      {% else %}
+      <a class="primary-button" href="{{ url_for('content_authorize') }}">Connect TikTok</a>
+      {% endif %}
+    </div>
+
+    <form id="form-upload" enctype="multipart/form-data">
+      <fieldset {% if not token.authorized %}disabled{% endif %}>
+        <legend>Publishing method</legend>
+        <div class="segmented" role="radiogroup" aria-label="Publishing method">
+          <label><input type="radio" name="publish_mode" value="draft" checked/><span>Send to drafts</span></label>
+          <label><input type="radio" name="publish_mode" value="direct"/><span>Direct post</span></label>
+        </div>
+        <p id="mode-help" class="field-help">
+          TikTok will send an inbox notification so you can finish editing and publish in the TikTok app.
+        </p>
+
+        <div id="direct-fields" hidden>
+          <label class="field">
+            <span>Caption</span>
+            <textarea name="title" maxlength="2200" rows="4"
+                      placeholder="Write your caption, mentions and hashtags"></textarea>
+            <small><span id="caption-count">0</span> / 2200</small>
+          </label>
+
+          <label class="field">
+            <span>Who can view this post?</span>
+            <select name="privacy_level" id="privacy-level">
+              <option value="">Select privacy setting</option>
+            </select>
+          </label>
+
+          <div class="field">
+            <span>Allow people to</span>
+            <div class="toggle-grid">
+              <label><input type="checkbox" name="allow_comment"/><span>Comment</span></label>
+              <label><input type="checkbox" name="allow_duet"/><span>Duet</span></label>
+              <label><input type="checkbox" name="allow_stitch"/><span>Stitch</span></label>
+            </div>
+            <small>Options unavailable in the connected account's TikTok settings are disabled.</small>
+          </div>
+
+          <div class="field">
+            <span>Commercial content disclosure</span>
+            <div class="check-stack">
+              <label><input type="checkbox" name="brand_organic"/> This video promotes my own brand or business.</label>
+              <label><input type="checkbox" name="brand_content"/> This video is a paid partnership for another brand.</label>
+            </div>
+          </div>
+        </div>
+
+        <label class="consent-row">
+          <input type="checkbox" name="consent" required/>
+          <span id="consent-text">
+            I reviewed this video and explicitly consent to send it to my connected TikTok account.
+          </span>
+        </label>
+
+        <div class="publish-actions">
+          <button type="submit" id="btn-publish" class="primary-button">Send to TikTok drafts</button>
+        </div>
+      </fieldset>
+    </form>
+
+    <div id="upload-result" class="publish-result" hidden aria-live="polite"></div>
+  </div>
+</section>
+
+<section class="public-explainer">
+  <div>
+    <span class="section-label">BUILT FOR CREATORS</span>
+    <h2>You decide what is sent and where it goes.</h2>
+  </div>
+  <div class="principles">
+    <article><b>Account clarity</b><p>The connected creator nickname is shown before every publishing action.</p></article>
+    <article><b>Editable settings</b><p>You select the caption, audience, interaction and commercial disclosure settings.</p></article>
+    <article><b>Visible status</b><p>After transfer, the processing result remains visible through TikTok's publishing status.</p></article>
+  </div>
+</section>
 {% endblock %}
 
 {% block scripts %}

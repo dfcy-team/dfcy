@@ -13,8 +13,12 @@ from config import API_BASE
 from oauth import get_access_token
 
 
-def _api_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    token = get_access_token()
+def _api_post(
+    path: str,
+    payload: dict[str, Any],
+    access_token: str | None = None,
+) -> dict[str, Any]:
+    token = access_token or get_access_token()
     url = f"{API_BASE}{path}"
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -69,7 +73,11 @@ def _put_file(upload_url: str, video_path: Path) -> None:
         raise RuntimeError(f"上传视频失败 HTTP {e.code}: {raw[:300]}") from e
 
 
-def upload_draft(video_path: Path) -> dict[str, Any]:
+def upload_draft(
+    video_path: Path,
+    *,
+    access_token: str | None = None,
+) -> dict[str, Any]:
     """
     上传到 TikTok 收件箱（草稿），用户可在 App 内编辑后发布。
     需要 scope: video.upload
@@ -93,6 +101,7 @@ def upload_draft(video_path: Path) -> dict[str, Any]:
                 "total_chunk_count": 1,
             }
         },
+        access_token,
     )
     upload_url = init.get("upload_url")
     publish_id = init.get("publish_id")
@@ -111,6 +120,9 @@ def upload_direct(
     disable_comment: bool = False,
     disable_duet: bool = False,
     disable_stitch: bool = False,
+    brand_content_toggle: bool = False,
+    brand_organic_toggle: bool = False,
+    access_token: str | None = None,
 ) -> dict[str, Any]:
     """
     直接发布到 TikTok（沙盒默认仅自己可见 SELF_ONLY）。
@@ -130,6 +142,8 @@ def upload_direct(
                 "disable_comment": disable_comment,
                 "disable_duet": disable_duet,
                 "disable_stitch": disable_stitch,
+                "brand_content_toggle": brand_content_toggle,
+                "brand_organic_toggle": brand_organic_toggle,
             },
             "source_info": {
                 "source": "FILE_UPLOAD",
@@ -138,6 +152,7 @@ def upload_direct(
                 "total_chunk_count": 1,
             },
         },
+        access_token,
     )
     upload_url = init.get("upload_url")
     publish_id = init.get("publish_id")
@@ -148,5 +163,17 @@ def upload_direct(
     return {"mode": "direct", "publish_id": publish_id, "video": video_path.name}
 
 
-def fetch_publish_status(publish_id: str) -> dict[str, Any]:
-    return _api_post("/v2/post/publish/status/fetch/", {"publish_id": publish_id})
+def query_creator_info(access_token: str | None = None) -> dict[str, Any]:
+    return _api_post("/v2/post/publish/creator_info/query/", {}, access_token)
+
+
+def fetch_publish_status(
+    publish_id: str,
+    *,
+    access_token: str | None = None,
+) -> dict[str, Any]:
+    return _api_post(
+        "/v2/post/publish/status/fetch/",
+        {"publish_id": publish_id},
+        access_token,
+    )

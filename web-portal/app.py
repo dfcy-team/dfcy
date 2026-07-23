@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-鼎峰 TikTok Shop Web 平台
-- 首页 / 控制台 / OAuth 回调 / 隐私政策
-- 在线触发 Excel 导出并下载
+?? TikTok Shop Web ??
+- ?? / ??? / OAuth ?? / ????
+- ???? Excel ?????
 """
 from __future__ import annotations
 
 import sys
 import re
 import json
+import secrets
+import uuid
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -106,7 +108,7 @@ def login_page():
         if user:
             auth.login_user(user)
             return redirect(next_url)
-        error = "用户名或密码错误"
+        error = "????????"
     return render_template(
         "login.html",
         error=error,
@@ -122,7 +124,7 @@ def logout():
 
 
 def _guess_shop_for_callback(region: str) -> str:
-    """无 state 时根据区域与当前 active 店猜测店键。"""
+    """? state ???????? active ??????"""
     region = (region or "").upper()
     try:
         import json
@@ -211,7 +213,7 @@ def authorize_page():
 def api_authorize_link():
     shop_key = (request.args.get("shop") or "").strip()
     if not shop_key:
-        return jsonify({"ok": False, "error": "缺少 shop 参数"}), 400
+        return jsonify({"ok": False, "error": "?? shop ??"}), 400
     try:
         url = shops.build_authorize_url(shop_key)
         return jsonify({"ok": True, "url": url, "shop_key": shop_key.upper()})
@@ -226,7 +228,7 @@ def api_setup_authorize():
     callback_url = (data.get("callback_url") or "").strip()
     pick = data.get("pick_index")
     if not shop_key or not callback_url:
-        return jsonify({"ok": False, "error": "请填写店铺键和完整回调 URL"}), 400
+        return jsonify({"ok": False, "error": "??????????? URL"}), 400
     try:
         pick_i = int(pick) if pick not in (None, "", "null") else None
         result = shops.setup_and_authorize(
@@ -254,7 +256,7 @@ def ads_page():
     auth_ok = request.args.get("ok") == "1" and tok.get("authorized")
     auth_error = request.args.get("error", "")
     if request.args.get("ok") == "1" and not tok.get("authorized"):
-        auth_error = auth_error or "授权回调完成但未保存 token，请重新点击「连接广告账户」"
+        auth_error = auth_error or "?????????? token??????????????"
     if tok.get("authorized") and auth_error:
         auth_error = ""
     cred_probe = marketing_auth.verify_credentials()
@@ -283,7 +285,7 @@ def ads_page():
             {
                 "key": "",
                 "tag": tag,
-                "label": (item.get("note") or tag) + "（自定义）",
+                "label": (item.get("note") or tag) + "?????",
                 "custom": True,
             }
         )
@@ -307,7 +309,7 @@ def ads_page():
 def ads_authorize():
     shop_name = (request.args.get("shop_name") or request.form.get("shop_name") or "").strip()
     if not shop_name:
-        return redirect(url_for("ads_page", error="请先填写绑定店铺名"))
+        return redirect(url_for("ads_page", error="?????????"))
     session["ads_shop_label"] = shop_name
     url, _state = marketing_auth.build_authorize_url()
     return redirect(url)
@@ -317,12 +319,12 @@ def ads_authorize():
 def api_ads_shop_label():
     tok = marketing_auth.token_status()
     if not tok.get("authorized"):
-        return jsonify({"ok": False, "error": "请先完成广告账户授权"}), 400
+        return jsonify({"ok": False, "error": "??????????"}), 400
     data = request.get_json(force=True, silent=True) or {}
     old_name = (data.get("old_shop_name") or data.get("shop_label") or "").strip()
     shop_name = (data.get("shop_name") or "").strip()
     if not shop_name:
-        return jsonify({"ok": False, "error": "请填写店铺名"}), 400
+        return jsonify({"ok": False, "error": "??????"}), 400
     try:
         if old_name and old_name != shop_name:
             marketing_auth.save_shop_label(old_name, new_label=shop_name)
@@ -346,7 +348,7 @@ def api_ads_custom_shops_add():
     tag = (data.get("tag") or data.get("shop_name") or "").strip()
     note = (data.get("note") or "").strip()
     if not tag:
-        return jsonify({"ok": False, "error": "请填写店铺名/导出标签"}), 400
+        return jsonify({"ok": False, "error": "??????/????"}), 400
     try:
         shops = marketing_auth.add_custom_ad_shop(tag, note=note)
         return jsonify({"ok": True, "shops": shops, "tag": tag})
@@ -359,7 +361,7 @@ def api_ads_custom_shops_remove():
     data = request.get_json(force=True, silent=True) or {}
     tag = (data.get("tag") or data.get("shop_name") or request.args.get("tag") or "").strip()
     if not tag:
-        return jsonify({"ok": False, "error": "请提供店铺名"}), 400
+        return jsonify({"ok": False, "error": "??????"}), 400
     try:
         shops = marketing_auth.remove_custom_ad_shop(tag)
         return jsonify({"ok": True, "shops": shops})
@@ -372,7 +374,7 @@ def api_ads_revoke():
     data = request.get_json(force=True, silent=True) or {}
     shop_label = (data.get("shop_label") or "").strip()
     if not shop_label:
-        return jsonify({"ok": False, "error": "请提供 shop_label"}), 400
+        return jsonify({"ok": False, "error": "??? shop_label"}), 400
     try:
         marketing_auth.delete_shop_authorization(shop_label)
         tok = marketing_auth.token_status()
@@ -392,7 +394,7 @@ def api_ads_revoke():
 def api_ads_refresh_advertisers():
     tok = marketing_auth.token_status()
     if not tok.get("authorized"):
-        return jsonify({"ok": False, "error": "请先完成广告账户授权"}), 400
+        return jsonify({"ok": False, "error": "??????????"}), 400
     data = request.get_json(force=True, silent=True) or {}
     shop_label = (data.get("shop_label") or request.args.get("shop_label") or "").strip()
     try:
@@ -417,9 +419,9 @@ def api_ads_refresh_advertisers():
 def api_ads_default_advertiser():
     shop_label = (request.args.get("shop_label") or "").strip()
     if not shop_label:
-        return jsonify({"ok": False, "error": "请提供 shop_label"}), 400
+        return jsonify({"ok": False, "error": "??? shop_label"}), 400
     if not marketing_auth.binding_for_shop(shop_label):
-        return jsonify({"ok": False, "error": f"店铺「{shop_label}」尚未授权广告"}), 400
+        return jsonify({"ok": False, "error": f"???{shop_label}???????"}), 400
     adv_id = marketing_auth.resolve_default_advertiser_id(shop_label)
     return jsonify({"ok": True, "shop_label": shop_label, "advertiser_id": adv_id})
 
@@ -428,7 +430,7 @@ def api_ads_default_advertiser():
 def api_ads_export():
     tok = marketing_auth.token_status()
     if not tok.get("authorized"):
-        return jsonify({"ok": False, "error": "请先完成广告账户授权"}), 400
+        return jsonify({"ok": False, "error": "??????????"}), 400
     data = request.get_json(force=True, silent=True) or {}
     shop_label = (data.get("shop_label") or "").strip()
     advertiser_id = (data.get("advertiser_id") or "").strip()
@@ -439,15 +441,15 @@ def api_ads_export():
         shop_label = (data.get("file_prefix") or tok.get("shop_label") or "").strip()
     file_prefix = (data.get("file_prefix") or shop_label or "ADS").strip() or "ADS"
     if not shop_label:
-        return jsonify({"ok": False, "error": "请选择或填写绑定店铺名"}), 400
+        return jsonify({"ok": False, "error": "???????????"}), 400
     if not marketing_auth.binding_for_shop(shop_label):
-        return jsonify({"ok": False, "error": f"店铺「{shop_label}」尚未授权广告"}), 400
+        return jsonify({"ok": False, "error": f"???{shop_label}???????"}), 400
     if not advertiser_id:
         advertiser_id = marketing_auth.resolve_default_advertiser_id(shop_label)
     if not advertiser_id or not start_date or not end_date:
-        return jsonify({"ok": False, "error": "请填写广告账户与日期范围（未选广告户时将自动使用卖家中心绑定户）"}), 400
+        return jsonify({"ok": False, "error": "????????????????????????????????"}), 400
     if report_kind not in ("creative", "live", "cost"):
-        return jsonify({"ok": False, "error": "报表类型须为 creative、live 或 cost"}), 400
+        return jsonify({"ok": False, "error": "?????? creative?live ? cost"}), 400
     try:
         job_id = ads_exporter.start_ads_export(
             advertiser_id=advertiser_id,
@@ -481,7 +483,7 @@ def api_ads_secret():
     data = request.get_json(silent=True) or {}
     secret = (data.get("secret") or request.form.get("secret") or "").strip()
     if not secret:
-        return jsonify({"ok": False, "error": "请填写 App Secret"}), 400
+        return jsonify({"ok": False, "error": "??? App Secret"}), 400
     try:
         marketing_auth.save_app_secret(secret)
         probe = marketing_auth.verify_credentials()
@@ -490,17 +492,25 @@ def api_ads_secret():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+def _content_session_id() -> str:
+    session_id = str(session.get("content_session_id") or "")
+    if not session_id:
+        session_id = uuid.uuid4().hex
+        session["content_session_id"] = session_id
+        session.permanent = True
+    return session_id
+
+
 @app.route("/content")
 def content_page():
-    tok = content_video.token_status()
+    tok = content_video.session_token_status(_content_session_id())
     auth_ok = request.args.get("ok") == "1" and tok.get("authorized")
     auth_error = request.args.get("error", "")
     if request.args.get("ok") == "1" and not tok.get("authorized"):
-        auth_error = auth_error or "授权回调完成但未保存 token，请重新点击「连接 TikTok」"
-    # 已有有效 token 时忽略「重新授权」失败提示，避免误导（可直接上传）
+        auth_error = auth_error or "?????????? token????????? TikTok?"
+    # ???? token ?????????????????????????
     if tok.get("authorized") and auth_error:
         auth_error = ""
-    cred_probe = content_video.verify_credentials()
     return render_template(
         "content.html",
         token=tok,
@@ -508,22 +518,58 @@ def content_page():
         auth_error=auth_error,
         client_key=content_video.CLIENT_KEY,
         redirect_uri=content_video.REDIRECT_URI,
-        credentials_ok=cred_probe.get("ok"),
     )
 
 
 @app.route("/content/authorize")
 def content_authorize():
-    url, _state = content_video.build_authorize_url()
+    url, state = content_video.build_authorize_url()
+    session["content_oauth_state"] = state
+    _content_session_id()
     return redirect(url)
+
+
+@app.get("/api/content/creator")
+def api_content_creator():
+    try:
+        access_token = content_video.session_access_token(_content_session_id())
+        creator = content_video.query_creator_info(access_token)
+        return jsonify({"ok": True, "creator": creator})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 401
+
+
+@app.post("/api/content/disconnect")
+def api_content_disconnect():
+    content_video.disconnect_session(_content_session_id())
+    session.pop("content_oauth_state", None)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/content/status")
+def api_content_status():
+    data = request.get_json(silent=True) or {}
+    publish_id = str(data.get("publish_id") or "").strip()
+    if not publish_id:
+        return jsonify({"ok": False, "error": "publish_id is required"}), 400
+    try:
+        access_token = content_video.session_access_token(_content_session_id())
+        status = content_video.fetch_publish_status(
+            publish_id,
+            access_token=access_token,
+        )
+        return jsonify({"ok": True, "status": status})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.post("/api/content/secret")
 def api_content_secret():
+    return jsonify({"ok": False, "error": "Not found"}), 404
     data = request.get_json(silent=True) or {}
     secret = (data.get("secret") or request.form.get("secret") or "").strip()
     if not secret:
-        return jsonify({"ok": False, "error": "请填写 Client Secret"}), 400
+        return jsonify({"ok": False, "error": "??? Client Secret"}), 400
     try:
         content_video.save_client_secret(secret)
         probe = content_video.verify_credentials()
@@ -534,15 +580,16 @@ def api_content_secret():
 
 @app.post("/api/content/exchange-url")
 def api_content_exchange_url():
+    return jsonify({"ok": False, "error": "Not found"}), 404
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or request.form.get("url") or "").strip()
     if not url:
-        return jsonify({"ok": False, "error": "请粘贴 TikTok 回调 URL"}), 400
+        return jsonify({"ok": False, "error": "??? TikTok ?? URL"}), 400
     try:
         content_video.exchange_callback_url(url)
         tok = content_video.token_status()
         if not tok.get("authorized"):
-            return jsonify({"ok": False, "error": "token 未保存"}), 400
+            return jsonify({"ok": False, "error": "token ???"}), 400
         return jsonify({"ok": True, "open_id": tok.get("open_id"), "scope": tok.get("scope")})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -551,20 +598,59 @@ def api_content_exchange_url():
 @app.post("/api/content/upload")
 def api_content_upload():
     if "video" not in request.files:
-        return jsonify({"ok": False, "error": "请选择视频文件"}), 400
+        return jsonify({"ok": False, "error": "???????"}), 400
     f = request.files["video"]
     if not f.filename:
-        return jsonify({"ok": False, "error": "文件名为空"}), 400
+        return jsonify({"ok": False, "error": "?????"}), 400
     mode = (request.form.get("mode") or "draft").strip().lower()
     title = (request.form.get("title") or "").strip()
-    safe_name = re.sub(r"[^\w.\-]", "_", f.filename)[:120]
+    consent = request.form.get("consent") == "true"
+    if not consent:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Please confirm your consent before sending content to TikTok",
+            }
+        ), 400
+    safe_name = (
+        f"{uuid.uuid4().hex}_"
+        f"{re.sub(r'[^a-zA-Z0-9_.-]', '_', f.filename)[:100]}"
+    )
     dest = content_video.UPLOAD_DIR / safe_name
     f.save(dest)
     try:
+        access_token = content_video.session_access_token(_content_session_id())
         if mode == "direct":
-            result = content_video.upload_direct(dest, title=title, privacy_level="SELF_ONLY")
+            privacy_level = str(request.form.get("privacy_level") or "").strip()
+            if not privacy_level:
+                return jsonify(
+                    {"ok": False, "error": "Please select a privacy setting"}
+                ), 400
+            creator = content_video.query_creator_info(access_token)
+            allowed_privacy = creator.get("privacy_level_options") or []
+            if privacy_level not in allowed_privacy:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "The selected privacy setting is not available for this creator",
+                    }
+                ), 400
+            result = content_video.upload_direct(
+                dest,
+                title=title,
+                privacy_level=privacy_level,
+                disable_comment=request.form.get("allow_comment") != "true",
+                disable_duet=request.form.get("allow_duet") != "true",
+                disable_stitch=request.form.get("allow_stitch") != "true",
+                brand_content_toggle=request.form.get("brand_content") == "true",
+                brand_organic_toggle=request.form.get("brand_organic") == "true",
+                access_token=access_token,
+            )
         else:
-            result = content_video.upload_draft(dest)
+            result = content_video.upload_draft(
+                dest,
+                access_token=access_token,
+            )
         return jsonify(
             {
                 "ok": True,
@@ -596,21 +682,36 @@ def privacy():
 @app.route("/content/callback")
 @app.route("/content/callback/")
 def content_callback():
-    """Content Posting API 专用 OAuth 回调（与 TikTok Shop /callback 分离）。"""
+    """Content Posting API ?? OAuth ???? TikTok Shop /callback ????"""
     error = request.args.get("error", "").strip()
     if error:
         return redirect(url_for("content_page", error=error))
-    # 优先从原始 query string 取 code，避免解码问题
+    # ????? query string ? code???????
     code = content_video.extract_code_from_query(request.query_string) or request.args.get("code", "").strip()
     if code:
         try:
-            content_video.exchange_code(code)
-            if not content_video.token_status().get("authorized"):
-                return redirect(url_for("content_page", error="token 保存失败，请重试"))
+            expected_state = str(session.pop("content_oauth_state", "") or "")
+            returned_state = str(request.args.get("state", "") or "")
+            if (
+                not expected_state
+                or not returned_state
+                or not secrets.compare_digest(expected_state, returned_state)
+            ):
+                return redirect(
+                    url_for(
+                        "content_page",
+                        error="OAuth state validation failed. Please connect again.",
+                    )
+                )
+            content_video.exchange_code_for_session(code, _content_session_id())
+            if not content_video.session_token_status(
+                _content_session_id()
+            ).get("authorized"):
+                return redirect(url_for("content_page", error="token ????????"))
             return redirect(url_for("content_page", ok=1))
         except Exception as e:
             return redirect(url_for("content_page", error=str(e)))
-    return redirect(url_for("content_page", error="未收到授权 code"))
+    return redirect(url_for("content_page", error="????? code"))
 
 
 @app.route(CALLBACK_PATH)
@@ -629,7 +730,7 @@ def callback():
         or request.args.get("auth_code", "").strip()
     )
 
-    # TikTok Marketing API（auth_code 或 state=ads_*）
+    # TikTok Marketing API?auth_code ? state=ads_*?
     if marketing_auth.is_marketing_callback(
         state_raw, auth_code, code=code, app_key=app_key, scopes=scopes
     ):
@@ -640,22 +741,28 @@ def callback():
                 shop_label = (session.pop("ads_shop_label", None) or "").strip()
                 marketing_auth.exchange_auth_code(auth_code, shop_label=shop_label)
                 if not marketing_auth.token_status().get("authorized"):
-                    return redirect(url_for("ads_page", error="token 保存失败，请重试"))
+                    return redirect(url_for("ads_page", error="token ????????"))
                 qs = f"ok=1&shop={quote(shop_label)}" if shop_label else "ok=1"
                 return redirect(url_for("ads_page") + "?" + qs)
             except Exception as e:
                 return redirect(url_for("ads_page", error=str(e)))
-        return redirect(url_for("ads_page", error="未收到 auth_code"))
+        return redirect(url_for("ads_page", error="??? auth_code"))
 
-    # TikTok Content Posting / Login Kit（带 scopes，无 app_key）
+    # TikTok Content Posting / Login Kit?? scopes?? app_key?
     if content_video.is_content_callback(state_raw, scopes, app_key):
+        return redirect(
+            url_for(
+                "content_page",
+                error="This callback is no longer supported. Please connect again.",
+            )
+        )
         if error:
             return redirect(url_for("content_page", error=error))
         if code:
             try:
                 content_video.exchange_code(code)
                 if not content_video.token_status().get("authorized"):
-                    return redirect(url_for("content_page", error="token 保存失败，请重试"))
+                    return redirect(url_for("content_page", error="token ????????"))
                 return redirect(url_for("content_page", ok=1))
             except Exception as e:
                 return redirect(url_for("content_page", error=str(e)))
@@ -690,7 +797,7 @@ def callback():
         return redirect(
             url_for(
                 "authorize_page",
-                error="回调缺少 state，请在下方选择店铺（如 TK1TH / TKKJ1TH）并点击「解析并保存授权」",
+                error="???? state??????????? TK1TH / TKKJ1TH?????????????",
                 shop=shop_hint,
                 callback_url=quote(full_url, safe=""),
             )
@@ -713,7 +820,7 @@ def api_authorize_shop():
     callback_url = (data.get("callback_url") or "").strip()
     pick = data.get("pick_index")
     if not shop_key or not callback_url:
-        return jsonify({"ok": False, "error": "缺少 shop_key 或 callback_url"}), 400
+        return jsonify({"ok": False, "error": "?? shop_key ? callback_url"}), 400
     try:
         pick_i = int(pick) if pick is not None else None
         result = shops.setup_and_authorize(
@@ -740,7 +847,7 @@ def api_export():
     start_date = (data.get("start_date") or data.get("stat_day") or "").strip()
     end_date = (data.get("end_date") or data.get("stat_day") or start_date or "").strip()
     if not shop_key or not start_date or not end_date:
-        return jsonify({"ok": False, "error": "请选择店铺和日期范围"}), 400
+        return jsonify({"ok": False, "error": "??????????"}), 400
     try:
         if kind == "analytics":
             types = (data.get("types") or "all").strip()
@@ -766,7 +873,7 @@ def api_export():
                 shop_key=shop_key, start_date=start_date, end_date=end_date
             )
         else:
-            return jsonify({"ok": False, "error": f"未知导出类型: {kind}"}), 400
+            return jsonify({"ok": False, "error": f"??????: {kind}"}), 400
         return jsonify({"ok": True, "job_id": job_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -776,7 +883,7 @@ def api_export():
 def api_job(job_id: str):
     job = exporter.get_job(job_id)
     if not job:
-        return jsonify({"ok": False, "error": "任务不存在"}), 404
+        return jsonify({"ok": False, "error": "?????"}), 404
     return jsonify({"ok": True, "job": job})
 
 
@@ -791,10 +898,10 @@ def api_files():
 def download():
     raw = unquote(request.args.get("path", "").strip())
     if not raw:
-        return "缺少 path 参数", 400
+        return "?? path ??", 400
     path = Path(raw)
     if not path.is_file() or not files.is_allowed_path(path):
-        return "文件不存在或无权访问", 403
+        return "??????????", 403
     return send_file(path, as_attachment=True, download_name=path.name)
 
 
@@ -860,5 +967,5 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 else:
-    # 通过 gunicorn / import app 启动时同样加载内置调度
+    # ?? gunicorn / import app ???????????
     start_ads_refresh_scheduler()

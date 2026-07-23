@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="description" content="Dingfeng Creator Studio helps creators review and publish their original videos to their own TikTok accounts."/>
+  <title>{% block title %}Dingfeng Creator Studio{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/content_studio.css') }}"/>
+</head>
+<body>
+  <header class="studio-header">
+    <a class="studio-brand" href="{{ url_for('content_page') }}" aria-label="Dingfeng Creator Studio home">
+      <span class="studio-logo">DF</span>
+      <span><strong>Dingfeng</strong><small>Creator Studio</small></span>
+    </a>
+    <nav aria-label="Public navigation">
+      <a href="{{ url_for('content_page') }}">Create</a>
+      <a href="{{ url_for('about') }}">About</a>
+      <a href="{{ url_for('contact') }}">Contact</a>
+      <a href="{{ url_for('terms') }}">Terms</a>
+      <a href="{{ url_for('privacy') }}">Privacy</a>
+    </nav>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <footer class="studio-footer">
+    <div>
+      <strong>Dingfeng Creator Studio</strong>
+      <span>A creator-controlled publishing service operated by {{ company_name }}.</span>
+    </div>
+    <div class="footer-links">
+      <a href="{{ url_for('terms') }}">Terms of Service</a>
+      <a href="{{ url_for('privacy') }}">Privacy Policy</a>
+      <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+    </div>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

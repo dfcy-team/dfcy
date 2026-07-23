@@ -127,7 +127,12 @@ def verify_credentials() -> dict[str, Any]:
         return {"ok": False, "error": msg}
 
 
-def exchange_code(code: str, *, redirect_uri: str | None = None) -> dict[str, Any]:
+def exchange_code(
+    code: str,
+    *,
+    redirect_uri: str | None = None,
+    persist: bool = True,
+) -> dict[str, Any]:
     cfg = get_config()
     secret = (cfg.get("CLIENT_SECRET") or "").strip()
     if not secret:
@@ -174,7 +179,8 @@ def exchange_code(code: str, *, redirect_uri: str | None = None) -> dict[str, An
                 _log_oauth(f"RETRY redirect={redir}")
             try:
                 data = _post_form(TOKEN_URL, payload)
-                save_token(data)
+                if persist:
+                    save_token(data)
                 _log_oauth(f"OK open_id={data.get('open_id')} scope={data.get('scope')}")
                 return data
             except RuntimeError as e:
@@ -193,7 +199,7 @@ def exchange_callback_url(url: str) -> dict[str, Any]:
     return exchange_code(extract_code_from_url(url))
 
 
-def refresh_token(refresh: str) -> dict[str, Any]:
+def refresh_token(refresh: str, *, persist: bool = True) -> dict[str, Any]:
     cfg = get_config()
     secret = (cfg.get("CLIENT_SECRET") or "").strip()
     if not secret:
@@ -207,7 +213,8 @@ def refresh_token(refresh: str) -> dict[str, Any]:
             "refresh_token": refresh,
         },
     )
-    save_token(data)
+    if persist:
+        save_token(data)
     return data
 
 

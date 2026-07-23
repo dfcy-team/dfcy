@@ -1,5 +1,65 @@
-{% extends "base.html" %}
-{% block title %}隐私政策 · {{ brand }}{% endblock %}
+{% extends "content_base.html" %}
+{% block title %}Privacy Policy | Dingfeng Creator Studio{% endblock %}
 {% block content %}
-{% include "partials/privacy_content.html" %}
+<section class="prose-page">
+  <span class="section-label">LEGAL</span>
+  <h1>Privacy Policy</h1>
+  <p>Last updated: July 23, 2026</p>
+  <p>
+    This policy explains how {{ company_name }} processes information when you
+    use Dingfeng Creator Studio at {{ domain }}.
+  </p>
+  <h2>1. Information we process</h2>
+  <ul>
+    <li>TikTok OAuth identifiers, access and refresh tokens, granted scopes and expiration information.</li>
+    <li>The connected creator nickname, username, temporary avatar URL and publishing capabilities.</li>
+    <li>The video file, caption, privacy choice, interaction settings and commercial-content declarations you submit.</li>
+    <li>Publishing identifiers, processing status, errors, basic security logs and device/browser information.</li>
+  </ul>
+  <h2>2. Why we use it</h2>
+  <p>
+    We use this information only to authenticate your account, display the
+    correct publishing controls, transfer content at your request, show
+    processing status, prevent abuse and maintain service security.
+  </p>
+  <h2>3. Video handling</h2>
+  <p>
+    Uploaded video files are held temporarily while they are transferred to
+    TikTok and are deleted from our upload directory after the transfer attempt.
+    We do not use creator videos to train models, create advertising profiles or
+    sell content to third parties.
+  </p>
+  <h2>4. Token storage and separation</h2>
+  <p>
+    OAuth tokens are stored server-side and associated with the user's service
+    session. They are not placed in public page source and are not shared with
+    other creators. Access is limited to the functions required to provide the
+    requested TikTok integration.
+  </p>
+  <h2>5. Sharing</h2>
+  <p>
+    Content and publishing settings are sent to TikTok only after your explicit
+    action. We may disclose limited information to infrastructure providers or
+    authorities when required to operate securely or comply with law. We do not
+    sell personal information.
+  </p>
+  <h2>6. Retention and deletion</h2>
+  <p>
+    Temporary upload files are deleted after transfer. OAuth records are kept
+    while your account remains connected or as needed for security and legal
+    obligations. Use the Disconnect control or email us to request deletion.
+  </p>
+  <h2>7. Your choices</h2>
+  <p>
+    You may decline authorization, disconnect your TikTok account, revoke
+    access through TikTok, or request access, correction or deletion by
+    contacting <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.
+  </p>
+  <h2>8. Contact</h2>
+  <p>
+    Operator: {{ company_name }}<br/>
+    Address: {{ contact_address }}<br/>
+    Email: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+  </p>
+</section>
 {% endblock %}

@@ -1,5 +1,48 @@
-{% extends "base.html" %}
-{% block title %}服务条款 · {{ brand }}{% endblock %}
+{% extends "content_base.html" %}
+{% block title %}Terms of Service | Dingfeng Creator Studio{% endblock %}
 {% block content %}
-{% include "partials/terms_content.html" %}
+<section class="prose-page">
+  <span class="section-label">LEGAL</span>
+  <h1>Terms of Service</h1>
+  <p>Last updated: July 23, 2026</p>
+  <p>
+    These terms govern use of Dingfeng Creator Studio, operated by
+    {{ company_name }}. By using the service, you confirm that you are legally
+    able to authorize the connected TikTok account and accept these terms.
+  </p>
+  <h2>1. Creator account and authorization</h2>
+  <p>
+    You must connect your own TikTok account using TikTok OAuth. You are
+    responsible for confirming the displayed creator identity before sending
+    any content. You may disconnect your account at any time.
+  </p>
+  <h2>2. Your content</h2>
+  <p>
+    You retain ownership of your content. You may upload only original content
+    or content for which you hold all necessary rights, permissions and music
+    licenses. You grant us a limited, temporary right to process and transfer
+    the selected file solely to perform the publishing action you request.
+  </p>
+  <h2>3. Publishing controls</h2>
+  <p>
+    You choose the caption, available privacy setting, interaction settings and
+    commercial-content disclosures. We do not publish until you review the
+    video and provide explicit consent. TikTok may process, moderate, reject or
+    limit content under its own terms and policies.
+  </p>
+  <h2>4. Prohibited use</h2>
+  <p>
+    Do not upload unlawful, infringing, deceptive, harmful or unauthorized
+    content; attempt to access another person's account; evade platform limits;
+    or use the service for spam or automated bulk publishing.
+  </p>
+  <h2>5. Availability</h2>
+  <p>
+    The service depends on TikTok APIs and may be interrupted by maintenance,
+    account restrictions, rate limits or moderation. We do not guarantee that a
+    submitted video will be published or publicly visible.
+  </p>
+  <h2>6. Contact</h2>
+  <p>Questions: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a></p>
+</section>
 {% endblock %}
