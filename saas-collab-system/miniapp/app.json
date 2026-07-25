@@ -4,6 +4,8 @@
     "pages/login/index",
     "pages/home/index",
     "pages/status/index",
+    "pages/supply-orders/index",
+    "pages/supply-order-detail/index",
     "pages/releases/index",
     "pages/release-detail/index"
   ],

@@ -35,6 +35,7 @@ export const menuItems = [
       { path: '/products/research', label: '新品市调', permissions: ['products.research.view'] },
       { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
       { path: '/purchasing/orders', label: '采购订单', permissions: ['purchasing.orders.view'] },
+      { path: '/supply-chain/purchase-orders', label: '供应链采购协同', permissions: ['supply.purchase_order.view'] },
       { path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] },
       { path: '/listings/sites', label: '多国家刊登', internal: true },
       { path: '/pricing/prices', label: '价格中心', internal: true }
@@ -150,6 +151,7 @@ export const routeCapabilities = [
   { path: '/products/status-transitions', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/purchasing/orders', permissions: ['purchasing.orders.view'], userTypes: ['internal'] },
+  { path: '/supply-chain/purchase-orders', permissions: ['supply.purchase_order.view'], userTypes: ['internal'] },
   { path: '/suppliers/my-performance', userTypes: ['external'] },
   { path: '/suppliers/performance', permissions: ['suppliers.performance.view'], userTypes: ['internal'] },
   { path: '/suppliers/tasks', userTypes: ['external'] },

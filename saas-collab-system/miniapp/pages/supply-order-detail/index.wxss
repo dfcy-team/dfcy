@@ -1,0 +1,88 @@
+.order-heading,
+.detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+.order-status {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #fff3d4;
+  color: #7a5a00;
+  font-size: 22rpx;
+}
+.status-in_production {
+  background: #eaf3fc;
+  color: #245d91;
+}
+.status-production_completed {
+  background: #e7f5ec;
+  color: #267047;
+}
+.boundary {
+  border-color: #f1d496;
+  background: #fff9ea;
+  color: #6f571d;
+  line-height: 1.6;
+}
+.detail-row {
+  padding: 12rpx 0;
+  color: #53677d;
+}
+.detail-row text:last-child {
+  color: #173a63;
+  font-weight: 600;
+}
+.progress-track {
+  height: 16rpx;
+  margin-top: 20rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: #e7edf4;
+}
+.progress-value {
+  height: 100%;
+  border-radius: inherit;
+  background: #2f74b8;
+}
+.progress-label {
+  margin-top: 10rpx;
+  color: #65778c;
+  font-size: 22rpx;
+  text-align: right;
+}
+.section-title {
+  margin: 36rpx 0 20rpx;
+  color: #173a63;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+.line-title {
+  margin-bottom: 8rpx;
+  color: #173a63;
+  font-weight: 700;
+}
+.form-title {
+  margin-top: 0;
+}
+.field {
+  width: 100%;
+  min-height: 84rpx;
+  margin-bottom: 20rpx;
+  padding: 0 22rpx;
+  border: 1rpx solid #cbd7e4;
+  border-radius: 12rpx;
+  background: #ffffff;
+}
+.note-field {
+  min-height: 150rpx;
+  padding-top: 20rpx;
+}
+.complete-button {
+  margin-top: 20rpx;
+}
+.progress-note {
+  margin-top: 10rpx;
+  line-height: 1.6;
+}

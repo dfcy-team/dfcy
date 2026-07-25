@@ -52,6 +52,14 @@ function getFoundationCapabilities(config, context = {}) {
         : "已接入服务端合同、状态机、门禁和只读查询。"
     },
     {
+      code: "supply_chain_f1",
+      name: "供应链采购协同",
+      status: config.useMock ? "mock" : "connected",
+      description: config.useMock
+        ? "使用本地脱敏采购单，验证接单与生产进度。"
+        : "通过 /api/miniapp/supply-chain/* 访问当前供应商的采购单。"
+    },
+    {
       code: "production_release",
       name: "真实平台发布",
       status: "disabled",

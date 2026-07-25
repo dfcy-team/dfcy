@@ -17,6 +17,8 @@ export const mockAuthUser = {
     'products.research.view', 'products.research.manage',
     'products.master.view', 'products.master.manage', 'products.master.freeze',
     'purchasing.orders.view', 'purchasing.orders.manage',
+    'supply.purchase_order.view', 'supply.purchase_order.create', 'supply.purchase_order.accept',
+    'supply.production.start', 'supply.production.update', 'supply.production.complete',
     'rpa.tasks.view', 'rpa.tasks.manage',
     'rpa.devices.view', 'rpa.devices.dry_run',
     'rpa.stability.view',

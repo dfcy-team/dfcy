@@ -26,6 +26,7 @@ const ProductStatusRecommendationDetail = () => import('../views/products/Produc
 const ProductStatusTransitionHistory = () => import('../views/products/ProductStatusTransitionHistory.vue');
 const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
 const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
+const SupplyPurchaseOrderConsole = () => import('../views/purchasing/SupplyPurchaseOrderConsole.vue');
 const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
 const SupplierTaskDetail = () => import('../views/suppliers/SupplierTaskDetail.vue');
 const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentList.vue');
@@ -150,6 +151,7 @@ const routes = [
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'purchasing/orders', component: PurchaseOrderList },
       { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
+      { path: 'supply-chain/purchase-orders', component: SupplyPurchaseOrderConsole },
       { path: 'suppliers/tasks', component: SupplierTaskList },
       { path: 'suppliers/tasks/:id', component: SupplierTaskDetail },
       { path: 'suppliers/shipments', component: SupplierShipmentList },

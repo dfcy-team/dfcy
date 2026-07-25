@@ -20,6 +20,7 @@
     <view class="capability-description">{{item.description}}</view>
   </view>
 
+  <button class="primary-button" bindtap="openSupplyOrders">进入供应链采购协同</button>
   <button class="secondary-button feature-button" bindtap="openReleases">查看发布合同</button>
   <button class="secondary-button diagnostics-button" bindtap="openStatus">查看运行诊断</button>
   <button class="logout-button" bindtap="handleLogout">退出登录</button>

@@ -33,6 +33,10 @@ Page({
     wx.navigateTo({ url: "/pages/releases/index" });
   },
 
+  openSupplyOrders() {
+    wx.navigateTo({ url: "/pages/supply-orders/index" });
+  },
+
   handleLogout() {
     getApp().globalData.services.auth.logout();
     wx.reLaunch({ url: "/pages/login/index" });
