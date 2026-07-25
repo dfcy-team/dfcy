@@ -76,6 +76,58 @@ describe('SC-F1 supply purchase order console', () => {
     expect(mockFetchSupplyOrders({ search: 'SC-TEST-001' }).data.count).toBe(1);
   });
 
+  it('enforces backend-equivalent state and progress rules in mock mode', () => {
+    const created = mockCreateSupplyOrder({
+      order_no: 'SC-STRICT-001',
+      supplier_id: 101,
+      order_date: '2026-07-25',
+      expected_delivery_date: '2026-08-25',
+      currency: 'CNY',
+      lines: [{ line_no: 1, sku_id: 201, quantity: 20, unit_price: '1.0000' }]
+    }).data;
+
+    expect(() => mockRunSupplyOrderAction(created.id, 'start-production')).toThrow(
+      '当前采购单状态不允许执行该动作'
+    );
+    mockRunSupplyOrderAction(created.id, 'accept');
+    mockRunSupplyOrderAction(created.id, 'start-production');
+    mockRunSupplyOrderAction(created.id, 'update-progress', { completed_quantity: 10 });
+    expect(() => mockRunSupplyOrderAction(
+      created.id,
+      'update-progress',
+      { completed_quantity: 9 }
+    )).toThrow('生产进度必须为整数、单调递增且不能超过采购数量');
+    expect(() => mockRunSupplyOrderAction(
+      created.id,
+      'update-progress',
+      { completed_quantity: 21 }
+    )).toThrow('生产进度必须为整数、单调递增且不能超过采购数量');
+    expect(() => mockRunSupplyOrderAction(created.id, 'complete-production')).toThrow(
+      '完成数量达到采购数量后才能标记生产完成'
+    );
+  });
+
+  it('supports multiple purchase-order lines in mock data and the create form', () => {
+    const created = mockCreateSupplyOrder({
+      order_no: 'SC-MULTI-LINE-001',
+      supplier_id: 101,
+      order_date: '2026-07-25',
+      expected_delivery_date: '2026-08-25',
+      currency: 'CNY',
+      lines: [
+        { line_no: 1, sku_id: 201, quantity: 2, unit_price: '1.0000' },
+        { line_no: 2, sku_id: 202, quantity: 3, unit_price: '2.0000' }
+      ]
+    }).data;
+    const page = read('src/views/purchasing/SupplyPurchaseOrderConsole.vue');
+
+    expect(created.lines).toHaveLength(2);
+    expect(created.total_quantity).toBe(5);
+    expect(page).toContain('addCreateLine');
+    expect(page).toContain('removeCreateLine');
+    expect(page).toContain('createForm.lines.map');
+  });
+
   it('passes backend pagination and paginates mock results consistently', () => {
     const page = read('src/views/purchasing/SupplyPurchaseOrderConsole.vue');
     expect(page).toContain('<el-pagination');

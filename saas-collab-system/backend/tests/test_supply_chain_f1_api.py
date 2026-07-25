@@ -5,7 +5,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import CustomUser, ExternalUserProfile
 from apps.audit.models import OperationLog
-from apps.masterdata.models import SupplierMaster
+from apps.masterdata.models import StatusChoices, SupplierMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import ProductSKU, ProductSPU
 from apps.purchasing.models import (
@@ -27,6 +27,22 @@ SUPPLY_PERMISSION_CODES = (
 )
 
 
+def ensure_supply_permissions():
+    permissions = []
+    for code in SUPPLY_PERMISSION_CODES:
+        permission, _ = Permission.objects.update_or_create(
+            code=code,
+            defaults={
+                "name": code,
+                "module": "supply",
+                "action": code.rsplit(".", 1)[-1],
+                "description": "SC-F1 test permission.",
+            },
+        )
+        permissions.append(permission)
+    return permissions
+
+
 def create_internal_user(tenant, username="supply-internal", scope_type=DataScope.ScopeType.ALL, config=None):
     user = CustomUser.objects.create_user(
         username=username,
@@ -38,7 +54,7 @@ def create_internal_user(tenant, username="supply-internal", scope_type=DataScop
         code=f"{username}-role",
         name="Supply role",
     )
-    role.permissions.add(*Permission.objects.filter(code__in=SUPPLY_PERMISSION_CODES))
+    role.permissions.add(*ensure_supply_permissions())
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(
         tenant=tenant,
@@ -172,6 +188,21 @@ def test_create_rejects_cross_tenant_supplier_and_sku():
 
 
 @pytest.mark.django_db
+def test_create_rejects_inactive_supplier():
+    tenant = Tenant.objects.create(name="Inactive Supplier Create", code="inactive-supplier-create")
+    user = create_internal_user(tenant)
+    supplier, sku = create_catalog(tenant, "INACTIVE-CREATE")
+    supplier.status = StatusChoices.INACTIVE
+    supplier.save(update_fields=["status"])
+
+    response = create_order(internal_client(user), supplier, sku, "SC-INACTIVE-CREATE")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert SupplyPurchaseOrder.objects.filter(tenant=tenant).count() == 0
+
+
+@pytest.mark.django_db
 def test_create_is_idempotent_and_rejects_key_reuse_with_different_payload():
     tenant = Tenant.objects.create(name="Create Idempotency", code="create-idempotency")
     user = create_internal_user(tenant)
@@ -231,6 +262,65 @@ def test_supplier_only_sees_own_orders_and_financial_fields_are_not_exposed():
     assert "request_id" not in serialized
     assert "actor_id" not in serialized
     assert hidden_response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_inactive_supplier_is_denied_on_web_and_miniapp_channels():
+    tenant = Tenant.objects.create(name="Inactive Supplier Access", code="inactive-supplier-access")
+    internal = create_internal_user(tenant)
+    supplier, sku = create_catalog(tenant, "INACTIVE-ACCESS")
+    order_id = create_order(
+        internal_client(internal),
+        supplier,
+        sku,
+        "SC-INACTIVE-ACCESS",
+    ).json()["data"]["id"]
+    supplier_user = create_supplier_user(tenant, supplier, "inactive-supplier")
+    supplier.status = StatusChoices.INACTIVE
+    supplier.save(update_fields=["status"])
+
+    web = supplier_client(supplier_user)
+    miniapp = miniapp_client(supplier_user)
+    responses = [
+        web.get("/api/external/supplier/purchase-orders/"),
+        web.get(f"/api/external/supplier/purchase-orders/{order_id}/"),
+        web.post(
+            f"/api/external/supplier/purchase-orders/{order_id}/actions/accept/",
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="inactive-web-accept",
+        ),
+        miniapp.get("/api/miniapp/supply-chain/orders/"),
+        miniapp.get(f"/api/miniapp/supply-chain/orders/{order_id}/"),
+        miniapp.post(
+            f"/api/miniapp/supply-chain/orders/{order_id}/actions/accept/",
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="inactive-miniapp-accept",
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [403] * len(responses)
+    order = SupplyPurchaseOrder.objects.get(pk=order_id)
+    assert order.status == SupplyPurchaseOrder.Status.PENDING
+    assert order.events.count() == 0
+
+
+@pytest.mark.django_db
+def test_supplier_profile_tenant_mismatch_is_denied():
+    tenant = Tenant.objects.create(name="Supplier Profile Tenant", code="supplier-profile-tenant")
+    other_tenant = Tenant.objects.create(name="Other Profile Tenant", code="other-profile-tenant")
+    supplier, _ = create_catalog(tenant, "PROFILE-TENANT")
+    supplier_user = create_supplier_user(tenant, supplier, "mismatched-profile-supplier")
+    profile = supplier_user.external_profile
+    profile.tenant = other_tenant
+    profile.save(update_fields=["tenant"])
+
+    web_response = supplier_client(supplier_user).get("/api/external/supplier/purchase-orders/")
+    miniapp_response = miniapp_client(supplier_user).get("/api/miniapp/supply-chain/orders/")
+
+    assert web_response.status_code == 403
+    assert miniapp_response.status_code == 403
 
 
 @pytest.mark.django_db

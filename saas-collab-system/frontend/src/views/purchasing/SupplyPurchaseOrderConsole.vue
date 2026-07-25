@@ -161,7 +161,7 @@
       </template>
     </el-drawer>
 
-    <el-dialog v-model="createOpen" title="新建供应链采购单" width="min(720px, 94vw)">
+    <el-dialog v-model="createOpen" title="新建供应链采购单" width="min(980px, 96vw)">
       <el-alert
         title="首批开发只支持已存在的供应商主档和 SKU；输入 ID 必须属于当前租户。"
         type="info"
@@ -173,12 +173,55 @@
           <el-form-item label="供应商主档 ID"><el-input-number v-model="createForm.supplier_id" :min="1" /></el-form-item>
           <el-form-item label="采购日期"><el-input v-model="createForm.order_date" placeholder="YYYY-MM-DD" /></el-form-item>
           <el-form-item label="预计交期"><el-input v-model="createForm.expected_delivery_date" placeholder="YYYY-MM-DD" /></el-form-item>
-          <el-form-item label="SKU ID"><el-input-number v-model="createForm.sku_id" :min="1" /></el-form-item>
-          <el-form-item label="数量"><el-input-number v-model="createForm.quantity" :min="1" /></el-form-item>
-          <el-form-item label="单价"><el-input v-model="createForm.unit_price" /></el-form-item>
           <el-form-item label="币种"><el-input v-model="createForm.currency" maxlength="8" /></el-form-item>
           <el-form-item label="备注" class="form-span"><el-input v-model="createForm.notes" type="textarea" /></el-form-item>
         </div>
+        <section class="create-lines" aria-label="采购明细录入">
+          <div class="create-lines__heading">
+            <div>
+              <h3>采购明细</h3>
+              <small>至少保留一条明细；行号按当前顺序自动生成。</small>
+            </div>
+            <el-button type="primary" plain @click="addCreateLine">新增明细</el-button>
+          </div>
+          <el-table :data="createForm.lines" border>
+            <el-table-column label="行号" width="70" align="center">
+              <template #default="{ $index }">{{ $index + 1 }}</template>
+            </el-table-column>
+            <el-table-column label="SKU ID" min-width="150">
+              <template #default="{ row }">
+                <el-input-number v-model="row.sku_id" :min="1" controls-position="right" />
+              </template>
+            </el-table-column>
+            <el-table-column label="数量" min-width="150">
+              <template #default="{ row }">
+                <el-input-number v-model="row.quantity" :min="1" controls-position="right" />
+              </template>
+            </el-table-column>
+            <el-table-column label="单价" min-width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.unit_price" inputmode="decimal" />
+              </template>
+            </el-table-column>
+            <el-table-column label="明细交期" min-width="150">
+              <template #default="{ row }">
+                <el-input v-model="row.expected_delivery_date" placeholder="默认采购单交期" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90" align="center">
+              <template #default="{ $index }">
+                <el-button
+                  link
+                  type="danger"
+                  :disabled="createForm.lines.length === 1"
+                  @click="removeCreateLine($index)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
       </el-form>
       <template #footer>
         <el-button @click="createOpen = false">取消</el-button>
@@ -237,11 +280,9 @@ const createForm = reactive({
   supplier_id: 1,
   order_date: '2026-07-25',
   expected_delivery_date: '',
-  sku_id: 1,
-  quantity: 1,
-  unit_price: '0.0000',
   currency: 'CNY',
-  notes: ''
+  notes: '',
+  lines: [newCreateLine()]
 });
 const progressForm = reactive({ completed_quantity: 0, note: '' });
 
@@ -338,12 +379,43 @@ async function openDetail(row) {
 
 function openCreate() {
   createForm.order_no = `SC-LOCAL-${Date.now()}`;
+  createForm.lines.splice(0, createForm.lines.length, newCreateLine());
   createOpen.value = true;
+}
+
+function newCreateLine() {
+  return {
+    sku_id: 1,
+    quantity: 1,
+    unit_price: '0.0000',
+    expected_delivery_date: ''
+  };
+}
+
+function addCreateLine() {
+  createForm.lines.push(newCreateLine());
+}
+
+function removeCreateLine(index) {
+  if (createForm.lines.length > 1) createForm.lines.splice(index, 1);
 }
 
 async function submitCreate() {
   if (!createForm.order_no || !createForm.order_date || !createForm.expected_delivery_date) {
     ElMessage.warning('请填写采购单号、采购日期和预计交期');
+    return;
+  }
+  const invalidLine = createForm.lines.some((line) => (
+    !Number.isInteger(Number(line.sku_id))
+    || Number(line.sku_id) <= 0
+    || !Number.isInteger(Number(line.quantity))
+    || Number(line.quantity) <= 0
+    || line.unit_price === ''
+    || !Number.isFinite(Number(line.unit_price))
+    || Number(line.unit_price) < 0
+  ));
+  if (!createForm.lines.length || invalidLine) {
+    ElMessage.warning('请至少填写一条有效明细，并检查 SKU、数量和单价');
     return;
   }
   submitting.value = true;
@@ -354,15 +426,13 @@ async function submitCreate() {
     expected_delivery_date: createForm.expected_delivery_date,
     currency: createForm.currency,
     notes: createForm.notes,
-    lines: [
-      {
-        line_no: 1,
-        sku_id: Number(createForm.sku_id),
-        quantity: Number(createForm.quantity),
-        unit_price: createForm.unit_price,
-        expected_delivery_date: createForm.expected_delivery_date
-      }
-    ]
+    lines: createForm.lines.map((line, index) => ({
+      line_no: index + 1,
+      sku_id: Number(line.sku_id),
+      quantity: Number(line.quantity),
+      unit_price: line.unit_price,
+      expected_delivery_date: line.expected_delivery_date || createForm.expected_delivery_date
+    }))
   });
   submitting.value = false;
   if (!response.success) {
@@ -473,6 +543,17 @@ h3 { margin: 22px 0 10px; }
   gap: 0 14px;
 }
 .form-span { grid-column: 1 / -1; }
+.create-lines { margin-top: 8px; }
+.create-lines__heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.create-lines__heading h3 { margin: 0 0 4px; }
+.create-lines__heading small { color: #64748b; }
+.create-lines :deep(.el-input-number) { width: 100%; }
 @media (max-width: 900px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

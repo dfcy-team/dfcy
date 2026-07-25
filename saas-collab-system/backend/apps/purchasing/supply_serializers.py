@@ -1,7 +1,7 @@
 from django.db import transaction
 from rest_framework import serializers
 
-from apps.masterdata.models import SupplierMaster
+from apps.masterdata.models import StatusChoices, SupplierMaster
 from apps.products.models import ProductSKU
 
 from .models import (
@@ -243,6 +243,7 @@ class SupplyPurchaseOrderCreateSerializer(serializers.Serializer):
         supplier = SupplierMaster.objects.filter(
             pk=attrs["supplier_id"],
             tenant=tenant,
+            status=StatusChoices.ACTIVE,
         ).first()
         if supplier is None:
             raise serializers.ValidationError({"supplier_id": "Supplier is not available in the current tenant."})

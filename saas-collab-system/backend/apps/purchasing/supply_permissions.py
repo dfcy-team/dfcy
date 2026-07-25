@@ -4,6 +4,7 @@ from rest_framework.permissions import BasePermission
 
 from apps.accounts.models import CustomUser
 from apps.accounts.miniapp_auth import MINIAPP_TOKEN_CHANNEL
+from apps.masterdata.models import StatusChoices, SupplierMaster
 from apps.permissions.models import DataScope
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
@@ -76,7 +77,16 @@ def supplier_id_for_user(user):
     ):
         raise PermissionDenied("An active supplier account is required.")
     profile = getattr(user, "external_profile", None)
-    if not profile or not profile.supplier_id:
+    if (
+        not profile
+        or profile.tenant_id != user.tenant_id
+        or not profile.supplier_id
+        or not SupplierMaster.objects.filter(
+            pk=profile.supplier_id,
+            tenant=user.tenant,
+            status=StatusChoices.ACTIVE,
+        ).exists()
+    ):
         raise PermissionDenied("The supplier account is not bound to a supplier master record.")
     return profile.supplier_id
 

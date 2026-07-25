@@ -62,7 +62,8 @@ export const mockFetchSupplyOrders = (params = {}) => {
 };
 
 export const mockFetchSupplyOrder = (id) => {
-  const order = orders.find((item) => item.id === Number(id)) || orders[0];
+  const order = orders.find((item) => item.id === Number(id));
+  if (!order) throw new Error('供应链采购单不存在');
   return successResponse({ ...summary(order), api_status: 'mock' });
 };
 
@@ -94,20 +95,41 @@ export const mockCreateSupplyOrder = (payload) => {
 };
 
 export const mockRunSupplyOrderAction = (id, action, payload = {}) => {
-  const order = orders.find((item) => item.id === Number(id)) || orders[0];
+  const order = orders.find((item) => item.id === Number(id));
+  if (!order) throw new Error('供应链采购单不存在');
   const now = new Date().toISOString();
   const before = order.status;
   const transitions = {
-    accept: 'accepted',
-    'start-production': 'in_production',
-    'update-progress': 'in_production',
-    'complete-production': 'production_completed'
+    accept: ['pending', 'accepted'],
+    'start-production': ['accepted', 'in_production'],
+    'update-progress': ['in_production', 'in_production'],
+    'complete-production': ['in_production', 'production_completed']
   };
-  order.status = transitions[action] || order.status;
+  const transition = transitions[action];
+  if (!transition) throw new Error('不支持的采购单动作');
+  if (order.status !== transition[0]) throw new Error('当前采购单状态不允许执行该动作');
+  if (action === 'update-progress') {
+    const quantity = Number(payload.completed_quantity);
+    if (
+      !Number.isInteger(quantity)
+      || quantity < order.completed_quantity
+      || quantity > order.total_quantity
+    ) {
+      throw new Error('生产进度必须为整数、单调递增且不能超过采购数量');
+    }
+  }
+  if (
+    action === 'complete-production'
+    && order.completed_quantity !== order.total_quantity
+  ) {
+    throw new Error('完成数量达到采购数量后才能标记生产完成');
+  }
+
+  order.status = transition[1];
   if (action === 'accept') order.accepted_at = now;
   if (action === 'start-production') order.production_started_at = now;
   if (action === 'update-progress') {
-    order.completed_quantity = Number(payload.completed_quantity || 0);
+    order.completed_quantity = Number(payload.completed_quantity);
     order.progress_entries.unshift({
       id: order.progress_entries.length + 1,
       completed_quantity: order.completed_quantity,
