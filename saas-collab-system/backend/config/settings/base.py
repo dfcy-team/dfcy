@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "apps.workflows",
     "apps.governance",
     "apps.pilot",
+    "apps.releases",
     "apps.common",
 ]
 

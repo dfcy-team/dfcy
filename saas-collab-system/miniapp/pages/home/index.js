@@ -29,6 +29,10 @@ Page({
     wx.navigateTo({ url: "/pages/status/index" });
   },
 
+  openReleases() {
+    wx.navigateTo({ url: "/pages/releases/index" });
+  },
+
   handleLogout() {
     getApp().globalData.services.auth.logout();
     wx.reLaunch({ url: "/pages/login/index" });

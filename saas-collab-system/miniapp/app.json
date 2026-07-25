@@ -3,7 +3,9 @@
     "pages/bootstrap/index",
     "pages/login/index",
     "pages/home/index",
-    "pages/status/index"
+    "pages/status/index",
+    "pages/releases/index",
+    "pages/release-detail/index"
   ],
   "window": {
     "navigationBarTitleText": "SaaS 协同",

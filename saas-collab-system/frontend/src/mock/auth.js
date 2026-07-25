@@ -38,7 +38,9 @@ export const mockAuthUser = {
     'pilot.security_review.view', 'pilot.security_review.plan', 'pilot.security_review.review',
     'pilot.verification.view', 'pilot.verification.plan', 'pilot.verification.review', 'pilot.verification.record', 'pilot.verification.cancel',
     'pilot.performance.view', 'pilot.performance.plan', 'pilot.performance.review', 'pilot.performance.record', 'pilot.performance.cancel',
-    'pilot.entry.view', 'pilot.entry.plan', 'pilot.entry.review'
+    'pilot.entry.view', 'pilot.entry.plan', 'pilot.entry.review',
+    'release.contract.view', 'release.contract.manage',
+    'release.contract.approve', 'release.contract.execute'
   ],
   data_scope: []
 };

@@ -20,6 +20,17 @@ npm run build
 - The largest JavaScript chunk is about `108.98 kB`; the previous `923.28 kB` Element Plus chunk and `500 kB` warning are removed.
 - Desktop browser smoke checks pass. The application includes a `900px` mobile navigation breakpoint; a real narrow viewport retest remains a release observation because the in-app viewport override did not apply during verification.
 
+## 发布合同操作台
+
+- 路由：`/releases/contracts`
+- 查看权限：`release.contract.view`
+- 草稿与门禁：`release.contract.manage`
+- 独立审批：`release.contract.approve`
+- 构建确认与状态记录：`release.contract.execute`
+- 页面支持环境/状态筛选、合同证据链、六项门禁、业务/技术/安全/回滚审批、不可变构建产物和受控状态推进。
+- 页面只调用 `/api/internal/releases/*`，不调用微信平台接口，不上传代码，不执行真实发布或回滚。
+- 桌面端和 390×844 窄屏视觉验收已通过；表格在窄屏中保持横向滚动，不压缩关键字段。
+
 ## Phase 2 frontend build observation
 
 - Route pages are lazy loaded in `frontend/src/router/index.js`.

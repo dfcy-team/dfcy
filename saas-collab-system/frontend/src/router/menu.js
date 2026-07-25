@@ -103,6 +103,7 @@ export const menuItems = [
       { path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
       { path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
       { path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
+      { path: '/releases/contracts', label: '发布合同', permissions: ['release.contract.view'] },
       { path: '/audit/operations', label: '日志审计', internal: true }
     ]
   },
@@ -191,6 +192,7 @@ export const routeCapabilities = [
   { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/audit/operations', userTypes: ['internal'] },
+  { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
   { path: '/governance/assistants', permissions: ['governance.assistants.view'], userTypes: ['internal'] },
   { path: '/pilot/readiness', permissions: ['pilot.readiness.view'], userTypes: ['internal'] },

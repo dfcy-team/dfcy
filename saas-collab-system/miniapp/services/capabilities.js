@@ -44,6 +44,14 @@ function getFoundationCapabilities(config, context = {}) {
       description: authCapability.description
     },
     {
+      code: "release_contract",
+      name: "发布合同",
+      status: config.useMock ? "mock" : "connected",
+      description: config.useMock
+        ? "只读工作台使用脱敏示例合同。"
+        : "已接入服务端合同、状态机、门禁和只读查询。"
+    },
+    {
       code: "production_release",
       name: "真实平台发布",
       status: "disabled",

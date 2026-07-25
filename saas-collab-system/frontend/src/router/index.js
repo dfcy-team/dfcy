@@ -96,6 +96,7 @@ const PilotSecurityReviews = () => import('../views/pilot/SecurityReviewWorkspac
 const PilotVerificationRuns = () => import('../views/pilot/VerificationRunWorkspace.vue');
 const PilotPerformanceRuns = () => import('../views/pilot/PerformanceRunWorkspace.vue');
 const PilotEntryDecisions = () => import('../views/pilot/EntryDecisionWorkspace.vue');
+const ReleaseContractConsole = () => import('../views/releases/ReleaseContractConsole.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -137,6 +138,7 @@ const routes = [
       { path: 'pilot/performance-runs/:id', component: PilotPerformanceRuns },
       { path: 'pilot/entry-decisions', component: PilotEntryDecisions },
       { path: 'pilot/entry-decisions/:id', component: PilotEntryDecisions },
+      { path: 'releases/contracts', component: ReleaseContractConsole },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },
