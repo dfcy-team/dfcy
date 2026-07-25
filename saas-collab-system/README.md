@@ -22,6 +22,11 @@ Current stage focuses on the backend foundation:
 - unified response and error handling
 - pytest baseline
 
+The repository also contains a native WeChat Mini Program foundation in
+`miniapp/`. It provides mock-first authentication, environment isolation,
+unified requests, session handling, redacted telemetry, shared page states,
+and dependency-free validation/tests. See `miniapp/README.md`.
+
 ## Backend
 
 See `backend/README.md` for local Python, Docker Compose, MySQL, Redis, Celery, migrations, and pytest commands.

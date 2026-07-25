@@ -18,3 +18,6 @@ CORS_ALLOWED_ORIGINS = CORS_ALLOWED_ORIGINS or [
 
 # The reversible provider is intentionally limited to local development and tests.
 INTEGRATION_ENCRYPTION_PROVIDER = os.getenv("INTEGRATION_ENCRYPTION_PROVIDER", "test-only")
+
+# Local/test-only identity exchange. Production settings override this to disabled.
+MINIAPP_AUTH_MODE = os.getenv("MINIAPP_AUTH_MODE", "sandbox")

@@ -88,3 +88,32 @@ class ExternalUserProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} external profile"
+
+
+class MiniAppIdentity(models.Model):
+    class Provider(models.TextChoices):
+        WECHAT = "wechat", "WeChat"
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.WECHAT)
+    subject_digest = models.CharField(max_length=64)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="miniapp_identities")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    last_login_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider", "user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("provider", "subject_digest"),
+                name="uniq_miniapp_provider_subject",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.provider}:{self.user.username}"

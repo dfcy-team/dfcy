@@ -1,0 +1,25 @@
+<view class="page">
+  <view class="hero card">
+    <view class="hero-meta">{{environment}} · {{tenantName}}</view>
+    <view class="page-title">你好，{{userName}}</view>
+    <view class="page-subtitle">
+      工程底座已启动。能力状态必须以证据为准，pending 与 mock 不等于已联通。
+    </view>
+  </view>
+
+  <view class="section-title">底座能力</view>
+  <view
+    wx:for="{{capabilities}}"
+    wx:key="code"
+    class="capability card"
+  >
+    <view class="capability-header">
+      <text class="capability-name">{{item.name}}</text>
+      <text class="status status-{{item.status}}">{{item.status}}</text>
+    </view>
+    <view class="capability-description">{{item.description}}</view>
+  </view>
+
+  <button class="secondary-button diagnostics-button" bindtap="openStatus">查看运行诊断</button>
+  <button class="logout-button" bindtap="handleLogout">退出登录</button>
+</view>

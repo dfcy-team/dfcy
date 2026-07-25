@@ -155,3 +155,13 @@ INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "INTEGRATION_ENCRYPTION_PROVIDER",
     "unconfigured-production",
 )
+
+# Mini Program authentication fails closed by default. The sandbox mode never
+# calls WeChat and only accepts pre-bound, hashed development identities.
+MINIAPP_AUTH_MODE = os.getenv("MINIAPP_AUTH_MODE", "disabled")
+MINIAPP_APP_ID = os.getenv("MINIAPP_APP_ID", "")
+MINIAPP_APP_SECRET = os.getenv("MINIAPP_APP_SECRET", "")
+MINIAPP_PROVIDER_TIMEOUT_SECONDS = max(
+    2,
+    min(int(os.getenv("MINIAPP_PROVIDER_TIMEOUT_SECONDS", "8")), 15),
+)

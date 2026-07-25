@@ -1,0 +1,82 @@
+.hero {
+  padding: 40rpx 36rpx;
+  background: linear-gradient(135deg, #173a63, #2f74b8);
+  color: #ffffff;
+}
+
+.hero .page-title,
+.hero .page-subtitle {
+  color: #ffffff;
+}
+
+.hero-meta {
+  margin-bottom: 18rpx;
+  color: #cfe2f5;
+  font-size: 24rpx;
+  text-transform: uppercase;
+}
+
+.section-title {
+  margin: 40rpx 0 20rpx;
+  color: #173a63;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.capability-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.capability-name {
+  color: #173a63;
+  font-size: 31rpx;
+  font-weight: 600;
+}
+
+.capability-description {
+  margin-top: 16rpx;
+  color: #65778c;
+  line-height: 1.6;
+}
+
+.status {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #edf1f5;
+  color: #607286;
+  font-size: 22rpx;
+}
+
+.status-connected {
+  background: #e7f5ec;
+  color: #267047;
+}
+
+.status-mock,
+.status-pending,
+.status-sandbox {
+  background: #fff3d4;
+  color: #7a5a00;
+}
+
+.status-disabled {
+  background: #f2f3f5;
+  color: #777f89;
+}
+
+.logout-button {
+  margin-top: 24rpx;
+  background: transparent;
+  color: #9a3030;
+  font-size: 26rpx;
+}
+
+.diagnostics-button {
+  margin-top: 24rpx;
+}
+
+.feature-button {
+  margin-top: 24rpx;
+}

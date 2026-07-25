@@ -1,0 +1,7 @@
+<view class="page bootstrap-page">
+  <state-view
+    state="loading"
+    title="正在启动"
+    description="正在恢复安全会话并检查运行环境。"
+  />
+</view>
