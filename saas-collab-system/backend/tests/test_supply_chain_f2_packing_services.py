@@ -1,8 +1,12 @@
+import importlib
+
 import pytest
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import OperationalError
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
+import apps.packing.services as packing_services
 from apps.accounts.models import CustomUser, ExternalUserProfile
 from apps.audit.models import OperationLog
 from apps.common.exceptions import BusinessRuleViolation, ScopedResourceNotFound, StateConflict
@@ -16,8 +20,10 @@ from apps.packing.models import (
     PackingEvent,
     PackingStandardVersion,
     PackingSupplierCapability,
+    _packing_domain_write_context,
 )
 from apps.packing.services import (
+    PackingReplayReference,
     add_packing_box,
     approve_packing_change,
     cancel_packing_batch,
@@ -39,20 +45,20 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture(autouse=True)
 def frozen_standard():
-    PackingStandardVersion.objects.get_or_create(
-        code="packing-v1",
-        version=1,
-        defaults={
-            "title": "SC-F2 frozen packing standard v1",
-            "rules": {
-                "empty_box_forbidden": True,
-                "exact_completion_required": True,
-                "mixed_box_label_items_required": True,
-                "single_order_single_sku_recommended": True,
-            },
-            "is_active": True,
-        },
-    )
+    if not PackingStandardVersion.objects.filter(code="packing-v1", version=1).exists():
+        with _packing_domain_write_context():
+            PackingStandardVersion.objects.create(
+                code="packing-v1",
+                version=1,
+                title="SC-F2 frozen packing standard v1",
+                rules={
+                    "empty_box_forbidden": True,
+                    "exact_completion_required": True,
+                    "mixed_box_label_items_required": True,
+                    "single_order_single_sku_recommended": True,
+                },
+                is_active=True,
+            )
 
 
 def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
@@ -191,6 +197,26 @@ def test_frozen_standard_and_supplier_capabilities_fail_closed():
     )
     assert capability.can_self_pack is True
     assert capability.can_mix_order_packing is False
+    created_log = OperationLog.objects.get(action="packing.capability.update")
+    assert created_log.before_data == {}
+    assert created_log.after_data == {
+        "supplier_id": supplier.id,
+        "can_self_pack": True,
+        "can_mix_order_packing": False,
+    }
+
+    capability = set_supplier_packing_capability(
+        supplier_id=supplier.id,
+        actor=internal,
+        can_self_pack=True,
+        can_mix_order_packing=True,
+    )
+    updated_log = OperationLog.objects.filter(
+        action="packing.capability.update"
+    ).order_by("-id").first()
+    assert capability.can_mix_order_packing is True
+    assert updated_log.before_data["can_mix_order_packing"] is False
+    assert updated_log.after_data["can_mix_order_packing"] is True
 
     batch, replayed = create_packing_batch(
         order_ids=[order.id],
@@ -409,6 +435,19 @@ def test_replace_remove_and_cancel_release_active_order():
     assert batch.status == PackingBatch.Status.DRAFT
     assert batch.boxes.count() == 0
 
+    replay_box, replay_event, was_replayed = add_packing_box(
+        batch_id=batch.id,
+        actor=actor,
+        idempotency_key="add-mutation",
+        expected_version=1,
+        items=[{"order_line_id": lines[0].id, "quantity": 4}],
+    )
+    assert isinstance(replay_box, PackingReplayReference)
+    assert replay_box.id == box.id
+    assert replay_box.snapshot["batch"]["version"] == 2
+    assert replay_event.action == PackingEvent.Action.ADD_BOX
+    assert was_replayed is True
+
     cancel_packing_batch(
         batch_id=batch.id,
         actor=actor,
@@ -538,6 +577,13 @@ def test_completed_change_requires_different_reviewer_and_applies_one_version():
     )
     batch.refresh_from_db()
 
+    completed_replay, completed_event, completed_was_replayed = complete_packing_batch(
+        batch_id=batch.id,
+        actor=submitter,
+        idempotency_key="complete-change",
+        expected_version=2,
+    )
+
     assert replayed is False
     assert was_replayed is True
     assert replay.id == approved.id
@@ -546,6 +592,11 @@ def test_completed_change_requires_different_reviewer_and_applies_one_version():
     assert approved.applied_version == batch.version
     assert batch.status == PackingBatch.Status.COMPLETED
     assert batch.boxes.count() == 2
+    assert isinstance(completed_replay, PackingReplayReference)
+    assert completed_replay.snapshot["version"] == 3
+    assert completed_replay.snapshot["boxes"][0]["items"][0]["quantity"] == 10
+    assert completed_event.action == PackingEvent.Action.COMPLETE_BATCH
+    assert completed_was_replayed is True
     assert sum(
         PackingBoxItem.objects.filter(box__batch=batch)
         .values_list("quantity", flat=True)
@@ -596,9 +647,20 @@ def test_change_reject_and_stale_approval_preserve_completed_layout():
         reason="Stale local proposal",
         proposed_boxes=proposed,
     )
-    batch.version += 1
-    batch._domain_service_write = True
-    batch.save(update_fields=["version", "updated_at"])
+    third, _, _ = submit_packing_change(
+        batch_id=batch.id,
+        actor=submitter,
+        idempotency_key="submit-winning",
+        expected_version=batch.version,
+        reason="Winning local proposal",
+        proposed_boxes=proposed,
+    )
+    approve_packing_change(
+        change_request_id=third.id,
+        reviewer=reviewer,
+        idempotency_key="approve-winning",
+        review_note="Advances the completed layout version",
+    )
     with pytest.raises(StateConflict):
         approve_packing_change(
             change_request_id=second.id,
@@ -614,6 +676,24 @@ def test_orm_bypass_paths_and_completed_instances_are_rejected():
     actor = create_user(tenant, "pack-orm-user")
     supplier = create_supplier(tenant, "ORM")
     order, lines = create_completed_order(tenant, supplier, actor, "ORM", (10,))
+
+    with pytest.raises(DjangoValidationError):
+        PackingBatch.objects.create(
+            tenant=tenant,
+            supplier=supplier,
+            standard_version=PackingStandardVersion.objects.get(
+                code="packing-v1",
+                version=1,
+            ),
+            batch_no="PACK-DIRECT-BYPASS",
+            status=PackingBatch.Status.COMPLETED,
+            version=1,
+            creation_idempotency_key="direct-bypass",
+            creation_request_hash="0" * 64,
+            created_by=actor,
+            completed_at=timezone.now(),
+        )
+
     batch = create_batch(order, actor, "create-orm")
     box, _ = add_exact_box(batch, lines[0], actor, "add-orm")
     complete_batch(batch, actor, "complete-orm")
@@ -636,6 +716,7 @@ def test_orm_bypass_paths_and_completed_instances_are_rejected():
         PackingBatchOrder.objects.filter(pk=link.pk).delete()
 
     batch.note = "tampered"
+    batch._domain_service_write = True
     with pytest.raises(DjangoValidationError):
         batch.save()
     item.quantity = 1
@@ -697,3 +778,37 @@ def test_external_supplier_cannot_mix_orders_without_capability():
     assert replayed is False
     assert PackingBatchOrder.objects.filter(batch=batch, active_guard=True).count() == 2
     assert PackingSupplierCapability.objects.get(supplier=supplier).can_mix_order_packing is True
+
+
+@pytest.mark.parametrize("mysql_code", [1205, 1213])
+def test_retryable_mysql_operational_errors_become_retryable_state_conflicts(
+    monkeypatch,
+    mysql_code,
+):
+    tenant = Tenant.objects.create(
+        name=f"Packing retry {mysql_code}",
+        code=f"pack-retry-{mysql_code}",
+    )
+    actor = create_user(tenant, f"pack-retry-user-{mysql_code}")
+
+    def raise_retryable_conflict(**kwargs):
+        raise OperationalError(mysql_code, "simulated MySQL transactional conflict")
+
+    monkeypatch.setattr(packing_services, "_locked_batch", raise_retryable_conflict)
+    with pytest.raises(StateConflict, match="retry with the same idempotency key"):
+        add_packing_box(
+            batch_id=999999,
+            actor=actor,
+            idempotency_key=f"retry-{mysql_code}",
+            expected_version=1,
+            items=[{"order_line_id": 1, "quantity": 1}],
+        )
+
+
+def test_reverse_seed_keeps_referenced_standard_until_tables_are_dropped():
+    migration = importlib.import_module("apps.packing.migrations.0001_initial")
+    standard = PackingStandardVersion.objects.get(code="packing-v1", version=1)
+
+    migration.remove_frozen_packing_standard(None, None)
+
+    assert PackingStandardVersion.objects.filter(pk=standard.pk).exists()

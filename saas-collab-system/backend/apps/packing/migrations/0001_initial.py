@@ -24,8 +24,10 @@ def seed_frozen_packing_standard(apps, schema_editor):
 
 
 def remove_frozen_packing_standard(apps, schema_editor):
-    standard = apps.get_model("packing", "PackingStandardVersion")
-    standard.objects.filter(code="packing-v1", version=1).delete()
+    # Reverse migration drops the referencing packing tables before it drops
+    # PackingStandardVersion. Deleting this seed first would violate PROTECT
+    # whenever a non-empty packing batch still references the frozen standard.
+    pass
 
 
 class Migration(migrations.Migration):

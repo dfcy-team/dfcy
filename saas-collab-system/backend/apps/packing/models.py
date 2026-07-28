@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
 from string import hexdigits
 
 from django.conf import settings
@@ -7,6 +9,22 @@ from django.db import models
 from apps.masterdata.models import SupplierMaster
 from apps.purchasing.models import SupplyPurchaseOrder, SupplyPurchaseOrderLine
 from apps.tenants.models import Tenant
+
+
+_packing_domain_write_depth = ContextVar("packing_domain_write_depth", default=0)
+
+
+@contextmanager
+def _packing_domain_write_context():
+    token = _packing_domain_write_depth.set(_packing_domain_write_depth.get() + 1)
+    try:
+        yield
+    finally:
+        _packing_domain_write_depth.reset(token)
+
+
+def _packing_domain_write_allowed():
+    return _packing_domain_write_depth.get() > 0
 
 
 class ProtectedPackingQuerySet(models.QuerySet):
@@ -38,21 +56,15 @@ class PackingDomainModel(models.Model):
         abstract = True
 
     def save(self, *args, **kwargs):
-        if self.pk and not getattr(self, "_domain_service_write", False):
+        if not _packing_domain_write_allowed():
             raise ValidationError("Packing records must be changed through the audited domain service.")
         self.full_clean()
-        try:
-            return super().save(*args, **kwargs)
-        finally:
-            self._domain_service_write = False
+        return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        if not getattr(self, "_domain_service_write", False):
+        if not _packing_domain_write_allowed():
             raise ValidationError("Packing records must be retained or changed through the audited domain service.")
-        try:
-            return super().delete(*args, **kwargs)
-        finally:
-            self._domain_service_write = False
+        return super().delete(*args, **kwargs)
 
 
 class PackingStandardVersion(PackingDomainModel):

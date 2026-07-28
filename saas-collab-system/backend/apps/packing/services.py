@@ -2,10 +2,12 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from functools import wraps
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -25,10 +27,44 @@ from .models import (
     PackingEvent,
     PackingStandardVersion,
     PackingSupplierCapability,
+    _packing_domain_write_context,
 )
 
 
 DEFAULT_STANDARD_CODE = "packing-v1"
+MYSQL_RETRYABLE_ERROR_CODES = {1205, 1213}
+
+
+@dataclass(frozen=True)
+class PackingReplayReference:
+    id: int
+    snapshot: dict
+
+
+def _database_error_code(exc):
+    candidates = [getattr(exc, "__cause__", None), exc]
+    for candidate in candidates:
+        args = getattr(candidate, "args", ())
+        if args and isinstance(args[0], int):
+            return args[0]
+    return None
+
+
+def packing_domain_action(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        try:
+            with _packing_domain_write_context():
+                return func(*args, **kwargs)
+        except OperationalError as exc:
+            if _database_error_code(exc) in MYSQL_RETRYABLE_ERROR_CODES:
+                raise StateConflict(
+                    "Packing transaction hit a retryable database conflict; "
+                    "retry with the same idempotency key."
+                ) from exc
+            raise
+
+    return wrapped
 
 
 def _canonical_hash(payload):
@@ -105,7 +141,6 @@ def _default_standard():
 def _set_domain_fields(instance, **fields):
     for field, value in fields.items():
         setattr(instance, field, value)
-    instance._domain_service_write = True
     instance.save(update_fields=[*fields, "updated_at"] if hasattr(instance, "updated_at") else list(fields))
 
 
@@ -147,7 +182,6 @@ def _batch_snapshot(batch):
 
 def _finish_event(event, snapshot):
     event.response_snapshot = snapshot
-    event._domain_service_write = True
     event.save(update_fields=["response_snapshot"])
 
 
@@ -178,6 +212,25 @@ def _event_replay(batch, *, action, idempotency_key, request_hash, actor):
     if event.request_hash != request_hash:
         raise StateConflict("The idempotency key was already used with another payload.")
     return event
+
+
+def _replay_reference(event, id_key="id"):
+    snapshot = event.response_snapshot
+    object_id = snapshot.get(id_key)
+    if not object_id:
+        raise StateConflict("The stored packing idempotency response is incomplete.")
+    return PackingReplayReference(id=object_id, snapshot=snapshot)
+
+
+def _creation_replay_reference(batch, idempotency_key):
+    event = PackingEvent.objects.filter(
+        batch=batch,
+        action=PackingEvent.Action.CREATE_BATCH,
+        idempotency_key=idempotency_key,
+    ).first()
+    if event is None:
+        raise StateConflict("The packing creation audit response is missing.")
+    return _replay_reference(event)
 
 
 def _create_event(
@@ -353,6 +406,7 @@ def _create_box_records(batch, *, sequence, items, lines, weight=None, volume=No
     return box
 
 
+@packing_domain_action
 def set_supplier_packing_capability(
     *,
     supplier_id,
@@ -376,22 +430,45 @@ def set_supplier_packing_capability(
             supplier=supplier,
         ).first()
         if capability is None:
-            return PackingSupplierCapability.objects.create(
+            before = {}
+            capability = PackingSupplierCapability.objects.create(
                 tenant=actor.tenant,
                 supplier=supplier,
                 can_self_pack=bool(can_self_pack),
                 can_mix_order_packing=bool(can_mix_order_packing),
                 updated_by=actor,
             )
-        _set_domain_fields(
-            capability,
-            can_self_pack=bool(can_self_pack),
-            can_mix_order_packing=bool(can_mix_order_packing),
-            updated_by=actor,
+        else:
+            before = {
+                "supplier_id": capability.supplier_id,
+                "can_self_pack": capability.can_self_pack,
+                "can_mix_order_packing": capability.can_mix_order_packing,
+            }
+            _set_domain_fields(
+                capability,
+                can_self_pack=bool(can_self_pack),
+                can_mix_order_packing=bool(can_mix_order_packing),
+                updated_by=actor,
+            )
+        after = {
+            "supplier_id": capability.supplier_id,
+            "can_self_pack": capability.can_self_pack,
+            "can_mix_order_packing": capability.can_mix_order_packing,
+        }
+        write_operation_log(
+            tenant=actor.tenant,
+            user=actor,
+            module="supply_chain",
+            action="packing.capability.update",
+            object_type="PackingSupplierCapability",
+            object_id=capability.id,
+            before_data=before,
+            after_data=after,
         )
         return capability
 
 
+@packing_domain_action
 def create_packing_batch(
     *,
     order_ids,
@@ -425,7 +502,7 @@ def create_packing_batch(
             if existing:
                 if existing.created_by_id != actor.id or existing.creation_request_hash != request_hash:
                     raise StateConflict("The creation idempotency key was used with another payload or actor.")
-                return existing, True
+                return _creation_replay_reference(existing, idempotency_key), True
 
             orders = list(
                 SupplyPurchaseOrder.objects.select_for_update()
@@ -468,7 +545,7 @@ def create_packing_batch(
                     and active_batch.created_by_id == actor.id
                     and active_batch.creation_request_hash == request_hash
                 ):
-                    return active_batch, True
+                    return _creation_replay_reference(active_batch, idempotency_key), True
                 raise StateConflict("A purchase order already belongs to an active packing batch.")
 
             source_values = (
@@ -536,7 +613,7 @@ def create_packing_batch(
             and existing.created_by_id == actor.id
             and existing.creation_request_hash == request_hash
         ):
-            return existing, True
+            return _creation_replay_reference(existing, idempotency_key), True
         active_batch = PackingBatch.objects.filter(
             batch_orders__order_id__in=normalized_ids,
             batch_orders__active_guard=True,
@@ -547,7 +624,7 @@ def create_packing_batch(
             and active_batch.created_by_id == actor.id
             and active_batch.creation_request_hash == request_hash
         ):
-            return active_batch, True
+            return _creation_replay_reference(active_batch, idempotency_key), True
         if active_batch or PackingBatchOrder.objects.filter(
             order_id__in=normalized_ids,
             active_guard=True,
@@ -558,6 +635,7 @@ def create_packing_batch(
         raise
 
 
+@packing_domain_action
 def add_packing_box(
     *,
     batch_id,
@@ -590,8 +668,7 @@ def add_packing_box(
             actor=actor,
         )
         if replay:
-            box = PackingBox.objects.get(pk=replay.response_snapshot["box_id"])
-            return box, replay, True
+            return _replay_reference(replay, "box_id"), replay, True
         if batch.version != expected_version:
             raise StateConflict("Packing batch version is stale.")
         if batch.status not in {PackingBatch.Status.DRAFT, PackingBatch.Status.IN_PROGRESS}:
@@ -638,6 +715,7 @@ def add_packing_box(
         return box, event, False
 
 
+@packing_domain_action
 def replace_packing_box(
     *,
     batch_id,
@@ -672,7 +750,7 @@ def replace_packing_box(
             actor=actor,
         )
         if replay:
-            return PackingBox.objects.get(pk=box_id), replay, True
+            return _replay_reference(replay, "box_id"), replay, True
         if batch.version != expected_version:
             raise StateConflict("Packing batch version is stale.")
         if batch.status != PackingBatch.Status.IN_PROGRESS:
@@ -687,7 +765,6 @@ def replace_packing_box(
         _validate_quantities(batch, normalized, lines, excluded_box_id=box.id)
         before = _batch_snapshot(batch)
         for item in list(box.items.all()):
-            item._domain_service_write = True
             item.delete()
         _set_domain_fields(
             box,
@@ -728,6 +805,7 @@ def replace_packing_box(
         return box, event, False
 
 
+@packing_domain_action
 def remove_packing_box(
     *,
     batch_id,
@@ -760,9 +838,7 @@ def remove_packing_box(
             raise ScopedResourceNotFound("Packing box is not available in this batch.")
         before = _batch_snapshot(batch)
         for item in list(box.items.all()):
-            item._domain_service_write = True
             item.delete()
-        box._domain_service_write = True
         box.delete()
         remaining = PackingBox.objects.filter(batch=batch).exists()
         _set_domain_fields(
@@ -791,6 +867,7 @@ def remove_packing_box(
         return event, False
 
 
+@packing_domain_action
 def complete_packing_batch(
     *,
     batch_id,
@@ -810,7 +887,7 @@ def complete_packing_batch(
             actor=actor,
         )
         if replay:
-            return batch, replay, True
+            return _replay_reference(replay), replay, True
         if batch.version != expected_version:
             raise StateConflict("Packing batch version is stale.")
         if batch.status != PackingBatch.Status.IN_PROGRESS:
@@ -846,6 +923,7 @@ def complete_packing_batch(
         return batch, event, False
 
 
+@packing_domain_action
 def cancel_packing_batch(
     *,
     batch_id,
@@ -865,7 +943,7 @@ def cancel_packing_batch(
             actor=actor,
         )
         if replay:
-            return batch, replay, True
+            return _replay_reference(replay), replay, True
         if batch.version != expected_version:
             raise StateConflict("Packing batch version is stale.")
         if batch.status not in {PackingBatch.Status.DRAFT, PackingBatch.Status.IN_PROGRESS}:
@@ -876,7 +954,6 @@ def cancel_packing_batch(
             active_guard=True,
         ):
             link.active_guard = None
-            link._domain_service_write = True
             link.save(update_fields=["active_guard"])
         _set_domain_fields(
             batch,
@@ -904,6 +981,7 @@ def cancel_packing_batch(
         return batch, event, False
 
 
+@packing_domain_action
 def submit_packing_change(
     *,
     batch_id,
@@ -934,10 +1012,7 @@ def submit_packing_change(
             actor=actor,
         )
         if replay:
-            change = PackingChangeRequest.objects.get(
-                pk=replay.response_snapshot["change_request_id"]
-            )
-            return change, replay, True
+            return _replay_reference(replay, "change_request_id"), replay, True
         if batch.status != PackingBatch.Status.COMPLETED:
             raise StateConflict("Only completed packing batches accept change requests.")
         if batch.version != expected_version:
@@ -1001,9 +1076,7 @@ def _replace_completed_layout(batch, boxes):
 
     for old_box in list(batch.boxes.prefetch_related("items").all()):
         for item in list(old_box.items.all()):
-            item._domain_service_write = True
             item.delete()
-        old_box._domain_service_write = True
         old_box.delete()
     for sequence, box in enumerate(boxes, start=1):
         _create_box_records(
@@ -1017,6 +1090,7 @@ def _replace_completed_layout(batch, boxes):
         )
 
 
+@packing_domain_action
 def approve_packing_change(
     *,
     change_request_id,
@@ -1052,7 +1126,7 @@ def approve_packing_change(
             actor=reviewer,
         )
         if replay:
-            return change, replay, True
+            return _replay_reference(replay, "change_request_id"), replay, True
         if change.submitted_by_id == reviewer.id:
             raise PermissionDenied("Packing changes require a different reviewer.")
         if change.status != PackingChangeRequest.Status.PENDING:
@@ -1069,7 +1143,6 @@ def approve_packing_change(
         change.review_note = review_note
         change.reviewed_at = timezone.now()
         change.applied_version = batch.version
-        change._domain_service_write = True
         change.save(
             update_fields=[
                 "status",
@@ -1114,6 +1187,7 @@ def approve_packing_change(
         return change, event, False
 
 
+@packing_domain_action
 def reject_packing_change(
     *,
     change_request_id,
@@ -1151,7 +1225,7 @@ def reject_packing_change(
             actor=reviewer,
         )
         if replay:
-            return change, replay, True
+            return _replay_reference(replay, "change_request_id"), replay, True
         if change.submitted_by_id == reviewer.id:
             raise PermissionDenied("Packing changes require a different reviewer.")
         if change.status != PackingChangeRequest.Status.PENDING:
@@ -1160,7 +1234,6 @@ def reject_packing_change(
         change.reviewed_by = reviewer
         change.review_note = str(review_note).strip()
         change.reviewed_at = timezone.now()
-        change._domain_service_write = True
         change.save(
             update_fields=["status", "reviewed_by", "review_note", "reviewed_at"]
         )

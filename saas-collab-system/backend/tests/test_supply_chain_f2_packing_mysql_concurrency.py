@@ -12,6 +12,7 @@ from apps.packing.models import (
     PackingBoxItem,
     PackingEvent,
     PackingStandardVersion,
+    _packing_domain_write_context,
 )
 from apps.packing.services import (
     add_packing_box,
@@ -42,15 +43,15 @@ pytestmark = [
 
 @pytest.fixture(autouse=True)
 def frozen_standard():
-    PackingStandardVersion.objects.get_or_create(
-        code="packing-v1",
-        version=1,
-        defaults={
-            "title": "SC-F2 frozen packing standard v1",
-            "rules": {"exact_completion_required": True},
-            "is_active": True,
-        },
-    )
+    if not PackingStandardVersion.objects.filter(code="packing-v1", version=1).exists():
+        with _packing_domain_write_context():
+            PackingStandardVersion.objects.create(
+                code="packing-v1",
+                version=1,
+                title="SC-F2 frozen packing standard v1",
+                rules={"exact_completion_required": True},
+                is_active=True,
+            )
 
 
 def _thread_create(order_id, actor, key, barrier):
