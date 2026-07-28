@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "apps.files",
     "apps.products",
     "apps.purchasing",
+    "apps.packing",
     "apps.suppliers",
     "apps.finance",
     "apps.reports",
