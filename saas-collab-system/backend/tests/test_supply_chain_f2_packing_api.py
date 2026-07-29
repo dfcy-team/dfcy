@@ -1,4 +1,5 @@
 import pytest
+from django.db import IntegrityError, OperationalError
 from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -6,11 +7,15 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import CustomUser, ExternalUserProfile
 from apps.audit.models import OperationLog
 from apps.masterdata.models import SupplierMaster
+from apps.packing.api_idempotency import canonical_hash
 from apps.packing.models import (
     PackingApiIdempotencyRecord,
     PackingBatch,
     PackingEvent,
+    PackingStandardVersion,
+    _packing_domain_write_context,
 )
+from apps.packing.serializers import PackingChangeSubmitSerializer
 from apps.packing.services import set_supplier_packing_capability
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import ProductSKU, ProductSPU
@@ -202,6 +207,266 @@ def test_internal_create_has_atomic_frozen_replay_and_strict_fields():
     assert PackingApiIdempotencyRecord.objects.filter(tenant=tenant).count() == 1
 
 
+@pytest.mark.parametrize("mysql_code", [1205, 1213])
+def test_api_idempotency_retryable_mysql_errors_map_to_state_conflict(
+    monkeypatch,
+    mysql_code,
+):
+    tenant = Tenant.objects.create(name=f"F2 API DB {mysql_code}", code=f"f2-api-db-{mysql_code}")
+    user = create_internal(tenant, f"f2-api-db-user-{mysql_code}")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code=f"F2-DB-{mysql_code}",
+        name="Database conflict",
+    )
+    order, _ = create_order(tenant, supplier, user, f"DB-{mysql_code}")
+
+    def fail_find(*args, **kwargs):
+        raise OperationalError(mysql_code, "simulated retryable MySQL conflict")
+
+    monkeypatch.setattr("apps.packing.api_idempotency._find_record", fail_find)
+    response = create_batch(internal_client(user), order, f"db-conflict-{mysql_code}")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "STATE_CONFLICT"
+    assert PackingBatch.objects.filter(tenant=tenant).count() == 0
+
+
+def test_api_idempotency_non_retryable_database_error_is_not_hidden(monkeypatch):
+    tenant = Tenant.objects.create(name="F2 API DB other", code="f2-api-db-other")
+    user = create_internal(tenant, "f2-api-db-other-user")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code="F2-DB-OTHER",
+        name="Database failure",
+    )
+    order, _ = create_order(tenant, supplier, user, "DB-OTHER")
+
+    def fail_find(*args, **kwargs):
+        raise OperationalError(2005, "simulated non-retryable database failure")
+
+    monkeypatch.setattr("apps.packing.api_idempotency._find_record", fail_find)
+    with pytest.raises(OperationalError):
+        create_batch(internal_client(user), order, "db-conflict-other")
+
+
+@pytest.mark.parametrize("mysql_code", [1205, 1213])
+def test_api_idempotency_record_insert_retryable_error_rolls_back_and_maps(
+    monkeypatch,
+    mysql_code,
+):
+    tenant = Tenant.objects.create(
+        name=f"F2 API insert {mysql_code}",
+        code=f"f2-api-insert-{mysql_code}",
+    )
+    user = create_internal(tenant, f"f2-api-insert-user-{mysql_code}")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code=f"F2-INSERT-{mysql_code}",
+        name="API record insert",
+    )
+    order, _ = create_order(tenant, supplier, user, f"INSERT-{mysql_code}")
+
+    def fail_record(*args, **kwargs):
+        raise OperationalError(mysql_code, "simulated API record insert conflict")
+
+    monkeypatch.setattr(PackingApiIdempotencyRecord.objects, "create", fail_record)
+    response = create_batch(internal_client(user), order, f"insert-conflict-{mysql_code}")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "STATE_CONFLICT"
+    assert PackingBatch.objects.filter(tenant=tenant).count() == 0
+    assert PackingEvent.objects.filter(tenant=tenant).count() == 0
+
+
+def test_api_idempotency_conflict_recovery_retryable_error_maps(monkeypatch):
+    tenant = Tenant.objects.create(name="F2 API recovery", code="f2-api-recovery")
+    user = create_internal(tenant, "f2-api-recovery-user")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code="F2-RECOVERY",
+        name="API recovery",
+    )
+    order, _ = create_order(tenant, supplier, user, "RECOVERY")
+    find_results = iter([None, OperationalError(1213, "simulated recovery deadlock")])
+
+    def staged_find(*args, **kwargs):
+        result = next(find_results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def duplicate_record(*args, **kwargs):
+        raise IntegrityError("simulated API idempotency unique race")
+
+    monkeypatch.setattr("apps.packing.api_idempotency._find_record", staged_find)
+    monkeypatch.setattr(PackingApiIdempotencyRecord.objects, "create", duplicate_record)
+    response = create_batch(internal_client(user), order, "recovery-conflict")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "STATE_CONFLICT"
+    assert PackingBatch.objects.filter(tenant=tenant).count() == 0
+
+
+def test_request_content_type_query_and_decimal_contract_is_strict():
+    tenant = Tenant.objects.create(name="F2 request strict", code="f2-request-strict")
+    user = create_internal(tenant, "request-strict-user")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code="F2-STRICT",
+        name="Strict request",
+    )
+    order, line = create_order(tenant, supplier, user, "STRICT")
+    client = internal_client(user)
+
+    form_response = client.post(
+        "/api/internal/packing/batches/",
+        {"order_ids": [order.id]},
+        HTTP_IDEMPOTENCY_KEY="strict-form",
+    )
+    unknown_standard_query = client.get(
+        "/api/internal/packing/standards/current/?unexpected=1"
+    )
+    batch = create_batch(client, order, "strict-create").json()["data"]
+    unknown_detail_query = client.get(
+        f"/api/internal/packing/batches/{batch['id']}/?unexpected=1"
+    )
+    numeric_decimal = client.post(
+        f"/api/internal/packing/batches/{batch['id']}/boxes/",
+        {
+            "expected_version": batch["version"],
+            "weight": 2.5,
+            "volume": 0.125,
+            "items": [{"order_line_id": line.id, "quantity": line.quantity}],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="strict-number",
+    )
+    scientific_decimal = client.post(
+        f"/api/internal/packing/batches/{batch['id']}/boxes/",
+        {
+            "expected_version": batch["version"],
+            "weight": "2.5e0",
+            "items": [{"order_line_id": line.id, "quantity": line.quantity}],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="strict-scientific",
+    )
+
+    assert form_response.status_code == 400
+    assert unknown_standard_query.status_code == 400
+    assert unknown_detail_query.status_code == 400
+    assert numeric_decimal.status_code == 400
+    assert scientific_decimal.status_code == 400
+    assert PackingEvent.objects.filter(
+        batch_id=batch["id"],
+        action=PackingEvent.Action.ADD_BOX,
+    ).count() == 0
+
+
+def test_reordered_box_items_replay_same_normalized_payload():
+    tenant = Tenant.objects.create(name="F2 normalized items", code="f2-normalized-items")
+    user = create_internal(tenant, "normalized-items-user")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code="F2-NORMALIZED",
+        name="Normalized items",
+    )
+    first_order, first_line = create_order(
+        tenant,
+        supplier,
+        user,
+        "NORMALIZED-1",
+        quantity=4,
+    )
+    second_order, second_line = create_order(
+        tenant,
+        supplier,
+        user,
+        "NORMALIZED-2",
+        quantity=6,
+    )
+    client = internal_client(user)
+    batch = client.post(
+        "/api/internal/packing/batches/",
+        {"order_ids": [first_order.id, second_order.id]},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="normalized-create",
+    ).json()["data"]
+    url = f"/api/internal/packing/batches/{batch['id']}/boxes/"
+    common = {
+        "expected_version": batch["version"],
+        "weight": "2.500",
+        "volume": "0.125000",
+    }
+
+    first = client.post(
+        url,
+        {
+            **common,
+            "items": [
+                {"order_line_id": second_line.id, "quantity": 6},
+                {"order_line_id": first_line.id, "quantity": 4},
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="normalized-add",
+    )
+    replay = client.post(
+        url,
+        {
+            **common,
+            "items": [
+                {"order_line_id": first_line.id, "quantity": 4},
+                {"order_line_id": second_line.id, "quantity": 6},
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="normalized-add",
+    )
+
+    assert first.status_code == replay.status_code == 201
+    assert first.json() == replay.json()
+    assert replay["Idempotency-Replayed"] == "true"
+    assert PackingEvent.objects.filter(
+        batch_id=batch["id"],
+        action=PackingEvent.Action.ADD_BOX,
+    ).count() == 1
+    first_change = PackingChangeSubmitSerializer(
+        data={
+            "expected_version": 2,
+            "reason": "Normalize proposed items",
+            "proposed_boxes": [
+                {
+                    "items": [
+                        {"order_line_id": second_line.id, "quantity": 6},
+                        {"order_line_id": first_line.id, "quantity": 4},
+                    ]
+                }
+            ],
+        }
+    )
+    reordered_change = PackingChangeSubmitSerializer(
+        data={
+            "expected_version": 2,
+            "reason": "Normalize proposed items",
+            "proposed_boxes": [
+                {
+                    "items": [
+                        {"order_line_id": first_line.id, "quantity": 4},
+                        {"order_line_id": second_line.id, "quantity": 6},
+                    ]
+                }
+            ],
+        }
+    )
+    assert first_change.is_valid(), first_change.errors
+    assert reordered_change.is_valid(), reordered_change.errors
+    assert canonical_hash(first_change.validated_data) == canonical_hash(
+        reordered_change.validated_data
+    )
+
+
 def test_permission_missing_scope_missing_and_invalid_scope_are_distinct():
     tenant = Tenant.objects.create(name="F2 API permission", code="f2-api-permission")
     no_permission = create_internal(tenant, "no-permission", permissions=(), with_scope=False)
@@ -364,6 +629,24 @@ def test_current_standard_scope_gate_and_external_channels():
     assert wrong_channel.status_code == 403
 
 
+def test_current_standard_uses_same_code_as_new_batches():
+    tenant = Tenant.objects.create(name="F2 standard choice", code="f2-standard-choice")
+    user = create_internal(tenant, "standard-choice-user")
+    with _packing_domain_write_context():
+        PackingStandardVersion.objects.create(
+            code="aaa-alternate",
+            version=99,
+            title="Alternate standard",
+            rules={"exact_completion_required": False},
+            is_active=True,
+        )
+
+    response = internal_client(user).get("/api/internal/packing/standards/current/")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["code"] == "packing-v1"
+
+
 def test_supplier_and_miniapp_write_capability_and_safe_dto():
     tenant = Tenant.objects.create(name="F2 supplier", code="f2-supplier")
     internal = create_internal(tenant, "supplier-admin")
@@ -397,6 +680,84 @@ def test_supplier_and_miniapp_write_capability_and_safe_dto():
     assert "created_by" not in web.json()["data"]
     assert "tenant" not in str(web.json()["data"]).lower()
     assert mini_wrong_channel.status_code == 403
+
+
+def test_supplier_existing_mixed_order_writes_only_require_self_pack():
+    tenant = Tenant.objects.create(name="F2 supplier mixed", code="f2-supplier-mixed")
+    internal = create_internal(tenant, "supplier-mixed-admin")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code="F2-SUP-MIXED",
+        name="Supplier mixed",
+    )
+    first_order, first_line = create_order(tenant, supplier, internal, "SUP-MIXED-1")
+    second_order, second_line = create_order(tenant, supplier, internal, "SUP-MIXED-2")
+    external = create_supplier_user(tenant, supplier, "supplier-mixed-user")
+    set_supplier_packing_capability(
+        supplier_id=supplier.id,
+        actor=internal,
+        can_self_pack=True,
+        can_mix_order_packing=True,
+    )
+    web_client = supplier_client(external)
+    created = web_client.post(
+        "/api/external/supplier/packing/batches/",
+        {"order_ids": [first_order.id, second_order.id]},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="supplier-mixed-create",
+    ).json()["data"]
+    set_supplier_packing_capability(
+        supplier_id=supplier.id,
+        actor=internal,
+        can_self_pack=True,
+        can_mix_order_packing=False,
+    )
+    added = web_client.post(
+        f"/api/external/supplier/packing/batches/{created['id']}/boxes/",
+        {
+            "expected_version": created["version"],
+            "items": [
+                {"order_line_id": first_line.id, "quantity": first_line.quantity},
+                {"order_line_id": second_line.id, "quantity": second_line.quantity},
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="supplier-mixed-add",
+    )
+    added_data = added.json()["data"]
+    box_id = added_data["boxes"][0]["id"]
+    miniapp_updated = miniapp_client(external).put(
+        f"/api/miniapp/supply-chain/packing/batches/{created['id']}/boxes/{box_id}/",
+        {
+            "expected_version": added_data["version"],
+            "items": [
+                {"order_line_id": second_line.id, "quantity": second_line.quantity},
+                {"order_line_id": first_line.id, "quantity": first_line.quantity},
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="supplier-mixed-update",
+    )
+
+    assert added.status_code == 201
+    assert miniapp_updated.status_code == 200
+
+
+def test_supplier_list_rejects_internal_date_filters():
+    tenant = Tenant.objects.create(name="F2 supplier filters", code="f2-supplier-filters")
+    internal = create_internal(tenant, "supplier-filter-admin")
+    supplier = SupplierMaster.objects.create(
+        tenant=tenant,
+        code="F2-SUP-FILTER",
+        name="Supplier filter",
+    )
+    external = create_supplier_user(tenant, supplier, "supplier-filter-user")
+
+    response = supplier_client(external).get(
+        "/api/external/supplier/packing/batches/?created_at_from=2026-01-01T00:00:00Z"
+    )
+
+    assert response.status_code == 400
 
 
 def test_label_pdf_is_byte_deterministic_and_snapshot_is_minimal():

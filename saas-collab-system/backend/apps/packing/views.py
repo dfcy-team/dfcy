@@ -20,7 +20,6 @@ from .models import (
     PackingBatch,
     PackingBox,
     PackingChangeRequest,
-    PackingStandardVersion,
 )
 from .permissions import (
     IsNonMiniAppChannel,
@@ -51,6 +50,7 @@ from .services import (
     cancel_packing_batch,
     complete_packing_batch,
     create_packing_batch,
+    find_current_packing_standard,
     reject_packing_change,
     remove_packing_box,
     replace_packing_box,
@@ -100,6 +100,13 @@ def _strict_query(request, allowed):
         raise ValidationError({"unknown_query": f"Unknown query parameters: {sorted(unknown)}"})
 
 
+def _require_json_request(request):
+    if request.content_type != "application/json":
+        raise ValidationError(
+            {"content_type": "Content-Type application/json is required."}
+        )
+
+
 def _page_values(request):
     page = _positive_query(request.query_params.get("page"), "page") or 1
     page_size = _positive_query(request.query_params.get("page_size"), "page_size") or 20
@@ -142,13 +149,11 @@ def _filter_batches(request, queryset, *, internal):
         "search",
         "status",
         "order_id",
-        "created_at_from",
-        "created_at_to",
         "page",
         "page_size",
     }
     if internal:
-        allowed.add("supplier_id")
+        allowed.update({"supplier_id", "created_at_from", "created_at_to"})
     _strict_query(request, allowed)
     search = request.query_params.get("search", "").strip()
     if len(search) > 100:
@@ -204,11 +209,7 @@ def _get_batch(request, pk, permission_code, *, internal):
 
 
 def _require_supplier_write(user, batch):
-    require_supplier_capability(
-        user,
-        batch.supplier_id,
-        mixed_orders=batch.batch_orders.count() > 1,
-    )
+    require_supplier_capability(user, batch.supplier_id)
 
 
 def _batch_collection(request, *, channel, internal):
@@ -223,6 +224,8 @@ def _batch_collection(request, *, channel, internal):
             _paginated(request, queryset, batch_summary_data)
         )
 
+    _strict_query(request, set())
+    _require_json_request(request)
     serializer = PackingBatchCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     payload = serializer.validated_data
@@ -290,6 +293,7 @@ def miniapp_batch_collection(request):
 
 
 def _batch_detail(request, pk, *, internal):
+    _strict_query(request, set())
     return _success(
         batch_detail_data(
             _get_batch(request, pk, "supply.packing.view", internal=internal),
@@ -320,6 +324,8 @@ def _box_write(request, pk, *, channel, internal, box_id=None):
     batch = _get_batch(request, pk, "supply.packing.manage", internal=internal)
     if not internal:
         _require_supplier_write(request.user, batch)
+    _strict_query(request, set())
+    _require_json_request(request)
     serializer = PackingBoxWriteSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     payload = serializer.validated_data
@@ -368,6 +374,8 @@ def _expected_action(
     batch = _get_batch(request, pk, permission_code, internal=internal)
     if not internal:
         _require_supplier_write(request.user, batch)
+    _strict_query(request, set())
+    _require_json_request(request)
     serializer = ExpectedVersionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     payload = serializer.validated_data
@@ -558,6 +566,8 @@ def _change_collection(request, pk, *, channel, internal):
         )
     if not internal:
         _require_supplier_write(request.user, batch)
+    _strict_query(request, set())
+    _require_json_request(request)
     serializer = PackingChangeSubmitSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     payload = serializer.validated_data
@@ -645,11 +655,14 @@ def _get_review_change(request, change_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsNonMiniAppChannel])
 def internal_review_detail(request, change_id):
+    _strict_query(request, set())
     return _success(change_request_data(_get_review_change(request, change_id), internal=True))
 
 
 def _review_action(request, change_id, action):
     _get_review_change(request, change_id)
+    _strict_query(request, set())
+    _require_json_request(request)
     serializer = PackingReviewSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     payload = serializer.validated_data
@@ -692,13 +705,12 @@ def internal_review_reject(request, change_id):
 
 
 def _standard(request, *, internal):
+    _strict_query(request, set())
     if internal:
         require_internal_permission(request.user, "supply.packing.view")
     else:
         supplier_id_for_user(request.user)
-    standard = PackingStandardVersion.objects.filter(is_active=True).order_by(
-        "code", "-version"
-    ).first()
+    standard = find_current_packing_standard()
     if standard is None:
         raise ScopedResourceNotFound("The current packing standard is not available.")
     return _success(standard_data(standard))
@@ -723,6 +735,8 @@ def miniapp_standard(request):
 
 
 def _label(request, *, channel, internal, batch_id=None, box_id=None):
+    _strict_query(request, set())
+    _require_json_request(request)
     serializer = PackingLabelSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     payload = serializer.validated_data

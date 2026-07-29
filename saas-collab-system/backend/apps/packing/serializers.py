@@ -1,6 +1,23 @@
+import re
 from decimal import Decimal
 
 from rest_framework import serializers
+
+
+class PlainDecimalStringField(serializers.DecimalField):
+    default_error_messages = {
+        "not_string": "A plain decimal string is required.",
+        "not_plain": "Scientific notation and signed decimal strings are not allowed.",
+    }
+
+    def to_internal_value(self, data):
+        if not isinstance(data, str):
+            self.fail("not_string")
+        integer_digits = self.max_digits - self.decimal_places
+        pattern = rf"[0-9]{{1,{integer_digits}}}(?:\.[0-9]{{1,{self.decimal_places}}})?"
+        if re.fullmatch(pattern, data) is None:
+            self.fail("not_plain")
+        return super().to_internal_value(data)
 
 
 class StrictSerializer(serializers.Serializer):
@@ -36,14 +53,14 @@ class PackingItemSerializer(StrictSerializer):
 
 class PackingBoxWriteSerializer(StrictSerializer):
     expected_version = serializers.IntegerField(min_value=1)
-    weight = serializers.DecimalField(
+    weight = PlainDecimalStringField(
         max_digits=12,
         decimal_places=3,
         min_value=Decimal("0.001"),
         required=False,
         allow_null=True,
     )
-    volume = serializers.DecimalField(
+    volume = PlainDecimalStringField(
         max_digits=12,
         decimal_places=6,
         min_value=Decimal("0.000001"),
@@ -57,7 +74,7 @@ class PackingBoxWriteSerializer(StrictSerializer):
         line_ids = [item["order_line_id"] for item in value]
         if len(line_ids) != len(set(line_ids)):
             raise serializers.ValidationError("Order-line IDs must not contain duplicates.")
-        return value
+        return sorted(value, key=lambda item: item["order_line_id"])
 
 
 class ExpectedVersionSerializer(StrictSerializer):
@@ -65,14 +82,14 @@ class ExpectedVersionSerializer(StrictSerializer):
 
 
 class ProposedPackingBoxSerializer(StrictSerializer):
-    weight = serializers.DecimalField(
+    weight = PlainDecimalStringField(
         max_digits=12,
         decimal_places=3,
         min_value=Decimal("0.001"),
         required=False,
         allow_null=True,
     )
-    volume = serializers.DecimalField(
+    volume = PlainDecimalStringField(
         max_digits=12,
         decimal_places=6,
         min_value=Decimal("0.000001"),
@@ -86,7 +103,7 @@ class ProposedPackingBoxSerializer(StrictSerializer):
         line_ids = [item["order_line_id"] for item in value]
         if len(line_ids) != len(set(line_ids)):
             raise serializers.ValidationError("Order-line IDs must not contain duplicates.")
-        return value
+        return sorted(value, key=lambda item: item["order_line_id"])
 
 
 class PackingChangeSubmitSerializer(StrictSerializer):

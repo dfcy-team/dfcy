@@ -133,11 +133,15 @@ def _require_supplier_capability(actor, supplier_id, *, mixed_orders=False):
         raise PermissionDenied("Supplier mixed-order packing is not enabled.")
 
 
-def _default_standard():
-    standard = PackingStandardVersion.objects.filter(
+def find_current_packing_standard():
+    return PackingStandardVersion.objects.filter(
         code=DEFAULT_STANDARD_CODE,
         is_active=True,
     ).order_by("-version").first()
+
+
+def _require_current_packing_standard():
+    standard = find_current_packing_standard()
     if standard is None:
         raise StateConflict("The frozen packing standard is not installed.")
     return standard
@@ -565,7 +569,7 @@ def create_packing_batch(
             batch = PackingBatch.objects.create(
                 tenant=actor.tenant,
                 supplier_id=supplier_id,
-                standard_version=_default_standard(),
+                standard_version=_require_current_packing_standard(),
                 batch_no=(
                     f"PKG-{timezone.localdate():%Y%m%d}-"
                     f"{supplier_id}-{uuid.uuid4().hex[:8].upper()}"

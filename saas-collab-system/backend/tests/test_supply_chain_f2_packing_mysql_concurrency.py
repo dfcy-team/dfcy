@@ -130,6 +130,28 @@ def _thread_api_create(order_id, actor, key, barrier):
         close_old_connections()
 
 
+def _thread_api_add_box(batch_id, line_id, actor, key, barrier):
+    from rest_framework.test import APIClient
+
+    close_old_connections()
+    try:
+        client = APIClient()
+        client.force_authenticate(user=actor)
+        barrier.wait(timeout=10)
+        response = client.post(
+            f"/api/internal/packing/batches/{batch_id}/boxes/",
+            {
+                "expected_version": 1,
+                "items": [{"order_line_id": line_id, "quantity": 10}],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+        return response.status_code, response.json()
+    finally:
+        close_old_connections()
+
+
 def test_mysql_api_same_key_commits_one_business_result_and_http_record():
     tenant = Tenant.objects.create(name="SC-F2 MySQL API", code="sc-f2-mysql-api")
     actor = create_api_internal(tenant, "sc-f2-mysql-api-user")
@@ -159,6 +181,65 @@ def test_mysql_api_same_key_commits_one_business_result_and_http_record():
     assert PackingApiIdempotencyRecord.objects.filter(
         tenant=tenant,
         idempotency_key="mysql-api-same-key",
+    ).count() == 1
+
+
+def test_mysql_api_same_tenant_key_across_scopes_allows_only_one_identity():
+    tenant = Tenant.objects.create(name="SC-F2 MySQL API scope", code="sc-f2-mysql-api-scope")
+    actor = create_api_internal(tenant, "sc-f2-mysql-api-scope-user")
+    supplier = create_supplier(tenant, "MYSQL-API-SCOPE")
+    first_order, first_lines = create_completed_order(
+        tenant,
+        supplier,
+        actor,
+        "MYSQL-API-SCOPE-1",
+        (10,),
+    )
+    second_order, second_lines = create_completed_order(
+        tenant,
+        supplier,
+        actor,
+        "MYSQL-API-SCOPE-2",
+        (10,),
+    )
+    first_batch, _ = create_packing_batch(
+        order_ids=[first_order.id],
+        actor=actor,
+        idempotency_key="mysql-api-scope-create-1",
+    )
+    second_batch, _ = create_packing_batch(
+        order_ids=[second_order.id],
+        actor=actor,
+        idempotency_key="mysql-api-scope-create-2",
+    )
+    barrier = Barrier(2)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = [
+            future.result(timeout=30)
+            for future in [
+                executor.submit(
+                    _thread_api_add_box,
+                    batch.id,
+                    line.id,
+                    actor,
+                    "mysql-api-cross-scope-key",
+                    barrier,
+                )
+                for batch, line in (
+                    (first_batch, first_lines[0]),
+                    (second_batch, second_lines[0]),
+                )
+            ]
+        ]
+
+    assert sorted(result[0] for result in results) == [201, 409], results
+    conflict = next(result[1] for result in results if result[0] == 409)
+    assert conflict["code"] == "IDEMPOTENCY_CONFLICT"
+    assert PackingBox.objects.filter(batch_id__in=[first_batch.id, second_batch.id]).count() == 1
+    assert PackingApiIdempotencyRecord.objects.filter(
+        tenant=tenant,
+        idempotency_key="mysql-api-cross-scope-key",
     ).count() == 1
 
 

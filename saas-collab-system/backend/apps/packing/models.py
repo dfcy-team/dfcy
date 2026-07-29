@@ -491,6 +491,10 @@ class PackingApiIdempotencyRecord(PackingDomainModel):
                 fields=["tenant", "scope_key", "idempotency_key"],
                 name="uniq_pack_api_scope_key",
             ),
+            models.UniqueConstraint(
+                fields=["tenant", "idempotency_key"],
+                name="uniq_pack_api_tenant_key",
+            ),
             models.CheckConstraint(
                 condition=models.Q(http_status__gte=200) & models.Q(http_status__lt=300),
                 name="pack_api_http_success",
