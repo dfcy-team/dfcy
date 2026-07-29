@@ -14,7 +14,12 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.accounts.models import CustomUser
 from apps.audit.services import write_operation_log
-from apps.common.exceptions import BusinessRuleViolation, ScopedResourceNotFound, StateConflict
+from apps.common.exceptions import (
+    BusinessRuleViolation,
+    ScopedResourceNotFound,
+    StateConflict,
+    VersionConflict,
+)
 from apps.masterdata.models import StatusChoices, SupplierMaster
 from apps.purchasing.models import SupplyPurchaseOrder, SupplyPurchaseOrderLine
 
@@ -670,7 +675,7 @@ def add_packing_box(
         if replay:
             return _replay_reference(replay, "box_id"), replay, True
         if batch.version != expected_version:
-            raise StateConflict("Packing batch version is stale.")
+            raise VersionConflict("Packing batch version is stale.")
         if batch.status not in {PackingBatch.Status.DRAFT, PackingBatch.Status.IN_PROGRESS}:
             raise StateConflict("Boxes can only be added to an unfinished packing batch.")
         lines = _lock_linked_lines(batch)
@@ -752,7 +757,7 @@ def replace_packing_box(
         if replay:
             return _replay_reference(replay, "box_id"), replay, True
         if batch.version != expected_version:
-            raise StateConflict("Packing batch version is stale.")
+            raise VersionConflict("Packing batch version is stale.")
         if batch.status != PackingBatch.Status.IN_PROGRESS:
             raise StateConflict("Only in-progress packing batches can be changed.")
         box = PackingBox.objects.select_for_update().filter(
@@ -830,7 +835,7 @@ def remove_packing_box(
         if replay:
             return replay, True
         if batch.version != expected_version:
-            raise StateConflict("Packing batch version is stale.")
+            raise VersionConflict("Packing batch version is stale.")
         if batch.status != PackingBatch.Status.IN_PROGRESS:
             raise StateConflict("Only in-progress packing batches can be changed.")
         box = PackingBox.objects.select_for_update().filter(pk=box_id, batch=batch).first()
@@ -889,7 +894,7 @@ def complete_packing_batch(
         if replay:
             return _replay_reference(replay), replay, True
         if batch.version != expected_version:
-            raise StateConflict("Packing batch version is stale.")
+            raise VersionConflict("Packing batch version is stale.")
         if batch.status != PackingBatch.Status.IN_PROGRESS:
             raise StateConflict("Only an in-progress packing batch can be completed.")
         lines = _lock_linked_lines(batch)
@@ -945,7 +950,7 @@ def cancel_packing_batch(
         if replay:
             return _replay_reference(replay), replay, True
         if batch.version != expected_version:
-            raise StateConflict("Packing batch version is stale.")
+            raise VersionConflict("Packing batch version is stale.")
         if batch.status not in {PackingBatch.Status.DRAFT, PackingBatch.Status.IN_PROGRESS}:
             raise StateConflict("Only unfinished packing batches can be cancelled.")
         before = _batch_snapshot(batch)
@@ -1016,7 +1021,7 @@ def submit_packing_change(
         if batch.status != PackingBatch.Status.COMPLETED:
             raise StateConflict("Only completed packing batches accept change requests.")
         if batch.version != expected_version:
-            raise StateConflict("Packing batch version is stale.")
+            raise VersionConflict("Packing batch version is stale.")
         change = PackingChangeRequest.objects.create(
             tenant=batch.tenant,
             batch=batch,
@@ -1134,7 +1139,7 @@ def approve_packing_change(
         if batch.status != PackingBatch.Status.COMPLETED:
             raise StateConflict("Packing change target must remain completed.")
         if batch.version != change.expected_version:
-            raise StateConflict("Packing batch changed after this request was submitted.")
+            raise VersionConflict("Packing batch changed after this request was submitted.")
         before = _batch_snapshot(batch)
         _replace_completed_layout(batch, change.proposed_boxes)
         _set_domain_fields(batch, version=batch.version + 1)

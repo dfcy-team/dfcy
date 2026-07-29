@@ -7,6 +7,7 @@ from django.db import close_old_connections, connection
 
 from apps.common.exceptions import StateConflict
 from apps.packing.models import (
+    PackingApiIdempotencyRecord,
     PackingBatch,
     PackingBox,
     PackingBoxItem,
@@ -30,6 +31,7 @@ from .test_supply_chain_f2_packing_services import (
     create_supplier,
     create_user,
 )
+from .test_supply_chain_f2_packing_api import create_internal as create_api_internal
 
 
 pytestmark = [
@@ -103,6 +105,61 @@ def _thread_approve(change_request_id, reviewer, key, barrier):
         return "conflict", str(exc.detail), None
     finally:
         close_old_connections()
+
+
+def _thread_api_create(order_id, actor, key, barrier):
+    from rest_framework.test import APIClient
+
+    close_old_connections()
+    try:
+        client = APIClient()
+        client.force_authenticate(user=actor)
+        barrier.wait(timeout=10)
+        response = client.post(
+            "/api/internal/packing/batches/",
+            {"order_ids": [order_id], "note": "MySQL API concurrency"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+        return (
+            response.status_code,
+            response.json(),
+            response.get("Idempotency-Replayed"),
+        )
+    finally:
+        close_old_connections()
+
+
+def test_mysql_api_same_key_commits_one_business_result_and_http_record():
+    tenant = Tenant.objects.create(name="SC-F2 MySQL API", code="sc-f2-mysql-api")
+    actor = create_api_internal(tenant, "sc-f2-mysql-api-user")
+    supplier = create_supplier(tenant, "MYSQL-API")
+    order, _ = create_completed_order(tenant, supplier, actor, "MYSQL-API", (10,))
+    barrier = Barrier(2)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = [
+            future.result(timeout=30)
+            for future in [
+                executor.submit(
+                    _thread_api_create,
+                    order.id,
+                    actor,
+                    "mysql-api-same-key",
+                    barrier,
+                )
+                for _ in range(2)
+            ]
+        ]
+
+    assert [result[0] for result in results] == [201, 201], results
+    assert results[0][1] == results[1][1]
+    assert sorted(result[2] for result in results) == ["false", "true"]
+    assert PackingBatch.objects.filter(tenant=tenant).count() == 1
+    assert PackingApiIdempotencyRecord.objects.filter(
+        tenant=tenant,
+        idempotency_key="mysql-api-same-key",
+    ).count() == 1
 
 
 def test_mysql_concurrent_create_same_key_replays_one_batch():

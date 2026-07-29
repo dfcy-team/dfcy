@@ -450,3 +450,74 @@ class PackingEvent(PackingDomainModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Packing events are append-only.")
+
+
+class PackingApiIdempotencyRecord(PackingDomainModel):
+    class Channel(models.TextChoices):
+        INTERNAL = "internal", "Internal"
+        SUPPLIER_WEB = "supplier_web", "Supplier web"
+        MINIAPP = "miniapp", "Mini Program"
+
+    class ResponseKind(models.TextChoices):
+        JSON = "json", "JSON"
+        LABEL = "label", "Label"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="packing_api_idempotency_records",
+    )
+    scope_key = models.CharField(max_length=255)
+    idempotency_key = models.CharField(max_length=128)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="packing_api_idempotency_records",
+    )
+    channel = models.CharField(max_length=20, choices=Channel.choices)
+    action = models.CharField(max_length=40)
+    resource_key = models.CharField(max_length=255)
+    request_hash = models.CharField(max_length=64)
+    http_status = models.PositiveSmallIntegerField()
+    response_kind = models.CharField(max_length=10, choices=ResponseKind.choices)
+    response_body = models.JSONField(null=True, blank=True)
+    label_snapshot = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["tenant_id", "-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "scope_key", "idempotency_key"],
+                name="uniq_pack_api_scope_key",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(http_status__gte=200) & models.Q(http_status__lt=300),
+                name="pack_api_http_success",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "idempotency_key"],
+                name="idx_pack_api_tenant_key",
+            ),
+        ]
+
+    def clean(self):
+        if self.actor_id and self.actor.tenant_id != self.tenant_id:
+            raise ValidationError("Packing API idempotency actor must belong to the same tenant.")
+        if not self.scope_key or not self.resource_key:
+            raise ValidationError("Packing API idempotency scope and resource keys are required.")
+        if len(self.request_hash) != 64 or any(
+            character not in hexdigits for character in self.request_hash
+        ):
+            raise ValidationError("Packing API request hash must be a SHA-256 hexadecimal digest.")
+        if self.response_kind == self.ResponseKind.JSON:
+            if self.response_body is None or self.label_snapshot is not None:
+                raise ValidationError("JSON idempotency records require only a response body.")
+        elif self.response_kind == self.ResponseKind.LABEL:
+            if self.label_snapshot is None or self.response_body is not None:
+                raise ValidationError("Label idempotency records require only a label snapshot.")
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Packing API idempotency records are append-only.")
