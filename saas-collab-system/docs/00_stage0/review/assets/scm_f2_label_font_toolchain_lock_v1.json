@@ -4,7 +4,7 @@
     "gate": "SC-F2-LABEL-FONT-R1-P2-001",
     "previous_status": "ACCEPTED_DEFERRED_WITH_PRE_ASSET_COMMIT_GATE",
     "closure_decision": "CLOSE_WITH_NORMAL_GIT_AND_TOOLCHAIN_LOCK_V1",
-    "effective_after": "SC-F2-LABEL-FONT-3_P1_REMEDIATION_RECHECK_PASS",
+    "effective_after": "SC-F2-LABEL-FONT-3_R3_P1_002_QUICK_RECHECK_PASS",
     "renderer_implementation_authorized": false
   },
   "authoritative_environment": {
@@ -102,6 +102,14 @@
     {
       "path": "backend/scripts/inspect_sc_f2_probe_pdf.py",
       "sha256": "31789c7837adbb86e39cf8cc96fd4033d06397c984d46158103bdc835784b32b"
+    },
+    {
+      "path": "backend/scripts/probe_sc_f2_font_memory.py",
+      "sha256": "4b242d1f52f7caba04c1c1b95f151e952882edb7c53087fbb0600cb7a5891b4b"
+    },
+    {
+      "path": "backend/scripts/run_sc_f2_font_ci_gate.py",
+      "sha256": "6d2ea1eb5ab1c729a05356d261b56d856cc9d7c9c431f693a6ebc16ab003f14b"
     }
   ],
   "candidate": {
@@ -126,6 +134,14 @@
     "hundred_page_probe_max_elapsed_ms": 5000,
     "python_tracemalloc_peak_max_bytes": 16777216,
     "standalone_probe_process_max_rss_kib": 131072,
+    "memory_probe_steady_renders": 10,
+    "memory_probe_concurrent_workers": 2,
+    "first_render_process_max_rss_kib": 131072,
+    "steady_state_rss_growth_max_kib": 16384,
+    "concurrent_worker_rss_max_kib": 131072,
+    "concurrent_aggregate_worker_rss_max_kib": 229376,
+    "concurrent_total_rss_max_kib": 245760,
+    "memory_probe_timeout_seconds": 30,
     "verification_container_memory_limit_bytes": 268435456,
     "budget_breach_action": "fail verification and require a new reviewed bundle/toolchain version"
   },
@@ -150,14 +166,39 @@
       "python_tracemalloc_peak_bytes": 10964943,
       "process_max_rss_kib": 88408,
       "container_memory_limit_bytes": 268435456
+    },
+    "ci_rehearsal": {
+      "evidence_bytes": 6754,
+      "evidence_sha256": "018b1517ac9b805b68e181e0cd03cbd85401eccf0a1a8ca09deb6ca2a1ab45f8",
+      "two_page_elapsed_ms": 46.339,
+      "hundred_page_elapsed_ms": 337.69,
+      "hundred_page_process_max_rss_kib": 88008,
+      "first_render_peak_rss_kib": 88788,
+      "steady_state_rss_growth_kib": 92,
+      "concurrent_workers": 2,
+      "concurrent_worker_rss_kib": [
+        89192,
+        89368
+      ],
+      "concurrent_aggregate_worker_rss_kib": 178560,
+      "concurrent_controller_rss_kib": 23092,
+      "concurrent_total_rss_kib": 201652,
+      "result": "PASS"
     }
   },
   "cross_environment_evidence": {
     "windows_bundle_verification": "PASS",
     "linux_bundle_verification": "PASS",
+    "ci_bundle_verification": "PASS",
+    "ci_dependency_resolution": "PASS",
+    "ci_entry": "backend/scripts/run_sc_f2_font_ci_gate.py",
+    "ci_execution_scope": "ARCHITECTURE_HOST_CONTAINER_CI_REHEARSAL",
+    "ci_evidence": "docs/00_stage0/review/assets/scm_f2_label_font_ci_evidence_v1.json",
     "bundle_digest_on_both": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2",
+    "bundle_digest_on_windows_linux_ci": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2",
     "windows_linux_probe_pdf_byte_identical": true,
-    "probe_pdf_sha256_on_both": "c3c6689a66411a2bf2dfc903285e7061d38b5e30c8560801cbb252618992a624"
+    "probe_pdf_sha256_on_both": "c3c6689a66411a2bf2dfc903285e7061d38b5e30c8560801cbb252618992a624",
+    "probe_pdf_sha256_on_windows_linux_ci": "c3c6689a66411a2bf2dfc903285e7061d38b5e30c8560801cbb252618992a624"
   },
   "negative_gate_evidence": {
     "unexpected_bundle_file": "REJECTED",

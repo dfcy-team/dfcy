@@ -7,8 +7,8 @@
 | 门禁 | `SC-F2-LABEL-FONT-R1-P2-001` |
 | 原状态 | `ACCEPTED_DEFERRED_WITH_PRE_ASSET_COMMIT_GATE` |
 | 关闭决定 | `CLOSE_WITH_NORMAL_GIT_AND_TOOLCHAIN_LOCK_V1` |
-| 当前状态 | `REMEDIATED_PENDING_SC_F2_LABEL_FONT_3_RECHECK` |
-| 生效条件 | `SC-F2-LABEL-FONT-3 P1 整改复核`通过 |
+| 当前状态 | `REMEDIATED_PENDING_R3_P1_002_QUICK_RECHECK` |
+| 生效条件 | `SC-F2-LABEL-FONT-3 R3-P1-002 快速复核`通过 |
 | renderer 实现 | 不授权 |
 | 客户端/生产 | 不授权 |
 
@@ -124,24 +124,34 @@ Windows 视觉栅格审计冻结为 workspace dependency bundle `26.727.11326` �
 | 100 页 Linux 时延 | 423.098 ms | 5,000 ms |
 | 100 页 Python allocation peak | 10,964,943 B | 16,777,216 B |
 | 100 页进程 max RSS | 88,408 KiB | 131,072 KiB |
+| 首次注册与首次渲染进程峰值 | 88,788 KiB | 131,072 KiB |
+| 同进程后续 10 次稳态 RSS 增长 | 92 KiB | 16,384 KiB |
+| 2 个并发字体探针 worker 单进程 RSS | 89,368 KiB | 131,072 KiB |
+| 2 个并发字体探针 worker 聚合 RSS | 178,560 KiB | 229,376 KiB |
+| 2 个 worker 加控制进程聚合 RSS | 201,652 KiB | 245,760 KiB |
 | 验证容器内存限制 | 256 MiB | 256 MiB |
 
-上限是资产和字体探针准入预算。真实 `packing-label-v2-cjk` 最大明细、多箱、并发 worker 和 Django 基线仍须在 renderer 阶段测量；若超过本预算，必须安全失败并重新审核工具链/预算版本，不能静默放宽。
+首次指标在全新子进程中包含 ReportLab 导入、字体注册和第一份 PDF；稳态指标是在同一子进程继续生成 10 份 PDF 后相对首次当前 RSS 的增长；并发指标是在两个隔离子进程均完成字体注册、首次和稳态渲染并保持存活时同步采样。
+
+这些上限关闭资产和基础字体探针的提交前内存门禁。真实 `packing-label-v2-cjk` 最大明细、多箱、Django 基线和业务 worker 并发仍须受 P2-002 阻断并在 renderer 阶段单独测量；不得用本探针替代真实 renderer 容量验收。任何资产探针或后续 renderer 超限都必须安全失败并重新审核工具链/预算版本，不能静默放宽。
 
 ## 7. 跨环境证据
 
-Windows amd64 和 Linux amd64 均使用 Python `3.12.13`、fontTools `4.63.0`、ReportLab `4.5.1` 及平台对应的锁定 Pillow `12.3.0`：
+Windows amd64、Linux amd64 和架构员主机上的受控 CI rehearsal 均使用 Python `3.12.13`、fontTools `4.63.0`、ReportLab `4.5.1` 及平台对应的锁定 Pillow `12.3.0`：
 
-| 检查 | Windows | Linux |
-| --- | --- | --- |
-| 候选 manifest v2 | PASS | PASS |
-| corpus | 105/105 | 105/105 |
-| bundle digest | `0f1fe3...43ba2` | `0f1fe3...43ba2` |
-| 两页 PDF 字节数 | 44,883 | 44,883 |
-| 两页 PDF SHA-256 | `c3c6689a...92a624` | `c3c6689a...92a624` |
-| PDF 跨平台逐字节一致 | PASS | PASS |
+| 检查 | Windows | Linux | CI rehearsal |
+| --- | --- | --- | --- |
+| 候选 manifest v2 | PASS | PASS | PASS |
+| corpus | 105/105 | 105/105 | 105/105 |
+| bundle digest | `0f1fe3...43ba2` | `0f1fe3...43ba2` | `0f1fe3...43ba2` |
+| 两页 PDF 字节数 | 44,883 | 44,883 | 44,883 |
+| 两页 PDF SHA-256 | `c3c6689a...92a624` | `c3c6689a...92a624` | `c3c6689a...92a624` |
+| PDF 逐字节一致 | PASS | PASS | PASS |
+| 精确依赖解析 | PASS | PASS | PASS |
 
-CI 必须复用 Linux 权威镜像 digest 和锁定 wheel，以 `--no-index --no-deps` 解析；不得依赖 runner 全局包。
+受控 CI 入口为 `backend/scripts/run_sc_f2_font_ci_gate.py`。本仓库当前没有特定 CI 服务配置，因此证据明确标记为 `ARCHITECTURE_HOST_CONTAINER_CI_REHEARSAL`：在不可变 Linux 镜像中设置 `CI=true`，以 `--network none`、`--no-index --no-deps`、只读代码/候选输入和 256 MiB 上限实际执行。机器可判定原始结果冻结在 `docs/00_stage0/review/assets/scm_f2_label_font_ci_evidence_v1.json`，SHA-256 为 `018b1517ac9b805b68e181e0cd03cbd85401eccf0a1a8ca09deb6ca2a1ab45f8`。
+
+后续接入任意远端 CI 时必须复用该入口、Linux 权威镜像 digest 和锁定 wheel；不得依赖 runner 全局包或把远端 CI 接入视为放宽本门禁的理由。
 
 ## 8. 离线构建、校验、备份和回滚
 
