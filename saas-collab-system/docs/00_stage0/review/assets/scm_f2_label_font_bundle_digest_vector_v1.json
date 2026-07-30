@@ -1,0 +1,38 @@
+{
+  "schema_version": "sc-f2-label-font-bundle-digest-vector-v1",
+  "algorithm": "SHA-256",
+  "canonicalization": {
+    "encoding": "UTF-8",
+    "bom": false,
+    "json_keys": "lexicographic ascending",
+    "json_separators": [
+      ",",
+      ":"
+    ],
+    "trailing_line_feed": false,
+    "asset_order": "path lexicographic ascending",
+    "manifest_included": false
+  },
+  "payload": {
+    "assets": [
+      {
+        "bytes": 4388,
+        "path": "LICENSE.txt",
+        "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+      },
+      {
+        "bytes": 10585916,
+        "path": "SCF2LabelSans-Bold.ttf",
+        "sha256": "fb03fe89d24b0b73b184a68d67dafb46132bf52e8685e7c6bfcf69863326cfe4"
+      },
+      {
+        "bytes": 10596408,
+        "path": "SCF2LabelSans-Regular.ttf",
+        "sha256": "976a1010423aeb77217358385e27cdd5ea18afbac4d83c036999d5b9cacaa0b3"
+      }
+    ],
+    "schema_version": "sc-f2-label-font-bundle-digest-v1"
+  },
+  "canonical_payload_bytes": 434,
+  "expected_sha256": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2"
+}
