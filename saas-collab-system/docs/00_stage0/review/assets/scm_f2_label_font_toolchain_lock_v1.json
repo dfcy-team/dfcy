@@ -4,6 +4,7 @@
     "gate": "SC-F2-LABEL-FONT-R1-P2-001",
     "previous_status": "ACCEPTED_DEFERRED_WITH_PRE_ASSET_COMMIT_GATE",
     "closure_decision": "CLOSE_WITH_NORMAL_GIT_AND_TOOLCHAIN_LOCK_V1",
+    "status": "CLOSED_BY_SC_F2_LABEL_FONT_3_R3_P1_002_QUICK_RECHECK",
     "effective_after": "SC-F2-LABEL-FONT-3_R3_P1_002_QUICK_RECHECK_PASS",
     "renderer_implementation_authorized": false
   },

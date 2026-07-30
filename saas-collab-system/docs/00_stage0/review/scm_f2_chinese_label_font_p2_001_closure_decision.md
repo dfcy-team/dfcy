@@ -7,12 +7,12 @@
 | 门禁 | `SC-F2-LABEL-FONT-R1-P2-001` |
 | 原状态 | `ACCEPTED_DEFERRED_WITH_PRE_ASSET_COMMIT_GATE` |
 | 关闭决定 | `CLOSE_WITH_NORMAL_GIT_AND_TOOLCHAIN_LOCK_V1` |
-| 当前状态 | `REMEDIATED_PENDING_R3_P1_002_QUICK_RECHECK` |
-| 生效条件 | `SC-F2-LABEL-FONT-3 R3-P1-002 快速复核`通过 |
+| 当前状态 | `CLOSED_BY_SC_F2_LABEL_FONT_3_R3_P1_002_QUICK_RECHECK` |
+| 生效条件 | `SC-F2-LABEL-FONT-3 R3-P1-002 快速复核`已通过 |
 | renderer 实现 | 不授权 |
 | 客户端/生产 | 不授权 |
 
-本决定关闭“依赖与大文件存储”设计悬而未决问题，但不自行宣布审核通过。独立复核确认本决定、锁文件、预算证据和候选 manifest v2 一致后，P2-001 才正式关闭并允许以单独资产提交复制审核批准的精确四文件包。
+本决定关闭“依赖与大文件存储”设计悬而未决问题。`SC-F2-LABEL-FONT-R3-P1-002` 快速复核已经确认本决定、锁文件、预算证据和候选 manifest v2 一致，因此 P2-001 正式关闭，并只允许以单独资产提交复制审核批准的精确四文件包。
 
 `SC-F2-LABEL-FONT-R1-P2-002` 继续保持 `ACCEPTED_DEFERRED_WITH_PRE_RENDERER_CONTRACT_GATE`，因此即使 P2-001 关闭，也不得实现中文 v2 renderer。
 
@@ -165,7 +165,7 @@ Windows amd64、Linux amd64 和架构员主机上的受控 CI rehearsal 均使�
 
 ## 9. 生效边界
 
-独立复核通过后，P2-001 只允许下一步创建“精确四文件字体资产的独立普通 Git 提交”。它不授权：
+快速复核已经通过，P2-001 只允许下一步创建“精确四文件字体资产的独立普通 Git 提交”。它不授权：
 
 - 修改 `backend/apps/packing/labels.py`；
 - 启用 `packing-label-v2-cjk`；
