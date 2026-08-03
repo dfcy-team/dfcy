@@ -2,7 +2,8 @@
   "schema_version": "sc-f2-label-renderer-contract-v1",
   "gate": {
     "id": "SC-F2-LABEL-FONT-R1-P2-002",
-    "state": "FROZEN_PENDING_INDEPENDENT_REVIEW",
+    "state": "AUTHORIZED_FOR_SC_F2_LABEL_FONT_4_LOCAL_IMPLEMENTATION",
+    "closed_by_review": "SC-F2-LABEL-FONT-R1-P2-002_INDEPENDENT_REVIEW_PASS",
     "next_stage_after_pass": "SC-F2-LABEL-FONT-4_LOCAL_RENDERER_IMPLEMENTATION",
     "local_implementation_only": true,
     "client_integration_authorized": false,
