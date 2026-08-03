@@ -86,6 +86,8 @@ class SupplyPurchaseOrderEventSerializer(serializers.ModelSerializer):
             "actor_type",
             "before_status",
             "after_status",
+            "before_shipping_route",
+            "after_shipping_route",
             "payload",
             "created_at",
         )
@@ -112,6 +114,7 @@ class SupplyPurchaseOrderSummarySerializer(serializers.ModelSerializer):
             "expected_delivery_date",
             "currency",
             "status",
+            "shipping_route",
             "total_quantity",
             "completed_quantity",
             "line_count",
@@ -133,6 +136,11 @@ class SupplyPurchaseOrderDetailSerializer(serializers.ModelSerializer):
     supplier_code = serializers.CharField(source="supplier.code", read_only=True)
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
     created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
+    shipping_route_decided_by_id = serializers.IntegerField(
+        source="shipping_route_decided_by.id",
+        read_only=True,
+        allow_null=True,
+    )
     total_quantity = serializers.SerializerMethodField()
     lines = SupplyPurchaseOrderLineSerializer(many=True, read_only=True)
     progress_entries = SupplyProductionProgressSerializer(many=True, read_only=True)
@@ -152,6 +160,9 @@ class SupplyPurchaseOrderDetailSerializer(serializers.ModelSerializer):
             "currency",
             "notes",
             "status",
+            "shipping_route",
+            "shipping_route_decided_at",
+            "shipping_route_decided_by_id",
             "total_quantity",
             "completed_quantity",
             "version",
@@ -194,6 +205,8 @@ class SupplierSupplyPurchaseOrderSerializer(serializers.ModelSerializer):
             "order_date",
             "expected_delivery_date",
             "status",
+            "shipping_route",
+            "shipping_route_decided_at",
             "total_quantity",
             "completed_quantity",
             "version",
@@ -239,6 +252,21 @@ class SupplyPurchaseOrderCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         request = self.context["request"]
+        controlled_route_fields = {
+            "shipping_route",
+            "shipping_route_decided_at",
+            "shipping_route_decided_by_id",
+        }
+        supplied_route_fields = sorted(controlled_route_fields.intersection(self.initial_data))
+        if supplied_route_fields:
+            raise serializers.ValidationError(
+                {
+                    "shipping_route": (
+                        "Shipping route is assigned only after production completion through "
+                        "the dedicated action endpoint."
+                    )
+                }
+            )
         tenant = request.user.tenant
         supplier = SupplierMaster.objects.filter(
             pk=attrs["supplier_id"],
@@ -320,3 +348,17 @@ class SupplyOrderProgressActionSerializer(serializers.Serializer):
 
 class EmptySupplyOrderActionSerializer(serializers.Serializer):
     pass
+
+
+class SupplyOrderShippingRouteActionSerializer(serializers.Serializer):
+    expected_version = serializers.IntegerField(min_value=1)
+    shipping_route = serializers.ChoiceField(
+        choices=(
+            SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+            SupplyPurchaseOrder.ShippingRoute.CONTAINER_CARGO,
+        )
+    )
+    reason = serializers.CharField(required=False, allow_blank=True, default="", max_length=2000)
+
+    def validate_reason(self, value):
+        return value.strip()

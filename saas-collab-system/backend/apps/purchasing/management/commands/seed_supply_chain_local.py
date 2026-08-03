@@ -16,6 +16,7 @@ PERMISSION_CODES = (
     "supply.purchase_order.view",
     "supply.purchase_order.create",
     "supply.purchase_order.accept",
+    "supply.purchase_order.assign_shipping_route",
     "supply.production.start",
     "supply.production.update",
     "supply.production.complete",

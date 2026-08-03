@@ -29,14 +29,18 @@ class SupplyPurchaseOrderAdmin(admin.ModelAdmin):
         "tenant",
         "supplier",
         "status",
+        "shipping_route",
         "completed_quantity",
         "version",
         "updated_at",
     )
     search_fields = ("order_no", "supplier__code", "supplier__name", "source_record_id")
-    list_filter = ("status", "currency")
+    list_filter = ("status", "shipping_route", "currency")
     readonly_fields = (
         "status",
+        "shipping_route",
+        "shipping_route_decided_at",
+        "shipping_route_decided_by",
         "completed_quantity",
         "version",
         "accepted_at",
@@ -72,7 +76,16 @@ class SupplyProductionProgressAdmin(admin.ModelAdmin):
 
 @admin.register(SupplyPurchaseOrderEvent)
 class SupplyPurchaseOrderEventAdmin(admin.ModelAdmin):
-    list_display = ("order", "action", "actor_type", "before_status", "after_status", "created_at")
+    list_display = (
+        "order",
+        "action",
+        "actor_type",
+        "before_status",
+        "after_status",
+        "before_shipping_route",
+        "after_shipping_route",
+        "created_at",
+    )
     search_fields = ("order__order_no", "idempotency_key")
     readonly_fields = (
         "tenant",
@@ -83,6 +96,8 @@ class SupplyPurchaseOrderEventAdmin(admin.ModelAdmin):
         "actor_type",
         "before_status",
         "after_status",
+        "before_shipping_route",
+        "after_shipping_route",
         "payload",
         "request_hash",
         "response_snapshot",

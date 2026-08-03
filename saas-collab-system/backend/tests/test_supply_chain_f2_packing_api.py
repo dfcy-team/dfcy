@@ -19,7 +19,11 @@ from apps.packing.serializers import PackingChangeSubmitSerializer
 from apps.packing.services import set_supplier_packing_capability
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import ProductSKU, ProductSPU
-from apps.purchasing.models import SupplyPurchaseOrder, SupplyPurchaseOrderLine
+from apps.purchasing.models import (
+    SupplyPurchaseOrder,
+    SupplyPurchaseOrderLine,
+    _supply_action_write_context,
+)
 from apps.tenants.models import Tenant
 
 
@@ -118,15 +122,21 @@ def create_order(tenant, supplier, actor, suffix, quantity=10):
     order.status = SupplyPurchaseOrder.Status.PRODUCTION_COMPLETED
     order.completed_quantity = quantity
     order.production_completed_at = timezone.now()
-    order._action_service_write = True
-    order.save(
-        update_fields=[
-            "status",
-            "completed_quantity",
-            "production_completed_at",
-            "updated_at",
-        ]
-    )
+    order.shipping_route = SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO
+    order.shipping_route_decided_at = timezone.now()
+    order.shipping_route_decided_by = actor
+    with _supply_action_write_context():
+        order.save(
+            update_fields=[
+                "status",
+                "completed_quantity",
+                "production_completed_at",
+                "shipping_route",
+                "shipping_route_decided_at",
+                "shipping_route_decided_by",
+                "updated_at",
+            ]
+        )
     return order, line
 
 

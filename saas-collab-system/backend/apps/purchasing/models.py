@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -5,6 +8,22 @@ from django.db import models
 from apps.masterdata.models import SupplierMaster
 from apps.products.models import ProductSKU
 from apps.tenants.models import Tenant
+
+
+_supply_action_write_depth = ContextVar("supply_action_write_depth", default=0)
+
+
+@contextmanager
+def _supply_action_write_context():
+    token = _supply_action_write_depth.set(_supply_action_write_depth.get() + 1)
+    try:
+        yield
+    finally:
+        _supply_action_write_depth.reset(token)
+
+
+def _supply_action_write_allowed():
+    return _supply_action_write_depth.get() > 0
 
 
 class PurchaseOrder(models.Model):
@@ -56,6 +75,10 @@ class PurchaseOrder(models.Model):
 class SupplyPurchaseOrderQuerySet(models.QuerySet):
     CONTROLLED_FIELDS = {
         "status",
+        "shipping_route",
+        "shipping_route_decided_at",
+        "shipping_route_decided_by",
+        "shipping_route_decided_by_id",
         "accepted_at",
         "production_started_at",
         "production_completed_at",
@@ -125,6 +148,11 @@ class SupplyPurchaseOrder(models.Model):
         SHIPPING = "shipping", "Shipping"
         SHIPPED = "shipped", "Shipped"
 
+    class ShippingRoute(models.TextChoices):
+        UNDECIDED = "undecided", "Undecided"
+        LOOSE_CARGO = "loose_cargo", "Loose cargo"
+        CONTAINER_CARGO = "container_cargo", "Container cargo"
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="supply_purchase_orders")
     supplier = models.ForeignKey(
         SupplierMaster,
@@ -137,6 +165,19 @@ class SupplyPurchaseOrder(models.Model):
     currency = models.CharField(max_length=8, default="CNY")
     notes = models.TextField(blank=True)
     status = models.CharField(max_length=40, choices=Status.choices, default=Status.PENDING)
+    shipping_route = models.CharField(
+        max_length=24,
+        choices=ShippingRoute.choices,
+        default=ShippingRoute.UNDECIDED,
+    )
+    shipping_route_decided_at = models.DateTimeField(null=True, blank=True)
+    shipping_route_decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="shipping_route_decisions",
+    )
     completed_quantity = models.PositiveBigIntegerField(default=0)
     version = models.PositiveIntegerField(default=1)
     creation_idempotency_key = models.CharField(max_length=128, null=True, blank=True)
@@ -174,6 +215,21 @@ class SupplyPurchaseOrder(models.Model):
                 fields=["tenant", "creation_idempotency_key"],
                 name="uniq_supply_po_create_key",
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        shipping_route="undecided",
+                        shipping_route_decided_at__isnull=True,
+                        shipping_route_decided_by__isnull=True,
+                    )
+                    | (
+                        models.Q(shipping_route__in=["loose_cargo", "container_cargo"])
+                        & models.Q(shipping_route_decided_at__isnull=False)
+                        & models.Q(shipping_route_decided_by__isnull=False)
+                    )
+                ),
+                name="supply_po_route_decision_consistent",
+            ),
         ]
         indexes = [
             models.Index(
@@ -191,6 +247,16 @@ class SupplyPurchaseOrder(models.Model):
             raise ValidationError("Supply purchase order and supplier must belong to the same tenant.")
         if self.created_by_id and self.created_by.tenant_id != self.tenant_id:
             raise ValidationError("Supply purchase order creator must belong to the same tenant.")
+        if (
+            self.shipping_route_decided_by_id
+            and self.shipping_route_decided_by.tenant_id != self.tenant_id
+        ):
+            raise ValidationError("Shipping-route decision actor must belong to the same tenant.")
+        if self.shipping_route == self.ShippingRoute.UNDECIDED:
+            if self.shipping_route_decided_at or self.shipping_route_decided_by_id:
+                raise ValidationError("An undecided shipping route cannot have decision metadata.")
+        elif not self.shipping_route_decided_at or not self.shipping_route_decided_by_id:
+            raise ValidationError("A decided shipping route requires decision actor and time.")
         source_values = (self.source_system, self.source_table, self.source_record_id)
         if any(source_values) and not all(source_values):
             raise ValidationError("Source system, table, and record ID must be provided together.")
@@ -198,6 +264,12 @@ class SupplyPurchaseOrder(models.Model):
             self.currency = self.currency.upper()
 
     def save(self, *args, **kwargs):
+        if not self.pk and (
+            self.shipping_route != self.ShippingRoute.UNDECIDED
+            or self.shipping_route_decided_at
+            or self.shipping_route_decided_by_id
+        ) and not _supply_action_write_allowed():
+            raise ValidationError("Shipping route must be assigned through the audited action service.")
         if self.pk:
             current = type(self).objects.filter(pk=self.pk).values(
                 *SupplyPurchaseOrderQuerySet.CONTROLLED_FIELDS
@@ -205,14 +277,11 @@ class SupplyPurchaseOrder(models.Model):
             if (
                 current
                 and any(current[field] != getattr(self, field) for field in current)
-                and not getattr(self, "_action_service_write", False)
+                and not _supply_action_write_allowed()
             ):
                 raise ValidationError("Supply purchase order state requires the audited action service.")
         self.full_clean()
-        try:
-            super().save(*args, **kwargs)
-        finally:
-            self._action_service_write = False
+        return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Supply purchase orders are retained as auditable business records.")
@@ -360,6 +429,8 @@ class SupplyPurchaseOrderEvent(models.Model):
         START_PRODUCTION = "start_production", "Start production"
         UPDATE_PROGRESS = "update_progress", "Update progress"
         COMPLETE_PRODUCTION = "complete_production", "Complete production"
+        ASSIGN_SHIPPING_ROUTE = "assign_shipping_route", "Assign shipping route"
+        CHANGE_SHIPPING_ROUTE = "change_shipping_route", "Change shipping route"
 
     class ActorType(models.TextChoices):
         INTERNAL = "internal", "Internal"
@@ -377,6 +448,16 @@ class SupplyPurchaseOrderEvent(models.Model):
     actor_type = models.CharField(max_length=20, choices=ActorType.choices)
     before_status = models.CharField(max_length=40, choices=SupplyPurchaseOrder.Status.choices)
     after_status = models.CharField(max_length=40, choices=SupplyPurchaseOrder.Status.choices)
+    before_shipping_route = models.CharField(
+        max_length=24,
+        choices=SupplyPurchaseOrder.ShippingRoute.choices,
+        default=SupplyPurchaseOrder.ShippingRoute.UNDECIDED,
+    )
+    after_shipping_route = models.CharField(
+        max_length=24,
+        choices=SupplyPurchaseOrder.ShippingRoute.choices,
+        default=SupplyPurchaseOrder.ShippingRoute.UNDECIDED,
+    )
     payload = models.JSONField(default=dict, blank=True)
     request_hash = models.CharField(max_length=64, blank=True)
     response_snapshot = models.JSONField(default=dict, blank=True)
@@ -406,13 +487,10 @@ class SupplyPurchaseOrderEvent(models.Model):
             raise ValidationError("Supply purchase order event actor must belong to the same tenant.")
 
     def save(self, *args, **kwargs):
-        if self.pk and not getattr(self, "_action_service_write", False):
-            raise ValidationError("Supply purchase order events are append-only.")
+        if not _supply_action_write_allowed():
+            raise ValidationError("Supply purchase order events require the audited action service.")
         self.full_clean()
-        try:
-            return super().save(*args, **kwargs)
-        finally:
-            self._action_service_write = False
+        return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Supply purchase order events are append-only.")

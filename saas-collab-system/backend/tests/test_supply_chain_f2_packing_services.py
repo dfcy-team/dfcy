@@ -36,7 +36,11 @@ from apps.packing.services import (
     submit_packing_change,
 )
 from apps.products.models import ProductSKU, ProductSPU
-from apps.purchasing.models import SupplyPurchaseOrder, SupplyPurchaseOrderLine
+from apps.purchasing.models import (
+    SupplyPurchaseOrder,
+    SupplyPurchaseOrderLine,
+    _supply_action_write_context,
+)
 from apps.tenants.models import Tenant
 
 
@@ -124,15 +128,21 @@ def create_completed_order(tenant, supplier, actor, suffix, quantities=(10,)):
     order.status = SupplyPurchaseOrder.Status.PRODUCTION_COMPLETED
     order.completed_quantity = sum(quantities)
     order.production_completed_at = timezone.now()
-    order._action_service_write = True
-    order.save(
-        update_fields=[
-            "status",
-            "completed_quantity",
-            "production_completed_at",
-            "updated_at",
-        ]
-    )
+    order.shipping_route = SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO
+    order.shipping_route_decided_at = timezone.now()
+    order.shipping_route_decided_by = actor
+    with _supply_action_write_context():
+        order.save(
+            update_fields=[
+                "status",
+                "completed_quantity",
+                "production_completed_at",
+                "shipping_route",
+                "shipping_route_decided_at",
+                "shipping_route_decided_by",
+                "updated_at",
+            ]
+        )
     return order, lines
 
 
@@ -281,8 +291,8 @@ def test_create_requires_production_completed_and_current_tenant():
     supplier_b = create_supplier(tenant_b, "TENANT-B")
     pending, _ = create_completed_order(tenant_a, supplier_a, actor_a, "PENDING")
     pending.status = SupplyPurchaseOrder.Status.IN_PRODUCTION
-    pending._action_service_write = True
-    pending.save(update_fields=["status", "updated_at"])
+    with _supply_action_write_context():
+        pending.save(update_fields=["status", "updated_at"])
     foreign, _ = create_completed_order(tenant_b, supplier_b, actor_b, "FOREIGN")
 
     with pytest.raises(StateConflict):

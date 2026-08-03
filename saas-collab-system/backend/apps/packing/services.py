@@ -541,6 +541,20 @@ def create_packing_batch(
                 raise StateConflict(
                     f"Purchase orders must be production_completed before packing: {invalid_states}"
                 )
+            undecided_routes = [
+                order.id
+                for order in orders
+                if order.shipping_route == SupplyPurchaseOrder.ShippingRoute.UNDECIDED
+            ]
+            if undecided_routes:
+                raise StateConflict(
+                    f"Purchase orders require a purchasing shipping-route decision before packing: {undecided_routes}"
+                )
+            shipping_routes = {order.shipping_route for order in orders}
+            if len(shipping_routes) != 1:
+                raise BusinessRuleViolation(
+                    "A packing batch cannot mix loose-cargo and container-cargo purchase orders."
+                )
             active_link = PackingBatchOrder.objects.select_for_update().select_related(
                 "batch"
             ).filter(
