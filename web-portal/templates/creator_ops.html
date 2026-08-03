@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>达人履约中心</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/creator_ops.css') }}"/>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="/creator-ops" aria-label="达人履约中心">
+        <span class="brand-mark">DF</span>
+        <span><strong>达人履约</strong><small>Creator Ops</small></span>
+      </a>
+
+      <nav class="side-nav" aria-label="主导航">
+        <button class="nav-item is-active" data-view="tasks"><i data-lucide="list-checks"></i><span>建联任务</span><b id="nav-task-count">0</b></button>
+        <button class="nav-item" data-view="samples"><i data-lucide="package-check"></i><span>送样履约</span></button>
+        <button class="nav-item" data-view="videos"><i data-lucide="play-square"></i><span>视频结果</span></button>
+        <button class="nav-item" data-view="creators"><i data-lucide="users"></i><span>达人协作</span></button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="data-source"><span class="source-dot feishu"></span><span>飞书任务 / 送样</span></div>
+        <div class="data-source"><span class="source-dot mysql"></span><span>视频数据库</span></div>
+        <a href="/dashboard"><i data-lucide="arrow-left"></i><span>返回数据平台</span></a>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="mobile-menu" title="打开菜单"><i data-lucide="menu"></i></button>
+        <div>
+          <p class="eyebrow" id="page-eyebrow">BD 工作台</p>
+          <h1 id="page-title">建联任务</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="sync-status"><i data-lucide="database"></i><span id="sync-time">正在同步</span></span>
+          <button class="icon-button" id="refresh-all" title="刷新数据"><i data-lucide="refresh-cw"></i></button>
+          <div class="avatar">BD</div>
+        </div>
+      </header>
+
+      <main>
+        <section class="view is-active" id="view-tasks">
+          <div class="metric-grid" id="metrics">
+            <div class="metric"><span>全部任务</span><strong id="metric-tasks">-</strong><small>飞书 + 网站</small></div>
+            <div class="metric"><span>进行中</span><strong id="metric-active">-</strong><small>待BD处理</small></div>
+            <div class="metric"><span>已建联</span><strong id="metric-linked">-</strong><small>飞书累计</small></div>
+            <div class="metric"><span>送样记录</span><strong id="metric-samples">-</strong><small>飞书累计</small></div>
+            <div class="metric accent"><span>视频数据日</span><strong id="metric-video-date">-</strong><small>数据库最新</small></div>
+          </div>
+
+          <section class="data-panel">
+            <div class="panel-toolbar">
+              <div class="search-box"><i data-lucide="search"></i><input id="task-search" type="search" placeholder="搜索任务、店铺、商品或负责人"/></div>
+              <select id="task-status" aria-label="任务状态"><option value="">全部状态</option><option>进行中</option><option>已完成</option><option>已关闭</option></select>
+              <select id="task-shop" aria-label="店铺"><option value="">全部店铺</option></select>
+              <button class="button primary" id="new-task"><i data-lucide="plus"></i><span>新建任务</span></button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table task-table">
+                <thead><tr><th>任务</th><th>店铺 / 商品</th><th>优先级</th><th>目标进度</th><th>负责人</th><th>状态</th><th>下发日期</th><th></th></tr></thead>
+                <tbody id="task-body"><tr><td colspan="8"><div class="loading-row"><span></span>正在读取飞书任务</div></td></tr></tbody>
+              </table>
+            </div>
+            <div class="pagination"><span id="task-total">0 个任务</span><div><button class="icon-button small" id="task-prev" title="上一页"><i data-lucide="chevron-left"></i></button><span id="task-page">1 / 1</span><button class="icon-button small" id="task-next" title="下一页"><i data-lucide="chevron-right"></i></button></div></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-samples">
+          <div class="view-heading"><div><h2>送样履约</h2><p>建联成功后的样品与内容交付状态</p></div><span class="source-tag"><span class="source-dot feishu"></span>飞书送样信息表</span></div>
+          <section class="data-panel">
+            <div class="panel-toolbar">
+              <div class="search-box"><i data-lucide="search"></i><input id="sample-search" type="search" placeholder="搜索达人、建联编号、产品或订单"/></div>
+              <select id="sample-shop" aria-label="店铺"><option value="">全部店铺</option></select>
+              <select id="sample-status" aria-label="履约状态"><option value="">全部状态</option><option>待发样</option><option>已发货</option><option>已发布</option></select>
+              <button class="button" id="sample-refresh"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>建联编号</th><th>达人</th><th>店铺</th><th>产品 / SKU</th><th>样品订单</th><th>成本</th><th>状态</th><th>建联日期</th></tr></thead>
+                <tbody id="sample-body"><tr><td colspan="8" class="empty-cell">点击左侧“送样履约”加载记录</td></tr></tbody>
+              </table>
+            </div>
+            <div class="pagination"><span id="sample-total">0 条记录</span><div><button class="icon-button small" id="sample-prev" title="上一页"><i data-lucide="chevron-left"></i></button><span id="sample-page">1 / 1</span><button class="icon-button small" id="sample-next" title="下一页"><i data-lucide="chevron-right"></i></button></div></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-videos">
+          <div class="view-heading"><div><h2>视频结果</h2><p>按店铺与达人账号匹配最近 30 天视频表现</p></div><span class="source-tag"><span class="source-dot mysql"></span>video_performance_report</span></div>
+          <section class="video-query">
+            <label><span>店铺</span><select id="video-shop"><option value="">选择店铺</option></select></label>
+            <label class="grow"><span>达人账号</span><div class="search-box"><i data-lucide="at-sign"></i><input id="video-handle" placeholder="例如 beautyby_skatem"/></div></label>
+            <button class="button primary" id="video-search"><i data-lucide="search"></i><span>查询视频</span></button>
+          </section>
+          <div class="video-empty" id="video-empty"><i data-lucide="scan-search"></i><strong>选择店铺并输入达人账号</strong><span>结果按数据库最新日期向前统计 30 天</span></div>
+          <div class="video-result hidden" id="video-result">
+            <div class="metric-grid compact">
+              <div class="metric"><span>匹配视频</span><strong id="video-count">0</strong></div>
+              <div class="metric"><span>播放量</span><strong id="video-vv">0</strong></div>
+              <div class="metric"><span>订单</span><strong id="video-orders">0</strong></div>
+              <div class="metric"><span>成交件数</span><strong id="video-items">0</strong></div>
+              <div class="metric accent"><span>GMV</span><strong id="video-gmv">$0</strong></div>
+            </div>
+            <section class="data-panel">
+              <div class="table-wrap"><table class="data-table"><thead><tr><th>视频ID</th><th>标题</th><th>商品</th><th>发布时间</th><th>播放量</th><th>订单</th><th>件数</th><th>GMV</th></tr></thead><tbody id="video-body"></tbody></table></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-creators">
+          <div class="view-heading"><div><h2>达人协作</h2><p>网站中正在跟进的达人与履约阶段</p></div><span class="source-tag"><span class="source-dot local"></span>网站工作记录</span></div>
+          <section class="data-panel">
+            <div class="panel-toolbar"><div class="search-box"><i data-lucide="search"></i><input id="creator-search" type="search" placeholder="搜索达人、任务或店铺"/></div></div>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>达人账号</th><th>任务</th><th>店铺</th><th>建联结果</th><th>履约阶段</th><th>最近更新</th><th></th></tr></thead><tbody id="creator-body"></tbody></table></div>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <aside class="drawer" id="task-drawer" aria-hidden="true">
+    <div class="drawer-head"><div><span class="source-tag" id="drawer-source">飞书</span><h2 id="drawer-title">任务详情</h2><p id="drawer-id"></p></div><button class="icon-button" id="close-drawer" title="关闭"><i data-lucide="x"></i></button></div>
+    <div class="drawer-body">
+      <div class="task-facts" id="task-facts"></div>
+      <div class="workflow">
+        <div class="workflow-step is-current"><b>1</b><span>建联任务</span></div><i data-lucide="chevron-right"></i>
+        <div class="workflow-step"><b>2</b><span>建联成功</span></div><i data-lucide="chevron-right"></i>
+        <div class="workflow-step"><b>3</b><span>送样履约</span></div><i data-lucide="chevron-right"></i>
+        <div class="workflow-step"><b>4</b><span>视频数据</span></div>
+      </div>
+      <div class="section-title"><div><h3>BD 跟进达人</h3><span id="drawer-creator-count">0 人</span></div><button class="button primary small-button" id="add-creator"><i data-lucide="user-plus"></i><span>添加达人</span></button></div>
+      <div class="creator-list" id="drawer-creators"></div>
+      <div class="section-title"><div><h3>飞书送样记录</h3><span id="drawer-sample-count">0 条</span></div></div>
+      <div class="sample-list" id="drawer-samples"></div>
+    </div>
+  </aside>
+  <div class="drawer-mask" id="drawer-mask"></div>
+
+  <dialog class="modal" id="task-modal">
+    <form method="dialog" id="task-form">
+      <div class="modal-head"><div><p>运营</p><h2>新建建联任务</h2></div><button class="icon-button modal-close" value="cancel" title="关闭"><i data-lucide="x"></i></button></div>
+      <div class="form-grid">
+        <label class="span-2"><span>任务名称</span><input name="name" required placeholder="例如 TK2PH HY014 七月建联"/></label>
+        <label><span>店铺</span><input name="shop" required placeholder="TK2PH"/></label>
+        <label><span>目标达人数</span><input name="target_count" type="number" min="1" value="10"/></label>
+        <label><span>商品ID</span><input name="product_id" placeholder="TikTok 商品ID"/></label>
+        <label><span>SKU前缀</span><input name="sku_prefix" placeholder="例如 HY014"/></label>
+        <label><span>优先级</span><select name="priority"><option>T0</option><option>T1</option><option selected>T2</option><option>T3</option></select></label>
+      </div>
+      <div class="modal-actions"><button class="button" value="cancel">取消</button><button class="button primary" value="default" id="task-submit">创建任务</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="creator-modal">
+    <form method="dialog" id="creator-form">
+      <div class="modal-head"><div><p>BD 填写</p><h2>添加达人</h2></div><button class="icon-button modal-close" value="cancel" title="关闭"><i data-lucide="x"></i></button></div>
+      <div class="form-grid">
+        <label><span>达人账号</span><input name="handle" required placeholder="TikTok 昵称"/></label>
+        <label><span>达人数字ID</span><input name="creator_id" placeholder="选填"/></label>
+        <label><span>建联结果</span><select name="outreach_result"><option value="pending">待联系</option><option value="success">建联成功</option><option value="rejected">拒绝</option><option value="no_response">无回复</option><option value="blocked">拉黑</option></select></label>
+        <label class="span-2"><span>备注</span><textarea name="note" rows="3" placeholder="沟通重点或合作条件"></textarea></label>
+      </div>
+      <div class="modal-actions"><button class="button" value="cancel">取消</button><button class="button primary" value="default" id="creator-submit">保存达人</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="{{ url_for('static', filename='js/creator_ops.js') }}"></script>
+  <script async src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" onload="window.lucide && window.lucide.createIcons({attrs:{'stroke-width':1.8}})"></script>
+</body>
+</html>

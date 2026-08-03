@@ -374,10 +374,26 @@ def _is_transient_api_error(resp: dict) -> bool:
     if is_rate_limit_error(resp):
         return True
     code = str(resp.get("code", ""))
-    if code in ("36009007", "36009002", "20001"):
+    if code in ("36009007", "36009002", "20001", "66007001"):
         return True
     msg = str(resp.get("message") or "").lower()
-    return "timeout" in msg or "timed out" in msg or "request timeout" in msg
+    return any(
+        marker in msg
+        for marker in (
+            "timeout",
+            "timed out",
+            "request timeout",
+            "rpc error",
+            "please try again",
+            "temporarily unavailable",
+        )
+    )
+
+
+_LIST_PAGE_INTERVALS = {
+    "video_list": 1.0,
+    "video_list_direct": 1.0,
+}
 
 
 def fetch_all_list(
@@ -395,6 +411,8 @@ def fetch_all_list(
     page_token: str | None = None
     total_count: int | None = None
     pages = 0
+    finished = False
+    seen_page_tokens: set[str] = set()
 
     for _ in range(max_pages):
         extra: dict = {}
@@ -425,16 +443,41 @@ def fetch_all_list(
         pages += 1
         if total_count is None and data.get("total_count") is not None:
             total_count = int(data["total_count"])
-        page_token = data.get("next_page_token") or ""
-        if not page_token:
+        next_page_token = str(data.get("next_page_token") or "")
+        if not next_page_token:
+            page_token = ""
+            finished = True
             break
-        time.sleep(0.35)
+        if next_page_token == page_token or next_page_token in seen_page_tokens:
+            return merged, {
+                "error": {
+                    "code": "PAGINATION_TOKEN_LOOP",
+                    "message": "API returned a repeated next_page_token",
+                },
+                "pages": pages,
+                "fetched": len(merged),
+                "total_count": total_count,
+                "complete": False,
+            }
+        seen_page_tokens.add(next_page_token)
+        page_token = next_page_token
+        time.sleep(_LIST_PAGE_INTERVALS.get(section_key, 0.35))
+
+    effective_fetched = len(merged)
+    if section_key in ("video_list", "video_list_direct"):
+        video_ids = {
+            str(item.get("id")).strip()
+            for item in merged
+            if item.get("id") is not None and str(item.get("id")).strip()
+        }
+        effective_fetched = len(video_ids)
 
     meta = {
         "pages": pages,
         "fetched": len(merged),
+        "unique_fetched": effective_fetched,
         "total_count": total_count,
-        "complete": total_count is None or len(merged) >= total_count,
+        "complete": finished and (total_count is None or effective_fetched >= total_count),
     }
     return merged, meta
 
@@ -762,6 +805,20 @@ def merge_video_lists(primary: list[dict], secondary: list[dict] | None = None) 
     return merged
 
 
+def _filter_invalid_video_items(items: list[dict], meta: dict) -> tuple[list[dict], dict]:
+    valid: list[dict] = []
+    for item in items:
+        video_id = str(item.get("id") or "").strip()
+        if video_id.isdigit() and int(video_id) > 0:
+            valid.append(item)
+    filtered = len(items) - len(valid)
+    if not filtered:
+        return valid, meta
+    clean_meta = dict(meta)
+    clean_meta["invalid_items"] = filtered
+    return valid, clean_meta
+
+
 def fetch_video_list_items(
     client: TikTokShopClient,
     token: str,
@@ -773,17 +830,28 @@ def fetch_video_list_items(
     all_pages: bool,
 ) -> tuple[list[dict], dict]:
     if all_pages:
-        return fetch_all_list(client, token, endpoint_key, start, end, page_size=page_size)
-    r = fetch_get(client, token, ENDPOINTS[endpoint_key], start, end, page_size=page_size)
-    if not is_ok(r):
-        return [], {"error": r, "complete": False}
-    items = extract_list(r.get("data") or {}, endpoint_key)
-    data = r.get("data") or {}
-    return items, {
-        "complete": not bool(data.get("next_page_token")),
-        "fetched": len(items),
-        "total_count": data.get("total_count"),
-    }
+        label = "视频列表" if endpoint_key == "video_list" else "视频GMV对照"
+        items, meta = fetch_all_list_with_retry(
+            client,
+            token,
+            endpoint_key,
+            start,
+            end,
+            page_size=page_size,
+            label=label,
+        )
+    else:
+        r = fetch_get(client, token, ENDPOINTS[endpoint_key], start, end, page_size=page_size)
+        if not is_ok(r):
+            return [], {"error": r, "complete": False}
+        items = extract_list(r.get("data") or {}, endpoint_key)
+        data = r.get("data") or {}
+        meta = {
+            "complete": not bool(data.get("next_page_token")),
+            "fetched": len(items),
+            "total_count": data.get("total_count"),
+        }
+    return _filter_invalid_video_items(items, meta)
 
 
 def load_video_direct_gmv_map(
@@ -805,8 +873,9 @@ def load_video_direct_gmv_map(
         page_size=page_size,
         all_pages=all_pages,
     )
-    if meta.get("error"):
-        print(f"  [视频GMV对照 202409] 翻页失败: {(meta['error'] or {}).get('message', '')[:80]}")
+    if meta.get("error") or not meta.get("complete", True):
+        message = (meta.get("error") or {}).get("message", "列表数量不完整")
+        print(f"  [视频GMV对照 202409] 翻页失败: {message[:80]}")
         return {}, items, meta
     if not all_pages and not meta.get("complete", True):
         print("  [视频GMV对照 202409] 仍有下一页，请加 --all")
@@ -1116,7 +1185,7 @@ def build_sku_excel_rows(
                     meta.get("title", ""),
                     meta.get("status", ""),
                     gmv_amount(gmv if isinstance(gmv, dict) else None),
-                    s.get("orders", ""),
+                    s.get("sku_orders", s.get("orders", "")),
                     s.get("units_sold", s.get("items_sold", "")),
                 ]
             )
@@ -1127,7 +1196,7 @@ def build_sku_excel_rows(
                     pid,
                     fmt_php(gmv if isinstance(gmv, dict) else None),
                     s.get("units_sold", s.get("items_sold", "")),
-                    s.get("orders", ""),
+                    s.get("sku_orders", s.get("orders", "")),
                     s.get("impressions", ""),
                     s.get("clicks", s.get("product_clicks", "")),
                     fmt_rate(s.get("click_through_rate") or s.get("conversion_rate")),
@@ -2224,6 +2293,16 @@ def list_fetch_complete(meta: dict | None, has_next_page: bool = False) -> bool:
     return bool(meta.get("complete", True))
 
 
+def report_date_is_available(latest_available_date: object, target_date: str) -> bool:
+    """Only a published report date may be classified as genuine zero data."""
+    try:
+        latest = date.fromisoformat(str(latest_available_date or "")[:10])
+        target = date.fromisoformat(str(target_date or "")[:10])
+    except ValueError:
+        return False
+    return latest >= target
+
+
 def save_table_json(
     path: Path, table_name: str, headers: list[str], rows: list[list], start: str, end: str
 ) -> None:
@@ -2560,6 +2639,8 @@ def main() -> int:
     videos: list[dict] = []
     video_details: list[dict] = []
     video_list_meta: dict = {}
+    video_direct_meta: dict = {}
+    video_latest_available_date = ""
     skus: list[dict] = []
     sku_list_meta: dict = {}
 
@@ -2599,7 +2680,11 @@ def main() -> int:
         ro = fetch_get(client, token, ENDPOINTS["video_overview"], start, end)
         out["sections"]["video_overview"] = ro
         if is_ok(ro):
-            print_video_overview(ro.get("data") or {})
+            video_overview_data = ro.get("data") or {}
+            video_latest_available_date = str(
+                video_overview_data.get("latest_available_date") or ""
+            )
+            print_video_overview(video_overview_data)
         else:
             failed += 1
             print(f"\n[视频概览] 失败 code={ro.get('code')} {ro.get('message')}")
@@ -2614,20 +2699,32 @@ def main() -> int:
                 page_size=args["size"],
                 all_pages=True,
             )
+            video_list_complete = list_fetch_complete(meta)
             out["sections"]["video_list"] = {
-                "code": 0 if not meta.get("error") else (meta["error"] or {}).get("code"),
-                "message": "paginated merge",
+                "code": 0
+                if video_list_complete
+                else (meta.get("error") or {}).get("code", "INCOMPLETE_PAGINATION"),
+                "message": "paginated merge" if video_list_complete else "incomplete pagination",
                 "data": {"videos": videos, **{k: v for k, v in meta.items() if k != "error"}},
             }
             video_list_meta = meta
-            if meta.get("error"):
+            if not video_list_complete:
                 failed += 1
-                print(f"\n[视频列表] 翻页中断: {meta['error'].get('message')}")
+                if meta.get("error"):
+                    print(f"\n[视频列表] 翻页中断: {meta['error'].get('message')}")
+                else:
+                    print(
+                        "\n[视频列表] 翻页数量不完整: "
+                        f"唯一视频 {meta.get('unique_fetched', len(videos))}/"
+                        f"{meta.get('total_count', '?')}"
+                    )
             else:
                 tc = meta.get("total_count")
+                invalid = int(meta.get("invalid_items") or 0)
                 print(
                     f"\n[视频列表] 已全部拉取: {len(videos)} 条"
                     + (f"（接口 total_count={tc}）" if tc is not None else "")
+                    + (f"，已过滤无效视频ID {invalid} 条" if invalid else "")
                     + f"，共 {meta.get('pages')} 页"
                 )
         else:
@@ -2892,7 +2989,7 @@ def main() -> int:
 
     # 商品/SKU 之后再拉视频详情
     video_direct_gmv: dict[str, float] = {}
-    if want["video"] and videos and (args["export_excel"] or args["save_tables"]):
+    if want["video"] and (args["export_excel"] or args["save_tables"]):
         print("\n拉取 202409 视频列表（对照「视频GMV」/间接GMV）...")
         video_direct_gmv, videos_409, meta409 = load_video_direct_gmv_map(
             client,
@@ -2902,7 +2999,8 @@ def main() -> int:
             page_size=args["size"],
             all_pages=args["all_pages"],
         )
-        if meta409.get("error"):
+        video_direct_meta = meta409
+        if not list_fetch_complete(meta409):
             failed += 1
         before = len(videos)
         videos = merge_video_lists(videos, videos_409)
@@ -2913,15 +3011,33 @@ def main() -> int:
             + f"；导出共 {len(videos)} 条"
         )
 
+    video_sources_complete = list_fetch_complete(video_list_meta) and list_fetch_complete(
+        video_direct_meta
+    )
     if want["video"] and not videos and (args["export_excel"] or args["save_tables"]):
-        if list_fetch_complete(video_list_meta):
+        video_date_open = report_date_is_available(video_latest_available_date, start)
+        if video_sources_complete and video_date_open:
             headers = active_headers("video")
             zp = cache_path("video_detail", start, end)
             zp.write_text(
-                json.dumps({"headers": headers, "rows": [], "zero_data": True}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "headers": headers,
+                        "rows": [],
+                        "zero_data": True,
+                        "target_date": start[:10],
+                        "latest_available_date": video_latest_available_date[:10],
+                    },
+                    ensure_ascii=False,
+                ),
                 encoding="utf-8",
             )
             print(f"\n[视频详情] API 零数据（已写缓存标记 {zp.name}）")
+        elif not video_date_open:
+            print(
+                "\n[视频详情] 目标日期尚未开放"
+                f"（latest_available_date={video_latest_available_date or '-'}），不标记零数据"
+            )
         else:
             print("\n[视频详情] 列表未拉全且无视频，不标记零数据")
 
@@ -2930,9 +3046,11 @@ def main() -> int:
             (args["detail"] or args["export_excel"] or args["save_tables"]) and not args["no_video_detail"]
         )
         video_failed: list[str] = []
-        video_list_ok = list_fetch_complete(video_list_meta)
+        video_list_ok = video_sources_complete
 
-        if want_detail:
+        if not video_list_ok:
+            print("\n[视频详情] 视频列表或视频GMV对照列表未拉全，不拉详情、不导出入库缓存")
+        elif want_detail:
             n_detail = args["detail_n"] if args["detail_n"] > 0 else len(videos)
             print(
                 f"\n正在拉取视频详情（{n_detail} 条，并发={args['video_workers']}，每条最多重试2次）..."
@@ -2952,7 +3070,9 @@ def main() -> int:
             print("\n已跳过视频详情（--no-video-detail）")
 
         if args["export_excel"] or args["save_tables"]:
-            if video_failed:
+            if not video_list_ok:
+                print("\n[视频详情] 列表不完整，本次不生成任何入库缓存")
+            elif video_failed:
                 skip_excel_incomplete("视频详情", video_failed, len(videos))
                 failed += 1
             elif want_detail and video_details:

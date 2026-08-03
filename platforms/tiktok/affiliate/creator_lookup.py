@@ -29,7 +29,10 @@ REGION_SHOP_KEYS = {
     "MY": f"{SHOP_PREFIX}MY",
 }
 DEFAULT_SHOP_KEY = REGION_SHOP_KEYS[DEFAULT_REGION]
-IM_LINK_TEMPLATE = "https://affiliate.tiktok.com/seller/im?creator_id={user_id}"
+IM_LINK_TEMPLATE = (
+    "https://affiliate.tiktokshopglobalselling.com/seller/im"
+    "?creator_id={creator_id}&shop_region={region}&shop_id={shop_id}"
+)
 DETAIL_LINK_TEMPLATE = (
     "https://affiliate.tiktok.com/connection/creator/detail"
     "?cid={affiliate_cid}&shop_region={region}"
@@ -104,8 +107,13 @@ def normalize_username(name: str) -> str:
     return s.lower()
 
 
-def build_im_link(user_id: str) -> str:
-    return IM_LINK_TEMPLATE.format(user_id=str(user_id).strip())
+def build_im_link(creator_id: str, region: str = DEFAULT_REGION, shop_id: str = "") -> str:
+    """Build the affiliate-console IM link from its frontend creator ID (cid)."""
+    return IM_LINK_TEMPLATE.format(
+        creator_id=str(creator_id).strip(),
+        region=str(region or DEFAULT_REGION).strip().upper(),
+        shop_id=str(shop_id).strip(),
+    )
 
 
 def build_detail_link(affiliate_cid: str, region: str) -> str:
@@ -145,6 +153,7 @@ def search_marketplace_creators(
     keyword: str,
     *,
     page_size: int = 20,
+    retry_rate_limit: bool = True,
 ) -> tuple[list[dict], str]:
     """POST marketplace_creators/search；失败时返回 ([], 原因)。"""
     last_err = ""
@@ -160,6 +169,8 @@ def search_marketplace_creators(
         code = resp.get("code")
         if code == RATE_LIMIT_CODE:
             last_err = f"search 限流 code={code}"
+            if not retry_rate_limit:
+                return [], last_err
             continue
         if not is_ok(resp):
             last_err = f"search code={code} {str(resp.get('message', ''))[:120]}"
@@ -359,6 +370,7 @@ def resolve_creators(
 
     proxy = prepare_network()
     client, token, cipher = _init_client(key)
+    shop_id = cfg("TTS_SHOP_ID")
     results = []
 
     for name in names:
@@ -368,7 +380,7 @@ def resolve_creators(
             "shop_key": key,
             "user_id": "",
             "affiliate_cid": "",
-            "creator_id": "",  # 兼容旧字段 = user_id
+            "creator_id": "",  # 联盟前台 creator_id/cid（用于 IM 链接）
             "im_link": "",
             "detail_link": "",
             "ok": False,
@@ -381,16 +393,16 @@ def resolve_creators(
         )
         if user_id:
             row["user_id"] = user_id
-            row["creator_id"] = user_id
-            row["im_link"] = build_im_link(user_id)
             row["ok"] = True
             row["source"] = "api"
             if affiliate_cid:
                 row["affiliate_cid"] = affiliate_cid
+                row["creator_id"] = affiliate_cid
                 row["detail_link"] = build_detail_link(affiliate_cid, region_code)
+                row["im_link"] = build_im_link(affiliate_cid, region_code, shop_id)
             else:
                 row["msg"] = (
-                    "已得 user_id；affiliate_cid 需联盟前台链接或更高版本 Open API（当前 search 不返回 cid）"
+                    "已得 TikTok user_id；联盟后台私信链接需要前台 creator_id/cid，当前 search 不返回该字段"
                 )
             if matched_handle and matched_handle != name:
                 extra = f"匹配 handle={matched_handle}"
@@ -416,7 +428,11 @@ def get_creator_ids(
     shop_key: str | None = None,
 ) -> list[str]:
     """兼容旧名：返回 TikTok user_id 列表（非联盟前台 cid）。"""
-    return get_user_ids(usernames, region=region, shop_key=shop_key)
+    return [
+        r["creator_id"]
+        for r in resolve_creators(usernames, region=region, shop_key=shop_key)
+        if r["creator_id"]
+    ]
 
 
 def get_im_links(

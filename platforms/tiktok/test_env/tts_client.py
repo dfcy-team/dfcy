@@ -26,6 +26,19 @@ _HTTP_RETRIES = 6
 _HTTP_RETRY_WAIT = (1.5, 3.0, 5.0, 8.0, 12.0)
 
 
+def _env_timeout(name: str, default: int) -> int:
+    """Read a bounded request timeout without letting a bad env value break imports."""
+    try:
+        return max(5, int(os.environ.get(name, str(default)) or default))
+    except ValueError:
+        return default
+
+
+# Video backfills may override this in the daily importer. Keep the existing
+# 60-second behaviour unless an explicit environment value is supplied.
+HTTP_TIMEOUT = _env_timeout("TTS_HTTP_TIMEOUT", 60)
+
+
 def _request_with_retry(method: str, url: str, **kwargs) -> Response:
     last_err: Exception | None = None
     for attempt in range(_HTTP_RETRIES):
@@ -381,7 +394,7 @@ class TikTokShopClient:
             f"{API_HOST}{path}",
             params=query,
             headers={"content-type": "application/json", "x-tts-access-token": tok},
-            timeout=60,
+            timeout=HTTP_TIMEOUT,
         )
         data = r.json()
         new = self._retry_after_refresh(data, tok)
@@ -393,7 +406,7 @@ class TikTokShopClient:
                 f"{API_HOST}{path}",
                 params=query,
                 headers={"content-type": "application/json", "x-tts-access-token": new},
-                timeout=60,
+                timeout=HTTP_TIMEOUT,
             )
             return r.json()
         return data
@@ -411,7 +424,7 @@ class TikTokShopClient:
             params=query,
             data=raw,
             headers={"content-type": "application/json", "x-tts-access-token": tok},
-            timeout=60,
+            timeout=HTTP_TIMEOUT,
         )
         data = r.json()
         new = self._retry_after_refresh(data, tok)
@@ -424,7 +437,7 @@ class TikTokShopClient:
                 params=query,
                 data=raw,
                 headers={"content-type": "application/json", "x-tts-access-token": new},
-                timeout=60,
+                timeout=HTTP_TIMEOUT,
             )
             return r.json()
         return data
@@ -441,7 +454,7 @@ class TikTokShopClient:
             params=query,
             data=raw,
             headers={"content-type": "application/json", "x-tts-access-token": token},
-            timeout=60,
+            timeout=HTTP_TIMEOUT,
         )
         return r.json()
 

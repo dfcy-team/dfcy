@@ -311,6 +311,8 @@ def _collect_gmv_max_campaign_ids(
     start_date: str,
     end_date: str,
     access_token: str,
+    *,
+    positive_cost_only: bool = False,
 ) -> list[str]:
     campaign_rows = _paginate_gmv_max_report(
         advertiser_id,
@@ -323,7 +325,9 @@ def _collect_gmv_max_campaign_ids(
     )
     campaign_ids: list[str] = []
     for row in campaign_rows:
-        dims, _ = _row_dims_metrics(row)
+        dims, metrics = _row_dims_metrics(row)
+        if positive_cost_only and _num(metrics.get("cost")) <= 0:
+            continue
         cid = str(dims.get("campaign_id") or "")
         if cid and cid not in campaign_ids:
             campaign_ids.append(cid)
@@ -771,7 +775,12 @@ def fetch_gmv_max_creative_report(
         )
     else:
         raw_campaign_ids = _collect_gmv_max_campaign_ids(
-            advertiser_id, store_ids, start_date, end_date, token
+            advertiser_id,
+            store_ids,
+            start_date,
+            end_date,
+            token,
+            positive_cost_only=True,
         )
     campaign_ids, campaign_info_cache = classify_gmv_max_campaign_ids(
         advertiser_id,

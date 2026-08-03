@@ -13,6 +13,8 @@ config/db.ini
 logs/
 *.log
 web-portal/data/jobs/
+web-portal/data/creator_ops.db
+web-portal/data/creator_ops_preview.png
 platforms/tiktok/**/logs/
 platforms/tiktok/**/finance_last_summary.json
 platforms/tiktok/shop/CURRENT_SHOP.txt

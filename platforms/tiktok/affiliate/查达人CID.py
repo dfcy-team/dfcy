@@ -69,7 +69,7 @@ def main(argv=None) -> int:
         print(json.dumps(results, ensure_ascii=False, indent=2))
     elif args.ids_only:
         for r in results:
-            print(r["user_id"] if r["ok"] else "")
+            print(r["creator_id"] if r["ok"] else "")
     else:
         if not args.ids_only:
             print(f"[网络] 代理: {proxy or '直连'}")

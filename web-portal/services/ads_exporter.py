@@ -23,6 +23,26 @@ def _load_export_module(report_kind: str = "creative"):
     assert spec.loader is not None
     sys.modules[mod_name] = mod
     prev = sys.path[:]
+    # The web app also loads TikTok Content's modules under generic names such
+    # as ``oauth``. Marketing exporters use a different OAuth/config pair;
+    # isolate those modules while importing the exporter.
+    module_names = ("config", "oauth", "report_client")
+    previous_modules = {name: sys.modules.get(name) for name in module_names}
+    marketing_cfg_spec = importlib.util.spec_from_file_location(
+        "tiktok_marketing_export_config", MARKETING_ROOT / "config.py"
+    )
+    marketing_cfg = importlib.util.module_from_spec(marketing_cfg_spec)
+    assert marketing_cfg_spec.loader is not None
+    marketing_cfg_spec.loader.exec_module(marketing_cfg)
+    marketing_oauth_spec = importlib.util.spec_from_file_location(
+        "tiktok_marketing_export_oauth", MARKETING_ROOT / "oauth.py"
+    )
+    marketing_oauth = importlib.util.module_from_spec(marketing_oauth_spec)
+    assert marketing_oauth_spec.loader is not None
+    sys.modules["config"] = marketing_cfg
+    marketing_oauth_spec.loader.exec_module(marketing_oauth)
+    sys.modules["oauth"] = marketing_oauth
+    sys.modules.pop("report_client", None)
     for p in (str(PROJECT_ROOT), str(MARKETING_ROOT)):
         if p not in sys.path:
             sys.path.insert(0, p)
@@ -30,6 +50,11 @@ def _load_export_module(report_kind: str = "creative"):
         spec.loader.exec_module(mod)
     finally:
         sys.path[:] = prev
+        for name, previous in previous_modules.items():
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
     return mod
 
 

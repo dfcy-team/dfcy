@@ -419,13 +419,25 @@ def import_shop_analytics_to_db(
     )
     try:
         if product_records:
+            # Product data is a complete shop/day snapshot. Replace it only
+            # after a non-empty fresh snapshot has been parsed, so products
+            # removed upstream cannot survive a later rerun as stale rows.
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM `{cfg['product_table']}` "
+                    "WHERE data_time=%s AND shop_abbr=%s",
+                    (data_time, shop_key),
+                )
+                replaced_rows = int(cur.rowcount or 0)
             n, _ = _upsert_many(
                 conn,
                 cfg["product_table"],
                 product_records,
                 ["data_time", "shop_abbr", "site", "product_id"],
             )
-            result["messages"].append(f"[DB] product 写入 {n} 条 -> {cfg['product_table']}")
+            result["messages"].append(
+                f"[DB] product 替换旧 {replaced_rows} 条，写入新 {n} 条 -> {cfg['product_table']}"
+            )
 
         if sku_records:
             n, _ = _upsert_many(
