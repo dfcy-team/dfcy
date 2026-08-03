@@ -15,7 +15,22 @@ INTEGRATION_PERMISSION_CODES = (
     "integrations.view",
     "integrations.rotate",
     "integrations.run",
+    "integrations.store.view",
+    "integrations.store.authorize",
+    "integrations.store.revoke",
+    "integrations.store.sync",
+    "integrations.store.retry",
+    "integrations.credential.rotate",
 )
+
+EXACT_INTEGRATION_PERMISSION_CODES = {
+    "integrations.store.view",
+    "integrations.store.authorize",
+    "integrations.store.revoke",
+    "integrations.store.sync",
+    "integrations.store.retry",
+    "integrations.credential.rotate",
+}
 
 INTEGRATION_ROLE_CODES = {"integration_admin", "tech_admin", "admin"}
 
@@ -155,6 +170,9 @@ def user_has_integration_permission(user, permission_code):
     ).values("role_id")
     if Permission.objects.filter(code=permission_code, roles__id__in=role_ids).exists():
         return True
+
+    if permission_code in EXACT_INTEGRATION_PERMISSION_CODES:
+        return False
 
     return Role.objects.filter(
         id__in=role_ids,

@@ -28,6 +28,8 @@ def _validate_non_empty_string_values(values, message):
 
 
 INTEGRATION_SCOPE_KEYS = {"platforms", "integration_config_ids", "resource_types"}
+STORE_AUTH_SCOPE_KEYS = {"platforms", "store_ids"}
+STORE_AUTH_PLATFORMS = {"shopee", "tiktok"}
 
 
 def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None):
@@ -221,6 +223,52 @@ def filter_sync_runs(user, queryset, permission_code):
             condition &= Q(sync_job__resource_type__in=[str(value) for value in config["resource_types"]])
         allowed |= condition
     return queryset.filter(allowed).distinct()
+
+
+def _store_authorization_scope_configs(user, permission_code):
+    configs = permission_scope_configs(user, permission_code, STORE_AUTH_SCOPE_KEYS)
+    if configs is None:
+        return None
+    for config in configs:
+        if "platforms" in config:
+            _validate_non_empty_string_values(
+                config["platforms"],
+                "Marketplace store data scope contains an invalid platform.",
+            )
+            if not set(config["platforms"]) <= STORE_AUTH_PLATFORMS:
+                _invalid_scope("Marketplace store data scope contains an unknown platform.")
+        if "store_ids" in config:
+            _validate_positive_int_values(
+                config["store_ids"],
+                "Marketplace store data scope contains an invalid store identifier.",
+            )
+    return configs
+
+
+def filter_store_authorizations(user, queryset, permission_code):
+    configs = _store_authorization_scope_configs(user, permission_code)
+    if configs is None:
+        return queryset
+    allowed = Q(pk__in=[])
+    for config in configs:
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(platform__in=config["platforms"])
+        if "store_ids" in config:
+            condition &= Q(store_id__in=config["store_ids"])
+        allowed |= condition
+    return queryset.filter(allowed).distinct()
+
+
+def store_authorization_values_allowed(user, permission_code, *, platform, store_id):
+    configs = _store_authorization_scope_configs(user, permission_code)
+    if configs is None:
+        return True
+    return any(
+        ("platforms" not in config or platform in set(config["platforms"]))
+        and ("store_ids" not in config or store_id in set(config["store_ids"]))
+        for config in configs
+    )
 
 
 def _finance_scope_configs(user, permission_code):

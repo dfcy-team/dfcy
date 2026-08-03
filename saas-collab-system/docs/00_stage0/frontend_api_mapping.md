@@ -161,10 +161,14 @@ UI-P4全部真实写动作必须由后端permission-specific data_scope与状态
 | RPA页面签名异常 | `/rpa/page-signatures` | `/api/internal/rpa/page-signatures/` | GET | `page`、`page_size` | `platform`、`page_type`、`signature_hash_masked`、`detected_status` | `frontend/src/mock/rpaStability.js` | connected |
 | API同步任务列表 | `/integrations/api-sync` | `/api/internal/integrations/sync-jobs/` | GET | `resource_type`、`status`、`schedule_type` | `count/next/previous/results` | `frontend/src/mock/integrations.js` | pending |
 | API同步日志列表 | `/integrations/api-sync/logs` | `/api/internal/integrations/sync-runs/` | GET | `platform`、`resource_type`、`status` | `count/next/previous/results`、`quality_check_result` | `frontend/src/mock/integrations.js` | pending |
-| 平台接入配置列表 | `/integrations/configs` | `/api/internal/integrations/configs/` | GET | `platform`、`status`、`environment` | `platform`、`account_alias`、`environment`、`status`、`credential_fingerprint`、`credential_key_version` | `frontend/src/mock/integrations.js` | pending |
-| 平台接入配置详情 | `/integrations/configs/:id` | `/api/internal/integrations/configs/{id}/` | GET | `id` | `platform`、`account_alias`、`environment`、`status`、`credential_fingerprint`、`credential_key_version` | `frontend/src/mock/integrations.js` | pending |
+| 平台接入配置列表 | `/integrations/configs` | `/api/internal/integrations/configs/` | GET | `platform`、`status`、`environment` | `platform`、`account_alias`、`environment`、`status`、`credential_mask`、`credential_reference_version` | `frontend/src/mock/integrations.js` | pending |
+| 平台接入配置详情 | `/integrations/configs/:id` | `/api/internal/integrations/configs/{id}/` | GET | `id` | `platform`、`account_alias`、`environment`、`status`、`credential_mask`、`credential_reference_version` | `frontend/src/mock/integrations.js` | pending |
 | 平台接入配置修改 | `/integrations/configs/:id` | `/api/internal/integrations/configs/{id}/` | PATCH | `id`及允许修改字段 | 统一响应；不得返回明文凭据 | 无真实配置Mock | pending |
-| 平台接入配置动作 | `/integrations/configs/:id` | `/api/internal/integrations/configs/{id}/disable/`、`verify/`、`rotate/` | POST | `id`及动作字段 | 脱敏结果与审计摘要 | 无真实配置Mock | pending |
+| 平台接入配置动作 | `/integrations/configs/:id` | `/api/internal/integrations/configs/{id}/disable/`、`verify/` | POST | `id`及动作字段 | 脱敏结果与审计摘要 | 无真实配置Mock | pending |
+| 旧凭据轮换 | `/integrations/configs/:id` | `/api/internal/integrations/configs/{id}/rotate/` | POST | 原始凭据字段一律拒绝 | 统一校验错误 | 无 | pending（旧密文写入已停用） |
+| Shopee/TikTok门店授权列表 | 待前端页面 | `/api/internal/integrations/store-authorizations/` | GET | `page`、`page_size`、`platform`、`status` | 统一分页、授权元数据、掩码和引用版本 | 无 | pending |
+| Shopee/TikTok门店授权详情 | 待前端页面 | `/api/internal/integrations/store-authorizations/{id}/` | GET | `id` | tenant/store/platform隔离后的授权元数据 | 无 | pending |
+| 门店授权动作 | 待前端页面 | `authorize/callback/refresh/revoke/sync/retry/credential-reference/rotate`，详见A-01合同 | POST/GET | 后续合同字段 | 当前无handler | 无 | pending |
 | 同步任务列表 | `/integrations/sync-jobs` | `/api/internal/integrations/sync-jobs/` | GET | `resource_type`、`status`、`schedule_type` | `resource_type`、`schedule_type`、`status`、`is_enabled`、`last_run_at`、`next_run_at` | `frontend/src/mock/integrations.js` | pending |
 | 同步执行记录列表 | `/integrations/sync-runs` | `/api/internal/integrations/sync-runs/` | GET | `platform`、`resource_type`、`status` | `run_id`、`status`、`fetched_count`、`failed_count`、`retry_count`、`masked_error_message` | `frontend/src/mock/integrations.js` | pending |
 | 同步执行记录详情 | `/integrations/sync-runs/:id` | `/api/internal/integrations/sync-runs/{id}/` | GET | `id` | `run_id`、`status`、`masked_error_message`、`quality_check_result` | `frontend/src/mock/integrations.js` | pending |
@@ -273,7 +277,7 @@ UI-P2 接口代码已完成，当前保留 Mock/API 切换；只有在受控 Pil
 | 仓库档案 | `/master-data/warehouses` | `/api/internal/master-data/warehouses/`、`/api/internal/master-data/warehouses/{id}/status/` | GET、POST | `masterdata.view/manage` | `frontend/src/mock/masterData.js` | pending（代码完成） |
 | 供应商档案 | `/master-data/suppliers` | `/api/internal/master-data/suppliers/`、`/api/internal/master-data/suppliers/{id}/status/` | GET、POST | `masterdata.view/manage` | `frontend/src/mock/masterData.js` | pending（代码完成） |
 
-UI-P2 所有页面仅允许 `internal` 用户；联系方式必须脱敏，安全运维只显示凭据别名、指纹、版本和引用状态。前端动作权限不替代后端 tenant、data scope 与 Permission 校验。
+UI-P2 所有页面仅允许 `internal` 用户；联系方式必须脱敏，安全运维只显示凭据别名、掩码、引用版本和状态，不显示引用ID或凭据材料。前端动作权限不替代后端 tenant、data scope 与 Permission 校验。
 
 ## UI-P7 治理与受控试点实施映射
 

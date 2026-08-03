@@ -97,3 +97,12 @@ CUSTOM scope 统一使用 `creator_dimensions` 对象数组。对象允许 key �
 - 达人模块不得访问 `/api/finance/*`、`/admin/` 或 RPA Agent 执行端点。
 - 财务页面只使用 `/api/finance/*` 或经授权的 `/api/report/*`。
 - 不存在真实平台 adapter、真实银行/支付接口或高风险自动化放行。
+
+## 6. Shopee / TikTok Shop 门店授权基础
+
+门店授权合同与平台差异矩阵分别冻结在：
+
+- `docs/03_api/shopee_tiktok_store_auth_contract.md`
+- `docs/03_api/shopee_tiktok_api_alignment_matrix.md`
+
+当前仅提供门店授权模型、synthetic credential reference Mock 服务以及 scoped 只读列表/详情。OAuth、callback、刷新、撤销、同步、重试和真实凭据引用轮换 handler 均为 `pending`；HTTP 200、Mock `active` 或模型迁移完成都不得解释为 `connected`。原始 `credentials/access_token/refresh_token` 写入已禁止，历史非空 `credential_ciphertext` 会阻止迁移直至完成受控外部引用迁移。

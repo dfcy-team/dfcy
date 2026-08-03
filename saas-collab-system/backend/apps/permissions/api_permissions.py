@@ -138,6 +138,30 @@ class IsIntegrationRunner(IntegrationActionPermission):
     permission_code = "integrations.run"
 
 
+class IsIntegrationStoreViewer(IntegrationActionPermission):
+    permission_code = "integrations.store.view"
+
+
+class IsIntegrationStoreAuthorizer(IntegrationActionPermission):
+    permission_code = "integrations.store.authorize"
+
+
+class IsIntegrationStoreRevoker(IntegrationActionPermission):
+    permission_code = "integrations.store.revoke"
+
+
+class IsIntegrationStoreSyncer(IntegrationActionPermission):
+    permission_code = "integrations.store.sync"
+
+
+class IsIntegrationStoreRetrier(IntegrationActionPermission):
+    permission_code = "integrations.store.retry"
+
+
+class IsMarketplaceCredentialReferenceRotator(IntegrationActionPermission):
+    permission_code = "integrations.credential.rotate"
+
+
 class IsIntegrationReadOrManage(IntegrationActionPermission):
     def has_permission(self, request, view):
         permission_code = "integrations.view" if request.method in SAFE_METHODS else "integrations.manage"

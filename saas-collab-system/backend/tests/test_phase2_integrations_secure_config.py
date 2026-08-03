@@ -1,12 +1,9 @@
 import json
 
 import pytest
-from django.test import override_settings
-from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.integrations.credential_service import decrypt_credentials, encrypt_credentials
 from apps.integrations.models import IntegrationAuditLog, PlatformIntegrationConfig
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
@@ -76,11 +73,6 @@ def config_payload(account_alias="demo-account", environment="mock", status="act
         "account_alias": account_alias,
         "environment": environment,
         "status": status,
-        "credential_key_version": "test-v1",
-        "credentials": {
-            "api_key": "not-a-real-secret",
-            "api_secret": "placeholder-secret",
-        },
     }
 
 
@@ -231,10 +223,19 @@ def test_integration_view_permission_cannot_create_update_rotate_or_disable():
 
 
 @pytest.mark.django_db
-def test_credentials_never_appear_in_api_response_or_audit_log():
+def test_raw_credentials_are_rejected_and_never_appear_in_api_or_audit():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "tech-admin")
     grant_integration_access(user)
+
+    rejected = authenticated_client(user).post(
+        "/api/internal/integrations/configs/",
+        {**config_payload(), "credentials": {"api_key": "demo-sensitive-material"}},
+        format="json",
+    )
+    assert rejected.status_code == 400
+    assert "demo-sensitive-material" not in json.dumps(rejected.json())
+    assert not PlatformIntegrationConfig.objects.exists()
 
     response = authenticated_client(user).post(
         "/api/internal/integrations/configs/",
@@ -244,26 +245,20 @@ def test_credentials_never_appear_in_api_response_or_audit_log():
 
     assert response.status_code == 201
     response_text = json.dumps(response.json())
-    assert "not-a-real-secret" not in response_text
-    assert "placeholder-secret" not in response_text
     assert "credential_ciphertext" not in response_text
 
     audit = IntegrationAuditLog.objects.get(action="create")
     audit_text = json.dumps(audit.masked_detail)
-    assert "not-a-real-secret" not in audit_text
-    assert "placeholder-secret" not in audit_text
-    assert audit.masked_detail["credential_mask"]["api_key"] == "***"
+    assert "demo-sensitive-material" not in audit_text
+    assert audit.masked_detail["credential_boundary"] == "external_reference_only"
 
 
 @pytest.mark.django_db
-def test_test_provider_encrypts_decrypts_and_rotation_changes_key_version():
+@pytest.mark.parametrize("field", ("credentials", "access_token", "refresh_token", "credential_ciphertext"))
+def test_raw_credential_fields_and_legacy_rotation_are_rejected(field):
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "tech-admin")
     grant_integration_access(user)
-
-    ciphertext, fingerprint = encrypt_credentials({"api_key": "not-a-real-secret"}, key_version="test-v1")
-    assert decrypt_credentials(ciphertext) == {"api_key": "not-a-real-secret"}
-    assert len(fingerprint) == 64
 
     create_response = authenticated_client(user).post(
         "/api/internal/integrations/configs/",
@@ -274,23 +269,13 @@ def test_test_provider_encrypts_decrypts_and_rotation_changes_key_version():
 
     rotate_response = authenticated_client(user).post(
         f"/api/internal/integrations/configs/{config_id}/rotate/",
-        {
-            "credential_key_version": "test-v2",
-            "credentials": {"api_key": "demo-rotated", "api_secret": "placeholder-rotated"},
-        },
+        {field: "demo-sensitive-material"},
         format="json",
     )
 
-    assert rotate_response.status_code == 200
-    assert rotate_response.json()["data"]["credential_key_version"] == "test-v2"
-    assert "credential_ciphertext" not in rotate_response.json()["data"]
-    assert IntegrationAuditLog.objects.filter(action="rotate_credentials").exists()
-
-
-def test_unconfigured_production_provider_rejects_credential_operations():
-    with override_settings(INTEGRATION_ENCRYPTION_PROVIDER="unconfigured-production"):
-        with pytest.raises(ValidationError, match="not configured"):
-            encrypt_credentials({"api_key": "not-a-real-secret"})
+    assert rotate_response.status_code == 400
+    assert "demo-sensitive-material" not in json.dumps(rotate_response.json())
+    assert not IntegrationAuditLog.objects.filter(action="rotate_credentials").exists()
 
 
 @pytest.mark.django_db

@@ -20,6 +20,14 @@ class PlatformIntegrationConfigAdmin(admin.ModelAdmin):
     list_filter = ("platform", "environment", "status", "tenant")
     search_fields = ("account_alias", "credential_fingerprint", "tenant__name", "tenant__code")
     exclude = ("credential_ciphertext",)
+    readonly_fields = (
+        "credential_id",
+        "token_id",
+        "credential_mask",
+        "credential_reference_version",
+        "credential_key_version",
+        "credential_fingerprint",
+    )
 
 
 @admin.register(IntegrationAuditLog)
@@ -27,6 +35,25 @@ class IntegrationAuditLogAdmin(admin.ModelAdmin):
     list_display = ("tenant", "integration_config", "action", "actor", "result", "created_at")
     list_filter = ("action", "result", "tenant")
     search_fields = ("integration_config__account_alias", "actor__username", "tenant__code")
+    readonly_fields = (
+        "tenant",
+        "integration_config",
+        "store_authorization",
+        "action",
+        "actor",
+        "result",
+        "masked_detail",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(SyncJob)

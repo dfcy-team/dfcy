@@ -4,6 +4,8 @@ from . import views
 
 
 urlpatterns = [
+    path("store-authorizations/", views.store_authorization_collection, name="store-authorization-collection"),
+    path("store-authorizations/<int:pk>/", views.store_authorization_detail, name="store-authorization-detail"),
     path("configs/", views.integration_config_collection, name="integration-config-collection"),
     path("configs/<int:pk>/", views.integration_config_detail, name="integration-config-detail"),
     path("configs/<int:pk>/rotate/", views.rotate_integration_credentials, name="integration-config-rotate"),

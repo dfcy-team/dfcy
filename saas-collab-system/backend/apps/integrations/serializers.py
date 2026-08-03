@@ -1,14 +1,47 @@
 from rest_framework import serializers
 
-from .credential_service import encrypt_credentials, mask_credentials
-from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
+from .models import IntegrationAuditLog, MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
 
 
-class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
+RAW_CREDENTIAL_FIELDS = {
+    "credentials",
+    "credential_ciphertext",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "api_secret",
+    "secret",
+    "token",
+    "cookie",
+    "session",
+    "password",
+}
+CONTROLLED_REFERENCE_FIELDS = {
+    "credential_id",
+    "token_id",
+    "credential_mask",
+    "credential_reference_version",
+}
+
+
+class RejectRawCredentialFieldsMixin:
+    def to_internal_value(self, data):
+        rejected = sorted(RAW_CREDENTIAL_FIELDS & set(data)) if hasattr(data, "keys") else []
+        if rejected:
+            raise serializers.ValidationError(
+                {field: "Raw credential material is not accepted; use an external credential reference." for field in rejected}
+            )
+        controlled = sorted(CONTROLLED_REFERENCE_FIELDS & set(data)) if hasattr(data, "keys") else []
+        if controlled:
+            raise serializers.ValidationError(
+                {field: "Credential references can only be changed by the controlled service." for field in controlled}
+            )
+        return super().to_internal_value(data)
+
+
+class PlatformIntegrationConfigSerializer(RejectRawCredentialFieldsMixin, serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
-    credential_mask = serializers.SerializerMethodField()
-    credentials = serializers.DictField(write_only=True, required=False)
 
     class Meta:
         model = PlatformIntegrationConfig
@@ -22,25 +55,24 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             "credential_key_version",
             "credential_fingerprint",
             "credential_mask",
+            "credential_reference_version",
             "last_verified_at",
             "created_by_id",
             "created_at",
             "updated_at",
-            "credentials",
         )
         read_only_fields = (
             "id",
             "tenant_id",
             "credential_fingerprint",
             "credential_mask",
+            "credential_key_version",
+            "credential_reference_version",
             "last_verified_at",
             "created_by_id",
             "created_at",
             "updated_at",
         )
-
-    def get_credential_mask(self, obj):
-        return {"fingerprint": obj.credential_fingerprint, "key_version": obj.credential_key_version}
 
     def validate(self, attrs):
         environment = attrs.get("environment", getattr(self.instance, "environment", None))
@@ -51,27 +83,51 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError(
                 {"status": "Production configs can only be disabled or pending review in phase 2."}
-            )
+        )
         return attrs
 
-    def create(self, validated_data):
-        credentials = validated_data.pop("credentials", {})
-        key_version = validated_data.get("credential_key_version") or "test-v1"
-        if credentials:
-            ciphertext, fingerprint = encrypt_credentials(credentials, key_version=key_version)
-            validated_data["credential_ciphertext"] = ciphertext
-            validated_data["credential_fingerprint"] = fingerprint
-            validated_data["credential_key_version"] = key_version
-        return super().create(validated_data)
 
-    def update(self, instance, validated_data):
-        validated_data.pop("credentials", None)
-        return super().update(instance, validated_data)
+class RotateCredentialsSerializer(RejectRawCredentialFieldsMixin, serializers.Serializer):
+    def validate(self, attrs):
+        raise serializers.ValidationError(
+            "Legacy encrypted credential rotation is retired. Marketplace reference rotation remains pending."
+        )
 
 
-class RotateCredentialsSerializer(serializers.Serializer):
-    credentials = serializers.DictField()
-    credential_key_version = serializers.CharField(max_length=40)
+class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(read_only=True)
+    store_id = serializers.IntegerField(read_only=True)
+    integration_config_id = serializers.IntegerField(read_only=True)
+    created_by_id = serializers.IntegerField(read_only=True)
+    updated_by_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = MarketplaceStoreAuthorization
+        fields = (
+            "id",
+            "tenant_id",
+            "platform",
+            "store_id",
+            "integration_config_id",
+            "region",
+            "platform_store_id",
+            "merchant_subject_id",
+            "shop_cipher",
+            "credential_mask",
+            "credential_reference_version",
+            "status",
+            "scopes",
+            "authorized_at",
+            "expires_at",
+            "refresh_due_at",
+            "revoked_at",
+            "masked_error_code",
+            "created_by_id",
+            "updated_by_id",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
 
 
 class IntegrationAuditLogSerializer(serializers.ModelSerializer):

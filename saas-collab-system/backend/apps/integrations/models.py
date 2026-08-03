@@ -1,7 +1,35 @@
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
+from apps.masterdata.models import StoreMaster
 from apps.tenants.models import Tenant
-from django.conf import settings
+
+
+class PlatformIntegrationConfigQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        protected = {
+            "credential_ciphertext",
+            "credential_id",
+            "token_id",
+            "credential_mask",
+            "credential_reference_version",
+        }
+        if protected & set(kwargs):
+            raise ValidationError("Credential material and references can only be changed by a controlled service.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if any(
+            obj.credential_ciphertext
+            or obj.credential_id
+            or obj.token_id
+            or obj.credential_mask
+            or obj.credential_reference_version
+            for obj in objs
+        ):
+            raise ValidationError("Credential material and references can only be changed by a controlled service.")
+        return super().bulk_create(objs, **kwargs)
 
 
 class PlatformChoices(models.TextChoices):
@@ -31,6 +59,10 @@ class PlatformIntegrationConfig(models.Model):
     credential_ciphertext = models.TextField(blank=True)
     credential_key_version = models.CharField(max_length=40, blank=True)
     credential_fingerprint = models.CharField(max_length=64, blank=True)
+    credential_id = models.CharField(max_length=160, blank=True)
+    token_id = models.CharField(max_length=160, blank=True)
+    credential_mask = models.JSONField(default=dict, blank=True)
+    credential_reference_version = models.PositiveIntegerField(default=0)
     last_verified_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -39,6 +71,8 @@ class PlatformIntegrationConfig(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = PlatformIntegrationConfigQuerySet.as_manager()
 
     class Meta:
         ordering = ["tenant_id", "platform", "account_alias"]
@@ -52,6 +86,186 @@ class PlatformIntegrationConfig(models.Model):
     def __str__(self):
         return f"{self.tenant.code}:{self.platform}:{self.account_alias}"
 
+    def save(self, *args, **kwargs):
+        if not getattr(self, "_service_credential_reference_write", False):
+            protected_values = {
+                "credential_ciphertext": self.credential_ciphertext,
+                "credential_id": self.credential_id,
+                "token_id": self.token_id,
+                "credential_mask": self.credential_mask,
+                "credential_reference_version": self.credential_reference_version,
+            }
+            previous = {
+                "credential_ciphertext": "",
+                "credential_id": "",
+                "token_id": "",
+                "credential_mask": {},
+                "credential_reference_version": 0,
+            }
+            if self.pk:
+                previous_row = type(self).objects.filter(pk=self.pk).values(*protected_values).first()
+                if previous_row:
+                    previous = previous_row
+            if protected_values != previous:
+                raise ValidationError("Credential material and references can only be changed by a controlled service.")
+        return super().save(*args, **kwargs)
+
+
+class StoreAuthorizationQuerySet(models.QuerySet):
+    protected_fields = {
+        "tenant",
+        "tenant_id",
+        "platform",
+        "store",
+        "store_id",
+        "integration_config",
+        "integration_config_id",
+        "platform_store_id",
+        "platform_identity_key",
+        "merchant_subject_id",
+        "shop_cipher",
+        "credential_id",
+        "token_id",
+        "credential_mask",
+        "credential_reference_version",
+        "status",
+        "scopes",
+        "authorized_at",
+        "expires_at",
+        "refresh_due_at",
+        "revoked_at",
+        "masked_error_code",
+        "created_by",
+        "created_by_id",
+        "updated_by",
+        "updated_by_id",
+        "created_at",
+        "updated_at",
+    }
+
+    def update(self, **kwargs):
+        if self.protected_fields & set(kwargs):
+            raise ValidationError("Store authorization state can only be changed by the service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Store authorizations cannot be bulk created.")
+
+    def bulk_update(self, objs, fields, **kwargs):
+        if self.protected_fields & set(fields):
+            raise ValidationError("Store authorization state cannot be bulk updated.")
+        return super().bulk_update(objs, fields, **kwargs)
+
+    def delete(self):
+        raise ValidationError("Store authorizations are retained for audit.")
+
+
+class MarketplaceStoreAuthorization(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        REVOKED = "revoked", "Revoked"
+        ERROR = "error", "Error"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="marketplace_store_authorizations")
+    platform = models.CharField(
+        max_length=30,
+        choices=((PlatformChoices.SHOPEE, "Shopee"), (PlatformChoices.TIKTOK, "TikTok Shop")),
+    )
+    store = models.ForeignKey(StoreMaster, on_delete=models.PROTECT, related_name="marketplace_authorizations")
+    integration_config = models.ForeignKey(
+        PlatformIntegrationConfig,
+        on_delete=models.PROTECT,
+        related_name="store_authorizations",
+    )
+    region = models.CharField(max_length=8)
+    platform_store_id = models.CharField(max_length=160)
+    platform_identity_key = models.CharField(max_length=64)
+    merchant_subject_id = models.CharField(max_length=160)
+    shop_cipher = models.CharField(max_length=255, blank=True)
+    credential_id = models.CharField(max_length=160, blank=True)
+    token_id = models.CharField(max_length=160, blank=True)
+    credential_mask = models.JSONField(default=dict, blank=True)
+    credential_reference_version = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    scopes = models.JSONField(default=list, blank=True)
+    authorized_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    refresh_due_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    masked_error_code = models.CharField(max_length=80, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_marketplace_store_authorizations",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_marketplace_store_authorizations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = StoreAuthorizationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["tenant_id", "platform", "store_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["platform", "platform_identity_key"],
+                name="uniq_marketplace_store_global_identity",
+            ),
+            models.UniqueConstraint(
+                fields=["tenant", "platform", "store"],
+                name="uniq_marketplace_auth_internal_store",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_market_auth_tenant_status"),
+            models.Index(fields=["tenant", "platform"], name="idx_market_auth_platform"),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.store_id and self.store.tenant_id != self.tenant_id:
+            errors["store"] = "Store tenant must match authorization tenant."
+        if self.integration_config_id and self.integration_config.tenant_id != self.tenant_id:
+            errors["integration_config"] = "Integration config tenant must match authorization tenant."
+        if self.integration_config_id and self.integration_config.platform != self.platform:
+            errors["platform"] = "Integration config platform must match authorization platform."
+        if self.store_id and self.store.platform.platform_type != self.platform:
+            errors["store"] = "Store platform type must match authorization platform."
+        if self.store_id and self.region.upper() != self.store.country_code.upper():
+            errors["region"] = "Authorization region must match store country code."
+        if self.platform == PlatformChoices.TIKTOK and not self.shop_cipher:
+            errors["shop_cipher"] = "TikTok Shop authorization requires a shop cipher."
+        if not isinstance(self.scopes, list) or any(not isinstance(value, str) or not value for value in self.scopes):
+            errors["scopes"] = "Scopes must be a list of non-empty strings."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not getattr(self, "_service_write", False):
+            raise ValidationError("Store authorizations can only be written by the service layer.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Store authorizations are retained for audit.")
+
+    def __str__(self):
+        return f"{self.platform}:{self.platform_store_id}:{self.status}"
+
+
+class IntegrationAuditLogQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Integration audit logs are append-only.")
+
+    def delete(self):
+        raise ValidationError("Integration audit logs are append-only.")
+
 
 class IntegrationAuditLog(models.Model):
     class Result(models.TextChoices):
@@ -59,11 +273,18 @@ class IntegrationAuditLog(models.Model):
         FAILED = "failed", "Failed"
         BLOCKED = "blocked", "Blocked"
 
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="integration_audit_logs")
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="integration_audit_logs")
     integration_config = models.ForeignKey(
         PlatformIntegrationConfig,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="audit_logs",
+    )
+    store_authorization = models.ForeignKey(
+        MarketplaceStoreAuthorization,
+        on_delete=models.PROTECT,
+        related_name="audit_logs",
+        null=True,
+        blank=True,
     )
     action = models.CharField(max_length=80)
     actor = models.ForeignKey(
@@ -75,11 +296,21 @@ class IntegrationAuditLog(models.Model):
     masked_detail = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = IntegrationAuditLogQuerySet.as_manager()
+
     class Meta:
         ordering = ["-created_at", "-id"]
 
     def __str__(self):
         return f"{self.integration_config_id}:{self.action}:{self.result}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Integration audit logs are append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Integration audit logs are append-only.")
 
 
 class SyncJob(models.Model):
