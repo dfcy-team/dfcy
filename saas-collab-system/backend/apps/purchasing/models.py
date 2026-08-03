@@ -264,12 +264,26 @@ class SupplyPurchaseOrder(models.Model):
             self.currency = self.currency.upper()
 
     def save(self, *args, **kwargs):
-        if not self.pk and (
-            self.shipping_route != self.ShippingRoute.UNDECIDED
-            or self.shipping_route_decided_at
-            or self.shipping_route_decided_by_id
-        ) and not _supply_action_write_allowed():
-            raise ValidationError("Shipping route must be assigned through the audited action service.")
+        if not self.pk and not _supply_action_write_allowed():
+            controlled_initial_state = {
+                "status": self.Status.PENDING,
+                "shipping_route": self.ShippingRoute.UNDECIDED,
+                "shipping_route_decided_at": None,
+                "shipping_route_decided_by_id": None,
+                "accepted_at": None,
+                "production_started_at": None,
+                "production_completed_at": None,
+                "completed_quantity": 0,
+                "version": 1,
+            }
+            if any(
+                getattr(self, field) != expected
+                for field, expected in controlled_initial_state.items()
+            ):
+                raise ValidationError(
+                    "Supply purchase order controlled state must start at canonical defaults; "
+                    "later state changes require the audited action service."
+                )
         if self.pk:
             current = type(self).objects.filter(pk=self.pk).values(
                 *SupplyPurchaseOrderQuerySet.CONTROLLED_FIELDS

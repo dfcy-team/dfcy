@@ -3,13 +3,15 @@ from types import SimpleNamespace
 import pytest
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
+from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.test import APIClient
 
+from apps.accounts.models import CustomUser
 from apps.audit.models import OperationLog
-from apps.common.exceptions import BusinessRuleViolation, StateConflict
+from apps.common.exceptions import BusinessRuleViolation, ScopedResourceNotFound, StateConflict
 from apps.packing.models import PackingStandardVersion, _packing_domain_write_context
 from apps.packing.services import create_packing_batch
-from apps.permissions.models import DataScope
+from apps.permissions.models import DataScope, Role, UserRole
 from apps.purchasing.models import (
     SupplyPurchaseOrder,
     SupplyPurchaseOrderEvent,
@@ -23,6 +25,7 @@ from .test_supply_chain_f1_api import (
     create_catalog,
     create_internal_user,
     create_supplier_user,
+    ensure_supply_permissions,
 )
 
 
@@ -380,3 +383,209 @@ def test_route_fields_cannot_be_bypassed_through_orm_mutations():
     forged_event._action_service_write = True
     with pytest.raises(DjangoValidationError, match="audited action service"):
         forged_event.save()
+
+
+@pytest.mark.parametrize(
+    ("controlled_values", "order_suffix"),
+    [
+        ({"status": SupplyPurchaseOrder.Status.PRODUCTION_COMPLETED}, "STATUS"),
+        ({"completed_quantity": 10}, "QUANTITY"),
+        ({"production_completed_at": timezone.now()}, "TIMESTAMP"),
+        ({"version": 2}, "VERSION"),
+    ],
+)
+def test_new_order_rejects_noncanonical_controlled_state(controlled_values, order_suffix):
+    tenant = Tenant.objects.create(
+        name=f"Route Initial {order_suffix}",
+        code=f"route-initial-{order_suffix.lower()}",
+    )
+    actor = create_internal_user(tenant, f"route-initial-{order_suffix.lower()}-user")
+    supplier, _ = create_catalog(tenant, f"ROUTE-INITIAL-{order_suffix}")
+
+    with pytest.raises(DjangoValidationError, match="canonical defaults"):
+        SupplyPurchaseOrder.objects.create(
+            tenant=tenant,
+            supplier=supplier,
+            order_no=f"ROUTE-INITIAL-{order_suffix}",
+            order_date=timezone.localdate(),
+            created_by=actor,
+            **controlled_values,
+        )
+
+
+def test_direct_route_service_enforces_permission_before_idempotency_replay():
+    tenant = Tenant.objects.create(name="Route Service Permission", code="route-service-perm")
+    owner = create_internal_user(tenant, "route-service-owner")
+    supplier, sku = create_catalog(tenant, "ROUTE-SERVICE-PERM")
+    order = _completed_order(tenant, owner, supplier, sku)
+    order, _, _ = _route_action(
+        order,
+        owner,
+        SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+        SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+        "route-service-existing-key",
+    )
+    unauthorized = CustomUser.objects.create_user(
+        username="route-service-no-permission",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    no_permission = CustomUser.objects.create_user(
+        username="route-service-no-permission-role",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    no_permission_role = Role.objects.create(
+        tenant=tenant,
+        code="route-service-no-permission-role",
+        name="No route permission",
+    )
+    UserRole.objects.create(tenant=tenant, user=no_permission, role=no_permission_role)
+    DataScope.objects.create(
+        tenant=tenant,
+        role=no_permission_role,
+        scope_type=DataScope.ScopeType.ALL,
+    )
+    no_scope = CustomUser.objects.create_user(
+        username="route-service-no-scope",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    no_scope_role = Role.objects.create(
+        tenant=tenant,
+        code="route-service-no-scope-role",
+        name="No route scope",
+    )
+    no_scope_role.permissions.add(*ensure_supply_permissions())
+    UserRole.objects.create(tenant=tenant, user=no_scope, role=no_scope_role)
+
+    for denied_actor in (unauthorized, no_permission, no_scope):
+        with pytest.raises(PermissionDenied, match="permission"):
+            perform_shipping_route_action(
+                order_id=order.id,
+                actor=denied_actor,
+                action=SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+                idempotency_key="route-service-existing-key",
+                expected_version=1,
+                shipping_route=SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+                reason="",
+                request=_request(),
+            )
+
+
+def test_direct_route_service_enforces_datascope():
+    tenant = Tenant.objects.create(name="Route Service Scope", code="route-service-scope")
+    owner = create_internal_user(tenant, "route-service-scope-owner")
+    supplier, sku = create_catalog(tenant, "ROUTE-SERVICE-SCOPE")
+    order = _completed_order(tenant, owner, supplier, sku)
+    scoped_out = create_internal_user(
+        tenant,
+        "route-service-scoped-out",
+        scope_type=DataScope.ScopeType.CUSTOM,
+        config={"supply_purchase_order_ids": []},
+    )
+
+    with pytest.raises(ScopedResourceNotFound, match="authorized scope"):
+        _route_action(
+            order,
+            scoped_out,
+            SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+            SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+            "route-service-scoped-key",
+        )
+
+
+def test_direct_route_service_supports_own_and_custom_scopes_and_hides_cross_tenant():
+    tenant = Tenant.objects.create(name="Route Scope Matrix", code="route-scope-matrix")
+    own_actor = create_internal_user(
+        tenant,
+        "route-own-actor",
+        scope_type=DataScope.ScopeType.OWN,
+    )
+    supplier, sku = create_catalog(tenant, "ROUTE-SCOPE-MATRIX")
+    own_order = _completed_order(tenant, own_actor, supplier, sku, "OWN")
+    own_result, _, _ = _route_action(
+        own_order,
+        own_actor,
+        SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+        SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+        "route-own-key",
+    )
+    assert own_result.shipping_route == SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO
+
+    owner = create_internal_user(tenant, "route-custom-owner")
+    supplier_order = _completed_order(tenant, owner, supplier, sku, "CUSTOM-SUPPLIER")
+    supplier_scoped = create_internal_user(
+        tenant,
+        "route-custom-supplier",
+        scope_type=DataScope.ScopeType.CUSTOM,
+        config={"supplier_ids": [supplier.id]},
+    )
+    supplier_result, _, _ = _route_action(
+        supplier_order,
+        supplier_scoped,
+        SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+        SupplyPurchaseOrder.ShippingRoute.CONTAINER_CARGO,
+        "route-custom-supplier-key",
+    )
+    assert supplier_result.shipping_route == SupplyPurchaseOrder.ShippingRoute.CONTAINER_CARGO
+
+    order_scoped_order = _completed_order(tenant, owner, supplier, sku, "CUSTOM-ORDER")
+    order_scoped = create_internal_user(
+        tenant,
+        "route-custom-order",
+        scope_type=DataScope.ScopeType.CUSTOM,
+        config={"supply_purchase_order_ids": [order_scoped_order.id]},
+    )
+    order_result, _, _ = _route_action(
+        order_scoped_order,
+        order_scoped,
+        SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+        SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+        "route-custom-order-key",
+    )
+    assert order_result.shipping_route == SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO
+
+    other_tenant = Tenant.objects.create(name="Route Other Tenant", code="route-other-tenant")
+    cross_tenant_actor = create_internal_user(other_tenant, "route-cross-tenant")
+    hidden_order = _completed_order(tenant, owner, supplier, sku, "CROSS-TENANT")
+    with pytest.raises(ScopedResourceNotFound, match="authorized scope"):
+        _route_action(
+            hidden_order,
+            cross_tenant_actor,
+            SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+            SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+            "route-cross-tenant-key",
+        )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field"),
+    [
+        ({"idempotency_key": 123}, "idempotency_key"),
+        ({"expected_version": True}, "expected_version"),
+        ({"expected_version": 0}, "expected_version"),
+        ({"reason": {"not": "text"}}, "reason"),
+        ({"reason": "x" * 2001}, "reason"),
+    ],
+)
+def test_direct_route_service_validates_contract_types_and_lengths(overrides, field):
+    tenant = Tenant.objects.create(name=f"Route Contract {field}", code=f"route-contract-{field}")
+    actor = create_internal_user(tenant, f"route-contract-{field}-user")
+    supplier, sku = create_catalog(tenant, f"ROUTE-CONTRACT-{field}")
+    order = _completed_order(tenant, actor, supplier, sku)
+    arguments = {
+        "order_id": order.id,
+        "actor": actor,
+        "action": SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
+        "idempotency_key": f"route-contract-{field}",
+        "expected_version": order.version,
+        "shipping_route": SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+        "reason": "",
+        "request": _request(),
+    }
+    arguments.update(overrides)
+
+    with pytest.raises(DRFValidationError) as exc_info:
+        perform_shipping_route_action(**arguments)
+    assert field in exc_info.value.detail

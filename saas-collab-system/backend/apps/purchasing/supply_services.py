@@ -5,7 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import write_operation_log
 from apps.common.exceptions import ScopedResourceNotFound, StateConflict
@@ -19,6 +19,10 @@ from .models import (
 from .supply_serializers import (
     SupplierSupplyPurchaseOrderSerializer,
     SupplyPurchaseOrderDetailSerializer,
+)
+from .supply_permissions import (
+    filter_internal_supply_orders,
+    require_internal_supply_permission,
 )
 
 
@@ -40,6 +44,8 @@ ACTION_TRANSITIONS = {
         SupplyPurchaseOrder.Status.PRODUCTION_COMPLETED,
     ),
 }
+
+SHIPPING_ROUTE_PERMISSION = "supply.purchase_order.assign_shipping_route"
 
 
 def _total_quantity(order):
@@ -253,14 +259,33 @@ def perform_shipping_route_action(
         SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE,
         SupplyPurchaseOrderEvent.Action.CHANGE_SHIPPING_ROUTE,
     }
-    if action not in allowed_actions:
+    if not isinstance(action, str) or action not in allowed_actions:
         raise ValidationError({"action": "Unsupported shipping-route action."})
-    if not idempotency_key or len(idempotency_key) > 128:
+    if (
+        not isinstance(idempotency_key, str)
+        or not idempotency_key.strip()
+        or len(idempotency_key) > 128
+    ):
         raise ValidationError({"idempotency_key": "A valid Idempotency-Key header is required."})
-    if actor.user_type != "internal":
-        raise PermissionDenied("Only an internal purchasing user may assign a shipping route.")
+    if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
+        raise ValidationError({"expected_version": "A positive integer version is required."})
+    if not isinstance(shipping_route, str) or shipping_route not in {
+        SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
+        SupplyPurchaseOrder.ShippingRoute.CONTAINER_CARGO,
+    }:
+        raise ValidationError({"shipping_route": "Unsupported shipping route."})
+    if reason is None:
+        reason = ""
+    elif not isinstance(reason, str):
+        raise ValidationError({"reason": "Reason must be a string."})
+    reason = reason.strip()
+    if len(reason) > 2000:
+        raise ValidationError({"reason": "Reason cannot exceed 2000 characters."})
 
-    reason = (reason or "").strip()
+    # Authorization belongs to the domain entry point so direct callers cannot
+    # bypass the API view's permission and DataScope gates.
+    require_internal_supply_permission(actor, SHIPPING_ROUTE_PERMISSION)
+
     if action == SupplyPurchaseOrderEvent.Action.CHANGE_SHIPPING_ROUTE and not reason:
         raise ValidationError({"reason": "A reason is required when changing a shipping route."})
     request_hash = hashlib.sha256(
@@ -277,11 +302,11 @@ def perform_shipping_route_action(
         ).encode("utf-8")
     ).hexdigest()
 
-    order = (
-        SupplyPurchaseOrder.objects.select_for_update()
-        .filter(pk=order_id, tenant=actor.tenant)
-        .first()
-    )
+    order = filter_internal_supply_orders(
+        actor,
+        SupplyPurchaseOrder.objects.select_for_update(),
+        SHIPPING_ROUTE_PERMISSION,
+    ).filter(pk=order_id).first()
     if order is None:
         raise ScopedResourceNotFound("Supply purchase order is not available in the authorized scope.")
 
@@ -302,12 +327,6 @@ def perform_shipping_route_action(
         raise StateConflict("The supply purchase order version is stale.")
     if order.status != SupplyPurchaseOrder.Status.PRODUCTION_COMPLETED:
         raise StateConflict("Shipping route can only be assigned after production completion.")
-    if shipping_route not in {
-        SupplyPurchaseOrder.ShippingRoute.LOOSE_CARGO,
-        SupplyPurchaseOrder.ShippingRoute.CONTAINER_CARGO,
-    }:
-        raise ValidationError({"shipping_route": "Unsupported shipping route."})
-
     if action == SupplyPurchaseOrderEvent.Action.ASSIGN_SHIPPING_ROUTE:
         if order.shipping_route != SupplyPurchaseOrder.ShippingRoute.UNDECIDED:
             raise StateConflict("The shipping route was already assigned.")

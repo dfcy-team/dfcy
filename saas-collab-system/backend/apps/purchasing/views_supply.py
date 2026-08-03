@@ -231,19 +231,6 @@ def internal_supply_order_action(request, pk, action_name):
     action = URL_ACTIONS.get(action_name) or INTERNAL_ROUTE_ACTIONS.get(action_name)
     if action is None:
         raise ScopedResourceNotFound("Supply purchase order action does not exist.")
-    permission_code = (
-        "supply.purchase_order.assign_shipping_route"
-        if action in INTERNAL_ROUTE_ACTIONS.values()
-        else INTERNAL_ACTION_PERMISSIONS[action]
-    )
-    require_internal_supply_permission(request.user, permission_code)
-    authorized = filter_internal_supply_orders(
-        request.user,
-        SupplyPurchaseOrder.objects.all(),
-        permission_code,
-    ).filter(pk=pk).exists()
-    if not authorized:
-        raise ScopedResourceNotFound("Supply purchase order is not available in the authorized scope.")
     if action in INTERNAL_ROUTE_ACTIONS.values():
         serializer = SupplyOrderShippingRouteActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -256,6 +243,17 @@ def internal_supply_order_action(request, pk, action_name):
             **serializer.validated_data,
         )
     else:
+        permission_code = INTERNAL_ACTION_PERMISSIONS[action]
+        require_internal_supply_permission(request.user, permission_code)
+        authorized = filter_internal_supply_orders(
+            request.user,
+            SupplyPurchaseOrder.objects.all(),
+            permission_code,
+        ).filter(pk=pk).exists()
+        if not authorized:
+            raise ScopedResourceNotFound(
+                "Supply purchase order is not available in the authorized scope."
+            )
         payload = _action_payload(request, action)
         order, event, replayed = perform_supply_order_action(
             order_id=pk,
