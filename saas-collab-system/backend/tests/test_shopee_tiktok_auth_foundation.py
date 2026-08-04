@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, migrations
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -1009,3 +1010,142 @@ def test_oauth_revoke_failure_blocks_usage_and_records_reconciliation_operation(
         action=MarketplaceOAuthAction.Action.REVOKE,
         status=MarketplaceOAuthAction.Status.RECONCILE_REQUIRED,
     ).exists()
+
+
+@pytest.mark.django_db
+def test_oauth_action_key_cannot_cross_resources():
+    tenant, user, store, config = marketplace_context("oauth-cross-resource", "shopee")
+    second_store = StoreMaster.objects.create(
+        tenant=tenant,
+        platform=store.platform,
+        code="store-oauth-cross-resource-2",
+        name="Second demo store",
+        country_code="SG",
+        currency="SGD",
+        timezone="Asia/Singapore",
+    )
+    first = create_store_authorization(
+        tenant=tenant,
+        integration_config=config,
+        store=store,
+        platform="shopee",
+        region="SG",
+        platform_store_id="demo-cross-resource-a",
+        merchant_subject_id="demo-cross-resource-a",
+        shop_cipher="",
+        credential_id="synthetic-cross-resource-a-credential",
+        token_id="synthetic-cross-resource-a-token",
+        scopes=["orders.read"],
+        actor=user,
+    )
+    second = create_store_authorization(
+        tenant=tenant,
+        integration_config=config,
+        store=second_store,
+        platform="shopee",
+        region="SG",
+        platform_store_id="demo-cross-resource-b",
+        merchant_subject_id="demo-cross-resource-b",
+        shop_cipher="",
+        credential_id="synthetic-cross-resource-b-credential",
+        token_id="synthetic-cross-resource-b-token",
+        scopes=["orders.read"],
+        actor=user,
+    )
+    grant(user, "integrations.credential.rotate", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    first_response = client.post(
+        f"/api/internal/integrations/store-authorizations/{first.id}/refresh/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-resource-key-001",
+    )
+    second_response = client.post(
+        f"/api/internal/integrations/store-authorizations/{second.id}/refresh/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-resource-key-001",
+    )
+    assert first_response.status_code == 200
+    assert second_response.status_code == 409
+    assert second_response.json()["code"] == "STATE_CONFLICT"
+    second.refresh_from_db()
+    assert second.credential_reference_version == 1
+
+
+@pytest.mark.django_db
+def test_reconcile_retry_replaces_existing_authorization_without_unique_conflict():
+    _tenant, user, store, config, authorization = create_authorization("oauth-retry-reconcile")
+    grant(user, "integrations.store.retry", DataScope.ScopeType.ALL)
+    transition_store_authorization(
+        authorization,
+        target_status=MarketplaceStoreAuthorization.Status.ACTIVE,
+        actor=user,
+    )
+    transition_store_authorization(
+        authorization,
+        target_status=MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED,
+        actor=user,
+        error_code="OAUTH_REVOKE_RECONCILE_REQUIRED",
+    )
+    client = client_for(user)
+    retry = client.post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/retry/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-retry-reconcile-001",
+    )
+    assert retry.status_code == 201
+    parsed = parse_qs(urlparse(retry.json()["data"]["authorization_url"]).query)
+    state = parsed["state"][0]
+    code = "synthetic-code-reconcile-retry"
+    store_id = f"synthetic-store-{store.id}"
+    callback = client.get(
+        "/api/platform/oauth/shopee/callback/",
+        {"state": state, "code": code, "platform_store_id": store_id, "signature": synthetic_callback_signature("shopee", state, code, store_id)},
+    )
+    assert callback.status_code == 302
+    authorization.refresh_from_db()
+    assert authorization.status == MarketplaceStoreAuthorization.Status.ACTIVE
+    assert authorization.credential_reference_version == 2
+
+
+@pytest.mark.django_db
+@override_settings(MARKETPLACE_OAUTH_SYNTHETIC_ENABLED=False, MARKETPLACE_OAUTH_NETWORK_ENABLED=False)
+def test_production_synthetic_gate_rejects_every_mutating_oauth_entrypoint_without_action_records():
+    _tenant, user, store, config, authorization = create_authorization("oauth-production-gate")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    grant(user, "integrations.credential.rotate", DataScope.ScopeType.ALL)
+    grant(user, "integrations.store.revoke", DataScope.ScopeType.ALL)
+    grant(user, "integrations.store.retry", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    initiate = client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        {"integration_config_id": config.id, "store_id": store.id, "platform": "shopee", "region": "SG", "redirect_target_code": "integrations"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-production-gate-initiate",
+    )
+    callback = client.get("/api/platform/oauth/shopee/callback/", {"state": "synthetic-state-not-stored"})
+    refresh = client.post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/refresh/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-production-gate-refresh",
+    )
+    revoke = client.post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/revoke/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-production-gate-revoke",
+    )
+    retry = client.post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/retry/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-production-gate-retry",
+    )
+    assert all(response.status_code == 503 for response in (initiate, callback, refresh, revoke, retry))
+    assert not MarketplaceOAuthAction.objects.exists()
+    authorization.refresh_from_db()
+    assert authorization.credential_reference_version == 1
+    assert authorization.status == MarketplaceStoreAuthorization.Status.PENDING

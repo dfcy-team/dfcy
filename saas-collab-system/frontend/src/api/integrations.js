@@ -4,7 +4,7 @@ import {
   mockApiSyncTasks,
   mockIntegrationConfigDetail,
   mockIntegrationConfigs,
-  mockMarketplaceStoreAuthorizations,
+  mockMarketplaceOAuthTargets,
   mockSyncJobs,
   mockSyncRunDetail,
   mockSyncRuns,
@@ -112,11 +112,11 @@ export const fetchApiSyncLogs = () =>
     'integrations.sync_runs'
   );
 
-export const fetchMarketplaceStoreAuthorizations = () =>
+export const fetchMarketplaceOAuthTargets = (action = 'authorize') =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/integrations/store-authorizations/?page=1&page_size=100' },
-    mockMarketplaceStoreAuthorizations,
-    'integrations.store_authorizations'
+    { method: 'get', url: `/api/internal/integrations/store-authorizations/oauth/targets/?action=${encodeURIComponent(action)}` },
+    () => mockMarketplaceOAuthTargets(action),
+    `integrations.oauth.targets.${action}`
   );
 
 export const initiateMarketplaceOAuth = (payload) => oauthRequest(

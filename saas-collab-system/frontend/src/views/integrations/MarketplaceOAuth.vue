@@ -90,9 +90,8 @@ import { useRoute } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { formatApiError } from '../../api/request';
 import {
-  fetchIntegrationConfigs,
   fetchMarketplaceOAuthAttempt,
-  fetchMarketplaceStoreAuthorizations,
+  fetchMarketplaceOAuthTargets,
   initiateMarketplaceOAuth,
   refreshMarketplaceAuthorization,
   revokeMarketplaceAuthorization,
@@ -107,6 +106,7 @@ const attemptId = ref('');
 const authorizationId = ref('');
 const authorizations = ref([]);
 const configOptions = ref([]);
+const storeTargets = ref([]);
 const scenario = ref('');
 const loading = ref(false);
 const actionLoading = ref('');
@@ -124,7 +124,7 @@ const statusLabel = computed(() => attempt.value.status || 'idle');
 const statusTagType = computed(() => ({
   succeeded: 'success', active: 'success', failed: 'danger', expired: 'danger', replayed: 'danger', forbidden: 'danger', offline: 'warning', pending: 'warning', initiated: 'warning', callback_received: 'warning'
 }[attempt.value.status] || 'info'));
-const storeOptions = computed(() => authorizations.value.filter((item) => item.platform === form.platform));
+const storeOptions = computed(() => storeTargets.value.filter((item) => item.platform === form.platform));
 
 function showError(response, fallback) {
   errorMessage.value = response?.http_status ? formatApiError(response) : (response?.message || fallback);
@@ -141,16 +141,22 @@ async function loadReferenceData() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const [configResponse, authorizationResponse] = await Promise.all([
-      fetchIntegrationConfigs(),
-      fetchMarketplaceStoreAuthorizations()
-    ]);
-    if (!configResponse.success) throw configResponse;
-    if (!authorizationResponse.success) throw authorizationResponse;
-    configOptions.value = Array.isArray(configResponse.data?.results) ? configResponse.data.results : (configResponse.data?.items || []);
-    authorizations.value = Array.isArray(authorizationResponse.data?.results) ? authorizationResponse.data.results : (authorizationResponse.data?.items || []);
+    const requests = [];
+    if (canAuthorize.value) requests.push(fetchMarketplaceOAuthTargets('authorize'));
+    if (canRotate.value) requests.push(fetchMarketplaceOAuthTargets('refresh'));
+    if (canRevoke.value) requests.push(fetchMarketplaceOAuthTargets('revoke'));
+    if (canRetry.value) requests.push(fetchMarketplaceOAuthTargets('retry'));
+    const responses = await Promise.all(requests);
+    if (responses.some((response) => !response.success)) throw responses.find((response) => !response.success);
+    const targetData = responses.map((response) => response.data || {});
+    const authorizationTarget = targetData.find((data) => data.action === 'authorize');
+    configOptions.value = authorizationTarget?.configs || [];
+    const stores = authorizationTarget?.stores || [];
+    storeTargets.value = stores;
+    const authorizationItems = targetData.flatMap((data) => data.authorizations || []);
+    authorizations.value = Array.from(new Map(authorizationItems.map((item) => [String(item.id), item])).values());
     const firstConfig = configOptions.value.find((config) => config.platform === form.platform);
-    const firstStore = storeOptions.value[0];
+    const firstStore = stores.find((store) => store.platform === form.platform);
     form.integration_config_id ||= firstConfig?.id || '';
     form.store_id ||= firstStore?.store_id || '';
     if (!authorizationId.value && authorizations.value[0]) authorizationId.value = String(authorizations.value[0].id);

@@ -55,7 +55,13 @@ export const menuItems = [
   },
   {
     label: 'API数据接入',
-    permissions: ['integrations.view'],
+    permissions: [
+      'integrations.view',
+      'integrations.store.authorize',
+      'integrations.credential.rotate',
+      'integrations.store.revoke',
+      'integrations.store.retry'
+    ],
     children: [
       { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.view'] },
       {

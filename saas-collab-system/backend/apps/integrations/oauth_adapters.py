@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import re
-import threading
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -77,10 +76,6 @@ class SyntheticMarketplaceAdapter:
 class SyntheticCustodyGateway:
     """Returns synthetic reference metadata only; no credential material crosses this boundary."""
 
-    def __init__(self):
-        self._results = {}
-        self._lock = threading.RLock()
-
     def _scenario(self, code):
         markers = {
             "reject": ("CUSTODY_REJECTED", 502),
@@ -94,52 +89,34 @@ class SyntheticCustodyGateway:
                 raise OAuthAdapterError(*result)
 
     def exchange_and_store(self, *, platform, code, operation_id, attempt_id):
-        with self._lock:
-            key = ("exchange", str(operation_id))
-            if key in self._results:
-                return dict(self._results[key])
-            self._scenario(code)
-            if not code.startswith("synthetic-code-"):
-                raise OAuthAdapterError("PLATFORM_RESPONSE_INVALID", 502)
-            suffix = str(attempt_id)
-            result = {
-                "credential_id": f"synthetic-oauth-{suffix}-credential",
-                "token_id": f"synthetic-oauth-{suffix}-token",
-                "credential_reference_version": 1,
-                "expires_at": None,
-                "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest(),
-            }
-            self._results[key] = result
-            return dict(result)
+        self._scenario(code)
+        if not code.startswith("synthetic-code-"):
+            raise OAuthAdapterError("PLATFORM_RESPONSE_INVALID", 502)
+        suffix = str(attempt_id)
+        return {
+            "credential_id": f"synthetic-oauth-{suffix}-credential",
+            "token_id": f"synthetic-oauth-{suffix}-token",
+            "credential_reference_version": 1,
+            "expires_at": None,
+            "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest(),
+        }
 
     def refresh_and_store(self, *, authorization, operation_id, scenario=""):
-        with self._lock:
-            key = ("refresh", str(operation_id))
-            if key in self._results:
-                return dict(self._results[key])
-            self._scenario(str(scenario))
-            result = {
-                "credential_id": f"synthetic-refresh-{authorization.pk}-credential",
-                "token_id": f"synthetic-refresh-{authorization.pk}-token",
-                "credential_reference_version": authorization.credential_reference_version + 1,
-                "expires_at": None,
-                "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest(),
-            }
-            self._results[key] = result
-            return dict(result)
+        self._scenario(str(scenario))
+        return {
+            "credential_id": f"synthetic-refresh-{authorization.pk}-credential",
+            "token_id": f"synthetic-refresh-{authorization.pk}-token",
+            "credential_reference_version": authorization.credential_reference_version + 1,
+            "expires_at": None,
+            "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest(),
+        }
 
     def revoke(self, *, authorization, operation_id, scenario=""):
-        with self._lock:
-            key = ("revoke", str(operation_id))
-            if key in self._results:
-                return dict(self._results[key])
-            self._scenario(str(scenario))
-            result = {
-                "status": "revoked",
-                "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest(),
-            }
-            self._results[key] = result
-            return dict(result)
+        self._scenario(str(scenario))
+        return {
+            "status": "revoked",
+            "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest(),
+        }
 
     def compensate_exchange(self, *, result, operation_id):
         return {"status": "revoked", "error_code": "", "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest()}

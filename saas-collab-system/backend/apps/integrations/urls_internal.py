@@ -19,6 +19,7 @@ urlpatterns = [
         views.store_authorization_detail,
         name="store-authorization-detail",
     ),
+    path("store-authorizations/oauth/targets/", views.oauth_target_collection, name="oauth-target-collection"),
     path("store-authorizations/oauth/initiate/", views.oauth_initiate, name="oauth-initiate"),
     path("oauth-attempts/<int:pk>/", views.oauth_attempt_detail, name="oauth-attempt-detail"),
     path("store-authorizations/<int:pk>/refresh/", views.refresh_store_authorization, name="store-authorization-refresh"),

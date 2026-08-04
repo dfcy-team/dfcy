@@ -508,6 +508,7 @@ class MarketplaceOAuthAction(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
         RECONCILE_REQUIRED = "reconcile_required", "Reconcile required"
@@ -543,6 +544,8 @@ class MarketplaceOAuthAction(models.Model):
     response_data = models.JSONField(default=dict, blank=True)
     response_status = models.PositiveSmallIntegerField(default=200)
     error_code = models.CharField(max_length=80, blank=True)
+    execution_owner = models.CharField(max_length=64, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
     contract_version = models.CharField(max_length=40, default="a2-synthetic-v1")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -553,7 +556,7 @@ class MarketplaceOAuthAction(models.Model):
         ordering = ["-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "internal_user", "action", "idempotency_key_hash"],
+                fields=["tenant", "internal_user", "action", "object_type", "object_id", "idempotency_key_hash"],
                 name="uniq_oauth_action_scope_key",
             ),
         ]
@@ -565,7 +568,19 @@ class MarketplaceOAuthAction(models.Model):
     def save(self, *args, **kwargs):
         if not _oauth_service_write.get():
             raise ValidationError("OAuth actions can only be written by the OAuth service layer.")
+        self.full_clean()
         return super().save(*args, **kwargs)
+
+    def clean(self):
+        errors = {}
+        if self.internal_user_id and self.tenant_id and self.internal_user.tenant_id != self.tenant_id:
+            errors["internal_user"] = "OAuth action user must belong to the action tenant."
+        if self.attempt_id and self.tenant_id and self.attempt.tenant_id != self.tenant_id:
+            errors["attempt"] = "OAuth action attempt must belong to the action tenant."
+        if self.authorization_id and self.tenant_id and self.authorization.tenant_id != self.tenant_id:
+            errors["authorization"] = "OAuth action authorization must belong to the action tenant."
+        if errors:
+            raise ValidationError(errors)
 
     def delete(self, *args, **kwargs):
         raise ValidationError("OAuth actions cannot be deleted.")
@@ -636,7 +651,17 @@ class MarketplaceOAuthOperation(models.Model):
     def save(self, *args, **kwargs):
         if not _oauth_service_write.get():
             raise ValidationError("OAuth operations can only be written by the OAuth service layer.")
+        self.full_clean()
         return super().save(*args, **kwargs)
+
+    def clean(self):
+        errors = {}
+        if self.attempt_id and self.tenant_id and self.attempt.tenant_id != self.tenant_id:
+            errors["attempt"] = "OAuth operation attempt must belong to the operation tenant."
+        if self.authorization_id and self.tenant_id and self.authorization.tenant_id != self.tenant_id:
+            errors["authorization"] = "OAuth operation authorization must belong to the operation tenant."
+        if errors:
+            raise ValidationError(errors)
 
     def delete(self, *args, **kwargs):
         raise ValidationError("OAuth operations cannot be deleted.")
