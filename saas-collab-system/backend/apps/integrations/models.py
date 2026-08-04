@@ -280,6 +280,8 @@ class MarketplaceStoreAuthorization(models.Model):
         PENDING = "pending", "Pending"
         ACTIVE = "active", "Active"
         EXPIRED = "expired", "Expired"
+        REVOKING = "revoking", "Revoking"
+        RECONCILE_REQUIRED = "reconcile_required", "Reconcile required"
         REVOKED = "revoked", "Revoked"
         ERROR = "error", "Error"
 
@@ -475,6 +477,169 @@ class MarketplaceOAuthAttempt(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("OAuth attempts cannot be deleted.")
+
+
+class MarketplaceOAuthActionQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth actions can only be changed by the OAuth service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth actions must be created by the OAuth service layer.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth actions can only be changed by the OAuth service layer.")
+        return super().bulk_update(objs, fields, **kwargs)
+
+    def delete(self):
+        raise ValidationError("OAuth actions cannot be deleted.")
+
+
+class MarketplaceOAuthAction(models.Model):
+    class Action(models.TextChoices):
+        INITIATE = "initiate", "Initiate"
+        REFRESH = "refresh", "Refresh"
+        REVOKE = "revoke", "Revoke"
+        RETRY = "retry", "Retry"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        RECONCILE_REQUIRED = "reconcile_required", "Reconcile required"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="marketplace_oauth_actions")
+    internal_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="marketplace_oauth_actions",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices)
+    object_type = models.CharField(max_length=40)
+    object_id = models.CharField(max_length=80, blank=True)
+    session_hash = models.CharField(max_length=64)
+    idempotency_key_hash = models.CharField(max_length=64)
+    request_fingerprint_hash = models.CharField(max_length=64)
+    operation_id_hash = models.CharField(max_length=64)
+    attempt = models.ForeignKey(
+        MarketplaceOAuthAttempt,
+        on_delete=models.PROTECT,
+        related_name="actions",
+        null=True,
+        blank=True,
+    )
+    authorization = models.ForeignKey(
+        MarketplaceStoreAuthorization,
+        on_delete=models.PROTECT,
+        related_name="oauth_actions",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING)
+    response_data = models.JSONField(default=dict, blank=True)
+    response_status = models.PositiveSmallIntegerField(default=200)
+    error_code = models.CharField(max_length=80, blank=True)
+    contract_version = models.CharField(max_length=40, default="a2-synthetic-v1")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = MarketplaceOAuthActionQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "internal_user", "action", "idempotency_key_hash"],
+                name="uniq_oauth_action_scope_key",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_oauth_action_status"),
+            models.Index(fields=["operation_id_hash"], name="idx_oauth_action_operation"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth actions can only be written by the OAuth service layer.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("OAuth actions cannot be deleted.")
+
+
+class MarketplaceOAuthOperationQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth operations can only be changed by the OAuth service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth operations must be created by the OAuth service layer.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth operations can only be changed by the OAuth service layer.")
+        return super().bulk_update(objs, fields, **kwargs)
+
+    def delete(self):
+        raise ValidationError("OAuth operations cannot be deleted.")
+
+
+class MarketplaceOAuthOperation(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        COMPENSATION_REQUIRED = "compensation_required", "Compensation required"
+        RECONCILE_REQUIRED = "reconcile_required", "Reconcile required"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="marketplace_oauth_operations")
+    action = models.CharField(max_length=20)
+    operation_id_hash = models.CharField(max_length=64, unique=True)
+    attempt = models.ForeignKey(
+        MarketplaceOAuthAttempt,
+        on_delete=models.PROTECT,
+        related_name="operations",
+        null=True,
+        blank=True,
+    )
+    authorization = models.ForeignKey(
+        MarketplaceStoreAuthorization,
+        on_delete=models.PROTECT,
+        related_name="oauth_operations",
+        null=True,
+        blank=True,
+    )
+    phase = models.CharField(max_length=40, default="created")
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
+    metadata = models.JSONField(default=dict, blank=True)
+    last_error_code = models.CharField(max_length=80, blank=True)
+    contract_version = models.CharField(max_length=40, default="a2-synthetic-v1")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = MarketplaceOAuthOperationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_oauth_op_status"),
+            models.Index(fields=["authorization", "status"], name="idx_oauth_op_auth_status"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth operations can only be written by the OAuth service layer.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("OAuth operations cannot be deleted.")
 
 
 class SyncJob(models.Model):

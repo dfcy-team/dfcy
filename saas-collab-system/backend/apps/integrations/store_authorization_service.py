@@ -18,12 +18,20 @@ from .models import (
 ALLOWED_TRANSITIONS = {
     MarketplaceStoreAuthorization.Status.PENDING: {
         MarketplaceStoreAuthorization.Status.ACTIVE,
+        MarketplaceStoreAuthorization.Status.REVOKING,
         MarketplaceStoreAuthorization.Status.REVOKED,
         MarketplaceStoreAuthorization.Status.ERROR,
     },
     MarketplaceStoreAuthorization.Status.ACTIVE: {
         MarketplaceStoreAuthorization.Status.EXPIRED,
+        MarketplaceStoreAuthorization.Status.REVOKING,
         MarketplaceStoreAuthorization.Status.REVOKED,
+        MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED,
+        MarketplaceStoreAuthorization.Status.ERROR,
+    },
+    MarketplaceStoreAuthorization.Status.REVOKING: {
+        MarketplaceStoreAuthorization.Status.REVOKED,
+        MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED,
         MarketplaceStoreAuthorization.Status.ERROR,
     },
     MarketplaceStoreAuthorization.Status.EXPIRED: {
@@ -35,6 +43,13 @@ ALLOWED_TRANSITIONS = {
         MarketplaceStoreAuthorization.Status.ACTIVE,
         MarketplaceStoreAuthorization.Status.REVOKED,
         MarketplaceStoreAuthorization.Status.EXPIRED,
+        MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED,
+    },
+    MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED: {
+        MarketplaceStoreAuthorization.Status.REVOKING,
+        MarketplaceStoreAuthorization.Status.ACTIVE,
+        MarketplaceStoreAuthorization.Status.REVOKED,
+        MarketplaceStoreAuthorization.Status.ERROR,
     },
     MarketplaceStoreAuthorization.Status.REVOKED: set(),
 }
@@ -145,10 +160,14 @@ def transition_store_authorization(record, *, target_status, actor, error_code="
         locked.expires_at = expires_at or now
     elif target_status == MarketplaceStoreAuthorization.Status.REVOKED:
         locked.revoked_at = now
+    elif target_status == MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED:
+        locked.last_error_code = normalized_error_code or "RECONCILE_REQUIRED"
     action = {
         MarketplaceStoreAuthorization.Status.ACTIVE: "activate",
         MarketplaceStoreAuthorization.Status.EXPIRED: "expire",
+        MarketplaceStoreAuthorization.Status.REVOKING: "revoke_started",
         MarketplaceStoreAuthorization.Status.REVOKED: "revoke",
+        MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED: "reconcile_required",
         MarketplaceStoreAuthorization.Status.ERROR: "error",
     }[target_status]
     with authorization_service_write():

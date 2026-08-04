@@ -16,6 +16,8 @@ from apps.common.exceptions import StateConflict
 from apps.integrations.models import (
     APIIntegrationConfig,
     IntegrationAuditLog,
+    MarketplaceOAuthAction,
+    MarketplaceOAuthOperation,
     MarketplaceStoreAuthorization,
     PlatformIntegrationConfig,
     marketplace_identity_key,
@@ -23,7 +25,7 @@ from apps.integrations.models import (
 from apps.integrations.admin import MarketplaceStoreAuthorizationAdmin, PlatformIntegrationConfigAdmin
 from apps.integrations.credential_service import rotate_config_references
 from apps.integrations.oauth_adapters import synthetic_callback_signature
-from apps.integrations.models import MarketplaceOAuthAttempt
+from apps.integrations.models import MarketplaceOAuthAttempt, oauth_service_write
 from apps.integrations.store_authorization_service import (
     create_store_authorization,
     rotate_store_authorization_references,
@@ -937,3 +939,73 @@ def test_oauth_refresh_and_revoke_use_exact_actions_and_idempotency():
     assert revoked.json()["data"]["status"] == "revoked"
     assert IntegrationAuditLog.objects.filter(action="oauth_refresh").exists()
     assert IntegrationAuditLog.objects.filter(action="oauth_revoke").exists()
+
+
+@pytest.mark.django_db
+def test_oauth_action_scope_does_not_share_state_and_expired_callback_is_persisted():
+    tenant, user, store, config = marketplace_context("oauth-action-scope", "shopee")
+    other_user = create_user(tenant, "oauth-action-scope-other")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    grant(other_user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    payload = {
+        "integration_config_id": config.id,
+        "store_id": store.id,
+        "platform": "shopee",
+        "region": "SG",
+        "redirect_target_code": "integrations",
+    }
+    user_client = client_for(user)
+    first = user_client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="same-key-for-two-users",
+    )
+    second = client_for(other_user).post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="same-key-for-two-users",
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["data"]["attempt_id"] != second.json()["data"]["attempt_id"]
+    assert all("authorization_url" not in action.response_data for action in MarketplaceOAuthAction.objects.all())
+
+    attempt = MarketplaceOAuthAttempt.objects.get(pk=first.json()["data"]["attempt_id"])
+    with oauth_service_write():
+        MarketplaceOAuthAttempt.objects.filter(pk=attempt.pk).update(
+            expires_at=attempt.created_at,
+        )
+    state = parse_qs(urlparse(first.json()["data"]["authorization_url"]).query)["state"][0]
+    expired = user_client.get(
+        "/api/platform/oauth/shopee/callback/",
+        {"state": state, "code": "synthetic-code-expired", "platform_store_id": f"synthetic-store-{store.id}", "signature": synthetic_callback_signature("shopee", state, "synthetic-code-expired", f"synthetic-store-{store.id}")},
+    )
+    assert expired.status_code == 302
+    attempt.refresh_from_db()
+    assert attempt.status == MarketplaceOAuthAttempt.Status.EXPIRED
+    assert attempt.consumed_at is not None
+
+
+@pytest.mark.django_db
+def test_oauth_revoke_failure_blocks_usage_and_records_reconciliation_operation():
+    _tenant, user, _store, _config, authorization = create_authorization("oauth-reconcile")
+    grant(user, "integrations.store.revoke", DataScope.ScopeType.ALL)
+    response = client_for(user).post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/revoke/",
+        {"scenario": "custody-fail"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-reconcile-key-001",
+    )
+    assert response.status_code == 503
+    authorization.refresh_from_db()
+    assert authorization.status == MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED
+    assert MarketplaceOAuthOperation.objects.filter(
+        action="revoke",
+        status=MarketplaceOAuthOperation.Status.RECONCILE_REQUIRED,
+    ).exists()
+    assert MarketplaceOAuthAction.objects.filter(
+        action=MarketplaceOAuthAction.Action.REVOKE,
+        status=MarketplaceOAuthAction.Status.RECONCILE_REQUIRED,
+    ).exists()

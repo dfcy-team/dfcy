@@ -52,3 +52,4 @@ UI_P4_COLLABORATION_MODE = "disabled"
 
 # Production must fail closed even if an environment variable is misconfigured.
 MARKETPLACE_OAUTH_NETWORK_ENABLED = False
+MARKETPLACE_OAUTH_SYNTHETIC_ENABLED = False

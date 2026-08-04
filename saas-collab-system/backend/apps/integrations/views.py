@@ -38,13 +38,24 @@ from apps.permissions.ui_p6_scopes import (
 )
 
 from .credential_service import reject_raw_credential_fields, rotate_config_references
-from .models import IntegrationAuditLog, MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
+from .models import (
+    IntegrationAuditLog,
+    MarketplaceOAuthAction,
+    MarketplaceStoreAuthorization,
+    PlatformIntegrationConfig,
+    SyncJob,
+    SyncRun,
+)
 from .models import MarketplaceOAuthAttempt
-from .oauth_adapters import OAuthAdapterError
+from .oauth_adapters import OAuthAdapterError, SyntheticMarketplaceAdapter
 from .oauth_serializers import MarketplaceOAuthAttemptSerializer
 from .oauth_services import (
     consume_callback,
+    begin_oauth_action,
+    complete_oauth_action,
+    create_oauth_operation,
     exchange_callback,
+    fail_oauth_action,
     fail_attempt,
     initiate_oauth,
     refresh_authorization,
@@ -277,19 +288,6 @@ def _oauth_attempt_scope_allowed(user, attempt, permission_code="integrations.st
     )
 
 
-def _oauth_action_idempotency(request, action, object_id):
-    key = str(request.headers.get("Idempotency-Key", "")).strip()
-    if not 16 <= len(key) <= 128:
-        raise ValidationError({"Idempotency-Key": "Idempotency-Key must be 16 to 128 characters."})
-    from django.core.cache import cache
-    import hashlib
-
-    fingerprint = hashlib.sha256(
-        json.dumps(request.data or {}, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    return cache, f"oauth-action:{action}:{object_id}:{hashlib.sha256(key.encode()).hexdigest()}", fingerprint
-
-
 @api_view(["POST"])
 @permission_classes([IsMarketplaceStoreAuthorizer])
 def oauth_initiate(request):
@@ -352,7 +350,7 @@ def oauth_callback(request, platform):
         callback = SyntheticMarketplaceAdapter().validate_callback(platform=platform, query=query, expected_state=state)
         if callback.platform_store_id and callback.platform_store_id != f"synthetic-store-{attempt.store_id}":
             raise OAuthAdapterError("OAUTH_STORE_MISMATCH", 422)
-        operation_id = str(uuid.uuid4())
+        _operation, operation_id = create_oauth_operation(tenant=attempt.tenant, action="exchange", attempt=attempt)
         exchange_callback(attempt=attempt, callback=callback, operation_id=operation_id)
         return _oauth_redirect(attempt, "success")
     except OAuthAdapterError as exc:
@@ -381,19 +379,36 @@ def refresh_store_authorization(request, pk):
     authorization = _get_scoped_authorization(request, pk, "integrations.credential.rotate")
     if set(request.data) - {"scenario"}:
         raise ValidationError("Only the synthetic scenario field is accepted.")
-    cache, cache_key, fingerprint = _oauth_action_idempotency(request, "refresh", pk)
-    cached = cache.get(cache_key)
-    if cached:
-        if cached["fingerprint"] != fingerprint:
-            raise StateConflict("The Idempotency-Key was already used for another action request.")
-        return success_response(cached["data"])
+    action, replay = begin_oauth_action(
+        request=request,
+        actor=request.user,
+        action=MarketplaceOAuthAction.Action.REFRESH,
+        object_type="store_authorization",
+        object_id=pk,
+        payload=request.data,
+        authorization=authorization,
+    )
+    if replay and action.status == MarketplaceOAuthAction.Status.SUCCEEDED:
+        return success_response(action.response_data, status=action.response_status)
+    if replay and action.status in {MarketplaceOAuthAction.Status.FAILED, MarketplaceOAuthAction.Status.RECONCILE_REQUIRED}:
+        return error_response(action.error_code or "OAUTH_ACTION_FAILED", "The OAuth refresh action requires review.", status=503)
+    operation_id = action.operation_id_hash
     try:
-        updated = refresh_authorization(authorization=authorization, actor=request.user, scenario=request.data.get("scenario", ""))
+        updated = refresh_authorization(
+            authorization=authorization,
+            actor=request.user,
+            operation_id=operation_id,
+            scenario=request.data.get("scenario", ""),
+        )
     except OAuthAdapterError as exc:
         _write_audit_log(authorization.integration_config, request.user, "oauth_refresh_failed", result=IntegrationAuditLog.Result.FAILED, detail={"error_code": exc.error_code, "operation": "synthetic"})
+        fail_oauth_action(action, exc.error_code, reconcile=exc.error_code == "OAUTH_REFRESH_RECONCILE_REQUIRED")
         return error_response(exc.error_code, "Synthetic custody refresh failed.", status=exc.http_status)
+    except Exception:
+        fail_oauth_action(action, "OAUTH_REFRESH_FAILED", reconcile=True)
+        return error_response("OAUTH_REFRESH_RECONCILE_REQUIRED", "Refresh requires reconciliation before retry.", status=503)
     data = {**MarketplaceStoreAuthorizationSerializer(updated).data, "api_status": "mock"}
-    cache.set(cache_key, {"fingerprint": fingerprint, "data": data}, timeout=300)
+    complete_oauth_action(action, data, authorization=updated)
     return success_response(data)
 
 
@@ -403,19 +418,36 @@ def revoke_store_authorization(request, pk):
     authorization = _get_scoped_authorization(request, pk, "integrations.store.revoke")
     if set(request.data) - {"scenario"}:
         raise ValidationError("Only the synthetic scenario field is accepted.")
-    cache, cache_key, fingerprint = _oauth_action_idempotency(request, "revoke", pk)
-    cached = cache.get(cache_key)
-    if cached:
-        if cached["fingerprint"] != fingerprint:
-            raise StateConflict("The Idempotency-Key was already used for another action request.")
-        return success_response(cached["data"])
+    action, replay = begin_oauth_action(
+        request=request,
+        actor=request.user,
+        action=MarketplaceOAuthAction.Action.REVOKE,
+        object_type="store_authorization",
+        object_id=pk,
+        payload=request.data,
+        authorization=authorization,
+    )
+    if replay and action.status == MarketplaceOAuthAction.Status.SUCCEEDED:
+        return success_response(action.response_data, status=action.response_status)
+    if replay and action.status in {MarketplaceOAuthAction.Status.FAILED, MarketplaceOAuthAction.Status.RECONCILE_REQUIRED}:
+        return error_response(action.error_code or "OAUTH_ACTION_FAILED", "The OAuth revoke action requires review.", status=503)
+    operation_id = action.operation_id_hash
     try:
-        updated = revoke_authorization(authorization=authorization, actor=request.user, scenario=request.data.get("scenario", ""))
+        updated = revoke_authorization(
+            authorization=authorization,
+            actor=request.user,
+            operation_id=operation_id,
+            scenario=request.data.get("scenario", ""),
+        )
     except OAuthAdapterError as exc:
         _write_audit_log(authorization.integration_config, request.user, "oauth_revoke_failed", result=IntegrationAuditLog.Result.FAILED, detail={"error_code": exc.error_code, "operation": "synthetic"})
+        fail_oauth_action(action, exc.error_code, reconcile=True)
         return error_response(exc.error_code, "Synthetic custody revoke failed; local authorization was not changed.", status=exc.http_status)
+    except Exception:
+        fail_oauth_action(action, "OAUTH_REVOKE_RECONCILE_REQUIRED", reconcile=True)
+        return error_response("OAUTH_REVOKE_RECONCILE_REQUIRED", "Revoke requires reconciliation before retry.", status=503)
     data = {**MarketplaceStoreAuthorizationSerializer(updated).data, "api_status": "mock"}
-    cache.set(cache_key, {"fingerprint": fingerprint, "data": data}, timeout=300)
+    complete_oauth_action(action, data, authorization=updated)
     return success_response(data)
 
 
@@ -423,8 +455,36 @@ def revoke_store_authorization(request, pk):
 @permission_classes([IsMarketplaceStoreRetryRunner])
 def retry_store_authorization(request, pk):
     authorization = _get_scoped_authorization(request, pk, "integrations.store.retry")
-    if authorization.status != MarketplaceStoreAuthorization.Status.ERROR:
+    if request.data:
+        raise ValidationError("Retry does not accept a request body.")
+    if authorization.status not in {
+        MarketplaceStoreAuthorization.Status.ERROR,
+        MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED,
+    }:
         raise StateConflict("Only failed authorizations can be retried.")
+    action, replay = begin_oauth_action(
+        request=request,
+        actor=request.user,
+        action=MarketplaceOAuthAction.Action.RETRY,
+        object_type="store_authorization",
+        object_id=pk,
+        payload=request.data,
+        authorization=authorization,
+    )
+    if replay and action.status == MarketplaceOAuthAction.Status.SUCCEEDED:
+        data = dict(action.response_data)
+        if action.attempt:
+            from .oauth_services import _vault_get
+            state = _vault_get(action.attempt.state_hash)
+            if state:
+                data["authorization_url"] = SyntheticMarketplaceAdapter().build_authorization_url(
+                    platform=action.attempt.platform,
+                    state=state,
+                    attempt_id=action.attempt.pk,
+                )
+        return success_response(data, status=action.response_status)
+    if replay and action.status in {MarketplaceOAuthAction.Status.FAILED, MarketplaceOAuthAction.Status.RECONCILE_REQUIRED}:
+        return error_response(action.error_code or "OAUTH_ACTION_FAILED", "The OAuth retry action requires review.", status=503)
     payload = {
         "integration_config_id": authorization.integration_config_id,
         "store_id": authorization.store_id,
@@ -432,16 +492,22 @@ def retry_store_authorization(request, pk):
         "region": authorization.region,
         "redirect_target_code": "integrations",
     }
-    attempt, authorization_url, created = initiate_oauth(
-        request=request,
-        payload=payload,
-        actor=request.user,
-        permission_code="integrations.store.retry",
-    )
-    return success_response(
-        {**MarketplaceOAuthAttemptSerializer(attempt).data, "attempt_id": attempt.pk, "authorization_url": authorization_url, "api_status": "mock"},
-        status=201 if created else 200,
-    )
+    try:
+        attempt, authorization_url, created = initiate_oauth(
+            request=request,
+            payload=payload,
+            actor=request.user,
+            permission_code="integrations.store.retry",
+        )
+        data = {**MarketplaceOAuthAttemptSerializer(attempt).data, "attempt_id": attempt.pk, "authorization_url": authorization_url, "api_status": "mock"}
+        complete_oauth_action(action, {key: value for key, value in data.items() if key != "authorization_url"}, response_status=201 if created else 200, attempt=attempt)
+        return success_response(data, status=201 if created else 200)
+    except OAuthAdapterError as exc:
+        fail_oauth_action(action, exc.error_code, reconcile=True)
+        return error_response(exc.error_code, "Synthetic OAuth retry failed.", status=exc.http_status)
+    except Exception:
+        fail_oauth_action(action, "OAUTH_RETRY_FAILED", reconcile=True)
+        return error_response("OAUTH_RETRY_FAILED", "OAuth retry requires reconciliation.", status=503)
 
 
 @api_view(["POST"])

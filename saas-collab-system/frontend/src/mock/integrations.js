@@ -79,6 +79,37 @@ export const mockSyncRunDetail = () => successResponse({
 export const mockApiSyncTasks = mockSyncJobs;
 export const mockApiSyncLogs = mockSyncRuns;
 
+export const mockMarketplaceStoreAuthorizations = () => successResponse({
+  count: 2,
+  page: 1,
+  page_size: 100,
+  results: [
+    {
+      id: 'mock-store-authorization-001',
+      integration_config_id: 1,
+      store_id: 1,
+      store_name: 'Demo Shopee Store',
+      platform: 'shopee',
+      region: 'SG',
+      status: 'active',
+      credential_mask: { credential: 'synthetic-***', token: 'synthetic-***' },
+      credential_reference_version: 1
+    },
+    {
+      id: 'mock-store-authorization-002',
+      integration_config_id: 2,
+      store_id: 2,
+      store_name: 'Demo TikTok Shop',
+      platform: 'tiktok',
+      region: 'MY',
+      status: 'error',
+      credential_mask: { credential: 'synthetic-***', token: 'synthetic-***' },
+      credential_reference_version: 1
+    }
+  ],
+  api_status: 'mock'
+});
+
 export const mockMarketplaceOAuthInitiate = () => successResponse({
   attempt_id: 'mock-oauth-attempt-001',
   platform: 'shopee',
