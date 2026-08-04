@@ -31,6 +31,7 @@ R1 的 P2 观察项同时关闭：进入 `error` 状态必须提供受控大写�
 | MySQL 未知混合批次 | 预期阻断；Platform/API 引用写入均为 0，`0008` 登记数为 0 |
 | MySQL 失败修正重跑 | PASS，修正显式 provenance 后完成转换和删列 |
 | 最终 Local Sandbox integration | PASS，MySQL 后端 440 passed、前端 160 passed、生产构建成功 |
+| 独立 R2 重跑 | PASS，已验证代码 HEAD `fc5cfd7` 再次完成本地 439 passed / 1 MySQL-only skipped，并完成 MySQL integration 440 passed、前端 160 passed 与生产构建 |
 | 前端本地测试 | PASS，160 passed；本机低可用内存下使用单 worker |
 | 前端生产构建 | PASS，1955 modules，无 chunk size warning；仅上游 PURE 注释提示 |
 | CI guard / 高置信凭据扫描 | PASS |
@@ -57,7 +58,7 @@ R1 的 P2 观察项同时关闭：进入 `error` 状态必须提供受控大写�
 截至本报告生成时：
 
 - PR #37：`OPEN`、`Draft`、未合并，门禁未满足。
-- PR #39：`OPEN`、`Draft`；旧远端 HEAD 的 CI 为绿色，但整改提交尚需推送并等待最新 HEAD CI。
-- R2：对固定整改提交 `91243e3` 为 PASS。
+- PR #39：`OPEN`、`Draft`；最新远端 HEAD 为 `fc5cfd7`，与 R2 已验证代码版本一致，全部远端 CI 已成功。
+- R2：对固定整改提交 `91243e3` 为 PASS，并已在报告 HEAD `fc5cfd7` 独立重跑确认。
 
-因此当前**不得进入 PR-A2**。仅在 PR #37 已合并、A1 分支按要求同步基线、PR #39 最新远端 HEAD 的全部 CI 重新成功后，才可开始 PR-A2。
+因此当前**仍不得进入 PR-A2**。剩余门禁为：PR #37 完成独立批准并合并，A1 分支同步最新 `main`、调整 stacked PR 基线并再次取得最新 HEAD 全部 CI 成功；满足后才可开始 PR-A2。
