@@ -328,3 +328,14 @@ UI-P8 列表统一支持 `page`、`page_size`、`environment`、`status` 及合�
 | 达人效果复盘 | `/creators/performance` | `GET /api/internal/creators/performance/` | `creator.performance.view` | 同上 | pending |
 
 达人模块不得访问 `/api/finance/*`、`/admin/` 或 `/api/rpa/*` Agent执行端点。销售库存权限不能替代财务权限；补货建议不得自动创建采购订单。只有统一响应、分页、401/403/404/409/422、tenant、permission-specific `data_scope` 和action permission均有实际联调证据后，相关条目才可改为 `connected`。
+
+## Shopee / TikTok Shop 门店授权基础映射（PR-A1）
+
+| 页面/能力 | 页面路径 | API | 请求方式 | 请求参数 | 返回字段 | Mock位置 | 当前状态 |
+|---|---|---|---|---|---|---|---|
+| 平台门店授权列表 | 后续内部平台接入页 | `/api/internal/integrations/store-authorizations/` | GET | `page`、`page_size`、`platform`、`status`、`store_id` | `count/next/previous/results`；授权元数据与凭据掩码，不返回引用原值 | 无前端 Mock 变更 | pending |
+| 平台门店授权详情 | 后续内部平台接入页 | `/api/internal/integrations/store-authorizations/{id}/` | GET | `id` | tenant/store scoped 授权元数据，不返回 Token/Secret | 无前端 Mock 变更 | pending |
+| 平台门店授权动作 | 后续 | authorize、callback、refresh、revoke | POST | 未冻结 | 未注册路由 | 无 | pending |
+| 平台门店同步/重试 | 后续 | sync、retry | POST | 未冻结 | 未注册路由 | 无 | pending |
+
+> PR-A1 只完成合同、模型、引用式凭据、权限和只读查询基础。未执行真实 OAuth、Sandbox 店铺请求或字段联调，所有 Shopee/TikTok Shop 能力均不得标记为 `connected`。
