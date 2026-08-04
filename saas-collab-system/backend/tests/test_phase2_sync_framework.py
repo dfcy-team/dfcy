@@ -68,8 +68,6 @@ def create_config(tenant, user, environment=PlatformIntegrationConfig.Environmen
         status=PlatformIntegrationConfig.Status.ACTIVE
         if environment != PlatformIntegrationConfig.Environment.PRODUCTION
         else PlatformIntegrationConfig.Status.PENDING_REVIEW,
-        credential_key_version="test-v1",
-        credential_fingerprint="placeholder-fingerprint",
         created_by=user,
     )
 

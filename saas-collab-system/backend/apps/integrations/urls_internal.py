@@ -9,6 +9,16 @@ urlpatterns = [
     path("configs/<int:pk>/rotate/", views.rotate_integration_credentials, name="integration-config-rotate"),
     path("configs/<int:pk>/disable/", views.disable_integration_config, name="integration-config-disable"),
     path("configs/<int:pk>/verify/", views.verify_integration_config, name="integration-config-verify"),
+    path(
+        "store-authorizations/",
+        views.store_authorization_collection,
+        name="store-authorization-collection",
+    ),
+    path(
+        "store-authorizations/<int:pk>/",
+        views.store_authorization_detail,
+        name="store-authorization-detail",
+    ),
     path("sync-jobs/", views.sync_job_collection, name="sync-job-collection"),
     path("sync-jobs/<int:pk>/run-mock/", views.run_mock_sync_job, name="sync-job-run-mock"),
     path("sync-jobs/<int:pk>/disable/", views.disable_sync_job, name="sync-job-disable"),

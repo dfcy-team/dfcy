@@ -21,15 +21,13 @@ def test_api_integration_config_can_be_created_without_real_secrets():
         platform=PlatformChoices.BIGSELLER,
         shop_code="shop-001",
         api_base_url="https://api.example.test",
-        api_key_encrypted="encrypted-placeholder-key",
-        api_secret_encrypted="encrypted-placeholder-secret",
     )
 
     assert config.id is not None
     assert config.status == APIIntegrationConfig.Status.ACTIVE
     assert config.environment == APIIntegrationConfig.Environment.MOCK
     assert config.credential_status == APIIntegrationConfig.CredentialStatus.PLACEHOLDER
-    assert "real" not in config.api_key_encrypted.lower()
+    assert config.is_legacy is True
 
 
 @pytest.mark.django_db
@@ -42,15 +40,12 @@ def test_api_credentials_keep_custody_metadata_without_plaintext_secret():
         api_base_url="https://sandbox.example.test",
         environment=APIIntegrationConfig.Environment.SANDBOX,
         credential_ref="vault://example/tiktok/shop-credential",
-        api_key_encrypted="ciphertext-placeholder-key",
-        api_secret_encrypted="ciphertext-placeholder-secret",
         credential_key_version="v1",
         least_privilege_scope=["orders:read", "inventory:read"],
     )
 
     assert config.credential_ref.startswith("vault://example/")
-    assert config.api_secret_encrypted.startswith("ciphertext-placeholder")
-    assert "plain" not in config.api_secret_encrypted.lower()
+    assert not hasattr(config, "api_secret_encrypted")
     assert "orders:read" in config.least_privilege_scope
 
 

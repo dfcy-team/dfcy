@@ -5,6 +5,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import success_response
+from apps.common.query import pagination_query, positive_int
+from apps.common.responses import paginated_data
 from apps.workflows.models import CollaborationEvent
 from apps.workflows.serializers import CollaborationEventSerializer
 from apps.workflows.services import receive_mock_collaboration_event
@@ -14,17 +16,20 @@ from apps.permissions.api_permissions import (
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
     IsIntegrationViewer,
+    IsMarketplaceStoreViewer,
 )
 from apps.permissions.ui_p6_scopes import (
     filter_integration_configs,
     filter_sync_jobs,
     filter_sync_runs,
     integration_values_allowed,
+    filter_store_authorizations,
 )
 
-from .credential_service import mask_credentials, rotate_credentials
-from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
+from .credential_service import reject_raw_credential_fields, rotate_config_references
+from .models import IntegrationAuditLog, MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
 from .serializers import (
+    MarketplaceStoreAuthorizationSerializer,
     PlatformIntegrationConfigSerializer,
     RotateCredentialsSerializer,
     SyncJobSerializer,
@@ -115,6 +120,7 @@ def integration_config_collection(request):
         serializer = PlatformIntegrationConfigSerializer(queryset, many=True)
         return success_response(serializer.data)
 
+    reject_raw_credential_fields(request.data)
     serializer = PlatformIntegrationConfigSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     if not integration_values_allowed(
@@ -135,7 +141,7 @@ def integration_config_collection(request):
             "platform": config.platform,
             "account_alias": config.account_alias,
             "environment": config.environment,
-            "credential_mask": mask_credentials(request.data.get("credentials", {})),
+            "credential_mask": config.credential_mask,
         },
     )
     return success_response(PlatformIntegrationConfigSerializer(config).data, status=201)
@@ -149,6 +155,7 @@ def integration_config_detail(request, pk):
     if request.method == "GET":
         return success_response(PlatformIntegrationConfigSerializer(config).data)
 
+    reject_raw_credential_fields(request.data)
     serializer = PlatformIntegrationConfigSerializer(config, data=request.data, partial=True)
     serializer.is_valid(raise_exception=True)
     candidate_platform = serializer.validated_data.get("platform", config.platform)
@@ -181,25 +188,61 @@ def integration_config_detail(request, pk):
 @permission_classes([IsIntegrationCredentialRotator])
 def rotate_integration_credentials(request, pk):
     config = _get_config_for_user(request, pk, "integrations.rotate")
+    reject_raw_credential_fields(request.data)
     serializer = RotateCredentialsSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    rotate_credentials(
+    config = rotate_config_references(
         config,
-        serializer.validated_data["credentials"],
-        serializer.validated_data["credential_key_version"],
-        request.user,
-    )
-    _write_audit_log(
-        config,
-        request.user,
-        "rotate_credentials",
-        detail={
-            "credential_key_version": config.credential_key_version,
-            "credential_fingerprint": config.credential_fingerprint,
-            "credential_mask": mask_credentials(serializer.validated_data["credentials"]),
-        },
+        credential_id=serializer.validated_data["credential_id"],
+        token_id=serializer.validated_data["token_id"],
+        version=serializer.validated_data["credential_reference_version"],
+        actor=request.user,
     )
     return success_response(PlatformIntegrationConfigSerializer(config).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsMarketplaceStoreViewer])
+def store_authorization_collection(request):
+    allowed_query = {"page", "page_size", "platform", "status", "store_id"}
+    if set(request.query_params) - allowed_query:
+        raise ValidationError("Unknown store authorization query parameter.")
+    queryset = MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store")
+    if request.query_params.get("platform"):
+        platform = request.query_params["platform"]
+        if platform not in {"shopee", "tiktok"}:
+            raise ValidationError("Unsupported marketplace platform filter.")
+        queryset = queryset.filter(platform=platform)
+    if request.query_params.get("status"):
+        status_value = request.query_params["status"]
+        if status_value not in MarketplaceStoreAuthorization.Status.values:
+            raise ValidationError("Unsupported authorization status filter.")
+        queryset = queryset.filter(status=status_value)
+    if request.query_params.get("store_id"):
+        queryset = queryset.filter(store_id=positive_int(request.query_params["store_id"], default=0))
+    queryset = filter_store_authorizations(request.user, queryset, "integrations.store.view")
+    page, page_size = pagination_query(request)
+    return success_response(
+        paginated_data(
+            request,
+            queryset,
+            MarketplaceStoreAuthorizationSerializer,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsMarketplaceStoreViewer])
+def store_authorization_detail(request, pk):
+    queryset = filter_store_authorizations(
+        request.user,
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store"),
+        "integrations.store.view",
+    )
+    authorization = get_scoped_object_or_404(queryset, pk=pk)
+    return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
 
 
 @api_view(["POST"])
