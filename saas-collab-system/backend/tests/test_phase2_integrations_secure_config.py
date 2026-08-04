@@ -73,8 +73,6 @@ def config_payload(account_alias="demo-account", environment="mock", status="act
         "account_alias": account_alias,
         "environment": environment,
         "status": status,
-        "credential_id": "synthetic-demo-config-credential",
-        "token_id": "synthetic-demo-config-token",
     }
 
 
@@ -199,8 +197,6 @@ def test_integration_view_permission_cannot_create_update_rotate_or_disable():
         account_alias="demo-view-only",
         environment=PlatformIntegrationConfig.Environment.MOCK,
         status=PlatformIntegrationConfig.Status.ACTIVE,
-        credential_key_version="test-v1",
-        credential_fingerprint="placeholder-fingerprint",
         created_by=user,
     )
     client = authenticated_client(user)
@@ -246,7 +242,18 @@ def test_credentials_never_appear_in_api_response_or_audit_log():
     audit_text = json.dumps(audit.masked_detail)
     assert "synthetic-demo-config-credential" not in audit_text
     assert "synthetic-demo-config-token" not in audit_text
-    assert audit.masked_detail["credential_mask"]["credential"].endswith("***")
+    assert audit.masked_detail["credential_mask"] == {}
+
+    rejected = authenticated_client(user).post(
+        "/api/internal/integrations/configs/",
+        {
+            **config_payload(account_alias="demo-rejected-reference"),
+            "credential_id": "synthetic-demo-config-credential",
+            "token_id": "synthetic-demo-config-token",
+        },
+        format="json",
+    )
+    assert rejected.status_code == 400
 
 
 @pytest.mark.django_db
@@ -298,8 +305,6 @@ def test_raw_credentials_are_rejected_without_persistence():
     user = create_user(tenant, "raw-credential-user")
     grant_integration_access(user)
     payload = config_payload()
-    payload.pop("credential_id")
-    payload.pop("token_id")
     payload["credentials"] = {"api_key": "forbidden-value"}
 
     response = authenticated_client(user).post("/api/internal/integrations/configs/", payload, format="json")

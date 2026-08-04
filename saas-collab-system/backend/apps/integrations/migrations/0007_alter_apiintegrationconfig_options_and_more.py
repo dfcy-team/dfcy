@@ -4,50 +4,108 @@ import base64
 import binascii
 import hashlib
 import json
+from urllib.parse import urlparse
 
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
 
 
-SAFE_MARKERS = ("mock", "demo", "synthetic", "placeholder", "not-a-real", "example")
+APPROVED_MOCK_PROVENANCE = {"approved_mock_fixture_v1"}
+APPROVED_LEGACY_API_HOSTS = {"api.example.test"}
+LEGACY_COLUMNS = {
+    "integrations_platformintegrationconfig": {"credential_ciphertext"},
+    "integrations_apiintegrationconfig": {"api_key_encrypted", "api_secret_encrypted"},
+}
 
 
-def _is_safe_mock_value(value):
-    if isinstance(value, dict):
-        return bool(value) and all(_is_safe_mock_value(item) for item in value.values())
-    if isinstance(value, list):
-        return bool(value) and all(_is_safe_mock_value(item) for item in value)
-    if not isinstance(value, str):
-        return False
-    lowered = value.lower()
-    return bool(lowered) and any(marker in lowered for marker in SAFE_MARKERS)
-
-
-def _is_safe_legacy_ciphertext(value):
-    if not value:
+def _legacy_columns_available(schema_editor):
+    if schema_editor is None:
         return True
-    if not value.startswith("test-only:"):
+    present_count = 0
+    expected_count = sum(len(columns) for columns in LEGACY_COLUMNS.values())
+    with schema_editor.connection.cursor() as cursor:
+        for table_name, expected_columns in LEGACY_COLUMNS.items():
+            columns = {
+                column.name
+                for column in schema_editor.connection.introspection.get_table_description(cursor, table_name)
+            }
+            present_count += len(columns.intersection(expected_columns))
+    if present_count == 0:
         return False
+    if present_count != expected_count:
+        raise RuntimeError("Legacy credential schema is partially present; manual review is required.")
+    return True
+
+
+def _approved_platform_payload(value):
+    if not value:
+        return None
+    if not value.startswith("test-only:"):
+        return None
     try:
         encoded = value.removeprefix("test-only:")
         payload = json.loads(base64.urlsafe_b64decode(encoded.encode()).decode())
     except (ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError):
-        return False
-    return isinstance(payload, dict) and _is_safe_mock_value(payload.get("credentials"))
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("migration_provenance") not in APPROVED_MOCK_PROVENANCE:
+        return None
+    if not isinstance(payload.get("credentials"), dict) or not payload["credentials"]:
+        return None
+    return payload
+
+
+def _is_approved_platform_record(config):
+    return (
+        config.environment == "mock"
+        and config.platform == "mock"
+        and _approved_platform_payload(config.credential_ciphertext) is not None
+    )
+
+
+def _is_approved_legacy_api_record(config):
+    return (
+        config.environment == "mock"
+        and config.platform == "mock"
+        and config.credential_status == "placeholder"
+        and urlparse(config.api_base_url).hostname in APPROVED_LEGACY_API_HOSTS
+    )
 
 
 def migrate_synthetic_credential_references(apps, schema_editor):
+    if not _legacy_columns_available(schema_editor):
+        return
     PlatformIntegrationConfig = apps.get_model("integrations", "PlatformIntegrationConfig")
     APIIntegrationConfig = apps.get_model("integrations", "APIIntegrationConfig")
+    platform_records = []
+    api_records = []
     blocked_count = 0
 
     for config in PlatformIntegrationConfig.objects.all().iterator():
         if not config.credential_ciphertext:
             continue
-        if not _is_safe_legacy_ciphertext(config.credential_ciphertext):
+        if not _is_approved_platform_record(config):
             blocked_count += 1
             continue
+        platform_records.append(config)
+
+    for config in APIIntegrationConfig.objects.all().iterator():
+        legacy_values = [config.api_key_encrypted, config.api_secret_encrypted]
+        if not any(legacy_values):
+            continue
+        if not _is_approved_legacy_api_record(config):
+            blocked_count += 1
+            continue
+        api_records.append(config)
+
+    if blocked_count:
+        raise RuntimeError(
+            f"Credential reference migration blocked for {blocked_count} record(s); key-custody approval is required."
+        )
+
+    for config in platform_records:
         credential_id = f"synthetic-legacy-config-{config.pk}-credential"
         token_id = f"synthetic-legacy-config-{config.pk}-token"
         config.credential_id = credential_id
@@ -67,24 +125,12 @@ def migrate_synthetic_credential_references(apps, schema_editor):
             ]
         )
 
-    for config in APIIntegrationConfig.objects.all().iterator():
-        legacy_values = [config.api_key_encrypted, config.api_secret_encrypted]
-        if not any(legacy_values):
-            continue
-        if any(value and not _is_safe_mock_value(value) for value in legacy_values):
-            blocked_count += 1
-            continue
+    for config in api_records:
         if not config.credential_ref:
             config.credential_ref = f"synthetic-legacy-api-config-{config.pk}"
         config.credential_status = "rotation_required"
         config.credential_key_version = "reference-v1"
         config.save(update_fields=["credential_ref", "credential_status", "credential_key_version"])
-
-    if blocked_count:
-        raise RuntimeError(
-            f"Credential reference migration blocked for {blocked_count} record(s); key-custody approval is required."
-        )
-
 
 class Migration(migrations.Migration):
 
@@ -119,19 +165,6 @@ class Migration(migrations.Migration):
             model_name='platformintegrationconfig',
             name='token_id',
             field=models.CharField(blank=True, max_length=160),
-        ),
-        migrations.RunPython(migrate_synthetic_credential_references, migrations.RunPython.noop),
-        migrations.RemoveField(
-            model_name='apiintegrationconfig',
-            name='api_key_encrypted',
-        ),
-        migrations.RemoveField(
-            model_name='apiintegrationconfig',
-            name='api_secret_encrypted',
-        ),
-        migrations.RemoveField(
-            model_name='platformintegrationconfig',
-            name='credential_ciphertext',
         ),
         migrations.AlterField(
             model_name='integrationauditlog',

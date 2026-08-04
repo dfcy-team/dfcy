@@ -1,4 +1,4 @@
-import hashlib
+import re
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -6,11 +6,12 @@ from django.utils import timezone
 
 from apps.common.exceptions import StateConflict
 
-from .credential_service import build_reference_metadata
+from .credential_service import _revoke_old_references, build_reference_metadata, revoke_synthetic_references
 from .models import (
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
     authorization_service_write,
+    marketplace_identity_key,
 )
 
 
@@ -39,12 +40,21 @@ ALLOWED_TRANSITIONS = {
 }
 
 
-def marketplace_identity_key(platform, region, platform_store_id):
-    normalized = f"{str(platform).lower()}:{str(region).upper()}:{str(platform_store_id).strip()}"
-    return hashlib.sha256(normalized.encode()).hexdigest()
+def _validate_actor_tenant(actor, tenant_id):
+    if actor.tenant_id != tenant_id:
+        raise ValidationError("Authorization actor must belong to the authorization tenant.")
 
 
-def _audit(record, actor, action, result=IntegrationAuditLog.Result.SUCCESS):
+def _audit(record, actor, action, result=IntegrationAuditLog.Result.SUCCESS, extra=None):
+    detail = {
+        "credential_id": record.credential_id,
+        "token_id": record.token_id,
+        "credential_mask": record.credential_mask,
+        "status": record.status,
+        "error_code": record.last_error_code,
+        "reference_version": record.credential_reference_version,
+    }
+    detail.update(extra or {})
     return IntegrationAuditLog.objects.create(
         tenant=record.tenant,
         integration_config=record.integration_config,
@@ -52,14 +62,7 @@ def _audit(record, actor, action, result=IntegrationAuditLog.Result.SUCCESS):
         action=action,
         actor=actor,
         result=result,
-        masked_detail={
-            "credential_id": record.credential_id,
-            "token_id": record.token_id,
-            "credential_mask": record.credential_mask,
-            "status": record.status,
-            "error_code": record.last_error_code,
-            "reference_version": record.credential_reference_version,
-        },
+        masked_detail=detail,
     )
 
 
@@ -79,6 +82,7 @@ def create_store_authorization(
     scopes,
     actor,
 ):
+    _validate_actor_tenant(actor, tenant.id)
     metadata = build_reference_metadata(credential_id, token_id, 1)
     identity_key = marketplace_identity_key(platform, region, platform_store_id)
     if MarketplaceStoreAuthorization.objects.filter(
@@ -121,11 +125,17 @@ def _validate_transition(current, target):
 
 @transaction.atomic
 def transition_store_authorization(record, *, target_status, actor, error_code="", expires_at=None):
+    _validate_actor_tenant(actor, record.tenant_id)
     locked = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk)
     _validate_transition(locked.status, target_status)
     locked.status = target_status
     locked.updated_by = actor
-    locked.last_error_code = str(error_code or "")
+    normalized_error_code = str(error_code or "")
+    if target_status == MarketplaceStoreAuthorization.Status.ERROR and not re.fullmatch(
+        r"[A-Z][A-Z0-9_]{2,79}", normalized_error_code
+    ):
+        raise ValidationError({"error_code": "Error transitions require a controlled uppercase error code."})
+    locked.last_error_code = normalized_error_code
     now = timezone.now()
     if target_status == MarketplaceStoreAuthorization.Status.ACTIVE:
         locked.authorized_at = locked.authorized_at or now
@@ -152,7 +162,6 @@ def transition_store_authorization(record, *, target_status, actor, error_code="
     return locked
 
 
-@transaction.atomic
 def rotate_store_authorization_references(
     record,
     *,
@@ -161,23 +170,68 @@ def rotate_store_authorization_references(
     version,
     actor,
     expires_at=None,
+    revoker=None,
 ):
-    locked = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk)
-    if locked.status == MarketplaceStoreAuthorization.Status.REVOKED:
-        raise StateConflict("Revoked authorization references cannot be rotated.")
-    if version <= locked.credential_reference_version:
-        raise StateConflict("Reference version must increase atomically.")
+    _validate_actor_tenant(actor, record.tenant_id)
     metadata = build_reference_metadata(credential_id, token_id, version)
-    for field in ("credential_id", "token_id", "credential_mask", "credential_reference_version"):
-        setattr(locked, field, metadata[field])
-    locked.refreshed_at = timezone.now()
-    locked.expires_at = expires_at
-    locked.last_error_code = ""
-    locked.updated_by = actor
-    with authorization_service_write():
-        locked.save()
-    _audit(locked, actor, "rotate_reference")
-    return locked
+    failed = None
+    with transaction.atomic():
+        locked = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk)
+        if locked.status == MarketplaceStoreAuthorization.Status.REVOKED:
+            raise StateConflict("Revoked authorization references cannot be rotated.")
+        if version <= locked.credential_reference_version:
+            raise StateConflict("Reference version must increase atomically.")
+        previous = {
+            "credential_id": locked.credential_id,
+            "token_id": locked.token_id,
+            "credential_mask": locked.credential_mask,
+            "reference_version": locked.credential_reference_version,
+        }
+        revocation = _revoke_old_references(revoker or revoke_synthetic_references, previous)
+        if revocation["status"] == "failed":
+            failed = (locked, previous, revocation)
+        else:
+            for field in ("credential_id", "token_id", "credential_mask", "credential_reference_version"):
+                setattr(locked, field, metadata[field])
+            locked.refreshed_at = timezone.now()
+            locked.expires_at = expires_at
+            locked.last_error_code = ""
+            locked.updated_by = actor
+            with authorization_service_write():
+                locked.save()
+            _audit(
+                locked,
+                actor,
+                "rotate_reference",
+                extra={
+                    "previous_reference": previous,
+                    "new_reference": {
+                        "credential_id": locked.credential_id,
+                        "token_id": locked.token_id,
+                        "credential_mask": locked.credential_mask,
+                        "reference_version": locked.credential_reference_version,
+                    },
+                    "revocation": revocation,
+                },
+            )
+            return locked
+
+    locked, previous, revocation = failed
+    _audit(
+        locked,
+        actor,
+        "rotate_reference",
+        result=IntegrationAuditLog.Result.FAILED,
+        extra={
+            "previous_reference": previous,
+            "attempted_reference": {
+                "credential_mask": metadata["credential_mask"],
+                "reference_version": metadata["credential_reference_version"],
+            },
+            "revocation": revocation,
+        },
+    )
+    raise StateConflict("Previous credential references could not be revoked; rotation was not applied.")
 
 
 def retry_store_authorization(record, *, actor):

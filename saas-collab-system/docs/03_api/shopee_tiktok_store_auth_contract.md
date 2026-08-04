@@ -51,7 +51,7 @@ Shopee 的精确 scope 名称、endpoint 配额和区域域名需从已批准应
 - 引用轮换必须在事务内 `select_for_update`，原子替换引用和版本，并追加旧引用撤销审计。
 - 审计仅保存引用 ID、掩码、状态、错误码和操作者；禁止保存凭据、完整平台响应或可还原密文。
 
-旧字段迁移只判断字段是否为空并在内存中验证是否为明确 synthetic/mock 内容；不打印、不复制、不写日志。未知或非 Mock 内容会中止迁移并要求密钥托管审批。完成 synthetic 转换后删除 `credential_ciphertext`、`api_key_encrypted`、`api_secret_encrypted` 持久化列。
+旧字段迁移不得根据凭据内容中的 `mock`、`demo`、`example` 等关键字猜测来源。迁移仅接受显式批准的 Mock provenance 和受控测试元数据，并在任何业务数据写入前完成全量只读预检；任一未知记录都会以零业务写入中止。迁移分为新增结构、数据预检转换、条件删除旧列三个阶段，并兼容已执行旧版 `0007` 且旧列已删除的环境。全过程不打印、不复制、不记录旧字段值。
 
 ## 5. 状态机
 
@@ -65,7 +65,7 @@ Shopee 的精确 scope 名称、endpoint 配额和区域域名需从已批准应
 | error | active（批准重试后）、revoked、expired |
 | revoked | 无，终态 |
 
-状态只能经 integrations 服务层修改。普通 `save()`、QuerySet `update()`、`bulk_create()`、`bulk_update()` 和删除操作不得绕过状态及不可变审计规则。
+状态、tenant/config/store 归属、平台身份、scope、引用和操作者只能经 integrations 服务层修改。服务上下文外禁止创建授权记录；普通 `save()`、QuerySet `update()`、`delete()`、`bulk_create()` 和 `bulk_update()` 不得绕过归属、状态、引用及不可变审计规则。配置引用只能通过轮换服务写入。
 
 ## 6. 请求、限流与恢复合同（未来连接器）
 

@@ -1,11 +1,13 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import importlib
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.db import migrations
+from django.db import close_old_connections, connection, migrations
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -15,7 +17,10 @@ from apps.integrations.models import (
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
     PlatformIntegrationConfig,
+    marketplace_identity_key,
 )
+from apps.integrations.admin import MarketplaceStoreAuthorizationAdmin, PlatformIntegrationConfigAdmin
+from apps.integrations.credential_service import rotate_config_references
 from apps.integrations.store_authorization_service import (
     create_store_authorization,
     rotate_store_authorization_references,
@@ -181,6 +186,8 @@ def test_status_transitions_require_service_and_revoked_is_terminal():
         MarketplaceStoreAuthorization.objects.filter(pk=record.pk).update(status="revoked")
     with pytest.raises(ValidationError, match="service layer"):
         MarketplaceStoreAuthorization.objects.bulk_create([MarketplaceStoreAuthorization()])
+    with pytest.raises(ValidationError, match="cannot be deleted"):
+        MarketplaceStoreAuthorization.objects.filter(pk=record.pk).delete()
 
     record.refresh_from_db()
     revoked = transition_store_authorization(
@@ -194,6 +201,139 @@ def test_status_transitions_require_service_and_revoked_is_terminal():
             target_status=MarketplaceStoreAuthorization.Status.ACTIVE,
             actor=user,
         )
+
+
+@pytest.mark.django_db
+def test_all_store_authorization_write_bypasses_are_blocked_without_audit():
+    tenant, user, store, config, record = create_authorization("write-guards")
+    other_tenant = Tenant.objects.create(name="Other tenant", code="write-guards-other")
+    other_user = create_user(other_tenant, "write-guards-other-user")
+    audit_count = IntegrationAuditLog.objects.count()
+    direct = MarketplaceStoreAuthorization(
+        tenant=tenant,
+        integration_config=config,
+        store=store,
+        platform="shopee",
+        region="SG",
+        platform_store_id="direct-demo-store",
+        platform_identity_key=marketplace_identity_key("shopee", "SG", "direct-demo-store"),
+        merchant_subject_id="direct-demo-subject",
+        credential_id="synthetic-direct-demo-credential",
+        token_id="synthetic-direct-demo-token",
+        created_by=user,
+        updated_by=user,
+    )
+    with pytest.raises(ValidationError, match="created by the service layer"):
+        direct.save()
+    with pytest.raises(ValidationError, match="service layer"):
+        MarketplaceStoreAuthorization.objects.filter(pk=record.pk).update(tenant_id=other_tenant.id)
+    with pytest.raises(ValidationError, match="service layer"):
+        MarketplaceStoreAuthorization.objects.filter(pk=record.pk).update(platform_store_id="changed")
+
+    record.region = "MY"
+    with pytest.raises(ValidationError, match="service layer"):
+        MarketplaceStoreAuthorization.objects.bulk_update([record], ["region"])
+    with pytest.raises(ValidationError, match="cannot be deleted"):
+        MarketplaceStoreAuthorization.objects.filter(pk=record.pk).delete()
+    with pytest.raises(ValidationError, match="actor"):
+        transition_store_authorization(
+            record,
+            target_status=MarketplaceStoreAuthorization.Status.ACTIVE,
+            actor=other_user,
+        )
+    with pytest.raises(ValidationError, match="actor"):
+        rotate_config_references(
+            config,
+            credential_id="synthetic-cross-tenant-config-credential",
+            token_id="synthetic-cross-tenant-config-token",
+            version=2,
+            actor=other_user,
+        )
+
+    record.refresh_from_db()
+    assert record.tenant_id == tenant.id
+    assert record.region == "SG"
+    assert IntegrationAuditLog.objects.count() == audit_count
+
+
+@pytest.mark.django_db
+def test_identity_key_config_reference_and_admin_bypasses_are_blocked():
+    tenant, user, store, config = marketplace_context("identity-guard")
+    invalid = MarketplaceStoreAuthorization(
+        tenant=tenant,
+        integration_config=config,
+        store=store,
+        platform="shopee",
+        region="SG",
+        platform_store_id="identity-guard-store",
+        platform_identity_key="0" * 64,
+        merchant_subject_id="identity-guard-subject",
+        credential_id="synthetic-identity-guard-credential",
+        token_id="synthetic-identity-guard-token",
+        created_by=user,
+        updated_by=user,
+    )
+    with pytest.raises(ValidationError) as exc_info:
+        invalid.full_clean()
+    assert "platform_identity_key" in exc_info.value.message_dict
+
+    config.credential_id = "synthetic-config-direct-credential"
+    with pytest.raises(ValidationError, match="rotation service"):
+        config.save()
+    with pytest.raises(ValidationError, match="rotation service"):
+        PlatformIntegrationConfig.objects.filter(pk=config.pk).update(
+            token_id="synthetic-config-direct-token"
+        )
+    config.refresh_from_db()
+    config.credential_reference_version = 2
+    with pytest.raises(ValidationError, match="rotation service"):
+        PlatformIntegrationConfig.objects.bulk_update(
+            [config],
+            ["credential_reference_version"],
+        )
+    with pytest.raises(ValidationError, match="rotation service"):
+        PlatformIntegrationConfig.objects.bulk_create(
+            [
+                PlatformIntegrationConfig(
+                    tenant=tenant,
+                    platform="mock",
+                    account_alias="direct-reference",
+                    credential_id="synthetic-config-bulk-credential",
+                    token_id="synthetic-config-bulk-token",
+                    created_by=user,
+                )
+            ]
+        )
+
+    assert set(PlatformIntegrationConfigAdmin.readonly_fields) >= {
+        "credential_id",
+        "token_id",
+        "credential_reference_version",
+    }
+    assert MarketplaceStoreAuthorizationAdmin.has_add_permission(None, None) is False
+    assert MarketplaceStoreAuthorizationAdmin.has_change_permission(None, None) is False
+    assert MarketplaceStoreAuthorizationAdmin.has_delete_permission(None, None) is False
+
+
+@pytest.mark.django_db
+def test_error_transition_requires_controlled_error_code():
+    _tenant, user, _store, _config, record = create_authorization("error-code")
+    for error_code in ("", "lowercase", "BAD-CODE"):
+        with pytest.raises(ValidationError):
+            transition_store_authorization(
+                record,
+                target_status=MarketplaceStoreAuthorization.Status.ERROR,
+                actor=user,
+                error_code=error_code,
+            )
+
+    failed = transition_store_authorization(
+        record,
+        target_status=MarketplaceStoreAuthorization.Status.ERROR,
+        actor=user,
+        error_code="AUTH_EXPIRED",
+    )
+    assert failed.last_error_code == "AUTH_EXPIRED"
 
 
 @pytest.mark.django_db
@@ -218,12 +358,147 @@ def test_reference_rotation_increments_version_and_audit_is_append_only():
 
     audit = IntegrationAuditLog.objects.get(store_authorization=record, action="rotate_reference")
     assert audit.masked_detail["credential_id"] == "synthetic-rotation-credential-v2"
+    assert audit.masked_detail["previous_reference"]["credential_id"] == "synthetic-rotation-credential"
+    assert audit.masked_detail["previous_reference"]["reference_version"] == 1
+    assert audit.masked_detail["new_reference"]["reference_version"] == 2
+    assert audit.masked_detail["revocation"] == {"status": "revoked", "error_code": ""}
     with pytest.raises(ValidationError, match="append-only"):
         audit.save()
     with pytest.raises(ValidationError, match="append-only"):
         IntegrationAuditLog.objects.filter(pk=audit.pk).update(action="changed")
     with pytest.raises(ValidationError, match="cannot be deleted"):
         audit.delete()
+
+
+@pytest.mark.django_db
+def test_reference_revocation_failure_preserves_old_reference_and_is_audited():
+    _tenant, user, _store, _config, record = create_authorization("revoke-failure")
+
+    def failing_revoker(_credential_id, _token_id):
+        return {"status": "failed", "error_code": "CUSTODY_UNAVAILABLE"}
+
+    with pytest.raises(StateConflict, match="could not be revoked"):
+        rotate_store_authorization_references(
+            record,
+            credential_id="synthetic-revoke-failure-credential-v2",
+            token_id="synthetic-revoke-failure-token-v2",
+            version=2,
+            actor=user,
+            revoker=failing_revoker,
+        )
+
+    record.refresh_from_db()
+    assert record.credential_id == "synthetic-revoke-failure-credential"
+    assert record.credential_reference_version == 1
+    audit = IntegrationAuditLog.objects.get(store_authorization=record, action="rotate_reference")
+    assert audit.result == IntegrationAuditLog.Result.FAILED
+    assert audit.masked_detail["revocation"] == {
+        "status": "failed",
+        "error_code": "CUSTODY_UNAVAILABLE",
+    }
+    audit_text = json.dumps(audit.masked_detail)
+    assert record.merchant_subject_id not in audit_text
+    assert "shop_cipher" not in audit_text
+
+    with pytest.raises(StateConflict):
+        rotate_store_authorization_references(
+            record,
+            credential_id="synthetic-revoke-failure-credential-v2",
+            token_id="synthetic-revoke-failure-token-v2",
+            version=2,
+            actor=user,
+            revoker=lambda _credential_id, _token_id: "unexpected-result",
+        )
+    non_dict_audit = IntegrationAuditLog.objects.filter(
+        store_authorization=record,
+        action="rotate_reference",
+        result=IntegrationAuditLog.Result.FAILED,
+    ).latest("id")
+    assert non_dict_audit.masked_detail["revocation"]["error_code"] == "REFERENCE_REVOCATION_FAILED"
+
+
+@pytest.mark.django_db
+def test_config_rotation_revokes_previous_reference_and_failure_keeps_current_version():
+    _tenant, user, _store, config = marketplace_context("config-rotation")
+    config = rotate_config_references(
+        config,
+        credential_id="synthetic-config-rotation-credential-v2",
+        token_id="synthetic-config-rotation-token-v2",
+        version=2,
+        actor=user,
+    )
+    rotated = rotate_config_references(
+        config,
+        credential_id="synthetic-config-rotation-credential-v3",
+        token_id="synthetic-config-rotation-token-v3",
+        version=3,
+        actor=user,
+    )
+    audit = IntegrationAuditLog.objects.filter(
+        integration_config=config,
+        action="rotate_config_reference",
+        result=IntegrationAuditLog.Result.SUCCESS,
+    ).first()
+    assert audit.masked_detail["previous_reference"]["reference_version"] == 2
+    assert audit.masked_detail["new_reference"]["reference_version"] == 3
+    assert audit.masked_detail["revocation"]["status"] == "revoked"
+
+    def failing_revoker(_credential_id, _token_id):
+        return {"status": "failed", "error_code": "CUSTODY_UNAVAILABLE"}
+
+    with pytest.raises(StateConflict):
+        rotate_config_references(
+            rotated,
+            credential_id="synthetic-config-rotation-credential-v4",
+            token_id="synthetic-config-rotation-token-v4",
+            version=4,
+            actor=user,
+            revoker=failing_revoker,
+        )
+    rotated.refresh_from_db()
+    assert rotated.credential_reference_version == 3
+    failed_audit = IntegrationAuditLog.objects.get(
+        integration_config=config,
+        action="rotate_config_reference",
+        result=IntegrationAuditLog.Result.FAILED,
+    )
+    assert failed_audit.masked_detail["revocation"]["error_code"] == "CUSTODY_UNAVAILABLE"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_store_reference_rotation_serializes_on_mysql():
+    if connection.vendor != "mysql":
+        pytest.skip("MySQL row-lock verification runs in Local Sandbox.")
+    _tenant, user, _store, _config, record = create_authorization("concurrent-rotation")
+    start = threading.Event()
+
+    def rotate(suffix):
+        close_old_connections()
+        start.wait(timeout=5)
+        try:
+            current = MarketplaceStoreAuthorization.objects.get(pk=record.pk)
+            actor = CustomUser.objects.get(pk=user.pk)
+            rotate_store_authorization_references(
+                current,
+                credential_id=f"synthetic-concurrent-rotation-credential-{suffix}",
+                token_id=f"synthetic-concurrent-rotation-token-{suffix}",
+                version=2,
+                actor=actor,
+            )
+            return "success"
+        except StateConflict:
+            return "conflict"
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(rotate, suffix) for suffix in ("a", "b")]
+        start.set()
+        results = [future.result(timeout=15) for future in futures]
+
+    assert sorted(results) == ["conflict", "success"]
+    record.refresh_from_db()
+    assert record.credential_reference_version == 2
 
 
 @pytest.mark.django_db
@@ -244,6 +519,8 @@ def test_read_api_is_paginated_scoped_and_never_returns_reference_ids():
     response_text = json.dumps(response.json())
     assert record.credential_id not in response_text
     assert record.token_id not in response_text
+    assert record.merchant_subject_id not in response_text
+    assert "shop_cipher" not in response_text
 
     other_tenant, other_user, _other_store, _other_config = marketplace_context("read-api-other", "shopee")
     grant(other_user, "integrations.store.view")
@@ -332,7 +609,7 @@ def test_query_errors_and_empty_state_keep_unified_response():
     assert not MarketplaceStoreAuthorization.objects.filter(tenant=tenant).exists()
 
 
-def test_legacy_credential_migration_converts_only_mock_and_never_outputs_values(capsys):
+def test_legacy_credential_migration_preflights_all_rows_before_writing(capsys):
     module = importlib.import_module("apps.integrations.migrations.0007_alter_apiintegrationconfig_options_and_more")
 
     class Records(list):
@@ -345,12 +622,20 @@ def test_legacy_credential_migration_converts_only_mock_and_never_outputs_values
     class Record(SimpleNamespace):
         def save(self, update_fields):
             self.saved_fields = update_fields
+            self.save_count = getattr(self, "save_count", 0) + 1
 
     safe_payload = base64.urlsafe_b64encode(
-        json.dumps({"credentials": {"api_key": "not-a-real-demo-value"}}).encode()
+        json.dumps(
+            {
+                "migration_provenance": "approved_mock_fixture_v1",
+                "credentials": {"api_key": "opaque-fixture-value"},
+            }
+        ).encode()
     ).decode()
     safe = Record(
         pk=1,
+        platform="mock",
+        environment="mock",
         credential_ciphertext=f"test-only:{safe_payload}",
         credential_id="",
         token_id="",
@@ -361,8 +646,11 @@ def test_legacy_credential_migration_converts_only_mock_and_never_outputs_values
     )
     legacy = Record(
         pk=2,
-        api_key_encrypted="placeholder-key",
-        api_secret_encrypted="mock-secret",
+        platform="mock",
+        environment="mock",
+        api_base_url="https://api.example.test/v1/",
+        api_key_encrypted="opaque-fixture-key",
+        api_secret_encrypted="opaque-fixture-secret",
         credential_ref="",
         credential_status="placeholder",
         credential_key_version="",
@@ -371,26 +659,83 @@ def test_legacy_credential_migration_converts_only_mock_and_never_outputs_values
         get_model=lambda app, name: SimpleNamespace(objects=Records([safe] if name == "PlatformIntegrationConfig" else [legacy]))
     )
 
-    module.migrate_synthetic_credential_references(safe_apps, None)
-
-    assert safe.credential_id == "synthetic-legacy-config-1-credential"
-    assert legacy.credential_ref == "synthetic-legacy-api-config-2"
-    unknown_text = "opaque-unapproved-value"
-    unknown_payload = base64.urlsafe_b64encode(json.dumps({"credentials": {"api_key": unknown_text}}).encode()).decode()
-    unknown = Record(pk=3, credential_ciphertext=f"test-only:{unknown_payload}")
+    false_positive_payload = base64.urlsafe_b64encode(
+        json.dumps({"credentials": {"api_key": "live-example-credential"}}).encode()
+    ).decode()
+    unknown = Record(
+        pk=3,
+        platform="mock",
+        environment="mock",
+        credential_ciphertext=f"test-only:{false_positive_payload}",
+    )
     blocked_apps = SimpleNamespace(
-        get_model=lambda app, name: SimpleNamespace(objects=Records([unknown] if name == "PlatformIntegrationConfig" else []))
+        get_model=lambda app, name: SimpleNamespace(
+            objects=Records([safe, unknown] if name == "PlatformIntegrationConfig" else [legacy])
+        )
     )
     with pytest.raises(RuntimeError) as exc_info:
         module.migrate_synthetic_credential_references(blocked_apps, None)
+    assert not hasattr(safe, "saved_fields")
+    assert not hasattr(legacy, "saved_fields")
+
+    unknown.credential_ciphertext = f"test-only:{safe_payload}"
+    module.migrate_synthetic_credential_references(blocked_apps, None)
+    assert safe.credential_id == "synthetic-legacy-config-1-credential"
+    assert legacy.credential_ref == "synthetic-legacy-api-config-2"
+    assert unknown.credential_id == "synthetic-legacy-config-3-credential"
     captured = capsys.readouterr()
-    assert unknown_text not in str(exc_info.value)
-    assert unknown_text not in captured.out + captured.err
+    assert "live-example-credential" not in str(exc_info.value)
+    assert "live-example-credential" not in captured.out + captured.err
 
 
 def test_auth_migration_uses_backend_portable_operations():
     module = importlib.import_module("apps.integrations.migrations.0007_alter_apiintegrationconfig_options_and_more")
     assert not any(isinstance(operation, migrations.RunSQL) for operation in module.Migration.operations)
+
+    data_migration = importlib.import_module(
+        "apps.integrations.migrations.0008_migrate_legacy_credential_references"
+    )
+    drop_migration = importlib.import_module(
+        "apps.integrations.migrations.0009_remove_legacy_credential_columns"
+    )
+    assert data_migration.Migration.atomic is False
+    assert any(isinstance(operation, migrations.RunPython) for operation in data_migration.Migration.operations)
+    assert any(
+        isinstance(operation, migrations.SeparateDatabaseAndState)
+        for operation in drop_migration.Migration.operations
+    )
+
+
+def test_legacy_column_preflight_accepts_absent_columns_and_rejects_partial_schema():
+    module = importlib.import_module("apps.integrations.migrations.0007_alter_apiintegrationconfig_options_and_more")
+
+    class Introspection:
+        def __init__(self, columns):
+            self.columns = columns
+
+        def get_table_description(self, _cursor, table_name):
+            return [SimpleNamespace(name=name) for name in self.columns.get(table_name, set())]
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def schema_editor(columns):
+        return SimpleNamespace(
+            connection=SimpleNamespace(
+                cursor=lambda: Cursor(),
+                introspection=Introspection(columns),
+            )
+        )
+
+    assert module._legacy_columns_available(schema_editor({})) is False
+    with pytest.raises(RuntimeError, match="partially present"):
+        module._legacy_columns_available(
+            schema_editor({"integrations_platformintegrationconfig": {"credential_ciphertext"}})
+        )
 
 
 def test_legacy_config_has_no_persistent_secret_fields():

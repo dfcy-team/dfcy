@@ -1,6 +1,5 @@
 from rest_framework import serializers
 
-from .credential_service import build_reference_metadata
 from .models import (
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
@@ -13,8 +12,6 @@ from .models import (
 class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
-    credential_id = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    token_id = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = PlatformIntegrationConfig
@@ -33,8 +30,6 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             "created_by_id",
             "created_at",
             "updated_at",
-            "credential_id",
-            "token_id",
         )
         read_only_fields = (
             "id",
@@ -50,6 +45,10 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
+        if {"credential_id", "token_id"}.intersection(self.initial_data):
+            raise serializers.ValidationError(
+                "Credential references must be changed through the rotate endpoint."
+            )
         environment = attrs.get("environment", getattr(self.instance, "environment", None))
         status = attrs.get("status", getattr(self.instance, "status", PlatformIntegrationConfig.Status.DISABLED))
         if (
@@ -59,29 +58,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"status": "Production configs can only be disabled or pending review in phase 2."}
             )
-        credential_id = attrs.get("credential_id")
-        token_id = attrs.get("token_id")
-        if bool(credential_id) != bool(token_id):
-            raise serializers.ValidationError("credential_id and token_id must be supplied together.")
-        if credential_id:
-            if self.instance:
-                raise serializers.ValidationError("Credential references must be changed through the rotate endpoint.")
-            attrs.update(
-                build_reference_metadata(
-                    credential_id,
-                    token_id,
-                    1,
-                )
-            )
         return attrs
-
-    def create(self, validated_data):
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        validated_data.pop("credential_id", None)
-        validated_data.pop("token_id", None)
-        return super().update(instance, validated_data)
 
 
 class RotateCredentialsSerializer(serializers.Serializer):
@@ -111,8 +88,6 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
             "platform",
             "region",
             "platform_store_id",
-            "merchant_subject_id",
-            "shop_cipher",
             "credential_mask",
             "credential_reference_version",
             "status",

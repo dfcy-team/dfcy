@@ -10,20 +10,20 @@
 
 | 命令/范围 | 结果 |
 |---|---|
-| 授权基础 + secure config + integrations model + UI-P2 回归 | 60 passed |
-| 授权基础 + secure config + sync framework | 53 passed |
-| 后端全量 pytest | 433 passed in 53.45s（最终 HEAD） |
+| A1 定向回归 | 78 passed；MySQL 并发用例在 SQLite 跳过 |
+| MySQL 并发引用轮换 | 1 passed |
+| 后端全量 pytest | 本地 SQLite 439 passed / 1 MySQL-only skipped；MySQL 并发专项另行通过 |
 | 前端 Vitest | 12 files、160 tests passed |
 | Vite build | 成功，1955 modules；无 chunk size warning |
 
 ## 3. 数据库与权限
 
-- 全新临时 SQLite 数据库从零应用全部迁移成功。
-- `integrations.0007` 反向到 `0006` 后再次前向到 `0007` 成功。
+- 迁移拆分为 `0007` 新增结构、`0008` 全量预检与转换、`0009` 条件删除旧列。
 - `makemigrations --check --dry-run` 无遗漏。
 - `sync_permissions --check` 通过。
-- 数据迁移专项测试确认：synthetic/mock 可转换；未知内容中止；异常和标准输出不包含待迁移值。
-- MySQL 可移植性专项测试确认迁移不含 backend-specific `RunSQL`，但 Docker engine 未运行，未获得 MySQL 8.4 容器执行成功证据。
+- 数据迁移专项确认：仅显式批准 Mock provenance 可转换；`live-example-credential` 不会因关键字误命中；混合安全/未知批次在首个业务写入前中止。
+- MySQL 8.4.10：全新全量迁移成功；安全 Mock 各转换 1 条；未知混合批次 `platform_reference_writes=0`、`api_reference_writes=0`、`0008` 登记数为 0；修正 provenance 后重跑成功；旧列余数为 0；待处理 metadata lock 为 0。
+- 已执行旧版 `0007` 且旧列已删除的 Local Sandbox 数据卷可继续应用 `0008/0009`，无需 reset 数据卷。
 
 ## 4. 安全与制品
 
@@ -35,9 +35,9 @@
 ## 5. Sandbox
 
 - `sandbox.ps1 contract integration`：PASS。
-- `sandbox.ps1 verify integration`：未完成，Docker Desktop Linux engine 未运行，启动镜像前即失败。
+- `sandbox.ps1 verify integration`：PASS；最终代码容器内 MySQL 后端 440 passed、前端 160 passed、Vite build 成功。
 - 未连接真实 Sandbox 店铺、真实平台、银行、支付或 VM。
 
 ## 6. 结论
 
-本地代码、SQLite 迁移、权限、后端全量、前端回归和合同检查通过。MySQL 容器运行与远端 CI 仍需补证，因此能力继续标记为 `pending/mock`，不得标记 `connected`。
+本地代码、MySQL 8.4 迁移与并发、权限、后端全量、前端回归、生产构建和 Local Sandbox integration 均通过。真实 Shopee/TikTok Shop 未接入，能力继续标记为 `pending/mock`，不得标记 `connected`；远端 CI 仍需在整改提交推送后复核。

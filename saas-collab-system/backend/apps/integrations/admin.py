@@ -20,6 +20,14 @@ class PlatformIntegrationConfigAdmin(admin.ModelAdmin):
     list_display = ("tenant", "platform", "account_alias", "environment", "status", "credential_reference_version")
     list_filter = ("platform", "environment", "status", "tenant")
     search_fields = ("account_alias", "credential_fingerprint", "tenant__name", "tenant__code")
+    readonly_fields = (
+        "credential_id",
+        "token_id",
+        "credential_mask",
+        "credential_reference_version",
+        "credential_key_version",
+        "credential_fingerprint",
+    )
 
 
 @admin.register(IntegrationAuditLog)
