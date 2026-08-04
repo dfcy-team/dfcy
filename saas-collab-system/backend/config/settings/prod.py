@@ -49,3 +49,6 @@ if INTEGRATION_ENCRYPTION_PROVIDER == "test-only":
 
 # UI-P4 only defines a mock callback contract. Production enablement requires a separate review.
 UI_P4_COLLABORATION_MODE = "disabled"
+
+# Production must fail closed even if an environment variable is misconfigured.
+MARKETPLACE_OAUTH_NETWORK_ENABLED = False

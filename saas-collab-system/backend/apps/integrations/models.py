@@ -10,6 +10,7 @@ from django.conf import settings
 
 
 _authorization_service_write = ContextVar("authorization_service_write", default=False)
+_oauth_service_write = ContextVar("oauth_service_write", default=False)
 
 
 @contextmanager
@@ -19,6 +20,15 @@ def authorization_service_write():
         yield
     finally:
         _authorization_service_write.reset(token)
+
+
+@contextmanager
+def oauth_service_write():
+    token = _oauth_service_write.set(True)
+    try:
+        yield
+    finally:
+        _oauth_service_write.reset(token)
 
 
 class PlatformChoices(models.TextChoices):
@@ -371,6 +381,100 @@ class MarketplaceStoreAuthorization(models.Model):
 
     def __str__(self):
         return f"{self.tenant_id}:{self.platform}:{self.store_id}:{self.status}"
+
+
+class MarketplaceOAuthAttemptQuerySet(models.QuerySet):
+    protected_fields = {
+        "tenant", "tenant_id", "internal_user", "internal_user_id", "session_hash",
+        "platform", "integration_config", "integration_config_id", "store", "store_id",
+        "region", "redirect_target_code", "state_hash", "idempotency_key_hash",
+        "request_fingerprint_hash", "status", "expires_at", "consumed_at", "request_id",
+        "operation_id_hash", "last_error_code", "contract_version", "updated_at",
+    }
+
+    def update(self, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth attempts can only be changed by the OAuth service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth attempts must be created by the OAuth service layer.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth attempts can only be changed by the OAuth service layer.")
+        return super().bulk_update(objs, fields, **kwargs)
+
+    def delete(self):
+        raise ValidationError("OAuth attempts cannot be deleted.")
+
+
+class MarketplaceOAuthAttempt(models.Model):
+    class Status(models.TextChoices):
+        INITIATED = "initiated", "Initiated"
+        CALLBACK_RECEIVED = "callback_received", "Callback received"
+        EXCHANGED = "exchanged", "Exchanged"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        EXPIRED = "expired", "Expired"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="marketplace_oauth_attempts")
+    internal_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="marketplace_oauth_attempts",
+    )
+    session_hash = models.CharField(max_length=64)
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    integration_config = models.ForeignKey(
+        PlatformIntegrationConfig,
+        on_delete=models.PROTECT,
+        related_name="oauth_attempts",
+    )
+    store = models.ForeignKey(
+        "masterdata.StoreMaster",
+        on_delete=models.PROTECT,
+        related_name="marketplace_oauth_attempts",
+    )
+    region = models.CharField(max_length=8)
+    redirect_target_code = models.CharField(max_length=40)
+    state_hash = models.CharField(max_length=64, unique=True)
+    idempotency_key_hash = models.CharField(max_length=64)
+    request_fingerprint_hash = models.CharField(max_length=64)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.INITIATED)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    request_id = models.UUIDField()
+    operation_id_hash = models.CharField(max_length=64)
+    last_error_code = models.CharField(max_length=80, blank=True)
+    contract_version = models.CharField(max_length=40, default="a2-synthetic-v1")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = MarketplaceOAuthAttemptQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "idempotency_key_hash"],
+                name="uniq_oauth_attempt_tenant_idempotency",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_oauth_tenant_status"),
+            models.Index(fields=["expires_at"], name="idx_oauth_expires"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not _oauth_service_write.get():
+            raise ValidationError("OAuth attempts can only be written by the OAuth service layer.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("OAuth attempts cannot be deleted.")
 
 
 class SyncJob(models.Model):

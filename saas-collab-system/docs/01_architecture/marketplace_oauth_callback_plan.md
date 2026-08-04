@@ -2,6 +2,8 @@
 
 ## 1. 架构原则
 
+PR-A2 当前交付为 synthetic/mock 闭环。真实 Sandbox adapter、平台 endpoint、scope、callback URL、密钥托管和网络出口仍需 A2-00 独立批准，未批准前不执行真实网络调用。
+
 - 业务系统只编排授权，不持有平台凭据。
 - OAuth state 是一次性安全凭证，不是 tenant 或用户输入。
 - 公网 callback 与 internal API 分区；callback 不因无 JWT 而降低验证要求。
@@ -98,4 +100,3 @@ failed -> 新建 attempt 重试（不复活旧 state）
 1. synthetic/mock：完整合同与负向测试，状态最多为 `mock`。
 2. Sandbox：专项安全批准后启用受控网络，完成 JWT、scope、tenant/store、字段和失败态联调；仍不代表 Production。
 3. Pilot/Production：不属于 PR-A2；需独立发布方案、回滚、证书、DNS、监控和审批。
-

@@ -54,6 +54,7 @@ const APISyncTaskList = () => import('../views/integrations/APISyncTaskList.vue'
 const APISyncLogList = () => import('../views/integrations/APISyncLogList.vue');
 const IntegrationConfigList = () => import('../views/integrations/IntegrationConfigList.vue');
 const IntegrationConfigDetail = () => import('../views/integrations/IntegrationConfigDetail.vue');
+const MarketplaceOAuth = () => import('../views/integrations/MarketplaceOAuth.vue');
 const SyncJobList = () => import('../views/integrations/SyncJobList.vue');
 const SyncRunList = () => import('../views/integrations/SyncRunList.vue');
 const SyncRunDetail = () => import('../views/integrations/SyncRunDetail.vue');
@@ -176,6 +177,7 @@ const routes = [
       { path: 'rpa/page-signatures', component: RPAPageSignatureAlertList },
       { path: 'integrations/configs', component: IntegrationConfigList },
       { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
+      { path: 'integrations/oauth', component: MarketplaceOAuth },
       { path: 'integrations/sync-jobs', component: SyncJobList },
       { path: 'integrations/sync-runs', component: SyncRunList },
       { path: 'integrations/sync-runs/:id', component: SyncRunDetail },

@@ -4,6 +4,7 @@ import importlib
 import json
 import threading
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -21,6 +22,8 @@ from apps.integrations.models import (
 )
 from apps.integrations.admin import MarketplaceStoreAuthorizationAdmin, PlatformIntegrationConfigAdmin
 from apps.integrations.credential_service import rotate_config_references
+from apps.integrations.oauth_adapters import synthetic_callback_signature
+from apps.integrations.models import MarketplaceOAuthAttempt
 from apps.integrations.store_authorization_service import (
     create_store_authorization,
     rotate_store_authorization_references,
@@ -744,3 +747,193 @@ def test_legacy_config_has_no_persistent_secret_fields():
     assert {"api_key_encrypted", "api_secret_encrypted"}.isdisjoint(field_names)
     platform_fields = {field.name for field in PlatformIntegrationConfig._meta.fields}
     assert "credential_ciphertext" not in platform_fields
+
+
+def oauth_scope_payload(config=None):
+    return config or {"platforms": ["shopee", "tiktok"], "store_ids": [1]}
+
+
+@pytest.mark.django_db
+def test_synthetic_oauth_success_is_one_time_and_stores_only_hashes():
+    tenant, user, store, config = marketplace_context("oauth-success", "shopee")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    payload = {
+        "integration_config_id": config.id,
+        "store_id": store.id,
+        "platform": "shopee",
+        "region": "SG",
+        "redirect_target_code": "integrations",
+    }
+    initiated = client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-idempotency-001",
+    )
+    assert initiated.status_code == 201
+    data = initiated.json()["data"]
+    assert data["api_status"] == "mock"
+    assert "state" not in data
+    assert "credential" not in json.dumps(data).lower()
+    attempt = MarketplaceOAuthAttempt.objects.get(pk=data["attempt_id"])
+    authorization_url = data["authorization_url"]
+    parsed = parse_qs(urlparse(authorization_url).query)
+    state = parsed["state"][0]
+    callback_code = "synthetic-code-success-001"
+    store_id = f"synthetic-store-{store.id}"
+    signature = synthetic_callback_signature("shopee", state, callback_code, store_id)
+
+    callback = client.get(
+        "/api/platform/oauth/shopee/callback/",
+        {"state": state, "code": callback_code, "platform_store_id": store_id, "signature": signature},
+    )
+    assert callback.status_code == 302
+    assert "oauth_result=success" in callback["Location"]
+    attempt.refresh_from_db()
+    assert attempt.status == MarketplaceOAuthAttempt.Status.SUCCEEDED
+    authorization = MarketplaceStoreAuthorization.objects.get(tenant=tenant, store=store)
+    assert authorization.status == MarketplaceStoreAuthorization.Status.ACTIVE
+    assert callback_code not in json.dumps(list(MarketplaceOAuthAttempt.objects.values()), default=str)
+    assert callback_code not in json.dumps(list(IntegrationAuditLog.objects.values()), default=str)
+    assert attempt.state_hash != state
+
+    replay = client.get(
+        "/api/platform/oauth/shopee/callback/",
+        {"state": state, "code": callback_code, "platform_store_id": store_id, "signature": signature},
+    )
+    assert replay.status_code == 409
+    assert replay.json()["code"] == "OAUTH_STATE_CONSUMED"
+
+
+@pytest.mark.django_db
+def test_oauth_idempotency_same_request_replays_and_changed_request_conflicts():
+    _tenant, user, store, config = marketplace_context("oauth-idempotency", "tiktok")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    payload = {
+        "integration_config_id": config.id,
+        "store_id": store.id,
+        "platform": "tiktok",
+        "region": "SG",
+        "redirect_target_code": "integrations",
+    }
+    headers = {"HTTP_IDEMPOTENCY_KEY": "oauth-idempotency-002"}
+    first = client.post("/api/internal/integrations/store-authorizations/oauth/initiate/", payload, format="json", **headers)
+    second = client.post("/api/internal/integrations/store-authorizations/oauth/initiate/", payload, format="json", **headers)
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["data"]["attempt_id"] == first.json()["data"]["attempt_id"]
+    changed = {**payload, "region": "MY"}
+    conflict = client.post("/api/internal/integrations/store-authorizations/oauth/initiate/", changed, format="json", **headers)
+    assert conflict.status_code == 409
+
+
+@pytest.mark.django_db
+def test_oauth_callback_rejects_signature_store_and_unknown_field_without_leaking_input():
+    _tenant, user, store, config = marketplace_context("oauth-negative", "shopee")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    payload = {
+        "integration_config_id": config.id,
+        "store_id": store.id,
+        "platform": "shopee",
+        "region": "SG",
+        "redirect_target_code": "integrations",
+    }
+    initiated = client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-idempotency-003",
+    )
+    parsed = parse_qs(urlparse(initiated.json()["data"]["authorization_url"]).query)
+    state = parsed["state"][0]
+    bad_signature = client.get(
+        "/api/platform/oauth/shopee/callback/",
+        {"state": state, "code": "synthetic-code-canary", "platform_store_id": f"synthetic-store-{store.id}", "signature": "bad"},
+    )
+    assert bad_signature.status_code == 302
+    assert "OAUTH_SIGNATURE_INVALID" in bad_signature["Location"]
+    assert not MarketplaceStoreAuthorization.objects.exists()
+
+    # A second attempt proves wrong-store and unknown callback fields are not accepted.
+    initiated_two = client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-idempotency-004",
+    )
+    parsed_two = parse_qs(urlparse(initiated_two.json()["data"]["authorization_url"]).query)
+    state_two = parsed_two["state"][0]
+    code_two = "synthetic-code-canary-two"
+    store_id_two = f"synthetic-store-{store.id}"
+    signature_two = synthetic_callback_signature("shopee", state_two, code_two, store_id_two)
+    unknown = client.get(
+        "/api/platform/oauth/shopee/callback/",
+        {"state": state_two, "code": code_two, "platform_store_id": store_id_two, "signature": signature_two, "redirect": "https://evil.invalid"},
+    )
+    assert unknown.status_code == 302
+    assert "OAUTH_CALLBACK_INVALID" in unknown["Location"]
+    assert "evil.invalid" not in unknown["Location"]
+
+
+@pytest.mark.django_db
+def test_oauth_cross_tenant_session_replay_and_exact_permission_are_denied():
+    tenant, user, store, config = marketplace_context("oauth-tenant-a", "shopee")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    other_tenant, other_user, _other_store, _other_config = marketplace_context("oauth-tenant-b", "shopee")
+    grant(other_user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    payload = {"integration_config_id": config.id, "store_id": store.id, "platform": "shopee", "region": "SG", "redirect_target_code": "integrations"}
+    initiated = client.post("/api/internal/integrations/store-authorizations/oauth/initiate/", payload, format="json", HTTP_IDEMPOTENCY_KEY="oauth-idempotency-005")
+    parsed = parse_qs(urlparse(initiated.json()["data"]["authorization_url"]).query)
+    state = parsed["state"][0]
+    code = "synthetic-code-cross-tenant"
+    store_id = f"synthetic-store-{store.id}"
+    signature = synthetic_callback_signature("shopee", state, code, store_id)
+    other_client = client_for(other_user)
+    replay = other_client.get("/api/platform/oauth/shopee/callback/", {"state": state, "code": code, "platform_store_id": store_id, "signature": signature})
+    assert replay.status_code == 302
+    assert "OAUTH_STATE_INVALID" in replay["Location"]
+    assert not MarketplaceStoreAuthorization.objects.filter(tenant=tenant).exists()
+    assert not MarketplaceStoreAuthorization.objects.filter(tenant=other_tenant).exists()
+
+
+@pytest.mark.django_db
+def test_oauth_refresh_and_revoke_use_exact_actions_and_idempotency():
+    tenant, user, store, config, authorization = create_authorization("oauth-actions")
+    grant(user, "integrations.credential.rotate", DataScope.ScopeType.ALL)
+    grant(user, "integrations.store.revoke", DataScope.ScopeType.ALL)
+    client = client_for(user)
+
+    refreshed = client.post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/refresh/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-refresh-key-001",
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()["data"]["api_status"] == "mock"
+    authorization.refresh_from_db()
+    assert authorization.credential_reference_version == 2
+
+    replay = client.post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/refresh/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-refresh-key-001",
+    )
+    assert replay.status_code == 200
+    assert replay.json()["data"]["credential_reference_version"] == 2
+
+    revoked = client.post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/revoke/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-revoke-key-001",
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["data"]["status"] == "revoked"
+    assert IntegrationAuditLog.objects.filter(action="oauth_refresh").exists()
+    assert IntegrationAuditLog.objects.filter(action="oauth_revoke").exists()

@@ -2,7 +2,7 @@
 
 ## 1. 状态与版本
 
-本合同当前为 `planning/pending`。精确平台 endpoint、scope、API 版本、区域域名、签名字段和配额必须由获批应用控制台与官方文档共同确认后登记；未登记时 adapter 必须 fail closed。
+本合同当前实现为 `synthetic/mock`，真实平台 endpoint、scope、API 版本、区域域名、签名字段和配额仍为 `pending`，必须由获批应用控制台与官方文档共同确认后登记；未登记时真实 adapter 必须 fail closed。
 
 官方入口：
 
@@ -25,6 +25,7 @@
 - body：`integration_config_id:int`、`store_id:int`、`platform:shopee|tiktok`、`region:string`、`redirect_target_code:string`。
 - 201 data：`attempt_id`、`authorization_url`、`expires_at`、`request_id`、`status=initiated`。
 - 禁止 body：state、callback URL、Token、Secret、Cookie、Session、credentials 或任意 redirect URL。
+- 当前实现使用 `/api/internal/integrations/store-authorizations/oauth/initiate/`，只生成 `synthetic.invalid` 授权地址；真实网络开关默认关闭且 Production 强制关闭。
 
 ### 2.2 查询授权 attempt
 
@@ -44,6 +45,8 @@
 | `POST /api/internal/integrations/store-authorizations/{id}/retry/` | `integrations.store.retry` | 新 attempt ID；旧 state 不复用 |
 
 三个动作均要求 `Idempotency-Key`、目标资源 scope、行锁、版本检查和不可变审计。
+
+当前 synthetic 实现只返回脱敏引用和稳定状态，不发送 Shopee/TikTok Shop 请求；真实 Sandbox 联调仍为 `pending`。
 
 ## 3. Public callback
 
@@ -82,7 +85,6 @@ Internal API 使用统一 `success/code/message/data`。Public callback 使用 3
 - loading、pending、success、expired、failed、replayed、forbidden、offline 均有明确状态。
 - 不在 localStorage、sessionStorage、路由 state、错误监控或 analytics 中保存授权 URL、state 或 callback query。
 
-## 6. connected 门槛
+## 6. 实现状态与 connected 门槛
 
-synthetic 全通过最多标记 `mock`。真实 Sandbox 通过仍标记 `sandbox_verified` 或现有等价受控状态；只有独立 Pilot/Production 安全评审、真实 JWT 与 permission/data_scope E2E、密钥托管、监控、回退和固定制品全部通过后，才可另行评估 `connected`。PR-A2 不直接授予该状态。
-
+synthetic 全通过最多标记 `mock`。当前页面和 API 映射均为 `mock/pending`。真实 Sandbox 通过仍标记 `sandbox_verified` 或现有等价受控状态；只有独立 Pilot/Production 安全评审、真实 JWT 与 permission/data_scope E2E、密钥托管、监控、回退和固定制品全部通过后，才可另行评估 `connected`。PR-A2 不直接授予该状态。

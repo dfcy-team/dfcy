@@ -155,3 +155,13 @@ INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "INTEGRATION_ENCRYPTION_PROVIDER",
     "unconfigured-production",
 )
+
+# OAuth remains synthetic-only until the separately approved A2-00 evidence exists.
+MARKETPLACE_OAUTH_NETWORK_ENABLED = env_bool("MARKETPLACE_OAUTH_NETWORK_ENABLED", False)
+MARKETPLACE_OAUTH_SYNTHETIC_SIGNING_KEY = os.getenv(
+    "MARKETPLACE_OAUTH_SYNTHETIC_SIGNING_KEY",
+    "synthetic-only-test-key",
+)
+MARKETPLACE_OAUTH_REDIRECT_TARGETS = {
+    "integrations": "/integrations/oauth",
+}

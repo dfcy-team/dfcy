@@ -1,10 +1,17 @@
+import hashlib
+import json
+import uuid
+
+from django.conf import settings
+from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
+from urllib.parse import urlencode
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.error_codes import ErrorCode
-from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
-from apps.common.responses import success_response
+from apps.common.exceptions import DataScopeDenied, StateConflict, get_scoped_object_or_404
+from apps.common.responses import error_response, success_response
 from apps.common.query import pagination_query, positive_int
 from apps.common.responses import paginated_data
 from apps.workflows.models import CollaborationEvent
@@ -16,6 +23,10 @@ from apps.permissions.api_permissions import (
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
     IsIntegrationViewer,
+    IsMarketplaceCredentialRotator,
+    IsMarketplaceStoreAuthorizer,
+    IsMarketplaceStoreRetryRunner,
+    IsMarketplaceStoreRevoker,
     IsMarketplaceStoreViewer,
 )
 from apps.permissions.ui_p6_scopes import (
@@ -28,6 +39,17 @@ from apps.permissions.ui_p6_scopes import (
 
 from .credential_service import reject_raw_credential_fields, rotate_config_references
 from .models import IntegrationAuditLog, MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
+from .models import MarketplaceOAuthAttempt
+from .oauth_adapters import OAuthAdapterError
+from .oauth_serializers import MarketplaceOAuthAttemptSerializer
+from .oauth_services import (
+    consume_callback,
+    exchange_callback,
+    fail_attempt,
+    initiate_oauth,
+    refresh_authorization,
+    revoke_authorization,
+)
 from .serializers import (
     MarketplaceStoreAuthorizationSerializer,
     PlatformIntegrationConfigSerializer,
@@ -243,6 +265,183 @@ def store_authorization_detail(request, pk):
     )
     authorization = get_scoped_object_or_404(queryset, pk=pk)
     return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+
+
+def _oauth_attempt_scope_allowed(user, attempt, permission_code="integrations.store.authorize"):
+    return integration_values_allowed(
+        user,
+        permission_code,
+        platform=attempt.platform,
+        config_id=attempt.integration_config_id,
+        store_id=attempt.store_id,
+    )
+
+
+def _oauth_action_idempotency(request, action, object_id):
+    key = str(request.headers.get("Idempotency-Key", "")).strip()
+    if not 16 <= len(key) <= 128:
+        raise ValidationError({"Idempotency-Key": "Idempotency-Key must be 16 to 128 characters."})
+    from django.core.cache import cache
+    import hashlib
+
+    fingerprint = hashlib.sha256(
+        json.dumps(request.data or {}, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return cache, f"oauth-action:{action}:{object_id}:{hashlib.sha256(key.encode()).hexdigest()}", fingerprint
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreAuthorizer])
+def oauth_initiate(request):
+    attempt, authorization_url, created = initiate_oauth(request=request, payload=request.data, actor=request.user)
+    return success_response(
+        {
+            **MarketplaceOAuthAttemptSerializer(attempt).data,
+            "attempt_id": attempt.pk,
+            "authorization_url": authorization_url,
+            "status": attempt.status,
+            "api_status": "mock",
+        },
+        status=201 if created else 200,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsMarketplaceStoreAuthorizer])
+def oauth_attempt_detail(request, pk):
+    attempt = get_scoped_object_or_404(
+        MarketplaceOAuthAttempt.objects.filter(tenant=request.user.tenant),
+        pk=pk,
+    )
+    if not _oauth_attempt_scope_allowed(request.user, attempt):
+        raise DataScopeDenied("OAuth attempt is outside the authorized store scope.", error_code=ErrorCode.DATA_SCOPE_FORBIDDEN)
+    return success_response({**MarketplaceOAuthAttemptSerializer(attempt).data, "api_status": "mock"})
+
+
+def _oauth_redirect(attempt, result, error_code=""):
+    target = settings.MARKETPLACE_OAUTH_REDIRECT_TARGETS.get(attempt.redirect_target_code)
+    if not target or not target.startswith("/") or target.startswith("//"):
+        return success_response({"status": "failed", "error_code": "OAUTH_REDIRECT_INVALID"}, status=422)
+    params = {"oauth_result": result, "attempt_id": str(attempt.pk)}
+    if error_code:
+        params["error_code"] = error_code
+    return HttpResponseRedirect(f"{target}?{urlencode(params)}")
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def oauth_callback(request, platform):
+    if platform not in {"shopee", "tiktok"}:
+        return error_response(ErrorCode.VALIDATION_ERROR, "Unsupported OAuth platform.", status=400)
+    query = {}
+    for key in request.query_params:
+        values = request.query_params.getlist(key)
+        if len(values) != 1:
+            return error_response("OAUTH_CALLBACK_INVALID", "Callback fields must occur once.", status=400)
+        query[key] = values[0]
+    state = query.get("state")
+    if not state:
+        return error_response("OAUTH_STATE_INVALID", "OAuth state is required.", status=422)
+    attempt = MarketplaceOAuthAttempt.objects.filter(state_hash=hashlib.sha256(state.encode()).hexdigest()).first()
+    if not attempt or attempt.platform != platform:
+        return error_response("OAUTH_STATE_INVALID", "OAuth state is invalid.", status=422)
+    try:
+        attempt = consume_callback(platform=platform, state=state, request=request)
+        from .oauth_adapters import SyntheticMarketplaceAdapter
+        callback = SyntheticMarketplaceAdapter().validate_callback(platform=platform, query=query, expected_state=state)
+        if callback.platform_store_id and callback.platform_store_id != f"synthetic-store-{attempt.store_id}":
+            raise OAuthAdapterError("OAUTH_STORE_MISMATCH", 422)
+        operation_id = str(uuid.uuid4())
+        exchange_callback(attempt=attempt, callback=callback, operation_id=operation_id)
+        return _oauth_redirect(attempt, "success")
+    except OAuthAdapterError as exc:
+        if exc.error_code != "OAUTH_STATE_EXPIRED" and exc.error_code != "OAUTH_STATE_CONSUMED":
+            fail_attempt(attempt, error_code=exc.error_code, actor=attempt.internal_user)
+        if exc.error_code == "OAUTH_STATE_CONSUMED":
+            return error_response(exc.error_code, "OAuth state was already consumed.", status=409)
+        return _oauth_redirect(attempt, "failed", exc.error_code)
+    except Exception:
+        fail_attempt(attempt, error_code="OAUTH_CALLBACK_FAILED", actor=attempt.internal_user)
+        return _oauth_redirect(attempt, "failed", "OAUTH_CALLBACK_FAILED")
+
+
+def _get_scoped_authorization(request, pk, permission_code):
+    queryset = filter_store_authorizations(
+        request.user,
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store", "integration_config"),
+        permission_code,
+    )
+    return get_scoped_object_or_404(queryset, pk=pk)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceCredentialRotator])
+def refresh_store_authorization(request, pk):
+    authorization = _get_scoped_authorization(request, pk, "integrations.credential.rotate")
+    if set(request.data) - {"scenario"}:
+        raise ValidationError("Only the synthetic scenario field is accepted.")
+    cache, cache_key, fingerprint = _oauth_action_idempotency(request, "refresh", pk)
+    cached = cache.get(cache_key)
+    if cached:
+        if cached["fingerprint"] != fingerprint:
+            raise StateConflict("The Idempotency-Key was already used for another action request.")
+        return success_response(cached["data"])
+    try:
+        updated = refresh_authorization(authorization=authorization, actor=request.user, scenario=request.data.get("scenario", ""))
+    except OAuthAdapterError as exc:
+        _write_audit_log(authorization.integration_config, request.user, "oauth_refresh_failed", result=IntegrationAuditLog.Result.FAILED, detail={"error_code": exc.error_code, "operation": "synthetic"})
+        return error_response(exc.error_code, "Synthetic custody refresh failed.", status=exc.http_status)
+    data = {**MarketplaceStoreAuthorizationSerializer(updated).data, "api_status": "mock"}
+    cache.set(cache_key, {"fingerprint": fingerprint, "data": data}, timeout=300)
+    return success_response(data)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreRevoker])
+def revoke_store_authorization(request, pk):
+    authorization = _get_scoped_authorization(request, pk, "integrations.store.revoke")
+    if set(request.data) - {"scenario"}:
+        raise ValidationError("Only the synthetic scenario field is accepted.")
+    cache, cache_key, fingerprint = _oauth_action_idempotency(request, "revoke", pk)
+    cached = cache.get(cache_key)
+    if cached:
+        if cached["fingerprint"] != fingerprint:
+            raise StateConflict("The Idempotency-Key was already used for another action request.")
+        return success_response(cached["data"])
+    try:
+        updated = revoke_authorization(authorization=authorization, actor=request.user, scenario=request.data.get("scenario", ""))
+    except OAuthAdapterError as exc:
+        _write_audit_log(authorization.integration_config, request.user, "oauth_revoke_failed", result=IntegrationAuditLog.Result.FAILED, detail={"error_code": exc.error_code, "operation": "synthetic"})
+        return error_response(exc.error_code, "Synthetic custody revoke failed; local authorization was not changed.", status=exc.http_status)
+    data = {**MarketplaceStoreAuthorizationSerializer(updated).data, "api_status": "mock"}
+    cache.set(cache_key, {"fingerprint": fingerprint, "data": data}, timeout=300)
+    return success_response(data)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreRetryRunner])
+def retry_store_authorization(request, pk):
+    authorization = _get_scoped_authorization(request, pk, "integrations.store.retry")
+    if authorization.status != MarketplaceStoreAuthorization.Status.ERROR:
+        raise StateConflict("Only failed authorizations can be retried.")
+    payload = {
+        "integration_config_id": authorization.integration_config_id,
+        "store_id": authorization.store_id,
+        "platform": authorization.platform,
+        "region": authorization.region,
+        "redirect_target_code": "integrations",
+    }
+    attempt, authorization_url, created = initiate_oauth(
+        request=request,
+        payload=payload,
+        actor=request.user,
+        permission_code="integrations.store.retry",
+    )
+    return success_response(
+        {**MarketplaceOAuthAttemptSerializer(attempt).data, "attempt_id": attempt.pk, "authorization_url": authorization_url, "api_status": "mock"},
+        status=201 if created else 200,
+    )
 
 
 @api_view(["POST"])

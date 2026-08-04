@@ -78,3 +78,38 @@ export const mockSyncRunDetail = () => successResponse({
 
 export const mockApiSyncTasks = mockSyncJobs;
 export const mockApiSyncLogs = mockSyncRuns;
+
+export const mockMarketplaceOAuthInitiate = () => successResponse({
+  attempt_id: 'mock-oauth-attempt-001',
+  platform: 'shopee',
+  store_id: 1,
+  region: 'SG',
+  status: 'initiated',
+  expires_at: '2099-01-01T00:05:00Z',
+  request_id: 'mock-request-001',
+  contract_version: 'a2-synthetic-v1',
+  authorization_url: '/integrations/oauth?oauth_result=success&attempt_id=mock-oauth-attempt-001',
+  api_status: 'mock'
+});
+
+export const mockMarketplaceOAuthStatus = (id = 'mock-oauth-attempt-001') => successResponse({
+  attempt_id: id,
+  platform: 'shopee',
+  store_id: 1,
+  region: 'SG',
+  status: 'pending',
+  expires_at: '2099-01-01T00:05:00Z',
+  consumed_at: null,
+  last_error_code: '',
+  request_id: 'mock-request-001',
+  contract_version: 'a2-synthetic-v1',
+  api_status: 'mock'
+});
+
+export const mockMarketplaceOAuthAction = () => successResponse({
+  status: 'pending',
+  api_status: 'mock',
+  message: 'Synthetic action placeholder; no platform request was sent.'
+});
+
+export const mockMarketplaceOAuthRetry = () => mockMarketplaceOAuthInitiate();

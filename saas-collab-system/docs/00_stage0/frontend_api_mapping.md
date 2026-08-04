@@ -335,12 +335,12 @@ UI-P8 列表统一支持 `page`、`page_size`、`environment`、`status` 及合�
 |---|---|---|---|---|---|---|---|
 | 平台门店授权列表 | 后续内部平台接入页 | `/api/internal/integrations/store-authorizations/` | GET | `page`、`page_size`、`platform`、`status`、`store_id` | `count/next/previous/results`；授权元数据与凭据掩码，不返回引用原值 | 无前端 Mock 变更 | pending |
 | 平台门店授权详情 | 后续内部平台接入页 | `/api/internal/integrations/store-authorizations/{id}/` | GET | `id` | tenant/store scoped 授权元数据，不返回 Token/Secret | 无前端 Mock 变更 | pending |
-| 平台门店授权发起 | 后续内部平台接入页 | `/api/internal/integrations/store-authorizations/oauth/initiate/` | POST | `integration_config_id/store_id/platform/region/redirect_target_code`；header `Idempotency-Key` | `attempt_id/authorization_url/expires_at/request_id/status` | PR-A2 synthetic adapter（规划） | pending |
-| 平台 OAuth callback | 平台浏览器跳转 | `/api/platform/oauth/{platform}/callback/` | GET | 平台冻结字段 + 一次性 state；拒绝未知字段和 raw credential | 仅 302 到 allowlisted 页面；不回显平台 query | PR-A2 synthetic adapter（规划） | pending |
-| OAuth attempt 状态 | 后续内部平台接入页 | `/api/internal/integrations/oauth-attempts/{id}/` | GET | `id` | 脱敏状态、过期/消费时间、稳定错误码、request ID | PR-A2 synthetic adapter（规划） | pending |
-| 平台门店刷新/撤销/重试 | 后续内部平台接入页 | `/api/internal/integrations/store-authorizations/{id}/{refresh,revoke,retry}/` | POST | `id`；header `Idempotency-Key` | 掩码、引用版本、状态、稳定错误码 | PR-A2 synthetic adapter（规划） | pending |
+| 平台门店授权发起 | `/integrations/oauth` | `/api/internal/integrations/store-authorizations/oauth/initiate/` | POST | `integration_config_id/store_id/platform/region/redirect_target_code`；header `Idempotency-Key` | `attempt_id/authorization_url/expires_at/request_id/status`；不返回原始 state | `frontend/src/mock/integrations.js` | mock |
+| 平台 OAuth callback | 平台浏览器跳转 | `/api/platform/oauth/{platform}/callback/` | GET | 合同冻结字段 + 一次性 state；拒绝未知字段和 raw credential | 仅 302 到 allowlisted 页面；不回显平台 query | `backend/apps/integrations/oauth_adapters.py` | mock |
+| OAuth attempt 状态 | `/integrations/oauth` | `/api/internal/integrations/oauth-attempts/{id}/` | GET | `id` | 脱敏状态、过期/消费时间、稳定错误码、request ID | `frontend/src/mock/integrations.js` | mock |
+| 平台门店刷新/撤销/重试 | `/integrations/oauth` | `/api/internal/integrations/store-authorizations/{id}/{refresh,revoke,retry}/` | POST | `id`；header `Idempotency-Key`；仅 synthetic scenario | 掩码、引用版本、状态、稳定错误码 | `frontend/src/mock/integrations.js` | mock |
 | 平台门店同步 | 后续 | sync | POST | 未冻结 | 未注册路由 | 无 | pending |
 
 > PR-A1 只完成合同、模型、引用式凭据、权限和只读查询基础。未执行真实 OAuth、Sandbox 店铺请求或字段联调，所有 Shopee/TikTok Shop 能力均不得标记为 `connected`。
 
-> PR-A2 当前只完成规划下发。上述路径均未注册；获批应用控制台证据、密钥托管和网络出口专项安全评审通过前，仅允许 synthetic/mock 实现。
+> PR-A2 已注册 synthetic/mock 路径并完成离线负向测试；获批应用控制台证据、密钥托管和网络出口专项安全评审通过前，真实 Sandbox/Production adapter 保持关闭，以上能力最多标记为 `mock`，不得标记 `connected`。
