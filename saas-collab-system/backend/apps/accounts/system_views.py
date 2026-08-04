@@ -280,7 +280,7 @@ class SecurityOperationsView(APIView):
         require_all_scope(request.user, self.read_permission_code)
         credentials = PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant).values(
             "id", "platform", "account_alias", "environment", "status", "credential_fingerprint",
-            "credential_key_version", "last_verified_at", "updated_at",
+            "credential_key_version", "credential_mask", "credential_reference_version", "last_verified_at", "updated_at",
         )
         audit = OperationLog.objects.filter(tenant=request.user.tenant).values(
             "id", "module", "action", "object_type", "object_id", "created_at"
@@ -296,6 +296,6 @@ class SecurityOperationsView(APIView):
                 },
                 "credential_references": list(credentials),
                 "recent_audit": list(audit),
-                "credential_contract": "alias_fingerprint_reference_only",
+                "credential_contract": "external_reference_metadata_only",
             }
         )

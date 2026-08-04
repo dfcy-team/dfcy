@@ -1,89 +1,98 @@
-import base64
 import hashlib
-import json
+import re
 
-from django.conf import settings
-from rest_framework.exceptions import ValidationError
+from django.core.exceptions import ValidationError
+from django.db import transaction
 
-from .security import mask_secret, sanitize_payload
+from apps.common.exceptions import StateConflict
 
-
-class EncryptionProvider:
-    provider_name = "base"
-
-    def encrypt(self, credentials, key_version):
-        raise NotImplementedError
-
-    def decrypt(self, ciphertext):
-        raise NotImplementedError
+from .models import IntegrationAuditLog, PlatformIntegrationConfig
 
 
-class TestOnlyEncryptionProvider(EncryptionProvider):
-    provider_name = "test-only"
-
-    def encrypt(self, credentials, key_version):
-        payload = {"key_version": key_version, "credentials": credentials}
-        encoded = base64.urlsafe_b64encode(json.dumps(payload, sort_keys=True).encode()).decode()
-        return f"{self.provider_name}:{encoded}"
-
-    def decrypt(self, ciphertext):
-        prefix = f"{self.provider_name}:"
-        if not ciphertext.startswith(prefix):
-            raise ValidationError("Unsupported test ciphertext format.")
-        encoded = ciphertext.removeprefix(prefix)
-        payload = json.loads(base64.urlsafe_b64decode(encoded.encode()).decode())
-        return payload["credentials"]
+SYNTHETIC_REFERENCE_PATTERN = re.compile(r"^synthetic-[a-z0-9][a-z0-9._:-]{5,149}$")
+RAW_CREDENTIAL_FIELDS = {
+    "access_token",
+    "refresh_token",
+    "secret",
+    "api_key",
+    "api_secret",
+    "credentials",
+    "credential_ciphertext",
+    "cookie",
+    "session",
+}
 
 
-class UnconfiguredProductionEncryptionProvider(EncryptionProvider):
-    provider_name = "unconfigured-production"
-
-    def encrypt(self, credentials, key_version):
-        raise ValidationError("Production encryption provider is not configured.")
-
-    def decrypt(self, ciphertext):
-        raise ValidationError("Production encryption provider is not configured.")
+def reject_raw_credential_fields(payload):
+    keys = {str(key).lower() for key in (payload or {})}
+    if keys.intersection(RAW_CREDENTIAL_FIELDS):
+        raise ValidationError("Raw credentials are forbidden; submit custody reference metadata only.")
 
 
-def get_encryption_provider():
-    provider_name = getattr(settings, "INTEGRATION_ENCRYPTION_PROVIDER", "test-only")
-    if provider_name == "test-only":
-        return TestOnlyEncryptionProvider()
-    return UnconfiguredProductionEncryptionProvider()
+def validate_synthetic_reference(reference_id, field_name):
+    value = str(reference_id or "").strip()
+    if not SYNTHETIC_REFERENCE_PATTERN.fullmatch(value):
+        raise ValidationError({field_name: "Only synthetic reference IDs are accepted in this foundation phase."})
+    return value
 
 
-def _fingerprint(credentials):
-    encoded = json.dumps(credentials, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+def reference_mask(reference_id):
+    prefix = str(reference_id).split("-", 2)[:2]
+    return f"{'-'.join(prefix)}-***"
 
 
-def encrypt_credentials(credentials, key_version="test-v1", provider=None):
-    provider = provider or get_encryption_provider()
-    return provider.encrypt(credentials, key_version), _fingerprint(credentials)
+def reference_fingerprint(credential_id, token_id):
+    value = f"{credential_id}:{token_id}".encode()
+    return hashlib.sha256(value).hexdigest()
 
 
-def decrypt_credentials(ciphertext, provider=None):
-    provider = provider or get_encryption_provider()
-    return provider.decrypt(ciphertext)
+def build_reference_metadata(credential_id, token_id, version):
+    credential_id = validate_synthetic_reference(credential_id, "credential_id")
+    token_id = validate_synthetic_reference(token_id, "token_id")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        raise ValidationError({"credential_reference_version": "Reference version must be a positive integer."})
+    return {
+        "credential_id": credential_id,
+        "token_id": token_id,
+        "credential_mask": {
+            "credential": reference_mask(credential_id),
+            "token": reference_mask(token_id),
+        },
+        "credential_reference_version": version,
+        "credential_fingerprint": reference_fingerprint(credential_id, token_id),
+        "credential_key_version": f"reference-v{version}",
+    }
 
 
-def mask_credentials(credentials):
-    if not isinstance(credentials, dict):
-        return "***"
-    return {key: mask_secret(value) for key, value in sanitize_payload(credentials).items()}
+@transaction.atomic
+def rotate_config_references(config, *, credential_id, token_id, version, actor):
+    locked = PlatformIntegrationConfig.objects.select_for_update().get(pk=config.pk, tenant_id=config.tenant_id)
+    metadata = build_reference_metadata(credential_id, token_id, version)
+    if version <= locked.credential_reference_version:
+        raise StateConflict("Credential reference version must increase.")
 
-
-def rotate_credentials(config, credentials, key_version, actor):
-    ciphertext, fingerprint = encrypt_credentials(credentials, key_version=key_version)
-    config.credential_ciphertext = ciphertext
-    config.credential_key_version = key_version
-    config.credential_fingerprint = fingerprint
-    config.save(
-        update_fields=[
-            "credential_ciphertext",
-            "credential_key_version",
-            "credential_fingerprint",
-            "updated_at",
-        ]
+    previous = {
+        "credential_id": locked.credential_id,
+        "token_id": locked.token_id,
+        "credential_mask": locked.credential_mask,
+        "reference_version": locked.credential_reference_version,
+    }
+    for field, value in metadata.items():
+        setattr(locked, field, value)
+    locked.save(update_fields=[*metadata.keys(), "updated_at"])
+    IntegrationAuditLog.objects.create(
+        tenant=locked.tenant,
+        integration_config=locked,
+        action="rotate_config_reference",
+        actor=actor,
+        result=IntegrationAuditLog.Result.SUCCESS,
+        masked_detail={
+            "previous_reference": previous,
+            "credential_id": locked.credential_id,
+            "token_id": locked.token_id,
+            "credential_mask": locked.credential_mask,
+            "reference_version": locked.credential_reference_version,
+            "status": locked.status,
+        },
     )
-    return config
+    return locked

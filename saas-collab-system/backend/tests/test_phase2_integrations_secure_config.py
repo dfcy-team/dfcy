@@ -1,12 +1,9 @@
 import json
 
 import pytest
-from django.test import override_settings
-from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.integrations.credential_service import decrypt_credentials, encrypt_credentials
 from apps.integrations.models import IntegrationAuditLog, PlatformIntegrationConfig
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
@@ -76,11 +73,8 @@ def config_payload(account_alias="demo-account", environment="mock", status="act
         "account_alias": account_alias,
         "environment": environment,
         "status": status,
-        "credential_key_version": "test-v1",
-        "credentials": {
-            "api_key": "not-a-real-secret",
-            "api_secret": "placeholder-secret",
-        },
+        "credential_id": "synthetic-demo-config-credential",
+        "token_id": "synthetic-demo-config-token",
     }
 
 
@@ -244,26 +238,22 @@ def test_credentials_never_appear_in_api_response_or_audit_log():
 
     assert response.status_code == 201
     response_text = json.dumps(response.json())
-    assert "not-a-real-secret" not in response_text
-    assert "placeholder-secret" not in response_text
+    assert "synthetic-demo-config-credential" not in response_text
+    assert "synthetic-demo-config-token" not in response_text
     assert "credential_ciphertext" not in response_text
 
     audit = IntegrationAuditLog.objects.get(action="create")
     audit_text = json.dumps(audit.masked_detail)
-    assert "not-a-real-secret" not in audit_text
-    assert "placeholder-secret" not in audit_text
-    assert audit.masked_detail["credential_mask"]["api_key"] == "***"
+    assert "synthetic-demo-config-credential" not in audit_text
+    assert "synthetic-demo-config-token" not in audit_text
+    assert audit.masked_detail["credential_mask"]["credential"].endswith("***")
 
 
 @pytest.mark.django_db
-def test_test_provider_encrypts_decrypts_and_rotation_changes_key_version():
+def test_reference_rotation_is_atomic_and_changes_reference_version():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "tech-admin")
     grant_integration_access(user)
-
-    ciphertext, fingerprint = encrypt_credentials({"api_key": "not-a-real-secret"}, key_version="test-v1")
-    assert decrypt_credentials(ciphertext) == {"api_key": "not-a-real-secret"}
-    assert len(fingerprint) == 64
 
     create_response = authenticated_client(user).post(
         "/api/internal/integrations/configs/",
@@ -275,22 +265,48 @@ def test_test_provider_encrypts_decrypts_and_rotation_changes_key_version():
     rotate_response = authenticated_client(user).post(
         f"/api/internal/integrations/configs/{config_id}/rotate/",
         {
-            "credential_key_version": "test-v2",
-            "credentials": {"api_key": "demo-rotated", "api_secret": "placeholder-rotated"},
+            "credential_reference_version": 2,
+            "credential_id": "synthetic-demo-rotated-credential",
+            "token_id": "synthetic-demo-rotated-token",
         },
         format="json",
     )
 
     assert rotate_response.status_code == 200
-    assert rotate_response.json()["data"]["credential_key_version"] == "test-v2"
+    assert rotate_response.json()["data"]["credential_key_version"] == "reference-v2"
+    assert rotate_response.json()["data"]["credential_reference_version"] == 2
     assert "credential_ciphertext" not in rotate_response.json()["data"]
-    assert IntegrationAuditLog.objects.filter(action="rotate_credentials").exists()
+    assert "synthetic-demo-rotated-token" not in json.dumps(rotate_response.json())
+    assert IntegrationAuditLog.objects.filter(action="rotate_config_reference").exists()
+
+    conflict_response = authenticated_client(user).post(
+        f"/api/internal/integrations/configs/{config_id}/rotate/",
+        {
+            "credential_reference_version": 2,
+            "credential_id": "synthetic-demo-conflict-credential",
+            "token_id": "synthetic-demo-conflict-token",
+        },
+        format="json",
+    )
+    assert conflict_response.status_code == 409
+    assert conflict_response.json()["code"] == "STATE_CONFLICT"
 
 
-def test_unconfigured_production_provider_rejects_credential_operations():
-    with override_settings(INTEGRATION_ENCRYPTION_PROVIDER="unconfigured-production"):
-        with pytest.raises(ValidationError, match="not configured"):
-            encrypt_credentials({"api_key": "not-a-real-secret"})
+@pytest.mark.django_db
+def test_raw_credentials_are_rejected_without_persistence():
+    tenant = Tenant.objects.create(name="Tenant", code="raw-credential-rejection")
+    user = create_user(tenant, "raw-credential-user")
+    grant_integration_access(user)
+    payload = config_payload()
+    payload.pop("credential_id")
+    payload.pop("token_id")
+    payload["credentials"] = {"api_key": "forbidden-value"}
+
+    response = authenticated_client(user).post("/api/internal/integrations/configs/", payload, format="json")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "BUSINESS_RULE_VIOLATION"
+    assert not PlatformIntegrationConfig.objects.filter(tenant=tenant).exists()
 
 
 @pytest.mark.django_db

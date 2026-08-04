@@ -27,7 +27,8 @@ def _validate_non_empty_string_values(values, message):
         _invalid_scope(message)
 
 
-INTEGRATION_SCOPE_KEYS = {"platforms", "integration_config_ids", "resource_types"}
+INTEGRATION_SCOPE_KEYS = {"platforms", "integration_config_ids", "resource_types", "store_ids"}
+MARKETPLACE_PLATFORMS = {"shopee", "tiktok"}
 
 
 def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None):
@@ -159,7 +160,45 @@ def filter_integration_configs(user, queryset, permission_code):
     return queryset.filter(allowed).distinct()
 
 
-def integration_values_allowed(user, permission_code, *, platform=None, config_id=None, resource_type=None):
+def filter_store_authorizations(user, queryset, permission_code):
+    from apps.masterdata.models import StoreMaster
+
+    configs = permission_scope_configs(
+        user,
+        permission_code,
+        {"platforms", "store_ids"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    )
+    if configs is None:
+        return queryset
+    for config in configs:
+        if "platforms" in config:
+            _validate_non_empty_string_values(config["platforms"], "Store authorization scope has an invalid platform.")
+            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
+                _invalid_scope("Store authorization scope contains an unsupported platform.")
+        if "store_ids" in config:
+            _validate_positive_int_values(config["store_ids"], "Store authorization scope has an invalid store identifier.")
+            authorized_store_count = StoreMaster.objects.filter(
+                tenant=user.tenant,
+                id__in=set(config["store_ids"]),
+            ).count()
+            if authorized_store_count != len(set(config["store_ids"])):
+                raise DataScopeDenied(
+                    "Store authorization scope exceeds the current tenant.",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
+    allowed = Q(pk__in=[])
+    for config in configs:
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(platform__in=config["platforms"])
+        if "store_ids" in config:
+            condition &= Q(store_id__in=config["store_ids"])
+        allowed |= condition
+    return queryset.filter(allowed).distinct()
+
+
+def integration_values_allowed(user, permission_code, *, platform=None, config_id=None, resource_type=None, store_id=None):
     configs = permission_scope_configs(
         user,
         permission_code,
@@ -175,6 +214,8 @@ def integration_values_allowed(user, permission_code, *, platform=None, config_i
             continue
         if "resource_types" in config and resource_type not in set(config["resource_types"]):
             continue
+        if "store_ids" in config and store_id not in set(config["store_ids"]):
+            continue
         return True
     return False
 
@@ -183,7 +224,8 @@ def filter_sync_jobs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        INTEGRATION_SCOPE_KEYS,
+        {"platforms", "integration_config_ids", "resource_types"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
         return queryset
@@ -205,7 +247,8 @@ def filter_sync_runs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        INTEGRATION_SCOPE_KEYS,
+        {"platforms", "integration_config_ids", "resource_types"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
         return queryset
@@ -286,6 +329,11 @@ def _validate_integration_configs(configs):
             _validate_non_empty_string_values(
                 config["resource_types"],
                 "Integration data scope contains an invalid resource type.",
+            )
+        if "store_ids" in config:
+            _validate_positive_int_values(
+                config["store_ids"],
+                "Integration data scope contains an invalid store identifier.",
             )
 
 
