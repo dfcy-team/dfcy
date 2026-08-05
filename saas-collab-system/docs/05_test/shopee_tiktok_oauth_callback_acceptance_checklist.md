@@ -62,4 +62,3 @@
 - [ ] synthetic 通过后仅标记 `mock`。
 - [ ] Sandbox 只有在 A2-00 全部批准后执行并记录脱敏证据。
 - [ ] PR-A2 不连接 Production，不标记 `connected`，不导入订单/库存/退款或启用 webhook。
-

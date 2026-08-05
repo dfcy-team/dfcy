@@ -96,4 +96,3 @@ PR-A2 首先必须以 synthetic adapter 完成全合同测试。只有获批应�
 2. 完成 A2-02 至 A2-06 后提交 Draft stacked PR，base 为 A1 分支，不合并。
 3. P0/P1 清零后执行固定 HEAD R1；整个任务完成时按依赖顺序统一合并并重跑 integration。
 4. 任何真实 Sandbox 执行必须在报告中记录应用环境、合同版本、掩码证据和结果，不记录凭据或真实业务载荷。
-

@@ -60,7 +60,12 @@
 - Backend full pytest: `446 passed, 1 skipped`.
 - Frontend tests: `164 passed`.
 - Frontend build: PASS; 1957 modules, no chunk-size warning. Existing third-party `@vueuse/core` PURE-comment notices remain non-blocking.
-- Docker/MySQL 8.4 fresh migration, upgrade, failure rerun and concurrency evidence remain blocked by the unavailable local Docker Desktop Linux engine and MySQL client. No success is claimed for those checks.
+- Local Docker Desktop Linux engine recovery: PASS. The failed backend left the Docker WSL runtime without `dockerd`, `containerd` or the Docker socket; a targeted `docker-desktop` runtime restart and clean Docker Desktop restart restored the engine without resetting Docker data. Verified server `29.5.3`, Linux/amd64.
+- `sandbox.ps1 verify integration`: PASS against local MySQL 8.4. Backend `447 passed`, Phase 3 data quality checks passed, frontend `164 passed`, production build passed with 1957 modules, and the script emitted `LOCAL_SANDBOX_VERIFY=PASS profile=integration`.
+- MySQL 8.4 fresh migration: PASS on a new isolated database from all migrations through `integrations.0011`.
+- MySQL 8.4 upgrade and failure rerun: PASS. An approved synthetic legacy record plus one unknown legacy record caused `integrations.0008` to fail closed; the approved record remained unchanged. After the unknown record was remediated, rerun succeeded through `integrations.0011`, the approved reference was migrated, and all legacy credential columns were removed.
+- MySQL 8.4 row-lock concurrency: PASS; `test_concurrent_store_reference_rotation_serializes_on_mysql` completed as `1 passed` with no skip.
+- The two isolated migration probe databases were removed after verification. No Docker image, volume or Local Sandbox business database was reset or removed.
 
 ## Security boundary
 
