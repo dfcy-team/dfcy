@@ -11,6 +11,7 @@ from django.conf import settings
 
 _authorization_service_write = ContextVar("authorization_service_write", default=False)
 _oauth_service_write = ContextVar("oauth_service_write", default=False)
+_oauth_lease_write = ContextVar("oauth_lease_write", default=False)
 
 
 @contextmanager
@@ -29,6 +30,15 @@ def oauth_service_write():
         yield
     finally:
         _oauth_service_write.reset(token)
+
+
+@contextmanager
+def oauth_lease_write():
+    token = _oauth_lease_write.set(True)
+    try:
+        yield
+    finally:
+        _oauth_lease_write.reset(token)
 
 
 class PlatformChoices(models.TextChoices):
@@ -717,6 +727,31 @@ class MarketplaceOAuthOperation(models.Model):
         raise ValidationError("OAuth operations cannot be deleted.")
 
 
+class MarketplaceOAuthResourceLeaseQuerySet(models.QuerySet):
+    protected_fields = {
+        "tenant", "tenant_id", "object_type", "object_id",
+        "execution_owner", "fence_token", "lease_expires_at", "updated_at",
+    }
+
+    def update(self, **kwargs):
+        if not _oauth_lease_write.get() and self.protected_fields.intersection(kwargs):
+            raise ValidationError("OAuth resource leases can only be changed by the OAuth service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _oauth_lease_write.get():
+            raise ValidationError("OAuth resource leases must be created by the OAuth service layer.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        if not _oauth_lease_write.get() and self.protected_fields.intersection(fields):
+            raise ValidationError("OAuth resource leases can only be changed by the OAuth service layer.")
+        return super().bulk_update(objs, fields, **kwargs)
+
+    def delete(self):
+        raise ValidationError("OAuth resource leases cannot be deleted.")
+
+
 class MarketplaceOAuthResourceLease(models.Model):
     """Durable per-resource fencing state for OAuth mutations."""
 
@@ -729,6 +764,8 @@ class MarketplaceOAuthResourceLease(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = MarketplaceOAuthResourceLeaseQuerySet.as_manager()
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -739,6 +776,14 @@ class MarketplaceOAuthResourceLease(models.Model):
 
     def __str__(self):
         return f"{self.tenant_id}:{self.object_type}:{self.object_id}"
+
+    def save(self, *args, **kwargs):
+        if not _oauth_lease_write.get():
+            raise ValidationError("OAuth resource leases can only be written by the OAuth service layer.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("OAuth resource leases cannot be deleted.")
 
 
 class SyncJob(models.Model):

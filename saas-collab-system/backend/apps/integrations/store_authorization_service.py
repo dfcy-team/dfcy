@@ -9,6 +9,7 @@ from apps.common.exceptions import StateConflict
 from .credential_service import _revoke_old_references, build_reference_metadata, revoke_synthetic_references
 from .models import (
     IntegrationAuditLog,
+    MarketplaceOAuthOperation,
     MarketplaceStoreAuthorization,
     authorization_service_write,
     marketplace_identity_key,
@@ -60,6 +61,29 @@ def _validate_actor_tenant(actor, tenant_id):
         raise ValidationError("Authorization actor must belong to the authorization tenant.")
 
 
+def assert_operation_fence(operation_claim):
+    """Fail closed unless the OAuth execution claim still owns the durable operation fence.
+
+    Must run inside the caller's transaction so the operation row lock is held until the
+    fenced business write commits; after a takeover the old owner sees the bumped fence
+    or owner change and performs zero business writes.
+    """
+    if operation_claim is None:
+        return
+    if not getattr(operation_claim, "execution_owner", "") or not getattr(operation_claim, "operation_id_hash", ""):
+        raise StateConflict("OAuth operation requires an active execution claim.")
+    locked = MarketplaceOAuthOperation.objects.select_for_update().get(
+        operation_id_hash=operation_claim.operation_id_hash
+    )
+    if (
+        locked.execution_owner != operation_claim.execution_owner
+        or locked.execution_fence != operation_claim.execution_fence
+        or not locked.lease_expires_at
+        or locked.lease_expires_at <= timezone.now()
+    ):
+        raise StateConflict("OAuth operation execution claim is stale.")
+
+
 def _audit(record, actor, action, result=IntegrationAuditLog.Result.SUCCESS, extra=None):
     detail = {
         "credential_id": record.credential_id,
@@ -96,8 +120,10 @@ def create_store_authorization(
     token_id,
     scopes,
     actor,
+    operation_claim=None,
 ):
     _validate_actor_tenant(actor, tenant.id)
+    assert_operation_fence(operation_claim)
     metadata = build_reference_metadata(credential_id, token_id, 1)
     identity_key = marketplace_identity_key(platform, region, platform_store_id)
     if MarketplaceStoreAuthorization.objects.filter(
@@ -139,8 +165,9 @@ def _validate_transition(current, target):
 
 
 @transaction.atomic
-def transition_store_authorization(record, *, target_status, actor, error_code="", expires_at=None):
+def transition_store_authorization(record, *, target_status, actor, error_code="", expires_at=None, operation_claim=None):
     _validate_actor_tenant(actor, record.tenant_id)
+    assert_operation_fence(operation_claim)
     locked = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk)
     _validate_transition(locked.status, target_status)
     locked.status = target_status
@@ -190,11 +217,13 @@ def rotate_store_authorization_references(
     actor,
     expires_at=None,
     revoker=None,
+    operation_claim=None,
 ):
     _validate_actor_tenant(actor, record.tenant_id)
     metadata = build_reference_metadata(credential_id, token_id, version)
     failed = None
     with transaction.atomic():
+        assert_operation_fence(operation_claim)
         locked = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk)
         if locked.status == MarketplaceStoreAuthorization.Status.REVOKED:
             raise StateConflict("Revoked authorization references cannot be rotated.")

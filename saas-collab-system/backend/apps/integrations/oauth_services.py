@@ -23,10 +23,12 @@ from .models import (
     MarketplaceStoreAuthorization,
     PlatformIntegrationConfig,
     authorization_service_write,
+    oauth_lease_write,
     oauth_service_write,
 )
 from .oauth_adapters import OAuthAdapterError, SyntheticCustodyGateway, SyntheticMarketplaceAdapter
 from .store_authorization_service import (
+    assert_operation_fence,
     create_store_authorization,
     rotate_store_authorization_references,
     transition_store_authorization,
@@ -205,11 +207,12 @@ def claim_oauth_action(action, *, lease_seconds=60, allow_recovery=False):
             and locked.lease_expires_at > now
         ):
             return locked, False
-        resource_lease, _created = MarketplaceOAuthResourceLease.objects.select_for_update().get_or_create(
-            tenant=locked.tenant,
-            object_type=locked.object_type,
-            object_id=locked.object_id,
-        )
+        with oauth_lease_write():
+            resource_lease, _created = MarketplaceOAuthResourceLease.objects.select_for_update().get_or_create(
+                tenant=locked.tenant,
+                object_type=locked.object_type,
+                object_id=locked.object_id,
+            )
         if (
             resource_lease.execution_owner
             and resource_lease.lease_expires_at
@@ -220,7 +223,8 @@ def claim_oauth_action(action, *, lease_seconds=60, allow_recovery=False):
         resource_lease.fence_token += 1
         resource_lease.execution_owner = owner
         resource_lease.lease_expires_at = now + timedelta(seconds=lease_seconds)
-        resource_lease.save(update_fields=["fence_token", "execution_owner", "lease_expires_at", "updated_at"])
+        with oauth_lease_write():
+            resource_lease.save(update_fields=["fence_token", "execution_owner", "lease_expires_at", "updated_at"])
         locked.status = MarketplaceOAuthAction.Status.RUNNING
         locked.execution_owner = owner
         locked.execution_fence = resource_lease.fence_token
@@ -311,6 +315,21 @@ def _update_operation(operation_id_hash, *, claim, status=None, phase=None, erro
         return operation
 
 
+_OAUTH_OPERATION_TERMINAL_PHASES = {
+    "initiate": "initiate_completed",
+    "refresh": "refresh_completed",
+    "revoke": "revoke_completed",
+    "retry": "retry_completed",
+    "exchange": "completed",
+}
+_OAUTH_OPERATION_TERMINAL_STATUSES = {
+    MarketplaceOAuthOperation.Status.SUCCEEDED,
+    MarketplaceOAuthOperation.Status.FAILED,
+    MarketplaceOAuthOperation.Status.COMPENSATION_REQUIRED,
+    MarketplaceOAuthOperation.Status.RECONCILE_REQUIRED,
+}
+
+
 def complete_oauth_action(action, data, *, response_status=200, authorization=None, attempt=None):
     _require_synthetic()
     with transaction.atomic():
@@ -355,10 +374,22 @@ def complete_oauth_action(action, data, *, response_status=200, authorization=No
                 operation_id_hash=locked.operation_id_hash
             )
             _assert_operation_claim(operation, action)
+            if operation.status not in _OAUTH_OPERATION_TERMINAL_STATUSES:
+                operation.status = MarketplaceOAuthOperation.Status.SUCCEEDED
+                operation.phase = _OAUTH_OPERATION_TERMINAL_PHASES.get(operation.action, "completed")
+                if authorization is not None and operation.authorization_id is None:
+                    operation.authorization = authorization
+                if attempt is not None and operation.attempt_id is None:
+                    operation.attempt = attempt
             operation.execution_owner = ""
             operation.lease_expires_at = None
-            operation.save(update_fields=["execution_owner", "lease_expires_at", "updated_at"])
-        resource_lease.save(update_fields=["execution_owner", "lease_expires_at", "updated_at"])
+            with oauth_service_write():
+                operation.save(update_fields=[
+                    "status", "phase", "authorization", "attempt",
+                    "execution_owner", "lease_expires_at", "updated_at"
+                ])
+        with oauth_lease_write():
+            resource_lease.save(update_fields=["execution_owner", "lease_expires_at", "updated_at"])
         return locked
 
 
@@ -403,10 +434,23 @@ def fail_oauth_action(action, error_code, *, reconcile=False, data=None):
                 operation_id_hash=locked.operation_id_hash
             )
             _assert_operation_claim(operation, action)
+            if operation.status not in _OAUTH_OPERATION_TERMINAL_STATUSES:
+                operation.status = (
+                    MarketplaceOAuthOperation.Status.RECONCILE_REQUIRED
+                    if reconcile
+                    else MarketplaceOAuthOperation.Status.FAILED
+                )
+                operation.phase = "action_failed"
+                operation.last_error_code = error_code
             operation.execution_owner = ""
             operation.lease_expires_at = None
-            operation.save(update_fields=["execution_owner", "lease_expires_at", "updated_at"])
-        resource_lease.save(update_fields=["execution_owner", "lease_expires_at", "updated_at"])
+            with oauth_service_write():
+                operation.save(update_fields=[
+                    "status", "phase", "last_error_code",
+                    "execution_owner", "lease_expires_at", "updated_at"
+                ])
+        with oauth_lease_write():
+            resource_lease.save(update_fields=["execution_owner", "lease_expires_at", "updated_at"])
         return locked
 
 
@@ -611,9 +655,10 @@ def create_oauth_operation(*, tenant, action, attempt=None, authorization=None, 
         ), operation_id
 
 
-def _set_reconcile_required(authorization, actor, error_code, operation_id=None):
+def _set_reconcile_required(authorization, actor, error_code, operation_id=None, operation_claim=None):
     _require_synthetic()
     with transaction.atomic():
+        assert_operation_fence(operation_claim)
         locked = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=authorization.pk)
         locked.status = MarketplaceStoreAuthorization.Status.RECONCILE_REQUIRED
         locked.last_error_code = error_code
@@ -681,6 +726,7 @@ def _complete_exchange(*, attempt, operation_claim, reference, platform_store_id
                 token_id=reference["token_id"],
                 version=target_version,
                 actor=attempt.internal_user,
+                operation_claim=operation_claim,
             )
     elif authorization:
         same_reference = (
@@ -703,6 +749,7 @@ def _complete_exchange(*, attempt, operation_claim, reference, platform_store_id
             token_id=reference["token_id"],
             scopes=["oauth.synthetic.read"],
             actor=attempt.internal_user,
+            operation_claim=operation_claim,
         )
     _update_operation(
         operation_hash,
@@ -717,8 +764,10 @@ def _complete_exchange(*, attempt, operation_claim, reference, platform_store_id
             authorization,
             target_status=MarketplaceStoreAuthorization.Status.ACTIVE,
             actor=attempt.internal_user,
+            operation_claim=operation_claim,
         )
     with transaction.atomic():
+        assert_operation_fence(operation_claim)
         locked = MarketplaceOAuthAttempt.objects.select_for_update().get(pk=attempt.pk)
         if locked.status != MarketplaceOAuthAttempt.Status.SUCCEEDED:
             with oauth_service_write():
@@ -845,6 +894,7 @@ def refresh_authorization(*, authorization, actor, operation_id, operation_claim
             token_id=reference["token_id"],
             version=target_version,
             actor=actor,
+            operation_claim=operation_claim,
         )
     _update_operation(
         operation_hash,
@@ -874,6 +924,7 @@ def revoke_authorization(*, authorization, actor, operation_id, operation_claim,
             authorization,
             target_status=MarketplaceStoreAuthorization.Status.REVOKING,
             actor=actor,
+            operation_claim=operation_claim,
         )
     _update_operation(
         operation_hash,
@@ -896,6 +947,7 @@ def revoke_authorization(*, authorization, actor, operation_id, operation_claim,
                 actor,
                 "OAUTH_REVOKE_RECONCILE_REQUIRED",
                 operation_id=operation_id,
+                operation_claim=operation_claim,
             )
             _update_operation(
                 operation_hash,
@@ -918,6 +970,7 @@ def revoke_authorization(*, authorization, actor, operation_id, operation_claim,
             authorization,
             target_status=MarketplaceStoreAuthorization.Status.REVOKED,
             actor=actor,
+            operation_claim=operation_claim,
         )
     _update_operation(
         operation_hash,
@@ -948,6 +1001,50 @@ def recover_oauth_operation(operation_id_hash, *, actor=None):
     action_record = MarketplaceOAuthAction.objects.filter(
         operation_id_hash=operation.operation_id_hash
     ).first()
+    if (
+        action_record is not None
+        and action_record.status in {
+            MarketplaceOAuthAction.Status.SUCCEEDED,
+            MarketplaceOAuthAction.Status.FAILED,
+            MarketplaceOAuthAction.Status.RECONCILE_REQUIRED,
+        }
+        and operation.status not in _OAUTH_OPERATION_TERMINAL_STATUSES
+    ):
+        # Crash window: the action committed its terminal state but the bound operation did not.
+        # Converge the operation to the action's terminal state idempotently; no business side
+        # effect is repeated because every business write of this operation already committed
+        # before the action terminal commit.
+        converge_claim, claimed = claim_oauth_operation(operation)
+        if not claimed:
+            raise StateConflict("OAuth operation is already being recovered.")
+        if action_record.status == MarketplaceOAuthAction.Status.SUCCEEDED:
+            _update_operation(
+                operation.operation_id_hash,
+                claim=converge_claim,
+                status=MarketplaceOAuthOperation.Status.SUCCEEDED,
+                phase=_OAUTH_OPERATION_TERMINAL_PHASES.get(operation.action, "completed"),
+                authorization=operation.authorization or action_record.authorization,
+                attempt=operation.attempt or action_record.attempt,
+                release=True,
+            )
+            return {"status": "succeeded", "operation_id_hash": operation.operation_id_hash}
+        _update_operation(
+            operation.operation_id_hash,
+            claim=converge_claim,
+            status=(
+                MarketplaceOAuthOperation.Status.RECONCILE_REQUIRED
+                if action_record.status == MarketplaceOAuthAction.Status.RECONCILE_REQUIRED
+                else MarketplaceOAuthOperation.Status.FAILED
+            ),
+            phase="action_failed",
+            error_code=action_record.error_code or "OAUTH_ACTION_FAILED",
+            release=True,
+        )
+        return {
+            "status": "compensated",
+            "error_code": action_record.error_code or "OAUTH_ACTION_FAILED",
+            "operation_id_hash": operation.operation_id_hash,
+        }
     if operation.status == MarketplaceOAuthOperation.Status.SUCCEEDED:
         if action_record and action_record.status != MarketplaceOAuthAction.Status.SUCCEEDED:
             operation_claim, claimed = claim_oauth_action(action_record, allow_recovery=True)
