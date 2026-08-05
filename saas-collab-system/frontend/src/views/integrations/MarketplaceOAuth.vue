@@ -89,6 +89,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { formatApiError } from '../../api/request';
+import { navigateToOAuthAuthorization } from '../../utils/oauthNavigation';
 import {
   fetchMarketplaceOAuthAttempt,
   fetchMarketplaceOAuthTargets,
@@ -212,7 +213,7 @@ async function startAuthorization() {
     attempt.value = response.data || {};
     attemptId.value = response.data?.attempt_id || response.data?.id || '';
     startPolling();
-    if (response.data?.authorization_url) window.location.assign(response.data.authorization_url);
+    if (response.data?.authorization_url) navigateToOAuthAuthorization(response.data.authorization_url);
   } catch (error) {
     showError(error, 'Unable to start authorization.');
   } finally {
@@ -237,6 +238,11 @@ async function runAction(action) {
     await loadReferenceData();
     if (response.data?.attempt_id) {
       attemptId.value = String(response.data.attempt_id);
+      startPolling();
+      if (response.data?.authorization_url) {
+        navigateToOAuthAuthorization(response.data.authorization_url);
+        return;
+      }
       await loadAttempt();
     }
   } catch (error) {

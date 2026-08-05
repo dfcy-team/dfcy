@@ -480,9 +480,18 @@ class MarketplaceOAuthAttempt(models.Model):
 
 
 class MarketplaceOAuthActionQuerySet(models.QuerySet):
+    immutable_binding_fields = {
+        "tenant", "tenant_id", "internal_user", "internal_user_id", "action",
+        "object_type", "object_id", "session_hash", "idempotency_key_hash",
+        "request_fingerprint_hash", "operation_id_hash", "attempt", "attempt_id",
+        "authorization", "authorization_id",
+    }
+
     def update(self, **kwargs):
         if not _oauth_service_write.get():
             raise ValidationError("OAuth actions can only be changed by the OAuth service layer.")
+        if self.immutable_binding_fields.intersection(kwargs):
+            raise ValidationError("OAuth action bindings cannot be changed by QuerySet update.")
         return super().update(**kwargs)
 
     def bulk_create(self, objs, **kwargs):
@@ -493,6 +502,8 @@ class MarketplaceOAuthActionQuerySet(models.QuerySet):
     def bulk_update(self, objs, fields, **kwargs):
         if not _oauth_service_write.get():
             raise ValidationError("OAuth actions can only be changed by the OAuth service layer.")
+        if self.immutable_binding_fields.intersection(fields):
+            raise ValidationError("OAuth action bindings cannot be changed by bulk update.")
         return super().bulk_update(objs, fields, **kwargs)
 
     def delete(self):
@@ -545,6 +556,7 @@ class MarketplaceOAuthAction(models.Model):
     response_status = models.PositiveSmallIntegerField(default=200)
     error_code = models.CharField(max_length=80, blank=True)
     execution_owner = models.CharField(max_length=64, blank=True)
+    execution_fence = models.PositiveBigIntegerField(default=0)
     lease_expires_at = models.DateTimeField(null=True, blank=True)
     contract_version = models.CharField(max_length=40, default="a2-synthetic-v1")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -556,7 +568,7 @@ class MarketplaceOAuthAction(models.Model):
         ordering = ["-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "internal_user", "action", "object_type", "object_id", "idempotency_key_hash"],
+                fields=["tenant", "internal_user", "action", "idempotency_key_hash"],
                 name="uniq_oauth_action_scope_key",
             ),
         ]
@@ -577,8 +589,27 @@ class MarketplaceOAuthAction(models.Model):
             errors["internal_user"] = "OAuth action user must belong to the action tenant."
         if self.attempt_id and self.tenant_id and self.attempt.tenant_id != self.tenant_id:
             errors["attempt"] = "OAuth action attempt must belong to the action tenant."
+        if self.attempt_id and self.internal_user_id and self.attempt.internal_user_id != self.internal_user_id:
+            errors["attempt"] = "OAuth action attempt must belong to the action user."
         if self.authorization_id and self.tenant_id and self.authorization.tenant_id != self.tenant_id:
             errors["authorization"] = "OAuth action authorization must belong to the action tenant."
+        if self.attempt_id and self.authorization_id:
+            if self.attempt.store_id != self.authorization.store_id:
+                errors["authorization"] = "OAuth action attempt and authorization must bind one store."
+            if self.attempt.integration_config_id != self.authorization.integration_config_id:
+                errors["authorization"] = "OAuth action attempt and authorization must bind one config."
+            if self.attempt.platform != self.authorization.platform:
+                errors["authorization"] = "OAuth action attempt and authorization must bind one platform."
+        if self.object_type == "oauth_attempt" and (
+            not self.attempt_id or self.object_id != str(self.attempt_id)
+        ):
+            errors["object_id"] = "OAuth attempt actions must bind their attempt ID."
+        if self.object_type == "store_authorization" and (
+            not self.authorization_id or self.object_id != str(self.authorization_id)
+        ):
+            errors["object_id"] = "Store authorization actions must bind their authorization ID."
+        if self.object_type == "store_target" and self.attempt_id and self.object_id != str(self.attempt.store_id):
+            errors["object_id"] = "OAuth initiation target must bind the attempt store."
         if errors:
             raise ValidationError(errors)
 
@@ -587,9 +618,16 @@ class MarketplaceOAuthAction(models.Model):
 
 
 class MarketplaceOAuthOperationQuerySet(models.QuerySet):
+    immutable_binding_fields = {
+        "tenant", "tenant_id", "action", "operation_id_hash", "attempt", "attempt_id",
+        "authorization", "authorization_id",
+    }
+
     def update(self, **kwargs):
         if not _oauth_service_write.get():
             raise ValidationError("OAuth operations can only be changed by the OAuth service layer.")
+        if self.immutable_binding_fields.intersection(kwargs):
+            raise ValidationError("OAuth operation bindings cannot be changed by QuerySet update.")
         return super().update(**kwargs)
 
     def bulk_create(self, objs, **kwargs):
@@ -600,6 +638,8 @@ class MarketplaceOAuthOperationQuerySet(models.QuerySet):
     def bulk_update(self, objs, fields, **kwargs):
         if not _oauth_service_write.get():
             raise ValidationError("OAuth operations can only be changed by the OAuth service layer.")
+        if self.immutable_binding_fields.intersection(fields):
+            raise ValidationError("OAuth operation bindings cannot be changed by bulk update.")
         return super().bulk_update(objs, fields, **kwargs)
 
     def delete(self):
@@ -635,6 +675,9 @@ class MarketplaceOAuthOperation(models.Model):
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
     metadata = models.JSONField(default=dict, blank=True)
     last_error_code = models.CharField(max_length=80, blank=True)
+    execution_owner = models.CharField(max_length=64, blank=True)
+    execution_fence = models.PositiveBigIntegerField(default=0)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
     contract_version = models.CharField(max_length=40, default="a2-synthetic-v1")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -660,11 +703,42 @@ class MarketplaceOAuthOperation(models.Model):
             errors["attempt"] = "OAuth operation attempt must belong to the operation tenant."
         if self.authorization_id and self.tenant_id and self.authorization.tenant_id != self.tenant_id:
             errors["authorization"] = "OAuth operation authorization must belong to the operation tenant."
+        if self.attempt_id and self.authorization_id:
+            if self.attempt.store_id != self.authorization.store_id:
+                errors["authorization"] = "OAuth operation attempt and authorization must bind one store."
+            if self.attempt.integration_config_id != self.authorization.integration_config_id:
+                errors["authorization"] = "OAuth operation attempt and authorization must bind one config."
+            if self.attempt.platform != self.authorization.platform:
+                errors["authorization"] = "OAuth operation attempt and authorization must bind one platform."
         if errors:
             raise ValidationError(errors)
 
     def delete(self, *args, **kwargs):
         raise ValidationError("OAuth operations cannot be deleted.")
+
+
+class MarketplaceOAuthResourceLease(models.Model):
+    """Durable per-resource fencing state for OAuth mutations."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="marketplace_oauth_resource_leases")
+    object_type = models.CharField(max_length=40)
+    object_id = models.CharField(max_length=80)
+    execution_owner = models.CharField(max_length=64, blank=True)
+    fence_token = models.PositiveBigIntegerField(default=0)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "object_type", "object_id"],
+                name="uniq_oauth_resource_lease",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.object_type}:{self.object_id}"
 
 
 class SyncJob(models.Model):

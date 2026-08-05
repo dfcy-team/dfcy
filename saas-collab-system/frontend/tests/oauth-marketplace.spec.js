@@ -23,7 +23,10 @@ describe('Marketplace OAuth frontend contract', () => {
 
   it('uses server authorization URLs and never persists callback secrets', () => {
     const page = read('src/views/integrations/MarketplaceOAuth.vue');
-    expect(page).toContain('window.location.assign(response.data.authorization_url)');
+    const navigation = read('src/utils/oauthNavigation.js');
+    expect(page).toContain('navigateToOAuthAuthorization(response.data.authorization_url)');
+    expect(navigation).toContain('window.location.assign(authorizationUrl)');
+    expect(navigation).toContain('https://synthetic.invalid/');
     expect(page).not.toMatch(/localStorage|sessionStorage|authorization_url\s*=|state\s*=\s*route/);
     expect(page).not.toContain('credential_ciphertext');
   });

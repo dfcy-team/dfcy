@@ -1,4 +1,3 @@
-import hashlib
 import json
 import uuid
 
@@ -8,7 +7,6 @@ from django.shortcuts import get_object_or_404
 from urllib.parse import urlencode
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from rest_framework.permissions import IsAuthenticated
 
 from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied, StateConflict, get_scoped_object_or_404
@@ -25,6 +23,7 @@ from apps.permissions.api_permissions import (
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
     IsIntegrationViewer,
+    IsInternalUser,
     IsMarketplaceCredentialRotator,
     IsMarketplaceStoreAuthorizer,
     IsMarketplaceStoreRetryRunner,
@@ -53,10 +52,9 @@ from .models import MarketplaceOAuthAttempt
 from .oauth_adapters import OAuthAdapterError, SyntheticMarketplaceAdapter
 from .oauth_serializers import MarketplaceOAuthAttemptSerializer
 from .oauth_services import (
-    consume_callback,
+    begin_callback_handoff,
     begin_oauth_action,
     complete_oauth_action,
-    create_oauth_operation,
     exchange_callback,
     fail_oauth_action,
     fail_attempt,
@@ -65,7 +63,7 @@ from .oauth_services import (
     refresh_authorization,
     revoke_authorization,
     _require_synthetic,
-    expire_oauth_attempts,
+    _update_operation,
     wait_for_oauth_action,
 )
 from .serializers import (
@@ -294,7 +292,7 @@ OAUTH_TARGET_PERMISSIONS = {
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsInternalUser])
 def oauth_target_collection(request):
     action = str(request.query_params.get("action", "authorize"))
     permission_code = OAUTH_TARGET_PERMISSIONS.get(action)
@@ -387,13 +385,26 @@ def oauth_initiate(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsMarketplaceStoreAuthorizer])
+@permission_classes([IsInternalUser])
 def oauth_attempt_detail(request, pk):
     attempt = get_scoped_object_or_404(
         MarketplaceOAuthAttempt.objects.filter(tenant=request.user.tenant),
         pk=pk,
     )
-    if not _oauth_attempt_scope_allowed(request.user, attempt):
+    permission_code = None
+    if user_has_integration_permission(request.user, "integrations.store.authorize"):
+        permission_code = "integrations.store.authorize"
+    elif (
+        user_has_integration_permission(request.user, "integrations.store.retry")
+        and attempt.actions.filter(
+            action=MarketplaceOAuthAction.Action.RETRY,
+            internal_user=request.user,
+        ).exists()
+    ):
+        permission_code = "integrations.store.retry"
+    if not permission_code:
+        raise PermissionDenied("OAuth attempt status is not permitted for this action.")
+    if not _oauth_attempt_scope_allowed(request.user, attempt, permission_code):
         raise DataScopeDenied("OAuth attempt is outside the authorized store scope.", error_code=ErrorCode.DATA_SCOPE_FORBIDDEN)
     return success_response({**MarketplaceOAuthAttemptSerializer(attempt).data, "api_status": "mock"})
 
@@ -427,47 +438,52 @@ def oauth_callback(request, platform):
     state = query.get("state")
     if not state:
         return error_response("OAUTH_STATE_INVALID", "OAuth state is required.", status=422)
-    expire_oauth_attempts(exclude_state_hash=hashlib.sha256(state.encode()).hexdigest())
-    attempt = MarketplaceOAuthAttempt.objects.filter(state_hash=hashlib.sha256(state.encode()).hexdigest()).first()
-    if not attempt or attempt.platform != platform:
-        return error_response("OAUTH_STATE_INVALID", "OAuth state is invalid.", status=422)
-    _operation, operation_id = create_oauth_operation(tenant=attempt.tenant, action="exchange", attempt=attempt)
+    attempt = None
+    operation = None
     try:
-        attempt = consume_callback(platform=platform, state=state, request=request)
-        from .oauth_services import _update_operation
-        _update_operation(
-            hashlib.sha256(operation_id.encode()).hexdigest(),
-            phase="callback_received",
-            attempt=attempt,
-        )
+        attempt, operation = begin_callback_handoff(platform=platform, state=state, request=request)
         from .oauth_adapters import SyntheticMarketplaceAdapter
         callback = SyntheticMarketplaceAdapter().validate_callback(platform=platform, query=query, expected_state=state)
         if callback.platform_store_id and callback.platform_store_id != f"synthetic-store-{attempt.store_id}":
             raise OAuthAdapterError("OAUTH_STORE_MISMATCH", 422)
-        exchange_callback(attempt=attempt, callback=callback, operation_id=operation_id)
+        exchange_callback(
+            attempt=attempt,
+            callback=callback,
+            operation_id=operation.operation_id_hash,
+            operation_claim=operation,
+        )
         return _oauth_redirect(attempt, "success")
     except OAuthAdapterError as exc:
-        from .oauth_services import _update_operation
-        _update_operation(
-            operation_id and hashlib.sha256(operation_id.encode()).hexdigest(),
-            status="failed",
-            phase="callback_failed",
-            error_code=exc.error_code,
-        )
-        if exc.error_code != "OAUTH_STATE_EXPIRED" and exc.error_code != "OAUTH_STATE_CONSUMED":
+        attempt = attempt or getattr(exc, "attempt", None)
+        if operation:
+            _update_operation(
+                operation.operation_id_hash,
+                claim=operation,
+                status="failed",
+                phase="callback_failed",
+                error_code=exc.error_code,
+                release=True,
+            )
             fail_attempt(attempt, error_code=exc.error_code, actor=attempt.internal_user)
         if exc.error_code == "OAUTH_STATE_CONSUMED":
             return error_response(exc.error_code, "OAuth state was already consumed.", status=409)
+        if not attempt:
+            return error_response(exc.error_code, "OAuth state is invalid.", status=exc.http_status)
         return _oauth_redirect(attempt, "failed", exc.error_code)
     except Exception:
-        from .oauth_services import _update_operation
-        _update_operation(
-            hashlib.sha256(operation_id.encode()).hexdigest(),
-            status="failed",
-            phase="callback_failed",
-            error_code="OAUTH_CALLBACK_FAILED",
-        )
-        fail_attempt(attempt, error_code="OAUTH_CALLBACK_FAILED", actor=attempt.internal_user)
+        if operation:
+            _update_operation(
+                operation.operation_id_hash,
+                claim=operation,
+                status="failed",
+                phase="callback_failed",
+                error_code="OAUTH_CALLBACK_FAILED",
+                release=True,
+            )
+        if attempt:
+            fail_attempt(attempt, error_code="OAUTH_CALLBACK_FAILED", actor=attempt.internal_user)
+        else:
+            return error_response("OAUTH_CALLBACK_FAILED", "OAuth callback failed.", status=503)
         return _oauth_redirect(attempt, "failed", "OAUTH_CALLBACK_FAILED")
 
 
@@ -515,6 +531,7 @@ def refresh_store_authorization(request, pk):
             authorization=authorization,
             actor=request.user,
             operation_id=operation_id,
+            operation_claim=action,
             scenario=request.data.get("scenario", ""),
         )
     except OAuthAdapterError as exc:
@@ -564,6 +581,7 @@ def revoke_store_authorization(request, pk):
             authorization=authorization,
             actor=request.user,
             operation_id=operation_id,
+            operation_claim=action,
             scenario=request.data.get("scenario", ""),
         )
     except OAuthAdapterError as exc:

@@ -103,12 +103,14 @@ class SyntheticCustodyGateway:
 
     def refresh_and_store(self, *, authorization, operation_id, scenario=""):
         self._scenario(str(scenario))
+        operation_hash = hashlib.sha256(str(operation_id).encode()).hexdigest()
+        version = authorization.credential_reference_version + 1
         return {
-            "credential_id": f"synthetic-refresh-{authorization.pk}-credential",
-            "token_id": f"synthetic-refresh-{authorization.pk}-token",
-            "credential_reference_version": authorization.credential_reference_version + 1,
+            "credential_id": f"synthetic-refresh-{authorization.pk}-{version}-{operation_hash[:12]}-credential",
+            "token_id": f"synthetic-refresh-{authorization.pk}-{version}-{operation_hash[:12]}-token",
+            "credential_reference_version": version,
             "expires_at": None,
-            "operation_id_hash": hashlib.sha256(str(operation_id).encode()).hexdigest(),
+            "operation_id_hash": operation_hash,
         }
 
     def revoke(self, *, authorization, operation_id, scenario=""):

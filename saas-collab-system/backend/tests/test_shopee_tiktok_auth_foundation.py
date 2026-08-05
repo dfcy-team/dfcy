@@ -3,13 +3,17 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib
 import json
 import threading
+from datetime import timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+import apps.integrations.oauth_services as oauth_services_module
+import apps.integrations.views as oauth_views_module
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, migrations
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -19,14 +23,23 @@ from apps.integrations.models import (
     IntegrationAuditLog,
     MarketplaceOAuthAction,
     MarketplaceOAuthOperation,
+    MarketplaceOAuthResourceLease,
     MarketplaceStoreAuthorization,
     PlatformIntegrationConfig,
     marketplace_identity_key,
 )
 from apps.integrations.admin import MarketplaceStoreAuthorizationAdmin, PlatformIntegrationConfigAdmin
 from apps.integrations.credential_service import rotate_config_references
-from apps.integrations.oauth_adapters import synthetic_callback_signature
+from apps.integrations.oauth_adapters import OAuthAdapterError, synthetic_callback_signature
 from apps.integrations.models import MarketplaceOAuthAttempt, oauth_service_write
+from apps.integrations.oauth_services import (
+    _update_operation,
+    begin_oauth_action,
+    claim_oauth_action,
+    complete_oauth_action,
+    fail_oauth_action,
+    recover_oauth_operation,
+)
 from apps.integrations.store_authorization_service import (
     create_store_authorization,
     rotate_store_authorization_references,
@@ -53,6 +66,30 @@ EXACT_PERMISSION_CLASSES = {
     "integrations.store.retry": IsMarketplaceStoreRetryRunner,
     "integrations.credential.rotate": IsMarketplaceCredentialRotator,
 }
+
+
+def oauth_service_request(path, key, body=None, session_key="test-oauth-session"):
+    return SimpleNamespace(
+        method="POST",
+        path=path,
+        headers={"Idempotency-Key": key},
+        session=SimpleNamespace(session_key=session_key, create=lambda: None),
+        data=body or {},
+    )
+
+
+def expire_oauth_claim(action):
+    expired_at = timezone.now() - timedelta(seconds=1)
+    with oauth_service_write():
+        MarketplaceOAuthAction.objects.filter(pk=action.pk).update(lease_expires_at=expired_at)
+        MarketplaceOAuthOperation.objects.filter(operation_id_hash=action.operation_id_hash).update(
+            lease_expires_at=expired_at
+        )
+    MarketplaceOAuthResourceLease.objects.filter(
+        tenant=action.tenant,
+        object_type=action.object_type,
+        object_id=action.object_id,
+    ).update(lease_expires_at=expired_at)
 
 
 def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
@@ -752,8 +789,42 @@ def test_legacy_config_has_no_persistent_secret_fields():
     assert "credential_ciphertext" not in platform_fields
 
 
+def test_global_oauth_idempotency_migration_preflights_before_writing():
+    module = importlib.import_module(
+        "apps.integrations.migrations.0013_marketplaceoauthresourcelease_and_more"
+    )
+
+    class DuplicateQuery:
+        def values(self, *_args):
+            return self
+
+        def annotate(self, **_kwargs):
+            return self
+
+        def filter(self, **_kwargs):
+            return self
+
+        def exists(self):
+            return True
+
+    fake_model = SimpleNamespace(objects=DuplicateQuery())
+    fake_apps = SimpleNamespace(get_model=lambda *_args: fake_model)
+    with pytest.raises(RuntimeError, match="duplicates must be reconciled"):
+        module.preflight_global_idempotency_key(fake_apps, None)
+
+
 def oauth_scope_payload(config=None):
     return config or {"platforms": ["shopee", "tiktok"], "store_ids": [1]}
+
+
+def oauth_initiate_payload(store, config):
+    return {
+        "integration_config_id": config.id,
+        "store_id": store.id,
+        "platform": config.platform,
+        "region": "SG",
+        "redirect_target_code": "integrations",
+    }
 
 
 @pytest.mark.django_db
@@ -896,10 +967,21 @@ def test_oauth_cross_tenant_session_replay_and_exact_permission_are_denied():
     store_id = f"synthetic-store-{store.id}"
     signature = synthetic_callback_signature("shopee", state, code, store_id)
     other_client = client_for(other_user)
+    operation_count = MarketplaceOAuthOperation.objects.count()
+    audit_count = IntegrationAuditLog.objects.count()
     replay = other_client.get("/api/platform/oauth/shopee/callback/", {"state": state, "code": code, "platform_store_id": store_id, "signature": signature})
-    assert replay.status_code == 302
-    assert "OAUTH_STATE_INVALID" in replay["Location"]
+    assert replay.status_code == 422
+    attempt = MarketplaceOAuthAttempt.objects.get(pk=initiated.json()["data"]["attempt_id"])
+    assert attempt.status == MarketplaceOAuthAttempt.Status.INITIATED
+    assert attempt.consumed_at is None
+    assert MarketplaceOAuthOperation.objects.count() == operation_count
+    assert IntegrationAuditLog.objects.count() == audit_count
     assert not MarketplaceStoreAuthorization.objects.filter(tenant=tenant).exists()
+    assert not MarketplaceStoreAuthorization.objects.filter(tenant=other_tenant).exists()
+    valid = client.get("/api/platform/oauth/shopee/callback/", {"state": state, "code": code, "platform_store_id": store_id, "signature": signature})
+    assert valid.status_code == 302
+    assert "oauth_result=success" in valid["Location"]
+    assert MarketplaceStoreAuthorization.objects.filter(tenant=tenant).count() == 1
     assert not MarketplaceStoreAuthorization.objects.filter(tenant=other_tenant).exists()
 
 
@@ -1149,3 +1231,472 @@ def test_production_synthetic_gate_rejects_every_mutating_oauth_entrypoint_witho
     authorization.refresh_from_db()
     assert authorization.credential_reference_version == 1
     assert authorization.status == MarketplaceStoreAuthorization.Status.PENDING
+
+
+@pytest.mark.django_db
+def test_callback_invalid_ownership_matrix_has_zero_side_effects():
+    _tenant, user, store, config = marketplace_context("oauth-zero-side-effect", "shopee")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    initiated = client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        oauth_initiate_payload(store, config),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-zero-side-effect-initiate",
+    )
+    state = parse_qs(urlparse(initiated.json()["data"]["authorization_url"]).query)["state"][0]
+    attempt = MarketplaceOAuthAttempt.objects.get(pk=initiated.json()["data"]["attempt_id"])
+    operation_count = MarketplaceOAuthOperation.objects.count()
+    audit_count = IntegrationAuditLog.objects.count()
+
+    invalid_requests = [
+        client.get("/api/platform/oauth/tiktok/callback/", {"state": state}),
+        client.get("/api/platform/oauth/shopee/callback/", {"state": "unknown-state"}),
+        client.get(f"/api/platform/oauth/shopee/callback/?state={state}&state=duplicate"),
+    ]
+    assert [response.status_code for response in invalid_requests] == [422, 422, 400]
+    attempt.refresh_from_db()
+    assert attempt.status == MarketplaceOAuthAttempt.Status.INITIATED
+    assert attempt.consumed_at is None
+    assert MarketplaceOAuthOperation.objects.count() == operation_count
+    assert IntegrationAuditLog.objects.count() == audit_count
+
+
+@pytest.mark.django_db
+def test_action_and_operation_bindings_reject_same_tenant_mismatches():
+    tenant, user, store, config = marketplace_context("oauth-binding", "shopee")
+    other_user = create_user(tenant, "oauth-binding-other")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    initiated = client_for(user).post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        oauth_initiate_payload(store, config),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-binding-initiate",
+    )
+    attempt = MarketplaceOAuthAttempt.objects.get(pk=initiated.json()["data"]["attempt_id"])
+    with pytest.raises(ValidationError), oauth_service_write():
+        MarketplaceOAuthAction.objects.create(
+            tenant=tenant,
+            internal_user=other_user,
+            action=MarketplaceOAuthAction.Action.INITIATE,
+            object_type="store_target",
+            object_id=str(store.id),
+            session_hash="a" * 64,
+            idempotency_key_hash="b" * 64,
+            request_fingerprint_hash="c" * 64,
+            operation_id_hash="d" * 64,
+            attempt=attempt,
+        )
+    action = MarketplaceOAuthAction.objects.get(attempt=attempt)
+    with pytest.raises(ValidationError), oauth_service_write():
+        MarketplaceOAuthAction.objects.filter(pk=action.pk).update(object_id="999999")
+
+    second_store = StoreMaster.objects.create(
+        tenant=tenant,
+        platform=store.platform,
+        code="store-oauth-binding-2",
+        name="Second demo store",
+        country_code="SG",
+        currency="SGD",
+        timezone="Asia/Singapore",
+    )
+    authorization = create_store_authorization(
+        tenant=tenant,
+        integration_config=config,
+        store=second_store,
+        platform="shopee",
+        region="SG",
+        platform_store_id="demo-binding-second",
+        merchant_subject_id="demo-binding-second",
+        shop_cipher="",
+        credential_id="synthetic-binding-second-credential",
+        token_id="synthetic-binding-second-token",
+        scopes=["orders.read"],
+        actor=user,
+    )
+    with pytest.raises(ValidationError), oauth_service_write():
+        MarketplaceOAuthOperation.objects.create(
+            tenant=tenant,
+            action="exchange",
+            operation_id_hash="e" * 64,
+            attempt=attempt,
+            authorization=authorization,
+        )
+
+
+@pytest.mark.django_db
+def test_resource_lease_fencing_rejects_old_owner_and_serializes_different_keys():
+    _tenant, user, _store, _config, authorization = create_authorization("oauth-fencing")
+    first, _ = begin_oauth_action(
+        request=oauth_service_request("/oauth/refresh/", "oauth-fencing-key-001"),
+        actor=user,
+        action=MarketplaceOAuthAction.Action.REFRESH,
+        object_type="store_authorization",
+        object_id=authorization.pk,
+        payload={},
+        authorization=authorization,
+    )
+    second, _ = begin_oauth_action(
+        request=oauth_service_request("/oauth/refresh/", "oauth-fencing-key-002"),
+        actor=user,
+        action=MarketplaceOAuthAction.Action.REFRESH,
+        object_type="store_authorization",
+        object_id=authorization.pk,
+        payload={},
+        authorization=authorization,
+    )
+    old_claim, claimed = claim_oauth_action(first)
+    assert claimed is True
+    _blocked, claimed = claim_oauth_action(second)
+    assert claimed is False
+    expire_oauth_claim(old_claim)
+    new_claim, claimed = claim_oauth_action(second)
+    assert claimed is True
+    assert new_claim.execution_fence > old_claim.execution_fence
+    with pytest.raises(StateConflict):
+        complete_oauth_action(old_claim, {"status": "stale"}, authorization=authorization)
+    complete_oauth_action(new_claim, {"status": "active"}, authorization=authorization)
+    second.refresh_from_db()
+    assert second.status == MarketplaceOAuthAction.Status.SUCCEEDED
+
+
+@pytest.mark.django_db
+def test_exchange_recovery_resumes_from_persisted_custody_reference(monkeypatch):
+    _tenant, user, store, config = marketplace_context("oauth-exchange-recovery", "shopee")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    initiated = client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        oauth_initiate_payload(store, config),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-exchange-recovery-initiate",
+    )
+    state = parse_qs(urlparse(initiated.json()["data"]["authorization_url"]).query)["state"][0]
+    code = "synthetic-code-exchange-recovery"
+    platform_store_id = f"synthetic-store-{store.id}"
+    signature = synthetic_callback_signature("shopee", state, code, platform_store_id)
+    original = oauth_services_module._complete_exchange
+    monkeypatch.setattr(oauth_services_module, "_complete_exchange", lambda **_kwargs: (_ for _ in ()).throw(SystemExit()))
+    with pytest.raises(SystemExit):
+        client.get(
+            "/api/platform/oauth/shopee/callback/",
+            {"state": state, "code": code, "platform_store_id": platform_store_id, "signature": signature},
+        )
+    operation = MarketplaceOAuthOperation.objects.get(action="exchange")
+    assert operation.phase == "custody_exchanged"
+    assert operation.metadata["custody_reference"]["credential_id"]
+    with oauth_service_write():
+        MarketplaceOAuthOperation.objects.filter(pk=operation.pk).update(
+            lease_expires_at=timezone.now() - timedelta(seconds=1)
+        )
+    monkeypatch.setattr(oauth_services_module, "_complete_exchange", original)
+    result = recover_oauth_operation(operation.operation_id_hash)
+    assert result["status"] == MarketplaceStoreAuthorization.Status.ACTIVE
+    operation.refresh_from_db()
+    assert operation.status == MarketplaceOAuthOperation.Status.SUCCEEDED
+    assert MarketplaceStoreAuthorization.objects.filter(store=store, status="active").count() == 1
+
+
+@pytest.mark.django_db
+def test_refresh_recovery_reuses_one_persisted_reference(monkeypatch):
+    _tenant, user, _store, _config, authorization = create_authorization("oauth-refresh-recovery")
+    grant(user, "integrations.credential.rotate", DataScope.ScopeType.ALL)
+    original = oauth_services_module.rotate_store_authorization_references
+    monkeypatch.setattr(
+        oauth_services_module,
+        "rotate_store_authorization_references",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(SystemExit()),
+    )
+    with pytest.raises(SystemExit):
+        client_for(user).post(
+            f"/api/internal/integrations/store-authorizations/{authorization.id}/refresh/",
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="oauth-refresh-recovery-key",
+        )
+    action = MarketplaceOAuthAction.objects.get(action=MarketplaceOAuthAction.Action.REFRESH)
+    operation = MarketplaceOAuthOperation.objects.get(operation_id_hash=action.operation_id_hash)
+    reference = dict(operation.metadata["custody_reference"])
+    expire_oauth_claim(action)
+    monkeypatch.setattr(oauth_services_module, "rotate_store_authorization_references", original)
+    recover_oauth_operation(operation.operation_id_hash)
+    authorization.refresh_from_db()
+    action.refresh_from_db()
+    assert authorization.credential_id == reference["credential_id"]
+    assert authorization.credential_reference_version == reference["credential_reference_version"]
+    assert action.status == MarketplaceOAuthAction.Status.SUCCEEDED
+
+
+@pytest.mark.django_db
+def test_revoke_recovery_skips_repeated_custody_side_effect(monkeypatch):
+    _tenant, user, _store, _config, authorization = create_authorization("oauth-revoke-recovery")
+    grant(user, "integrations.store.revoke", DataScope.ScopeType.ALL)
+    original = oauth_services_module.transition_store_authorization
+
+    def crash_before_local_revoke(record, *, target_status, actor, **kwargs):
+        if target_status == MarketplaceStoreAuthorization.Status.REVOKED:
+            raise SystemExit()
+        return original(record, target_status=target_status, actor=actor, **kwargs)
+
+    monkeypatch.setattr(oauth_services_module, "transition_store_authorization", crash_before_local_revoke)
+    with pytest.raises(SystemExit):
+        client_for(user).post(
+            f"/api/internal/integrations/store-authorizations/{authorization.id}/revoke/",
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="oauth-revoke-recovery-key",
+        )
+    action = MarketplaceOAuthAction.objects.get(action=MarketplaceOAuthAction.Action.REVOKE)
+    operation = MarketplaceOAuthOperation.objects.get(operation_id_hash=action.operation_id_hash)
+    assert operation.metadata["custody_revoked"] is True
+    expire_oauth_claim(action)
+    monkeypatch.setattr(oauth_services_module, "transition_store_authorization", original)
+    recover_oauth_operation(operation.operation_id_hash)
+    authorization.refresh_from_db()
+    action.refresh_from_db()
+    assert authorization.status == MarketplaceStoreAuthorization.Status.REVOKED
+    assert action.status == MarketplaceOAuthAction.Status.SUCCEEDED
+
+
+@pytest.mark.django_db
+def test_refresh_recovery_finalizes_action_after_operation_success(monkeypatch):
+    _tenant, user, _store, _config, authorization = create_authorization("oauth-refresh-finalize")
+    grant(user, "integrations.credential.rotate", DataScope.ScopeType.ALL)
+    original = oauth_views_module.complete_oauth_action
+    monkeypatch.setattr(
+        oauth_views_module,
+        "complete_oauth_action",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(SystemExit()),
+    )
+    with pytest.raises(SystemExit):
+        client_for(user).post(
+            f"/api/internal/integrations/store-authorizations/{authorization.id}/refresh/",
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="oauth-refresh-finalize-key",
+        )
+    action = MarketplaceOAuthAction.objects.get(action=MarketplaceOAuthAction.Action.REFRESH)
+    operation = MarketplaceOAuthOperation.objects.get(operation_id_hash=action.operation_id_hash)
+    assert operation.status == MarketplaceOAuthOperation.Status.SUCCEEDED
+    assert action.status == MarketplaceOAuthAction.Status.RUNNING
+    expire_oauth_claim(action)
+    monkeypatch.setattr(oauth_views_module, "complete_oauth_action", original)
+    result = recover_oauth_operation(operation.operation_id_hash)
+    action.refresh_from_db()
+    authorization.refresh_from_db()
+    assert result["status"] == "succeeded"
+    assert action.status == MarketplaceOAuthAction.Status.SUCCEEDED
+    assert authorization.credential_reference_version == 2
+
+
+@pytest.mark.django_db
+def test_exchange_recovery_keeps_compensated_reference_inactive(monkeypatch):
+    tenant, user, store, config = marketplace_context("oauth-exchange-compensated", "shopee")
+    grant(user, "integrations.store.authorize", DataScope.ScopeType.ALL)
+    client = client_for(user)
+    initiated = client.post(
+        "/api/internal/integrations/store-authorizations/oauth/initiate/",
+        oauth_initiate_payload(store, config),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-exchange-compensated-initiate",
+    )
+    state = parse_qs(urlparse(initiated.json()["data"]["authorization_url"]).query)["state"][0]
+    code = "synthetic-code-exchange-compensated"
+    platform_store_id = f"synthetic-store-{store.id}"
+    monkeypatch.setattr(
+        oauth_services_module,
+        "_complete_exchange",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("synthetic crash")),
+    )
+    callback = client.get(
+        "/api/platform/oauth/shopee/callback/",
+        {
+            "state": state,
+            "code": code,
+            "platform_store_id": platform_store_id,
+            "signature": synthetic_callback_signature("shopee", state, code, platform_store_id),
+        },
+    )
+    assert callback.status_code == 302
+    operation = MarketplaceOAuthOperation.objects.get(action="exchange")
+    assert operation.metadata["compensation"]["status"] == "revoked"
+    result = recover_oauth_operation(operation.operation_id_hash)
+    operation.refresh_from_db()
+    assert result["status"] == "compensated"
+    assert operation.phase == "compensated"
+    assert not MarketplaceStoreAuthorization.objects.filter(tenant=tenant).exists()
+
+
+@pytest.mark.django_db
+def test_production_gate_blocks_direct_mutation_services_without_side_effects():
+    _tenant, user, _store, _config, authorization = create_authorization("oauth-service-gate")
+    action, _ = begin_oauth_action(
+        request=oauth_service_request("/oauth/refresh/", "oauth-service-gate-key"),
+        actor=user,
+        action=MarketplaceOAuthAction.Action.REFRESH,
+        object_type="store_authorization",
+        object_id=authorization.pk,
+        payload={},
+        authorization=authorization,
+    )
+    action, claimed = claim_oauth_action(action)
+    assert claimed is True
+    counts = {
+        "actions": MarketplaceOAuthAction.objects.count(),
+        "operations": MarketplaceOAuthOperation.objects.count(),
+        "attempts": MarketplaceOAuthAttempt.objects.count(),
+        "audits": IntegrationAuditLog.objects.count(),
+    }
+    with override_settings(MARKETPLACE_OAUTH_SYNTHETIC_ENABLED=False):
+        blocked_calls = [
+            lambda: begin_oauth_action(
+                request=oauth_service_request("/oauth/revoke/", "oauth-service-gate-new-key"),
+                actor=user,
+                action=MarketplaceOAuthAction.Action.REVOKE,
+                object_type="store_authorization",
+                object_id=authorization.pk,
+                payload={},
+                authorization=authorization,
+            ),
+            lambda: claim_oauth_action(action),
+            lambda: complete_oauth_action(action, {"status": "active"}, authorization=authorization),
+            lambda: fail_oauth_action(action, "OAUTH_BLOCKED"),
+            lambda: _update_operation(
+                action.operation_id_hash,
+                claim=action,
+                status=MarketplaceOAuthOperation.Status.SUCCEEDED,
+            ),
+        ]
+        for blocked_call in blocked_calls:
+            with pytest.raises(OAuthAdapterError) as exc_info:
+                blocked_call()
+            assert exc_info.value.error_code == "OAUTH_SYNTHETIC_DISABLED"
+    assert MarketplaceOAuthAction.objects.count() == counts["actions"]
+    assert MarketplaceOAuthOperation.objects.count() == counts["operations"]
+    assert MarketplaceOAuthAttempt.objects.count() == counts["attempts"]
+    assert IntegrationAuditLog.objects.count() == counts["audits"]
+    authorization.refresh_from_db()
+    assert authorization.credential_reference_version == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("action", "permission_code"),
+    (
+        ("authorize", "integrations.store.authorize"),
+        ("refresh", "integrations.credential.rotate"),
+        ("revoke", "integrations.store.revoke"),
+        ("retry", "integrations.store.retry"),
+    ),
+)
+def test_oauth_target_endpoint_uses_internal_exact_action_permission(action, permission_code):
+    _tenant, user, _store, _config, _authorization = create_authorization(f"oauth-target-{action}")
+    grant(user, permission_code, DataScope.ScopeType.ALL)
+    response = client_for(user).get(
+        "/api/internal/integrations/store-authorizations/oauth/targets/",
+        {"action": action},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["action"] == action
+
+
+@pytest.mark.django_db
+def test_oauth_target_endpoint_rejects_external_user_even_with_exact_scope():
+    tenant, _user, _store, _config, _authorization = create_authorization("oauth-target-external")
+    external = create_user(tenant, "oauth-target-external-user", CustomUser.UserType.EXTERNAL)
+    grant(external, "integrations.store.retry", DataScope.ScopeType.ALL)
+    response = client_for(external).get(
+        "/api/internal/integrations/store-authorizations/oauth/targets/",
+        {"action": "retry"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_retry_only_user_can_read_the_attempt_created_by_retry():
+    _tenant, user, _store, _config, authorization = create_authorization("oauth-retry-only-status")
+    grant(user, "integrations.store.retry", DataScope.ScopeType.ALL)
+    transition_store_authorization(
+        authorization,
+        target_status=MarketplaceStoreAuthorization.Status.ERROR,
+        actor=user,
+        error_code="OAUTH_SYNTHETIC_FAILURE",
+    )
+    retry = client_for(user).post(
+        f"/api/internal/integrations/store-authorizations/{authorization.id}/retry/",
+        {},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="oauth-retry-only-status-key",
+    )
+    assert retry.status_code == 201
+    data = retry.json()["data"]
+    assert data["authorization_url"].startswith("https://synthetic.invalid/")
+    detail = client_for(user).get(
+        f"/api/internal/integrations/oauth-attempts/{data['attempt_id']}/"
+    )
+    assert detail.status_code == 200
+    assert detail.json()["data"]["id"] == data["attempt_id"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_mysql_oauth_idempotency_registry_serializes_concurrent_workers():
+    if connection.vendor != "mysql":
+        pytest.skip("MySQL idempotency race verification runs in Local Sandbox.")
+    tenant, user, _store, config, first = create_authorization("oauth-action-race")
+    second_store = StoreMaster.objects.create(
+        tenant=tenant,
+        platform=first.store.platform,
+        code="store-oauth-action-race-second",
+        name="Second race store",
+        country_code="SG",
+        currency="SGD",
+        timezone="Asia/Singapore",
+    )
+    second = create_store_authorization(
+        tenant=tenant,
+        integration_config=config,
+        store=second_store,
+        platform="shopee",
+        region="SG",
+        platform_store_id="demo-oauth-action-race-second",
+        merchant_subject_id="demo-oauth-action-race-second",
+        shop_cipher="",
+        credential_id="synthetic-oauth-action-race-second-credential",
+        token_id="synthetic-oauth-action-race-second-token",
+        scopes=["orders.read"],
+        actor=user,
+    )
+
+    def begin(authorization_id, key):
+        close_old_connections()
+        try:
+            actor = CustomUser.objects.get(pk=user.pk)
+            authorization = MarketplaceStoreAuthorization.objects.get(pk=authorization_id)
+            _action, replay = begin_oauth_action(
+                request=oauth_service_request("/oauth/refresh/", key),
+                actor=actor,
+                action=MarketplaceOAuthAction.Action.REFRESH,
+                object_type="store_authorization",
+                object_id=authorization.pk,
+                payload={},
+                authorization=authorization,
+            )
+            return "replay" if replay else "created"
+        except StateConflict:
+            return "conflict"
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cross_resource = list(executor.map(
+            lambda authorization_id: begin(authorization_id, "oauth-action-race-cross-key"),
+            (first.pk, second.pk),
+        ))
+    assert sorted(cross_resource) == ["conflict", "created"]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        same_resource = list(executor.map(
+            lambda _index: begin(first.pk, "oauth-action-race-same-key"),
+            range(2),
+        ))
+    assert sorted(same_resource) == ["created", "replay"]
