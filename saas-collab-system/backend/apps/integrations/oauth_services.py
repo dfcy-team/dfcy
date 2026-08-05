@@ -191,9 +191,11 @@ def begin_oauth_action(*, request, actor, action, object_type, object_id="", pay
 def claim_oauth_action(action, *, lease_seconds=60, allow_recovery=False):
     _require_synthetic()
     owner = secrets.token_hex(24)
-    now = timezone.now()
     with transaction.atomic():
         locked = MarketplaceOAuthAction.objects.select_for_update().get(pk=action.pk)
+        # Recompute "now" after each blocking row lock so expiry decisions reflect the
+        # moment the lock is actually held, not the moment the wait started.
+        now = timezone.now()
         if locked.status == MarketplaceOAuthAction.Status.SUCCEEDED:
             return locked, False
         if not allow_recovery and locked.status in {
@@ -213,6 +215,7 @@ def claim_oauth_action(action, *, lease_seconds=60, allow_recovery=False):
                 object_type=locked.object_type,
                 object_id=locked.object_id,
             )
+        now = timezone.now()
         if (
             resource_lease.execution_owner
             and resource_lease.lease_expires_at
@@ -257,10 +260,12 @@ def wait_for_oauth_action(action, *, timeout_seconds=2):
 
 def claim_oauth_operation(operation, *, lease_seconds=60):
     _require_synthetic()
-    now = timezone.now()
     owner = secrets.token_hex(24)
     with transaction.atomic():
         locked = MarketplaceOAuthOperation.objects.select_for_update().get(pk=operation.pk)
+        # Recompute "now" after the blocking row lock so the expiry decision reflects the
+        # moment the lock is actually held, not the moment the wait started.
+        now = timezone.now()
         if (
             locked.execution_owner
             and locked.lease_expires_at

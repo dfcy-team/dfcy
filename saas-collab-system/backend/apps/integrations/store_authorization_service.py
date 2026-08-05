@@ -10,6 +10,7 @@ from .credential_service import _revoke_old_references, build_reference_metadata
 from .models import (
     IntegrationAuditLog,
     MarketplaceOAuthOperation,
+    MarketplaceOAuthResourceLease,
     MarketplaceStoreAuthorization,
     authorization_service_write,
     marketplace_identity_key,
@@ -61,17 +62,51 @@ def _validate_actor_tenant(actor, tenant_id):
         raise ValidationError("Authorization actor must belong to the authorization tenant.")
 
 
-def assert_operation_fence(operation_claim):
-    """Fail closed unless the OAuth execution claim still owns the durable operation fence.
+def _resource_lease_identity(operation_claim):
+    """Return the shared resource lease identity carried by an action-bound claim."""
+    object_type = str(getattr(operation_claim, "object_type", "") or "")
+    object_id = str(getattr(operation_claim, "object_id", "") or "")
+    tenant_id = getattr(operation_claim, "tenant_id", None)
+    if not object_type or not object_id or tenant_id is None:
+        return None
+    return {"tenant_id": tenant_id, "object_type": object_type, "object_id": object_id}
 
-    Must run inside the caller's transaction so the operation row lock is held until the
-    fenced business write commits; after a takeover the old owner sees the bumped fence
-    or owner change and performs zero business writes.
+
+def assert_operation_fence(operation_claim):
+    """Fail closed unless the OAuth execution claim still owns the durable fence.
+
+    Must run inside the caller's transaction so the fenced row locks are held until the
+    fenced business write commits. Action-bound claims (refresh/revoke) carry a shared
+    resource lease identity: the shared resource lease row is locked FIRST and its
+    owner/fence/expiry validated before the operation row, using the unified global lock
+    order resource lease -> operation -> authorization. A new action can therefore never
+    issue a higher resource fence while the old owner's fenced write is still open, and
+    the old owner performs zero business writes once its claim turns stale. Claims without
+    a resource lease (callback exchange) keep the single operation row lock.
     """
     if operation_claim is None:
         return
     if not getattr(operation_claim, "execution_owner", "") or not getattr(operation_claim, "operation_id_hash", ""):
         raise StateConflict("OAuth operation requires an active execution claim.")
+    lease_identity = _resource_lease_identity(operation_claim)
+    if lease_identity is not None:
+        lease = (
+            MarketplaceOAuthResourceLease.objects.select_for_update()
+            .filter(
+                tenant_id=lease_identity["tenant_id"],
+                object_type=lease_identity["object_type"],
+                object_id=lease_identity["object_id"],
+            )
+            .first()
+        )
+        if (
+            lease is None
+            or lease.execution_owner != operation_claim.execution_owner
+            or lease.fence_token != operation_claim.execution_fence
+            or not lease.lease_expires_at
+            or lease.lease_expires_at <= timezone.now()
+        ):
+            raise StateConflict("OAuth resource execution claim is stale.")
     locked = MarketplaceOAuthOperation.objects.select_for_update().get(
         operation_id_hash=operation_claim.operation_id_hash
     )

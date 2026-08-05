@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib
 import json
 import threading
+import time
 from datetime import timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -1714,38 +1715,72 @@ def test_mysql_oauth_idempotency_registry_serializes_concurrent_workers():
     assert sorted(same_resource) == ["created", "replay"]
 
 
-def _pause_fence_and_take_over(monkeypatch, worker_call, takeover):
-    """Pause a worker inside a fenced write boundary, take over its lease, then release it."""
+def _pause_after_fence_and_take_over(monkeypatch, worker_call, takeover, hold_seconds=3.0):
+    """Pause a worker AFTER the original resource+operation fence validation completed.
+
+    The paused worker keeps its fenced write transaction open, so it still holds the
+    shared resource lease (and operation) row locks. The takeover therefore must block on
+    those row locks until the old transaction ends; a new fence can never be issued while
+    the old fenced write is in flight. The old worker is then crashed inside the boundary
+    so its transaction rolls back with zero side effects before the takeover proceeds.
+    """
     gate = threading.Event()
     release = threading.Event()
     original_fence = store_authorization_module.assert_operation_fence
 
     def pausing_fence(claim):
+        result = original_fence(claim)
         gate.set()
-        if not release.wait(timeout=15):
+        if not release.wait(timeout=30):
             raise RuntimeError("fence release timed out")
-        return original_fence(claim)
+        raise StateConflict("simulated old worker crash inside the fenced write boundary")
 
     monkeypatch.setattr(store_authorization_module, "assert_operation_fence", pausing_fence)
-    errors = []
+
+    def restore_fence():
+        """Restore the real fence once the race phase is over so the new owner can finish."""
+        monkeypatch.setattr(store_authorization_module, "assert_operation_fence", original_fence)
+
+    worker_errors = []
 
     def worker():
         close_old_connections()
         try:
             worker_call()
         except Exception as exc:
-            errors.append(exc)
+            worker_errors.append(exc)
         finally:
             close_old_connections()
 
-    thread = threading.Thread(target=worker)
-    thread.start()
-    assert gate.wait(timeout=15)
-    result = takeover()
+    takeover_errors = []
+    takeover_results = []
+
+    def takeover_runner():
+        close_old_connections()
+        try:
+            takeover_results.append(takeover())
+        except Exception as exc:
+            takeover_errors.append(exc)
+        finally:
+            close_old_connections()
+
+    worker_thread = threading.Thread(target=worker)
+    worker_thread.start()
+    assert gate.wait(timeout=30)
+    takeover_thread = threading.Thread(target=takeover_runner)
+    takeover_thread.start()
+    time.sleep(1.0)
+    assert takeover_thread.is_alive(), "the new action must wait for the old fenced write transaction"
+    time.sleep(max(hold_seconds - 1.0, 0.0))
     release.set()
-    thread.join(timeout=15)
-    assert not thread.is_alive()
-    return errors, result
+    worker_thread.join(timeout=30)
+    takeover_thread.join(timeout=30)
+    assert not worker_thread.is_alive()
+    assert not takeover_thread.is_alive()
+    assert not takeover_errors, f"takeover must complete after the old transaction ends: {takeover_errors!r}"
+    assert len(worker_errors) == 1
+    restore_fence()
+    return worker_errors, takeover_results[0]
 
 
 @pytest.mark.django_db
@@ -1779,6 +1814,17 @@ def test_assert_operation_fence_rejects_stale_expired_and_foreign_claims():
     for stale in (foreign, bumped):
         with pytest.raises(StateConflict), transaction.atomic():
             assert_operation_fence(stale)
+    lease = MarketplaceOAuthResourceLease.objects.get(
+        tenant=claim.tenant,
+        object_type=claim.object_type,
+        object_id=claim.object_id,
+    )
+    with oauth_lease_write():
+        MarketplaceOAuthResourceLease.objects.filter(pk=lease.pk).update(fence_token=lease.fence_token + 1)
+    with pytest.raises(StateConflict), transaction.atomic():
+        assert_operation_fence(claim)
+    with oauth_lease_write():
+        MarketplaceOAuthResourceLease.objects.filter(pk=lease.pk).update(fence_token=lease.fence_token)
     expire_oauth_claim(claim)
     with pytest.raises(StateConflict), transaction.atomic():
         assert_operation_fence(claim)
@@ -2014,7 +2060,7 @@ def test_resource_lease_service_gate_blocks_bypass_writes():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_mysql_exchange_create_boundary_zero_side_effects_after_takeover(monkeypatch):
+def test_mysql_exchange_create_fence_holds_operation_row_until_commit(monkeypatch):
     if connection.vendor != "mysql":
         pytest.skip("MySQL double-worker fencing verification runs in Local Sandbox.")
     tenant, user, store, config = marketplace_context("oauth-fence-exchange-race", "shopee")
@@ -2048,6 +2094,12 @@ def test_mysql_exchange_create_boundary_zero_side_effects_after_takeover(monkeyp
     reference = dict(operation.metadata["custody_reference"])
     meta_store_id = operation.metadata["platform_store_id"]
     audit_count = IntegrationAuditLog.objects.count()
+    # Shorten the exchange operation lease so the wall clock expires it while the old
+    # worker is paused after passing its fence check (no row writes while it is locked).
+    with oauth_service_write():
+        MarketplaceOAuthOperation.objects.filter(pk=operation.pk).update(
+            lease_expires_at=timezone.now() + timedelta(seconds=3)
+        )
 
     def worker_call():
         worker_attempt = MarketplaceOAuthAttempt.objects.get(pk=attempt_pk)
@@ -2059,17 +2111,14 @@ def test_mysql_exchange_create_boundary_zero_side_effects_after_takeover(monkeyp
         )
 
     def takeover():
-        with oauth_service_write():
-            MarketplaceOAuthOperation.objects.filter(pk=operation.pk).update(
-                lease_expires_at=timezone.now() - timedelta(seconds=1)
-            )
         new_claim, claimed = claim_oauth_operation(MarketplaceOAuthOperation.objects.get(pk=operation.pk))
         assert claimed is True
         return new_claim
 
-    errors, _new_claim = _pause_fence_and_take_over(monkeypatch, worker_call, takeover)
+    errors, new_claim = _pause_after_fence_and_take_over(monkeypatch, worker_call, takeover, hold_seconds=4.5)
     assert len(errors) == 1
     assert isinstance(errors[0], StateConflict)
+    assert new_claim.execution_fence > stale_claim.execution_fence
     assert not MarketplaceStoreAuthorization.objects.filter(tenant=tenant).exists()
     assert IntegrationAuditLog.objects.count() == audit_count
     attempt = MarketplaceOAuthAttempt.objects.get(pk=attempt_pk)
@@ -2084,7 +2133,7 @@ def test_mysql_exchange_create_boundary_zero_side_effects_after_takeover(monkeyp
 
 
 @pytest.mark.django_db(transaction=True)
-def test_mysql_refresh_rotate_boundary_zero_side_effects_after_takeover(monkeypatch):
+def test_mysql_refresh_rotate_fence_holds_resource_lease_until_commit(monkeypatch):
     if connection.vendor != "mysql":
         pytest.skip("MySQL double-worker fencing verification runs in Local Sandbox.")
     _tenant, user, _store, _config, authorization = create_authorization("oauth-fence-refresh-race")
@@ -2106,7 +2155,7 @@ def test_mysql_refresh_rotate_boundary_zero_side_effects_after_takeover(monkeypa
         payload={},
         authorization=authorization,
     )
-    old_claim, claimed = claim_oauth_action(first)
+    old_claim, claimed = claim_oauth_action(first, lease_seconds=3)
     assert claimed is True
     reference = {
         "credential_id": "synthetic-fence-refresh-race-credential",
@@ -2115,12 +2164,6 @@ def test_mysql_refresh_rotate_boundary_zero_side_effects_after_takeover(monkeypa
         "expires_at": None,
     }
     _update_operation(first.operation_id_hash, claim=old_claim, phase="new_reference_created", metadata={"custody_reference": reference})
-    stale_claim = SimpleNamespace(
-        operation_id_hash=first.operation_id_hash,
-        execution_owner=old_claim.execution_owner,
-        execution_fence=old_claim.execution_fence,
-        lease_expires_at=old_claim.lease_expires_at,
-    )
     audit_count = IntegrationAuditLog.objects.count()
 
     def worker_call():
@@ -2130,18 +2173,24 @@ def test_mysql_refresh_rotate_boundary_zero_side_effects_after_takeover(monkeypa
             authorization=worker_authorization,
             actor=worker_actor,
             operation_id=first.operation_id_hash,
-            operation_claim=stale_claim,
+            operation_claim=MarketplaceOAuthAction.objects.get(pk=first.pk),
         )
 
     def takeover():
-        expire_oauth_claim(MarketplaceOAuthAction.objects.get(pk=first.pk))
         new_claim, claimed_new = claim_oauth_action(MarketplaceOAuthAction.objects.get(pk=second.pk))
         assert claimed_new is True
         return new_claim
 
-    errors, new_claim = _pause_fence_and_take_over(monkeypatch, worker_call, takeover)
+    errors, new_claim = _pause_after_fence_and_take_over(monkeypatch, worker_call, takeover, hold_seconds=4.5)
     assert len(errors) == 1
     assert isinstance(errors[0], StateConflict)
+    assert new_claim.execution_fence > old_claim.execution_fence
+    lease = MarketplaceOAuthResourceLease.objects.get(
+        tenant=first.tenant,
+        object_type="store_authorization",
+        object_id=str(authorization.pk),
+    )
+    assert lease.fence_token == new_claim.execution_fence
     authorization.refresh_from_db()
     assert authorization.credential_reference_version == 1
     assert IntegrationAuditLog.objects.count() == audit_count
@@ -2156,7 +2205,7 @@ def test_mysql_refresh_rotate_boundary_zero_side_effects_after_takeover(monkeypa
 
 
 @pytest.mark.django_db(transaction=True)
-def test_mysql_revoke_transition_boundary_zero_side_effects_after_takeover(monkeypatch):
+def test_mysql_revoke_transition_fence_holds_resource_lease_until_commit(monkeypatch):
     if connection.vendor != "mysql":
         pytest.skip("MySQL double-worker fencing verification runs in Local Sandbox.")
     _tenant, user, _store, _config, authorization = create_authorization("oauth-fence-revoke-race")
@@ -2178,14 +2227,8 @@ def test_mysql_revoke_transition_boundary_zero_side_effects_after_takeover(monke
         payload={},
         authorization=authorization,
     )
-    old_claim, claimed = claim_oauth_action(first)
+    old_claim, claimed = claim_oauth_action(first, lease_seconds=3)
     assert claimed is True
-    stale_claim = SimpleNamespace(
-        operation_id_hash=first.operation_id_hash,
-        execution_owner=old_claim.execution_owner,
-        execution_fence=old_claim.execution_fence,
-        lease_expires_at=old_claim.lease_expires_at,
-    )
     audit_count = IntegrationAuditLog.objects.count()
 
     def worker_call():
@@ -2195,18 +2238,24 @@ def test_mysql_revoke_transition_boundary_zero_side_effects_after_takeover(monke
             authorization=worker_authorization,
             actor=worker_actor,
             operation_id=first.operation_id_hash,
-            operation_claim=stale_claim,
+            operation_claim=MarketplaceOAuthAction.objects.get(pk=first.pk),
         )
 
     def takeover():
-        expire_oauth_claim(MarketplaceOAuthAction.objects.get(pk=first.pk))
         new_claim, claimed_new = claim_oauth_action(MarketplaceOAuthAction.objects.get(pk=second.pk))
         assert claimed_new is True
         return new_claim
 
-    errors, new_claim = _pause_fence_and_take_over(monkeypatch, worker_call, takeover)
+    errors, new_claim = _pause_after_fence_and_take_over(monkeypatch, worker_call, takeover, hold_seconds=4.5)
     assert len(errors) == 1
     assert isinstance(errors[0], StateConflict)
+    assert new_claim.execution_fence > old_claim.execution_fence
+    lease = MarketplaceOAuthResourceLease.objects.get(
+        tenant=first.tenant,
+        object_type="store_authorization",
+        object_id=str(authorization.pk),
+    )
+    assert lease.fence_token == new_claim.execution_fence
     authorization.refresh_from_db()
     assert authorization.status == MarketplaceStoreAuthorization.Status.PENDING
     operation = MarketplaceOAuthOperation.objects.get(operation_id_hash=first.operation_id_hash)
