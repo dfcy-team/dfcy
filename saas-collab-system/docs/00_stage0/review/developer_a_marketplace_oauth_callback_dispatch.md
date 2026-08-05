@@ -7,7 +7,7 @@
 - 规划基线：`feature/module-a-platform-auth-foundation` / `05308bd`。
 - 交付方式：stacked Draft PR；按用户要求，PR #37、PR #39 和 PR-A2 在整个任务完成前均不合并。
 - 风险等级：L3，涉及公网 callback、OAuth state、密钥托管、网络出口、授权身份、迁移、权限和审计。
-- 当前状态：`planning`。本分发不实现 OAuth、不发真实平台请求、不创建真实凭据。
+- 当前状态：`技术复审通过、等待总任务合并`。本分发不实现 OAuth、不发真实平台请求、不创建真实凭据。
 
 ## 2. 开发目标
 
@@ -96,3 +96,11 @@ PR-A2 首先必须以 synthetic adapter 完成全合同测试。只有获批应�
 2. 完成 A2-02 至 A2-06 后提交 Draft stacked PR，base 为 A1 分支，不合并。
 3. P0/P1 清零后执行固定 HEAD R1；整个任务完成时按依赖顺序统一合并并重跑 integration。
 4. 任何真实 Sandbox 执行必须在报告中记录应用环境、合同版本、掩码证据和结果，不记录凭据或真实业务载荷。
+
+## 8. R7 状态登记（2026-08-05，架构员核对）
+
+- A-PR2 状态：由“本地复审通过、远程门禁 PENDING”更新为“技术复审通过、等待总任务合并”。
+- 依据：PR #40 最终 HEAD `907ad541efa6cc27f481287e4dbeb91b2ea8062e` 的全部 15 项 checks 均 pass（含 Django and pytest、Phase 3 Django, data quality, and pytest）；未沿用旧 HEAD `5111c00` 的绿色结果。
+- HEAD 演进：`bc09028`（R5 整改）→ `66c7546`（R6 报告归档，R7-T1）→ `5704ef4`（npm high 清零，R7-T3）→ `907ad54`（redaction 门禁登记，R7-T4）。
+- PR #40 保持 Draft；合并须待用户授权后按 #37 → #39 → #40 顺序以 merge commit 执行（R7-T5）。
+- 结论仅覆盖 synthetic/mock 合同；不授权标记 `connected`，不启用真实回调域名。callback query redaction 已登记为发布前置条件（`docs/06_release/a_pr2_oauth_callback_query_redaction_gate.md`）。
