@@ -12,6 +12,7 @@ from django.conf import settings
 _authorization_service_write = ContextVar("authorization_service_write", default=False)
 _oauth_service_write = ContextVar("oauth_service_write", default=False)
 _oauth_lease_write = ContextVar("oauth_lease_write", default=False)
+_oauth_evidence_write = ContextVar("oauth_evidence_write", default=False)
 
 
 @contextmanager
@@ -39,6 +40,15 @@ def oauth_lease_write():
         yield
     finally:
         _oauth_lease_write.reset(token)
+
+
+@contextmanager
+def oauth_evidence_write():
+    token = _oauth_evidence_write.set(True)
+    try:
+        yield
+    finally:
+        _oauth_evidence_write.reset(token)
 
 
 class PlatformChoices(models.TextChoices):
@@ -1059,3 +1069,78 @@ class APIDataQualityCheck(models.Model):
 
     def __str__(self):
         return f"{self.check_type}:{self.status}"
+
+
+class MarketplaceOAuthEvidenceQuerySet(models.QuerySet):
+    """Evidence rows are append-only; only the registry service may supersede the current row."""
+
+    supersession_fields = {"is_current", "superseded_at"}
+
+    def update(self, **kwargs):
+        if not _oauth_evidence_write.get():
+            raise ValidationError("OAuth evidence can only be changed by the evidence registry service.")
+        if set(kwargs) - self.supersession_fields:
+            raise ValidationError("OAuth evidence is append-only; register a new row instead of editing.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _oauth_evidence_write.get():
+            raise ValidationError("OAuth evidence must be registered by the evidence registry service.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        raise ValidationError("OAuth evidence is append-only; register a new row instead of editing.")
+
+    def delete(self):
+        raise ValidationError("OAuth evidence cannot be deleted.")
+
+
+class MarketplaceOAuthEvidence(models.Model):
+    """Masked-only registry for real Sandbox technical readiness evidence (A2-00)."""
+
+    class EvidenceKey(models.TextChoices):
+        APP_IDENTITY = "a2_00_app_identity", "Approved application identity"
+        ENDPOINT_CONTRACT = "a2_00_endpoint_contract", "Console endpoint contract"
+        CALLBACK_URL = "a2_00_callback_url", "Registered HTTPS callback URL"
+        CUSTODY_CONTRACT = "a2_00_custody_contract", "Credential custody contract"
+        NETWORK_EGRESS = "a2_00_network_egress", "Network egress plan"
+        SECURITY_CONFIRMATION = "a2_00_security_confirmation", "Security confirmation trail"
+
+    class Readiness(models.TextChoices):
+        PENDING = "pending", "Pending"
+        READY = "ready", "Ready"
+
+    class Environment(models.TextChoices):
+        SANDBOX = "sandbox", "Sandbox"
+        PILOT = "pilot", "Pilot"
+        PRODUCTION = "production", "Production"
+
+    evidence_key = models.CharField(max_length=40, choices=EvidenceKey.choices)
+    platform = models.CharField(max_length=20)  # "shopee", "tiktok" or "shared"
+    environment = models.CharField(max_length=20, choices=Environment.choices, default=Environment.SANDBOX)
+    readiness = models.CharField(max_length=20, choices=Readiness.choices, default=Readiness.PENDING)
+    masked_value = models.JSONField(default=dict, blank=True)
+    source = models.CharField(max_length=200, blank=True)
+    confirmed_by = models.CharField(max_length=120, blank=True)
+    contract_version = models.CharField(max_length=40, blank=True)
+    is_current = models.BooleanField(default=True)
+    superseded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MarketplaceOAuthEvidenceQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["evidence_key", "platform", "environment", "-id"]
+
+    def __str__(self):
+        return f"{self.evidence_key}:{self.platform}:{self.environment}:{self.readiness}"
+
+    def save(self, *args, **kwargs):
+        if not _oauth_evidence_write.get():
+            raise ValidationError("OAuth evidence can only be registered by the evidence registry service.")
+        if self.pk:
+            raise ValidationError("OAuth evidence is append-only; register a new row instead of editing.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("OAuth evidence cannot be deleted.")

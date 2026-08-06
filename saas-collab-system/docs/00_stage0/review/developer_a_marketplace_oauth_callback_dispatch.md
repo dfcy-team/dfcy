@@ -104,3 +104,12 @@ PR-A2 首先必须以 synthetic adapter 完成全合同测试。只有获批应�
 - HEAD 演进：`bc09028`（R5 整改）→ `66c7546`（R6 报告归档，R7-T1）→ `5704ef4`（npm high 清零，R7-T3）→ `907ad54`（redaction 门禁登记，R7-T4）。
 - PR #40 保持 Draft；合并须待用户授权后按 #37 → #39 → #40 顺序以 merge commit 执行（R7-T5）。
 - 结论仅覆盖 synthetic/mock 合同；不授权标记 `connected`，不启用真实回调域名。callback query redaction 已登记为发布前置条件（`docs/06_release/a_pr2_oauth_callback_query_redaction_gate.md`）。
+
+## 9. 交接文件覆盖登记（2026-08-06，开发A留痕）
+
+- 交接文件 `developer_a_shopee_tiktok_handover.md`（2026-08-06）生效：开发A升级为开发负责人、模块架构负责人、上线负责人；本模块不再设流程阻断项。
+- 本文 §3 A2-00 六项证据的流程阻断效力被交接文件覆盖：证据收集转为技术准备事项，由开发A自行推进与确认，安全检查留痕即可；Pilot/Production 阶段仍按完整六项口径。
+- 三项技术底线继续强制：真实密码/Token/Secret/私钥不进 Git/日志；tenant/store 数据不互串；数据库变更前保留可恢复备份。
+- 技术不变量默认保持：OAuth attempt/action/operation/resource lease 的 fencing 锁顺序与一次性 state 语义（R1–R6 已验证），改动需自评估并留痕。
+- PR #40 基线 HEAD `8470ed6d91373559a74cf8d084419774aca00966` 已记录；合并或重写前保留可回退引用。
+- 真实联调的技术事实约束不变：获批应用、控制台端点、callback URL、托管接口证据未就绪前，真实 adapter 保持 fail closed，不发起真实网络请求；合同值不填推测值。

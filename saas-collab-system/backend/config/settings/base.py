@@ -156,13 +156,26 @@ INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "unconfigured-production",
 )
 
-# OAuth remains synthetic-only until the separately approved A2-00 evidence exists.
+# OAuth stays synthetic until the A2-00 technical preparation items are registered
+# in the evidence registry AND the double network gate is explicitly enabled.
 MARKETPLACE_OAUTH_NETWORK_ENABLED = env_bool("MARKETPLACE_OAUTH_NETWORK_ENABLED", False)
 MARKETPLACE_OAUTH_SYNTHETIC_ENABLED = env_bool("MARKETPLACE_OAUTH_SYNTHETIC_ENABLED", True)
 MARKETPLACE_OAUTH_SYNTHETIC_SIGNING_KEY = os.getenv(
     "MARKETPLACE_OAUTH_SYNTHETIC_SIGNING_KEY",
     "synthetic-only-test-key",
 )
+# Double gate partner: exact egress host allowlist. Hosts are derived from the
+# frozen a2-sandbox-v1 contract after console evidence is registered; never edited ad hoc.
+MARKETPLACE_OAUTH_NETWORK_ALLOWLIST = tuple(
+    host.strip()
+    for host in os.getenv("MARKETPLACE_OAUTH_NETWORK_ALLOWLIST", "").split(",")
+    if host.strip()
+)
+# Frozen a2-sandbox-v1 real contract values (authorization entry, endpoints, regional
+# host, callback URL, minimum read scopes, app reference masks). Values are registered
+# only after console/official-document confirmation; never guessed. Empty by default
+# so every real adapter path fails closed.
+MARKETPLACE_OAUTH_REAL_CONTRACT = {}
 MARKETPLACE_OAUTH_REDIRECT_TARGETS = {
     "integrations": "/integrations/oauth",
 }

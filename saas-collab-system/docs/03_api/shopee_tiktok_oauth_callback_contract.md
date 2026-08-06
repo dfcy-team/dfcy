@@ -2,7 +2,18 @@
 
 ## 1. 状态与版本
 
-本合同当前实现为 `synthetic/mock`，真实平台 endpoint、scope、API 版本、区域域名、签名字段和配额仍为 `pending`，必须由获批应用控制台与官方文档共同确认后登记；未登记时真实 adapter 必须 fail closed。
+本合同当前实现为 `synthetic/mock`，合同版本体系为 `a2-synthetic-v1`（已实现）与 `a2-sandbox-v1`（结构已冻结、值待登记）。真实平台 endpoint、scope、API 版本、区域域名、签名字段和配额仍为 `pending`，必须由获批应用控制台与官方文档共同确认后登记；未登记时真实 adapter 必须 fail closed。
+
+### 1.1 a2-sandbox-v1 冻结结构（2026-08-06）
+
+真实 Sandbox 合同升版为 `a2-sandbox-v1`，冻结以下结构与约束；具体值以控制台与官方文档原文为准，不填推测值，登记位置为 evidence registry（仅掩码/引用）与 `MARKETPLACE_OAUTH_REAL_CONTRACT`：
+
+- 每平台（shopee/tiktok）字段：`authorization_entry`、`token_exchange`、`token_refresh`、`token_revoke`、`regional_host`、`api_version`、`minimum_read_scopes`、`token_ttl`、`callback_url`、`app_reference`（掩码）。
+- 托管字段：`custody.host` 与合同版本引用；业务层输入 code、输出 `credential_id/token_id/mask/version/expires_at`，HMAC-SHA256 请求签名只在托管侧计算。
+- 真实回调无签名字段：callback 校验改为字段白名单 + state 一次性消费 + 交换响应门店身份比对（Shopee 白名单 `state/code/shop_id`；TikTok 白名单 `state/code`，门店身份由托管侧 shops 查询返回）。
+- 网络出口：`MARKETPLACE_OAUTH_NETWORK_ENABLED` + `MARKETPLACE_OAUTH_NETWORK_ALLOWLIST` 双重门禁，仅 HTTPS 白名单 host，DNS 解析不得落入私网地址段，固定超时，429/5xx 上限退避，认证/签名错误不无限重试；Production 无条件拒绝。
+- TikTok 交换成功后经托管侧调用 `/authorization/{api_version}/shops` 获取 shop_id/shop_cipher/region 并写入门店绑定。
+- 状态规则：技术准备项未就绪继续 synthetic；Sandbox 联调通过标 `sandbox_verified`；`connected` 须经真实请求、权限负向态、字段验证全部通过，不得仅凭端点连通或路径一致标记。
 
 官方入口：
 
@@ -11,7 +22,7 @@
 - TikTok Shop Request signing：`https://partner.tiktokshop.com/docv2/page/sign-your-api-request`。
 - TikTok Shop Rate limits：`https://partner.tiktokshop.com/docv2/page/rate-limits`。
 
-规划生成时自动抓取通道无法读取上述页面正文，因此本合同不声称已复核具体值；A2-00 控制台证据是实现真实 Sandbox adapter 的阻断项。
+规划生成时自动抓取通道无法读取上述页面正文，因此本合同不声称已复核具体值。2026-08-06 交接文件生效后，A2-00 控制台证据转为技术准备事项（evidence registry 登记现状：除安全确认留痕外均为 `pending`），未登记前真实 adapter 仍保持 fail closed。
 
 ## 2. Internal API
 
@@ -87,4 +98,4 @@ Internal API 使用统一 `success/code/message/data`。Public callback 使用 3
 
 ## 6. 实现状态与 connected 门槛
 
-synthetic 全通过最多标记 `mock`。当前页面和 API 映射均为 `mock/pending`。真实 Sandbox 通过仍标记 `sandbox_verified` 或现有等价受控状态；只有独立 Pilot/Production 安全评审、真实 JWT 与 permission/data_scope E2E、密钥托管、监控、回退和固定制品全部通过后，才可另行评估 `connected`。PR-A2 不直接授予该状态。
+synthetic 全通过最多标记 `mock`。当前页面和 API 映射均为 `mock/pending`。真实 Sandbox 联调（授权、callback、刷新、过期、撤销全流程）通过后标记 `sandbox_verified`；只有真实请求、权限负向态、字段验证全部通过，并经独立安全评审后，才可另行评估 `connected`，不得仅凭端点连通或路径一致标记。Pilot/Production 仍按完整六项 A2-00 口径。

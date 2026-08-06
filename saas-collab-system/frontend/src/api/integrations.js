@@ -1,4 +1,5 @@
 import { createIdempotencyKey, requestWithMockFallback } from './request';
+import { normalizeOAuthCapability } from '../utils/oauthCapability';
 import {
   mockApiSyncLogs,
   mockApiSyncTasks,
@@ -23,9 +24,10 @@ const oauthRequest = (config = {}, handler) => requestWithMockFallback(
   'integrations.oauth'
 );
 
-const asMockStatus = (response) => {
+// Capability mapping (a2-sandbox-v1): keep a backend-verified api_status, never promote locally.
+const asCapabilityStatus = (response) => {
   if (!response?.success || !response.data || typeof response.data !== 'object') return response;
-  return { ...response, data: { ...response.data, api_status: 'mock' } };
+  return { ...response, data: { ...response.data, api_status: normalizeOAuthCapability(response.data.api_status) } };
 };
 
 export const fetchIntegrationConfigs = () =>
@@ -122,24 +124,24 @@ export const fetchMarketplaceOAuthTargets = (action = 'authorize') =>
 export const initiateMarketplaceOAuth = (payload) => oauthRequest(
   { method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/initiate/', data: payload },
   mockMarketplaceOAuthInitiate
-).then(asMockStatus);
+).then(asCapabilityStatus);
 
 export const fetchMarketplaceOAuthAttempt = (id) => oauthRequest(
   { method: 'get', url: `/api/internal/integrations/oauth-attempts/${id}/` },
   () => mockMarketplaceOAuthStatus(id)
-).then(asMockStatus);
+).then(asCapabilityStatus);
 
 export const refreshMarketplaceAuthorization = (id, scenario = '') => oauthRequest(
   { method: 'post', url: `/api/internal/integrations/store-authorizations/${id}/refresh/`, data: scenario ? { scenario } : {} },
   mockMarketplaceOAuthAction
-).then(asMockStatus);
+).then(asCapabilityStatus);
 
 export const revokeMarketplaceAuthorization = (id, scenario = '') => oauthRequest(
   { method: 'post', url: `/api/internal/integrations/store-authorizations/${id}/revoke/`, data: scenario ? { scenario } : {} },
   mockMarketplaceOAuthAction
-).then(asMockStatus);
+).then(asCapabilityStatus);
 
 export const retryMarketplaceAuthorization = (id) => oauthRequest(
   { method: 'post', url: `/api/internal/integrations/store-authorizations/${id}/retry/`, data: {} },
   mockMarketplaceOAuthRetry
-).then(asMockStatus);
+).then(asCapabilityStatus);

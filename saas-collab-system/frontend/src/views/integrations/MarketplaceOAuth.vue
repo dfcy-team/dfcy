@@ -3,9 +3,12 @@
     <header class="oauth-header">
       <div>
         <h1 class="page-title">Marketplace authorization</h1>
-        <p>Backend-provided authorization URLs only. Synthetic mode is active; no real platform request is sent.</p>
+        <p>Backend-provided authorization URLs only. {{ capabilityDescription }}</p>
       </div>
-      <el-tag :type="statusTagType">{{ statusLabel }}</el-tag>
+      <div class="oauth-tags">
+        <el-tag :type="capabilityTagType">{{ capabilityLabel }}</el-tag>
+        <el-tag :type="statusTagType">{{ statusLabel }}</el-tag>
+      </div>
     </header>
 
     <el-alert
@@ -91,6 +94,12 @@ import { useAuthStore } from '../../stores/auth';
 import { formatApiError } from '../../api/request';
 import { navigateToOAuthAuthorization } from '../../utils/oauthNavigation';
 import {
+  normalizeOAuthCapability,
+  oauthCapabilityDescription,
+  oauthCapabilityLabel,
+  oauthCapabilityTagType
+} from '../../utils/oauthCapability';
+import {
   fetchMarketplaceOAuthAttempt,
   fetchMarketplaceOAuthTargets,
   initiateMarketplaceOAuth,
@@ -114,6 +123,7 @@ const actionLoading = ref('');
 const errorMessage = ref('');
 const callbackMessage = ref('');
 const callbackErrorCode = ref('');
+const capability = ref('mock');
 let pollTimer;
 
 const canAuthorize = computed(() => auth.hasPermission('integrations.store.authorize'));
@@ -121,6 +131,9 @@ const canRotate = computed(() => auth.hasPermission('integrations.credential.rot
 const canRevoke = computed(() => auth.hasPermission('integrations.store.revoke'));
 const canRetry = computed(() => auth.hasPermission('integrations.store.retry'));
 const selectedAuthorization = computed(() => authorizations.value.find((item) => String(item.id) === String(authorizationId.value)) || null);
+const capabilityLabel = computed(() => oauthCapabilityLabel(capability.value));
+const capabilityTagType = computed(() => oauthCapabilityTagType(capability.value));
+const capabilityDescription = computed(() => oauthCapabilityDescription(capability.value));
 const statusLabel = computed(() => attempt.value.status || 'idle');
 const statusTagType = computed(() => ({
   succeeded: 'success', active: 'success', failed: 'danger', expired: 'danger', replayed: 'danger', forbidden: 'danger', offline: 'warning', pending: 'warning', initiated: 'warning', callback_received: 'warning'
@@ -150,6 +163,8 @@ async function loadReferenceData() {
     const responses = await Promise.all(requests);
     if (responses.some((response) => !response.success)) throw responses.find((response) => !response.success);
     const targetData = responses.map((response) => response.data || {});
+    const capabilityStatus = responses.map((response) => response.data?.api_status).find(Boolean);
+    capability.value = normalizeOAuthCapability(capabilityStatus);
     const authorizationTarget = targetData.find((data) => data.action === 'authorize');
     configOptions.value = authorizationTarget?.configs || [];
     const stores = authorizationTarget?.stores || [];
@@ -176,6 +191,7 @@ async function loadAttempt({ silent = false } = {}) {
     const response = await fetchMarketplaceOAuthAttempt(attemptId.value);
     if (!response.success) throw response;
     attempt.value = response.data || {};
+    capability.value = normalizeOAuthCapability(response.data?.api_status);
     if (['initiated', 'callback_received', 'pending'].includes(attempt.value.status)) startPolling();
     else stopPolling();
   } catch (error) {
@@ -211,6 +227,7 @@ async function startAuthorization() {
     });
     if (!response.success) throw response;
     attempt.value = response.data || {};
+    capability.value = normalizeOAuthCapability(response.data?.api_status);
     attemptId.value = response.data?.attempt_id || response.data?.id || '';
     startPolling();
     if (response.data?.authorization_url) navigateToOAuthAuthorization(response.data.authorization_url);
@@ -234,7 +251,8 @@ async function runAction(action) {
     };
     const response = await calls[action]();
     if (!response.success) throw response;
-    callbackMessage.value = `Synthetic ${action} completed with status ${response.data?.status || 'pending'}.`;
+    capability.value = normalizeOAuthCapability(response.data?.api_status);
+    callbackMessage.value = `${capabilityLabel.value}: ${action} completed with status ${response.data?.status || 'pending'}.`;
     await loadReferenceData();
     if (response.data?.attempt_id) {
       attemptId.value = String(response.data.attempt_id);
@@ -269,6 +287,7 @@ onBeforeUnmount(stopPolling);
 <style scoped>
 .oauth-page { display: grid; gap: 16px; }
 .oauth-header { display: flex; justify-content: space-between; gap: 16px; }
+.oauth-tags { display: flex; gap: 8px; align-items: flex-start; }
 .oauth-header p { margin: -8px 0 0; color: #64748b; font-size: 13px; }
 .oauth-actions { align-self: end; }
 </style>
