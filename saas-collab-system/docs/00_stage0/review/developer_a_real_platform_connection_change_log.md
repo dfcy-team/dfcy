@@ -122,3 +122,13 @@ git diff --stat
 1. 提供获批应用控制台导出的当前 Shopee 合同与 TikTok revoke 合同；只提供掩码标识。
 2. 提供批准的 custody 接口合同和固定部署环境/制品生成方式。
 3. 从固定 Review SHA 生成不可变制品，完成两平台真实试点与真实流量后的 DB/log/browser 扫描，再启动独立复审。
+
+## 7. SaaS 部署配置补充（2026-08-07）
+
+- 代码 Review SHA：`24ed0f9f9e30cb382dfa4b04db403edc501ae491`。
+- Shopee 与 TikTok callback 改为独立配置，使用 `dingfengchuangyu.com` 下各自的精确公开路径。
+- `deploy/pilot/application/env.pilot.example` 增加 Shopee `PH/TH/MY` 与 TikTok `ROW` 的 fail-closed 配置；模板不保存 App Secret、Token、authorization code、Cookie 或 Session。
+- 新增 `docs/00_operations/local_vm_real_platform_deployment.md`，记录本地双 VM 放置方式与 custody 边界。
+- 安装门禁同时拒绝 `change-me` 与 `REPLACE_ME` 占位符。
+- 验证：Django check PASS；migration drift PASS；focused live tests 22 passed；后端全量 528 passed / 3 MySQL-only skipped；CI guard PASS；`git diff --check` PASS。
+- 只读连通性确认操作员提供的私网应用主机 pilot HTTP/HTTPS 端口可达，数据库端口从操作员工作站不可达。尚未证明 TLS/应用健康、SSH 主机身份、不可变镜像 digest 和 custody；未部署、未执行真实 OAuth，两个 capability 继续为 `pending/mock`。

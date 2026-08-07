@@ -11,7 +11,7 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | Base branch | `feature/module-a-marketplace-oauth` |
 | Base SHA | `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
 | PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
-| Code Review SHA | `45b130c586d9de2d15d420ec237773174aa19c3c` |
+| Code Review SHA | `24ed0f9f9e30cb382dfa4b04db403edc501ae491` |
 | Final PR Head SHA | Freeze from PR #42 after this evidence-only commit |
 | Deployment artifact / image digest | NOT AVAILABLE |
 | Database / migration head | MySQL 8.4.10 Local Sandbox / `integrations.0013_authorization_reauthorization_bindings` |
@@ -26,8 +26,8 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | migration drift | PASS, no changes |
 | fresh SQLite migration | PASS through `0013` |
 | upgrade SQLite migration | PASS, `0012 -> 0013` |
-| focused OAuth/live tests | PASS, 21 passed locally |
-| full backend (local SQLite) | PASS, 527 passed / 3 MySQL-only skipped |
+| focused OAuth/live tests | PASS, 22 passed locally |
+| full backend (local SQLite) | PASS, 528 passed / 3 MySQL-only skipped |
 | frontend | PASS, 160 passed |
 | production build | PASS, 1955 modules |
 | MySQL 8.4.10 / live dual-worker refresh | PASS, one commit and one controlled conflict |
@@ -36,6 +36,8 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | remote CI | PENDING — must pass against final PR #42 head |
 
 Automated fake-transport tests cover fail-closed gates, synthetic/live separation, exact redirect, forbidden callback context, TikTok code exchange/authorized-shop/minimal metadata contract, custody references, cleanup after persistence/identity failure, reauthorization, version conflict, old-reference revoke failure, bounded 429/5xx/DNS/timeout/reset handling, and Nginx callback access-log suppression. They are not real-platform evidence.
+
+The SaaS pilot deployment template now records separate Shopee/TikTok callback URLs for `dingfengchuangyu.com`, Shopee pilot regions `PH/TH/MY`, and TikTok market `ROW`. Both live gates and both contract approvals remain disabled, and only custody reference placeholders are permitted. A read-only private-host probe found the project HTTP/HTTPS pilot ports reachable and the database port unreachable from the operator workstation; TLS/application health and deployment identity were not proven, so this is not deployment or live-connection evidence.
 
 ## Real platform matrix
 
