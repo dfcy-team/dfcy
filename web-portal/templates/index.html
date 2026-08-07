@@ -1,86 +1,86 @@
-{% extends "base.html" %}
-{% block title %}首页 · {{ brand }}{% endblock %}
+{% extends "content_base.html" %}
+{% block title %}Dingfeng Creator Studio | Creator-led TikTok publishing{% endblock %}
 {% block content %}
-<section class="site-hero">
-  <span class="hero-badge">企业级 TikTok 运营平台</span>
-  <h1>{{ brand }}</h1>
-  <p class="lead">
-    {{ company_name }} 为已授权卖家与内部营销团队提供
-    TikTok Shop 数据分析、Excel 报表导出，以及 TikTok 内容发布能力。
-  </p>
-  <div class="hero-actions">
-    <a class="btn primary" href="{{ url_for('dashboard') }}">进入数据导出</a>
-    <a class="btn" href="{{ url_for('ads_page') }}">广告数据</a>
-    <a class="btn" href="{{ url_for('content_page') }}">视频上传</a>
-    <a class="btn" href="{{ url_for('authorize_page') }}">店铺授权</a>
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <span class="eyebrow">Creator-led publishing · Content Posting API</span>
+    <h1 id="hero-title">A clear path from your edit to TikTok.</h1>
+    <p>Dingfeng Creator Studio helps independent creators connect an account they own, review an original video, choose every available setting and decide how it reaches TikTok.</p>
+    <p class="hero-assurance">Nothing is sent or published without your explicit review and final confirmation.</p>
+    <div class="actions">
+      <a class="button primary" href="{{ url_for('content_page') }}">Open the publishing workspace</a>
+      <a class="button ghost" href="#how-it-works">See how it works</a>
+    </div>
+    <p class="micro">Independent service · Uses TikTok's official OAuth and Content Posting API</p>
   </div>
+  <aside class="flow-card" aria-label="Five-step publishing flow">
+    <p class="flow-title">One deliberate path</p>
+    <span><b>1</b> Connect your TikTok account</span>
+    <span><b>2</b> Preview an original video</span>
+    <span><b>3</b> Choose available settings</span>
+    <span><b>4</b> Confirm drafts or direct post</span>
+    <span><b>5</b> Follow the returned status</span>
+  </aside>
 </section>
 
-<div class="stats-row">
-  <div class="stat-card">
-    <div class="stat-num">{{ shop_count }}</div>
-    <div class="stat-label">登记店铺</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-num">{{ authorized_count }}</div>
-    <div class="stat-label">已授权店铺</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-num">2</div>
-    <div class="stat-label">核心产品模块</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-num">HTTPS</div>
-    <div class="stat-label">全站安全加密</div>
-  </div>
-</div>
+<section class="intro" aria-labelledby="intro-title">
+  <span class="eyebrow">鼎峰内容工作室</span>
+  <h2 id="intro-title">Publishing controls that keep the creator in the room.</h2>
+  <p>Choose the account, content, caption, audience and moment. The workspace keeps every important publishing decision visible.</p>
+</section>
 
-<p class="section-title">核心能力</p>
-<div class="grid three">
-  <div class="card feature-card">
-    <div class="feature-icon shop">📊</div>
-    <h2>TikTok Shop 数据分析</h2>
-    <p class="muted">授权后读取店铺经营、订单与财务数据，一键生成 Excel 报表，覆盖菲律宾等市场本土店与跨境店。</p>
-    <a class="feature-link" href="{{ url_for('dashboard') }}">进入控制台 →</a>
+<section id="how-it-works" class="section" aria-labelledby="how-title">
+  <div class="section-heading">
+    <div><span class="eyebrow">How it works</span><h2 id="how-title">Every important decision has a visible step.</h2></div>
+    <p>A guided sequence makes authorization, publishing choices and status easy to understand.</p>
   </div>
-  <div class="card feature-card">
-    <div class="feature-icon video">🎬</div>
-    <h2>鼎峰TK内容管家</h2>
-    <p class="muted">通过 Content Posting API，将本地视频上传至 TikTok 收件箱草稿，或发布至已授权创作者账号。</p>
-    <a class="feature-link" href="{{ url_for('content_page') }}">视频上传 →</a>
-  </div>
-  <div class="card feature-card">
-    <div class="feature-icon shield">🔒</div>
-    <h2>安全合规</h2>
-    <p class="muted">OAuth 官方授权接入，数据仅用于内部运营，不出售、不向无关第三方提供，公开条款与隐私政策。</p>
-    <a class="feature-link" href="{{ url_for('privacy') }}">隐私政策 →</a>
-  </div>
-</div>
+  <ol class="steps">
+    <li><span>01</span><h3>Connect your account</h3><p>Use TikTok OAuth with an account you own or are authorized to manage.</p></li>
+    <li><span>02</span><h3>Review the media</h3><p>Preview the video and edit its caption before any transfer begins.</p></li>
+    <li><span>03</span><h3>Choose settings</h3><p>Select a privacy value returned by TikTok; Comment, Duet and Stitch begin off.</p></li>
+    <li><span>04</span><h3>Make the call</h3><p>Choose Upload to drafts or Direct post, then give explicit final consent.</p></li>
+    <li><span>05</span><h3>Track the outcome</h3><p>See processing and publishing status returned by TikTok.</p></li>
+  </ol>
+</section>
 
-<div class="grid two">
-  <div class="card">
-    <h2>平台概览</h2>
-    <ul class="kv">
-      <li><span>运营主体</span><strong>{{ company_name }}</strong></li>
-      <li><span>官方网站</span><a href="{{ site_base }}">{{ domain }}</a></li>
-      <li><span>联系邮箱</span><a href="mailto:{{ contact_email }}">{{ contact_email }}</a></li>
-      <li><span>Service ID</span><code>{{ service_id }}</code></li>
-      <li><span>内容发布</span><a href="{{ url_for('content_page') }}">/content</a></li>
-    </ul>
-  </div>
-  <div class="card">
-    <h2>如何开始使用</h2>
-    <ol class="steps">
-      {% if login_enabled %}
-      <li>由企业管理员分配权限（不对外开放注册）。</li>
-      {% else %}
-      <li>当前登录已关闭，可直接使用下方功能。</li>
-      {% endif %}
-      <li><strong>店铺数据</strong>：<a href="{{ url_for('authorize_page') }}">店铺授权</a> → <a href="{{ url_for('dashboard') }}">数据导出</a>。</li>
-      <li><strong>广告数据</strong>：<a href="{{ url_for('ads_page') }}">广告授权与导出</a>。</li>
-      <li><strong>视频发布</strong>：<a href="{{ url_for('content_page') }}">视频上传</a> → TikTok 授权。</li>
-      <li>需要帮助？<a href="{{ url_for('contact') }}">联系我们</a></li>
-    </ol>
-  </div>
-</div>
+<section class="feature-grid" aria-label="Product principles">
+  <article class="feature-card"><span class="icon" aria-hidden="true">◎</span><h3>Creator control</h3><p>You choose the account, video, caption, audience, interaction options and publishing moment.</p></article>
+  <article class="feature-card"><span class="icon" aria-hidden="true">↗</span><h3>Two publishing modes</h3><p>Send a prepared video to TikTok drafts or use Direct Post after reviewing every available setting.</p></article>
+  <article class="feature-card"><span class="icon" aria-hidden="true">✓</span><h3>Compliance in context</h3><p>Commercial disclosure, music confirmation and final consent appear next to the action they govern.</p></article>
+</section>
+
+<section class="comparison" aria-labelledby="modes-title">
+  <article class="mode-card">
+    <span class="eyebrow">Mode one</span>
+    <h3 id="modes-title">Upload to drafts</h3>
+    <p>Transfer the prepared video to the creator's TikTok inbox so they can finish or publish in TikTok.</p>
+    <ul><li>The creator reviews the video first</li><li>The destination account is shown clearly</li><li>Final publishing remains in TikTok</li></ul>
+  </article>
+  <article class="mode-card accent">
+    <span class="eyebrow">Mode two</span>
+    <h3>Direct post</h3>
+    <p>Publish through the connected account after the creator selects every available setting and confirms the action.</p>
+    <ul><li>Privacy has no preselected value</li><li>Comment, Duet and Stitch are opt-in</li><li>Processing status remains visible</li></ul>
+  </article>
+</section>
+
+<section class="two-column" aria-labelledby="boundaries-title">
+  <article class="panel">
+    <span class="eyebrow">Before a post can move</span>
+    <h2 id="boundaries-title">A review checklist the creator can see.</h2>
+    <ul class="check-list"><li>The connected account identity is displayed.</li><li>Video preview and editable caption are visible.</li><li>Privacy is selected manually.</li><li>Interaction controls are off until enabled.</li><li>Commercial content is disclosed when applicable.</li><li>Music use is acknowledged before posting.</li></ul>
+  </article>
+  <article class="panel panel-dark">
+    <span class="eyebrow">Clear boundaries</span>
+    <h2>Official APIs, honest expectations.</h2>
+    <p>Dingfeng Creator Studio is an independent creator service. TikTok OAuth and the Content Posting API handle authorization and content transfer.</p>
+    <p>We do not add watermarks, promotional labels or uneditable captions to a creator's video.</p>
+    <p class="small">TikTok is a third-party platform and is not owned, operated or endorsed by Dingfeng Creator Studio.</p>
+  </article>
+</section>
+
+<section class="cta-band" aria-label="Open publishing workspace">
+  <div><h2>Review every choice before you publish.</h2><p>Connect your account and use the real creator publishing workspace.</p></div>
+  <a class="button primary" href="{{ url_for('content_page') }}">Open Creator Studio</a>
+</section>
 {% endblock %}

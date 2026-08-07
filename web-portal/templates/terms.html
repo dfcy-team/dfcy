@@ -1,10 +1,10 @@
 {% extends "content_base.html" %}
 {% block title %}Terms of Service | Dingfeng Creator Studio{% endblock %}
 {% block content %}
-<section class="prose-page">
-  <span class="section-label">LEGAL</span>
+<section class="prose-page prose">
+  <span class="eyebrow">Legal</span>
   <h1>Terms of Service</h1>
-  <p>Last updated: July 23, 2026</p>
+  <p>Effective Date: August 6, 2026<br>Last Updated: August 6, 2026</p>
   <p>
     These terms govern use of Dingfeng Creator Studio, operated by
     {{ company_name }}. By using the service, you confirm that you are legally
@@ -43,6 +43,6 @@
     submitted video will be published or publicly visible.
   </p>
   <h2>6. Contact</h2>
-  <p>Questions: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a></p>
+  <p>Questions: <a href="mailto:legal@dingfengchuangyu.com">legal@dingfengchuangyu.com</a>. Our privacy practices and deletion process are described in the <a href="{{ url_for('privacy') }}">Privacy Policy</a> and <a href="{{ url_for('data_deletion') }}">Data Deletion</a> page.</p>
 </section>
 {% endblock %}

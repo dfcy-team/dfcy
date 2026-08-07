@@ -151,13 +151,8 @@ def _guess_shop_for_callback(region: str) -> str:
 
 @app.route("/")
 def index():
-    shop_list = shops.load_shops()
-    return render_template(
-        "index.html",
-        shops=shop_list,
-        shop_count=len(shop_list),
-        authorized_count=sum(1 for s in shop_list if s.get("has_token")),
-    )
+    # Keep the public review URL independent from private shop configuration.
+    return render_template("index.html")
 
 
 @app.route("/about")
@@ -503,6 +498,7 @@ def _content_session_id() -> str:
 
 
 @app.route("/content")
+@app.route("/content/")
 def content_page():
     tok = content_video.session_token_status(_content_session_id())
     auth_ok = request.args.get("ok") == "1" and tok.get("authorized")
@@ -636,6 +632,23 @@ def api_content_upload():
                         "error": "The selected privacy setting is not available for this creator",
                     }
                 ), 400
+            commercial_toggle = request.form.get("commercial_toggle") == "true"
+            brand_content = request.form.get("brand_content") == "true"
+            brand_organic = request.form.get("brand_organic") == "true"
+            if commercial_toggle and not (brand_content or brand_organic):
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "Select Your brand, Branded content, or both",
+                    }
+                ), 400
+            if brand_content and privacy_level == "SELF_ONLY":
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "Branded content visibility cannot be set to private",
+                    }
+                ), 400
             result = content_video.upload_direct(
                 dest,
                 title=title,
@@ -643,8 +656,8 @@ def api_content_upload():
                 disable_comment=request.form.get("allow_comment") != "true",
                 disable_duet=request.form.get("allow_duet") != "true",
                 disable_stitch=request.form.get("allow_stitch") != "true",
-                brand_content_toggle=request.form.get("brand_content") == "true",
-                brand_organic_toggle=request.form.get("brand_organic") == "true",
+                brand_content_toggle=brand_content,
+                brand_organic_toggle=brand_organic,
                 access_token=access_token,
             )
         else:
@@ -678,6 +691,12 @@ def terms():
 @app.route("/privacy/")
 def privacy():
     return render_template("privacy.html")
+
+
+@app.route("/data-deletion")
+@app.route("/data-deletion/")
+def data_deletion():
+    return render_template("data_deletion.html")
 
 
 @app.route("/content/callback")

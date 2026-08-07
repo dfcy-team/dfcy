@@ -1,14 +1,12 @@
 {% extends "content_base.html" %}
 {% block title %}About | Dingfeng Creator Studio{% endblock %}
 {% block content %}
-<section class="prose-page">
-  <span class="section-label">ABOUT THE SERVICE</span>
-  <h1>A publishing workspace for independent creators.</h1>
-  <p>
-    Dingfeng Creator Studio is operated by <strong>{{ company_name }}</strong>.
-    The service is available to creators who want a clear, creator-controlled
-    way to transfer their original videos to their own TikTok accounts.
-  </p>
+<section class="prose-page prose">
+  <span class="eyebrow">About the service</span>
+  <h1>A publishing workspace built around creator choice.</h1>
+  <p class="lead">Dingfeng Creator Studio is operated by <strong>{{ company_name }}</strong> (厦门市鼎峰创域科技有限公司).</p>
+  <h2>What the service does</h2>
+  <p>Eligible independent creators can connect a TikTok account they own or are authorized to manage, prepare original video content, review available publishing options and send that content to TikTok through official APIs.</p>
   <h2>How it works</h2>
   <ol>
     <li>The creator connects their own TikTok account through TikTok OAuth.</li>
@@ -18,16 +16,9 @@
     <li>The service displays TikTok's processing and publishing status.</li>
   </ol>
   <h2>Who can use it</h2>
-  <p>
-    The creator publishing workspace is intended for a broad audience of
-    authentic TikTok creators. It is not restricted to Dingfeng employees,
-    company-managed accounts or a private internal group.
-  </p>
+  <p>The publishing workspace is intended for a broad audience of authentic creators. It is not restricted to Dingfeng employees, company-managed accounts or a private internal group.</p>
   <h2>Creator control</h2>
-  <p>
-    We do not choose a creator's account, add watermarks, prefill promotional
-    captions, or publish without an explicit user action. Each user can
-    disconnect their TikTok account at any time.
-  </p>
+  <p>We do not choose a creator's account, add watermarks, prefill promotional captions or publish without explicit user action. Users can disconnect TikTok at any time and request deletion of their related information.</p>
+  <p class="notice">Dingfeng Creator Studio is an independent service. It is not owned, operated or endorsed by TikTok.</p>
 </section>
 {% endblock %}

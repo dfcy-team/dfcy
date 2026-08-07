@@ -1,27 +1,16 @@
 {% extends "content_base.html" %}
 {% block title %}Contact | Dingfeng Creator Studio{% endblock %}
 {% block content %}
-<section class="prose-page">
-  <span class="section-label">SUPPORT</span>
-  <h1>Contact Dingfeng Creator Studio</h1>
-  <p>
-    Contact us for account connection, publishing, privacy, data deletion or
-    accessibility questions. Include the error message and approximate time of
-    the issue, but never send your password, access token or client secret.
-  </p>
-  <h2>Support contact</h2>
-  <p>
-    Email: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a><br/>
-    Operator: {{ company_name }}<br/>
-    Address: {{ contact_address }}
-  </p>
-  <h2>Response time</h2>
-  <p>We aim to respond within two business days.</p>
-  <h2>Account and data requests</h2>
-  <p>
-    To disconnect immediately, use the Disconnect button in the publishing
-    workspace. For access or deletion requests, email us from the address you
-    used to contact support and describe the connected TikTok account.
-  </p>
+<section class="prose-page prose">
+  <span class="eyebrow">Contact us</span>
+  <h1>We're here to help.</h1>
+  <p class="lead">For account connection, publishing, privacy or data-deletion questions, contact us by email.</p>
+  <div class="contact-card">
+    <h2>Support</h2><p><a href="mailto:{{ contact_email }}">{{ contact_email }}</a></p>
+    <h2>Privacy and data deletion</h2><p><a href="mailto:privacy@dingfengchuangyu.com">privacy@dingfengchuangyu.com</a></p>
+    <h2>Legal notices</h2><p><a href="mailto:legal@dingfengchuangyu.com">legal@dingfengchuangyu.com</a></p>
+  </div>
+  <p>When contacting us, never send your password, TikTok access token or client secret.</p>
+  <p>Operator: {{ company_name }}<br>Address: {{ contact_address }}</p>
 </section>
 {% endblock %}

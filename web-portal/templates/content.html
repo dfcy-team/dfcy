@@ -118,9 +118,14 @@
 
           <div class="field">
             <span>Commercial content disclosure</span>
-            <div class="check-stack">
-              <label><input type="checkbox" name="brand_organic"/> This video promotes my own brand or business.</label>
-              <label><input type="checkbox" name="brand_content"/> This video is a paid partnership for another brand.</label>
+            <label class="disclosure-toggle">
+              <input type="checkbox" name="commercial_toggle"/>
+              <span>This video promotes a brand, product or service.</span>
+            </label>
+            <div class="check-stack" id="commercial-options" hidden>
+              <label><input type="checkbox" name="brand_organic"/> Your brand — promotes my own business.</label>
+              <label><input type="checkbox" name="brand_content"/> Branded content — paid partnership for another brand.</label>
+              <small id="commercial-label" class="commercial-label"></small>
             </div>
           </div>
         </div>

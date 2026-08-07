@@ -24,6 +24,7 @@ PUBLIC_ENDPOINTS = frozenset(
         "contact",
         "terms",
         "privacy",
+        "data_deletion",
         "login_page",
         "logout",
         "callback",

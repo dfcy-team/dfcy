@@ -13,6 +13,11 @@
   const caption = form?.querySelector('[name="title"]');
   const captionCount = document.getElementById("caption-count");
   const consentText = document.getElementById("consent-text");
+  const commercialToggle = form?.querySelector('[name="commercial_toggle"]');
+  const commercialOptions = document.getElementById("commercial-options");
+  const brandOrganic = form?.querySelector('[name="brand_organic"]');
+  const brandContent = form?.querySelector('[name="brand_content"]');
+  const commercialLabel = document.getElementById("commercial-label");
 
   let creatorInfo = null;
   let videoObjectUrl = "";
@@ -44,10 +49,40 @@
     modeHelp.textContent = direct
       ? "Your selections below will be used for this direct post."
       : "TikTok will send an inbox notification so you can finish editing and publish in the TikTok app.";
-    consentText.textContent = direct
-      ? "By posting, you agree to TikTok's Music Usage Confirmation."
-      : "I reviewed this video and explicitly consent to send it to my TikTok inbox drafts.";
+    updateCommercialState();
     privacy.required = direct;
+  }
+
+  function updateCommercialState() {
+    const enabled = Boolean(commercialToggle?.checked);
+    if (commercialOptions) commercialOptions.hidden = !enabled;
+    if (!enabled) {
+      if (brandOrganic) brandOrganic.checked = false;
+      if (brandContent) brandContent.checked = false;
+    }
+
+    const branded = Boolean(brandContent?.checked);
+    const ownBrand = Boolean(brandOrganic?.checked);
+    const privateOption = Array.from(privacy?.options || []).find((option) => option.value === "SELF_ONLY");
+    if (privateOption) privateOption.disabled = branded;
+    if (branded && privacy?.value === "SELF_ONLY") privacy.value = "";
+
+    if (commercialLabel) {
+      commercialLabel.textContent = branded
+        ? "Your video will be labeled as 'Paid partnership'. Branded content cannot use Only me visibility."
+        : ownBrand
+          ? "Your video will be labeled as 'Promotional content'."
+          : enabled
+            ? "Select Your brand, Branded content, or both."
+            : "";
+    }
+    if (consentText) {
+      consentText.textContent = selectedMode() === "direct"
+        ? branded
+          ? "By posting, you agree to TikTok's Branded Content Policy and Music Usage Confirmation."
+          : "By posting, you agree to TikTok's Music Usage Confirmation."
+        : "I reviewed this video and explicitly consent to send it to my TikTok inbox drafts.";
+    }
   }
 
   function renderCreator(info) {
@@ -66,6 +101,7 @@
       option.textContent = privacyLabels[value] || value;
       privacy.appendChild(option);
     });
+    updateCommercialState();
 
     const interactionRules = [
       ["allow_comment", "comment_disabled"],
@@ -125,6 +161,10 @@
     captionCount.textContent = String(caption.value.length);
   });
 
+  commercialToggle?.addEventListener("change", updateCommercialState);
+  brandOrganic?.addEventListener("change", updateCommercialState);
+  brandContent?.addEventListener("change", updateCommercialState);
+
   document.getElementById("btn-disconnect")?.addEventListener("click", async () => {
     await fetch("/api/content/disconnect", { method: "POST" });
     window.location.reload();
@@ -168,13 +208,24 @@
     }
     if (!form.reportValidity()) return;
 
+    if (selectedMode() === "direct" && commercialToggle?.checked && !brandOrganic?.checked && !brandContent?.checked) {
+      setResult("error", "<strong>Choose a commercial content type.</strong><span>Select Your brand, Branded content, or both.</span>");
+      brandOrganic?.focus();
+      return;
+    }
+    if (selectedMode() === "direct" && brandContent?.checked && privacy.value === "SELF_ONLY") {
+      setResult("error", "<strong>Choose another privacy setting.</strong><span>Branded content visibility cannot be set to private.</span>");
+      privacy.focus();
+      return;
+    }
+
     const mode = selectedMode();
     const payload = new FormData();
     payload.set("video", file);
     payload.set("mode", mode);
     payload.set("title", caption.value);
     payload.set("privacy_level", privacy.value);
-    ["allow_comment", "allow_duet", "allow_stitch", "brand_content", "brand_organic", "consent"].forEach((name) => {
+    ["allow_comment", "allow_duet", "allow_stitch", "commercial_toggle", "brand_content", "brand_organic", "consent"].forEach((name) => {
       payload.set(name, form.querySelector(`[name="${name}"]`)?.checked ? "true" : "false");
     });
 

@@ -1,10 +1,10 @@
 {% extends "content_base.html" %}
 {% block title %}Privacy Policy | Dingfeng Creator Studio{% endblock %}
 {% block content %}
-<section class="prose-page">
-  <span class="section-label">LEGAL</span>
+<section class="prose-page prose">
+  <span class="eyebrow">Legal</span>
   <h1>Privacy Policy</h1>
-  <p>Last updated: July 23, 2026</p>
+  <p>Effective Date: August 6, 2026<br>Last Updated: August 6, 2026</p>
   <p>
     This policy explains how {{ company_name }} processes information when you
     use Dingfeng Creator Studio at {{ domain }}.
@@ -53,13 +53,13 @@
   <p>
     You may decline authorization, disconnect your TikTok account, revoke
     access through TikTok, or request access, correction or deletion by
-    contacting <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>.
+    visiting our <a href="{{ url_for('data_deletion') }}">Data Deletion</a> page or contacting <a href="mailto:privacy@dingfengchuangyu.com">privacy@dingfengchuangyu.com</a>.
   </p>
   <h2>8. Contact</h2>
   <p>
     Operator: {{ company_name }}<br/>
     Address: {{ contact_address }}<br/>
-    Email: <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+    Email: <a href="mailto:privacy@dingfengchuangyu.com">privacy@dingfengchuangyu.com</a>
   </p>
 </section>
 {% endblock %}
