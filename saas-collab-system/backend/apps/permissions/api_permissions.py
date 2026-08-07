@@ -166,3 +166,9 @@ class IsMarketplaceStoreRetryRunner(IntegrationActionPermission):
 
 class IsMarketplaceCredentialRotator(IntegrationActionPermission):
     permission_code = "integrations.credential.rotate"
+
+
+class IsMarketplaceStoreMappingManager(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        permission_code = "integrations.store.view" if request.method in SAFE_METHODS else "integrations.store.authorize"
+        return self.has_action_permission(request, permission_code)

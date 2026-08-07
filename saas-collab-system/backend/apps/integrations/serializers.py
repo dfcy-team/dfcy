@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import (
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
+    MarketplaceStoreMapping,
     PlatformChoices,
     PlatformIntegrationConfig,
     SyncJob,
@@ -135,6 +136,70 @@ class MarketplaceOAuthStartSerializer(serializers.Serializer):
         if len(scopes) > 20:
             raise serializers.ValidationError("Too many OAuth scopes requested.")
         return scopes
+
+
+class MarketplaceStoreMappingSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(read_only=True)
+    store_code = serializers.CharField(source="store.code", read_only=True)
+    store_name = serializers.CharField(source="store.name", read_only=True)
+    authorization_id = serializers.IntegerField(read_only=True)
+    mapped_by_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = MarketplaceStoreMapping
+        fields = (
+            "id",
+            "tenant_id",
+            "platform",
+            "store_id",
+            "store_code",
+            "store_name",
+            "authorization_id",
+            "platform_store_id",
+            "region",
+            "timezone",
+            "currency",
+            "status",
+            "mapping_source",
+            "mapped_by_id",
+            "mapped_at",
+            "last_verified_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class StoreMappingCreateSerializer(serializers.Serializer):
+    store_id = serializers.IntegerField(min_value=1)
+    authorization_id = serializers.IntegerField(min_value=1)
+    timezone = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
+    currency = serializers.CharField(max_length=3, required=False, allow_blank=True, default="")
+
+    def validate_currency(self, value):
+        currency = str(value or "").strip().upper()
+        if currency and (len(currency) != 3 or not currency.isalpha()):
+            raise serializers.ValidationError("Currency must be an uppercase ISO 4217 code.")
+        return currency
+
+    def validate(self, attrs):
+        forbidden = {"tenant", "tenant_id", "mapped_by", "mapped_by_id", "platform_store_id", "platform_identity_key"}
+        provided = forbidden.intersection({str(key).lower() for key in self.initial_data})
+        if provided:
+            raise serializers.ValidationError("Tenant, operator and platform identity fields are not accepted.")
+        return attrs
+
+
+class StoreMappingUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=MarketplaceStoreMapping.Status.choices, required=False)
+    timezone = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    currency = serializers.CharField(max_length=3, required=False, allow_blank=True)
+
+    def validate_currency(self, value):
+        currency = str(value or "").strip().upper()
+        if currency and (len(currency) != 3 or not currency.isalpha()):
+            raise serializers.ValidationError("Currency must be an uppercase ISO 4217 code.")
+        return currency
 
 
 class IntegrationAuditLogSerializer(serializers.ModelSerializer):

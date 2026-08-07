@@ -198,6 +198,44 @@ def filter_store_authorizations(user, queryset, permission_code):
     return queryset.filter(allowed).distinct()
 
 
+def filter_store_mappings(user, queryset, permission_code):
+    from apps.masterdata.models import StoreMaster
+
+    configs = permission_scope_configs(
+        user,
+        permission_code,
+        {"platforms", "store_ids"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    )
+    if configs is None:
+        return queryset
+    for config in configs:
+        if "platforms" in config:
+            _validate_non_empty_string_values(config["platforms"], "Store mapping scope has an invalid platform.")
+            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
+                _invalid_scope("Store mapping scope contains an unsupported platform.")
+        if "store_ids" in config:
+            _validate_positive_int_values(config["store_ids"], "Store mapping scope has an invalid store identifier.")
+            authorized_store_count = StoreMaster.objects.filter(
+                tenant=user.tenant,
+                id__in=set(config["store_ids"]),
+            ).count()
+            if authorized_store_count != len(set(config["store_ids"])):
+                raise DataScopeDenied(
+                    "Store mapping scope exceeds the current tenant.",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
+    allowed = Q(pk__in=[])
+    for config in configs:
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(platform__in=config["platforms"])
+        if "store_ids" in config:
+            condition &= Q(store_id__in=config["store_ids"])
+        allowed |= condition
+    return queryset.filter(allowed).distinct()
+
+
 def integration_values_allowed(user, permission_code, *, platform=None, config_id=None, resource_type=None, store_id=None):
     configs = permission_scope_configs(
         user,

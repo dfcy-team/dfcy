@@ -11,6 +11,7 @@ from django.conf import settings
 
 _authorization_service_write = ContextVar("authorization_service_write", default=False)
 _oauth_state_service_write = ContextVar("oauth_state_service_write", default=False)
+_store_mapping_service_write = ContextVar("store_mapping_service_write", default=False)
 
 
 @contextmanager
@@ -29,6 +30,15 @@ def oauth_state_service_write():
         yield
     finally:
         _oauth_state_service_write.reset(token)
+
+
+@contextmanager
+def store_mapping_service_write():
+    token = _store_mapping_service_write.set(True)
+    try:
+        yield
+    finally:
+        _store_mapping_service_write.reset(token)
 
 
 class PlatformChoices(models.TextChoices):
@@ -478,6 +488,116 @@ class OAuthStateSession(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("OAuth state sessions cannot be deleted.")
+
+
+class StoreMappingQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if not _store_mapping_service_write.get():
+            raise ValidationError("Store mappings can only be changed by the service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _store_mapping_service_write.get():
+            raise ValidationError("Store mappings must be created by the service layer.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if not _store_mapping_service_write.get():
+            raise ValidationError("Store mappings can only be changed by the service layer.")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def delete(self):
+        raise ValidationError("Store mappings cannot be deleted; deactivate them instead.")
+
+
+class MarketplaceStoreMapping(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        INACTIVE = "inactive", "Inactive"
+
+    class MappingSource(models.TextChoices):
+        OAUTH_CALLBACK = "oauth_callback", "OAuth callback"
+        MANUAL = "manual", "Manual"
+        SYNTHETIC_FIXTURE = "synthetic_fixture", "Synthetic fixture"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="store_mappings")
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    store = models.ForeignKey(
+        "masterdata.StoreMaster",
+        on_delete=models.PROTECT,
+        related_name="marketplace_mappings",
+    )
+    authorization = models.ForeignKey(
+        MarketplaceStoreAuthorization,
+        on_delete=models.PROTECT,
+        related_name="store_mappings",
+    )
+    platform_store_id = models.CharField(max_length=160)
+    platform_identity_key = models.CharField(max_length=64)
+    platform_subject_id = models.CharField(max_length=160, blank=True)
+    region = models.CharField(max_length=8)
+    timezone = models.CharField(max_length=64, blank=True)
+    currency = models.CharField(max_length=3, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    mapping_source = models.CharField(max_length=30, choices=MappingSource.choices)
+    mapped_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="mapped_store_mappings",
+    )
+    mapped_at = models.DateTimeField(auto_now_add=True)
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = StoreMappingQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "platform", "platform_store_id"],
+                name="uniq_store_mapping_tenant_platform_store",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "platform", "status"], name="idx_store_map_tenant_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.platform}:{self.platform_store_id}"
+
+    def clean(self):
+        errors = {}
+        if self.platform not in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+            errors["platform"] = "Store mappings only support Shopee or TikTok Shop."
+        if self.store_id and self.store.tenant_id != self.tenant_id:
+            errors["store"] = "Store mapping store must belong to the mapping tenant."
+        if self.store_id and self.store.platform.platform_type != self.platform:
+            errors["store"] = "Store mapping store platform must match the mapping platform."
+        if self.authorization_id:
+            if self.authorization.tenant_id != self.tenant_id:
+                errors["authorization"] = "Store mapping authorization must belong to the mapping tenant."
+            if self.authorization.platform != self.platform:
+                errors["authorization"] = "Store mapping authorization platform must match the mapping platform."
+            if self.authorization.platform_identity_key != self.platform_identity_key:
+                errors["platform_identity_key"] = "Store mapping identity must match the authorization identity."
+        expected_key = marketplace_identity_key(self.platform, self.region, self.platform_store_id)
+        if self.platform_identity_key != expected_key:
+            errors["platform_identity_key"] = "Store mapping identity key does not match the platform store identity."
+        if self.currency and (len(self.currency) != 3 or not self.currency.isalpha() or self.currency != self.currency.upper()):
+            errors["currency"] = "Currency must be an uppercase ISO 4217 code."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not _store_mapping_service_write.get():
+            raise ValidationError("Store mappings must be changed by the service layer.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Store mappings cannot be deleted; deactivate them instead.")
 
 
 class SyncJob(models.Model):
