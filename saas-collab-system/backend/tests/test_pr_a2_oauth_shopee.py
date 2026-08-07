@@ -108,7 +108,7 @@ def test_start_requires_permission_and_rejects_raw_or_insecure_input():
     assert client.post(START_URL, {"platform": "shopee"}, format="json").status_code == 403
 
     grant(user, "integrations.store.authorize")
-    raw = start_oauth(client, store, config, access_token="raw-token-value")
+    raw = start_oauth(client, store, config, access_token="raw-test-token-value")
     assert raw.status_code == 422
     assert raw.json()["code"] == "BUSINESS_RULE_VIOLATION"
 
@@ -248,7 +248,7 @@ def test_shopee_callback_rejects_raw_credential_query_params():
     grant(user, "integrations.store.authorize")
     state = start_oauth(client_for(user), store, config).json()["data"]["state"]
 
-    response = shopee_callback(APIClient(), state, access_token="leaked-token")
+    response = shopee_callback(APIClient(), state, access_token="leaked-test-token")
 
     assert response.status_code == 409
     assert "OAUTH_CALLBACK_REJECTED" in response.json()["message"]

@@ -189,7 +189,7 @@ def test_tiktok_callback_rejects_raw_credential_params_and_unknown_state():
     grant(user, "integrations.store.authorize")
     state = start_oauth(client_for(user), store, config).json()["data"]["state"]
 
-    raw = tiktok_callback(APIClient(), state, refresh_token="leaked-refresh")
+    raw = tiktok_callback(APIClient(), state, refresh_token="leaked-test-refresh")
     assert raw.status_code == 409
     assert "OAUTH_CALLBACK_REJECTED" in raw.json()["message"]
     session = OAuthStateSession.objects.get(tenant=tenant)
