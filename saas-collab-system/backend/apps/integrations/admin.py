@@ -6,6 +6,7 @@ from .models import (
     APISyncLog,
     APISyncTask,
     IntegrationAuditLog,
+    MarketplaceProductMapping,
     MarketplaceStoreAuthorization,
     MarketplaceStoreMapping,
     OAuthStateSession,
@@ -89,6 +90,23 @@ class MarketplaceStoreMappingAdmin(admin.ModelAdmin):
     list_filter = ("platform", "status", "mapping_source", "tenant")
     search_fields = ("platform_store_id", "store__code", "tenant__code")
     readonly_fields = tuple(field.name for field in MarketplaceStoreMapping._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MarketplaceProductMapping)
+class MarketplaceProductMappingAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "platform", "store_mapping", "platform_variant_id", "status", "mapping_source")
+    list_filter = ("platform", "status", "mapping_source", "tenant")
+    search_fields = ("platform_product_id", "platform_variant_id", "platform_sku", "tenant__code")
+    readonly_fields = tuple(field.name for field in MarketplaceProductMapping._meta.fields)
 
     def has_add_permission(self, request):
         return False

@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     IntegrationAuditLog,
+    MarketplaceProductMapping,
     MarketplaceStoreAuthorization,
     MarketplaceStoreMapping,
     PlatformChoices,
@@ -200,6 +201,70 @@ class StoreMappingUpdateSerializer(serializers.Serializer):
         if currency and (len(currency) != 3 or not currency.isalpha()):
             raise serializers.ValidationError("Currency must be an uppercase ISO 4217 code.")
         return currency
+
+
+class MarketplaceProductMappingSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(read_only=True)
+    store_mapping_id = serializers.IntegerField(read_only=True)
+    product_id = serializers.IntegerField(read_only=True)
+    sku_id = serializers.IntegerField(read_only=True)
+    sku_code = serializers.CharField(source="sku.sku_code", read_only=True, default=None)
+
+    class Meta:
+        model = MarketplaceProductMapping
+        fields = (
+            "id",
+            "tenant_id",
+            "platform",
+            "store_mapping_id",
+            "platform_product_id",
+            "platform_variant_id",
+            "platform_sku",
+            "product_id",
+            "sku_id",
+            "sku_code",
+            "status",
+            "mapping_source",
+            "confidence",
+            "manually_confirmed",
+            "result_code",
+            "first_seen_at",
+            "last_verified_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class ProductMappingCreateSerializer(serializers.Serializer):
+    store_mapping_id = serializers.IntegerField(min_value=1)
+    platform_product_id = serializers.CharField(max_length=160)
+    platform_variant_id = serializers.CharField(max_length=160)
+    platform_sku = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        forbidden = {
+            "tenant",
+            "tenant_id",
+            "created_by",
+            "updated_by",
+            "status",
+            "sku_id",
+            "product_id",
+            "manually_confirmed",
+            "confidence",
+        }
+        provided = forbidden.intersection({str(key).lower() for key in self.initial_data})
+        if provided:
+            raise serializers.ValidationError("Status, identity and confirmation fields are not accepted on create.")
+        return attrs
+
+
+class ProductMappingUpdateSerializer(serializers.Serializer):
+    sku_id = serializers.IntegerField(min_value=1, required=False)
+    confidence = serializers.IntegerField(min_value=0, max_value=100, required=False)
+    manually_confirmed = serializers.BooleanField(required=False, default=False)
+    status = serializers.ChoiceField(choices=[MarketplaceProductMapping.Status.INACTIVE], required=False)
 
 
 class IntegrationAuditLogSerializer(serializers.ModelSerializer):

@@ -46,6 +46,8 @@ urlpatterns = [
     ),
     path("store-mappings/", views.store_mapping_collection, name="store-mapping-collection"),
     path("store-mappings/<int:pk>/", views.store_mapping_detail, name="store-mapping-detail"),
+    path("product-mappings/", views.product_mapping_collection, name="product-mapping-collection"),
+    path("product-mappings/<int:pk>/", views.product_mapping_detail, name="product-mapping-detail"),
     path("sync-jobs/", views.sync_job_collection, name="sync-job-collection"),
     path("sync-jobs/<int:pk>/run-mock/", views.run_mock_sync_job, name="sync-job-run-mock"),
     path("sync-jobs/<int:pk>/disable/", views.disable_sync_job, name="sync-job-disable"),

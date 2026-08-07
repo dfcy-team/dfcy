@@ -24,6 +24,7 @@ from apps.permissions.api_permissions import (
 )
 from apps.permissions.ui_p6_scopes import (
     filter_integration_configs,
+    filter_product_mappings,
     filter_store_mappings,
     filter_sync_jobs,
     filter_sync_runs,
@@ -40,6 +41,7 @@ from .marketplace_oauth_service import (
 )
 from .models import (
     IntegrationAuditLog,
+    MarketplaceProductMapping,
     MarketplaceStoreAuthorization,
     MarketplaceStoreMapping,
     PlatformChoices,
@@ -47,11 +49,20 @@ from .models import (
     SyncJob,
     SyncRun,
 )
+from .product_mapping_service import (
+    confirm_product_mapping,
+    create_product_mapping,
+    deactivate_product_mapping,
+    suggest_product_mapping,
+)
 from .serializers import (
     MarketplaceOAuthStartSerializer,
+    MarketplaceProductMappingSerializer,
     MarketplaceStoreAuthorizationSerializer,
     MarketplaceStoreMappingSerializer,
     PlatformIntegrationConfigSerializer,
+    ProductMappingCreateSerializer,
+    ProductMappingUpdateSerializer,
     RotateCredentialsSerializer,
     StoreMappingCreateSerializer,
     StoreMappingUpdateSerializer,
@@ -468,6 +479,118 @@ def store_mapping_detail(request, pk):
         currency=serializer.validated_data.get("currency"),
     )
     return success_response(MarketplaceStoreMappingSerializer(mapping).data)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsMarketplaceStoreMappingManager])
+def product_mapping_collection(request):
+    if request.method == "GET":
+        allowed_query = {"page", "page_size", "platform", "status", "store_mapping_id"}
+        if set(request.query_params) - allowed_query:
+            raise ValidationError("Unknown product mapping query parameter.")
+        queryset = MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related("sku")
+        if request.query_params.get("platform"):
+            platform = request.query_params["platform"]
+            if platform not in {"shopee", "tiktok"}:
+                raise ValidationError("Unsupported marketplace platform filter.")
+            queryset = queryset.filter(platform=platform)
+        if request.query_params.get("status"):
+            status_value = request.query_params["status"]
+            if status_value not in MarketplaceProductMapping.Status.values:
+                raise ValidationError("Unsupported product mapping status filter.")
+            queryset = queryset.filter(status=status_value)
+        if request.query_params.get("store_mapping_id"):
+            queryset = queryset.filter(
+                store_mapping_id=positive_int(request.query_params["store_mapping_id"], default=0)
+            )
+        queryset = filter_product_mappings(request.user, queryset, "integrations.store.view")
+        page, page_size = pagination_query(request)
+        return success_response(
+            paginated_data(
+                request,
+                queryset,
+                MarketplaceProductMappingSerializer,
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    reject_raw_credential_fields(request.data)
+    serializer = ProductMappingCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    store_mapping = get_scoped_object_or_404(
+        filter_store_mappings(
+            request.user,
+            MarketplaceStoreMapping.objects.filter(tenant=request.user.tenant),
+            "integrations.store.authorize",
+        ),
+        pk=data["store_mapping_id"],
+    )
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=store_mapping.platform,
+        store_id=store_mapping.store_id,
+    ):
+        raise DataScopeDenied(
+            "Product mapping is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    mapping = create_product_mapping(
+        tenant=request.user.tenant,
+        actor=request.user,
+        store_mapping=store_mapping,
+        platform_product_id=data["platform_product_id"],
+        platform_variant_id=data["platform_variant_id"],
+        platform_sku=data["platform_sku"],
+    )
+    return success_response(MarketplaceProductMappingSerializer(mapping).data, status=201)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsMarketplaceStoreMappingManager])
+def product_mapping_detail(request, pk):
+    permission_code = "integrations.store.view" if request.method == "GET" else "integrations.store.authorize"
+    queryset = filter_product_mappings(
+        request.user,
+        MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related("sku"),
+        permission_code,
+    )
+    mapping = get_scoped_object_or_404(queryset, pk=pk)
+    if request.method == "GET":
+        return success_response(MarketplaceProductMappingSerializer(mapping).data)
+
+    if not request.data:
+        raise ValidationError("No supported product mapping fields were provided.")
+    reject_raw_credential_fields(request.data)
+    serializer = ProductMappingUpdateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=mapping.platform,
+        store_id=mapping.store_mapping.store_id,
+    ):
+        raise DataScopeDenied(
+            "Product mapping update is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    sku = None
+    if data.get("sku_id"):
+        from apps.products.models import ProductSKU
+
+        sku = get_object_or_404(ProductSKU, tenant=request.user.tenant, pk=data["sku_id"])
+    if data.get("status") == MarketplaceProductMapping.Status.INACTIVE:
+        mapping = deactivate_product_mapping(mapping, actor=request.user)
+    elif data.get("manually_confirmed"):
+        mapping = confirm_product_mapping(mapping, actor=request.user, sku=sku, manually_confirmed=True)
+    else:
+        if sku is None or "confidence" not in data:
+            raise ValidationError("Product mapping suggestions require a SKU and a confidence score.")
+        mapping = suggest_product_mapping(mapping, actor=request.user, sku=sku, confidence=data["confidence"])
+    return success_response(MarketplaceProductMappingSerializer(mapping).data)
 
 
 @api_view(["POST"])

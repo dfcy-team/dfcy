@@ -258,6 +258,33 @@ def integration_values_allowed(user, permission_code, *, platform=None, config_i
     return False
 
 
+def filter_product_mappings(user, queryset, permission_code):
+    configs = permission_scope_configs(
+        user,
+        permission_code,
+        {"platforms", "store_ids"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    )
+    if configs is None:
+        return queryset
+    for config in configs:
+        if "platforms" in config:
+            _validate_non_empty_string_values(config["platforms"], "Product mapping scope has an invalid platform.")
+            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
+                _invalid_scope("Product mapping scope contains an unsupported platform.")
+        if "store_ids" in config:
+            _validate_positive_int_values(config["store_ids"], "Product mapping scope has an invalid store identifier.")
+    allowed = Q(pk__in=[])
+    for config in configs:
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(platform__in=config["platforms"])
+        if "store_ids" in config:
+            condition &= Q(store_mapping__store_id__in=config["store_ids"])
+        allowed |= condition
+    return queryset.filter(allowed).distinct()
+
+
 def filter_sync_jobs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,

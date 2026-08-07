@@ -12,6 +12,7 @@ from django.conf import settings
 _authorization_service_write = ContextVar("authorization_service_write", default=False)
 _oauth_state_service_write = ContextVar("oauth_state_service_write", default=False)
 _store_mapping_service_write = ContextVar("store_mapping_service_write", default=False)
+_product_mapping_service_write = ContextVar("product_mapping_service_write", default=False)
 
 
 @contextmanager
@@ -39,6 +40,15 @@ def store_mapping_service_write():
         yield
     finally:
         _store_mapping_service_write.reset(token)
+
+
+@contextmanager
+def product_mapping_service_write():
+    token = _product_mapping_service_write.set(True)
+    try:
+        yield
+    finally:
+        _product_mapping_service_write.reset(token)
 
 
 class PlatformChoices(models.TextChoices):
@@ -598,6 +608,139 @@ class MarketplaceStoreMapping(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Store mappings cannot be deleted; deactivate them instead.")
+
+
+class ProductMappingQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if not _product_mapping_service_write.get():
+            raise ValidationError("Product mappings can only be changed by the service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _product_mapping_service_write.get():
+            raise ValidationError("Product mappings must be created by the service layer.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if not _product_mapping_service_write.get():
+            raise ValidationError("Product mappings can only be changed by the service layer.")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def delete(self):
+        raise ValidationError("Product mappings cannot be deleted; deactivate them instead.")
+
+
+class MarketplaceProductMapping(models.Model):
+    class Status(models.TextChoices):
+        UNMAPPED = "unmapped", "Unmapped"
+        SUGGESTED = "suggested", "Suggested"
+        MAPPED = "mapped", "Mapped"
+        CONFLICT = "conflict", "Conflict"
+        INACTIVE = "inactive", "Inactive"
+
+    class MappingSource(models.TextChoices):
+        SYNTHETIC_DISCOVERY = "synthetic_discovery", "Synthetic discovery"
+        MANUAL = "manual", "Manual"
+        SUGGESTED = "suggested", "Suggested"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="product_mappings")
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    store_mapping = models.ForeignKey(
+        MarketplaceStoreMapping,
+        on_delete=models.PROTECT,
+        related_name="product_mappings",
+    )
+    platform_product_id = models.CharField(max_length=160)
+    platform_variant_id = models.CharField(max_length=160)
+    platform_sku = models.CharField(max_length=160, blank=True)
+    product = models.ForeignKey(
+        "products.ProductSPU",
+        on_delete=models.PROTECT,
+        related_name="marketplace_mappings",
+        null=True,
+        blank=True,
+    )
+    sku = models.ForeignKey(
+        "products.ProductSKU",
+        on_delete=models.PROTECT,
+        related_name="marketplace_mappings",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.UNMAPPED)
+    mapping_source = models.CharField(max_length=30, choices=MappingSource.choices)
+    confidence = models.PositiveSmallIntegerField(null=True, blank=True)
+    manually_confirmed = models.BooleanField(default=False)
+    result_code = models.CharField(max_length=80, blank=True)
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_product_mappings",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_product_mappings",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ProductMappingQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["store_mapping", "platform_variant_id"],
+                name="uniq_product_mapping_variant",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "platform", "status"], name="idx_prod_map_tenant_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.platform}:{self.platform_variant_id}"
+
+    def clean(self):
+        errors = {}
+        if self.platform not in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+            errors["platform"] = "Product mappings only support Shopee or TikTok Shop."
+        if self.store_mapping_id:
+            if self.store_mapping.tenant_id != self.tenant_id:
+                errors["store_mapping"] = "Product mapping store mapping must belong to the mapping tenant."
+            if self.store_mapping.platform != self.platform:
+                errors["store_mapping"] = "Product mapping platform must match the store mapping platform."
+        if self.sku_id:
+            if self.sku.tenant_id != self.tenant_id:
+                errors["sku"] = "Product mapping SKU must belong to the mapping tenant."
+            if self.product_id and self.product_id != self.sku.spu_id:
+                errors["product"] = "Product mapping SPU must be the SKU parent product."
+        if self.product_id and self.product.tenant_id != self.tenant_id:
+            errors["product"] = "Product mapping SPU must belong to the mapping tenant."
+        if self.status == self.Status.SUGGESTED:
+            if self.confidence is None or not 0 <= self.confidence <= 100:
+                errors["confidence"] = "Suggested mappings require a confidence score between 0 and 100."
+            if not self.sku_id:
+                errors["sku"] = "Suggested mappings require a candidate SKU."
+        if self.status == self.Status.MAPPED:
+            if not self.manually_confirmed:
+                errors["manually_confirmed"] = "Mapped product mappings require manual confirmation."
+            if not self.sku_id:
+                errors["sku"] = "Mapped product mappings require an internal SKU."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not _product_mapping_service_write.get():
+            raise ValidationError("Product mappings must be changed by the service layer.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Product mappings cannot be deleted; deactivate them instead.")
 
 
 class SyncJob(models.Model):
