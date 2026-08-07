@@ -35,7 +35,10 @@ class OAuthFlowError(exceptions.APIException):
         self.status_code = status_code
         self.error_code = error_code
         self.controlled_code = controlled_code
-        super().__init__(detail=detail or f"OAuth flow rejected: {controlled_code}", code=error_code)
+        message = str(detail) if detail else f"OAuth flow rejected: {controlled_code}"
+        if controlled_code not in message:
+            message = f"{controlled_code}: {message}"
+        super().__init__(detail=message, code=error_code)
 
 
 def raise_oauth_error(controlled_code, detail=None):

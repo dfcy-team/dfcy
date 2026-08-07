@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import (
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
+    PlatformChoices,
     PlatformIntegrationConfig,
     SyncJob,
     SyncRun,
@@ -103,6 +104,37 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+
+class MarketplaceOAuthStartSerializer(serializers.Serializer):
+    """OAuth start request; raw credential fields are rejected by the view."""
+
+    platform = serializers.ChoiceField(choices=[PlatformChoices.SHOPEE, PlatformChoices.TIKTOK])
+    integration_config_id = serializers.IntegerField(min_value=1)
+    store_id = serializers.IntegerField(min_value=1)
+    region = serializers.CharField(max_length=8)
+    redirect_uri = serializers.CharField(max_length=500)
+    scopes = serializers.ListField(child=serializers.CharField(max_length=64), required=False, default=list)
+
+    def validate_region(self, value):
+        region = str(value or "").strip().upper()
+        if not region or len(region) > 8 or not all(ch.isalnum() or ch == "-" for ch in region):
+            raise serializers.ValidationError("region must be a short alphanumeric region code.")
+        return region
+
+    def validate_redirect_uri(self, value):
+        redirect_uri = str(value or "").strip()
+        if not redirect_uri.startswith("https://"):
+            raise serializers.ValidationError("OAuth redirect URI must be an https URL.")
+        return redirect_uri
+
+    def validate_scopes(self, value):
+        scopes = [str(scope).strip() for scope in value if str(scope).strip()]
+        if len(set(scopes)) != len(scopes):
+            raise serializers.ValidationError("OAuth scopes must be unique.")
+        if len(scopes) > 20:
+            raise serializers.ValidationError("Too many OAuth scopes requested.")
+        return scopes
 
 
 class IntegrationAuditLogSerializer(serializers.ModelSerializer):

@@ -16,6 +16,7 @@ from apps.permissions.api_permissions import (
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
     IsIntegrationViewer,
+    IsMarketplaceStoreAuthorizer,
     IsMarketplaceStoreViewer,
 )
 from apps.permissions.ui_p6_scopes import (
@@ -27,8 +28,20 @@ from apps.permissions.ui_p6_scopes import (
 )
 
 from .credential_service import reject_raw_credential_fields, rotate_config_references
-from .models import IntegrationAuditLog, MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
+from .marketplace_oauth_service import (
+    complete_marketplace_oauth_callback,
+    start_marketplace_oauth,
+)
+from .models import (
+    IntegrationAuditLog,
+    MarketplaceStoreAuthorization,
+    PlatformChoices,
+    PlatformIntegrationConfig,
+    SyncJob,
+    SyncRun,
+)
 from .serializers import (
+    MarketplaceOAuthStartSerializer,
     MarketplaceStoreAuthorizationSerializer,
     PlatformIntegrationConfigSerializer,
     RotateCredentialsSerializer,
@@ -243,6 +256,72 @@ def store_authorization_detail(request, pk):
     )
     authorization = get_scoped_object_or_404(queryset, pk=pk)
     return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreAuthorizer])
+def start_marketplace_store_oauth(request):
+    reject_raw_credential_fields(request.data)
+    serializer = MarketplaceOAuthStartSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=data["platform"],
+        config_id=data["integration_config_id"],
+        store_id=data["store_id"],
+    ):
+        raise DataScopeDenied(
+            "OAuth start is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    config = get_scoped_object_or_404(
+        filter_integration_configs(
+            request.user,
+            PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+            "integrations.store.authorize",
+        ),
+        pk=data["integration_config_id"],
+    )
+    from apps.masterdata.models import StoreMaster
+
+    store = get_object_or_404(StoreMaster, tenant=request.user.tenant, pk=data["store_id"])
+    result = start_marketplace_oauth(
+        actor=request.user,
+        platform=data["platform"],
+        integration_config=config,
+        store=store,
+        region=data["region"],
+        redirect_uri=data["redirect_uri"],
+        scopes=data["scopes"],
+    )
+    _write_audit_log(
+        config,
+        request.user,
+        "oauth_start",
+        detail={"platform": data["platform"], "region": data["region"], "store_id": store.id},
+    )
+    return success_response(result, status=201)
+
+
+def _marketplace_oauth_callback(request, platform):
+    authorization = complete_marketplace_oauth_callback(platform=platform, query_params=request.query_params)
+    return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def marketplace_oauth_callback_shopee(request):
+    return _marketplace_oauth_callback(request, PlatformChoices.SHOPEE)
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def marketplace_oauth_callback_tiktok(request):
+    return _marketplace_oauth_callback(request, PlatformChoices.TIKTOK)
 
 
 @api_view(["POST"])

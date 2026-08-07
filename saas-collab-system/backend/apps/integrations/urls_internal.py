@@ -15,6 +15,21 @@ urlpatterns = [
         name="store-authorization-collection",
     ),
     path(
+        "store-authorizations/oauth/start/",
+        views.start_marketplace_store_oauth,
+        name="store-authorization-oauth-start",
+    ),
+    path(
+        "store-authorizations/oauth/callback/shopee/",
+        views.marketplace_oauth_callback_shopee,
+        name="store-authorization-oauth-callback-shopee",
+    ),
+    path(
+        "store-authorizations/oauth/callback/tiktok/",
+        views.marketplace_oauth_callback_tiktok,
+        name="store-authorization-oauth-callback-tiktok",
+    ),
+    path(
         "store-authorizations/<int:pk>/",
         views.store_authorization_detail,
         name="store-authorization-detail",
