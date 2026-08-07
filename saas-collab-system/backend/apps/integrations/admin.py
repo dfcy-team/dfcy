@@ -7,6 +7,7 @@ from .models import (
     APISyncTask,
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
+    OAuthStateSession,
     PlatformIntegrationConfig,
     SyncCursor,
     SyncJob,
@@ -53,6 +54,23 @@ class MarketplaceStoreAuthorizationAdmin(admin.ModelAdmin):
     list_filter = ("platform", "region", "status", "tenant")
     search_fields = ("store__code", "platform_store_id", "merchant_subject_id")
     readonly_fields = tuple(field.name for field in MarketplaceStoreAuthorization._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(OAuthStateSession)
+class OAuthStateSessionAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "platform", "store", "status", "expires_at", "consumed_at")
+    list_filter = ("platform", "status", "tenant")
+    search_fields = ("state_hash", "tenant__code")
+    readonly_fields = tuple(field.name for field in OAuthStateSession._meta.fields)
 
     def has_add_permission(self, request):
         return False

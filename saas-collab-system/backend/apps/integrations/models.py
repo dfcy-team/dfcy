@@ -10,6 +10,7 @@ from django.conf import settings
 
 
 _authorization_service_write = ContextVar("authorization_service_write", default=False)
+_oauth_state_service_write = ContextVar("oauth_state_service_write", default=False)
 
 
 @contextmanager
@@ -19,6 +20,15 @@ def authorization_service_write():
         yield
     finally:
         _authorization_service_write.reset(token)
+
+
+@contextmanager
+def oauth_state_service_write():
+    token = _oauth_state_service_write.set(True)
+    try:
+        yield
+    finally:
+        _oauth_state_service_write.reset(token)
 
 
 class PlatformChoices(models.TextChoices):
@@ -371,6 +381,103 @@ class MarketplaceStoreAuthorization(models.Model):
 
     def __str__(self):
         return f"{self.tenant_id}:{self.platform}:{self.store_id}:{self.status}"
+
+
+class OAuthStateSessionQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if not _oauth_state_service_write.get():
+            raise ValidationError("OAuth state sessions can only be changed by the service layer.")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        if not _oauth_state_service_write.get():
+            raise ValidationError("OAuth state sessions must be created by the service layer.")
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if not _oauth_state_service_write.get():
+            raise ValidationError("OAuth state sessions can only be changed by the service layer.")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def delete(self):
+        raise ValidationError("OAuth state sessions cannot be deleted.")
+
+
+class OAuthStateSession(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONSUMED = "consumed", "Consumed"
+        FAILED = "failed", "Failed"
+        EXPIRED = "expired", "Expired"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="oauth_state_sessions")
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="initiated_oauth_state_sessions",
+    )
+    store = models.ForeignKey(
+        "masterdata.StoreMaster",
+        on_delete=models.PROTECT,
+        related_name="oauth_state_sessions",
+        null=True,
+        blank=True,
+    )
+    integration_config = models.ForeignKey(
+        PlatformIntegrationConfig,
+        on_delete=models.PROTECT,
+        related_name="oauth_state_sessions",
+    )
+    region = models.CharField(max_length=8)
+    state_hash = models.CharField(max_length=64)
+    redirect_uri = models.CharField(max_length=500)
+    requested_scopes = models.JSONField(default=list, blank=True)
+    session_binding = models.CharField(max_length=128)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    result_code = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = OAuthStateSessionQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["state_hash"], name="uniq_oauth_state_hash"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "platform", "status"], name="idx_oauth_state_tenant_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.platform}:{self.status}"
+
+    def clean(self):
+        errors = {}
+        if self.platform not in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+            errors["platform"] = "OAuth state only supports Shopee or TikTok Shop."
+        if not self.state_hash or len(self.state_hash) != 64:
+            errors["state_hash"] = "OAuth state must be stored as a SHA-256 hash."
+        if self.store_id and self.store.tenant_id != self.tenant_id:
+            errors["store"] = "OAuth state store must belong to the initiating tenant."
+        if self.integration_config_id:
+            if self.integration_config.tenant_id != self.tenant_id:
+                errors["integration_config"] = "OAuth state config must belong to the initiating tenant."
+            if self.integration_config.platform != self.platform:
+                errors["integration_config"] = "OAuth state config platform must match the state platform."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not _oauth_state_service_write.get():
+            raise ValidationError("OAuth state sessions must be changed by the service layer.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("OAuth state sessions cannot be deleted.")
 
 
 class SyncJob(models.Model):
