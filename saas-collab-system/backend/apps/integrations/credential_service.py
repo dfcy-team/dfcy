@@ -10,6 +10,7 @@ from .models import IntegrationAuditLog, PlatformIntegrationConfig, authorizatio
 
 
 SYNTHETIC_REFERENCE_PATTERN = re.compile(r"^synthetic-[a-z0-9][a-z0-9._:-]{5,149}$")
+LIVE_REFERENCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{7,159}$")
 RAW_CREDENTIAL_FIELDS = {
     "access_token",
     "refresh_token",
@@ -36,6 +37,13 @@ def validate_synthetic_reference(reference_id, field_name):
     return value
 
 
+def validate_live_reference(reference_id, field_name):
+    value = str(reference_id or "").strip()
+    if not LIVE_REFERENCE_PATTERN.fullmatch(value) or value.startswith("synthetic-"):
+        raise ValidationError({field_name: "Custody returned an invalid opaque reference ID."})
+    return value
+
+
 def reference_mask(reference_id):
     prefix = str(reference_id).split("-", 2)[:2]
     return f"{'-'.join(prefix)}-***"
@@ -46,15 +54,16 @@ def reference_fingerprint(credential_id, token_id):
     return hashlib.sha256(value).hexdigest()
 
 
-def build_reference_metadata(credential_id, token_id, version):
-    credential_id = validate_synthetic_reference(credential_id, "credential_id")
-    token_id = validate_synthetic_reference(token_id, "token_id")
+def build_reference_metadata(credential_id, token_id, version, *, credential_mask=None, allow_live=False):
+    validator = validate_live_reference if allow_live else validate_synthetic_reference
+    credential_id = validator(credential_id, "credential_id")
+    token_id = validator(token_id, "token_id")
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise ValidationError({"credential_reference_version": "Reference version must be a positive integer."})
     return {
         "credential_id": credential_id,
         "token_id": token_id,
-        "credential_mask": {
+        "credential_mask": credential_mask or {
             "credential": reference_mask(credential_id),
             "token": reference_mask(token_id),
         },
