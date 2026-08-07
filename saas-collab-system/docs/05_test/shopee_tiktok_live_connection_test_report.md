@@ -11,10 +11,11 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | Base branch | `feature/module-a-marketplace-oauth` |
 | Base SHA | `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
 | PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
-| Head / Review SHA | Freeze from PR #42 remote head after this evidence update |
+| Code Review SHA | `45b130c586d9de2d15d420ec237773174aa19c3c` |
+| Final PR Head SHA | Freeze from PR #42 after this evidence-only commit |
 | Deployment artifact / image digest | NOT AVAILABLE |
-| Database / migration head | local SQLite / `integrations.0013_authorization_reauthorization_bindings` |
-| Environment | local development only; not valid live evidence |
+| Database / migration head | MySQL 8.4.10 Local Sandbox / `integrations.0013_authorization_reauthorization_bindings` |
+| Environment | Local Sandbox with real-platform switches OFF; not valid live evidence |
 
 ## Local engineering evidence
 
@@ -25,13 +26,14 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | migration drift | PASS, no changes |
 | fresh SQLite migration | PASS through `0013` |
 | upgrade SQLite migration | PASS, `0012 -> 0013` |
-| focused OAuth/live tests | PASS, 76 passed / 1 MySQL-only skipped |
-| full backend | PASS, 527 passed / 2 skipped |
+| focused OAuth/live tests | PASS, 21 passed locally |
+| full backend (local SQLite) | PASS, 527 passed / 3 MySQL-only skipped |
 | frontend | PASS, 160 passed |
 | production build | PASS, 1955 modules |
-| MySQL 8.4 / dual-worker refresh | NOT RUN — Docker engine unavailable |
-| Local Sandbox integration | NOT RUN — Docker engine unavailable |
-| remote CI | PENDING — rerun/verify against final PR #42 remote head |
+| MySQL 8.4.10 / live dual-worker refresh | PASS, one commit and one controlled conflict |
+| Local Sandbox integration | PASS, backend 530 / frontend 160 / build 1955 modules |
+| Sandbox DB/log raw scan | PASS, 0 findings; authorization rows were 0 |
+| remote CI | PENDING — must pass against final PR #42 head |
 
 Automated fake-transport tests cover fail-closed gates, synthetic/live separation, exact redirect, forbidden callback context, TikTok code exchange/authorized-shop/minimal metadata contract, custody references, cleanup after persistence/identity failure, reauthorization, version conflict, old-reference revoke failure, bounded 429/5xx/DNS/timeout/reset handling, and Nginx callback access-log suppression. They are not real-platform evidence.
 
@@ -53,4 +55,4 @@ Automated fake-transport tests cover fail-closed gates, synthetic/live separatio
 - Shopee: `pending/mock`.
 - TikTok Shop: `pending/mock`.
 - Production synchronization: OFF / NOT APPROVED.
-- Result: `FAIL / REQUEST CHANGES` until fixed remote SHA/artifact, MySQL, Sandbox, CI, custody, official applications/contracts, live pilots and independent review all pass.
+- Result: `FAIL / REQUEST CHANGES` until immutable artifact, final CI, custody, official applications/contracts, live pilots, post-live scans and independent review all pass.

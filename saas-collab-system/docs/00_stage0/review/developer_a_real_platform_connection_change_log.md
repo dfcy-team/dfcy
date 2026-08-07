@@ -98,18 +98,20 @@ git diff --stat
 8. refresh 使用 DB 锁和单调版本；竞争失败时清理新引用，旧引用撤销失败时进入受控 error，不报告完整成功。
 9. Nginx callback location 关闭 access log；Django 审计仅记录平台、内部 store、引用、掩码、版本、状态和受控错误码。
 10. 新增 migration `integrations.0013_authorization_reauthorization_bindings` 及负向、并发、故障和网络边界测试。
+11. Local Sandbox 首轮发现 Nginx 证据测试未挂载 deploy 配置；改为只读挂载两份 Nginx 配置，并增加 MySQL live custody reference 双 worker 并发测试。
 
 ## 5. 验证与发布状态
 
 - `git diff --check`：PASS。
 - Django check / migration drift：PASS。
 - SQLite fresh migration 与 `0012 -> 0013` upgrade：PASS。
-- focused：76 passed / 1 MySQL-only skipped。
-- backend full：527 passed / 2 skipped。
+- focused live/provider：21 passed；MySQL live refresh 双 worker：1 passed。
+- backend local full：527 passed / 3 MySQL-only skipped。
 - frontend full：160 passed；production build：PASS（1955 modules）。
-- MySQL 8.4 / Local Sandbox：Docker engine 无权限，NOT RUN。
-- 真实 OAuth、固定部署扫描、浏览器扫描与远程 CI：NOT RUN。
-- 本地 Head SHA：已提交；发布前以 `git rev-parse HEAD` 再固定。远程 Review SHA：未生成。
+- MySQL 8.4.10 / Local Sandbox integration：PASS，backend 530 passed、frontend 160 passed、build 1955 modules；真实平台开关关闭。
+- Sandbox DB scan：0 findings / 0 authorization rows；container log scan：0 findings。空表扫描不替代真实试点后的扫描。
+- 固定代码 Review SHA：`45b130c586d9de2d15d420ec237773174aa19c3c`。
+- 真实 OAuth、固定部署制品扫描与浏览器扫描：NOT RUN。
 - 部署制品 SHA / image digest：未提供。
 - 数据库版本 / migration head：待固定环境验证。
 - GitHub Draft PR：#42，Base 为 `feature/module-a-marketplace-oauth`；PR #41 与 #42 均须保持 Draft。
@@ -117,7 +119,6 @@ git diff --stat
 
 ## 6. 恢复条件
 
-1. 恢复 `gh` 认证，并确认对 `dfcy-team/dfcy` 有推送与创建 Draft PR 权限。
-2. 提供获批应用控制台导出的当前 Shopee 合同与 TikTok revoke 合同；只提供掩码标识。
-3. 提供批准的 custody 接口合同、固定部署环境/制品生成方式和 MySQL 8.4/Sandbox 验证环境。
-4. 提交并固定远程 Review SHA 后，使用该 SHA 的固定制品完成两平台真实试点与全链路扫描，再启动独立复审。
+1. 提供获批应用控制台导出的当前 Shopee 合同与 TikTok revoke 合同；只提供掩码标识。
+2. 提供批准的 custody 接口合同和固定部署环境/制品生成方式。
+3. 从固定 Review SHA 生成不可变制品，完成两平台真实试点与真实流量后的 DB/log/browser 扫描，再启动独立复审。

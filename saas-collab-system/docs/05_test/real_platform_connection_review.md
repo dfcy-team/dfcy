@@ -10,11 +10,12 @@ Review date: 2026-08-07. Current result: **FAIL / REQUEST CHANGES**. This is a d
 | PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
 | Branch | `feature/module-a-real-platform-connection` |
 | Base | `feature/module-a-marketplace-oauth` @ `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
-| Head / Review SHA | Freeze from PR #42 remote head after this evidence update |
-| Commit count / changed files | PENDING commit |
+| Code Review SHA | `45b130c586d9de2d15d420ec237773174aa19c3c` |
+| Final PR Head SHA | Freeze after this evidence-only commit |
+| Expected commit count / changed files | 4 / 29 |
 | Runtime artifact / image digest | NOT AVAILABLE |
-| Environment | local development only |
-| Database | SQLite local; MySQL 8.4 NOT VERIFIED |
+| Environment | Local Sandbox; real-platform switches OFF |
+| Database | MySQL 8.4.10 PASS; not a fixed deployment artifact |
 | Migration head | `integrations.0013_authorization_reauthorization_bindings` |
 
 PR-A1 architecture/security R2 recorded PASS for its fixed scope. PR-A2 review recorded architecture/security/testing PASS for synthetic scope, with repository-hygiene and CI observations. Neither conclusion proves live connectivity.
@@ -30,11 +31,11 @@ PR-A1 architecture/security R2 recorded PASS for its fixed scope. PR-A2 review r
 | custody architecture | CONDITIONAL | HTTP custody reference only; approved provider/runtime absent |
 | outbound allowlist/TLS/timeouts/retries | PASS in controlled tests | real egress not tested |
 | callback query log suppression | PASS config test | runtime Django/container/error-report scans absent |
-| refresh concurrency / revoke / reauthorization | PASS on SQLite mechanisms | MySQL dual-worker and live platform runs absent |
+| refresh concurrency / revoke / reauthorization | PASS locally | MySQL live-reference dual worker passed; real platform runs absent |
 | audit immutability | PASS regression | live-runtime audit inspection absent |
-| fresh/upgrade migration | PASS SQLite | MySQL 8.4 absent |
-| backend/frontend/build | PASS | 527/2 skipped; 160; build success |
-| Local Sandbox / remote CI | FAIL | Docker unavailable; final remote CI not yet verified |
+| fresh/upgrade migration | PASS | SQLite fresh/upgrade and MySQL 8.4.10 Sandbox migration |
+| backend/frontend/build | PASS | local 527/3 skipped; MySQL 530; frontend 160; build success |
+| Local Sandbox / remote CI | CONDITIONAL | Sandbox PASS; final remote CI pending new head |
 | Shopee official/live flow | FAIL | contract/app/pilot/evidence absent |
 | TikTok official/live flow | FAIL | app/pilot/revoke contract/evidence absent |
 | DB/log/browser credential scans | FAIL | no fixed live deployment to scan |
@@ -48,7 +49,7 @@ Controlled tests cover 429 Retry-After with caps, 5xx, DNS, timeout and connecti
 ## Issues
 
 - P0: none observed in local synthetic evidence.
-- P1: no fixed Head/Review SHA or immutable artifact; dirty workspace; MySQL 8.4 and dual-worker test absent; Sandbox and remote CI absent; approved custody/runtime absent; Shopee contract absent; TikTok revoke contract absent; both real pilot flows and post-flow DB/log/browser scans absent; refresh saga recovery not validated in deployed infrastructure.
+- P1: immutable deployment artifact absent; approved custody/runtime absent; Shopee contract absent; TikTok revoke contract absent; both real pilot flows and post-live DB/log/browser scans absent; refresh saga recovery not validated in deployed infrastructure; final remote CI pending this evidence update.
 - P2: local backend test key emits an existing short-HMAC warning; outside this task's marketplace scope.
 
 ## Capability and production decision
