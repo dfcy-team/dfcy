@@ -9,14 +9,14 @@
 ```text
 Repository: dfcy-team/dfcy
 Branch: feature/module-a-real-platform-connection
-PR Number: NOT CREATED
-PR URL: NOT CREATED
+PR Number: 42
+PR URL: https://github.com/dfcy-team/dfcy/pull/42
 Base Branch: feature/module-a-marketplace-oauth
 Base SHA: 5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0
-Head SHA: NOT FROZEN
-Review SHA: NOT FROZEN
-Commit Count: PENDING
-Changed Files: PENDING
+Head SHA: freeze from remote head after this evidence update
+Review SHA: freeze from remote head after this evidence update
+Commit Count: 2
+Changed Files: 28
 Deployment Environment: NOT AVAILABLE
 Deployment Artifact SHA: NOT AVAILABLE
 Container Image Digest: NOT AVAILABLE

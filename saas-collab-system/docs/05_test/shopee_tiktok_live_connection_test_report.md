@@ -10,7 +10,8 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | Branch | `feature/module-a-real-platform-connection` |
 | Base branch | `feature/module-a-marketplace-oauth` |
 | Base SHA | `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
-| PR / Head / Review SHA | PENDING — not committed or pushed |
+| PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
+| Head / Review SHA | Freeze from PR #42 remote head after this evidence update |
 | Deployment artifact / image digest | NOT AVAILABLE |
 | Database / migration head | local SQLite / `integrations.0013_authorization_reauthorization_bindings` |
 | Environment | local development only; not valid live evidence |
@@ -30,7 +31,7 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | production build | PASS, 1955 modules |
 | MySQL 8.4 / dual-worker refresh | NOT RUN — Docker engine unavailable |
 | Local Sandbox integration | NOT RUN — Docker engine unavailable |
-| remote CI | NOT RUN — no remote Review SHA |
+| remote CI | PENDING — rerun/verify against final PR #42 remote head |
 
 Automated fake-transport tests cover fail-closed gates, synthetic/live separation, exact redirect, forbidden callback context, TikTok code exchange/authorized-shop/minimal metadata contract, custody references, cleanup after persistence/identity failure, reauthorization, version conflict, old-reference revoke failure, bounded 429/5xx/DNS/timeout/reset handling, and Nginx callback access-log suppression. They are not real-platform evidence.
 

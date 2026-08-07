@@ -6,7 +6,7 @@
 - 目标分支：`feature/module-a-real-platform-connection`
 - stacked base：`feature/module-a-marketplace-oauth`
 - 固定基线：`5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0`
-- 当前状态：本地实现、回归与提交完成；尚未推送、创建 PR 或执行真实平台请求。
+- 当前状态：实现、回归、提交、推送和 Draft stacked PR #42 创建完成；未执行真实平台请求。
 - Capability：Shopee 与 TikTok Shop 均保持 `pending/mock`；`production-enabled` 未设置。
 
 阻断原因：GitHub CLI 认证失效；Shopee 当前官方合同尚未从获批应用控制台冻结；TikTok revoke 合同未冻结；固定部署制品、批准的 Credential Custody、MySQL 8.4、Local Sandbox 和真实试点环境均未提供。完整 43 节复审任务书已于本轮补齐。
@@ -112,7 +112,7 @@ git diff --stat
 - 本地 Head SHA：已提交；发布前以 `git rev-parse HEAD` 再固定。远程 Review SHA：未生成。
 - 部署制品 SHA / image digest：未提供。
 - 数据库版本 / migration head：待固定环境验证。
-- GitHub Draft PR：未创建；`gh auth status` 显示当前认证失效。
+- GitHub Draft PR：#42，Base 为 `feature/module-a-marketplace-oauth`；PR #41 与 #42 均须保持 Draft。
 - PR #41：未修改、未合并，应继续保持 Draft。
 
 ## 6. 恢复条件

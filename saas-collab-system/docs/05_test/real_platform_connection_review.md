@@ -7,10 +7,10 @@ Review date: 2026-08-07. Current result: **FAIL / REQUEST CHANGES**. This is a d
 | Field | Value |
 |---|---|
 | Repository | `dfcy-team/dfcy` |
-| PR | NOT CREATED |
+| PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
 | Branch | `feature/module-a-real-platform-connection` |
 | Base | `feature/module-a-marketplace-oauth` @ `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
-| Head / Review SHA | NOT FROZEN |
+| Head / Review SHA | Freeze from PR #42 remote head after this evidence update |
 | Commit count / changed files | PENDING commit |
 | Runtime artifact / image digest | NOT AVAILABLE |
 | Environment | local development only |
@@ -34,7 +34,7 @@ PR-A1 architecture/security R2 recorded PASS for its fixed scope. PR-A2 review r
 | audit immutability | PASS regression | live-runtime audit inspection absent |
 | fresh/upgrade migration | PASS SQLite | MySQL 8.4 absent |
 | backend/frontend/build | PASS | 527/2 skipped; 160; build success |
-| Local Sandbox / remote CI | FAIL | Docker unavailable; Review SHA absent |
+| Local Sandbox / remote CI | FAIL | Docker unavailable; final remote CI not yet verified |
 | Shopee official/live flow | FAIL | contract/app/pilot/evidence absent |
 | TikTok official/live flow | FAIL | app/pilot/revoke contract/evidence absent |
 | DB/log/browser credential scans | FAIL | no fixed live deployment to scan |
