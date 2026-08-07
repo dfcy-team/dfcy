@@ -29,7 +29,7 @@ secure_json_file() {
 }
 
 [ -f "$env_file" ] || fail "Missing $env_file. Copy env.pilot.example and inject approved values."
-grep -Eq 'change-me|example\.internal|not-a-real' "$env_file" && fail "Placeholder values remain in $env_file."
+grep -Eq 'change-me|REPLACE_ME|example\.internal|not-a-real' "$env_file" && fail "Placeholder values remain in $env_file."
 chmod 600 "$env_file"
 
 [ "$(env_value PILOT_ENVIRONMENT_CODE)" = "controlled-pilot" ] || fail "PILOT_ENVIRONMENT_CODE must be controlled-pilot."

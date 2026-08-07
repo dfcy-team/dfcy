@@ -9,7 +9,7 @@ import pytest
 from apps.integrations import capability
 from apps.integrations.credential_service import build_reference_metadata
 from apps.integrations.custody import HttpCustodyBackend, RefusingCustodyBackend
-from apps.integrations.live_providers import ShopeeLiveOAuthProvider, TikTokLiveOAuthProvider
+from apps.integrations.live_providers import ShopeeLiveOAuthProvider, TikTokLiveOAuthProvider, build_live_provider
 from apps.integrations.marketplace_oauth_service import _revoke_uncommitted_exchange
 from apps.integrations.net_guard import HttpResponse, PlatformHttpClient
 from apps.integrations.oauth_errors import (
@@ -162,6 +162,14 @@ def test_live_gate_requires_approved_http_custody(monkeypatch, settings):
 
 def test_capability_never_auto_reports_connected(live_gate):
     assert capability.get_capability_status("shopee") == "pending/live-validation"
+
+
+def test_live_providers_use_separate_approved_redirects(settings):
+    settings.LIVE_SHOPEE_REDIRECT_URI = SHOPEE_CALLBACK
+    settings.LIVE_TIKTOK_REDIRECT_URI = TIKTOK_CALLBACK
+
+    assert build_live_provider("shopee").config["redirect_uri"] == SHOPEE_CALLBACK
+    assert build_live_provider("tiktok").config["redirect_uri"] == TIKTOK_CALLBACK
 
 
 def test_network_guard_rejects_http_and_unknown_host(settings):
