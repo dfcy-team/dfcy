@@ -16,10 +16,16 @@ from apps.permissions.api_permissions import (
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
     IsIntegrationViewer,
+    IsMarketplaceCredentialRotator,
+    IsMarketplaceStoreAuthorizer,
+    IsMarketplaceStoreMappingManager,
+    IsMarketplaceStoreRevoker,
     IsMarketplaceStoreViewer,
 )
 from apps.permissions.ui_p6_scopes import (
     filter_integration_configs,
+    filter_product_mappings,
+    filter_store_mappings,
     filter_sync_jobs,
     filter_sync_runs,
     integration_values_allowed,
@@ -27,14 +33,43 @@ from apps.permissions.ui_p6_scopes import (
 )
 
 from .credential_service import reject_raw_credential_fields, rotate_config_references
-from .models import IntegrationAuditLog, MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
+from .marketplace_oauth_service import (
+    complete_marketplace_oauth_callback,
+    refresh_marketplace_authorization,
+    revoke_marketplace_authorization,
+    start_marketplace_oauth,
+)
+from .models import (
+    IntegrationAuditLog,
+    MarketplaceProductMapping,
+    MarketplaceStoreAuthorization,
+    MarketplaceStoreMapping,
+    PlatformChoices,
+    PlatformIntegrationConfig,
+    SyncJob,
+    SyncRun,
+)
+from .product_mapping_service import (
+    confirm_product_mapping,
+    create_product_mapping,
+    deactivate_product_mapping,
+    suggest_product_mapping,
+)
 from .serializers import (
+    MarketplaceOAuthStartSerializer,
+    MarketplaceProductMappingSerializer,
     MarketplaceStoreAuthorizationSerializer,
+    MarketplaceStoreMappingSerializer,
     PlatformIntegrationConfigSerializer,
+    ProductMappingCreateSerializer,
+    ProductMappingUpdateSerializer,
     RotateCredentialsSerializer,
+    StoreMappingCreateSerializer,
+    StoreMappingUpdateSerializer,
     SyncJobSerializer,
     SyncRunSerializer,
 )
+from .store_mapping_service import create_store_mapping, update_store_mapping
 from .sync_services import run_sync_job
 
 
@@ -243,6 +278,319 @@ def store_authorization_detail(request, pk):
     )
     authorization = get_scoped_object_or_404(queryset, pk=pk)
     return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreAuthorizer])
+def start_marketplace_store_oauth(request):
+    reject_raw_credential_fields(request.data)
+    serializer = MarketplaceOAuthStartSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=data["platform"],
+        config_id=data["integration_config_id"],
+        store_id=data["store_id"],
+    ):
+        raise DataScopeDenied(
+            "OAuth start is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    config = get_scoped_object_or_404(
+        filter_integration_configs(
+            request.user,
+            PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+            "integrations.store.authorize",
+        ),
+        pk=data["integration_config_id"],
+    )
+    from apps.masterdata.models import StoreMaster
+
+    store = get_object_or_404(StoreMaster, tenant=request.user.tenant, pk=data["store_id"])
+    result = start_marketplace_oauth(
+        actor=request.user,
+        platform=data["platform"],
+        integration_config=config,
+        store=store,
+        region=data["region"],
+        redirect_uri=data["redirect_uri"],
+        scopes=data["scopes"],
+    )
+    _write_audit_log(
+        config,
+        request.user,
+        "oauth_start",
+        detail={"platform": data["platform"], "region": data["region"], "store_id": store.id},
+    )
+    return success_response(result, status=201)
+
+
+def _marketplace_oauth_callback(request, platform):
+    authorization = complete_marketplace_oauth_callback(platform=platform, query_params=request.query_params)
+    return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def marketplace_oauth_callback_shopee(request):
+    return _marketplace_oauth_callback(request, PlatformChoices.SHOPEE)
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def marketplace_oauth_callback_tiktok(request):
+    return _marketplace_oauth_callback(request, PlatformChoices.TIKTOK)
+
+
+def _get_store_authorization_for_user(request, pk, permission_code):
+    queryset = filter_store_authorizations(
+        request.user,
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant),
+        permission_code,
+    )
+    return get_scoped_object_or_404(queryset, pk=pk)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreAuthorizer, IsMarketplaceCredentialRotator])
+def refresh_store_authorization(request, pk):
+    reject_raw_credential_fields(request.data)
+    record = _get_store_authorization_for_user(request, pk, "integrations.credential.rotate")
+    record = refresh_marketplace_authorization(record, actor=request.user)
+    return success_response(MarketplaceStoreAuthorizationSerializer(record).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreRevoker])
+def revoke_store_authorization(request, pk):
+    reject_raw_credential_fields(request.data)
+    record = _get_store_authorization_for_user(request, pk, "integrations.store.revoke")
+    record, idempotent = revoke_marketplace_authorization(record, actor=request.user)
+    return success_response(
+        {"idempotent": idempotent, "authorization": MarketplaceStoreAuthorizationSerializer(record).data}
+    )
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsMarketplaceStoreMappingManager])
+def store_mapping_collection(request):
+    if request.method == "GET":
+        allowed_query = {"page", "page_size", "platform", "status", "store_id"}
+        if set(request.query_params) - allowed_query:
+            raise ValidationError("Unknown store mapping query parameter.")
+        queryset = MarketplaceStoreMapping.objects.filter(tenant=request.user.tenant).select_related("store")
+        if request.query_params.get("platform"):
+            platform = request.query_params["platform"]
+            if platform not in {"shopee", "tiktok"}:
+                raise ValidationError("Unsupported marketplace platform filter.")
+            queryset = queryset.filter(platform=platform)
+        if request.query_params.get("status"):
+            status_value = request.query_params["status"]
+            if status_value not in MarketplaceStoreMapping.Status.values:
+                raise ValidationError("Unsupported store mapping status filter.")
+            queryset = queryset.filter(status=status_value)
+        if request.query_params.get("store_id"):
+            queryset = queryset.filter(store_id=positive_int(request.query_params["store_id"], default=0))
+        queryset = filter_store_mappings(request.user, queryset, "integrations.store.view")
+        page, page_size = pagination_query(request)
+        return success_response(
+            paginated_data(
+                request,
+                queryset,
+                MarketplaceStoreMappingSerializer,
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    reject_raw_credential_fields(request.data)
+    serializer = StoreMappingCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    authorization = get_scoped_object_or_404(
+        filter_store_authorizations(
+            request.user,
+            MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant),
+            "integrations.store.authorize",
+        ),
+        pk=data["authorization_id"],
+    )
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=authorization.platform,
+        store_id=data["store_id"],
+    ):
+        raise DataScopeDenied(
+            "Store mapping is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    from apps.masterdata.models import StoreMaster
+
+    store = get_object_or_404(StoreMaster, tenant=request.user.tenant, pk=data["store_id"])
+    mapping = create_store_mapping(
+        tenant=request.user.tenant,
+        actor=request.user,
+        store=store,
+        authorization=authorization,
+        store_timezone=data["timezone"],
+        currency=data["currency"],
+    )
+    return success_response(MarketplaceStoreMappingSerializer(mapping).data, status=201)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsMarketplaceStoreMappingManager])
+def store_mapping_detail(request, pk):
+    permission_code = "integrations.store.view" if request.method == "GET" else "integrations.store.authorize"
+    queryset = filter_store_mappings(
+        request.user,
+        MarketplaceStoreMapping.objects.filter(tenant=request.user.tenant).select_related("store", "authorization"),
+        permission_code,
+    )
+    mapping = get_scoped_object_or_404(queryset, pk=pk)
+    if request.method == "GET":
+        return success_response(MarketplaceStoreMappingSerializer(mapping).data)
+
+    reject_raw_credential_fields(request.data)
+    serializer = StoreMappingUpdateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    if not serializer.validated_data:
+        raise ValidationError("No supported store mapping fields were provided.")
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=mapping.platform,
+        store_id=mapping.store_id,
+    ):
+        raise DataScopeDenied(
+            "Store mapping update is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    mapping = update_store_mapping(
+        mapping,
+        actor=request.user,
+        status=serializer.validated_data.get("status"),
+        store_timezone=serializer.validated_data.get("timezone"),
+        currency=serializer.validated_data.get("currency"),
+    )
+    return success_response(MarketplaceStoreMappingSerializer(mapping).data)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsMarketplaceStoreMappingManager])
+def product_mapping_collection(request):
+    if request.method == "GET":
+        allowed_query = {"page", "page_size", "platform", "status", "store_mapping_id"}
+        if set(request.query_params) - allowed_query:
+            raise ValidationError("Unknown product mapping query parameter.")
+        queryset = MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related("sku")
+        if request.query_params.get("platform"):
+            platform = request.query_params["platform"]
+            if platform not in {"shopee", "tiktok"}:
+                raise ValidationError("Unsupported marketplace platform filter.")
+            queryset = queryset.filter(platform=platform)
+        if request.query_params.get("status"):
+            status_value = request.query_params["status"]
+            if status_value not in MarketplaceProductMapping.Status.values:
+                raise ValidationError("Unsupported product mapping status filter.")
+            queryset = queryset.filter(status=status_value)
+        if request.query_params.get("store_mapping_id"):
+            queryset = queryset.filter(
+                store_mapping_id=positive_int(request.query_params["store_mapping_id"], default=0)
+            )
+        queryset = filter_product_mappings(request.user, queryset, "integrations.store.view")
+        page, page_size = pagination_query(request)
+        return success_response(
+            paginated_data(
+                request,
+                queryset,
+                MarketplaceProductMappingSerializer,
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    reject_raw_credential_fields(request.data)
+    serializer = ProductMappingCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    store_mapping = get_scoped_object_or_404(
+        filter_store_mappings(
+            request.user,
+            MarketplaceStoreMapping.objects.filter(tenant=request.user.tenant),
+            "integrations.store.authorize",
+        ),
+        pk=data["store_mapping_id"],
+    )
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=store_mapping.platform,
+        store_id=store_mapping.store_id,
+    ):
+        raise DataScopeDenied(
+            "Product mapping is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    mapping = create_product_mapping(
+        tenant=request.user.tenant,
+        actor=request.user,
+        store_mapping=store_mapping,
+        platform_product_id=data["platform_product_id"],
+        platform_variant_id=data["platform_variant_id"],
+        platform_sku=data["platform_sku"],
+    )
+    return success_response(MarketplaceProductMappingSerializer(mapping).data, status=201)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsMarketplaceStoreMappingManager])
+def product_mapping_detail(request, pk):
+    permission_code = "integrations.store.view" if request.method == "GET" else "integrations.store.authorize"
+    queryset = filter_product_mappings(
+        request.user,
+        MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related("sku"),
+        permission_code,
+    )
+    mapping = get_scoped_object_or_404(queryset, pk=pk)
+    if request.method == "GET":
+        return success_response(MarketplaceProductMappingSerializer(mapping).data)
+
+    if not request.data:
+        raise ValidationError("No supported product mapping fields were provided.")
+    reject_raw_credential_fields(request.data)
+    serializer = ProductMappingUpdateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    if not integration_values_allowed(
+        request.user,
+        "integrations.store.authorize",
+        platform=mapping.platform,
+        store_id=mapping.store_mapping.store_id,
+    ):
+        raise DataScopeDenied(
+            "Product mapping update is outside the authorized data scope.",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    sku = None
+    if data.get("sku_id"):
+        from apps.products.models import ProductSKU
+
+        sku = get_object_or_404(ProductSKU, tenant=request.user.tenant, pk=data["sku_id"])
+    if data.get("status") == MarketplaceProductMapping.Status.INACTIVE:
+        mapping = deactivate_product_mapping(mapping, actor=request.user)
+    elif data.get("manually_confirmed"):
+        mapping = confirm_product_mapping(mapping, actor=request.user, sku=sku, manually_confirmed=True)
+    else:
+        if sku is None or "confidence" not in data:
+            raise ValidationError("Product mapping suggestions require a SKU and a confidence score.")
+        mapping = suggest_product_mapping(mapping, actor=request.user, sku=sku, confidence=data["confidence"])
+    return success_response(MarketplaceProductMappingSerializer(mapping).data)
 
 
 @api_view(["POST"])
