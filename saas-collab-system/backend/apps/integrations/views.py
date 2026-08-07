@@ -16,7 +16,9 @@ from apps.permissions.api_permissions import (
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
     IsIntegrationViewer,
+    IsMarketplaceCredentialRotator,
     IsMarketplaceStoreAuthorizer,
+    IsMarketplaceStoreRevoker,
     IsMarketplaceStoreViewer,
 )
 from apps.permissions.ui_p6_scopes import (
@@ -30,6 +32,8 @@ from apps.permissions.ui_p6_scopes import (
 from .credential_service import reject_raw_credential_fields, rotate_config_references
 from .marketplace_oauth_service import (
     complete_marketplace_oauth_callback,
+    refresh_marketplace_authorization,
+    revoke_marketplace_authorization,
     start_marketplace_oauth,
 )
 from .models import (
@@ -322,6 +326,35 @@ def marketplace_oauth_callback_shopee(request):
 @permission_classes([])
 def marketplace_oauth_callback_tiktok(request):
     return _marketplace_oauth_callback(request, PlatformChoices.TIKTOK)
+
+
+def _get_store_authorization_for_user(request, pk, permission_code):
+    queryset = filter_store_authorizations(
+        request.user,
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant),
+        permission_code,
+    )
+    return get_scoped_object_or_404(queryset, pk=pk)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreAuthorizer, IsMarketplaceCredentialRotator])
+def refresh_store_authorization(request, pk):
+    reject_raw_credential_fields(request.data)
+    record = _get_store_authorization_for_user(request, pk, "integrations.credential.rotate")
+    record = refresh_marketplace_authorization(record, actor=request.user)
+    return success_response(MarketplaceStoreAuthorizationSerializer(record).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceStoreRevoker])
+def revoke_store_authorization(request, pk):
+    reject_raw_credential_fields(request.data)
+    record = _get_store_authorization_for_user(request, pk, "integrations.store.revoke")
+    record, idempotent = revoke_marketplace_authorization(record, actor=request.user)
+    return success_response(
+        {"idempotent": idempotent, "authorization": MarketplaceStoreAuthorizationSerializer(record).data}
+    )
 
 
 @api_view(["POST"])

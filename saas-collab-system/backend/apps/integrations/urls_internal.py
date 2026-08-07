@@ -30,6 +30,16 @@ urlpatterns = [
         name="store-authorization-oauth-callback-tiktok",
     ),
     path(
+        "store-authorizations/<int:pk>/refresh/",
+        views.refresh_store_authorization,
+        name="store-authorization-refresh",
+    ),
+    path(
+        "store-authorizations/<int:pk>/revoke/",
+        views.revoke_store_authorization,
+        name="store-authorization-revoke",
+    ),
+    path(
         "store-authorizations/<int:pk>/",
         views.store_authorization_detail,
         name="store-authorization-detail",

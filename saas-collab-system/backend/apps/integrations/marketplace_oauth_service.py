@@ -121,3 +121,36 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
         raise
     _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.SUCCESS, "", authorization=authorization)
     return authorization
+
+
+def refresh_marketplace_authorization(record, *, actor):
+    provider = get_oauth_provider(record.platform)
+    result = provider.refresh_authorization(record)
+    return rotate_store_authorization_references(
+        record,
+        credential_id=result["credential_id"],
+        token_id=result["token_id"],
+        version=result["reference_version"],
+        actor=actor,
+        expires_at=result["expires_at"],
+    )
+
+
+def revoke_marketplace_authorization(record, *, actor):
+    if record.status == MarketplaceStoreAuthorization.Status.REVOKED:
+        IntegrationAuditLog.objects.create(
+            tenant=record.tenant,
+            integration_config=record.integration_config,
+            store_authorization=record,
+            action="revoke",
+            actor=actor,
+            result=IntegrationAuditLog.Result.SUCCESS,
+            masked_detail={"idempotent": True, "status": record.status},
+        )
+        return record, True
+    provider = get_oauth_provider(record.platform)
+    outcome = provider.revoke_authorization(record)
+    if outcome.get("status") != "revoked":
+        raise_oauth_error(OAUTH_CALLBACK_REJECTED, "Provider revoke did not confirm revocation.")
+    revoked = transition_store_authorization(record, target_status=MarketplaceStoreAuthorization.Status.REVOKED, actor=actor)
+    return revoked, False
