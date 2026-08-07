@@ -1,6 +1,9 @@
 import secrets
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from django.db import close_old_connections, connection
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -325,3 +328,56 @@ def test_live_refresh_old_reference_revoke_failure_is_not_reported_success():
         action="rotate_reference",
         result=IntegrationAuditLog.Result.FAILED,
     ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_live_refresh_allows_one_mysql_commit_and_revokes_loser():
+    if connection.vendor != "mysql":
+        pytest.skip("MySQL live-reference row-lock verification runs in Local Sandbox.")
+    _tenant, user, record = active_authorization("live-mysql-race")
+    start = threading.Event()
+    previous_revocations = []
+    losing_revocations = []
+
+    def revoke_previous(credential_id, token_id):
+        previous_revocations.append((credential_id, token_id))
+        return {"status": "revoked", "error_code": ""}
+
+    def rotate(suffix):
+        close_old_connections()
+        start.wait(timeout=5)
+        try:
+            current = MarketplaceStoreAuthorization.objects.get(pk=record.pk)
+            actor = CustomUser.objects.get(pk=user.pk)
+
+            def revoke_new(credential_id, token_id):
+                losing_revocations.append((credential_id, token_id))
+                return {"status": "revoked", "error_code": ""}
+
+            rotate_store_authorization_references(
+                current,
+                credential_id=f"custody:credential:live-mysql-race-{suffix}",
+                token_id=f"custody:token:live-mysql-race-{suffix}",
+                credential_mask={"credential": "custody-***", "token": "custody-***"},
+                version=2,
+                actor=actor,
+                allow_live_references=True,
+                revoker=revoke_previous,
+                new_reference_revoker=revoke_new,
+            )
+            return "success"
+        except StateConflict:
+            return "conflict"
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(rotate, suffix) for suffix in ("a", "b")]
+        start.set()
+        results = [future.result(timeout=15) for future in futures]
+
+    assert sorted(results) == ["conflict", "success"]
+    assert len(previous_revocations) == 1
+    assert len(losing_revocations) == 1
+    record.refresh_from_db()
+    assert record.credential_reference_version == 2

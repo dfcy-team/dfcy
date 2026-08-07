@@ -27,6 +27,7 @@ x-backend-environment: &backend-environment
   LOCAL_SANDBOX_DEMO_PASSWORD: ${LOCAL_SANDBOX_DEMO_PASSWORD}
   SANDBOX_ALLOW_REAL_PLATFORM: "false"
   SANDBOX_ALLOW_HIGH_RISK_AUTOMATION: "false"
+  NGINX_EVIDENCE_ROOT: /evidence/nginx
 
 services:
   mysql:
@@ -72,6 +73,8 @@ services:
     environment: *backend-environment
     volumes:
       - ../../backend:/app
+      - ../sandbox/application/nginx.conf:/evidence/nginx/sandbox.conf:ro
+      - ../pilot/application/nginx.conf:/evidence/nginx/pilot.conf:ro
     ports:
       - "127.0.0.1:${LOCAL_SANDBOX_BACKEND_PORT:-8000}:8000"
     depends_on:

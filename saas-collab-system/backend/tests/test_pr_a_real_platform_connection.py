@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import urllib.parse
 from pathlib import Path
@@ -373,8 +374,13 @@ def test_uncommitted_custody_reference_is_revoked_after_persistence_failure():
 
 @pytest.mark.parametrize("environment", ["sandbox", "pilot"])
 def test_nginx_callback_query_is_not_logged(environment):
-    repository_root = Path(__file__).resolve().parents[2]
-    nginx = (repository_root / "deploy" / environment / "application" / "nginx.conf").read_text(encoding="utf-8")
+    evidence_root = os.getenv("NGINX_EVIDENCE_ROOT")
+    if evidence_root:
+        nginx_path = Path(evidence_root) / f"{environment}.conf"
+    else:
+        repository_root = Path(__file__).resolve().parents[2]
+        nginx_path = repository_root / "deploy" / environment / "application" / "nginx.conf"
+    nginx = nginx_path.read_text(encoding="utf-8")
     callback_locations = [
         block for block in nginx.split("location ")
         if "store-authorizations/oauth/callback" in block
