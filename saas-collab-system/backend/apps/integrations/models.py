@@ -67,6 +67,9 @@ class PlatformIntegrationConfigQuerySet(models.QuerySet):
         "credential_reference_version",
         "credential_key_version",
         "credential_fingerprint",
+        "credential_status",
+        "credential_expires_at",
+        "last_rotated_at",
     }
 
     def update(self, **kwargs):
@@ -98,24 +101,55 @@ class PlatformIntegrationConfig(models.Model):
     class Environment(models.TextChoices):
         MOCK = "mock", "Mock"
         SANDBOX = "sandbox", "Sandbox"
+        PILOT = "pilot", "Pilot"
         PRODUCTION = "production", "Production"
 
     class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        CONFIGURED = "configured", "Configured"
+        VERIFIED = "verified", "Verified"
+        ERROR = "error", "Error"
         ACTIVE = "active", "Active"
         DISABLED = "disabled", "Disabled"
         PENDING_REVIEW = "pending_review", "Pending review"
+
+    class CredentialStatus(models.TextChoices):
+        UNCONFIGURED = "unconfigured", "Unconfigured"
+        CONFIGURED = "configured", "Configured"
+        EXPIRING = "expiring", "Expiring"
+        EXPIRED = "expired", "Expired"
+        RECONCILE_REQUIRED = "reconcile_required", "Reconcile required"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_integration_configs")
     platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
     account_alias = models.CharField(max_length=120)
     environment = models.CharField(max_length=20, choices=Environment.choices, default=Environment.MOCK)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DISABLED)
+    regions = models.JSONField(default=list, blank=True)
+    contract_version = models.CharField(max_length=80, blank=True)
+    callback_url = models.URLField(max_length=500, blank=True)
+    scopes = models.JSONField(default=list, blank=True)
+    platform_config = models.JSONField(default=dict, blank=True)
+    connect_timeout_seconds = models.PositiveSmallIntegerField(default=3)
+    read_timeout_seconds = models.PositiveSmallIntegerField(default=8)
+    proxy_profile = models.CharField(max_length=120, blank=True)
+    network_enabled = models.BooleanField(default=False)
+    sync_read_enabled = models.BooleanField(default=False)
+    sync_write_enabled = models.BooleanField(default=False)
+    config_version = models.PositiveIntegerField(default=1)
     credential_id = models.CharField(max_length=160, blank=True)
     token_id = models.CharField(max_length=160, blank=True)
     credential_mask = models.JSONField(default=dict, blank=True)
     credential_reference_version = models.PositiveIntegerField(default=1)
     credential_key_version = models.CharField(max_length=40, blank=True)
     credential_fingerprint = models.CharField(max_length=64, blank=True)
+    credential_status = models.CharField(
+        max_length=30,
+        choices=CredentialStatus.choices,
+        default=CredentialStatus.UNCONFIGURED,
+    )
+    credential_expires_at = models.DateTimeField(null=True, blank=True)
+    last_rotated_at = models.DateTimeField(null=True, blank=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -213,6 +247,44 @@ class IntegrationAuditLog(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Integration audit records cannot be deleted.")
+
+
+class CredentialMutationRequest(models.Model):
+    class Action(models.TextChoices):
+        ROTATE = "rotate", "Rotate"
+        CLEAR = "clear", "Clear"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="credential_mutation_requests")
+    integration_config = models.ForeignKey(
+        PlatformIntegrationConfig,
+        on_delete=models.PROTECT,
+        related_name="credential_mutation_requests",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices)
+    idempotency_key_hash = models.CharField(max_length=64)
+    payload_digest = models.CharField(max_length=64)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    response_metadata = models.JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "idempotency_key_hash"],
+                name="uniq_tenant_credential_mutation_key",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.integration_config_id}:{self.action}:{self.status}"
 
 
 class MarketplaceStoreAuthorizationQuerySet(models.QuerySet):

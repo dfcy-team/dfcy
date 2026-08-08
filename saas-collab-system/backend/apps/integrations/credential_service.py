@@ -1,12 +1,21 @@
 import hashlib
+import json
 import re
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.common.exceptions import StateConflict
 
-from .models import IntegrationAuditLog, PlatformIntegrationConfig, authorization_service_write
+from .custody import CustodyError, get_custody_backend
+from .models import (
+    CredentialMutationRequest,
+    IntegrationAuditLog,
+    PlatformIntegrationConfig,
+    authorization_service_write,
+)
 
 
 SYNTHETIC_REFERENCE_PATTERN = re.compile(r"^synthetic-[a-z0-9][a-z0-9._:-]{5,149}$")
@@ -15,12 +24,18 @@ RAW_CREDENTIAL_FIELDS = {
     "access_token",
     "refresh_token",
     "secret",
+    "app_secret",
+    "partner_key",
+    "signing_secret",
+    "webhook_secret",
     "api_key",
     "api_secret",
     "credentials",
     "credential_ciphertext",
     "cookie",
     "session",
+    "authorization_code",
+    "bearer",
 }
 
 
@@ -60,6 +75,11 @@ def build_reference_metadata(credential_id, token_id, version, *, credential_mas
     token_id = validator(token_id, "token_id")
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise ValidationError({"credential_reference_version": "Reference version must be a positive integer."})
+    if credential_mask and allow_live:
+        mask_keys = {str(key) for key, value in credential_mask.items() if value} if isinstance(credential_mask, dict) else set()
+        credential_mask = {key: "********" for key in mask_keys & {"credential", "token", "configured"}}
+        if not credential_mask:
+            credential_mask = {"configured": "********"}
     return {
         "credential_id": credential_id,
         "token_id": token_id,
@@ -159,3 +179,281 @@ def rotate_config_references(config, *, credential_id, token_id, version, actor,
         },
     )
     raise StateConflict("Previous credential references could not be revoked; rotation was not applied.")
+
+
+def _mutation_digest(payload):
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _mutation_request(config, action, idempotency_key, payload):
+    key = str(idempotency_key or "").strip()
+    if not 12 <= len(key) <= 200:
+        raise ValidationError({"Idempotency-Key": "A 12-200 character idempotency key is required."})
+    key_hash = hashlib.sha256(key.encode()).hexdigest()
+    payload_digest = _mutation_digest(payload)
+    try:
+        with transaction.atomic():
+            operation = CredentialMutationRequest.objects.create(
+                tenant=config.tenant,
+                integration_config=config,
+                action=action,
+                idempotency_key_hash=key_hash,
+                payload_digest=payload_digest,
+            )
+        return operation, False
+    except IntegrityError:
+        operation = CredentialMutationRequest.objects.get(
+            tenant=config.tenant,
+            idempotency_key_hash=key_hash,
+        )
+        if operation.integration_config_id != config.id or operation.action != action:
+            raise StateConflict("The idempotency key was already used for another credential operation.")
+        if operation.payload_digest != payload_digest:
+            raise StateConflict("The idempotency key was already used with a different request.")
+        if operation.status != CredentialMutationRequest.Status.COMPLETED:
+            raise StateConflict("The credential operation is already pending or previously failed.")
+        return operation, True
+
+
+def _safe_expiry(value):
+    if not value:
+        return None
+    parsed = parse_datetime(str(value))
+    return parsed if parsed and timezone.is_aware(parsed) else None
+
+
+def _record_failed_mutation(operation, config, actor, action, error_code, *, reconcile_required=False):
+    try:
+        operation.status = CredentialMutationRequest.Status.FAILED
+        operation.error_code = error_code
+        operation.save(update_fields=["status", "error_code", "updated_at"])
+    except Exception:
+        pass
+    if not reconcile_required:
+        return
+    try:
+        with transaction.atomic():
+            locked = PlatformIntegrationConfig.objects.select_for_update().get(
+                pk=config.pk,
+                tenant_id=config.tenant_id,
+            )
+            locked.credential_status = PlatformIntegrationConfig.CredentialStatus.RECONCILE_REQUIRED
+            with authorization_service_write():
+                locked.save(update_fields=["credential_status", "updated_at"])
+            IntegrationAuditLog.objects.create(
+                tenant=locked.tenant,
+                integration_config=locked,
+                action=action,
+                actor=actor,
+                result=IntegrationAuditLog.Result.FAILED,
+                masked_detail={"error_code": error_code, "reconcile_required": True},
+            )
+    except Exception:
+        pass
+
+
+def rotate_config_secrets(config, *, credentials, version, reason, actor, idempotency_key):
+    if actor.tenant_id != config.tenant_id:
+        raise ValidationError("Credential rotation actor must belong to the config tenant.")
+    payload = {"version": version, "reason": reason, "credentials": credentials}
+    operation, repeated = _mutation_request(
+        config,
+        CredentialMutationRequest.Action.ROTATE,
+        idempotency_key,
+        payload,
+    )
+    if repeated:
+        return PlatformIntegrationConfig.objects.get(pk=config.pk), True
+
+    custody = get_custody_backend()
+    had_previous_reference = False
+    try:
+        with transaction.atomic():
+            locked = PlatformIntegrationConfig.objects.select_for_update().get(
+                pk=config.pk,
+                tenant_id=config.tenant_id,
+            )
+            if locked.config_version != version:
+                raise StateConflict("The configuration version changed; reload before replacing credentials.")
+            had_previous_reference = bool(locked.credential_id or locked.token_id)
+            next_reference_version = locked.credential_reference_version + 1
+            custody_payload = {
+                "credential_type": locked.platform,
+                "reference_version": next_reference_version,
+                "metadata": {
+                    "tenant_id": locked.tenant_id,
+                    "integration_config_id": locked.id,
+                    "environment": locked.environment,
+                },
+                **credentials,
+            }
+            try:
+                if locked.credential_id or locked.token_id:
+                    stored = custody.rotate_secrets(
+                        previous_credential_id=locked.credential_id,
+                        previous_token_id=locked.token_id,
+                        **custody_payload,
+                    )
+                else:
+                    stored = custody.store_secrets(**custody_payload)
+            finally:
+                for secret_key in list(credentials):
+                    custody_payload.pop(secret_key, None)
+                credentials.clear()
+            metadata = build_reference_metadata(
+                stored["credential_id"],
+                stored["token_id"],
+                int(stored.get("reference_version") or next_reference_version),
+                credential_mask=stored.get("credential_mask") or {"configured": "********"},
+                allow_live=True,
+            )
+            for field, value in metadata.items():
+                setattr(locked, field, value)
+            locked.credential_status = PlatformIntegrationConfig.CredentialStatus.CONFIGURED
+            if locked.status == PlatformIntegrationConfig.Status.DRAFT:
+                locked.status = PlatformIntegrationConfig.Status.CONFIGURED
+            locked.credential_expires_at = _safe_expiry(stored.get("expires_at"))
+            locked.last_rotated_at = timezone.now()
+            locked.config_version += 1
+            with authorization_service_write():
+                locked.save(
+                    update_fields=[
+                        *metadata.keys(),
+                        "credential_status",
+                        "status",
+                        "credential_expires_at",
+                        "last_rotated_at",
+                        "config_version",
+                        "updated_at",
+                    ]
+                )
+            IntegrationAuditLog.objects.create(
+                tenant=locked.tenant,
+                integration_config=locked,
+                action="rotate_credential",
+                actor=actor,
+                result=IntegrationAuditLog.Result.SUCCESS,
+                masked_detail={
+                    "credential_mask": locked.credential_mask,
+                    "reference_version": locked.credential_reference_version,
+                    "config_version": locked.config_version,
+                    "reason_recorded": bool(reason),
+                },
+            )
+            operation.status = CredentialMutationRequest.Status.COMPLETED
+            operation.response_metadata = {
+                "config_version": locked.config_version,
+                "reference_version": locked.credential_reference_version,
+            }
+            operation.save(update_fields=["status", "response_metadata", "updated_at"])
+        return locked, False
+    except Exception as exc:
+        if "stored" in locals():
+            try:
+                custody.revoke(stored.get("credential_id"), stored.get("token_id"))
+            except Exception:
+                pass
+        _record_failed_mutation(
+            operation,
+            config,
+            actor,
+            "rotate_credential",
+            "CREDENTIAL_ROTATION_FAILED",
+            reconcile_required=had_previous_reference and "stored" in locals(),
+        )
+        if isinstance(exc, (CustodyError, StateConflict, ValidationError)):
+            raise
+        raise CustodyError("Credential custody rotation failed.") from None
+
+
+def clear_config_secrets(config, *, version, reason, actor, idempotency_key):
+    if actor.tenant_id != config.tenant_id:
+        raise ValidationError("Credential clear actor must belong to the config tenant.")
+    payload = {"version": version, "reason": reason}
+    operation, repeated = _mutation_request(
+        config,
+        CredentialMutationRequest.Action.CLEAR,
+        idempotency_key,
+        payload,
+    )
+    if repeated:
+        return PlatformIntegrationConfig.objects.get(pk=config.pk), True
+    custody = get_custody_backend()
+    reference_revoked = False
+    try:
+        with transaction.atomic():
+            locked = PlatformIntegrationConfig.objects.select_for_update().get(
+                pk=config.pk,
+                tenant_id=config.tenant_id,
+            )
+            if locked.config_version != version:
+                raise StateConflict("The configuration version changed; reload before clearing credentials.")
+            revocation = custody.revoke(locked.credential_id, locked.token_id)
+            if revocation.get("status") not in {"revoked", "not_required"}:
+                raise CustodyError("Credential custody did not confirm reference revocation.")
+            reference_revoked = bool(locked.credential_id or locked.token_id)
+            locked.credential_id = ""
+            locked.token_id = ""
+            locked.credential_mask = {}
+            locked.credential_reference_version += 1
+            locked.credential_key_version = ""
+            locked.credential_fingerprint = ""
+            locked.credential_status = PlatformIntegrationConfig.CredentialStatus.UNCONFIGURED
+            if locked.status in {
+                PlatformIntegrationConfig.Status.CONFIGURED,
+                PlatformIntegrationConfig.Status.VERIFIED,
+            }:
+                locked.status = PlatformIntegrationConfig.Status.DRAFT
+            locked.credential_expires_at = None
+            locked.last_rotated_at = timezone.now()
+            locked.config_version += 1
+            with authorization_service_write():
+                locked.save(
+                    update_fields=[
+                        "credential_id",
+                        "token_id",
+                        "credential_mask",
+                        "credential_reference_version",
+                        "credential_key_version",
+                        "credential_fingerprint",
+                        "credential_status",
+                        "status",
+                        "credential_expires_at",
+                        "last_rotated_at",
+                        "config_version",
+                        "updated_at",
+                    ]
+                )
+            IntegrationAuditLog.objects.create(
+                tenant=locked.tenant,
+                integration_config=locked,
+                action="clear_credential",
+                actor=actor,
+                result=IntegrationAuditLog.Result.SUCCESS,
+                masked_detail={
+                    "credential_status": locked.credential_status,
+                    "reference_version": locked.credential_reference_version,
+                    "config_version": locked.config_version,
+                    "reason_recorded": bool(reason),
+                },
+            )
+            operation.status = CredentialMutationRequest.Status.COMPLETED
+            operation.response_metadata = {
+                "config_version": locked.config_version,
+                "reference_version": locked.credential_reference_version,
+            }
+            operation.save(update_fields=["status", "response_metadata", "updated_at"])
+        return locked, False
+    except Exception as exc:
+        _record_failed_mutation(
+            operation,
+            config,
+            actor,
+            "clear_credential",
+            "CREDENTIAL_CLEAR_FAILED",
+            reconcile_required=reference_revoked,
+        )
+        if isinstance(exc, (CustodyError, StateConflict, ValidationError)):
+            raise
+        raise CustodyError("Credential custody clear failed.") from None

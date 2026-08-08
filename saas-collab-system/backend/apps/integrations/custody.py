@@ -93,13 +93,19 @@ class HttpCustodyBackend(CustodyBackend):
         return value
 
     def store_secrets(self, **kwargs):
-        return _reference_result(self._request_json("POST", "/tokens", body=kwargs))
+        try:
+            return _reference_result(self._request_json("POST", "/tokens", body=kwargs))
+        finally:
+            kwargs.clear()
 
     def rotate_secrets(self, **kwargs):
-        result = _reference_result(self._request_json("POST", "/tokens/rotate", body=kwargs))
-        if result["previous_reference_status"] != "revoked":
-            raise CustodyError("Custody did not atomically revoke the previous reference.")
-        return result
+        try:
+            result = _reference_result(self._request_json("POST", "/tokens/rotate", body=kwargs))
+            if result["previous_reference_status"] != "revoked":
+                raise CustodyError("Custody did not atomically revoke the previous reference.")
+            return result
+        finally:
+            kwargs.clear()
 
     def retrieve_access_token(self, token_id):
         payload = self._request_json("POST", "/tokens/resolve", body={"token_id": token_id, "kind": "access"})

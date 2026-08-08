@@ -55,9 +55,9 @@ export const menuItems = [
   },
   {
     label: 'API数据接入',
-    permissions: ['integrations.view'],
+    permissions: ['integrations.view', 'integrations.config.view'],
     children: [
-      { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.view'] },
+      { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.config.view'] },
       { path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
       { path: '/integrations/sync-runs', label: '运行记录', permissions: ['integrations.view'] }
     ]
@@ -164,7 +164,7 @@ export const routeCapabilities = [
   { path: '/rpa/stability', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/rpa/account-locks', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/rpa/page-signatures', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
-  { path: '/integrations/configs', permissions: ['integrations.view'], userTypes: ['internal'] },
+  { path: '/integrations/configs', permissions: ['integrations.config.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-jobs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-runs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/api-sync', permissions: ['integrations.view'], userTypes: ['internal'] },
