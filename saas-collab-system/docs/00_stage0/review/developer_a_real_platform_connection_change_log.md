@@ -132,3 +132,12 @@ git diff --stat
 - 安装门禁同时拒绝 `change-me` 与 `REPLACE_ME` 占位符。
 - 验证：Django check PASS；migration drift PASS；focused live tests 22 passed；后端全量 528 passed / 3 MySQL-only skipped；CI guard PASS；`git diff --check` PASS。
 - 只读连通性确认操作员提供的私网应用主机 pilot HTTP/HTTPS 端口可达，数据库端口从操作员工作站不可达。尚未证明 TLS/应用健康、SSH 主机身份、不可变镜像 digest 和 custody；未部署、未执行真实 OAuth，两个 capability 继续为 `pending/mock`。
+
+## 8. 连接配置页面接线（2026-08-08）
+
+- 代码 Review SHA：`bcb3281774f5166cf14e0d7346f43095ffa46b21`。
+- 将 Shopee/TikTok OAuth start、授权列表、refresh 和 revoke 前端入口放入 `API数据接入 -> 连接配置`（`/integrations/configs`）。
+- 页面按当前 HTTPS origin 生成两个独立 callback URL，只提交内部 config/store、platform、region、redirect 和空 scope 请求，不提供原始 App Secret/Token 输入或展示。
+- 操作按钮继续执行 `integrations.store.authorize`、`integrations.credential.rotate`、`integrations.store.revoke` 精确权限；Mock 不生成真实授权地址。
+- 验证：新增前端契约测试 3 passed；前端全量 163 passed；production build PASS（1957 modules）；CI guard 和 `git diff --check` PASS。
+- 未执行真实 OAuth，未改变 `pending/mock` capability，也未启用同步任务。

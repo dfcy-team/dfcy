@@ -10,9 +10,9 @@ Review date: 2026-08-07. Current result: **FAIL / REQUEST CHANGES**. This is a d
 | PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
 | Branch | `feature/module-a-real-platform-connection` |
 | Base | `feature/module-a-marketplace-oauth` @ `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
-| Code Review SHA | `24ed0f9f9e30cb382dfa4b04db403edc501ae491` |
+| Code Review SHA | `bcb3281774f5166cf14e0d7346f43095ffa46b21` |
 | Final PR Head SHA | Freeze after this evidence-only commit |
-| Expected commit count / changed files | 6 / 32 |
+| Expected commit count / changed files | 8 / 39 |
 | Runtime artifact / image digest | NOT AVAILABLE |
 | Environment | Local Sandbox; real-platform switches OFF |
 | Database | MySQL 8.4.10 PASS; not a fixed deployment artifact |
@@ -34,7 +34,7 @@ PR-A1 architecture/security R2 recorded PASS for its fixed scope. PR-A2 review r
 | refresh concurrency / revoke / reauthorization | PASS locally | MySQL live-reference dual worker passed; real platform runs absent |
 | audit immutability | PASS regression | live-runtime audit inspection absent |
 | fresh/upgrade migration | PASS | SQLite fresh/upgrade and MySQL 8.4.10 Sandbox migration |
-| backend/frontend/build | PASS | local 528/3 skipped; MySQL 530; frontend 160; build success |
+| backend/frontend/build | PASS | local backend 528/3 skipped; MySQL 530; local frontend 163; build 1957 modules |
 | Local Sandbox / remote CI | CONDITIONAL | Sandbox PASS; final remote CI pending new head |
 | Shopee official/live flow | FAIL | contract/app/pilot/evidence absent |
 | TikTok official/live flow | FAIL | app/pilot/revoke contract/evidence absent |

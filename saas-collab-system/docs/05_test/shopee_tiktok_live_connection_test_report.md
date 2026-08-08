@@ -11,7 +11,7 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | Base branch | `feature/module-a-marketplace-oauth` |
 | Base SHA | `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
 | PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
-| Code Review SHA | `24ed0f9f9e30cb382dfa4b04db403edc501ae491` |
+| Code Review SHA | `bcb3281774f5166cf14e0d7346f43095ffa46b21` |
 | Final PR Head SHA | Freeze from PR #42 after this evidence-only commit |
 | Deployment artifact / image digest | NOT AVAILABLE |
 | Database / migration head | MySQL 8.4.10 Local Sandbox / `integrations.0013_authorization_reauthorization_bindings` |
@@ -28,8 +28,8 @@ Task: `A-REAL-PLATFORM-CONNECTION`; date: 2026-08-07. This report contains no re
 | upgrade SQLite migration | PASS, `0012 -> 0013` |
 | focused OAuth/live tests | PASS, 22 passed locally |
 | full backend (local SQLite) | PASS, 528 passed / 3 MySQL-only skipped |
-| frontend | PASS, 160 passed |
-| production build | PASS, 1955 modules |
+| frontend | PASS, 163 passed |
+| production build | PASS, 1957 modules |
 | MySQL 8.4.10 / live dual-worker refresh | PASS, one commit and one controlled conflict |
 | Local Sandbox integration | PASS, backend 530 / frontend 160 / build 1955 modules |
 | Sandbox DB/log raw scan | PASS, 0 findings; authorization rows were 0 |
