@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -78,6 +79,91 @@ def authenticated_client(user):
     client = APIClient()
     client.force_authenticate(user=user)
     return client
+
+
+SHOPEE_LOOPBACK_CALLBACK = (
+    "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/"
+)
+
+
+def shopee_pilot_payload(callback_url):
+    return {
+        "platform": "shopee",
+        "account_alias": "pilot-loopback",
+        "environment": "pilot",
+        "status": "draft",
+        "regions": ["PH"],
+        "contract_version": "v2",
+        "callback_url": callback_url,
+        "platform_config": {"partner_id": "approved-public-partner-id"},
+    }
+
+
+@pytest.mark.django_db
+@override_settings(
+    LIVE_OAUTH_REDIRECT_ALLOWLIST=[SHOPEE_LOOPBACK_CALLBACK],
+    LIVE_SHOPEE_REDIRECT_URI=SHOPEE_LOOPBACK_CALLBACK,
+)
+def test_pilot_accepts_exact_shopee_loopback_callback():
+    tenant = Tenant.objects.create(name="Tenant", code="pilot-loopback-callback")
+    user = create_user(tenant, "pilot-loopback-admin")
+    grant_integration_access(user)
+
+    response = authenticated_client(user).post(
+        "/api/internal/integrations/configs/",
+        shopee_pilot_payload(SHOPEE_LOOPBACK_CALLBACK),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["callback_url"] == SHOPEE_LOOPBACK_CALLBACK
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "environment,callback_url",
+    [
+        (
+            "production",
+            "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+        ),
+        (
+            "pilot",
+            "http://192.168.2.10:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+        ),
+        (
+            "pilot",
+            "http://127.0.0.1:8001/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+        ),
+        (
+            "pilot",
+            "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
+        ),
+        (
+            "pilot",
+            "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/?next=evil",
+        ),
+    ],
+)
+def test_marketplace_callback_rejects_unapproved_http_targets(environment, callback_url):
+    tenant = Tenant.objects.create(name="Tenant", code="reject-http-callback")
+    user = create_user(tenant, "reject-http-admin")
+    grant_integration_access(user)
+
+    with override_settings(
+        LIVE_OAUTH_REDIRECT_ALLOWLIST=[callback_url],
+        LIVE_SHOPEE_REDIRECT_URI=callback_url,
+    ):
+        payload = shopee_pilot_payload(callback_url)
+        payload["environment"] = environment
+        response = authenticated_client(user).post(
+            "/api/internal/integrations/configs/",
+            payload,
+            format="json",
+        )
+
+    assert response.status_code == 400
+    assert "callback_url" in json.dumps(response.json())
 
 
 def config_payload(account_alias="demo-account", environment="mock", status="active"):

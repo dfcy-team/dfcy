@@ -49,7 +49,10 @@
           </el-checkbox-group>
         </el-form-item>
         <el-form-item class="span-2" label="Callback URL" required>
-          <el-input v-model="form.callback_url" placeholder="https://dingfengchuangyu.com/..." />
+          <el-input
+            v-model="form.callback_url"
+            placeholder="Pilot 可填 http://127.0.0.1:8000/...；正式环境必须使用 HTTPS"
+          />
         </el-form-item>
         <el-form-item
           v-for="field in schema.public_fields || []"

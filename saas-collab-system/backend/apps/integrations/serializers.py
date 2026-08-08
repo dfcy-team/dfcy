@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from django.conf import settings
 from rest_framework import serializers
 
@@ -12,6 +14,33 @@ from .models import (
     SyncRun,
 )
 from .platform_schema_service import get_platform_schema, validate_platform_config
+
+
+PILOT_LOOPBACK_CALLBACKS = {
+    PlatformChoices.SHOPEE: "/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+    PlatformChoices.TIKTOK: "/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
+}
+
+
+def _is_approved_callback_transport(callback_url, environment, platform):
+    try:
+        parsed = urlsplit(str(callback_url))
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme == "https":
+        return True
+    return (
+        environment == PlatformIntegrationConfig.Environment.PILOT
+        and parsed.scheme == "http"
+        and parsed.hostname == "127.0.0.1"
+        and port == 8000
+        and parsed.path == PILOT_LOOPBACK_CALLBACKS.get(platform)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
 class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
@@ -117,8 +146,15 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         callback_url = attrs.get("callback_url", getattr(self.instance, "callback_url", ""))
         if platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK} and not callback_url:
             raise serializers.ValidationError({"callback_url": "Platform callback URL is required."})
-        if callback_url and not str(callback_url).startswith("https://"):
-            raise serializers.ValidationError({"callback_url": "Callback URL must use HTTPS."})
+        if callback_url and not _is_approved_callback_transport(callback_url, environment, platform):
+            raise serializers.ValidationError(
+                {
+                    "callback_url": (
+                        "Callback URL must use HTTPS; controlled Pilot testing may use only the exact "
+                        "http://127.0.0.1:8000 marketplace callback."
+                    )
+                }
+            )
         redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
         expected_callback = {
             PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
