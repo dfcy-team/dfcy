@@ -53,6 +53,20 @@ export const mockIntegrationConfigDetail = () => successResponse({
   ...config
 });
 
+export const mockMarketplaceStoreAuthorizations = () => successResponse({
+  status: 'mock',
+  count: 0,
+  next: null,
+  previous: null,
+  results: []
+});
+
+export const mockMarketplaceAuthorizationStart = () => successResponse({
+  status: 'pending/mock',
+  authorization_url: '',
+  expires_at: ''
+});
+
 export const mockSyncJobs = () => successResponse({
   status: 'mock',
   module: 'integrations.sync_jobs',
