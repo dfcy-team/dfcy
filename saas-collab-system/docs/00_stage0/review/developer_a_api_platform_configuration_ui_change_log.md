@@ -38,3 +38,4 @@
 - TikTok 无平台 revoke API 合同时执行 seller-managed/local disconnect，并撤销 custody 引用，不伪造平台 API 撤销成功。
 - 当前验证：Django check PASS；migration drift PASS；后端全量 543 passed / 3 skipped；前端全量 165 passed；production build PASS（1963 modules）；CI guard 与 `git diff --check` PASS。
 - 尚未执行真实 callback、authorized shop、最小只读 API、refresh、revoke、MySQL 试点及凭据扫描；两个 capability 继续保持 `pending/mock`。
+- 本机 pilot 页面优先使用选中配置中的批准 callback；仅 HTTPS 或 `localhost/127.0.0.1/::1` loopback 页面可发起 OAuth，禁止其他明文 HTTP origin。

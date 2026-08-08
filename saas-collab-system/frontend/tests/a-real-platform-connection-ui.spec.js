@@ -50,6 +50,8 @@ describe('real marketplace connection UI boundary', () => {
     expect(panel).toContain('/oauth/callback/shopee/');
     expect(panel).toContain('/oauth/callback/tiktok/');
     expect(panel).toContain("selectedConfig.value?.scopes || []");
+    expect(panel).toContain('selectedConfig.value?.callback_url');
+    expect(panel).toContain("['localhost', '127.0.0.1', '::1']");
   });
 
   it('exposes the required configuration list filters and safe status columns', () => {

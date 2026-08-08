@@ -136,9 +136,11 @@ const platforms = ref([]);
 const authorizations = ref([]);
 const form = reactive({ platform: 'shopee', integration_config_id: '', store_id: '', region: 'PH' });
 
-const callbackUrl = computed(() => new URL(callbackPaths[form.platform], globalThis.location.origin).toString());
 const matchingConfigs = computed(() => configs.value.filter((item) => String(item.platform).toLowerCase() === form.platform));
 const selectedConfig = computed(() => matchingConfigs.value.find((item) => item.id === form.integration_config_id));
+const callbackUrl = computed(() => (
+  selectedConfig.value?.callback_url || new URL(callbackPaths[form.platform], globalThis.location.origin).toString()
+));
 const platformIds = computed(() => new Set(
   platforms.value.filter((item) => item.platform_type === form.platform).map((item) => item.id)
 ));
@@ -146,13 +148,15 @@ const matchingStores = computed(() => stores.value.filter((item) => platformIds.
 const canAuthorize = computed(() => auth.hasPermission('integrations.store.authorize'));
 const canRefresh = computed(() => auth.hasPermission('integrations.credential.rotate'));
 const canRevoke = computed(() => auth.hasPermission('integrations.store.revoke'));
-const isHttps = computed(() => globalThis.location.protocol === 'https:');
+const isSecureOrigin = computed(() => (
+  globalThis.location.protocol === 'https:' || ['localhost', '127.0.0.1', '::1'].includes(globalThis.location.hostname)
+));
 const canStart = computed(() => Boolean(
-  canAuthorize.value && isHttps.value && form.integration_config_id && form.store_id && form.region
+  canAuthorize.value && isSecureOrigin.value && form.integration_config_id && form.store_id && form.region
 ));
 const startDisabledReason = computed(() => {
   if (!canAuthorize.value) return '缺少 integrations.store.authorize 权限';
-  if (!isHttps.value) return '真实 OAuth 只能从 HTTPS 页面发起';
+  if (!isSecureOrigin.value) return '真实 OAuth 只能从 HTTPS 或本机 loopback 页面发起';
   if (!form.integration_config_id || !form.store_id) return '请先选择应用配置和内部店铺';
   return '';
 });
