@@ -70,6 +70,9 @@ class APIIntegrationConfigAdmin(admin.ModelAdmin):
     list_display = ("tenant", "platform", "shop_code", "status", "created_at", "updated_at")
     list_filter = ("platform", "status", "tenant")
     search_fields = ("shop_code", "tenant__name", "tenant__code")
+    # Legacy encrypted columns are retained for migration compatibility only;
+    # admin writes must go through the independent custody service.
+    exclude = ("api_key_encrypted", "api_secret_encrypted")
 
 
 @admin.register(APISyncTask)

@@ -22,7 +22,8 @@ from apps.permissions.ui_p6_scopes import (
     integration_values_allowed,
 )
 
-from .credential_service import mask_credentials, rotate_credentials
+from .credential_service import mask_credentials, rotate_stored_credentials
+from .custody import CredentialCustodyError
 from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
 from .serializers import (
     PlatformIntegrationConfigSerializer,
@@ -183,19 +184,29 @@ def rotate_integration_credentials(request, pk):
     config = _get_config_for_user(request, pk, "integrations.rotate")
     serializer = RotateCredentialsSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    rotate_credentials(
-        config,
-        serializer.validated_data["credentials"],
-        serializer.validated_data["credential_key_version"],
-        request.user,
-    )
+    try:
+        reference = rotate_stored_credentials(
+            config,
+            serializer.validated_data["credentials"],
+            expected_version=config.credential_version or None,
+            expires_at=serializer.validated_data.get("expires_at"),
+            idempotency_key=request.headers.get("Idempotency-Key"),
+            operation_id=request.headers.get("X-Request-ID"),
+        )
+    except CredentialCustodyError as exc:
+        raise ValidationError("Credential custody operation failed.") from exc
+    # ``credential_key_version`` is a compatibility label used by existing
+    # clients.  It is metadata only; the custody service's monotonic integer
+    # remains authoritative in ``credential_version``.
+    config.credential_key_version = serializer.validated_data["credential_key_version"]
+    config.save(update_fields=["credential_key_version", "updated_at"])
     _write_audit_log(
         config,
         request.user,
         "rotate_credentials",
         detail={
             "credential_key_version": config.credential_key_version,
-            "credential_fingerprint": config.credential_fingerprint,
+            "credential_reference": reference.to_dict(),
             "credential_mask": mask_credentials(serializer.validated_data["credentials"]),
         },
     )

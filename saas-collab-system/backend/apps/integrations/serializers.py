@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from .credential_service import encrypt_credentials, mask_credentials
+from .credential_service import store_credentials
+from .custody import CredentialCustodyError
 from .models import IntegrationAuditLog, PlatformIntegrationConfig, SyncJob, SyncRun
 
 
@@ -9,6 +10,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
     created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
     credential_mask = serializers.SerializerMethodField()
     credentials = serializers.DictField(write_only=True, required=False)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = PlatformIntegrationConfig
@@ -22,17 +24,32 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             "credential_key_version",
             "credential_fingerprint",
             "credential_mask",
+            "credential_id",
+            "token_id",
+            "credential_version",
+            "credential_status",
+            "credential_expires_at",
+            "credential_operation_id_hash",
+            "credential_revoked_at",
             "last_verified_at",
             "created_by_id",
             "created_at",
             "updated_at",
             "credentials",
+            "expires_at",
         )
         read_only_fields = (
             "id",
             "tenant_id",
             "credential_fingerprint",
             "credential_mask",
+            "credential_id",
+            "token_id",
+            "credential_version",
+            "credential_status",
+            "credential_expires_at",
+            "credential_operation_id_hash",
+            "credential_revoked_at",
             "last_verified_at",
             "created_by_id",
             "created_at",
@@ -40,7 +57,19 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         )
 
     def get_credential_mask(self, obj):
-        return {"fingerprint": obj.credential_fingerprint, "key_version": obj.credential_key_version}
+        # Keep the response metadata-only.  ``credential_fingerprint`` and
+        # ``credential_key_version`` are retained solely for old records; new
+        # custody writes use opaque IDs, a fixed mask, version and expiry.
+        return {
+            "credential_id": obj.credential_id,
+            "token_id": obj.token_id,
+            "mask": obj.credential_mask or "***",
+            "version": obj.credential_version,
+            "status": obj.credential_status,
+            "expires_at": obj.credential_expires_at,
+            "fingerprint": obj.credential_fingerprint,
+            "key_version": obj.credential_key_version,
+        }
 
     def validate(self, attrs):
         environment = attrs.get("environment", getattr(self.instance, "environment", None))
@@ -56,12 +85,51 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         credentials = validated_data.pop("credentials", {})
-        key_version = validated_data.get("credential_key_version") or "test-v1"
-        if credentials:
-            ciphertext, fingerprint = encrypt_credentials(credentials, key_version=key_version)
-            validated_data["credential_ciphertext"] = ciphertext
-            validated_data["credential_fingerprint"] = fingerprint
-            validated_data["credential_key_version"] = key_version
+        expires_at = validated_data.pop("expires_at", None)
+        if not credentials:
+            return super().create(validated_data)
+
+        # Secrets enter the independent custody boundary before the business
+        # model is written.  Only the safe reference metadata is copied into
+        # ``validated_data``; legacy ciphertext/fingerprint columns are never
+        # populated by this path.
+        request = self.context.get("request")
+        idempotency_key = request.headers.get("Idempotency-Key") if request else None
+        operation_id = request.headers.get("X-Request-ID") if request else None
+        try:
+            reference = store_credentials(
+                credentials,
+                expires_at=expires_at,
+                idempotency_key=idempotency_key,
+                operation_id=operation_id,
+            )
+        except CredentialCustodyError as exc:
+            # Custody exceptions intentionally contain no input values.  Map
+            # them to a normal API validation response rather than leaking a
+            # storage traceback to callers.
+            raise serializers.ValidationError("Credential custody operation failed.") from exc
+        reference_data = reference.to_dict()
+        validated_data.update(
+            {
+                "credential_id": reference_data["credential_id"],
+                "token_id": reference_data["token_id"],
+                "credential_mask": reference_data["mask"],
+                "credential_version": reference_data["version"],
+                "credential_status": reference_data["status"],
+                "credential_expires_at": reference_data["expires_at"],
+                "credential_operation_id_hash": reference_data["operation_id_hash"] or "",
+            }
+        )
+        # ``credential_expires_at`` is a model DateTimeField, while the local
+        # store returns ISO metadata.  Let DRF/Django handle a datetime-like
+        # value only when one was supplied; the normal store path has no
+        # expiry and therefore remains ``None``.
+        if reference_data["expires_at"]:
+            from datetime import datetime
+
+            validated_data["credential_expires_at"] = datetime.fromisoformat(
+                reference_data["expires_at"].replace("Z", "+00:00")
+            )
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -72,6 +140,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
 class RotateCredentialsSerializer(serializers.Serializer):
     credentials = serializers.DictField()
     credential_key_version = serializers.CharField(max_length=40)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True, write_only=True)
 
 
 class IntegrationAuditLogSerializer(serializers.ModelSerializer):

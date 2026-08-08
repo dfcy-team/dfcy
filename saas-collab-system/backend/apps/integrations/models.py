@@ -23,6 +23,12 @@ class PlatformIntegrationConfig(models.Model):
         DISABLED = "disabled", "Disabled"
         PENDING_REVIEW = "pending_review", "Pending review"
 
+    class CredentialStatus(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        REVOKED = "revoked", "Revoked"
+        PLACEHOLDER = "placeholder", "Placeholder"
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_integration_configs")
     platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
     account_alias = models.CharField(max_length=120)
@@ -31,6 +37,20 @@ class PlatformIntegrationConfig(models.Model):
     credential_ciphertext = models.TextField(blank=True)
     credential_key_version = models.CharField(max_length=40, blank=True)
     credential_fingerprint = models.CharField(max_length=64, blank=True)
+    # Custody metadata only.  New writes use these opaque references and do
+    # not write the legacy ciphertext/fingerprint columns above.
+    credential_id = models.CharField(max_length=96, blank=True, db_index=True)
+    token_id = models.CharField(max_length=96, blank=True)
+    credential_mask = models.CharField(max_length=16, blank=True, default="***")
+    credential_version = models.PositiveIntegerField(default=0)
+    credential_expires_at = models.DateTimeField(null=True, blank=True)
+    credential_status = models.CharField(
+        max_length=20,
+        choices=CredentialStatus.choices,
+        default=CredentialStatus.PLACEHOLDER,
+    )
+    credential_revoked_at = models.DateTimeField(null=True, blank=True)
+    credential_operation_id_hash = models.CharField(max_length=64, blank=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -242,6 +262,7 @@ class APIIntegrationConfig(models.Model):
         PLACEHOLDER = "placeholder", "Placeholder"
         ACTIVE = "active", "Active"
         ROTATION_REQUIRED = "rotation_required", "Rotation required"
+        EXPIRED = "expired", "Expired"
         REVOKED = "revoked", "Revoked"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="api_integration_configs")
@@ -254,6 +275,14 @@ class APIIntegrationConfig(models.Model):
     api_key_encrypted = models.TextField(blank=True)
     api_secret_encrypted = models.TextField(blank=True)
     credential_key_version = models.CharField(max_length=40, blank=True)
+    # Custody metadata only; secret values stay in the independent local
+    # custody service and never in this business database.
+    credential_id = models.CharField(max_length=96, blank=True, db_index=True)
+    token_id = models.CharField(max_length=96, blank=True)
+    credential_mask = models.CharField(max_length=16, blank=True, default="***")
+    credential_version = models.PositiveIntegerField(default=0)
+    credential_revoked_at = models.DateTimeField(null=True, blank=True)
+    credential_operation_id_hash = models.CharField(max_length=64, blank=True)
     credential_status = models.CharField(
         max_length=30,
         choices=CredentialStatus.choices,

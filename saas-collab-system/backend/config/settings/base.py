@@ -158,6 +158,13 @@ INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "unconfigured-production",
 )
 
+# Independent local credential custody. Deployed environments must point this
+# at a dedicated persistent volume with restrictive operating-system ACLs.
+CREDENTIAL_CUSTODY_PATH = os.getenv(
+    "CREDENTIAL_CUSTODY_PATH",
+    str(Path(os.getenv("TMPDIR", os.getenv("TEMP", "/tmp"))) / "saas-collab-system-credential-custody"),
+)
+
 # Mini Program authentication fails closed by default. The sandbox mode never
 # calls WeChat and only accepts pre-bound, hashed development identities.
 MINIAPP_AUTH_MODE = os.getenv("MINIAPP_AUTH_MODE", "disabled")
