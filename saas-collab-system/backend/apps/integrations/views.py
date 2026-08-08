@@ -413,6 +413,12 @@ def start_marketplace_store_oauth(request):
         ),
         pk=data["integration_config_id"],
     )
+    if config.regions and data["region"] not in config.regions:
+        raise ValidationError({"region": "OAuth region is not approved by the selected configuration."})
+    if config.callback_url and data["redirect_uri"] != config.callback_url:
+        raise ValidationError({"redirect_uri": "OAuth redirect URI does not match the selected configuration."})
+    if config.scopes and set(data["scopes"]) != set(config.scopes):
+        raise ValidationError({"scopes": "OAuth scopes must exactly match the selected configuration."})
     from apps.masterdata.models import StoreMaster
 
     store = get_object_or_404(StoreMaster, tenant=request.user.tenant, pk=data["store_id"])

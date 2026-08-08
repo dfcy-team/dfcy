@@ -141,3 +141,14 @@ git diff --stat
 - 操作按钮继续执行 `integrations.store.authorize`、`integrations.credential.rotate`、`integrations.store.revoke` 精确权限；Mock 不生成真实授权地址。
 - 验证：新增前端契约测试 3 passed；前端全量 163 passed；production build PASS（1957 modules）；CI guard 和 `git diff --check` PASS。
 - 未执行真实 OAuth，未改变 `pending/mock` capability，也未启用同步任务。
+
+## 9. 本机真实授权前运行门禁修复（2026-08-08）
+
+- 修复 live provider 未使用 SaaS 连接配置的问题；公开应用标识、callback、合同版本、网络开关和 custody 引用现在按当前 tenant 配置注入。
+- 支持批准的独立文件 custody 作为本机受控接入后端；不允许业务数据库保存原始 Secret 或 Token。
+- 强制 OAuth region、callback、scope 与选中配置精确一致，并阻止同步读写开关随真实连接自动开启。
+- Shopee/TikTok live provider 的官方授权、交换、授权店铺、最小 metadata、refresh/revoke 边界已补充回归测试。
+- 验证：后端 543 passed / 3 skipped；前端 165 passed；production build PASS；CI guard、migration drift 与 `git diff --check` PASS。
+- Shopee 已只读确认应用为 Online、Live Redirect Domain 为批准域名且 Partner Key 保持掩码；未在证据中记录完整应用标识或密钥。
+- TikTok PH/TH/MY 使用 Non-US/ROW Partner Center；登录由操作员在正常浏览器中完成，凭据不进入聊天或自动化输出。
+- 本节仍不是 live PASS 证据；必须从下方固定提交生成本机运行制品并完成真实 OAuth 后再更新 capability。

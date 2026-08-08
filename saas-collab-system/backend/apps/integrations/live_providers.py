@@ -64,6 +64,11 @@ class LiveOAuthProviderBase:
 
     def _preflight(self, operation):
         require_live_mode(f"{self.platform} {operation}")
+        if self.config.get("integration_config_ready") is False:
+            raise OAuthFlowError(
+                OAUTH_PROVIDER_UNAVAILABLE,
+                "The selected integration configuration is not approved for controlled live validation.",
+            )
         if not self.config.get("contract_approved"):
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, f"{self.platform} platform contract is not approved.")
         redirect_uri = _required(self.config.get("redirect_uri"), f"{self.platform}.redirect_uri")
@@ -138,7 +143,11 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
         auth_url = _required(self.config.get("auth_url"), "shopee.auth_url")
         path = urllib.parse.urlparse(auth_url).path
         query = self._signed_public_query(path)
-        query.update({"redirect": self.config["redirect_uri"], "state": context["state"]})
+        redirect_parts = list(urllib.parse.urlsplit(self.config["redirect_uri"]))
+        redirect_query = urllib.parse.parse_qsl(redirect_parts[3], keep_blank_values=True)
+        redirect_query.append(("state", context["state"]))
+        redirect_parts[3] = urllib.parse.urlencode(redirect_query)
+        query["redirect"] = urllib.parse.urlunsplit(redirect_parts)
         return {"url": f"{auth_url}?{urllib.parse.urlencode(query)}", "provider_request_id": None}
 
     def validate_callback(self, params, context):
@@ -302,7 +311,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         if payload.get("code") != 0:
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok rejected the token request.")
         data = payload.get("data") or {}
-        if data.get("user_type") != 0:
+        if "user_type" in data and str(data.get("user_type")) != "0":
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok authorization is not a seller authorization.")
         return data, payload.get("request_id")
 
@@ -432,25 +441,62 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
 
     def revoke_authorization(self, authorization):
         self._preflight("revoke")
-        path = _required(self.config.get("revoke_path"), "tiktok.revoke_path")
-        access_token = self.custody.retrieve_access_token(authorization.token_id)
-        payload = self._request_json(
-            "POST",
-            f"{_required(self.config.get('token_host'), 'tiktok.token_host')}{path}",
-            json_body={"app_key": self._app_id(), "app_secret": self._app_secret(), "access_token": access_token},
-        )
-        if payload.get("code") != 0:
-            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok platform revoke failed.")
+        path = str(self.config.get("revoke_path") or "").strip()
+        platform_revocation = "seller_managed"
+        if path and not path.startswith("REPLACE_ME"):
+            access_token = self.custody.retrieve_access_token(authorization.token_id)
+            payload = self._request_json(
+                "POST",
+                f"{_required(self.config.get('token_host'), 'tiktok.token_host')}{path}",
+                json_body={"app_key": self._app_id(), "app_secret": self._app_secret(), "access_token": access_token},
+            )
+            if payload.get("code") != 0:
+                raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok platform revoke failed.")
+            platform_revocation = "api"
         result = self.custody.revoke(authorization.credential_id, authorization.token_id)
         if result.get("status") not in {"revoked", "not_required"}:
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Custody revoke failed.")
-        return {"status": "revoked"}
+        return {"status": "revoked", "platform_revocation": platform_revocation}
 
     def fetch_authorized_stores(self, authorization):
         self._preflight("authorized-shop verification")
         shop = self._authorized_shops(authorization.token_id)
         self._verify_metadata(authorization.token_id, shop)
         return [shop]
+
+
+def _integration_config_overrides(platform, integration_config):
+    if integration_config is None:
+        return {}
+    if str(getattr(integration_config, "platform", "")).lower() != platform:
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Integration configuration platform mismatch.")
+    values = dict(getattr(integration_config, "platform_config", {}) or {})
+    expected_contract = "v2" if platform == "shopee" else "202407"
+    status = str(getattr(integration_config, "status", ""))
+    credential_status = str(getattr(integration_config, "credential_status", ""))
+    ready = (
+        str(getattr(integration_config, "environment", "")) == "pilot"
+        and bool(getattr(integration_config, "network_enabled", False))
+        and not bool(getattr(integration_config, "sync_read_enabled", False))
+        and not bool(getattr(integration_config, "sync_write_enabled", False))
+        and status in {"configured", "verified"}
+        and credential_status == "configured"
+        and bool(getattr(integration_config, "credential_id", ""))
+        and str(getattr(integration_config, "contract_version", "")) == expected_contract
+    )
+    common = {
+        "app_secret_reference": str(getattr(integration_config, "credential_id", "") or ""),
+        "redirect_uri": str(getattr(integration_config, "callback_url", "") or ""),
+        "integration_config_ready": ready,
+    }
+    if platform == "shopee":
+        common["app_id"] = str(values.get("partner_id") or "")
+    else:
+        common.update({
+            "app_id": str(values.get("app_key") or ""),
+            "service_id": str(values.get("service_id") or ""),
+        })
+    return common
 
 
 def build_live_provider(platform, integration_config=None, secret_resolver=None, **overrides):
@@ -470,6 +516,7 @@ def build_live_provider(platform, integration_config=None, secret_resolver=None,
             "region": getattr(settings, "LIVE_SHOPEE_DEFAULT_REGION", ""),
         }
         config.update(overrides)
+        config.update(_integration_config_overrides(platform, integration_config))
         return ShopeeLiveOAuthProvider(config, secret_resolver=secret_resolver)
     if platform == "tiktok":
         market = str(getattr(settings, "LIVE_TIKTOK_MARKET", "ROW")).upper()
@@ -492,5 +539,6 @@ def build_live_provider(platform, integration_config=None, secret_resolver=None,
             "metadata_path": getattr(settings, "LIVE_TIKTOK_METADATA_PATH", PLACEHOLDER),
         }
         config.update(overrides)
+        config.update(_integration_config_overrides(platform, integration_config))
         return TikTokLiveOAuthProvider(config, secret_resolver=secret_resolver)
     raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Unsupported live marketplace platform.")

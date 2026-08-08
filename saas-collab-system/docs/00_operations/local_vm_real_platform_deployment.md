@@ -23,7 +23,7 @@ Shopee 试点地区为 `PH`、`TH`、`MY`；TikTok Shop 对应应用市场为 `R
 
 ## 凭据边界
 
-当前运行时只接受 `LIVE_CUSTODY_BACKEND=http` 的批准 HTTPS custody API。custody 可以部署在本地受控环境，但必须与业务数据库普通字段隔离，向 SaaS 返回引用，并负责保存、读取、轮换和撤销；SaaS 数据库只保存引用、mask、版本、状态和时间戳。
+当前本地受控运行时使用 `LIVE_CUSTODY_BACKEND=file` 与独立宿主机目录。该目录不得挂载给 Nginx、前端或数据库；SaaS 数据库只保存引用、mask、版本、状态和时间戳。批准的 HTTPS custody API 仍可作为替代部署方案。
 
 如果不部署 custody 服务，必须保持：
 

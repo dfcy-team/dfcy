@@ -58,3 +58,23 @@ The SaaS pilot deployment template now records separate Shopee/TikTok callback U
 - TikTok Shop: `pending/mock`.
 - Production synchronization: OFF / NOT APPROVED.
 - Result: `FAIL / REQUEST CHANGES` until immutable artifact, final CI, custody, official applications/contracts, live pilots, post-live scans and independent review all pass.
+
+## Pre-live local wiring verification (2026-08-08)
+
+This section records engineering readiness only and contains no raw credential or complete application/store identifier.
+
+| Check | Result |
+|---|---|
+| Django check / migration drift | PASS |
+| Backend full suite | PASS, 543 passed / 3 skipped |
+| Frontend full suite | PASS, 165 passed |
+| Frontend production build | PASS, 1963 modules |
+| CI guard / forbidden artifact scan | PASS |
+| Integration-config to live-provider binding | PASS, automated tests |
+| Exact region / callback / scope binding | PASS, automated tests |
+| File custody live gate | PASS, automated tests; real credential not yet written |
+| Shopee approved app status / redirect domain | Read-only operator-console check PASS; identifiers omitted |
+| TikTok Non-US operator login | Operator-confirmed; app configuration not yet verified |
+| Real OAuth and post-flow scans | NOT RUN |
+
+Capability remains `pending/mock` until the fixed commit is running and all required live scenarios and scans pass.

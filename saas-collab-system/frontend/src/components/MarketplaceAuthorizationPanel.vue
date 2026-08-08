@@ -138,6 +138,7 @@ const form = reactive({ platform: 'shopee', integration_config_id: '', store_id:
 
 const callbackUrl = computed(() => new URL(callbackPaths[form.platform], globalThis.location.origin).toString());
 const matchingConfigs = computed(() => configs.value.filter((item) => String(item.platform).toLowerCase() === form.platform));
+const selectedConfig = computed(() => matchingConfigs.value.find((item) => item.id === form.integration_config_id));
 const platformIds = computed(() => new Set(
   platforms.value.filter((item) => item.platform_type === form.platform).map((item) => item.id)
 ));
@@ -207,7 +208,7 @@ async function startAuthorization() {
     store_id: form.store_id,
     region: form.region,
     redirect_uri: callbackUrl.value,
-    scopes: []
+    scopes: selectedConfig.value?.scopes || []
   });
   starting.value = false;
   if (!response?.success) {

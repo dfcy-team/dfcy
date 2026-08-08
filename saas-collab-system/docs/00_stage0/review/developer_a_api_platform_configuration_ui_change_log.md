@@ -26,3 +26,15 @@
 ## 移交限制
 
 在远程 Review SHA、固定 artifact/image digest、MySQL 8.4、VM HTTPS、浏览器扫描、托管服务和两平台真实试点验证完成前，不得标记 `connected`，不得设置 `production-enabled`。
+
+## 真实平台运行接线补充（2026-08-08）
+
+- live provider 现在从当前 `PlatformIntegrationConfig` 读取批准的公开应用标识、精确 callback、合同版本及 custody 引用；配置不完整时在网络请求前 fail closed。
+- 本地独立文件 custody 被纳入批准后端类型；业务数据库仍只保存引用、掩码、版本、状态和到期元数据。
+- TikTok 配置新增必填 `service_id`；前端 OAuth start 使用选中配置的精确 scopes，不再发送固定空列表。
+- OAuth start 增加 region、callback 和 scopes 与选中配置的精确绑定校验。
+- live OAuth 响应不再向前端返回 state；synthetic 测试路径继续保留测试 state。
+- Shopee state 绑定到批准 redirect query；TikTok token 响应兼容官方未返回 `user_type` 的情况。
+- TikTok 无平台 revoke API 合同时执行 seller-managed/local disconnect，并撤销 custody 引用，不伪造平台 API 撤销成功。
+- 当前验证：Django check PASS；migration drift PASS；后端全量 543 passed / 3 skipped；前端全量 165 passed；production build PASS（1963 modules）；CI guard 与 `git diff --check` PASS。
+- 尚未执行真实 callback、authorized shop、最小只读 API、refresh、revoke、MySQL 试点及凭据扫描；两个 capability 继续保持 `pending/mock`。

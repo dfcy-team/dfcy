@@ -496,6 +496,37 @@ def test_platform_schema_and_write_only_credential_lifecycle(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_tiktok_platform_schema_requires_service_id():
+    tenant = Tenant.objects.create(name="Tenant", code="tiktok-schema-service-id")
+    user = create_user(tenant, "tiktok-schema-admin")
+    grant_integration_access(user)
+    client = authenticated_client(user)
+
+    schema = client.get("/api/internal/integrations/platform-schemas/tiktok/?environment=pilot")
+    assert schema.status_code == 200
+    assert {field["key"] for field in schema.json()["data"]["public_fields"]} >= {"app_key", "service_id"}
+
+    response = client.post(
+        "/api/internal/integrations/configs/",
+        {
+            "platform": "tiktok",
+            "account_alias": "pilot-tiktok",
+            "environment": "pilot",
+            "status": "draft",
+            "regions": ["PH"],
+            "contract_version": "202407",
+            "callback_url": "https://dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
+            "scopes": ["seller.authorization.info"],
+            "platform_config": {"app_key": "approved-public-app-key"},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "service_id" in json.dumps(response.json())
+
+
+@pytest.mark.django_db
 def test_config_exact_scope_filters_environment_and_regions():
     tenant = Tenant.objects.create(name="Tenant", code="config-environment-region-scope")
     user = create_user(tenant, "config-region-viewer")

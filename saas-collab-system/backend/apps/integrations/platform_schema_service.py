@@ -76,6 +76,14 @@ SCHEMAS = {
                 "help_text": "Public identifier from the approved Partner Center application.",
             },
             {
+                "key": "service_id",
+                "label": "Service ID",
+                "type": "text",
+                "required": True,
+                "secret": False,
+                "help_text": "Seller authorization service identifier from the approved Partner Center application.",
+            },
+            {
                 "key": "organization_reference",
                 "label": "Organization reference",
                 "type": "text",
