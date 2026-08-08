@@ -12,12 +12,17 @@
 | `makemigrations --check --dry-run` | PASS |
 | 全新 SQLite migration | PASS |
 | 从 integrations 0013 / permissions 0015 升级 migration | PASS |
-| 配置、权限、幂等、write-only focused pytest | 20 PASS |
-| 后端全量 pytest | 530 PASS / 3 SKIP |
+| custody、配置安全、真实平台 focused pytest | 42 PASS |
+| 后端全量 pytest | 536 PASS / 3 SKIP |
 | 前端全量 Vitest | 165 PASS |
 | 前端 production build | PASS，1963 modules transformed |
 | CI guard / forbidden artifact / high-confidence credential scan | PASS |
 | `git diff --check` | PASS |
+| 文件 custody fresh migration | PASS |
+| integrations 0014 → 0015 upgrade | PASS |
+| 项目 known_hosts 严格主机身份阶段 | PASS |
+| Pilot install shell syntax | PASS |
+| Pilot Docker Compose config | PASS |
 
 安全测试覆盖：普通接口拒绝原始凭据、固定掩码、托管返回值不可信、响应/审计不含请求原文、Idempotency-Key 重放、相同 key 不同 payload 冲突、陈旧版本在调用托管前拒绝、独立清除 action、tenant 404、exact permission 和 data scope。
 
@@ -26,7 +31,7 @@
 - MySQL 8.4 migration 与双 worker 并发：尚未在数据库 VM 执行。
 - 应用 VM HTTPS 页面、浏览器 storage/network/console 扫描：尚未部署固定制品。
 - Shopee/TikTok 真实 OAuth、authorized shop、refresh、revoke、reauthorization 与最小只读 API：尚未使用固定部署制品验证。
-- Credential Custody：默认后端保持 fail closed；在批准的 custody endpoint 配置前，真实凭据写入返回受控失败。
+- Credential Custody：本地文件后端已实现；目标 VM 专用目录、ACL、持久卷和备份尚未作为固定制品证据验证。
 - 远端 CI、artifact SHA/image digest：尚未推送并构建。
 
 因此当前结论只能是：

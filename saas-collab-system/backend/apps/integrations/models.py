@@ -69,6 +69,8 @@ class PlatformIntegrationConfigQuerySet(models.QuerySet):
         "credential_fingerprint",
         "credential_status",
         "credential_expires_at",
+        "credential_revoked_at",
+        "credential_operation_id_hash",
         "last_rotated_at",
     }
 
@@ -85,6 +87,8 @@ class PlatformIntegrationConfigQuerySet(models.QuerySet):
             or obj.credential_mask
             or obj.credential_key_version
             or obj.credential_fingerprint
+            or obj.credential_revoked_at
+            or obj.credential_operation_id_hash
             or obj.credential_reference_version != 1
             for obj in objs
         ):
@@ -118,6 +122,7 @@ class PlatformIntegrationConfig(models.Model):
         CONFIGURED = "configured", "Configured"
         EXPIRING = "expiring", "Expiring"
         EXPIRED = "expired", "Expired"
+        REVOKED = "revoked", "Revoked"
         RECONCILE_REQUIRED = "reconcile_required", "Reconcile required"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_integration_configs")
@@ -149,6 +154,8 @@ class PlatformIntegrationConfig(models.Model):
         default=CredentialStatus.UNCONFIGURED,
     )
     credential_expires_at = models.DateTimeField(null=True, blank=True)
+    credential_revoked_at = models.DateTimeField(null=True, blank=True)
+    credential_operation_id_hash = models.CharField(max_length=64, blank=True)
     last_rotated_at = models.DateTimeField(null=True, blank=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -186,6 +193,8 @@ class PlatformIntegrationConfig(models.Model):
                 or self.credential_mask
                 or self.credential_key_version
                 or self.credential_fingerprint
+                or self.credential_revoked_at
+                or self.credential_operation_id_hash
                 or self.credential_reference_version != 1
             ):
                 raise ValidationError("Credential references can only be created by the rotation service.")

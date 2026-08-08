@@ -76,6 +76,12 @@ jq -e '.network_evidence_sha256 | length == 5 and all(.[]; test("^[0-9a-f]{64}$"
 [ "$(env_value DJANGO_DEBUG)" = "false" ] || fail "DJANGO_DEBUG must be false."
 [ "$(env_value DB_ENGINE)" = "django.db.backends.mysql" ] || fail "DB_ENGINE must be django.db.backends.mysql."
 [ "$(env_value INTEGRATION_ENCRYPTION_PROVIDER)" = "unconfigured-production" ] || fail "Real integration credential storage must remain disabled."
+[ "$(env_value LIVE_CUSTODY_BACKEND)" = "file" ] || fail "LIVE_CUSTODY_BACKEND must use the approved file boundary."
+custody_path=$(env_value CREDENTIAL_CUSTODY_PATH)
+case "$custody_path" in /var/lib/saas-collab/credential-custody) ;; *) fail "CREDENTIAL_CUSTODY_PATH is outside the approved path." ;; esac
+[ -d "$custody_path" ] || fail "Credential custody directory is missing."
+[ ! -L "$custody_path" ] || fail "Credential custody directory must not be a symbolic link."
+[ "$(stat -c '%a' "$custody_path")" = "700" ] || fail "Credential custody directory mode must be 700."
 
 tls_cert_path=$(env_value PILOT_TLS_CERT_PATH)
 tls_key_path=$(env_value PILOT_TLS_KEY_PATH)

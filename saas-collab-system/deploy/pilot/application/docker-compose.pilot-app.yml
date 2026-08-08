@@ -41,6 +41,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PILOT_APP_PORT:-8000}:8000"
+    volumes:
+      - ${CREDENTIAL_CUSTODY_PATH:?Set the dedicated custody path}:${CREDENTIAL_CUSTODY_PATH:?Set the dedicated custody path}
     networks:
       - pilot-internal
     depends_on:
@@ -53,6 +55,8 @@ services:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: celery -A config worker --loglevel=info
     restart: unless-stopped
+    volumes:
+      - ${CREDENTIAL_CUSTODY_PATH:?Set the dedicated custody path}:${CREDENTIAL_CUSTODY_PATH:?Set the dedicated custody path}
     networks:
       - pilot-internal
     depends_on:

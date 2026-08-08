@@ -30,6 +30,10 @@ class PlatformIntegrationConfigAdmin(admin.ModelAdmin):
         "credential_reference_version",
         "credential_key_version",
         "credential_fingerprint",
+        "credential_status",
+        "credential_expires_at",
+        "credential_revoked_at",
+        "credential_operation_id_hash",
     )
 
 

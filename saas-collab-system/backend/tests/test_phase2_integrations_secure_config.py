@@ -490,7 +490,8 @@ def test_platform_schema_and_write_only_credential_lifecycle(monkeypatch):
         HTTP_IDEMPOTENCY_KEY="platform-config-clear-0001",
     )
     assert clear_response.status_code == 200
-    assert clear_response.json()["data"]["credential_status"] == "unconfigured"
+    assert clear_response.json()["data"]["credential_status"] == "revoked"
+    assert clear_response.json()["data"]["credential_revoked_at"]
     assert clear_response.json()["data"]["credential_mask"] == {}
 
 

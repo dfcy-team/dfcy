@@ -286,6 +286,8 @@ def rotate_config_secrets(config, *, credentials, version, reason, actor, idempo
                     "integration_config_id": locked.id,
                     "environment": locked.environment,
                 },
+                "idempotency_key": idempotency_key,
+                "operation_id": str(operation.id),
                 **credentials,
             }
             try:
@@ -311,6 +313,8 @@ def rotate_config_secrets(config, *, credentials, version, reason, actor, idempo
             for field, value in metadata.items():
                 setattr(locked, field, value)
             locked.credential_status = PlatformIntegrationConfig.CredentialStatus.CONFIGURED
+            locked.credential_revoked_at = None
+            locked.credential_operation_id_hash = str(stored.get("operation_id_hash") or "")
             if locked.status == PlatformIntegrationConfig.Status.DRAFT:
                 locked.status = PlatformIntegrationConfig.Status.CONFIGURED
             locked.credential_expires_at = _safe_expiry(stored.get("expires_at"))
@@ -321,6 +325,8 @@ def rotate_config_secrets(config, *, credentials, version, reason, actor, idempo
                     update_fields=[
                         *metadata.keys(),
                         "credential_status",
+                        "credential_revoked_at",
+                        "credential_operation_id_hash",
                         "status",
                         "credential_expires_at",
                         "last_rotated_at",
@@ -399,7 +405,9 @@ def clear_config_secrets(config, *, version, reason, actor, idempotency_key):
             locked.credential_reference_version += 1
             locked.credential_key_version = ""
             locked.credential_fingerprint = ""
-            locked.credential_status = PlatformIntegrationConfig.CredentialStatus.UNCONFIGURED
+            locked.credential_status = PlatformIntegrationConfig.CredentialStatus.REVOKED
+            locked.credential_revoked_at = timezone.now()
+            locked.credential_operation_id_hash = str(revocation.get("operation_id_hash") or "")
             if locked.status in {
                 PlatformIntegrationConfig.Status.CONFIGURED,
                 PlatformIntegrationConfig.Status.VERIFIED,
@@ -418,6 +426,8 @@ def clear_config_secrets(config, *, version, reason, actor, idempotency_key):
                         "credential_key_version",
                         "credential_fingerprint",
                         "credential_status",
+                        "credential_revoked_at",
+                        "credential_operation_id_hash",
                         "status",
                         "credential_expires_at",
                         "last_rotated_at",

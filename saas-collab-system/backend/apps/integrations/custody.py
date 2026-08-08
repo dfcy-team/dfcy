@@ -1,14 +1,15 @@
 """Credential custody boundary for live marketplace authorization.
 
-Only an approved HTTPS custody service can handle live secrets. The default
-backend refuses every secret operation. No filesystem or application-database
-fallback exists.
+Only an approved custody backend can handle live secrets. The default backend
+refuses every secret operation. The file backend requires an explicit path
+outside the repository and never falls back to the application database.
 """
 
 from abc import ABC, abstractmethod
 
 from django.conf import settings
 
+from .file_custody import FileCredentialStore, FileCustodyError
 from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE, OAuthFlowError
 
 
@@ -64,6 +65,7 @@ def _reference_result(payload):
         "credential_mask": payload.get("credential_mask") or {},
         "expires_at": payload.get("expires_at"),
         "reference_version": payload.get("reference_version"),
+        "operation_id_hash": payload.get("operation_id_hash") or "",
         "previous_reference_status": payload.get("previous_reference_status", "not_required"),
     }
 
@@ -131,6 +133,142 @@ class HttpCustodyBackend(CustodyBackend):
         return {"status": status, "error_code": ""}
 
 
+class FileCustodyBackend(CustodyBackend):
+    """Adapter for the operator-owned local custody volume."""
+
+    _SECRET_KEYS = {
+        "secret",
+        "app_secret",
+        "partner_key",
+        "signing_secret",
+        "webhook_secret",
+        "api_key",
+        "api_secret",
+        "access_token",
+        "refresh_token",
+        "private_key",
+    }
+
+    def __init__(self, path):
+        self._store = FileCredentialStore(path)
+
+    @staticmethod
+    def _result(reference, *, previous_reference_status="not_required"):
+        return {
+            "credential_id": reference["credential_id"],
+            "token_id": reference["token_id"],
+            "credential_mask": {"configured": "********"},
+            "expires_at": reference.get("expires_at"),
+            "reference_version": reference["version"],
+            "operation_id_hash": reference.get("operation_id_hash") or "",
+            "previous_reference_status": previous_reference_status,
+        }
+
+    def _values(self, identifier, *, allow_expired=False):
+        try:
+            return self._store._resolve_credentials(identifier, allow_expired=allow_expired)
+        except FileCustodyError as exc:
+            raise CustodyError(str(exc)) from None
+
+    def retrieve_secret(self, reference_id):
+        values = self._values(reference_id)
+        for key in ("app_secret", "partner_key", "api_secret", "signing_secret", "secret", "private_key"):
+            value = values.get(key)
+            if isinstance(value, str) and value:
+                return value
+        raise CustodyError("Custody reference does not contain an application secret.")
+
+    def store_secrets(self, **kwargs):
+        payload = dict(kwargs)
+        try:
+            metadata = dict(payload.pop("metadata", {}) or {})
+            credential_type = str(payload.pop("credential_type", "") or "")
+            if credential_type:
+                metadata["credential_type"] = credential_type
+            reference_version = int(payload.pop("reference_version", 1))
+            expires_at = payload.pop("expires_at", None)
+            idempotency_key = payload.pop("idempotency_key", None)
+            operation_id = payload.pop("operation_id", None)
+            credentials = {key: value for key, value in payload.items() if key in self._SECRET_KEYS}
+            reference = self._store.store(
+                credentials,
+                version=reference_version,
+                expires_at=expires_at,
+                idempotency_key=idempotency_key,
+                operation_id=operation_id,
+                metadata=metadata,
+            )
+            return self._result(reference)
+        except FileCustodyError as exc:
+            raise CustodyError(str(exc)) from None
+        finally:
+            payload.clear()
+            kwargs.clear()
+
+    def rotate_secrets(self, **kwargs):
+        payload = dict(kwargs)
+        try:
+            credential_id = str(payload.pop("previous_credential_id", "") or "")
+            token_id = str(payload.pop("previous_token_id", "") or "")
+            current = self._store.get_reference(credential_id or token_id)
+            if credential_id and token_id and current["token_id"] != token_id:
+                raise FileCustodyError("Credential and token references do not match.")
+            metadata = dict(payload.pop("metadata", {}) or {})
+            credential_type = str(payload.pop("credential_type", "") or "")
+            if credential_type:
+                metadata["credential_type"] = credential_type
+            requested_version = int(payload.pop("reference_version", current["version"] + 1))
+            if requested_version != current["version"] + 1:
+                raise FileCustodyError("Credential version has changed.")
+            expires_at = payload.pop("expires_at", None)
+            idempotency_key = payload.pop("idempotency_key", None)
+            operation_id = payload.pop("operation_id", None)
+            credentials = {key: value for key, value in payload.items() if key in self._SECRET_KEYS}
+            reference = self._store.rotate(
+                credential_id or token_id,
+                credentials,
+                expected_version=current["version"],
+                expires_at=expires_at,
+                idempotency_key=idempotency_key,
+                operation_id=operation_id,
+                metadata=metadata,
+            )
+            return self._result(reference, previous_reference_status="revoked")
+        except FileCustodyError as exc:
+            raise CustodyError(str(exc)) from None
+        finally:
+            payload.clear()
+            kwargs.clear()
+
+    def retrieve_access_token(self, token_id):
+        value = self._values(token_id).get("access_token")
+        if not isinstance(value, str) or not value:
+            raise CustodyError("Custody reference does not contain an access token.")
+        return value
+
+    def retrieve_refresh_token(self, token_id):
+        value = self._values(token_id, allow_expired=True).get("refresh_token")
+        if not isinstance(value, str) or not value:
+            raise CustodyError("Custody reference does not contain a refresh token.")
+        return value
+
+    def revoke(self, credential_id, token_id):
+        if not credential_id and not token_id:
+            return {"status": "not_required", "error_code": "", "operation_id_hash": ""}
+        try:
+            current = self._store.get_reference(credential_id or token_id)
+            if credential_id and token_id and current["token_id"] != token_id:
+                raise FileCustodyError("Credential and token references do not match.")
+            reference = self._store.revoke(credential_id or token_id)
+            return {
+                "status": reference["status"],
+                "error_code": "",
+                "operation_id_hash": reference.get("operation_id_hash") or "",
+            }
+        except FileCustodyError:
+            return {"status": "failed", "error_code": "CUSTODY_REVOCATION_FAILED", "operation_id_hash": ""}
+
+
 _cached_backend = None
 
 
@@ -138,7 +276,17 @@ def get_custody_backend():
     global _cached_backend
     if _cached_backend is not None:
         return _cached_backend
-    if getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") != "http":
+    backend = getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse")
+    if backend == "file":
+        path = getattr(settings, "CREDENTIAL_CUSTODY_PATH", "")
+        if not path:
+            raise CustodyError("CREDENTIAL_CUSTODY_PATH is required for file custody.")
+        try:
+            _cached_backend = FileCustodyBackend(path)
+        except FileCustodyError as exc:
+            raise CustodyError(str(exc)) from None
+        return _cached_backend
+    if backend != "http":
         _cached_backend = RefusingCustodyBackend()
         return _cached_backend
     base_url = getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "")
