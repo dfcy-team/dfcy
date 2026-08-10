@@ -1,0 +1,183 @@
+import django.db.models.deletion
+from django.conf import settings
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('listings', '0001_initial'),
+        ('masterdata', '0002_alter_suppliermaster_status'),
+        ('rpa', '0006_rpa_production_task_mode'),
+        ('tenants', '0001_initial'),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name='listingpublicationjob',
+            name='confirmed_production',
+            field=models.BooleanField(default=False),
+        ),
+        migrations.AddField(
+            model_name='listingpublicationjob',
+            name='execution_channel',
+            field=models.CharField(choices=[('api', 'API'), ('rpa', 'RPA'), ('manual', 'Manual')], default='rpa', max_length=20),
+        ),
+        migrations.AddField(
+            model_name='listingpublicationjob',
+            name='execution_mode',
+            field=models.CharField(choices=[('dry_run', 'Dry run'), ('production', 'Production')], default='dry_run', max_length=20),
+        ),
+        migrations.AddField(
+            model_name='listingpublicationjob',
+            name='rpa_task',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='listing_publication_jobs', to='rpa.rpatask'),
+        ),
+        migrations.CreateModel(
+            name='ListingTask',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('task_no', models.CharField(max_length=100)),
+                ('execution_channel', models.CharField(choices=[('api', 'API'), ('rpa', 'RPA'), ('manual', 'Manual')], default='rpa', max_length=20)),
+                ('execution_mode', models.CharField(choices=[('dry_run', 'Dry run'), ('production', 'Production')], default='dry_run', max_length=20)),
+                ('status', models.CharField(choices=[('pending', 'Pending'), ('running', 'Running'), ('succeeded', 'Succeeded'), ('failed', 'Failed'), ('cancelled', 'Cancelled')], default='pending', max_length=20)),
+                ('idempotency_key', models.CharField(max_length=128)),
+                ('payload_snapshot', models.JSONField(default=dict)),
+                ('result_snapshot', models.JSONField(blank=True, default=dict)),
+                ('current_step', models.CharField(blank=True, max_length=120)),
+                ('error_code', models.CharField(blank=True, max_length=80)),
+                ('error_message', models.TextField(blank=True)),
+                ('confirmed_production', models.BooleanField(default=False)),
+                ('started_at', models.DateTimeField(blank=True, null=True)),
+                ('finished_at', models.DateTimeField(blank=True, null=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('profile', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='listing_tasks', to='listings.listingprofile')),
+                ('publication_job', models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='listing_task', to='listings.listingpublicationjob')),
+                ('requested_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='requested_listing_tasks', to=settings.AUTH_USER_MODEL)),
+                ('rpa_task', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='listing_tasks', to='rpa.rpatask')),
+                ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_tasks', to='tenants.tenant')),
+            ],
+            options={
+                'ordering': ['tenant_id', '-created_at'],
+            },
+        ),
+        migrations.CreateModel(
+            name='ListingTaskStepLog',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('step_no', models.PositiveIntegerField(default=1)),
+                ('step_name', models.CharField(max_length=120)),
+                ('status', models.CharField(choices=[('pending', 'Pending'), ('running', 'Running'), ('succeeded', 'Succeeded'), ('failed', 'Failed'), ('skipped', 'Skipped')], default='pending', max_length=20)),
+                ('message', models.TextField(blank=True)),
+                ('detail', models.JSONField(blank=True, default=dict)),
+                ('started_at', models.DateTimeField(blank=True, null=True)),
+                ('finished_at', models.DateTimeField(blank=True, null=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('task', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='step_logs', to='listings.listingtask')),
+                ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_task_step_logs', to='tenants.tenant')),
+            ],
+            options={
+                'ordering': ['task_id', 'step_no', 'id'],
+            },
+        ),
+        migrations.CreateModel(
+            name='ListingTaskErrorLog',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('error_code', models.CharField(max_length=80)),
+                ('message', models.TextField()),
+                ('detail', models.JSONField(blank=True, default=dict)),
+                ('is_resolved', models.BooleanField(default=False)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('resolved_at', models.DateTimeField(blank=True, null=True)),
+                ('resolved_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='resolved_listing_task_errors', to=settings.AUTH_USER_MODEL)),
+                ('task', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='error_logs', to='listings.listingtask')),
+                ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_task_error_logs', to='tenants.tenant')),
+                ('step', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='error_logs', to='listings.listingtasksteplog')),
+            ],
+            options={
+                'ordering': ['task_id', '-created_at', '-id'],
+            },
+        ),
+        migrations.CreateModel(
+            name='PlatformCategoryMapping',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('country_code', models.CharField(blank=True, max_length=8)),
+                ('source_category_code', models.CharField(max_length=120)),
+                ('source_category_name', models.CharField(blank=True, max_length=200)),
+                ('target_category_code', models.CharField(max_length=160)),
+                ('target_category_name', models.CharField(blank=True, max_length=200)),
+                ('mapping_version', models.PositiveIntegerField(default=1)),
+                ('metadata', models.JSONField(blank=True, default=dict)),
+                ('status', models.CharField(choices=[('draft', 'Draft'), ('active', 'Active'), ('inactive', 'Inactive')], default='draft', max_length=20)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('created_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='created_listing_category_mappings', to=settings.AUTH_USER_MODEL)),
+                ('platform', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='listing_category_mappings', to='masterdata.platformmaster')),
+                ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_category_mappings', to='tenants.tenant')),
+            ],
+            options={
+                'ordering': ['tenant_id', 'platform_id', 'country_code', 'source_category_code', '-mapping_version'],
+            },
+        ),
+        migrations.CreateModel(
+            name='ListingAttributeMapping',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('country_code', models.CharField(blank=True, max_length=8)),
+                ('source_attribute_code', models.CharField(max_length=120)),
+                ('source_attribute_name', models.CharField(blank=True, max_length=200)),
+                ('target_attribute_code', models.CharField(max_length=160)),
+                ('target_attribute_name', models.CharField(blank=True, max_length=200)),
+                ('value_mapping', models.JSONField(blank=True, default=dict)),
+                ('is_required', models.BooleanField(default=False)),
+                ('status', models.CharField(choices=[('draft', 'Draft'), ('active', 'Active'), ('inactive', 'Inactive')], default='draft', max_length=20)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('created_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='created_listing_attribute_mappings', to=settings.AUTH_USER_MODEL)),
+                ('platform', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='listing_attribute_mappings', to='masterdata.platformmaster')),
+                ('template', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='attribute_mappings', to='listings.listingtemplate')),
+                ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_attribute_mappings', to='tenants.tenant')),
+            ],
+            options={
+                'ordering': ['tenant_id', 'platform_id', 'country_code', 'source_attribute_code', 'id'],
+                'indexes': [models.Index(fields=['tenant', 'platform', 'country_code', 'status'], name='idx_listing_attr_map')],
+                'constraints': [models.UniqueConstraint(fields=('tenant', 'platform', 'template', 'country_code', 'source_attribute_code'), name='uniq_listing_attribute_mapping')],
+            },
+        ),
+        migrations.AddIndex(
+            model_name='listingtask',
+            index=models.Index(fields=['tenant', 'status', 'created_at'], name='idx_listing_task_status'),
+        ),
+        migrations.AddIndex(
+            model_name='listingtask',
+            index=models.Index(fields=['tenant', 'execution_channel', 'execution_mode'], name='idx_listing_task_channel'),
+        ),
+        migrations.AddConstraint(
+            model_name='listingtask',
+            constraint=models.UniqueConstraint(fields=('tenant', 'task_no'), name='uniq_listing_task_no'),
+        ),
+        migrations.AddConstraint(
+            model_name='listingtask',
+            constraint=models.UniqueConstraint(fields=('tenant', 'idempotency_key'), name='uniq_listing_task_key'),
+        ),
+        migrations.AddConstraint(
+            model_name='listingtasksteplog',
+            constraint=models.UniqueConstraint(fields=('task', 'step_no'), name='uniq_listing_task_step_no'),
+        ),
+        migrations.AddIndex(
+            model_name='listingtaskerrorlog',
+            index=models.Index(fields=['tenant', 'is_resolved', 'created_at'], name='idx_listing_task_error'),
+        ),
+        migrations.AddIndex(
+            model_name='platformcategorymapping',
+            index=models.Index(fields=['tenant', 'platform', 'country_code', 'status'], name='idx_listing_category_map'),
+        ),
+        migrations.AddConstraint(
+            model_name='platformcategorymapping',
+            constraint=models.UniqueConstraint(fields=('tenant', 'platform', 'country_code', 'source_category_code', 'mapping_version'), name='uniq_listing_category_mapping_ver'),
+        ),
+    ]
