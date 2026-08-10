@@ -18,8 +18,19 @@ function listingRequest(config, fallback, moduleName) {
   return requestWithMockFallback(config, fallback, moduleName);
 }
 
-export const fetchSiteProfiles = () =>
-  requestPendingOrMock(mockSiteProfiles, 'listings.sites');
+export const fetchSiteProfiles = (params = {}) => {
+  // The legacy /listings/sites page remains a pending/mock placeholder. The
+  // online-products route passes a status filter and uses the connected
+  // listing profile collection (published by default at the route level).
+  if (Object.keys(params).length) {
+    return listingRequest(
+      { method: 'get', url: listingUrl('profiles/'), params },
+      emptyCollection,
+      'listings.online-products'
+    );
+  }
+  return requestPendingOrMock(mockSiteProfiles, 'listings.sites');
+};
 
 export const fetchSiteProfileDetail = (id = 1) =>
   requestPendingOrMock(mockSiteProfiles, `listings.sites.detail:${id}`);

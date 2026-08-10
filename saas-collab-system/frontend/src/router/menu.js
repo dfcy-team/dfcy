@@ -14,15 +14,16 @@ export const menuItems = [
     ]
   },
   {
-    label: '多平台刊登',
+    label: '全球刊登',
     permissions: ['listings.profile.view','listings.template.view','listings.workbench.view','listings.mapping.view','listings.task.view'],
     children: [
-      { path: '/listings/workbench', label: 'Global Listing Workbench', permissions: ['listings.workbench.view'] },
-      { path: '/listings/mappings/categories', label: 'Platform Category Mappings', permissions: ['listings.mapping.view'] },
-      { path: '/listings/mappings/attributes', label: 'Product Attribute Mappings', permissions: ['listings.mapping.view'] },
-      { path: '/listings/tasks', label: 'Listing Tasks', permissions: ['listings.task.view'] },
-      { path: '/listings/logs', label: 'Listing Logs', permissions: ['listings.task.view'] },
-      { path: '/listings/exceptions', label: 'Listing Exceptions', permissions: ['listings.task.view'] },
+      { path: '/listings/workbench', label: '全球刊登工作台', permissions: ['listings.workbench.view'] },
+      { path: '/listings/tasks', label: '刊登任务', permissions: ['listings.task.view'] },
+      { path: '/listings/online-products', label: '在线商品', permissions: ['listings.profile.view'] },
+      { path: '/listings/category-mappings', label: '平台类目映射', permissions: ['listings.mapping.view'] },
+      { path: '/listings/attribute-mappings', label: '商品属性映射', permissions: ['listings.mapping.view'] },
+      { path: '/listings/logs', label: '刊登日志', permissions: ['listings.task.view'] },
+      { path: '/listings/exceptions', label: '刊登异常', permissions: ['listings.task.view'] },
       { path: '/listings/sites', label: '刊登资料', permissions: ['listings.profile.view'] },
       { path: '/listings/templates', label: '刊登模板', permissions: ['listings.template.view'] }
     ]
@@ -217,9 +218,10 @@ export const routeCapabilities = [
   { path: '/listings/sites', permissions: ['listings.profile.view'], userTypes: ['internal'] },
   { path: '/listings/templates', permissions: ['listings.template.view'], userTypes: ['internal'] },
   { path: '/listings/workbench', permissions: ['listings.workbench.view'], userTypes: ['internal'] },
-  { path: '/listings/mappings/categories', permissions: ['listings.mapping.view'], userTypes: ['internal'] },
-  { path: '/listings/mappings/attributes', permissions: ['listings.mapping.view'], userTypes: ['internal'] },
   { path: '/listings/tasks', permissions: ['listings.task.view'], userTypes: ['internal'] },
+  { path: '/listings/online-products', permissions: ['listings.profile.view'], userTypes: ['internal'] },
+  { path: '/listings/category-mappings', permissions: ['listings.mapping.view'], userTypes: ['internal'] },
+  { path: '/listings/attribute-mappings', permissions: ['listings.mapping.view'], userTypes: ['internal'] },
   { path: '/listings/logs', permissions: ['listings.task.view'], userTypes: ['internal'] },
   { path: '/listings/exceptions', permissions: ['listings.task.view'], userTypes: ['internal'] },
   { path: '/pricing/prices', userTypes: ['internal'] },
