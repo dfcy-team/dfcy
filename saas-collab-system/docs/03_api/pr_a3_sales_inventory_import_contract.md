@@ -40,11 +40,32 @@
   "cursor_after": "normalized-cursor-1",
   "watermark_after": "2026-08-01T00:00:00Z",
   "contract_version": "pr-a3-normalized-v1",
-  "orders": []
+  "orders": [
+    {
+      "platform_order_id": "synthetic-order-0001",
+      "status": "shipped",
+      "currency": "PHP",
+      "total_amount": "20.0000",
+      "ordered_at": "2026-08-01T00:00:00Z",
+      "platform_updated_at": "2026-08-01T00:00:00Z",
+      "cancelled_at": null,
+      "line_items": [
+        {
+          "platform_line_id": "synthetic-line-0001",
+          "platform_variant_id": "synthetic-variant-0001",
+          "platform_sku": "SYNTHETIC-SKU-0001",
+          "quantity": 2,
+          "unit_price": "10.0000",
+          "line_amount": "20.0000"
+        }
+      ],
+      "refunds": []
+    }
+  ]
 }
 ```
 
-`resource_type=orders` 只允许 `orders`；`resource_type=inventory` 只允许 `inventory`。集合不能为空，单批最多 100 条；单订单最多 100 行。未知字段拒绝。`idempotency_key` 长度 8–160，只保存 SHA-256，不保存原值。
+以上示例是可执行的 synthetic order 合同；`store_mapping_id` 必须替换为当前 tenant/store scope 内已有的 active mapping。`resource_type=orders` 只允许 `orders`；`resource_type=inventory` 只允许 `inventory`。集合不能为空，单批最多 100 条；单订单最多 100 行。未知字段拒绝。`idempotency_key` 长度 8–160，只保存 SHA-256，不保存原值。
 
 ## 4. normalized orders/refunds
 
@@ -71,6 +92,8 @@
 - initial 必须从空 cursor 开始；incremental 的 `cursor_before` 必须精确匹配当前 cursor。
 - watermark 不得倒退；整个批次在一个事务中成功后才更新 cursor、watermark 和 version。
 - 任一记录失败会回滚该批次的业务记录和游标；failed batch 只记录受控错误码。
+- failed batch 的 retry 必须在 `transaction.atomic()` 与 `select_for_update()` 内认领；获得行锁后重新检查状态。已 completed 返回 duplicate，processing 返回 409，只有成功认领本次 attempt 的执行者可以提交 completed 或 failed。
+- 每次 import/retry 写入不可变 attempt audit，记录 tenant、store、actor、action、attempt/version、前后状态、结果、受控错误码和时间；不保存原始 payload 或凭据。
 
 ## 7. 后续 adapter 插入点
 

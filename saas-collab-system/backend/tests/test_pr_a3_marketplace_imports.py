@@ -1,15 +1,20 @@
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import inspect
+import threading
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import close_old_connections, connection
 from django.test import override_settings
 from rest_framework.test import APIClient
 
+from apps.accounts.models import CustomUser
 from apps.integrations.models import MarketplaceStoreMapping
 from apps.marketplace_imports.adapters import PlatformResponseContractPending, get_real_response_adapter
 from apps.marketplace_imports.models import (
     MarketplaceImportBatch,
+    MarketplaceImportBatchAttempt,
     MarketplaceImportCursor,
     MarketplaceInventorySnapshot,
     MarketplaceOrder,
@@ -442,6 +447,124 @@ def test_failed_batch_can_be_retried_with_same_payload(monkeypatch):
     assert retried.status_code == 200
     batch.refresh_from_db()
     assert batch.status == "completed"
+    assert batch.attempt_version == 2
+    assert batch.active_attempt_id is None
+    attempts = list(batch.attempts.order_by("created_at", "id"))
+    assert [attempt.action for attempt in attempts] == ["import", "import", "retry", "retry"]
+    assert [attempt.attempt_version for attempt in attempts] == [1, 1, 2, 2]
+    assert [attempt.result for attempt in attempts] == ["started", "failed", "started", "success"]
+    assert attempts[1].controlled_error_code == "MARKETPLACE_IMPORT_REJECTED"
+    assert all(attempt.actor_id == user.id for attempt in attempts)
+
+    duplicate = client_for(user).post(f"{BATCHES_URL}{batch.id}/retry/", payload, format="json")
+    assert duplicate.status_code == 200
+    assert duplicate.json()["data"]["duplicate"] is True
+    batch.refresh_from_db()
+    assert batch.attempt_version == 2
+    assert batch.attempts.count() == 4
+
+
+@pytest.mark.django_db
+@override_settings(PR_A3_SYNTHETIC_IMPORT_ENABLED=True)
+def test_import_attempt_audit_is_append_only():
+    _tenant, user, mapping = context("a3-attempt-guard")
+    assert client_for(user).post(IMPORT_URL, order_payload(mapping), format="json").status_code == 201
+    attempt = MarketplaceImportBatchAttempt.objects.get(result="success")
+    attempt.result = MarketplaceImportBatchAttempt.Result.FAILED
+    with pytest.raises(ValidationError, match="append-only"):
+        attempt.save()
+    with pytest.raises(ValidationError, match="append-only"):
+        MarketplaceImportBatchAttempt.objects.filter(pk=attempt.pk).update(result="failed")
+    with pytest.raises(ValidationError, match="cannot be deleted"):
+        MarketplaceImportBatchAttempt.objects.filter(pk=attempt.pk).delete()
+    with pytest.raises(ValidationError, match="cannot be deleted"):
+        attempt.delete()
+
+
+@pytest.mark.django_db
+@override_settings(PR_A3_SYNTHETIC_IMPORT_ENABLED=True)
+def test_stale_attempt_cannot_overwrite_completed_batch():
+    tenant, user, mapping = context("a3-stale-attempt")
+    payload = order_payload(mapping)
+    assert client_for(user).post(IMPORT_URL, payload, format="json").status_code == 201
+    batch = MarketplaceImportBatch.objects.get(tenant=tenant)
+    started = batch.attempts.get(result="started")
+    from apps.marketplace_imports import services
+
+    changed = services._fail_batch_attempt(
+        batch_id=batch.id,
+        actor=user,
+        attempt_id=started.attempt_id,
+        action=MarketplaceImportBatchAttempt.Action.IMPORT,
+        controlled_error_code="STALE_ATTEMPT_MUST_NOT_WIN",
+    )
+
+    assert changed is False
+    batch.refresh_from_db()
+    cursor = MarketplaceImportCursor.objects.get(tenant=tenant, store_mapping=mapping, resource_type="orders")
+    assert batch.status == "completed"
+    assert batch.controlled_error_code == ""
+    assert cursor.version == 1
+    assert MarketplaceOrder.objects.filter(tenant=tenant, store_mapping=mapping).count() == 1
+    assert batch.attempts.count() == 2
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(PR_A3_SYNTHETIC_IMPORT_ENABLED=True)
+def test_concurrent_failed_batch_retry_allows_at_most_one_mysql_commit(monkeypatch):
+    if connection.vendor != "mysql":
+        pytest.skip("MySQL failed-batch row-lock verification runs in Local Sandbox.")
+    tenant, user, mapping = context("a3-retry-mysql")
+    payload = order_payload(mapping)
+    from apps.marketplace_imports import services
+
+    original = services._upsert_order
+    calls = {"count": 0}
+
+    def transient_failure(**kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise ImportRuleViolation("controlled transient failure")
+        return original(**kwargs)
+
+    monkeypatch.setattr(services, "_upsert_order", transient_failure)
+    assert client_for(user).post(IMPORT_URL, payload, format="json").status_code == 422
+    batch = MarketplaceImportBatch.objects.get(status="failed")
+    grant(user, "integrations.store.retry")
+    start = threading.Event()
+
+    def retry():
+        close_old_connections()
+        start.wait(timeout=5)
+        try:
+            actor = CustomUser.objects.get(pk=user.pk)
+            response = client_for(actor).post(f"{BATCHES_URL}{batch.id}/retry/", payload, format="json")
+            duplicate = response.json().get("data", {}).get("duplicate")
+            return response.status_code, duplicate
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(retry) for _ in range(2)]
+        start.set()
+        results = [future.result(timeout=20) for future in futures]
+
+    assert sum(status == 200 and duplicate is False for status, duplicate in results) == 1
+    assert all(status in {200, 409} for status, _duplicate in results)
+    batch.refresh_from_db()
+    cursor = MarketplaceImportCursor.objects.get(
+        tenant=tenant,
+        store_mapping=mapping,
+        resource_type="orders",
+    )
+    assert batch.status == "completed"
+    assert batch.active_attempt_id is None
+    assert batch.attempt_version == 2
+    assert cursor.version == 1
+    assert cursor.cursor == payload["cursor_after"]
+    assert MarketplaceOrder.objects.filter(tenant=tenant, store_mapping=mapping).count() == 1
+    assert batch.attempts.filter(action="retry", result="started").count() == 1
+    assert batch.attempts.filter(action="retry", result="success").count() == 1
 
 
 def test_real_response_adapter_is_explicitly_pending_and_has_no_fallback():

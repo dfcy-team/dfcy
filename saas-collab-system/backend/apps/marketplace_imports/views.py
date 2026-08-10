@@ -138,7 +138,6 @@ def retry_batch(request, pk):
         MarketplaceImportBatch.objects.filter(
             tenant=request.user.tenant,
             store_mapping__in=mappings,
-            status=MarketplaceImportBatch.Status.FAILED,
         ),
         pk=pk,
     )

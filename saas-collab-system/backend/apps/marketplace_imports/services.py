@@ -2,6 +2,7 @@ import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
@@ -12,6 +13,7 @@ from apps.integrations.models import MarketplaceProductMapping, MarketplaceStore
 
 from .models import (
     MarketplaceImportBatch,
+    MarketplaceImportBatchAttempt,
     MarketplaceImportCursor,
     MarketplaceInventorySnapshot,
     MarketplaceOrder,
@@ -71,7 +73,33 @@ def _existing_batch(*, tenant, store_mapping, resource_type, key_hash, payload_h
     raise ImportStateConflict("Import batch is not eligible for this operation.")
 
 
-def _create_batch(*, tenant, actor, store_mapping, payload, key_hash, payload_hash):
+def _audit_attempt(
+    *,
+    batch,
+    actor,
+    attempt_id,
+    action,
+    previous_status,
+    new_status,
+    result,
+    controlled_error_code="",
+):
+    return MarketplaceImportBatchAttempt.objects.create(
+        batch=batch,
+        tenant=batch.tenant,
+        store_mapping=batch.store_mapping,
+        actor=actor,
+        attempt_id=attempt_id,
+        attempt_version=batch.attempt_version,
+        action=action,
+        previous_status=previous_status,
+        new_status=new_status,
+        result=result,
+        controlled_error_code=controlled_error_code,
+    )
+
+
+def _create_batch(*, tenant, actor, store_mapping, payload, key_hash, payload_hash, attempt_id):
     with import_service_write():
         return MarketplaceImportBatch.objects.create(
             tenant=tenant,
@@ -87,8 +115,41 @@ def _create_batch(*, tenant, actor, store_mapping, payload, key_hash, payload_ha
             cursor_after=payload["cursor_after"],
             watermark_after=payload["watermark_after"],
             received_count=len(payload[payload["resource_type"]]),
+            attempt_version=1,
+            active_attempt_id=attempt_id,
             created_by=actor,
         )
+
+
+def _claim_retry_batch(*, batch, actor, payload_hash):
+    with transaction.atomic():
+        locked = MarketplaceImportBatch.objects.select_for_update().get(pk=batch.pk)
+        if locked.payload_hash != payload_hash:
+            raise ImportStateConflict("Idempotency key was already used for a different normalized payload.")
+        if locked.status == MarketplaceImportBatch.Status.COMPLETED:
+            return locked, None, True
+        if locked.status != MarketplaceImportBatch.Status.FAILED:
+            raise ImportStateConflict("Import batch is not eligible for retry.")
+
+        attempt_id = uuid4()
+        previous_status = locked.status
+        locked.status = MarketplaceImportBatch.Status.PROCESSING
+        locked.controlled_error_code = ""
+        locked.completed_at = None
+        locked.attempt_version += 1
+        locked.active_attempt_id = attempt_id
+        with import_service_write():
+            locked.save()
+        _audit_attempt(
+            batch=locked,
+            actor=actor,
+            attempt_id=attempt_id,
+            action=MarketplaceImportBatchAttempt.Action.RETRY,
+            previous_status=previous_status,
+            new_status=locked.status,
+            result=MarketplaceImportBatchAttempt.Result.STARTED,
+        )
+        return locked, attempt_id, False
 
 
 def _validate_cursor(cursor, payload):
@@ -247,9 +308,14 @@ def _insert_inventory(*, tenant, store_mapping, batch, record):
     return "created"
 
 
-def _execute_batch(batch, payload):
+def _execute_batch(batch, payload, *, actor, attempt_id, action):
     with transaction.atomic():
         batch = MarketplaceImportBatch.objects.select_for_update().get(pk=batch.pk)
+        if (
+            batch.status != MarketplaceImportBatch.Status.PROCESSING
+            or batch.active_attempt_id != attempt_id
+        ):
+            raise ImportStateConflict("Import attempt no longer owns the batch.")
         with import_service_write():
             cursor, _ = MarketplaceImportCursor.objects.select_for_update().get_or_create(
                 tenant=batch.tenant,
@@ -286,10 +352,47 @@ def _execute_batch(batch, payload):
         batch.skipped_count = counts["skipped"]
         batch.completed_at = timezone.now()
         batch.controlled_error_code = ""
+        batch.active_attempt_id = None
         with import_service_write():
             cursor.save()
             batch.save()
+        _audit_attempt(
+            batch=batch,
+            actor=actor,
+            attempt_id=attempt_id,
+            action=action,
+            previous_status=MarketplaceImportBatch.Status.PROCESSING,
+            new_status=batch.status,
+            result=MarketplaceImportBatchAttempt.Result.SUCCESS,
+        )
         return batch
+
+
+def _fail_batch_attempt(*, batch_id, actor, attempt_id, action, controlled_error_code):
+    with transaction.atomic():
+        batch = MarketplaceImportBatch.objects.select_for_update().get(pk=batch_id)
+        if (
+            batch.status != MarketplaceImportBatch.Status.PROCESSING
+            or batch.active_attempt_id != attempt_id
+        ):
+            return False
+        batch.status = MarketplaceImportBatch.Status.FAILED
+        batch.controlled_error_code = controlled_error_code
+        batch.completed_at = timezone.now()
+        batch.active_attempt_id = None
+        with import_service_write():
+            batch.save()
+        _audit_attempt(
+            batch=batch,
+            actor=actor,
+            attempt_id=attempt_id,
+            action=action,
+            previous_status=MarketplaceImportBatch.Status.PROCESSING,
+            new_status=batch.status,
+            result=MarketplaceImportBatchAttempt.Result.FAILED,
+            controlled_error_code=controlled_error_code,
+        )
+        return True
 
 
 def import_normalized_batch(*, tenant, actor, store_mapping, payload, allow_retry=False):
@@ -308,12 +411,17 @@ def import_normalized_batch(*, tenant, actor, store_mapping, payload, allow_retr
     if existing and existing.status == MarketplaceImportBatch.Status.COMPLETED:
         return existing, True
     if existing:
-        batch = existing
-        batch.status = MarketplaceImportBatch.Status.PROCESSING
-        batch.controlled_error_code = ""
-        with import_service_write():
-            batch.save()
+        batch, attempt_id, duplicate = _claim_retry_batch(
+            batch=existing,
+            actor=actor,
+            payload_hash=payload_hash,
+        )
+        if duplicate:
+            return batch, True
+        action = MarketplaceImportBatchAttempt.Action.RETRY
     else:
+        attempt_id = uuid4()
+        action = MarketplaceImportBatchAttempt.Action.IMPORT
         try:
             with transaction.atomic():
                 batch = _create_batch(
@@ -323,6 +431,16 @@ def import_normalized_batch(*, tenant, actor, store_mapping, payload, allow_retr
                     payload=payload,
                     key_hash=key_hash,
                     payload_hash=payload_hash,
+                    attempt_id=attempt_id,
+                )
+                _audit_attempt(
+                    batch=batch,
+                    actor=actor,
+                    attempt_id=attempt_id,
+                    action=action,
+                    previous_status="",
+                    new_status=batch.status,
+                    result=MarketplaceImportBatchAttempt.Result.STARTED,
                 )
         except IntegrityError:
             concurrent = _existing_batch(
@@ -337,20 +455,28 @@ def import_normalized_batch(*, tenant, actor, store_mapping, payload, allow_retr
                 return concurrent, True
             raise ImportStateConflict("A concurrent request already owns this idempotency key.")
     try:
-        return _execute_batch(batch, payload), False
+        return _execute_batch(
+            batch,
+            payload,
+            actor=actor,
+            attempt_id=attempt_id,
+            action=action,
+        ), False
     except (ImportStateConflict, ImportRuleViolation, DjangoValidationError) as exc:
-        with import_service_write():
-            MarketplaceImportBatch.objects.filter(pk=batch.pk).update(
-                status=MarketplaceImportBatch.Status.FAILED,
-                controlled_error_code=getattr(exc, "error_code", "MARKETPLACE_IMPORT_REJECTED"),
-                completed_at=timezone.now(),
-            )
+        _fail_batch_attempt(
+            batch_id=batch.pk,
+            actor=actor,
+            attempt_id=attempt_id,
+            action=action,
+            controlled_error_code=getattr(exc, "error_code", "MARKETPLACE_IMPORT_REJECTED"),
+        )
         raise
     except Exception as exc:
-        with import_service_write():
-            MarketplaceImportBatch.objects.filter(pk=batch.pk).update(
-                status=MarketplaceImportBatch.Status.FAILED,
-                controlled_error_code="MARKETPLACE_IMPORT_INTERNAL_FAILURE",
-                completed_at=timezone.now(),
-            )
+        _fail_batch_attempt(
+            batch_id=batch.pk,
+            actor=actor,
+            attempt_id=attempt_id,
+            action=action,
+            controlled_error_code="MARKETPLACE_IMPORT_INTERNAL_FAILURE",
+        )
         raise ImportRuleViolation("The import failed without advancing its cursor.") from exc

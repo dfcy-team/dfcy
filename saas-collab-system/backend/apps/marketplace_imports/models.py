@@ -139,6 +139,8 @@ class MarketplaceImportBatch(ProtectedImportModel):
     updated_count = models.PositiveIntegerField(default=0)
     skipped_count = models.PositiveIntegerField(default=0)
     controlled_error_code = models.CharField(max_length=80, blank=True)
+    attempt_version = models.PositiveIntegerField(default=0)
+    active_attempt_id = models.UUIDField(null=True, blank=True, editable=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -164,6 +166,94 @@ class MarketplaceImportBatch(ProtectedImportModel):
             raise ValidationError("Import batch and store mapping must belong to the same tenant.")
         if self.store_mapping_id and self.store_mapping.platform != self.platform:
             raise ValidationError("Import batch platform must come from the store mapping.")
+
+
+class ImmutableImportAttemptQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Marketplace import attempt records are append-only.")
+
+    def delete(self):
+        raise ValidationError("Marketplace import attempt records cannot be deleted.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Marketplace import attempt records are append-only.")
+
+
+class MarketplaceImportBatchAttempt(models.Model):
+    class Action(models.TextChoices):
+        IMPORT = "import", "Import"
+        RETRY = "retry", "Retry"
+
+    class Result(models.TextChoices):
+        STARTED = "started", "Started"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+
+    batch = models.ForeignKey(
+        MarketplaceImportBatch,
+        on_delete=models.PROTECT,
+        related_name="attempts",
+    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="marketplace_import_attempts")
+    store_mapping = models.ForeignKey(
+        MarketplaceStoreMapping,
+        on_delete=models.PROTECT,
+        related_name="import_attempts",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="marketplace_import_attempts",
+    )
+    attempt_id = models.UUIDField()
+    attempt_version = models.PositiveIntegerField()
+    action = models.CharField(max_length=20, choices=Action.choices)
+    previous_status = models.CharField(
+        max_length=20,
+        choices=MarketplaceImportBatch.Status.choices,
+        blank=True,
+    )
+    new_status = models.CharField(max_length=20, choices=MarketplaceImportBatch.Status.choices)
+    result = models.CharField(max_length=20, choices=Result.choices)
+    controlled_error_code = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableImportAttemptQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "attempt_id", "new_status"],
+                name="uniq_market_attempt_transition",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "batch", "attempt_version"], name="idx_market_attempt_batch"),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.batch_id:
+            if self.batch.tenant_id != self.tenant_id:
+                errors["batch"] = "Import attempt and batch must belong to the same tenant."
+            if self.batch.store_mapping_id != self.store_mapping_id:
+                errors["store_mapping"] = "Import attempt and batch must belong to the same store mapping."
+        if self.store_mapping_id and self.store_mapping.tenant_id != self.tenant_id:
+            errors["store_mapping"] = "Import attempt and store mapping must belong to the same tenant."
+        if self.actor_id and self.actor.tenant_id != self.tenant_id:
+            errors["actor"] = "Import attempt actor must belong to the same tenant."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Marketplace import attempt records are append-only.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Marketplace import attempt records cannot be deleted.")
 
 
 class MarketplaceOrder(ProtectedImportModel):
