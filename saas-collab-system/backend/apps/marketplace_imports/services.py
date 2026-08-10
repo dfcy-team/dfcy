@@ -18,6 +18,7 @@ from .models import (
     MarketplaceInventorySnapshot,
     MarketplaceOrder,
     MarketplaceRefund,
+    _audit_attempt_creation,
     import_service_write,
 )
 
@@ -84,19 +85,20 @@ def _audit_attempt(
     result,
     controlled_error_code="",
 ):
-    return MarketplaceImportBatchAttempt.objects.create(
-        batch=batch,
-        tenant=batch.tenant,
-        store_mapping=batch.store_mapping,
-        actor=actor,
-        attempt_id=attempt_id,
-        attempt_version=batch.attempt_version,
-        action=action,
-        previous_status=previous_status,
-        new_status=new_status,
-        result=result,
-        controlled_error_code=controlled_error_code,
-    )
+    with _audit_attempt_creation():
+        return MarketplaceImportBatchAttempt.objects.create(
+            batch=batch,
+            tenant=batch.tenant,
+            store_mapping=batch.store_mapping,
+            actor=actor,
+            attempt_id=attempt_id,
+            attempt_version=batch.attempt_version,
+            action=action,
+            previous_status=previous_status,
+            new_status=new_status,
+            result=result,
+            controlled_error_code=controlled_error_code,
+        )
 
 
 def _create_batch(*, tenant, actor, store_mapping, payload, key_hash, payload_hash, attempt_id):
@@ -410,73 +412,85 @@ def import_normalized_batch(*, tenant, actor, store_mapping, payload, allow_retr
     )
     if existing and existing.status == MarketplaceImportBatch.Status.COMPLETED:
         return existing, True
-    if existing:
-        batch, attempt_id, duplicate = _claim_retry_batch(
-            batch=existing,
-            actor=actor,
-            payload_hash=payload_hash,
-        )
-        if duplicate:
-            return batch, True
-        action = MarketplaceImportBatchAttempt.Action.RETRY
-    else:
-        attempt_id = uuid4()
-        action = MarketplaceImportBatchAttempt.Action.IMPORT
-        try:
-            with transaction.atomic():
-                batch = _create_batch(
+    execution_error = None
+    execution_cause = None
+    completed_batch = None
+    with transaction.atomic():
+        if existing:
+            batch, attempt_id, duplicate = _claim_retry_batch(
+                batch=existing,
+                actor=actor,
+                payload_hash=payload_hash,
+            )
+            if duplicate:
+                return batch, True
+            action = MarketplaceImportBatchAttempt.Action.RETRY
+        else:
+            attempt_id = uuid4()
+            action = MarketplaceImportBatchAttempt.Action.IMPORT
+            try:
+                with transaction.atomic():
+                    batch = _create_batch(
+                        tenant=tenant,
+                        actor=actor,
+                        store_mapping=store_mapping,
+                        payload=payload,
+                        key_hash=key_hash,
+                        payload_hash=payload_hash,
+                        attempt_id=attempt_id,
+                    )
+                    _audit_attempt(
+                        batch=batch,
+                        actor=actor,
+                        attempt_id=attempt_id,
+                        action=action,
+                        previous_status="",
+                        new_status=batch.status,
+                        result=MarketplaceImportBatchAttempt.Result.STARTED,
+                    )
+            except IntegrityError:
+                concurrent = _existing_batch(
                     tenant=tenant,
-                    actor=actor,
                     store_mapping=store_mapping,
-                    payload=payload,
+                    resource_type=payload["resource_type"],
                     key_hash=key_hash,
                     payload_hash=payload_hash,
-                    attempt_id=attempt_id,
+                    allow_retry=False,
                 )
-                _audit_attempt(
-                    batch=batch,
-                    actor=actor,
-                    attempt_id=attempt_id,
-                    action=action,
-                    previous_status="",
-                    new_status=batch.status,
-                    result=MarketplaceImportBatchAttempt.Result.STARTED,
-                )
-        except IntegrityError:
-            concurrent = _existing_batch(
-                tenant=tenant,
-                store_mapping=store_mapping,
-                resource_type=payload["resource_type"],
-                key_hash=key_hash,
-                payload_hash=payload_hash,
-                allow_retry=False,
+                if concurrent and concurrent.status == MarketplaceImportBatch.Status.COMPLETED:
+                    return concurrent, True
+                raise ImportStateConflict("A concurrent request already owns this idempotency key.")
+        try:
+            completed_batch = _execute_batch(
+                batch,
+                payload,
+                actor=actor,
+                attempt_id=attempt_id,
+                action=action,
             )
-            if concurrent and concurrent.status == MarketplaceImportBatch.Status.COMPLETED:
-                return concurrent, True
-            raise ImportStateConflict("A concurrent request already owns this idempotency key.")
-    try:
-        return _execute_batch(
-            batch,
-            payload,
-            actor=actor,
-            attempt_id=attempt_id,
-            action=action,
-        ), False
-    except (ImportStateConflict, ImportRuleViolation, DjangoValidationError) as exc:
-        _fail_batch_attempt(
-            batch_id=batch.pk,
-            actor=actor,
-            attempt_id=attempt_id,
-            action=action,
-            controlled_error_code=getattr(exc, "error_code", "MARKETPLACE_IMPORT_REJECTED"),
-        )
-        raise
-    except Exception as exc:
-        _fail_batch_attempt(
-            batch_id=batch.pk,
-            actor=actor,
-            attempt_id=attempt_id,
-            action=action,
-            controlled_error_code="MARKETPLACE_IMPORT_INTERNAL_FAILURE",
-        )
-        raise ImportRuleViolation("The import failed without advancing its cursor.") from exc
+        except (ImportStateConflict, ImportRuleViolation, DjangoValidationError) as exc:
+            if not _fail_batch_attempt(
+                batch_id=batch.pk,
+                actor=actor,
+                attempt_id=attempt_id,
+                action=action,
+                controlled_error_code=getattr(exc, "error_code", "MARKETPLACE_IMPORT_REJECTED"),
+            ):
+                raise ImportStateConflict("Import attempt no longer owns the batch.") from exc
+            execution_error = exc
+        except Exception as exc:
+            if not _fail_batch_attempt(
+                batch_id=batch.pk,
+                actor=actor,
+                attempt_id=attempt_id,
+                action=action,
+                controlled_error_code="MARKETPLACE_IMPORT_INTERNAL_FAILURE",
+            ):
+                raise ImportStateConflict("Import attempt no longer owns the batch.") from exc
+            execution_error = ImportRuleViolation("The import failed without advancing its cursor.")
+            execution_cause = exc
+    if execution_error is not None:
+        if execution_cause is not None:
+            raise execution_error from execution_cause
+        raise execution_error
+    return completed_batch, False

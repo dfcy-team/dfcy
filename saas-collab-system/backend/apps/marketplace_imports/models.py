@@ -10,6 +10,10 @@ from apps.tenants.models import Tenant
 
 
 _import_service_write = contextvars.ContextVar("marketplace_import_service_write", default=False)
+_audit_attempt_service_create = contextvars.ContextVar(
+    "marketplace_import_audit_attempt_service_create",
+    default=False,
+)
 
 
 @contextlib.contextmanager
@@ -19,6 +23,15 @@ def import_service_write():
         yield
     finally:
         _import_service_write.reset(token)
+
+
+@contextlib.contextmanager
+def _audit_attempt_creation():
+    token = _audit_attempt_service_create.set(True)
+    try:
+        yield
+    finally:
+        _audit_attempt_service_create.reset(token)
 
 
 class ProtectedImportQuerySet(models.QuerySet):
@@ -169,6 +182,20 @@ class MarketplaceImportBatch(ProtectedImportModel):
 
 
 class ImmutableImportAttemptQuerySet(models.QuerySet):
+    def create(self, **kwargs):
+        if not _audit_attempt_service_create.get():
+            raise ValidationError("Marketplace import attempts require the audit service.")
+        return super().create(**kwargs)
+
+    def get_or_create(self, defaults=None, **kwargs):
+        try:
+            return self.get(**kwargs), False
+        except self.model.DoesNotExist as exc:
+            raise ValidationError("Marketplace import attempts require the audit service.") from exc
+
+    def update_or_create(self, defaults=None, create_defaults=None, **kwargs):
+        raise ValidationError("Marketplace import attempt records are append-only.")
+
     def update(self, **kwargs):
         raise ValidationError("Marketplace import attempt records are append-only.")
 
@@ -177,6 +204,9 @@ class ImmutableImportAttemptQuerySet(models.QuerySet):
 
     def bulk_update(self, objs, fields, batch_size=None):
         raise ValidationError("Marketplace import attempt records are append-only.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Marketplace import attempts require the audit service.")
 
 
 class MarketplaceImportBatchAttempt(models.Model):
@@ -243,12 +273,77 @@ class MarketplaceImportBatchAttempt(models.Model):
             errors["store_mapping"] = "Import attempt and store mapping must belong to the same tenant."
         if self.actor_id and self.actor.tenant_id != self.tenant_id:
             errors["actor"] = "Import attempt actor must belong to the same tenant."
+        valid_transitions = {
+            (
+                self.Action.IMPORT,
+                "",
+                MarketplaceImportBatch.Status.PROCESSING,
+                self.Result.STARTED,
+            ),
+            (
+                self.Action.RETRY,
+                MarketplaceImportBatch.Status.FAILED,
+                MarketplaceImportBatch.Status.PROCESSING,
+                self.Result.STARTED,
+            ),
+            (
+                self.Action.IMPORT,
+                MarketplaceImportBatch.Status.PROCESSING,
+                MarketplaceImportBatch.Status.COMPLETED,
+                self.Result.SUCCESS,
+            ),
+            (
+                self.Action.RETRY,
+                MarketplaceImportBatch.Status.PROCESSING,
+                MarketplaceImportBatch.Status.COMPLETED,
+                self.Result.SUCCESS,
+            ),
+            (
+                self.Action.IMPORT,
+                MarketplaceImportBatch.Status.PROCESSING,
+                MarketplaceImportBatch.Status.FAILED,
+                self.Result.FAILED,
+            ),
+            (
+                self.Action.RETRY,
+                MarketplaceImportBatch.Status.PROCESSING,
+                MarketplaceImportBatch.Status.FAILED,
+                self.Result.FAILED,
+            ),
+        }
+        transition = (self.action, self.previous_status, self.new_status, self.result)
+        if transition not in valid_transitions:
+            errors["result"] = "Import attempt status and result combination is invalid."
+        if self.result == self.Result.FAILED:
+            if not self.controlled_error_code:
+                errors["controlled_error_code"] = "Failed attempts require a controlled error code."
+        elif self.controlled_error_code:
+            errors["controlled_error_code"] = "Only failed attempts may record a controlled error code."
+        if self.batch_id:
+            if self.attempt_version != self.batch.attempt_version:
+                errors["attempt_version"] = "Import attempt version must match the batch."
+            if self.new_status != self.batch.status:
+                errors["new_status"] = "Import attempt new status must match the batch."
+            if self.result == self.Result.STARTED:
+                if self.batch.active_attempt_id != self.attempt_id:
+                    errors["attempt_id"] = "Started attempt must own the active batch attempt."
+            elif not self.__class__.objects.filter(
+                batch_id=self.batch_id,
+                attempt_id=self.attempt_id,
+                attempt_version=self.attempt_version,
+                action=self.action,
+                new_status=MarketplaceImportBatch.Status.PROCESSING,
+                result=self.Result.STARTED,
+            ).exists():
+                errors["attempt_id"] = "Terminal attempt requires a matching started audit."
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        if self.pk:
+        if not self._state.adding:
             raise ValidationError("Marketplace import attempt records are append-only.")
+        if not _audit_attempt_service_create.get():
+            raise ValidationError("Marketplace import attempts require the audit service.")
         self.full_clean()
         return super().save(*args, **kwargs)
 

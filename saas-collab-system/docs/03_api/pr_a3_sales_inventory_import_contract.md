@@ -94,6 +94,9 @@
 - 任一记录失败会回滚该批次的业务记录和游标；failed batch 只记录受控错误码。
 - failed batch 的 retry 必须在 `transaction.atomic()` 与 `select_for_update()` 内认领；获得行锁后重新检查状态。已 completed 返回 duplicate，processing 返回 409，只有成功认领本次 attempt 的执行者可以提交 completed 或 failed。
 - 每次 import/retry 写入不可变 attempt audit，记录 tenant、store、actor、action、attempt/version、前后状态、结果、受控错误码和时间；不保存原始 payload 或凭据。
+- attempt audit 只能由 `services._audit_attempt()` 的受控创建上下文写入。普通实例首次/再次 `save()`、manager/queryset `create()`、`get_or_create()` 创建分支、`update_or_create()`、`bulk_create()`、`update()`、`bulk_update()`、实例和 queryset `delete()` 均拒绝；append-only 不代表任意调用方可以追加记录。
+- 合法 attempt 组合固定为：import started `empty -> processing / started`；retry started `failed -> processing / started`；import/retry success `processing -> completed / success`；import/retry failed `processing -> failed / failed`。终态审计必须对应同 batch、attempt、version、action 的 started 审计；failed 必须记录受控错误码，started/success 不得记录错误码。
+- batch 认领、started 审计、业务执行、cursor/watermark 提交和 success/failed 审计位于同一外层事务边界，业务执行使用独立保存点。任一最终审计失败时业务记录与游标回滚；若失败审计也无法写入，则本次认领和 started 审计一并回滚。
 
 ## 7. 后续 adapter 插入点
 

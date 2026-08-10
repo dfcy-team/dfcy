@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import inspect
 import threading
+from uuid import uuid4
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -105,6 +106,47 @@ def inventory_payload(mapping, *, key="inventory-key-0001", mode="initial", befo
             }
         ],
     }
+
+
+def processing_batch(tenant, user, mapping):
+    attempt_id = uuid4()
+    with import_service_write():
+        batch = MarketplaceImportBatch.objects.create(
+            tenant=tenant,
+            store_mapping=mapping,
+            platform=mapping.platform,
+            resource_type="orders",
+            import_mode="initial",
+            source_mode="synthetic_contract",
+            contract_version="pr-a3-normalized-v1",
+            idempotency_key_hash=uuid4().hex * 2,
+            payload_hash=uuid4().hex * 2,
+            cursor_before="",
+            cursor_after="orders-c1",
+            received_count=1,
+            attempt_version=1,
+            active_attempt_id=attempt_id,
+            created_by=user,
+        )
+    return batch, attempt_id
+
+
+def attempt_kwargs(batch, actor, attempt_id=None, **overrides):
+    values = {
+        "batch": batch,
+        "tenant": batch.tenant,
+        "store_mapping": batch.store_mapping,
+        "actor": actor,
+        "attempt_id": attempt_id or batch.active_attempt_id or uuid4(),
+        "attempt_version": batch.attempt_version,
+        "action": MarketplaceImportBatchAttempt.Action.IMPORT,
+        "previous_status": "",
+        "new_status": MarketplaceImportBatch.Status.PROCESSING,
+        "result": MarketplaceImportBatchAttempt.Result.STARTED,
+        "controlled_error_code": "",
+    }
+    values.update(overrides)
+    return values
 
 
 @pytest.mark.django_db
@@ -479,6 +521,224 @@ def test_import_attempt_audit_is_append_only():
         MarketplaceImportBatchAttempt.objects.filter(pk=attempt.pk).delete()
     with pytest.raises(ValidationError, match="cannot be deleted"):
         attempt.delete()
+
+
+@pytest.mark.django_db
+def test_attempt_first_instance_save_requires_audit_service():
+    tenant, user, mapping = context("a3-attempt-save-create")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    with pytest.raises(ValidationError, match="audit service"):
+        MarketplaceImportBatchAttempt(**attempt_kwargs(batch, user)).save()
+    assert not batch.attempts.exists()
+
+
+@pytest.mark.django_db
+def test_attempt_manager_create_requires_audit_service():
+    tenant, user, mapping = context("a3-attempt-manager-create")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    with pytest.raises(ValidationError, match="audit service"):
+        MarketplaceImportBatchAttempt.objects.create(**attempt_kwargs(batch, user))
+    assert not batch.attempts.exists()
+
+
+@pytest.mark.django_db
+def test_attempt_get_or_create_creation_branch_requires_audit_service():
+    tenant, user, mapping = context("a3-attempt-get-create")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    with pytest.raises(ValidationError, match="audit service"):
+        MarketplaceImportBatchAttempt.objects.get_or_create(
+            batch=batch,
+            attempt_id=uuid4(),
+            new_status=MarketplaceImportBatch.Status.PROCESSING,
+            defaults=attempt_kwargs(batch, user),
+        )
+    assert not batch.attempts.exists()
+
+
+@pytest.mark.django_db
+def test_attempt_update_or_create_creation_branch_is_rejected():
+    tenant, user, mapping = context("a3-attempt-update-create")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    with pytest.raises(ValidationError, match="append-only"):
+        MarketplaceImportBatchAttempt.objects.update_or_create(
+            batch=batch,
+            attempt_id=uuid4(),
+            new_status=MarketplaceImportBatch.Status.PROCESSING,
+            defaults=attempt_kwargs(batch, user),
+        )
+    assert not batch.attempts.exists()
+
+
+@pytest.mark.django_db
+def test_attempt_bulk_create_is_rejected():
+    tenant, user, mapping = context("a3-attempt-bulk-create")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    attempt = MarketplaceImportBatchAttempt(**attempt_kwargs(batch, user))
+    with pytest.raises(ValidationError, match="audit service"):
+        MarketplaceImportBatchAttempt.objects.bulk_create([attempt])
+    assert not batch.attempts.exists()
+
+
+@pytest.mark.django_db
+def test_controlled_audit_entry_creates_and_restores_creation_guard():
+    tenant, user, mapping = context("a3-attempt-controlled")
+    batch, attempt_id = processing_batch(tenant, user, mapping)
+    from apps.marketplace_imports import services
+
+    created = services._audit_attempt(
+        batch=batch,
+        actor=user,
+        attempt_id=attempt_id,
+        action=MarketplaceImportBatchAttempt.Action.IMPORT,
+        previous_status="",
+        new_status=MarketplaceImportBatch.Status.PROCESSING,
+        result=MarketplaceImportBatchAttempt.Result.STARTED,
+    )
+    assert created.batch_id == batch.id
+    with pytest.raises(ValidationError, match="audit service"):
+        MarketplaceImportBatchAttempt.objects.create(**attempt_kwargs(batch, user, attempt_id=uuid4()))
+
+
+@pytest.mark.django_db
+def test_existing_attempt_save_update_and_bulk_update_are_rejected():
+    tenant, user, mapping = context("a3-attempt-update-guards")
+    batch, attempt_id = processing_batch(tenant, user, mapping)
+    from apps.marketplace_imports import services
+
+    attempt = services._audit_attempt(
+        batch=batch,
+        actor=user,
+        attempt_id=attempt_id,
+        action=MarketplaceImportBatchAttempt.Action.IMPORT,
+        previous_status="",
+        new_status=MarketplaceImportBatch.Status.PROCESSING,
+        result=MarketplaceImportBatchAttempt.Result.STARTED,
+    )
+    attempt.result = MarketplaceImportBatchAttempt.Result.FAILED
+    with pytest.raises(ValidationError, match="append-only"):
+        attempt.save()
+    with pytest.raises(ValidationError, match="append-only"):
+        MarketplaceImportBatchAttempt.objects.filter(pk=attempt.pk).update(result="failed")
+    with pytest.raises(ValidationError, match="append-only"):
+        MarketplaceImportBatchAttempt.objects.bulk_update([attempt], ["result"])
+    with pytest.raises(ValidationError, match="append-only"):
+        MarketplaceImportBatchAttempt.objects.update_or_create(
+            pk=attempt.pk,
+            defaults={"result": MarketplaceImportBatchAttempt.Result.FAILED},
+        )
+
+
+@pytest.mark.django_db
+def test_attempt_instance_and_queryset_delete_are_rejected():
+    tenant, user, mapping = context("a3-attempt-delete-guards")
+    batch, attempt_id = processing_batch(tenant, user, mapping)
+    from apps.marketplace_imports import services
+
+    attempt = services._audit_attempt(
+        batch=batch,
+        actor=user,
+        attempt_id=attempt_id,
+        action=MarketplaceImportBatchAttempt.Action.IMPORT,
+        previous_status="",
+        new_status=MarketplaceImportBatch.Status.PROCESSING,
+        result=MarketplaceImportBatchAttempt.Result.STARTED,
+    )
+    with pytest.raises(ValidationError, match="cannot be deleted"):
+        attempt.delete()
+    with pytest.raises(ValidationError, match="cannot be deleted"):
+        MarketplaceImportBatchAttempt.objects.filter(pk=attempt.pk).delete()
+
+
+@pytest.mark.django_db
+def test_controlled_audit_rejects_cross_tenant_actor_and_restores_guard():
+    tenant, user, mapping = context("a3-attempt-actor-a")
+    _other_tenant, other_user, _other_mapping = context("a3-attempt-actor-b")
+    batch, attempt_id = processing_batch(tenant, user, mapping)
+    from apps.marketplace_imports import services
+
+    with pytest.raises(ValidationError) as exc:
+        services._audit_attempt(
+            batch=batch,
+            actor=other_user,
+            attempt_id=attempt_id,
+            action=MarketplaceImportBatchAttempt.Action.IMPORT,
+            previous_status="",
+            new_status=MarketplaceImportBatch.Status.PROCESSING,
+            result=MarketplaceImportBatchAttempt.Result.STARTED,
+        )
+    assert "actor" in exc.value.error_dict
+    with pytest.raises(ValidationError, match="audit service"):
+        MarketplaceImportBatchAttempt.objects.create(**attempt_kwargs(batch, user))
+
+
+@pytest.mark.django_db
+def test_attempt_validation_rejects_batch_tenant_mismatch():
+    tenant, user, mapping = context("a3-attempt-tenant-a")
+    other_tenant, other_user, _other_mapping = context("a3-attempt-tenant-b")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    attempt = MarketplaceImportBatchAttempt(
+        **attempt_kwargs(batch, other_user, tenant=other_tenant)
+    )
+    with pytest.raises(ValidationError) as exc:
+        attempt.full_clean()
+    assert "batch" in exc.value.error_dict
+
+
+@pytest.mark.django_db
+def test_attempt_validation_rejects_batch_store_mapping_mismatch():
+    tenant, user, mapping = context("a3-attempt-store-a")
+    _other_tenant, _other_user, other_mapping = context("a3-attempt-store-b")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    attempt = MarketplaceImportBatchAttempt(
+        **attempt_kwargs(batch, user, store_mapping=other_mapping)
+    )
+    with pytest.raises(ValidationError) as exc:
+        attempt.full_clean()
+    assert "store_mapping" in exc.value.error_dict
+
+
+@pytest.mark.django_db
+def test_controlled_audit_rejects_invalid_status_result_combination():
+    tenant, user, mapping = context("a3-attempt-transition")
+    batch, attempt_id = processing_batch(tenant, user, mapping)
+    from apps.marketplace_imports import services
+
+    with pytest.raises(ValidationError) as exc:
+        services._audit_attempt(
+            batch=batch,
+            actor=user,
+            attempt_id=attempt_id,
+            action=MarketplaceImportBatchAttempt.Action.IMPORT,
+            previous_status="",
+            new_status=MarketplaceImportBatch.Status.PROCESSING,
+            result=MarketplaceImportBatchAttempt.Result.SUCCESS,
+        )
+    assert "result" in exc.value.error_dict
+    assert not batch.attempts.exists()
+
+
+@pytest.mark.django_db
+@override_settings(PR_A3_SYNTHETIC_IMPORT_ENABLED=True)
+def test_success_audit_failure_rolls_back_records_and_cursor(monkeypatch):
+    tenant, user, mapping = context("a3-attempt-audit-rollback")
+    from apps.marketplace_imports import services
+
+    original_create = MarketplaceImportBatchAttempt.objects.create
+
+    def fail_success_audit(**kwargs):
+        if kwargs["result"] == MarketplaceImportBatchAttempt.Result.SUCCESS:
+            raise RuntimeError("synthetic audit storage failure")
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(MarketplaceImportBatchAttempt.objects, "create", fail_success_audit)
+    response = client_for(user).post(IMPORT_URL, order_payload(mapping), format="json")
+    assert response.status_code == 422
+    batch = MarketplaceImportBatch.objects.get(tenant=tenant)
+    assert batch.status == MarketplaceImportBatch.Status.FAILED
+    assert batch.controlled_error_code == "MARKETPLACE_IMPORT_INTERNAL_FAILURE"
+    assert list(batch.attempts.values_list("result", flat=True)) == ["started", "failed"]
+    assert not MarketplaceOrder.objects.filter(tenant=tenant).exists()
+    assert not MarketplaceImportCursor.objects.filter(tenant=tenant).exists()
 
 
 @pytest.mark.django_db
