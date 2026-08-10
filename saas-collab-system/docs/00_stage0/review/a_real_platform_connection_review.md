@@ -13,12 +13,12 @@ PR Number: 42
 PR URL: https://github.com/dfcy-team/dfcy/pull/42
 Base Branch: feature/module-a-marketplace-oauth
 Base SHA: 5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0
-Head SHA: freeze from PR #42 after this evidence-only commit
-Review SHA: c3307626affdae78c14db66dc19ad7c65744ae39 (code review source; final evidence head pending)
+Head SHA: evidence-only successor; read from Draft PR #42 after this commit
+Review / CI SHA: ea62cc791b599e9e83a68346630a27621d6e2c08
 Commit Count: freeze from final PR #42 head
 Changed Files: freeze from final PR #42 head
 Deployment Environment: Local Sandbox only; real-platform switches OFF
-Source Artifact SHA-256: 962cfe48451856d09b3a633fb195057037137d7eafb60e67a23b44a7b088f2f0
+Source Artifact: a-real-platform-ea62cc7.zip / SHA-256 AE6731248227DAC39A15F1D38F3BB192BB75F4511DA3AA85B0A559831AF29792 / 1,548,019 bytes
 Deployment Artifact SHA: NOT AVAILABLE
 Container Image Digest: NOT AVAILABLE
 Database Version: MySQL 8.4.10 Local Sandbox PASS

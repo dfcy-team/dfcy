@@ -159,5 +159,6 @@ git diff --stat
 - callback 在调用服务前复制一次性参数，随后立即脱敏 Django request；服务完成或失败后清空内存副本。非 `OAuthFlowError` 统一返回/抛出 `OAUTH_DATABASE_FAILURE`，响应不反射平台异常正文。
 - 新增非 OAuth 数据库/托管式异常负向测试，验证 exception report、Django 日志及 303 错误跳转中均不存在 code/state/sign/token/session 测试标记。
 - Django check、migration drift、focused 37 passed、backend 543 passed / 3 MySQL-only skipped、`git diff --check` 均 PASS。
-- 远程 CI 在先前证据 HEAD `e4c0073cbb8620df0257048ddcf1433d08532772` 的三套工作流全部 PASS；本次整改提交仍须按正常流程完成当前 HEAD CI 冻结。
+- 代码 Review / CI SHA `ea62cc791b599e9e83a68346630a27621d6e2c08` 的三套远程工作流全部 PASS：Local Sandbox `31354734765`、Phase 2 `31354734691`、Phase 3 `31354734727`。
+- 固定源码制品 `a-real-platform-ea62cc7.zip`，SHA-256 `AE6731248227DAC39A15F1D38F3BB192BB75F4511DA3AA85B0A559831AF29792`，1,548,019 bytes；1048 个条目，禁止产物 0。该 ZIP 不是运行镜像，image digest 仍为开放门禁。
 - 未调用 Shopee/TikTok 真实 API；两平台继续 `pending/mock`，Production synchronization 继续 OFF。

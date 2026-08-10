@@ -11,9 +11,9 @@ Task: `A-REAL-PLATFORM-CONNECTION`; updated: 2026-08-10. This report contains no
 | Base branch | `feature/module-a-marketplace-oauth` |
 | Base SHA | `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
 | PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
-| Code Review SHA | `c3307626affdae78c14db66dc19ad7c65744ae39` |
-| Final PR Head SHA | Freeze from PR #42 after this evidence-only commit |
-| Source artifact | `a-real-platform-c3307626.zip`, SHA-256 `962cfe48451856d09b3a633fb195057037137d7eafb60e67a23b44a7b088f2f0`, 1,580,387 bytes |
+| Code Review / CI SHA | `ea62cc791b599e9e83a68346630a27621d6e2c08` |
+| Final PR Head SHA | Evidence-only successor; read from Draft PR #42 after this commit |
+| Source artifact | `a-real-platform-ea62cc7.zip`, SHA-256 `AE6731248227DAC39A15F1D38F3BB192BB75F4511DA3AA85B0A559831AF29792`, 1,548,019 bytes |
 | Deployment image digest | NOT AVAILABLE — Docker daemon timed out; must be built after remote SHA freeze |
 | Database / migration head | Previous MySQL 8.4.10 Sandbox; current SQLite verified / `integrations.0013_authorization_reauthorization_bindings` |
 | Environment | Local Sandbox with real-platform switches OFF; not valid live evidence |
@@ -37,7 +37,7 @@ Task: `A-REAL-PLATFORM-CONNECTION`; updated: 2026-08-10. This report contains no
 | Sandbox DB/log raw scan | PASS, 0 findings; authorization rows were 0 |
 | Docker Compose static config | PASS |
 | CI guard / forbidden artifact scan | PASS, 0 findings |
-| remote CI | PASS at evidence HEAD `e4c0073cbb8620df0257048ddcf1433d08532772`; all three GitHub Actions workflows passed. This callback-reporter remediation requires the normal current-head rerun before final freeze. |
+| remote CI | PASS for Code Review SHA `ea62cc791b599e9e83a68346630a27621d6e2c08`: Local Sandbox Contract Gates `31354734765`, Phase 2 `31354734691`, Phase 3 `31354734727` |
 
 Automated fake-transport tests cover fail-closed gates, synthetic/live separation, current Shopee/TikTok authorization parameters, exact callback/result redirect allowlists, forbidden callback context, TikTok code exchange/authorized-shop/minimal metadata contract, HTTP/local-file custody references, cleanup after persistence/identity failure, local custody dual-process rotation, reauthorization, version conflict, old-reference revoke failure, bounded 429/5xx/DNS/timeout/reset handling, and Nginx/Gunicorn callback query suppression. They are not real-platform evidence.
 

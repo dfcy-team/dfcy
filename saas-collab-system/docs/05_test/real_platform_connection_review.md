@@ -10,10 +10,10 @@ Review date: 2026-08-10. Current result: **FAIL / REQUEST CHANGES**. Offline-rem
 | PR | Draft #42 — `https://github.com/dfcy-team/dfcy/pull/42` |
 | Branch | `feature/module-a-real-platform-connection` |
 | Base | `feature/module-a-marketplace-oauth` @ `5c3d285e2bf89baa13f669c71e6ef6cbfb9263e0` |
-| Code Review SHA | `c3307626affdae78c14db66dc19ad7c65744ae39` |
-| Final PR Head SHA | Freeze after this evidence-only commit |
+| Code Review / CI SHA | `ea62cc791b599e9e83a68346630a27621d6e2c08` |
+| Final PR Head SHA | Evidence-only successor; read from Draft PR #42 after this commit |
 | Final commit count / changed files | Freeze from final PR #42 head |
-| Source artifact | `a-real-platform-c3307626.zip` / SHA-256 `962cfe48451856d09b3a633fb195057037137d7eafb60e67a23b44a7b088f2f0` |
+| Source artifact | `a-real-platform-ea62cc7.zip` / SHA-256 `AE6731248227DAC39A15F1D38F3BB192BB75F4511DA3AA85B0A559831AF29792` / 1,548,019 bytes |
 | Runtime image digest | NOT AVAILABLE |
 | Environment | Local Sandbox; real-platform switches OFF |
 | Database | Previous MySQL 8.4.10 Sandbox PASS; current code SHA NOT RERUN (Docker daemon timeout) |
@@ -36,7 +36,7 @@ PR-A1 architecture/security R2 recorded PASS for its fixed scope. PR-A2 review r
 | audit immutability | PASS regression | live-runtime audit inspection absent |
 | fresh/upgrade migration | PASS locally | current SQLite fresh/upgrade; previous MySQL 8.4.10 Sandbox migration not promoted to current SHA |
 | backend/frontend/build | PASS | local backend 543/3 skipped; local frontend 163; build 1957 modules |
-| Local Sandbox / remote CI | CONDITIONAL | previous Sandbox PASS; remote CI PASS at evidence HEAD `e4c0073cbb8620df0257048ddcf1433d08532772`; current-SHA Docker/MySQL and final freeze verification pending |
+| Local Sandbox / remote CI | CONDITIONAL | remote CI PASS for Code Review SHA `ea62cc791b599e9e83a68346630a27621d6e2c08` in all three workflows; current-SHA Docker/MySQL and final evidence-head verification pending |
 | Shopee official/live flow | FAIL | contract/app/pilot/evidence absent |
 | TikTok official/live flow | FAIL | app/pilot/revoke contract/evidence absent |
 | DB/log/browser credential scans | FAIL | no fixed live deployment to scan |
