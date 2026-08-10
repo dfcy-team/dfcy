@@ -24,6 +24,10 @@ const ProductStatusDashboard = () => import('../views/products/ProductStatusDash
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
 const ProductStatusRecommendationDetail = () => import('../views/products/ProductStatusRecommendationDetail.vue');
 const ProductStatusTransitionHistory = () => import('../views/products/ProductStatusTransitionHistory.vue');
+const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
+const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
+const InfluencerResourceLibrary = () => import('../views/influencers/InfluencerResourceLibrary.vue');
+const InfluencerReadOnlyPage = () => import('../views/influencers/InfluencerReadOnlyPage.vue');
 const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
 const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
 const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
@@ -146,6 +150,12 @@ const routes = [
       { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
       { path: 'products/status-recommendations/:id', component: ProductStatusRecommendationDetail },
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
+      { path: 'influencers/outreach', component: OutreachTaskList },
+      { path: 'influencers/fulfillment', component: SampleFulfillmentList },
+      { path: 'influencers/videos', component: InfluencerReadOnlyPage, props: { title: '视频结果', description: '达人视频与店铺、商品、建联任务的关联结果。' } },
+      { path: 'influencers/performance', component: InfluencerReadOnlyPage, props: { title: 'BD绩效', description: '联盟订单、送样和视频事实将在后台归因后展示。' } },
+      { path: 'influencers/orders', component: InfluencerReadOnlyPage, props: { title: '店铺订单', description: '联盟订单作为数据源并入店铺订单，不单独建菜单。' } },
+      { path: 'influencers/library', component: InfluencerResourceLibrary },
       { path: 'purchasing/orders', component: PurchaseOrderList },
       { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
       { path: 'suppliers/tasks', component: SupplierTaskList },
