@@ -1,6 +1,6 @@
 # 开发A PR-A3 销售与库存离线导入变更日志
 
-任务：`A-PR3-P1-OFFLINE-SALES-INVENTORY-IMPORT`
+任务：`A-PR3-P1-FIX-R4-AUDIT-CREATION-GUARD`
 
 日期：2026-08-10
 
@@ -11,15 +11,18 @@ PR URL: https://github.com/dfcy-team/dfcy/pull/45
 Branch: feature/module-a-sales-inventory-import
 Base Branch: feature/module-a-real-platform-connection
 Base SHA: 75995f74ec74a3315065ecfcec317edda8b1df73
-Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
-Remote CI SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
+Previous Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
+Previous Evidence HEAD: ace63284395ce5a0a6ef3bbd3366b9b4f0d05558
+Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Evidence HEAD: current evidence-only commit; exact SHA is recorded in the final R4 handoff
+Remote CI SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
 Migration Head: marketplace_imports.0002_marketplaceimportbatch_active_attempt_id_and_more
 PR State: OPEN / Draft / Unmerged
 ```
 
-Evidence HEAD 为包含本日志、测试报告和 R3 证据的后续 evidence-only 提交；它不改变 `Code Review SHA` 的运行时代码。
+Evidence HEAD 为包含本日志、测试报告和 R4 证据的后续 evidence-only 提交；它不改变 `Code Review SHA` 的运行时代码。
 
-## 1. 实现与 R2 整改
+## 1. 实现与 R2 整改历史
 
 - 新建独立 `marketplace_imports` app、normalized synthetic/offline 合同和内部 API。
 - failed retry 在事务和行锁内认领并重检状态；只有 active attempt owner 能提交成功或失败。
@@ -28,7 +31,7 @@ Evidence HEAD 为包含本日志、测试报告和 R3 证据的后续 evidence-o
 - API 合同包含可执行的完整 synthetic order 示例。
 - 未加入真实平台网络、scheduler、正式 webhook、历史回补、平台写接口、finance、purchasing 或 RPA。
 
-## 2. Docker / WSL 修复
+## 2. R3 Docker / WSL 修复历史
 
 - 确认原始失败为 `Wsl/Service/AttachDisk/CreateVm/HCS/0x800705aa`。
 - 保留 `docker_data.vhdx` 和历史 Docker volume，未执行 factory reset 或数据删除。
@@ -38,13 +41,13 @@ Evidence HEAD 为包含本日志、测试报告和 R3 证据的后续 evidence-o
 - MySQL 8.4.10 独立验证容器健康。
 - 本机 `.wslconfig`、`.env.local` 和临时验证资源均未进入 Git。
 
-## 3. MySQL 测试隔离修复
+## 3. R3 MySQL 测试隔离修复历史
 
 - 并发测试现在显式、幂等准备 `integrations.store.sync` 和 `integrations.store.retry`，不再依赖 migration seed 或全量测试顺序。
 - 受控 409 错误响应允许 `data=null`；测试不再把它误当作对象调用 `.get()`。
 - 产品状态机、锁和 attempt owner 逻辑未因该测试修复改变。
 
-## 4. 验证
+## 4. R3 验证历史
 
 - Docker engine：PASS，29.5.3。
 - MySQL version：PASS，8.4.10。
@@ -60,7 +63,7 @@ Evidence HEAD 为包含本日志、测试报告和 R3 证据的后续 evidence-o
 - CI guard、credential scan、forbidden artifact scan、API boundary scan、`git diff --check`：PASS。
 - Code Review SHA 远程 CI：15/15 checks PASS。
 
-## 5. 状态与移交
+## 5. R3 状态与移交历史
 
 - R1 P1/P2 开发整改：全部关闭。
 - Open developer P1：0。
@@ -71,3 +74,36 @@ Evidence HEAD 为包含本日志、测试报告和 R3 证据的后续 evidence-o
 - `Production synchronization = OFF`。
 - `Real platform API = NOT CALLED`。
 - PR #45 保持 Draft、不合并，等待独立复审。
+
+## 6. R4 audit creation guard 整改
+
+R4 入场状态已更正为：`Open P1: 1`；`P2-003: REOPENED / escalated to P1`；`Attempt audit bulk protection: FAIL`；`Independent Review: FAIL / REQUEST CHANGES`。
+
+- 为 `MarketplaceImportBatchAttempt` 增加独立私有 `ContextVar` 创建门，只有 `services._audit_attempt()` 在受控 context manager 中创建；上下文使用 `try/finally` 恢复。
+- 普通首次/既有实例 `save()`、`objects.create()`、`get_or_create()` 创建分支、`update_or_create()` 创建/更新、`bulk_create()`、`update()`、`bulk_update()`、实例和 QuerySet `delete()` 全部拒绝。
+- 模型层冻结 import/retry started、success、failed 合法组合，并校验 batch/tenant/store/actor、attempt version、batch 当前状态、active owner、终态 started 前置记录和 controlled error code。
+- 将认领、started、业务保存点和 success/failed 审计纳入同一外层事务；审计失败不留下半完成业务记录、cursor/watermark 或 processing 认领。
+- 保持 failed retry `select_for_update()`、锁内重检、active attempt owner、completed duplicate、processing 409、stale attempt、cursor/watermark 和幂等规则不变。
+
+## 7. R4 验证与移交
+
+- Django check：PASS，0 issues；migration drift：PASS，No changes detected；无新 migration。
+- SQLite focused：55 passed / 1 MySQL-only skipped；SQLite backend full：598 passed / 4 MySQL-only skipped。
+- MySQL 8.4.11 fresh/`0001 -> 0002` upgrade：PASS；focused：56 passed / 0 skipped；backend full：602 passed / 0 skipped。
+- MySQL 双 worker：retry started 最多 1 条、success 最多 1 条，PASS。
+- 前端：13 files / 163 tests PASS；production build 1957 modules PASS。`npm ci` 的 3 个 high 漏洞保留为未扩范围的供应链观察项。
+- CI guard、credential、forbidden artifact、API boundary、`git diff --check`、dist/node_modules/cache tracking：PASS，0 findings。
+- Code Review SHA remote CI：15/15 checks PASS。
+- R4 代码提交只修改 models、services、focused tests 与 PR-A3 API contract；未修改公共权限、统一异常、data scope、settings 或路由。
+
+```text
+Developer R4 Remediation Evidence: PASS
+Independent R4 Review: PENDING
+A-REAL-PLATFORM-CONNECTION: FAIL / REQUEST CHANGES
+Shopee: pending/mock
+TikTok Shop: pending/mock
+Production synchronization: OFF
+Real platform API: NOT CALLED
+PR #45: OPEN / Draft / Unmerged
+Merge: FORBIDDEN pending independent review
+```

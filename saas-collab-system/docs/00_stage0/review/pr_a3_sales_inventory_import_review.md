@@ -1,6 +1,6 @@
-# PR-A3 销售与库存离线导入 R3 整改证据
+# PR-A3 销售与库存离线导入 R4 整改证据
 
-任务编号：`A-PR3-P1-OFFLINE-SALES-INVENTORY-IMPORT-REVIEW`
+任务编号：`A-PR3-P1-FIX-R4-AUDIT-CREATION-GUARD`
 
 证据日期：2026-08-10
 
@@ -14,13 +14,16 @@ PR URL: https://github.com/dfcy-team/dfcy/pull/45
 PR State: OPEN / Draft / Unmerged
 Base Branch: feature/module-a-real-platform-connection
 Base SHA: 75995f74ec74a3315065ecfcec317edda8b1df73
-Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
-Remote CI SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
-Code Commit Count: 4
+Previous Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
+Previous Evidence HEAD: ace63284395ce5a0a6ef3bbd3366b9b4f0d05558
+Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Evidence HEAD: current evidence-only commit; exact SHA is recorded in the final R4 handoff
+Remote CI SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Code Commit Count: 6
 Changed Files: 21
-Additions / Deletions: +2656 / -0
+Additions / Deletions: +3020 / -0
 Deployment Environment: 未部署；本地 synthetic/offline + MySQL 8.4 验证
-Database Version: MySQL 8.4.10
+Database Version: MySQL 8.4.11
 Migration Head: marketplace_imports.0002_marketplaceimportbatch_active_attempt_id_and_more
 ```
 
@@ -34,9 +37,9 @@ Migration Head: marketplace_imports.0002_marketplaceimportbatch_active_attempt_i
 | PR-A3-R1-P1-002 MySQL 8.4 必需验证缺失 | P1 | Docker/WSL 修复；MySQL 8.4.10 fresh/upgrade、focused 43、backend full 589 全部 PASS | CLOSED |
 | PR-A3-R1-P2-001 原始证据未冻结 SHA | P2 | 测试报告、变更日志和本证据拆分 Code Review SHA 与 Evidence HEAD | CLOSED |
 | PR-A3-R1-P2-002 合同示例不可执行 | P2 | 已提供可通过 serializer 的完整 synthetic order 示例 | CLOSED |
-| PR-A3-R1-P2-003 retry actor/attempt 不可审计 | P2 | append-only `MarketplaceImportBatchAttempt` 记录 actor、版本、状态转换、结果和受控错误码 | CLOSED |
+| PR-A3-R1-P2-003 retry actor/attempt 不可审计 | P2 -> P1 | R3 只保护修改/删除，普通 create/get_or_create/update_or_create/bulk_create 仍可伪造；R4 入场时重新打开并升级 | REOPENED / ESCALATED TO P1 |
 
-## 3. Docker / WSL 阻断修复
+## 3. R3 Docker / WSL 阻断修复历史
 
 原始错误稳定发生在 Docker Desktop 使用 WSL 创建 VM 并挂载 `docker_data.vhdx` 时：
 
@@ -70,7 +73,7 @@ Wsl/Service/CreateInstance/CreateVm/HCS/0x800705aa
 - 修复后日志未再出现 `0x800705aa`。
 - MySQL 容器健康，版本 `8.4.10`。
 
-## 4. MySQL 8.4 验证
+## 4. R3 MySQL 8.4 验证历史
 
 使用独立临时容器、独立 volume、仅绑定 `127.0.0.1:3308` 的数据库执行；没有使用历史 Local Sandbox volume 作为证据，也没有打印数据库密码。
 
@@ -87,7 +90,7 @@ Wsl/Service/CreateInstance/CreateVm/HCS/0x800705aa
 
 首次 MySQL 全量运行得到 `588 passed / 1 failed`：失败原因是 transaction 测试依赖 migration seed 的执行顺序，未显式准备 `integrations.store.sync/retry` 权限；并发状态机未失败。测试已改为显式、幂等创建所需权限，并兼容受控 409 响应的 `data=null`。整改后重新执行聚焦和全量测试，分别为 `43 passed`、`589 passed`。
 
-## 5. 其他验证
+## 5. R3 其他验证历史
 
 | 验证 | 结果 |
 |---|---|
@@ -112,16 +115,27 @@ Wsl/Service/CreateInstance/CreateVm/HCS/0x800705aa
 - Production synchronization 保持 OFF。
 - 未将 `.wslconfig`、`.env.local`、数据库 volume、密码或临时验证配置加入 Git。
 
-## 7. 开发整改结论
+## 7. R4 入场状态更正与开发整改结论
+
+上一轮“Open P1: 0”“attempt audit bulk protection PASS”和独立复审待签字的表述不准确。R4 入场冻结状态为：
+
+```text
+Open P1: 1
+P2-003: REOPENED / escalated to P1
+Attempt audit bulk protection: FAIL
+Independent Review: FAIL / REQUEST CHANGES
+```
+
+完成本轮代码、测试、MySQL、前端、扫描和 Code Review SHA 远端 CI 后，开发侧状态为：
 
 ```text
 P0: 0
 Open P1: 0
 Open P2: 0
 
-Developer R3 Remediation Evidence: PASS
+Developer R4 Remediation Evidence: PASS
 MySQL 8.4 Engineering Gate: PASS
-Independent R3 Reviewer Sign-off: PENDING
+Independent R4 Review: PENDING
 
 PR #45: KEEP OPEN / DRAFT / UNMERGED
 A-REAL-PLATFORM-CONNECTION: FAIL / REQUEST CHANGES
@@ -132,43 +146,54 @@ Real Platform API: NOT CALLED
 Merge: FORBIDDEN pending independent review
 ```
 
-本证据关闭开发侧 MySQL P1，但不替代架构、安全、测试、数据与发布负责人的独立签字；也不批准真实平台连接或 Production 同步。
+本证据只关闭开发侧 R4 P1，不替代架构、安全、测试、数据与发布负责人的独立签字；也不批准真实平台连接或 Production 同步。
 
-## 8. 独立 R3 复审表
+## 8. R4 实现和验证证据
+
+- attempt audit 创建 ContextVar 与 context manager 为私有能力，只有 `_audit_attempt()` 使用；普通 manager/queryset/实例创建、更新、bulk 和删除入口均有负向测试。
+- 合法状态组合、tenant/store/actor、attempt version、active owner 和 started 前置记录在模型层校验。
+- 业务执行使用内层保存点，attempt 生命周期使用外层事务；success audit 故障测试证明 records/cursor 回滚并形成受控 failed 状态。
+- MySQL 8.4.11 focused `56 passed / 0 skipped`、backend full `602 passed / 0 skipped`；双 worker retry started/success 各最多 1 条。
+- SQLite focused `55 passed / 1 skipped`、backend full `598 passed / 4 skipped`；SQLite skipped 仅为 MySQL-only 并发测试，不记为 MySQL PASS。
+- 前端 13 files / 163 tests、1957 modules build PASS；CI guard、credential、forbidden artifact、API boundary、生成物 tracking 和 `git diff --check` 全部 PASS。
+- Code Review SHA `69a623f52fe6e2e66c0ec83aebeceee767406819` 远端 CI 15/15 PASS。
+
+## 9. 独立 R4 复审表
 
 ```text
-PR-A3 SALES / INVENTORY OFFLINE IMPORT R3 REVIEW
+PR-A3 SALES / INVENTORY OFFLINE IMPORT R4 REVIEW
 
 Repository: dfcy-team/dfcy
 PR: #45
 Branch: feature/module-a-sales-inventory-import
 Base SHA: 75995f74ec74a3315065ecfcec317edda8b1df73
-Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
+Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
 
 Draft / Unmerged: PASS
-Scope Boundary: PASS
-Synthetic Switch Default OFF: PASS
-Tenant / Store / Platform Isolation: PASS
-Exact Permissions: PASS
-Failed Retry Ownership: PASS
-Failed Retry MySQL Concurrency: PASS
-Immutable Retry Audit: PASS
-SQLite Migration: PASS
-MySQL 8.4 Fresh / Upgrade: PASS
-MySQL Focused Tests: PASS, 43 passed
-MySQL Backend Full: PASS, 589 passed
-Frontend Tests / Build: PASS
-Remote CI: PASS on Code Review SHA
+Scope Boundary: PENDING REVIEW
+Synthetic Switch Default OFF: PENDING REVIEW
+Tenant / Store / Platform Isolation: PENDING REVIEW
+Exact Permissions: PENDING REVIEW
+Failed Retry Ownership: PENDING REVIEW
+Failed Retry MySQL Concurrency: PENDING REVIEW
+Service-only Attempt Audit Creation: PENDING REVIEW
+Immutable Retry Audit: PENDING REVIEW
+SQLite Migration: DEVELOPER EVIDENCE PASS
+MySQL 8.4 Fresh / Upgrade: DEVELOPER EVIDENCE PASS
+MySQL Focused Tests: DEVELOPER EVIDENCE PASS, 56 passed / 0 skipped
+MySQL Backend Full: DEVELOPER EVIDENCE PASS, 602 passed / 0 skipped
+Frontend Tests / Build: DEVELOPER EVIDENCE PASS
+Remote CI: DEVELOPER EVIDENCE PASS on Code Review SHA
 Real Platform Network: NOT CALLED
 Production Synchronization: OFF
 
 P0: 0
-OPEN P1: 0
+OPEN P1: 0 after developer remediation
 OPEN P2: 0
 
-DEVELOPER REMEDIATION: PASS
-INDEPENDENT REVIEW RESULT: PENDING SIGN-OFF
-MERGE: FORBIDDEN UNTIL SIGN-OFF
+DEVELOPER R4 REMEDIATION: PASS
+INDEPENDENT R4 REVIEW RESULT: PENDING
+MERGE: FORBIDDEN UNTIL INDEPENDENT PASS
 
 Architecture Reviewer:
 Security Reviewer:
