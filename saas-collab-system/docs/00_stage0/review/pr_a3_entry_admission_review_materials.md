@@ -13,8 +13,8 @@
 
 ```text
 A-REAL-PLATFORM-CONNECTION review = FAIL / REQUEST CHANGES
-Shopee capability = pending/live-validation
-TikTok Shop capability = pending/live-validation
+Shopee capability = pending/mock
+TikTok Shop capability = pending/mock
 PR-A3 admission = NOT APPROVED
 Production synchronization = OFF
 ```
@@ -32,8 +32,12 @@ Production synchronization = OFF
 | PR #42 base / head | `feature/module-a-marketplace-oauth` / `a276fa647081ccdec1484473450d2b0828479480` |
 | 配置 UI stacked PR | Draft [#43](https://github.com/dfcy-team/dfcy/pull/43) |
 | PR #43 base / head | `feature/module-a-real-platform-connection` / `d36be683668f819f9471c9af3195ab37f443a9f3` |
-| Code Review SHA / runtime source SHA | `d36be683668f819f9471c9af3195ab37f443a9f3` |
-| Evidence document commit | 本文所在的 evidence-only commit；不得改变可部署源码 |
+| Code Review SHA | `d36be683668f819f9471c9af3195ab37f443a9f3` |
+| Artifact source SHA | `d36be683668f819f9471c9af3195ab37f443a9f3` |
+| Last fully passed evidence baseline SHA | `4b16a9af4490d26a70298a00e097452bcf48aced` |
+| Evidence HEAD SHA | 复审签字时从 PR #43 `headRefOid` 冻结；提交不能自包含其自身 SHA |
+| CI SHA | 必须等于复审签字时冻结的 Evidence HEAD SHA |
+| Evidence-only diff | 从 Code Review SHA 到 Evidence HEAD 仅允许修改本文档；用 `git diff --name-only` 复核 |
 | PR #42 commit count / changed files | 8 / 39 |
 | PR #43 stacked commit count / changed files | 7 / 51 |
 | Deployment environment | 本机受控 Pilot；Production 同步关闭 |
@@ -41,12 +45,12 @@ Production synchronization = OFF
 | Artifact SHA-256 | `35B344C87F0FD9F43EC9250B5339E86BDD464F80030D25D9E28C46362C093C63` |
 | Artifact size | 1,614,807 bytes |
 | Container image digest | `NOT AVAILABLE` |
-| Database | MySQL 8.4.10（已记录；须在最终 Review SHA 上复核） |
+| Database | MySQL 8.4.10（已记录；须在最终 Code Review SHA 上复核） |
 | Integrations migration head | `0015_file_credential_custody_metadata` |
 | Permissions migration head | `0016_seed_api_platform_config_permissions` |
 | Review date | 2026-08-10 |
 
-冻结说明：PR #41、#42、#43 均为 `OPEN / Draft`。当前制品来自 PR #43 的固定远程代码 SHA；远程 CI 与该 SHA 一致且全部通过。本文可由后续 evidence-only commit 承载，但该提交不得改变可部署源码。不存在容器镜像 digest，因此不能把本机制品等同于正式部署镜像证据。
+冻结说明：PR #41、#42、#43 均为 `OPEN / Draft`。当前制品来自固定 Code Review SHA；Evidence HEAD/CI 允许晚于 Code Review SHA，但差异必须仅为本文档，且 CI SHA 必须与签字时的 Evidence HEAD SHA 一致。禁止再笼统声称“CI SHA 与 Review SHA 一致”。不存在容器镜像 digest，因此不能把本机制品等同于正式部署镜像证据。
 
 ## 3. 已取得的工程证据
 
@@ -59,13 +63,13 @@ Production synchronization = OFF
 | 后端全量 pytest | PASS，550 passed / 3 skipped | 未替代真实平台测试 |
 | 前端全量测试 | PASS，166 passed | 未替代浏览器真实流程扫描 |
 | 前端 production build | PASS，1963 modules | 本机制品 |
-| PR #43 远程 CI | PASS，全部 checks | CI SHA 与 Review SHA 一致 |
+| PR #43 远程 CI | PASS at evidence baseline `4b16a9a` | 后续整改提交必须重新全绿；CI SHA 绑定 Evidence HEAD，不等于 Code Review SHA |
 | 本机后端 health | PASS，HTTP 200 | 仅本机运行状态 |
 | 本机 Shopee callback 路由 | PASS，缺少参数时返回受控 HTTP 400 | 仅证明路由存在，不证明 OAuth 成功 |
 | Pilot loopback callback 限制 | PASS | 仅允许 `127.0.0.1:8000` 固定平台路径；Production 仍强制 HTTPS |
 | Production 同步边界 | PASS by code/test | 订单、库存、财务、webhook、定时任务、RPA 和平台写能力未因本任务开启 |
 
-上述结果只支持 `pending/live-validation`，不支持 `connected`。
+由于真实 OAuth、callback、authorized shop、refresh、revoke 和最小只读 API 均未完成，上述结果只支持 `pending/mock`，不支持 `pending/live-validation` 或 `connected`。
 
 ## 4. 前置复审状态
 
@@ -74,7 +78,7 @@ Production synchronization = OFF
 | PR-A1 架构/安全 R2 | PASS | 固定范围结论；不证明真实平台连接 |
 | PR-A2 OAuth/state/permission 基线 | PASS in developer regression | 最终准入仍须由独立复审人员重新确认 |
 | A-REAL-PLATFORM-CONNECTION 独立复审 | FAIL | 真实平台矩阵和真实流程后扫描未完成 |
-| MySQL 8.4 migration | PARTIAL | 已记录 8.4.10 和 migration head；须对最终 Review SHA 重跑并冻结输出 |
+| MySQL 8.4 migration | PARTIAL | 已记录 8.4.10 和 migration head；须对最终 Code Review SHA 重跑并冻结输出 |
 | MySQL 同授权双 worker refresh | NOT RUN on final live authorization | synthetic/MySQL 工程测试不能替代真实授权引用验证 |
 | Local Sandbox integration | PASS previously | 不能替代固定真实 Pilot 制品证据 |
 | 固定部署制品 | PARTIAL | zip SHA 已固定，无镜像 digest |
@@ -111,8 +115,8 @@ Production synchronization = OFF
 
 | 扫描 | 状态 | 准入要求 |
 |---|---|---|
-| Git credential scan | PASS for current tracked tree | 最终 Review SHA 再跑，0 raw findings |
-| Forbidden artifact scan | PASS for current tracked tree | 最终 Review SHA 再跑 |
+| Git credential scan | PASS for current tracked tree | 最终 Code Review SHA 再跑，0 raw findings |
+| Forbidden artifact scan | PASS for current tracked tree | 最终 Code Review SHA 再跑 |
 | 业务数据库 raw credential scan | NOT RUN after live OAuth | 必须为 0 |
 | Django/runtime log scan | NOT RUN after live OAuth | 必须为 0 |
 | Nginx callback query scan | BLOCKED | 公网 callback 曾在进入 Django 前返回 404；须确认相关日志不含原始 query，并部署脱敏路由 |
@@ -136,7 +140,7 @@ Production synchronization = OFF
 3. 两平台真实授权引用的 MySQL 双 worker refresh 并发证据缺失。
 4. 真实流程后的数据库、Nginx、Django、Docker/Celery/CI 和浏览器扫描缺失。
 5. 公网 callback 路由与 query 日志脱敏未形成可接受证据。
-6. 容器镜像 digest 不可用；正式运行环境与 Review SHA 的构建链未完成。
+6. 容器镜像 digest 不可用；正式运行环境与 Code Review SHA 的构建链未完成。
 7. 架构、安全、测试和发布独立复审未签字。
 8. PR #41、#42、#43 仍为 Draft，正式平台连接基线未合并或形成独立批准的固定基线。
 
@@ -157,17 +161,17 @@ Production synchronization = OFF
 - [x] 订单/库存数据口径未因 OAuth 工程完成而默认批准。
 - [x] 全量初始化、增量游标、幂等、退款取消、库存口径和限流保留给 PR-A3 独立设计复审。
 
-准入判定：**2/9 边界项满足，7/9 核心准入项未满足；NOT APPROVED。**
+准入判定：**3/9 边界项满足，6/9 核心准入项未满足；NOT APPROVED。**
 
 ## 9. 关闭阻断项所需的最小证据包
 
-1. 从同一远程 Review SHA 构建固定镜像，记录 artifact SHA 和 image digest。
+1. 从同一远程 Code Review SHA 构建固定镜像，记录 artifact SHA 和 image digest。
 2. 在已部署脱敏 callback 路由的受控环境中，为 Shopee 和 TikTok Shop 分别创建新的 OAuth state。
 3. 完成两平台 OAuth、主体绑定、authorized shop、最小只读 metadata、refresh、并发 refresh、revoke 和 reauthorization。
 4. 每个平台、每个试点店铺独立记录 mask/reference/version/status/error code，不记录真实凭据。
 5. 真实流程后执行 Git、数据库、日志、浏览器和 API boundary 扫描，全部为 0 raw findings。
 6. 复核 Production 同步、订单、库存、webhook、定时任务、历史回补、财务、RPA 和平台写能力全部关闭。
-7. 架构、安全、测试、数据和发布负责人对同一 Review SHA 和同一制品签字。
+7. 架构、安全、测试、数据和发布负责人对同一 Code Review SHA、Evidence HEAD/CI SHA 和制品签字。
 8. 重跑 focused/full backend、frontend test/build、MySQL 8.4、Sandbox、CI 和相关真实平台场景。
 
 整改后不得只验证修改点，必须重新执行完整 A-REAL-PLATFORM-CONNECTION 复审。
@@ -177,13 +181,18 @@ Production synchronization = OFF
 ```text
 PR-A3 ENTRY REVIEW
 
-Review SHA: d36be683668f819f9471c9af3195ab37f443a9f3
+Code Review SHA: d36be683668f819f9471c9af3195ab37f443a9f3
+Artifact Source SHA: d36be683668f819f9471c9af3195ab37f443a9f3
+Last Fully Passed Evidence Baseline SHA: 4b16a9af4490d26a70298a00e097452bcf48aced
+Evidence HEAD SHA: <freeze from PR #43 headRefOid at signing>
+CI SHA: <must equal Evidence HEAD SHA>
+Evidence-only Diff: docs/00_stage0/review/pr_a3_entry_admission_review_materials.md only
 Artifact SHA-256: 35B344C87F0FD9F43EC9250B5339E86BDD464F80030D25D9E28C46362C093C63
 Image Digest: NOT AVAILABLE
 
 A-REAL-PLATFORM-CONNECTION Review: FAIL / REQUEST CHANGES
-Shopee: pending/live-validation
-TikTok Shop: pending/live-validation
+Shopee: pending/mock
+TikTok Shop: pending/mock
 Production Synchronization: OFF
 PR-A3 Admission: NOT APPROVED
 
