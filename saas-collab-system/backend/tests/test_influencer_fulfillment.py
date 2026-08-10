@@ -103,8 +103,7 @@ def test_outreach_external_id_allows_multiple_nulls_but_rejects_duplicates():
         source="feishu",
         external_id="record-1",
     )
-    with pytest.raises(IntegrityError), transaction.atomic():
-        OutreachTask.objects.create(
+    duplicate = OutreachTask(
             tenant=tenant,
             task_no="EXT-2",
             influencer=influencer,
@@ -114,6 +113,8 @@ def test_outreach_external_id_allows_multiple_nulls_but_rejects_duplicates():
             source="feishu",
             external_id="record-1",
         )
+    with pytest.raises(IntegrityError), transaction.atomic():
+        duplicate.save_base(force_insert=True)
 
 
 def test_outreach_rejects_cross_tenant_relations():
