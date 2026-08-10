@@ -29,6 +29,18 @@ class StateConflict(exceptions.APIException):
     default_code = ErrorCode.STATE_CONFLICT
 
 
+class VersionConflict(StateConflict):
+    error_code = ErrorCode.VERSION_CONFLICT
+    default_detail = "The supplied resource version is stale."
+    default_code = ErrorCode.VERSION_CONFLICT
+
+
+class IdempotencyConflict(StateConflict):
+    error_code = ErrorCode.IDEMPOTENCY_CONFLICT
+    default_detail = "The idempotency key was already used for a different request."
+    default_code = ErrorCode.IDEMPOTENCY_CONFLICT
+
+
 class DataScopeDenied(exceptions.PermissionDenied):
     error_code = ErrorCode.DATA_SCOPE_FORBIDDEN
 

@@ -1,0 +1,37 @@
+<view class="page">
+  <view class="card">
+    <view class="page-title">运行诊断</view>
+    <view class="diagnostic-row">
+      <text class="muted">环境</text>
+      <text>{{environment}}</text>
+    </view>
+    <view class="diagnostic-row">
+      <text class="muted">Mock</text>
+      <text>{{mock ? "启用" : "关闭"}}</text>
+    </view>
+    <view class="diagnostic-row">
+      <text class="muted">网络</text>
+      <text>{{networkType}}</text>
+    </view>
+    <view class="diagnostic-row">
+      <text class="muted">认证后端</text>
+      <text>{{backendStatus}}</text>
+    </view>
+    <view class="diagnostic-row">
+      <text class="muted">身份交换</text>
+      <text>{{providerExchange}}</text>
+    </view>
+    <view class="diagnostic-row diagnostic-url">
+      <text class="muted">API</text>
+      <text>{{apiBaseUrl}}</text>
+    </view>
+  </view>
+
+  <state-view
+    state="{{state}}"
+    title="{{state === 'offline' ? '当前离线' : '诊断完成'}}"
+    description="{{state === 'offline' ? '离线状态只允许读取明确可缓存的数据。' : '未发现阻断启动的问题。'}}"
+    action-text="重新检测"
+    bind:action="refreshNetwork"
+  />
+</view>

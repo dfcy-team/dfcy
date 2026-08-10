@@ -1,0 +1,24 @@
+{
+  "pages": [
+    "pages/bootstrap/index",
+    "pages/login/index",
+    "pages/home/index",
+    "pages/status/index",
+    "pages/supply-orders/index",
+    "pages/supply-order-detail/index",
+    "pages/releases/index",
+    "pages/release-detail/index",
+    "pages/consolidations/index",
+    "pages/consolidation-detail/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "SaaS 协同",
+    "navigationBarBackgroundColor": "#173a63",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f4f7fb",
+    "backgroundTextStyle": "light"
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
+  "sitemapLocation": "sitemap.json"
+}

@@ -1,0 +1,130 @@
+{
+  "schema_version": "sc-f2-label-font-candidate-manifest-v2",
+  "status": "REMEDIATED_PENDING_R3_RECHECK",
+  "asset_bundle_id": "sc-f2-label-font-v1-candidate-2",
+  "upstream": {
+    "project": "Google Fonts / Noto Sans SC",
+    "repository": "https://github.com/google/fonts",
+    "commit": "2894aab31764f10f29c421bdfd2340d3b382d384",
+    "commit_url": "https://github.com/google/fonts/commit/2894aab31764f10f29c421bdfd2340d3b382d384",
+    "source_path": "ofl/notosanssc/NotoSansSC[wght].ttf",
+    "source_url": "https://raw.githubusercontent.com/google/fonts/2894aab31764f10f29c421bdfd2340d3b382d384/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+    "source_blob_sha1": "fb0637bafbcd804fe32152370a1225990745b4bc",
+    "source_bytes": 17772300,
+    "source_sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+    "source_font_version": "Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603",
+    "retrieval_completed_at_utc": "2026-07-30T02:16:09.501Z"
+  },
+  "license": {
+    "spdx": "OFL-1.1",
+    "file": "LICENSE.txt",
+    "upstream_file": "OFL.txt",
+    "upstream_path": "ofl/notosanssc/OFL.txt",
+    "upstream_url": "https://raw.githubusercontent.com/google/fonts/2894aab31764f10f29c421bdfd2340d3b382d384/ofl/notosanssc/OFL.txt",
+    "upstream_blob_sha1": "1c9f43281b8f216c5461fe9ac729afbade7724e4",
+    "bytes": 4388,
+    "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9",
+    "renamed_without_byte_change": true,
+    "reserved_font_names": [
+      "Source"
+    ],
+    "candidate_primary_name_contains_reserved_font_name": false
+  },
+  "derivation": {
+    "kind": "variable-to-static-instance-and-primary-name-change",
+    "tool": "fontTools",
+    "tool_version": "4.63.0",
+    "tool_wheel_sha256": "445af2eab030a16b9171ea8bdda7ebf7d96bda2df88ee182a464252f6e05e20d",
+    "script_sha256": "51ac9c6fe50e4a57794b9c895bdb8cf0afe8689604efd9aabb6050960be683eb",
+    "python_version": "3.12.13",
+    "container_image": "python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de",
+    "network": "none",
+    "determinism_runs": 3,
+    "determinism_result": "BYTE_IDENTICAL"
+  },
+  "assets": [
+    {
+      "path": "SCF2LabelSans-Regular.ttf",
+      "role": "regular",
+      "axis": {
+        "wght": 400
+      },
+      "bytes": 10596408,
+      "sha256": "976a1010423aeb77217358385e27cdd5ea18afbac4d83c036999d5b9cacaa0b3",
+      "family": "SC F2 Label Sans",
+      "subfamily": "Regular",
+      "full_name": "SC F2 Label Sans Regular",
+      "postscript_name": "SCF2LabelSans-Regular",
+      "font_version": "Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603",
+      "outline": "TrueType",
+      "variable": false,
+      "weight_class": 400,
+      "width_class": 5,
+      "embedding": {
+        "fs_type": 0,
+        "rights": "INSTALLABLE_EMBEDDING",
+        "no_subsetting": false,
+        "bitmap_embedding_only": false
+      }
+    },
+    {
+      "path": "SCF2LabelSans-Bold.ttf",
+      "role": "bold",
+      "axis": {
+        "wght": 700
+      },
+      "bytes": 10585916,
+      "sha256": "fb03fe89d24b0b73b184a68d67dafb46132bf52e8685e7c6bfcf69863326cfe4",
+      "family": "SC F2 Label Sans",
+      "subfamily": "Bold",
+      "full_name": "SC F2 Label Sans Bold",
+      "postscript_name": "SCF2LabelSans-Bold",
+      "font_version": "Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603",
+      "outline": "TrueType",
+      "variable": false,
+      "weight_class": 700,
+      "width_class": 5,
+      "embedding": {
+        "fs_type": 0,
+        "rights": "INSTALLABLE_EMBEDDING",
+        "no_subsetting": false,
+        "bitmap_embedding_only": false
+      }
+    }
+  ],
+  "coverage": {
+    "tool": {
+      "name": "verify_sc_f2_font_bundle.py",
+      "repository_path": "backend/scripts/verify_sc_f2_font_bundle.py",
+      "script_sha256": "23c0ab79c4b45396343d90cf286e38820419671f5c7eb8eaa79e83749cc54427",
+      "fonttools_version": "4.63.0",
+      "fonttools_wheel_sha256": "445af2eab030a16b9171ea8bdda7ebf7d96bda2df88ee182a464252f6e05e20d"
+    },
+    "corpus": {
+      "schema_version": "sc-f2-label-font-corpus-v1",
+      "file_sha256": "4d28a684f034a90a10d9bc4d0e0ccde8ff41435887a1de8b4de55d0e833feb6f",
+      "positive_codepoints_count": 105,
+      "positive_codepoints_sha256": "18817beaf1ec51db9464fa3225ae1c1d4631801a29237c87b3bc727273975232"
+    },
+    "missing_glyphs": {
+      "SCF2LabelSans-Regular.ttf": 0,
+      "SCF2LabelSans-Bold.ttf": 0
+    }
+  },
+  "bundle_digest": {
+    "schema_version": "sc-f2-label-font-bundle-digest-v1",
+    "canonicalization": "UTF-8; JSON keys sorted; separators comma/colon; no BOM; no trailing LF; assets sorted by path; manifest excluded",
+    "sha256": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2"
+  },
+  "authorization": {
+    "renderer_versions": [],
+    "layout_versions": [],
+    "state": "BLOCKED_PENDING_R3_RECHECK_AND_R1_P2_002"
+  },
+  "admission": {
+    "font_binary_in_git": false,
+    "storage_decision": "NORMAL_GIT_PENDING_R3_RECHECK",
+    "renderer_implementation_authorized": false,
+    "next_gate": "SC-F2-LABEL-FONT-3_P1_REMEDIATION_RECHECK"
+  }
+}

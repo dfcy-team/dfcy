@@ -1,0 +1,80 @@
+.boundary {
+  border-color: #f1d496;
+  background: #fff9ea;
+  color: #6f571d;
+  line-height: 1.6;
+}
+.boundary-title {
+  margin-bottom: 8rpx;
+  color: #8a6200;
+  font-weight: 700;
+}
+.summary-number {
+  color: #173a63;
+  font-size: 60rpx;
+  font-weight: 700;
+}
+.order-header,
+.order-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+}
+.order-no {
+  color: #173a63;
+  font-weight: 700;
+}
+.order-status {
+  padding: 7rpx 14rpx;
+  border-radius: 999rpx;
+  background: #fff3d4;
+  color: #7a5a00;
+  font-size: 22rpx;
+}
+.status-in_production {
+  background: #eaf3fc;
+  color: #245d91;
+}
+.status-production_completed {
+  background: #e7f5ec;
+  color: #267047;
+}
+.order-supplier {
+  margin-top: 16rpx;
+  color: #53677d;
+}
+.order-meta {
+  margin-top: 18rpx;
+  color: #718398;
+  font-size: 23rpx;
+}
+.progress-track {
+  height: 14rpx;
+  margin-top: 24rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: #e7edf4;
+}
+.progress-value {
+  height: 100%;
+  border-radius: inherit;
+  background: #2f74b8;
+}
+.progress-label {
+  margin-top: 9rpx;
+  color: #65778c;
+  font-size: 22rpx;
+  text-align: right;
+}
+.load-more {
+  margin: 24rpx 0;
+  border: 1rpx solid #c8d6e5;
+  background: #fff;
+  color: #245d91;
+  font-size: 26rpx;
+}
+.list-end {
+  padding: 24rpx 0 36rpx;
+  text-align: center;
+}
