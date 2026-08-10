@@ -502,6 +502,31 @@ PERMISSION_DEFINITIONS = (
         "description": "Create, update, activate, and deactivate tenant-scoped influencer profiles.",
     },
     {
+        "code": "influencers.outreach.view", "name": "View outreach tasks",
+        "module": "influencers", "action": "outreach.view",
+        "description": "View tenant-scoped influencer outreach tasks.",
+    },
+    {
+        "code": "influencers.outreach.manage", "name": "Manage outreach tasks",
+        "module": "influencers", "action": "outreach.manage",
+        "description": "Create and transition audited tenant-scoped outreach tasks.",
+    },
+    {
+        "code": "influencers.fulfillment.view", "name": "View sample fulfillment",
+        "module": "influencers", "action": "fulfillment.view",
+        "description": "View tenant-scoped sample fulfillment records.",
+    },
+    {
+        "code": "influencers.fulfillment.manage", "name": "Manage sample fulfillment",
+        "module": "influencers", "action": "fulfillment.manage",
+        "description": "Create idempotent sample requests and transition fulfillment status.",
+    },
+    {
+        "code": "influencers.catalog.view", "name": "View influencer product prices",
+        "module": "influencers", "action": "catalog.view",
+        "description": "Query tenant, store and site scoped SKU price snapshots.",
+    },
+    {
         "code": "security.operations.view",
         "name": "View security operations",
         "module": "security",
