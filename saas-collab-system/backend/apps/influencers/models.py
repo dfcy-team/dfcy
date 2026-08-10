@@ -118,7 +118,7 @@ class OutreachTask(TenantValidatedModel):
     started_at = models.DateTimeField(null=True, blank=True)
     finalized_at = models.DateTimeField(null=True, blank=True)
     source = models.CharField(max_length=40, default="manual")
-    external_id = models.CharField(max_length=160, blank=True)
+    external_id = models.CharField(max_length=160, blank=True, null=True)
     version = models.PositiveIntegerField(default=1)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -129,7 +129,7 @@ class OutreachTask(TenantValidatedModel):
         ordering = ["tenant_id", "-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "task_no"], name="uniq_outreach_task_no"),
-            models.UniqueConstraint(fields=["tenant", "source", "external_id"], condition=~models.Q(external_id=""), name="uniq_outreach_external"),
+            models.UniqueConstraint(fields=["tenant", "source", "external_id"], name="uniq_outreach_external"),
         ]
         indexes = [models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status")]
 
@@ -152,7 +152,7 @@ class SampleFulfillment(TenantValidatedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="owned_sample_fulfillments")
     source = models.CharField(max_length=40, default="manual")
-    external_id = models.CharField(max_length=160, blank=True)
+    external_id = models.CharField(max_length=160, blank=True, null=True)
     version = models.PositiveIntegerField(default=1)
     notes = models.TextField(blank=True)
     finalized_at = models.DateTimeField(null=True, blank=True)
@@ -165,7 +165,7 @@ class SampleFulfillment(TenantValidatedModel):
         constraints = [
             models.UniqueConstraint(fields=["tenant", "fulfillment_no"], name="uniq_sample_fulfillment_no"),
             models.UniqueConstraint(fields=["tenant", "request_key"], name="uniq_sample_request_key"),
-            models.UniqueConstraint(fields=["tenant", "source", "external_id"], condition=~models.Q(external_id=""), name="uniq_sample_external"),
+            models.UniqueConstraint(fields=["tenant", "source", "external_id"], name="uniq_sample_external"),
         ]
         indexes = [models.Index(fields=["tenant", "owner", "status"], name="idx_sample_owner_status")]
 

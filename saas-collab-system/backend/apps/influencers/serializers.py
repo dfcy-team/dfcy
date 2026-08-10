@@ -47,6 +47,9 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "version", "created_at", "updated_at",
         )
 
+    def validate_external_id(self, value):
+        return value or None
+
 
 class SampleItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -72,6 +75,9 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id", "tenant_id", "status", "version", "finalized_at", "created_at", "updated_at",
         )
+
+    def validate_external_id(self, value):
+        return value or None
 
 
 class SkuPriceSnapshotSerializer(serializers.ModelSerializer):

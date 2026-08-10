@@ -68,7 +68,7 @@ class Migration(migrations.Migration):
                 ('started_at', models.DateTimeField(blank=True, null=True)),
                 ('finalized_at', models.DateTimeField(blank=True, null=True)),
                 ('source', models.CharField(default='manual', max_length=40)),
-                ('external_id', models.CharField(blank=True, max_length=160)),
+                ('external_id', models.CharField(blank=True, max_length=160, null=True)),
                 ('version', models.PositiveIntegerField(default=1)),
                 ('notes', models.TextField(blank=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
@@ -93,7 +93,7 @@ class Migration(migrations.Migration):
                 ('request_hash', models.CharField(max_length=64)),
                 ('status', models.CharField(choices=[('pending', 'Pending'), ('processing', 'Processing'), ('shipped', 'Shipped'), ('delivered', 'Delivered'), ('completed', 'Completed'), ('cancelled', 'Cancelled')], default='pending', max_length=20)),
                 ('source', models.CharField(default='manual', max_length=40)),
-                ('external_id', models.CharField(blank=True, max_length=160)),
+                ('external_id', models.CharField(blank=True, max_length=160, null=True)),
                 ('version', models.PositiveIntegerField(default=1)),
                 ('notes', models.TextField(blank=True)),
                 ('finalized_at', models.DateTimeField(blank=True, null=True)),
@@ -206,7 +206,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='outreachtask',
-            constraint=models.UniqueConstraint(condition=models.Q(('external_id', ''), _negated=True), fields=('tenant', 'source', 'external_id'), name='uniq_outreach_external'),
+            constraint=models.UniqueConstraint(fields=('tenant', 'source', 'external_id'), name='uniq_outreach_external'),
         ),
         migrations.AddIndex(
             model_name='samplefulfillment',
@@ -222,7 +222,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='samplefulfillment',
-            constraint=models.UniqueConstraint(condition=models.Q(('external_id', ''), _negated=True), fields=('tenant', 'source', 'external_id'), name='uniq_sample_external'),
+            constraint=models.UniqueConstraint(fields=('tenant', 'source', 'external_id'), name='uniq_sample_external'),
         ),
         migrations.AddConstraint(
             model_name='sampleitem',
