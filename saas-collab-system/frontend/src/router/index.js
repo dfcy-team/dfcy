@@ -42,6 +42,11 @@ const MySupplierPerformanceHistory = () => import('../views/suppliers/MySupplier
 const SiteProfileList = () => import('../views/listings/SiteProfileList.vue');
 const SiteProfileDetail = () => import('../views/listings/SiteProfileDetail.vue');
 const ListingTemplateList = () => import('../views/listings/ListingTemplateList.vue');
+const ListingWorkbench = () => import('../views/listings/ListingWorkbench.vue');
+const ListingTaskList = () => import('../views/listings/ListingTaskList.vue');
+const ListingMappingList = () => import('../views/listings/ListingMappingList.vue');
+const ListingLogList = () => import('../views/listings/ListingLogList.vue');
+const ListingExceptionList = () => import('../views/listings/ListingExceptionList.vue');
 const DevelopmentWorkspace = () => import('../views/development/DevelopmentWorkspace.vue');
 const PriceList = () => import('../views/pricing/PriceList.vue');
 const PriceDetail = () => import('../views/pricing/PriceDetail.vue');
@@ -178,6 +183,12 @@ const routes = [
       { path: 'listings/sites', component: SiteProfileList },
       { path: 'listings/sites/:id', component: SiteProfileDetail },
       { path: 'listings/templates', component: ListingTemplateList },
+      { path: 'listings/workbench', component: ListingWorkbench },
+      { path: 'listings/mappings/categories', component: ListingMappingList, props: { mode: 'category' } },
+      { path: 'listings/mappings/attributes', component: ListingMappingList, props: { mode: 'attribute' } },
+      { path: 'listings/tasks', component: ListingTaskList },
+      { path: 'listings/logs', component: ListingLogList },
+      { path: 'listings/exceptions', component: ListingExceptionList },
       { path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } },
       { path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } },
       { path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } },
