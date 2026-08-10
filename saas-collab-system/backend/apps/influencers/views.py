@@ -1,6 +1,8 @@
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import ValidationError
+from django.utils.dateparse import parse_datetime
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.views import APIView
 
 from apps.audit.services import write_operation_log
@@ -8,8 +10,43 @@ from apps.common.responses import paginated_data, success_response
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.ui_p2_scopes import require_all_scope
 
-from .models import Influencer
-from .serializers import InfluencerSerializer
+from .models import Influencer, OutreachTask, SampleFulfillment, SkuPriceSnapshot
+from .serializers import (
+    InfluencerSerializer,
+    OutreachTaskSerializer,
+    SampleFulfillmentSerializer,
+    SkuPriceSnapshotSerializer,
+)
+from .services import (
+    create_outreach_task,
+    create_sample_fulfillment,
+    transition_outreach_task,
+    transition_sample_fulfillment,
+)
+
+
+class Conflict(APIException):
+    status_code = 409
+    default_detail = "The resource changed or the idempotency key conflicts."
+    default_code = "conflict"
+
+
+def _pagination(request):
+    try:
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 20))
+    except ValueError as exc:
+        raise ValidationError("Pagination values must be integers.") from exc
+    if page < 1 or page_size < 1 or page_size > 100:
+        raise ValidationError("Invalid pagination range.")
+    return page, page_size
+
+
+def _expected_version(request):
+    raw = request.headers.get("If-Match", "").strip().strip('"')
+    if not raw.isdigit():
+        raise ValidationError({"If-Match": "A numeric resource version is required."})
+    return int(raw)
 
 
 class InfluencerCollectionView(APIView):
@@ -18,29 +55,33 @@ class InfluencerCollectionView(APIView):
     write_permission_code = "influencers.manage"
 
     def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
         queryset = Influencer.objects.filter(tenant=request.user.tenant)
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
-            queryset = queryset.filter(Q(code__icontains=search) | Q(name__icontains=search) | Q(handle__icontains=search))
+            queryset = queryset.filter(Q(code__icontains=search) | Q(name__icontains=search))
         if status:
             queryset = queryset.filter(status=status)
-        try:
-            page, page_size = int(request.query_params.get("page", 1)), int(request.query_params.get("page_size", 20))
-        except ValueError:
-            raise ValidationError("Pagination values must be integers.")
-        if page < 1 or page_size < 1 or page_size > 100:
-            raise ValidationError("Invalid pagination range.")
+        page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, InfluencerSerializer, page=page, page_size=page_size))
 
+    @transaction.atomic
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
         serializer = InfluencerSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         instance = serializer.save(tenant=request.user.tenant)
-        write_operation_log(tenant=request.user.tenant, user=request.user, module="influencers", action="create",
-                            object_type="influencer", object_id=instance.pk, after_data={"code": instance.code, "status": instance.status})
-        return success_response(InfluencerSerializer(instance, context={"request": request}).data, status=201)
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="influencers",
+            action="create",
+            object_type="influencer",
+            object_id=instance.pk,
+            after_data={"code": instance.code, "status": instance.status},
+        )
+        return success_response(InfluencerSerializer(instance).data, status=201)
 
 
 class InfluencerDetailView(APIView):
@@ -52,18 +93,28 @@ class InfluencerDetailView(APIView):
         return get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
-        return success_response(InfluencerSerializer(self.get_object(request, pk), context={"request": request}).data)
+        require_all_scope(request.user, self.read_permission_code)
+        return success_response(InfluencerSerializer(self.get_object(request, pk)).data)
 
+    @transaction.atomic
     def patch(self, request, pk):
-        instance = self.get_object(request, pk)
+        require_all_scope(request.user, self.write_permission_code)
+        instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         before = {"code": instance.code, "status": instance.status}
         serializer = InfluencerSerializer(instance, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         instance = serializer.save()
-        write_operation_log(tenant=request.user.tenant, user=request.user, module="influencers", action="update",
-                            object_type="influencer", object_id=instance.pk, before_data=before,
-                            after_data={"code": instance.code, "status": instance.status})
-        return success_response(serializer.data)
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="influencers",
+            action="update",
+            object_type="influencer",
+            object_id=instance.pk,
+            before_data=before,
+            after_data={"code": instance.code, "status": instance.status},
+        )
+        return success_response(InfluencerSerializer(instance).data)
 
 
 class InfluencerStatusView(APIView):
@@ -71,14 +122,162 @@ class InfluencerStatusView(APIView):
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
+    @transaction.atomic
     def post(self, request, pk):
-        instance = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        require_all_scope(request.user, self.write_permission_code)
+        instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        raw_version = request.headers.get("If-Match", "").strip().strip('"')
+        expected_updated_at = parse_datetime(raw_version)
+        if expected_updated_at is None:
+            raise ValidationError({"If-Match": "The current updated_at timestamp is required."})
+        if expected_updated_at != instance.updated_at:
+            raise Conflict({"If-Match": "Influencer was changed by another request."})
         status = request.data.get("status")
         if status not in Influencer.Status.values:
             raise ValidationError({"status": "Status must be active or inactive."})
         before = instance.status
         instance.status = status
         instance.save(update_fields=["status", "updated_at"])
-        write_operation_log(tenant=request.user.tenant, user=request.user, module="influencers", action="status_change",
-                            object_type="influencer", object_id=instance.pk, before_data={"status": before}, after_data={"status": status})
-        return success_response(InfluencerSerializer(instance, context={"request": request}).data)
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="influencers",
+            action="status_change",
+            object_type="influencer",
+            object_id=instance.pk,
+            before_data={"status": before},
+            after_data={"status": status},
+        )
+        return success_response(InfluencerSerializer(instance).data)
+
+
+class OutreachTaskCollectionView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        queryset = OutreachTask.objects.filter(tenant=request.user.tenant).select_related("influencer", "store", "owner", "dispatcher")
+        status = request.query_params.get("status", "").strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        page, page_size = _pagination(request)
+        return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size))
+
+    def post(self, request):
+        require_all_scope(request.user, self.write_permission_code)
+        serializer = OutreachTaskSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        task = create_outreach_task(user=request.user, validated_data=serializer.validated_data)
+        return success_response(OutreachTaskSerializer(task).data, status=201)
+
+
+class OutreachTaskStatusView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def post(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        task = get_object_or_404(OutreachTask, tenant=request.user.tenant, pk=pk)
+        try:
+            task = transition_outreach_task(
+                user=request.user,
+                task=task,
+                status=request.data.get("status", ""),
+                expected_version=_expected_version(request),
+            )
+        except ValidationError as exc:
+            if exc.get_codes() == {"version": "conflict"}:
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(OutreachTaskSerializer(task).data)
+
+
+class SampleFulfillmentCollectionView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.fulfillment.view"
+    write_permission_code = "influencers.fulfillment.manage"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).prefetch_related("items")
+        status = request.query_params.get("status", "").strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        page, page_size = _pagination(request)
+        return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
+
+    def post(self, request):
+        require_all_scope(request.user, self.write_permission_code)
+        request_key = request.headers.get("Idempotency-Key", "").strip()
+        if not request_key:
+            raise ValidationError({"Idempotency-Key": "This header is required."})
+        serializer = SampleFulfillmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated_data = dict(serializer.validated_data)
+        items = validated_data.pop("items", [])
+        try:
+            fulfillment, created = create_sample_fulfillment(
+                user=request.user,
+                request_key=request_key,
+                validated_data=validated_data,
+                item_payloads=items,
+            )
+        except ValidationError as exc:
+            if {"idempotency_key", "fulfillment_no"}.intersection(exc.detail):
+                raise Conflict(exc.detail) from exc
+            raise
+        fulfillment = SampleFulfillment.objects.prefetch_related("items").get(pk=fulfillment.pk)
+        return success_response(SampleFulfillmentSerializer(fulfillment).data, status=201 if created else 200)
+
+
+class SampleFulfillmentStatusView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.fulfillment.view"
+    write_permission_code = "influencers.fulfillment.manage"
+
+    def post(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        fulfillment = get_object_or_404(SampleFulfillment, tenant=request.user.tenant, pk=pk)
+        try:
+            fulfillment = transition_sample_fulfillment(
+                user=request.user,
+                fulfillment=fulfillment,
+                status=request.data.get("status", ""),
+                expected_version=_expected_version(request),
+                reason=request.data.get("reason", ""),
+            )
+        except ValidationError as exc:
+            if exc.get_codes() == {"version": "conflict"}:
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(SampleFulfillmentSerializer(fulfillment).data)
+
+
+class ProductPriceLookupView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.catalog.view"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        store_id = request.query_params.get("store_id", "").strip()
+        site_code = request.query_params.get("site_code", "").strip()
+        sku = request.query_params.get("sku", "").strip()
+        product_id = request.query_params.get("product_id", "").strip()
+        if not store_id.isdigit() or not site_code or not (sku or product_id):
+            raise ValidationError("store_id, site_code and either sku or product_id are required.")
+        queryset = SkuPriceSnapshot.objects.select_related("listing", "listing__store").filter(
+            tenant=request.user.tenant,
+            listing__store_id=int(store_id),
+            listing__site_code=site_code,
+        )
+        if sku:
+            queryset = queryset.filter(external_sku__iexact=sku)
+        if product_id:
+            queryset = queryset.filter(listing__external_product_id=product_id)
+        rows = list(queryset.order_by("external_sku", "variant_id", "-source_updated_at", "-id"))
+        if not rows:
+            return success_response({"matched": False, "reason": "data_source_not_imported", "results": []})
+        return success_response({"matched": True, "reason": "", "results": SkuPriceSnapshotSerializer(rows, many=True).data})

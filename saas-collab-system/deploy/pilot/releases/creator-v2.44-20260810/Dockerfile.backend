@@ -1,0 +1,20 @@
+# The base must be supplied as an immutable image reference, for example
+# registry.example/backend@sha256:<digest>. No mutable tag is accepted.
+ARG BACKEND_BASE_IMAGE_DIGEST
+FROM ${BACKEND_BASE_IMAGE_DIGEST}
+
+ARG BACKEND_BASE_IMAGE_DIGEST
+RUN case "${BACKEND_BASE_IMAGE_DIGEST}" in *@sha256:*) ;; *) echo "BACKEND_BASE_IMAGE_DIGEST must contain @sha256:" >&2; exit 1 ;; esac
+
+ARG RELEASE_REVISION
+RUN test "${#RELEASE_REVISION}" -eq 40 && case "${RELEASE_REVISION}" in *[!0-9a-f]*) exit 1 ;; *) exit 0 ;; esac
+
+LABEL org.opencontainers.image.version="creator-v2.44-20260810" \
+      org.opencontainers.image.revision="${RELEASE_REVISION}"
+
+WORKDIR /app
+
+# This release is an additive layer over the validated VM morning image.
+COPY backend/apps/influencers/ /app/apps/influencers/
+COPY backend/apps/permissions/catalog.py /app/apps/permissions/catalog.py
+COPY backend/apps/permissions/migrations/0025_expand_influencer_permissions.py /app/apps/permissions/migrations/0025_expand_influencer_permissions.py

@@ -1,0 +1,11 @@
+services:
+  migrate:
+    image: ${PILOT_BACKEND_IMAGE:?Set PILOT_BACKEND_IMAGE to an immutable @sha256 backend image}
+  backend:
+    image: ${PILOT_BACKEND_IMAGE:?Set PILOT_BACKEND_IMAGE to an immutable @sha256 backend image}
+  celery:
+    image: ${PILOT_BACKEND_IMAGE:?Set PILOT_BACKEND_IMAGE to an immutable @sha256 backend image}
+  celery-beat:
+    image: ${PILOT_BACKEND_IMAGE:?Set PILOT_BACKEND_IMAGE to an immutable @sha256 backend image}
+  frontend:
+    image: ${PILOT_FRONTEND_IMAGE:?Set PILOT_FRONTEND_IMAGE to an immutable @sha256 frontend image}

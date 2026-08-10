@@ -86,7 +86,10 @@ const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
-const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
+const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
+const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
+const InfluencerResourceLibrary = () => import('../views/influencers/InfluencerResourceLibrary.vue');
+const InfluencerReadOnlyPage = () => import('../views/influencers/InfluencerReadOnlyPage.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
@@ -226,7 +229,13 @@ const routes = [
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
-      { path: 'influencers', component: InfluencerList },
+      { path: 'influencers', redirect: '/influencers/library' },
+      { path: 'influencers/outreach', component: OutreachTaskList },
+      { path: 'influencers/fulfillment', component: SampleFulfillmentList },
+      { path: 'influencers/videos', component: InfluencerReadOnlyPage, props: { title: '视频结果', description: '达人视频与店铺、商品、建联任务的关联结果。' } },
+      { path: 'influencers/performance', component: InfluencerReadOnlyPage, props: { title: 'BD绩效', description: '联盟订单、送样和视频事实将在后台归因后展示。' } },
+      { path: 'influencers/orders', component: InfluencerReadOnlyPage, props: { title: '店铺订单', description: '联盟订单作为数据源并入店铺订单，不单独建菜单。' } },
+      { path: 'influencers/library', component: InfluencerResourceLibrary },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }
