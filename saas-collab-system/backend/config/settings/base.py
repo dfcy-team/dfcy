@@ -87,6 +87,10 @@ LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH = os.getenv("LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH
 LIVE_TIKTOK_METADATA_PATH = os.getenv("LIVE_TIKTOK_METADATA_PATH", "/seller/202309/permissions")
 LIVE_TIKTOK_DEFAULT_SCOPE = os.getenv("LIVE_TIKTOK_DEFAULT_SCOPE", "")
 
+# PR-A3 phase 1 accepts only the reviewed normalized synthetic contract.
+# It is disabled unless an operator explicitly enables offline import testing.
+PR_A3_SYNTHETIC_IMPORT_ENABLED = env_bool("PR_A3_SYNTHETIC_IMPORT_ENABLED", False)
+
 DEFAULT_EXCEPTION_REPORTER_FILTER = (
     "apps.integrations.exception_reporting.MarketplaceOAuthExceptionReporterFilter"
 )
@@ -111,6 +115,7 @@ INSTALLED_APPS = [
     "apps.permissions",
     "apps.rpa",
     "apps.integrations",
+    "apps.marketplace_imports",
     "apps.audit",
     "apps.files",
     "apps.products",

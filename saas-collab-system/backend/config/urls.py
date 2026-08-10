@@ -7,6 +7,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/internal/", include("apps.accounts.urls_internal")),
     path("api/internal/integrations/", include("apps.integrations.urls_internal")),
+    path("api/internal/marketplace-imports/", include("apps.marketplace_imports.urls")),
     path("api/internal/analytics/", include("apps.reports.urls_internal")),
     path("api/internal/alerts/", include("apps.alerts.urls")),
     path("api/internal/replenishment/", include("apps.replenishment.urls")),

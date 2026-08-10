@@ -339,3 +339,17 @@ UI-P8 列表统一支持 `page`、`page_size`、`environment`、`status` 及合�
 | 平台门店同步/重试 | 后续 | sync、retry | POST | 未冻结 | 未注册路由 | 无 | pending |
 
 > PR-A1 只完成合同、模型、引用式凭据、权限和只读查询基础。未执行真实 OAuth、Sandbox 店铺请求或字段联调，所有 Shopee/TikTok Shop 能力均不得标记为 `connected`。
+
+## PR-A3 销售与库存离线导入 API 映射
+
+本阶段没有新增前端页面或真实同步入口。以下接口仅供后续受控内部 UI 使用，当前只能提交 `pr-a3-normalized-v1` synthetic contract。
+
+| 能力 | API | Method | exact permission | 当前状态 |
+|---|---|---|---|---|
+| 执行离线导入 | `/api/internal/marketplace-imports/imports/` | POST | `integrations.store.sync` | development / default OFF |
+| 查询批次 | `/api/internal/marketplace-imports/batches/` | GET | `integrations.store.view` | development |
+| 重试失败批次 | `/api/internal/marketplace-imports/batches/{id}/retry/` | POST | `integrations.store.retry` | development / default OFF |
+| 查询 normalized 订单/退款 | `/api/internal/marketplace-imports/orders/` | GET | `integrations.store.view` | development |
+| 查询库存快照 | `/api/internal/marketplace-imports/inventory/` | GET | `integrations.store.view` | development |
+
+前端不得提交 tenant、platform、平台店铺主体、credential 或原始平台 payload。真实 Shopee/TikTok adapter 等待用户提供批准的脱敏响应样本；两平台保持 `pending/mock`，Production synchronization OFF。
