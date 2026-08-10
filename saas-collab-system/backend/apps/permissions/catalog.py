@@ -35,6 +35,46 @@ PERMISSION_DEFINITIONS = (
         "description": "Freeze authorized SPU and SKU codes without changing lifecycle state.",
     },
     {
+        "code": "products.category.view", "name": "查看商品分类", "module": "products",
+        "action": "category.view", "description": "查看当前租户的商品分类。",
+    },
+    {
+        "code": "products.category.manage", "name": "维护商品分类", "module": "products",
+        "action": "category.manage", "description": "新增和维护商品三级分类。",
+    },
+    {
+        "code": "products.color.view", "name": "查看颜色字典", "module": "products",
+        "action": "color.view", "description": "查看当前租户的颜色编码字典。",
+    },
+    {
+        "code": "products.color.manage", "name": "维护颜色字典", "module": "products",
+        "action": "color.manage", "description": "新增和维护颜色编码。",
+    },
+    {
+        "code": "products.attribute.view", "name": "查看商品属性", "module": "products",
+        "action": "attribute.view", "description": "查看末级分类的 SKU 属性定义。",
+    },
+    {
+        "code": "products.attribute.manage", "name": "维护商品属性", "module": "products",
+        "action": "attribute.manage", "description": "维护末级分类的 SKU 属性及编码顺序。",
+    },
+    {
+        "code": "products.specification.view", "name": "查看商品规格", "module": "products",
+        "action": "specification.view", "description": "查看末级分类的 SKU 规格维度。",
+    },
+    {
+        "code": "products.specification.manage", "name": "维护商品规格", "module": "products",
+        "action": "specification.manage", "description": "维护末级分类的 SKU 规格维度及编码顺序。",
+    },
+    {
+        "code": "products.bundle.view", "name": "查看组合商品", "module": "products",
+        "action": "bundle.view", "description": "查看由现有 SKU 组成的组合 SKU。",
+    },
+    {
+        "code": "products.bundle.manage", "name": "维护组合商品", "module": "products",
+        "action": "bundle.manage", "description": "创建组合 SKU 并维护其现有 SKU 组成明细。",
+    },
+    {
         "code": "purchasing.orders.view",
         "name": "View purchase orders",
         "module": "purchasing",
@@ -448,6 +488,45 @@ PERMISSION_DEFINITIONS = (
         "description": "Create, update, activate, and deactivate tenant master data.",
     },
     {
+        "code": "influencers.view",
+        "name": "View influencers",
+        "module": "influencers",
+        "action": "view",
+        "description": "View tenant-scoped influencer profiles and masked contact details.",
+    },
+    {
+        "code": "influencers.manage",
+        "name": "Manage influencers",
+        "module": "influencers",
+        "action": "manage",
+        "description": "Create, update, activate, and deactivate tenant-scoped influencer profiles.",
+    },
+    {
+        "code": "influencers.outreach.view", "name": "View outreach tasks",
+        "module": "influencers", "action": "outreach.view",
+        "description": "View tenant-scoped influencer outreach tasks.",
+    },
+    {
+        "code": "influencers.outreach.manage", "name": "Manage outreach tasks",
+        "module": "influencers", "action": "outreach.manage",
+        "description": "Create and transition audited tenant-scoped outreach tasks.",
+    },
+    {
+        "code": "influencers.fulfillment.view", "name": "View sample fulfillment",
+        "module": "influencers", "action": "fulfillment.view",
+        "description": "View tenant-scoped sample fulfillment records.",
+    },
+    {
+        "code": "influencers.fulfillment.manage", "name": "Manage sample fulfillment",
+        "module": "influencers", "action": "fulfillment.manage",
+        "description": "Create idempotent sample requests and transition fulfillment status.",
+    },
+    {
+        "code": "influencers.catalog.view", "name": "View influencer product prices",
+        "module": "influencers", "action": "catalog.view",
+        "description": "Query tenant, store and site scoped SKU price snapshots.",
+    },
+    {
         "code": "security.operations.view",
         "name": "View security operations",
         "module": "security",
@@ -537,6 +616,36 @@ PERMISSION_DEFINITIONS = (
     {
         "code": "pilot.security_review.review", "name": "Review pilot security reviews", "module": "pilot",
         "action": "security_review.review", "description": "Approve or reject security reviews with separation of duties.",
+    },
+    # Global listing workbench permissions.  Legacy profile/template codes are
+    # retained and accepted by the listings permission adapters.
+    {
+        "code": "listings.workbench.view", "name": "查看全球刊登工作台", "module": "listings",
+        "action": "workbench.view", "description": "查看租户范围内的全球刊登商品、店铺和模板选择器。",
+    },
+    {
+        "code": "listings.workbench.manage", "name": "管理全球刊登工作台", "module": "listings",
+        "action": "workbench.manage", "description": "批量生成租户范围内的刊登草稿。",
+    },
+    {
+        "code": "listings.mapping.view", "name": "查看平台类目与属性映射", "module": "listings",
+        "action": "mapping.view", "description": "查看租户范围内的平台类目及商品属性映射。",
+    },
+    {
+        "code": "listings.mapping.manage", "name": "维护平台类目与属性映射", "module": "listings",
+        "action": "mapping.manage", "description": "维护租户范围内的平台类目及商品属性映射。",
+    },
+    {
+        "code": "listings.task.view", "name": "查看刊登任务与日志", "module": "listings",
+        "action": "task.view", "description": "查看刊登任务、步骤日志和异常。",
+    },
+    {
+        "code": "listings.task.manage", "name": "管理刊登任务", "module": "listings",
+        "action": "task.manage", "description": "发起、重试或记录刊登执行任务；不代表已接通外部平台。",
+    },
+    {
+        "code": "listings.publish.production", "name": "确认生产刊登", "module": "listings",
+        "action": "publish.production", "description": "二次确认生产模式的刊登任务。",
     },
     *(
         {

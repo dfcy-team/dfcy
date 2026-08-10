@@ -1,6 +1,17 @@
 from django.urls import path
 
 from .views import (
+    product_bundle_component_collection,
+    product_bundle_component_detail,
+    product_category_collection,
+    product_attribute_collection,
+    product_attribute_detail,
+    product_category_detail,
+    product_category_attributes,
+    product_coding_options,
+    product_color_collection,
+    product_color_detail,
+    import_standard_product_colors,
     freeze_product_spu_code,
     confirm_status_recommendation,
     evaluate_mock_status_view,
@@ -8,6 +19,10 @@ from .views import (
     product_research_detail,
     product_sku_collection,
     product_sku_detail,
+    product_sku_image,
+    product_legacy_collection,
+    product_legacy_detail,
+    product_legacy_generate,
     product_spu_collection,
     product_spu_detail,
     reject_status_recommendation,
@@ -18,6 +33,15 @@ from .views import (
 
 
 urlpatterns = [
+    path("coding-options/", product_coding_options, name="product-coding-options"),
+    path("attributes/", product_attribute_collection, name="product-attribute-collection"),
+    path("attributes/<int:pk>/", product_attribute_detail, name="product-attribute-detail"),
+    path("categories/", product_category_collection, name="product-category-collection"),
+    path("categories/<int:pk>/", product_category_detail, name="product-category-detail"),
+    path("categories/<int:pk>/attributes/", product_category_attributes, name="product-category-attributes"),
+    path("colors/", product_color_collection, name="product-color-collection"),
+    path("colors/<int:pk>/", product_color_detail, name="product-color-detail"),
+    path("colors/import-standard/", import_standard_product_colors, name="product-color-import-standard"),
     path("research/", product_research_collection, name="product-research-collection"),
     path("research/<int:pk>/", product_research_detail, name="product-research-detail"),
     path("spus/", product_spu_collection, name="product-spu-collection"),
@@ -25,6 +49,12 @@ urlpatterns = [
     path("spus/<int:pk>/freeze-code/", freeze_product_spu_code, name="product-spu-freeze-code"),
     path("skus/", product_sku_collection, name="product-sku-collection"),
     path("skus/<int:pk>/", product_sku_detail, name="product-sku-detail"),
+    path("skus/<int:pk>/image/", product_sku_image, name="product-sku-image"),
+    path("legacy-items/", product_legacy_collection, name="product-legacy-collection"),
+    path("legacy-items/<int:pk>/", product_legacy_detail, name="product-legacy-detail"),
+    path("legacy-items/<int:pk>/generate/", product_legacy_generate, name="product-legacy-generate"),
+    path("bundle-components/", product_bundle_component_collection, name="product-bundle-component-collection"),
+    path("bundle-components/<int:pk>/", product_bundle_component_detail, name="product-bundle-component-detail"),
     path("status-recommendations/", status_recommendation_collection, name="product-status-recommendation-collection"),
     path(
         "status-recommendations/<int:pk>/",

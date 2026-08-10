@@ -78,7 +78,7 @@ def test_drf_validation_exception_uses_unified_format():
     assert response.status_code == 400
     assert response.data["success"] is False
     assert response.data["code"] == ErrorCode.VALIDATION_ERROR
-    assert response.data["message"] == "error message"
+    assert response.data["message"] == "This field is required."
     assert "name" in response.data["data"]
 
 

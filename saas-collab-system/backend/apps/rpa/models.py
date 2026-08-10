@@ -37,6 +37,7 @@ class RPAAgent(models.Model):
     class ExecutionMode(models.TextChoices):
         MOCK = "mock", "Mock"
         DRY_RUN = "dry_run", "Dry run"
+        PRODUCTION = "production", "Production"
         PRODUCTION_DISABLED = "production_disabled", "Production disabled"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="rpa_agents")
@@ -92,6 +93,11 @@ class BigSellerAccount(models.Model):
 
 
 class RPATask(models.Model):
+    class ExecutionMode(models.TextChoices):
+        MOCK = "mock", "Mock"
+        DRY_RUN = "dry_run", "Dry run"
+        PRODUCTION = "production", "Production"
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CLAIMED = "claimed", "Claimed"
@@ -107,6 +113,7 @@ class RPATask(models.Model):
     business_type = models.CharField(max_length=80)
     business_id = models.CharField(max_length=80)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.PENDING)
+    execution_mode = models.CharField(max_length=20, choices=ExecutionMode.choices, default=ExecutionMode.DRY_RUN)
     priority = models.IntegerField(default=0)
     payload = models.JSONField(default=dict, blank=True)
     result = models.JSONField(default=dict, blank=True)
