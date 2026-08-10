@@ -1,6 +1,6 @@
 # TikTok Shop 正式平台合同对齐记录
 
-复核日期：2026-08-07。来源为 TikTok Shop Partner Center 当前官方文档；执行真实试点当日仍须在获批应用控制台复核 market、scope 与 redirect。
+复核日期：2026-08-10。来源为 TikTok Shop Partner Center 当前官方文档；执行真实试点当日仍须在获批应用控制台复核 market、scope 与 redirect。
 
 ## 已对齐合同
 
@@ -11,6 +11,8 @@
 - authorized shops：`GET /authorization/202309/shops`，从平台响应取得 `shop_id` 与 `shop_cipher`。
 - 最小 metadata：`GET /seller/202309/permissions`，仅验证批准的只读 scope。
 - Open API：请求使用 `x-tts-access-token`；签名排除 `sign`/`access_token`，按官方顺序拼接 path、参数及适用 body，并以 App Secret 执行 HMAC-SHA256。
+
+官方依据：`https://partner.tiktokshop.com/docv2/page/authorization-guide-202309`、`https://partner.tiktokshop.com/docv2/page/get-authorized-shops`、`https://partner.tiktokshop.com/docv2/page/sign-your-api-request`。
 
 ## 尚未冻结
 

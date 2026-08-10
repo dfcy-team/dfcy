@@ -141,3 +141,14 @@ git diff --stat
 - 操作按钮继续执行 `integrations.store.authorize`、`integrations.credential.rotate`、`integrations.store.revoke` 精确权限；Mock 不生成真实授权地址。
 - 验证：新增前端契约测试 3 passed；前端全量 163 passed；production build PASS（1957 modules）；CI guard 和 `git diff --check` PASS。
 - 未执行真实 OAuth，未改变 `pending/mock` capability，也未启用同步任务。
+
+## 9. 非真实连接 P1 整改（2026-08-10）
+
+- 固定代码源 SHA：`c3307626affdae78c14db66dc19ad7c65744ae39`。
+- 固定源码制品：`a-real-platform-c3307626.zip`，SHA-256 `962cfe48451856d09b3a633fb195057037137d7eafb60e67a23b44a7b088f2f0`；该制品不等同于运行镜像。
+- Shopee initiate 对齐当前官方 seller authorization URL/参数；只做离线 URL 合同测试，未打开页面、未交换 code。
+- 增加 `file` custody：凭据保存在 Git 与业务数据库之外的 operator-owned 挂载目录；业务数据库仍只接收 reference/mask/version/status/time。默认 backend 继续为 `refuse`。
+- live callback 成功或受控失败后 303 到精确 allowlist 的无 query HTTPS 页面，并设置 `no-store`/`no-referrer`；Nginx callback access log 关闭，Gunicorn access format 排除 query/request line。
+- focused 34 passed；backend 539 passed / 3 skipped；frontend 163 passed；build 1957 modules；Django check、migration drift、SQLite fresh/upgrade、Compose config、CI guard、`git diff --check` 均 PASS。
+- Docker daemon 在只读检查时超时，当前 SHA 的 MySQL 8.4、容器镜像 digest 与容器日志扫描未生成，继续列为 P1。
+- Shopee/TikTok 真实 OAuth、authorized shop、minimal read、refresh/revoke/reauthorization 与真实流量后扫描全部 `NOT RUN`；两平台保持 `pending/mock`，Production synchronization 保持 OFF。
