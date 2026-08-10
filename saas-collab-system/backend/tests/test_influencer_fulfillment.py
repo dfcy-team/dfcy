@@ -218,6 +218,17 @@ def test_workflow_models_require_audited_state_machine_writes_and_stale_versions
     )
     store, influencer, task = base_records(tenant, user, "guard")
 
+    with pytest.raises(DjangoValidationError):
+        OutreachTask.objects.create(
+            tenant=tenant,
+            task_no="ILLEGAL-TERMINAL-CREATE",
+            influencer=influencer,
+            store=store,
+            dispatcher=user,
+            owner=user,
+            status=OutreachTask.Status.COMPLETED,
+        )
+
     task.status = OutreachTask.Status.IN_PROGRESS
     with pytest.raises(DjangoValidationError):
         task.save()
@@ -375,6 +386,33 @@ def test_fulfillment_number_race_is_reported_as_a_domain_conflict(monkeypatch):
             item_payloads=[],
         )
     assert error.value.get_codes() == {"fulfillment_no": "conflict"}
+
+
+def test_fulfillment_number_domain_conflict_maps_to_http_409(monkeypatch):
+    tenant = Tenant.objects.create(name="Tenant", code="fulfillment-number-http-conflict")
+    user, client = user_with_permissions(tenant, "fulfillment-http-user", "influencers.fulfillment.manage")
+    store, influencer, task = base_records(tenant, user, "fulfillment-http")
+
+    import apps.influencers.views as influencer_views
+
+    def raise_number_conflict(**kwargs):
+        raise DRFValidationError({"fulfillment_no": "Fulfillment number already exists."}, code="conflict")
+
+    monkeypatch.setattr(influencer_views, "create_sample_fulfillment", raise_number_conflict)
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "HTTP-CONFLICT",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "owner": user.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="http-conflict-key",
+    )
+    assert response.status_code == 409
 
 
 def test_requested_sku_nullable_migration_is_explicitly_irreversible():

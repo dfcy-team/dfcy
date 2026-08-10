@@ -226,7 +226,7 @@ class SampleFulfillmentCollectionView(APIView):
                 item_payloads=items,
             )
         except ValidationError as exc:
-            if "idempotency_key" in exc.detail:
+            if {"idempotency_key", "fulfillment_no"}.intersection(exc.detail):
                 raise Conflict(exc.detail) from exc
             raise
         fulfillment = SampleFulfillment.objects.prefetch_related("items").get(pk=fulfillment.pk)

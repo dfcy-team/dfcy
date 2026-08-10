@@ -90,9 +90,17 @@ class StateMachineTenantModel(TenantValidatedModel):
         abstract = True
 
     protected_state_fields = ()
+    initial_state_values = {}
 
     def _assert_state_fields_unchanged(self):
         if self._state.adding or not self.pk:
+            invalid = {
+                field: "Workflow records must be created in their initial state."
+                for field, expected in self.initial_state_values.items()
+                if getattr(self, field) != expected
+            }
+            if invalid:
+                raise ValidationError(invalid)
             return
         persisted = type(self).objects.filter(pk=self.pk).values(*self.protected_state_fields).first()
         if persisted is None:
@@ -130,6 +138,7 @@ class InfluencerRestriction(TenantValidatedModel):
 
 class OutreachTask(StateMachineTenantModel):
     protected_state_fields = ("status", "version", "started_at", "finalized_at")
+    initial_state_values = {"status": "pending", "version": 1, "started_at": None, "finalized_at": None}
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -165,6 +174,7 @@ class OutreachTask(StateMachineTenantModel):
 
 class SampleFulfillment(StateMachineTenantModel):
     protected_state_fields = ("status", "version", "finalized_at")
+    initial_state_values = {"status": "pending", "version": 1, "finalized_at": None}
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

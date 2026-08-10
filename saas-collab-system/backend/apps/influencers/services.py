@@ -234,10 +234,11 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             if existing.request_hash != request_hash:
                 raise ValidationError({"idempotency_key": "Key was already used with a different payload."}, code="conflict") from exc
             return existing, False
-        if SampleFulfillment.objects.filter(
+        competing_number = SampleFulfillment.objects.select_for_update().filter(
             tenant=user.tenant,
             fulfillment_no=fulfillment.fulfillment_no,
-        ).exists():
+        ).first()
+        if competing_number is not None:
             raise ValidationError({"fulfillment_no": "Fulfillment number already exists."}, code="conflict") from exc
         raise
 
