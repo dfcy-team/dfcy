@@ -77,6 +77,40 @@ class IsProductMasterReadOrManage(ProductBusinessPermission):
     write_permission_code = "products.master.manage"
 
 
+class IsProductCategoryReadOrManage(ProductBusinessPermission):
+    read_permission_code = "products.category.view"
+    write_permission_code = "products.category.manage"
+
+
+class IsProductColorReadOrManage(ProductBusinessPermission):
+    read_permission_code = "products.color.view"
+    write_permission_code = "products.color.manage"
+
+
+class IsProductAttributeReadOrManage(ProductBusinessPermission):
+    read_permission_code = "products.attribute.view"
+    write_permission_code = "products.attribute.manage"
+
+    def has_permission(self, request, view):
+        user = request.user
+        codes = (
+            ("products.attribute.view", "products.specification.view")
+            if request.method == "GET"
+            else ("products.attribute.manage", "products.specification.manage")
+        )
+        return bool(
+            user
+            and user.is_authenticated
+            and user.user_type == CustomUser.UserType.INTERNAL
+            and any(check_user_permission(user, code) and get_permission_data_scopes(user, code) for code in codes)
+        )
+
+
+class IsProductBundleReadOrManage(ProductBusinessPermission):
+    read_permission_code = "products.bundle.view"
+    write_permission_code = "products.bundle.manage"
+
+
 class IsProductCodeFreezer(ProductBusinessPermission):
     write_permission_code = "products.master.freeze"
 
