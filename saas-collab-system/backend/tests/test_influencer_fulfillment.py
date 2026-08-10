@@ -3,6 +3,7 @@ import importlib
 import pytest
 from django.apps import apps as django_apps
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -72,6 +73,47 @@ def base_records(tenant, user, suffix="a"):
         owner=user,
     )
     return store, influencer, task
+
+
+def test_outreach_external_id_allows_multiple_nulls_but_rejects_duplicates():
+    tenant = Tenant.objects.create(name="Tenant", code="outreach-external-id")
+    user = CustomUser.objects.create_user(username="external-id-user", tenant=tenant)
+    store = store_for(tenant, "external-id-store")
+    influencer = Influencer.objects.create(tenant=tenant, code="external-id-creator", name="Creator", platform="tiktok")
+
+    for number in (1, 2):
+        OutreachTask.objects.create(
+            tenant=tenant,
+            task_no=f"NULL-EXT-{number}",
+            influencer=influencer,
+            store=store,
+            dispatcher=user,
+            owner=user,
+            source="manual",
+            external_id=None,
+        )
+
+    OutreachTask.objects.create(
+        tenant=tenant,
+        task_no="EXT-1",
+        influencer=influencer,
+        store=store,
+        dispatcher=user,
+        owner=user,
+        source="feishu",
+        external_id="record-1",
+    )
+    with pytest.raises(IntegrityError), transaction.atomic():
+        OutreachTask.objects.create(
+            tenant=tenant,
+            task_no="EXT-2",
+            influencer=influencer,
+            store=store,
+            dispatcher=user,
+            owner=user,
+            source="feishu",
+            external_id="record-1",
+        )
 
 
 def test_outreach_rejects_cross_tenant_relations():
