@@ -1,3 +1,7 @@
+import logging
+from urllib.parse import urlencode
+
+from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -33,6 +37,7 @@ from apps.permissions.ui_p6_scopes import (
 )
 
 from .credential_service import reject_raw_credential_fields, rotate_config_references
+from .capability import get_live_callback_result_uri, live_network_mode_enabled
 from .marketplace_oauth_service import (
     complete_marketplace_oauth_callback,
     refresh_marketplace_authorization,
@@ -49,6 +54,8 @@ from .models import (
     SyncJob,
     SyncRun,
 )
+from .exception_reporting import redact_callback_request
+from .oauth_errors import OAUTH_DATABASE_FAILURE, OAuthFlowError
 from .product_mapping_service import (
     confirm_product_mapping,
     create_product_mapping,
@@ -71,6 +78,9 @@ from .serializers import (
 )
 from .store_mapping_service import create_store_mapping, update_store_mapping
 from .sync_services import run_sync_job
+
+
+logger = logging.getLogger(__name__)
 
 
 def health_response(service):
@@ -327,8 +337,53 @@ def start_marketplace_store_oauth(request):
     return success_response(result, status=201)
 
 
+def _live_callback_result_response(platform, result, error_code="", *, result_uri=None):
+    query = {"oauth": result, "platform": platform}
+    if error_code:
+        query["error_code"] = error_code
+    redirect_uri = result_uri or get_live_callback_result_uri()
+    response = HttpResponseRedirect(f"{redirect_uri}?{urlencode(query)}")
+    response.status_code = 303
+    response["Cache-Control"] = "no-store"
+    response["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 def _marketplace_oauth_callback(request, platform):
-    authorization = complete_marketplace_oauth_callback(platform=platform, query_params=request.query_params)
+    callback_params = request.query_params.copy()
+    redact_callback_request(request)
+    live_mode = live_network_mode_enabled()
+    result_uri = None
+    try:
+        if live_mode:
+            result_uri = get_live_callback_result_uri()
+        authorization = complete_marketplace_oauth_callback(
+            platform=platform,
+            query_params=callback_params,
+        )
+    except OAuthFlowError as exc:
+        if live_mode and result_uri:
+            return _live_callback_result_response(
+                platform,
+                "error",
+                exc.controlled_code,
+                result_uri=result_uri,
+            )
+        raise
+    except Exception:
+        logger.exception("Marketplace OAuth callback failed with an unexpected internal error.")
+        if live_mode and result_uri:
+            return _live_callback_result_response(
+                platform,
+                "error",
+                OAUTH_DATABASE_FAILURE,
+                result_uri=result_uri,
+            )
+        raise OAuthFlowError(OAUTH_DATABASE_FAILURE, "OAuth callback failed.") from None
+    finally:
+        callback_params.clear()
+    if live_mode:
+        return _live_callback_result_response(platform, "success", result_uri=result_uri)
     return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
 
 

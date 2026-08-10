@@ -262,6 +262,21 @@ def test_shopee_callback_rejects_raw_credential_query_params():
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("field", ["tenant", "user_id", "store_id", "internal_store_id"])
+def test_shopee_callback_rejects_frontend_context_replacement(field):
+    tenant, user, store, config = marketplace_context(f"sp-callback-context-{field.replace('_', '-')}")
+    grant(user, "integrations.store.authorize")
+    state = start_oauth(client_for(user), store, config).json()["data"]["state"]
+
+    response = shopee_callback(APIClient(), state, **{field: "attacker-value"})
+
+    assert response.status_code == 409
+    session = OAuthStateSession.objects.get(tenant=tenant)
+    assert session.status == OAuthStateSession.Status.FAILED
+    assert not MarketplaceStoreAuthorization.objects.filter(tenant=tenant).exists()
+
+
+@pytest.mark.django_db
 def test_shopee_callback_unknown_or_missing_state_is_rejected():
     anonymous = APIClient()
 

@@ -4,6 +4,8 @@ import {
   mockApiSyncTasks,
   mockIntegrationConfigDetail,
   mockIntegrationConfigs,
+  mockMarketplaceAuthorizationStart,
+  mockMarketplaceStoreAuthorizations,
   mockSyncJobs,
   mockSyncRunDetail,
   mockSyncRuns
@@ -42,6 +44,34 @@ export const verifyIntegrationConfig = (id) =>
     { method: 'post', url: `/api/internal/integrations/configs/${id}/verify/`, data: {} },
     mockIntegrationConfigDetail,
     'integrations.configs.verify'
+  );
+
+export const fetchMarketplaceStoreAuthorizations = (params = {}) =>
+  requestWithMockFallback(
+    { method: 'get', url: '/api/internal/integrations/store-authorizations/', params },
+    mockMarketplaceStoreAuthorizations,
+    'integrations.store_authorizations'
+  );
+
+export const startMarketplaceStoreAuthorization = (payload) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/start/', data: payload },
+    mockMarketplaceAuthorizationStart,
+    'integrations.store_authorizations.oauth_start'
+  );
+
+export const refreshMarketplaceStoreAuthorization = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/store-authorizations/${id}/refresh/`, data: {} },
+    mockMarketplaceStoreAuthorizations,
+    'integrations.store_authorizations.refresh'
+  );
+
+export const revokeMarketplaceStoreAuthorization = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/store-authorizations/${id}/revoke/`, data: {} },
+    mockMarketplaceStoreAuthorizations,
+    'integrations.store_authorizations.revoke'
   );
 
 export const fetchSyncJobs = () =>

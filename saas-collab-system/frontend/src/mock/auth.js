@@ -29,6 +29,8 @@ export const mockAuthUser = {
     'finance.view',
     'products.lifecycle.view', 'products.lifecycle.evaluate',
     'integrations.view', 'integrations.manage', 'integrations.run',
+    'integrations.store.view', 'integrations.store.authorize', 'integrations.store.revoke',
+    'integrations.credential.rotate',
     'reports.view', 'reports.export', 'reports.download',
     'governance.api.view', 'governance.api.check',
     'governance.assistants.view', 'governance.assistants.evaluate',

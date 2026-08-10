@@ -107,6 +107,9 @@ def consume_oauth_state(state_plaintext, *, platform, redirect_uri=None):
             raise_oauth_error(OAUTH_STATE_EXPIRED)
         raise_oauth_error(OAUTH_STATE_CONSUMED)
     session = OAuthStateSession.objects.get(state_hash=digest)
+    if session.session_binding != _session_binding(session.initiated_by, state_plaintext):
+        _mark_failed(session, OAUTH_SESSION_MISMATCH)
+        raise_oauth_error(OAUTH_SESSION_MISMATCH)
     if session.platform != platform:
         _mark_failed(session, OAUTH_PLATFORM_MISMATCH)
         raise_oauth_error(OAUTH_PLATFORM_MISMATCH)

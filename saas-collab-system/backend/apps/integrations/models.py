@@ -227,6 +227,8 @@ class MarketplaceStoreAuthorizationQuerySet(models.QuerySet):
         "region",
         "platform_store_id",
         "platform_identity_key",
+        "active_platform_identity_key",
+        "active_store_binding_key",
         "merchant_subject_id",
         "shop_cipher",
         "status",
@@ -254,6 +256,8 @@ class MarketplaceStoreAuthorizationQuerySet(models.QuerySet):
         "region",
         "platform_store_id",
         "platform_identity_key",
+        "active_platform_identity_key",
+        "active_store_binding_key",
         "merchant_subject_id",
         "shop_cipher",
         "status",
@@ -295,6 +299,11 @@ def marketplace_identity_key(platform, region, platform_store_id):
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
+def marketplace_store_binding_key(tenant_id, platform, store_id):
+    normalized = f"{tenant_id}:{str(platform).lower()}:{store_id}"
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
 class MarketplaceStoreAuthorization(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -318,6 +327,8 @@ class MarketplaceStoreAuthorization(models.Model):
     region = models.CharField(max_length=8)
     platform_store_id = models.CharField(max_length=120)
     platform_identity_key = models.CharField(max_length=64)
+    active_platform_identity_key = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    active_store_binding_key = models.CharField(max_length=64, null=True, blank=True, unique=True)
     merchant_subject_id = models.CharField(max_length=160)
     shop_cipher = models.CharField(max_length=255, blank=True)
     credential_id = models.CharField(max_length=160)
@@ -348,16 +359,6 @@ class MarketplaceStoreAuthorization(models.Model):
 
     class Meta:
         ordering = ["tenant_id", "platform", "store_id"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["platform", "platform_identity_key"],
-                name="uniq_market_store_global_identity",
-            ),
-            models.UniqueConstraint(
-                fields=["tenant", "platform", "store"],
-                name="uniq_market_store_tenant_link",
-            ),
-        ]
         indexes = [
             models.Index(fields=["tenant", "status"], name="idx_market_auth_tenant_status"),
             models.Index(fields=["tenant", "store"], name="idx_market_auth_tenant_store"),
@@ -381,6 +382,15 @@ class MarketplaceStoreAuthorization(models.Model):
             errors["shop_cipher"] = "TikTok Shop authorization requires shop_cipher."
         if self.platform_identity_key != marketplace_identity_key(self.platform, self.region, self.platform_store_id):
             errors["platform_identity_key"] = "Platform identity key does not match the platform store identity."
+        expected_store_binding = marketplace_store_binding_key(self.tenant_id, self.platform, self.store_id)
+        if self.status == self.Status.REVOKED:
+            if self.active_platform_identity_key or self.active_store_binding_key:
+                errors["status"] = "Revoked authorization cannot retain an active binding key."
+        else:
+            if self.active_platform_identity_key != self.platform_identity_key:
+                errors["active_platform_identity_key"] = "Active platform binding key is invalid."
+            if self.active_store_binding_key != expected_store_binding:
+                errors["active_store_binding_key"] = "Active internal-store binding key is invalid."
         if errors:
             raise ValidationError(errors)
 

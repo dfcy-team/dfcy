@@ -1,6 +1,9 @@
 import secrets
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from django.db import close_old_connections, connection
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -11,8 +14,10 @@ from apps.integrations.models import (
 )
 from apps.integrations.store_authorization_service import (
     create_store_authorization,
+    rotate_store_authorization_references,
     transition_store_authorization,
 )
+from apps.common.exceptions import StateConflict
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
@@ -217,3 +222,162 @@ def test_revoke_requires_permission_and_rejects_raw_payload():
     assert raw.status_code == 422
     record.refresh_from_db()
     assert record.status == MarketplaceStoreAuthorization.Status.ACTIVE
+
+
+@pytest.mark.django_db
+def test_reauthorization_creates_new_record_and_reference_after_revoke():
+    tenant, user, record = active_authorization("reauthorize")
+    revoked = transition_store_authorization(
+        record,
+        target_status=MarketplaceStoreAuthorization.Status.REVOKED,
+        actor=user,
+    )
+
+    replacement = create_store_authorization(
+        tenant=tenant,
+        integration_config=revoked.integration_config,
+        store=revoked.store,
+        platform=revoked.platform,
+        region=revoked.region,
+        platform_store_id=revoked.platform_store_id,
+        merchant_subject_id=revoked.merchant_subject_id,
+        shop_cipher=revoked.shop_cipher,
+        credential_id="synthetic-shopee-credential-reauthorize-new",
+        token_id="synthetic-shopee-token-reauthorize-new",
+        scopes=revoked.scopes,
+        actor=user,
+    )
+    replacement = transition_store_authorization(
+        replacement,
+        target_status=MarketplaceStoreAuthorization.Status.ACTIVE,
+        actor=user,
+    )
+
+    revoked.refresh_from_db()
+    assert revoked.active_platform_identity_key is None
+    assert revoked.active_store_binding_key is None
+    assert replacement.pk != revoked.pk
+    assert replacement.credential_id != revoked.credential_id
+    assert MarketplaceStoreAuthorization.objects.filter(tenant=tenant).count() == 2
+
+
+@pytest.mark.django_db
+def test_live_refresh_version_conflict_revokes_losing_new_reference():
+    _tenant, user, record = active_authorization("live-race")
+    revoked = []
+
+    def revoke(credential_id, token_id):
+        revoked.append((credential_id, token_id))
+        return {"status": "revoked", "error_code": ""}
+
+    first = rotate_store_authorization_references(
+        record,
+        credential_id="custody:credential:live-race-0002",
+        token_id="custody:token:live-race-0002",
+        credential_mask={"credential": "custody-***", "token": "custody-***"},
+        version=2,
+        actor=user,
+        allow_live_references=True,
+        revoker=revoke,
+        new_reference_revoker=revoke,
+    )
+    assert first.credential_reference_version == 2
+
+    with pytest.raises(StateConflict):
+        rotate_store_authorization_references(
+            record,
+            credential_id="custody:credential:live-race-loser",
+            token_id="custody:token:live-race-loser",
+            credential_mask={"credential": "custody-***", "token": "custody-***"},
+            version=2,
+            actor=user,
+            allow_live_references=True,
+            revoker=revoke,
+            new_reference_revoker=revoke,
+        )
+    assert ("custody:credential:live-race-loser", "custody:token:live-race-loser") in revoked
+    first.refresh_from_db()
+    assert first.credential_reference_version == 2
+
+
+@pytest.mark.django_db
+def test_live_refresh_old_reference_revoke_failure_is_not_reported_success():
+    tenant, user, record = active_authorization("live-revoke-failure")
+
+    def fail_old(credential_id, token_id):
+        return {"status": "failed", "error_code": "CUSTODY_REVOCATION_FAILED"}
+
+    with pytest.raises(StateConflict):
+        rotate_store_authorization_references(
+            record,
+            credential_id="custody:credential:revoke-failure-0002",
+            token_id="custody:token:revoke-failure-0002",
+            credential_mask={"credential": "custody-***", "token": "custody-***"},
+            version=2,
+            actor=user,
+            allow_live_references=True,
+            revoker=fail_old,
+            new_reference_revoker=lambda credential_id, token_id: {"status": "revoked"},
+        )
+
+    record.refresh_from_db()
+    assert record.status == MarketplaceStoreAuthorization.Status.ERROR
+    assert record.last_error_code == "CUSTODY_REVOCATION_FAILED"
+    assert IntegrationAuditLog.objects.filter(
+        tenant=tenant,
+        action="rotate_reference",
+        result=IntegrationAuditLog.Result.FAILED,
+    ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_live_refresh_allows_one_mysql_commit_and_revokes_loser():
+    if connection.vendor != "mysql":
+        pytest.skip("MySQL live-reference row-lock verification runs in Local Sandbox.")
+    _tenant, user, record = active_authorization("live-mysql-race")
+    start = threading.Event()
+    previous_revocations = []
+    losing_revocations = []
+
+    def revoke_previous(credential_id, token_id):
+        previous_revocations.append((credential_id, token_id))
+        return {"status": "revoked", "error_code": ""}
+
+    def rotate(suffix):
+        close_old_connections()
+        start.wait(timeout=5)
+        try:
+            current = MarketplaceStoreAuthorization.objects.get(pk=record.pk)
+            actor = CustomUser.objects.get(pk=user.pk)
+
+            def revoke_new(credential_id, token_id):
+                losing_revocations.append((credential_id, token_id))
+                return {"status": "revoked", "error_code": ""}
+
+            rotate_store_authorization_references(
+                current,
+                credential_id=f"custody:credential:live-mysql-race-{suffix}",
+                token_id=f"custody:token:live-mysql-race-{suffix}",
+                credential_mask={"credential": "custody-***", "token": "custody-***"},
+                version=2,
+                actor=actor,
+                allow_live_references=True,
+                revoker=revoke_previous,
+                new_reference_revoker=revoke_new,
+            )
+            return "success"
+        except StateConflict:
+            return "conflict"
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(rotate, suffix) for suffix in ("a", "b")]
+        start.set()
+        results = [future.result(timeout=15) for future in futures]
+
+    assert sorted(results) == ["conflict", "success"]
+    assert len(previous_revocations) == 1
+    assert len(losing_revocations) == 1
+    record.refresh_from_db()
+    assert record.credential_reference_version == 2

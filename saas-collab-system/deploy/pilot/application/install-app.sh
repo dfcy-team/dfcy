@@ -28,8 +28,17 @@ secure_json_file() {
   [ "$mode" = "400" ] || [ "$mode" = "600" ] || fail "$label mode must be 400 or 600."
 }
 
+secure_custody_directory() {
+  directory=$1
+  case "$directory" in /*) ;; *) fail "PILOT_CREDENTIAL_CUSTODY_HOST_PATH must be absolute." ;; esac
+  [ -d "$directory" ] || fail "Credential custody directory is missing: $directory"
+  [ ! -L "$directory" ] || fail "Credential custody directory must not be a symbolic link."
+  mode=$(stat -c '%a' "$directory")
+  [ "$mode" = "700" ] || fail "Credential custody directory mode must be 700."
+}
+
 [ -f "$env_file" ] || fail "Missing $env_file. Copy env.pilot.example and inject approved values."
-grep -Eq 'change-me|example\.internal|not-a-real' "$env_file" && fail "Placeholder values remain in $env_file."
+grep -Eq 'change-me|REPLACE_ME|example\.internal|not-a-real' "$env_file" && fail "Placeholder values remain in $env_file."
 chmod 600 "$env_file"
 
 [ "$(env_value PILOT_ENVIRONMENT_CODE)" = "controlled-pilot" ] || fail "PILOT_ENVIRONMENT_CODE must be controlled-pilot."
@@ -76,6 +85,20 @@ jq -e '.network_evidence_sha256 | length == 5 and all(.[]; test("^[0-9a-f]{64}$"
 [ "$(env_value DJANGO_DEBUG)" = "false" ] || fail "DJANGO_DEBUG must be false."
 [ "$(env_value DB_ENGINE)" = "django.db.backends.mysql" ] || fail "DB_ENGINE must be django.db.backends.mysql."
 [ "$(env_value INTEGRATION_ENCRYPTION_PROVIDER)" = "unconfigured-production" ] || fail "Real integration credential storage must remain disabled."
+
+custody_backend=$(env_value LIVE_CUSTODY_BACKEND)
+case "$custody_backend" in
+  file)
+    secure_custody_directory "$(env_value PILOT_CREDENTIAL_CUSTODY_HOST_PATH)"
+    [ "$(env_value CREDENTIAL_CUSTODY_PATH)" = "/var/lib/saas-collab/credential-custody" ] || fail "Container custody path is not approved."
+    ;;
+  http)
+    [ -n "$(env_value LIVE_CUSTODY_SERVICE_URL)" ] || fail "HTTPS custody service URL is required."
+    ;;
+  refuse)
+    ;;
+  *) fail "LIVE_CUSTODY_BACKEND must be refuse, file or http." ;;
+esac
 
 tls_cert_path=$(env_value PILOT_TLS_CERT_PATH)
 tls_key_path=$(env_value PILOT_TLS_KEY_PATH)
