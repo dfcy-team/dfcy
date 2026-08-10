@@ -1,12 +1,19 @@
 import hashlib
 import json
+from collections.abc import Mapping
+from datetime import date, datetime, time
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Model
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import write_operation_log
+from apps.masterdata.models import StoreMaster
 
 from .models import (
     FulfillmentStatusEvent,
@@ -16,11 +23,32 @@ from .models import (
     SampleFulfillment,
     SampleItem,
     SkuPriceSnapshot,
+    state_machine_write,
 )
 
 
+def _canonical_scalar(value):
+    """Reduce request data to deterministic JSON scalars and relation primary keys."""
+    if isinstance(value, Model):
+        return _canonical_scalar(value.pk)
+    if isinstance(value, Mapping):
+        return {str(key): _canonical_scalar(item) for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))}
+    if isinstance(value, (list, tuple)):
+        return [_canonical_scalar(item) for item in value]
+    if isinstance(value, set):
+        return sorted((_canonical_scalar(item) for item in value), key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    if isinstance(value, Decimal):
+        normalized = value.normalize()
+        return "0" if normalized == 0 else format(normalized, "f")
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, (UUID, Enum)):
+        return str(value.value if isinstance(value, Enum) else value)
+    return value
+
+
 def _payload_hash(payload):
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    encoded = json.dumps(_canonical_scalar(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -37,17 +65,71 @@ def _audit(user, action, object_type, instance, before=None, after=None):
     )
 
 
-def _save(instance):
+def _save(instance, *, state_machine=False):
     try:
-        instance.save()
+        if state_machine:
+            with state_machine_write():
+                instance.save()
+        else:
+            instance.save()
     except DjangoValidationError as exc:
         raise ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages) from exc
 
 
+def _pk(value):
+    return getattr(value, "pk", value)
+
+
+def _locked_influencer(user, influencer_id):
+    try:
+        return Influencer.objects.select_for_update().get(pk=influencer_id, tenant=user.tenant)
+    except Influencer.DoesNotExist as exc:
+        raise ValidationError({"influencer": "Influencer does not exist in the current tenant."}) from exc
+
+
+def _locked_store(user, store_id):
+    try:
+        return StoreMaster.objects.select_for_update().get(pk=store_id, tenant=user.tenant)
+    except StoreMaster.DoesNotExist as exc:
+        raise ValidationError({"store": "Store does not exist in the current tenant."}) from exc
+
+
+def _locked_task(user, task_id):
+    try:
+        return OutreachTask.objects.select_for_update().get(pk=task_id, tenant=user.tenant)
+    except OutreachTask.DoesNotExist as exc:
+        raise ValidationError({"outreach_task": "Outreach task does not exist in the current tenant."}) from exc
+
+
+def _lock_task_relations(user, *, task_id, influencer_id, store_id):
+    """Lock and validate all task relations before a fulfillment can be created."""
+    influencer = _locked_influencer(user, influencer_id)
+    store = _locked_store(user, store_id)
+    task = _locked_task(user, task_id)
+    if task.influencer_id != influencer.pk:
+        raise ValidationError({"influencer": "Influencer must match the outreach task."})
+    if task.store_id != store.pk:
+        raise ValidationError({"store": "Store must match the outreach task."})
+    return task, influencer, store
+
+
+def _normalize_item_payloads(item_payloads):
+    normalized = []
+    for payload in item_payloads:
+        item = dict(payload)
+        requested_sku = item.get("requested_sku")
+        item["requested_sku"] = str(requested_sku).strip() or None if requested_sku is not None else None
+        normalized.append(item)
+    return normalized
+
+
 @transaction.atomic
 def create_outreach_task(*, user, validated_data):
+    validated_data = dict(validated_data)
+    validated_data["influencer"] = _locked_influencer(user, _pk(validated_data["influencer"]))
+    validated_data["store"] = _locked_store(user, _pk(validated_data["store"]))
     task = OutreachTask(tenant=user.tenant, dispatcher=user, **validated_data)
-    _save(task)
+    _save(task, state_machine=True)
     _audit(user, "outreach_create", "outreach_task", task, after={"task_no": task.task_no, "status": task.status})
     return task
 
@@ -75,7 +157,7 @@ def transition_outreach_task(*, user, task, status, expected_version):
         task.finalized_at = now
     task.status = status
     task.version += 1
-    _save(task)
+    _save(task, state_machine=True)
     _audit(user, "outreach_status", "outreach_task", task, before=before, after={"status": task.status, "version": task.version})
     return task
 
@@ -99,18 +181,24 @@ def _price_for_item(tenant, store_id, payload):
 
 @transaction.atomic
 def create_sample_fulfillment(*, user, request_key, validated_data, item_payloads):
+    validated_data = dict(validated_data)
+    item_payloads = _normalize_item_payloads(item_payloads)
     request_hash = _payload_hash({"fulfillment": validated_data, "items": item_payloads})
-    existing = SampleFulfillment.objects.filter(tenant=user.tenant, request_key=request_key).first()
+    existing = SampleFulfillment.objects.select_for_update().filter(tenant=user.tenant, request_key=request_key).first()
     if existing:
         if existing.request_hash != request_hash:
             raise ValidationError({"idempotency_key": "Key was already used with a different payload."}, code="conflict")
         return existing, False
 
-    influencer = Influencer.objects.select_for_update().get(
-        pk=validated_data["influencer"].pk,
-        tenant=user.tenant,
+    outreach_task, influencer, store = _lock_task_relations(
+        user,
+        task_id=_pk(validated_data["outreach_task"]),
+        influencer_id=_pk(validated_data["influencer"]),
+        store_id=_pk(validated_data["store"]),
     )
+    validated_data["outreach_task"] = outreach_task
     validated_data["influencer"] = influencer
+    validated_data["store"] = store
     if InfluencerRestriction.objects.filter(tenant=user.tenant, influencer=influencer, is_blacklisted=True).exists():
         raise ValidationError({"influencer": "Blacklisted influencers cannot receive samples."})
 
@@ -122,9 +210,11 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
     )
     try:
         with transaction.atomic():
-            _save(fulfillment)
+            _save(fulfillment, state_machine=True)
     except IntegrityError:
-        existing = SampleFulfillment.objects.select_for_update().get(tenant=user.tenant, request_key=request_key)
+        existing = SampleFulfillment.objects.select_for_update().filter(tenant=user.tenant, request_key=request_key).first()
+        if existing is None:
+            raise
         if existing.request_hash != request_hash:
             raise ValidationError({"idempotency_key": "Key was already used with a different payload."}, code="conflict")
         return existing, False
@@ -175,7 +265,7 @@ def transition_sample_fulfillment(*, user, fulfillment, status, expected_version
     fulfillment.version += 1
     if status in {SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED}:
         fulfillment.finalized_at = timezone.now()
-    _save(fulfillment)
+    _save(fulfillment, state_machine=True)
     FulfillmentStatusEvent.objects.create(
         tenant=user.tenant,
         fulfillment=fulfillment,

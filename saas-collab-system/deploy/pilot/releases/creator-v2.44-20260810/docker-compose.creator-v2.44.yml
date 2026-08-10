@@ -1,11 +1,11 @@
 services:
   migrate:
-    image: saas-collab-backend:creator-v2.44-20260810
+    image: ${CREATOR_BACKEND_IMAGE:?Set CREATOR_BACKEND_IMAGE to an immutable @sha256 backend image}
   backend:
-    image: saas-collab-backend:creator-v2.44-20260810
+    image: ${CREATOR_BACKEND_IMAGE:?Set CREATOR_BACKEND_IMAGE to an immutable @sha256 backend image}
   celery:
-    image: saas-collab-backend:creator-v2.44-20260810
+    image: ${CREATOR_BACKEND_IMAGE:?Set CREATOR_BACKEND_IMAGE to an immutable @sha256 backend image}
   celery-beat:
-    image: saas-collab-backend:creator-v2.44-20260810
+    image: ${CREATOR_BACKEND_IMAGE:?Set CREATOR_BACKEND_IMAGE to an immutable @sha256 backend image}
   frontend:
-    image: saas-collab-frontend:creator-v2.44-20260810
+    image: ${CREATOR_FRONTEND_IMAGE:?Set CREATOR_FRONTEND_IMAGE to an immutable @sha256 frontend image}

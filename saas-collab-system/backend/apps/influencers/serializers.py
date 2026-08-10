@@ -56,9 +56,12 @@ class SampleItemSerializer(serializers.ModelSerializer):
         model = SampleItem
         fields = (
             "id", "sku", "external_product_id", "site_code", "requested_sku", "product_name", "quantity",
-            "unit_price", "unit_cost", "currency", "price_match_status", "created_at", "updated_at",
+            "unit_price", "currency", "price_match_status", "created_at", "updated_at",
         )
-        read_only_fields = ("id", "unit_price", "unit_cost", "currency", "price_match_status", "created_at", "updated_at")
+        read_only_fields = ("id", "unit_price", "currency", "price_match_status", "created_at", "updated_at")
+
+    def validate_requested_sku(self, value):
+        return value.strip() or None if value is not None else None
 
 
 class SampleFulfillmentSerializer(serializers.ModelSerializer):
@@ -93,6 +96,5 @@ class SkuPriceSnapshotSerializer(serializers.ModelSerializer):
         fields = (
             "id", "store_id", "store_name", "site_code", "product_id", "product_name",
             "parent_sku", "external_sku", "variant_id", "variant_name", "original_price",
-            "promotion_price", "effective_price", "currency", "inbound_cost", "stock",
-            "source_updated_at", "cost_updated_at", "imported_at",
+            "promotion_price", "effective_price", "currency", "source_updated_at", "imported_at",
         )

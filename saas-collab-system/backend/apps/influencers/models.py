@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -5,6 +8,23 @@ from django.db import models, transaction
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
+
+
+_state_machine_write_depth = ContextVar("influencer_state_machine_write_depth", default=0)
+
+
+@contextmanager
+def state_machine_write():
+    """Allow an influencer workflow service to persist a validated state change."""
+    token = _state_machine_write_depth.set(_state_machine_write_depth.get() + 1)
+    try:
+        yield
+    finally:
+        _state_machine_write_depth.reset(token)
+
+
+def _state_machine_write_allowed():
+    return _state_machine_write_depth.get() > 0
 
 
 class ProtectedInfluencerQuerySet(models.QuerySet):
@@ -83,6 +103,25 @@ class TenantValidatedModel(models.Model):
         return super().save(*args, **kwargs)
 
 
+class StateMachineTenantModel(TenantValidatedModel):
+    """Tenant-owned workflow records may only be persisted by workflow services."""
+
+    class Meta:
+        abstract = True
+
+    def _assert_state_machine_write(self):
+        if not _state_machine_write_allowed():
+            raise ValidationError("Workflow records must be changed through an audited state-machine service.")
+
+    def save(self, *args, **kwargs):
+        self._assert_state_machine_write()
+        return super().save(*args, **kwargs)
+
+    def save_base(self, *args, **kwargs):
+        self._assert_state_machine_write()
+        return super().save_base(*args, **kwargs)
+
+
 class InfluencerRestriction(TenantValidatedModel):
     influencer = models.ForeignKey(Influencer, on_delete=models.CASCADE, related_name="restrictions")
     is_blacklisted = models.BooleanField(default=True)
@@ -101,7 +140,7 @@ class InfluencerRestriction(TenantValidatedModel):
             return super().save(*args, **kwargs)
 
 
-class OutreachTask(TenantValidatedModel):
+class OutreachTask(StateMachineTenantModel):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         IN_PROGRESS = "in_progress", "In progress"
@@ -134,7 +173,7 @@ class OutreachTask(TenantValidatedModel):
         indexes = [models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status")]
 
 
-class SampleFulfillment(TenantValidatedModel):
+class SampleFulfillment(StateMachineTenantModel):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         PROCESSING = "processing", "Processing"
@@ -171,8 +210,19 @@ class SampleFulfillment(TenantValidatedModel):
 
     def clean(self):
         super().clean()
-        if self.outreach_task_id and self.influencer_id and self.outreach_task.influencer_id != self.influencer_id:
+        if not self.outreach_task_id:
+            return
+        task = OutreachTask.objects.filter(pk=self.outreach_task_id).values(
+            "tenant_id", "influencer_id", "store_id"
+        ).first()
+        if task is None:
+            raise ValidationError({"outreach_task": "Outreach task does not exist."})
+        if task["tenant_id"] != self.tenant_id:
+            raise ValidationError({"outreach_task": "Outreach task must belong to the same tenant."})
+        if self.influencer_id and task["influencer_id"] != self.influencer_id:
             raise ValidationError({"influencer": "Influencer must match the outreach task."})
+        if self.store_id and task["store_id"] != self.store_id:
+            raise ValidationError({"store": "Store must match the outreach task."})
 
 
 class SampleItem(TenantValidatedModel):
@@ -180,7 +230,7 @@ class SampleItem(TenantValidatedModel):
     sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, null=True, blank=True, related_name="sample_items")
     external_product_id = models.CharField(max_length=120, blank=True)
     site_code = models.CharField(max_length=16)
-    requested_sku = models.CharField(max_length=120, blank=True)
+    requested_sku = models.CharField(max_length=120, null=True, blank=True)
     product_name = models.CharField(max_length=240, blank=True)
     quantity = models.PositiveIntegerField(default=1)
     unit_price = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
@@ -193,6 +243,11 @@ class SampleItem(TenantValidatedModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["tenant", "fulfillment", "requested_sku"], name="uniq_sample_item_requested_sku")]
+
+    def clean(self):
+        super().clean()
+        if self.requested_sku is not None:
+            self.requested_sku = self.requested_sku.strip() or None
 
 
 class FulfillmentStatusEvent(TenantValidatedModel):

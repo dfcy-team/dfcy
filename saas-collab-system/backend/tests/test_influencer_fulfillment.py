@@ -4,20 +4,29 @@ import pytest
 from django.apps import apps as django_apps
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.audit.models import OperationLog
 from apps.influencers.models import (
     Influencer,
     InfluencerRestriction,
     OutreachTask,
     SampleFulfillment,
+    SampleItem,
     SkuPriceSnapshot,
     StoreProductListing,
 )
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
+from apps.influencers.services import (
+    _payload_hash,
+    create_outreach_task,
+    transition_outreach_task,
+    transition_sample_fulfillment,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -64,13 +73,14 @@ def base_records(tenant, user, suffix="a"):
         name=f"Creator {suffix}",
         platform="tiktok",
     )
-    task = OutreachTask.objects.create(
-        tenant=tenant,
-        task_no=f"TASK-{suffix}",
-        influencer=influencer,
-        store=store,
-        dispatcher=user,
-        owner=user,
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_no": f"TASK-{suffix}",
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+        },
     )
     return store, influencer, task
 
@@ -82,39 +92,41 @@ def test_outreach_external_id_allows_multiple_nulls_but_rejects_duplicates():
     influencer = Influencer.objects.create(tenant=tenant, code="external-id-creator", name="Creator", platform="tiktok")
 
     for number in (1, 2):
-        OutreachTask.objects.create(
-            tenant=tenant,
-            task_no=f"NULL-EXT-{number}",
-            influencer=influencer,
-            store=store,
-            dispatcher=user,
-            owner=user,
-            source="manual",
-            external_id=None,
+        create_outreach_task(
+            user=user,
+            validated_data={
+                "task_no": f"NULL-EXT-{number}",
+                "influencer": influencer,
+                "store": store,
+                "owner": user,
+                "source": "manual",
+                "external_id": None,
+            },
         )
 
-    OutreachTask.objects.create(
-        tenant=tenant,
-        task_no="EXT-1",
-        influencer=influencer,
-        store=store,
-        dispatcher=user,
-        owner=user,
-        source="feishu",
-        external_id="record-1",
+    create_outreach_task(
+        user=user,
+        validated_data={
+            "task_no": "EXT-1",
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+            "source": "feishu",
+            "external_id": "record-1",
+        },
     )
-    duplicate = OutreachTask(
-            tenant=tenant,
-            task_no="EXT-2",
-            influencer=influencer,
-            store=store,
-            dispatcher=user,
-            owner=user,
-            source="feishu",
-            external_id="record-1",
+    with pytest.raises(DRFValidationError):
+        create_outreach_task(
+            user=user,
+            validated_data={
+                "task_no": "EXT-2",
+                "influencer": influencer,
+                "store": store,
+                "owner": user,
+                "source": "feishu",
+                "external_id": "record-1",
+            },
         )
-    with pytest.raises(IntegrityError), transaction.atomic():
-        duplicate.save_base(force_insert=True)
 
 
 def test_outreach_rejects_cross_tenant_relations():
@@ -182,6 +194,148 @@ def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
     assert first.data["data"]["id"] == second.data["data"]["id"]
     assert first.data["data"]["items"][0]["price_match_status"] == "not_imported"
     assert SampleFulfillment.objects.count() == 1
+
+    conflicting_payload = {**payload, "fulfillment_no": "SAMPLE-OTHER"}
+    conflict = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        conflicting_payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="sample-key-1",
+    )
+    assert conflict.status_code == 409
+    assert SampleFulfillment.objects.count() == 1
+
+
+def test_workflow_models_require_audited_state_machine_writes_and_stale_versions_are_rejected():
+    tenant = Tenant.objects.create(name="Tenant", code="state-machine-guard")
+    user, client = user_with_permissions(
+        tenant,
+        "state-machine-user",
+        "influencers.outreach.manage",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "guard")
+
+    task.status = OutreachTask.Status.IN_PROGRESS
+    with pytest.raises(DjangoValidationError):
+        task.save()
+    task.refresh_from_db()
+    task.status = OutreachTask.Status.IN_PROGRESS
+    with pytest.raises(DjangoValidationError):
+        task.save(update_fields=["status"])
+    with pytest.raises(DjangoValidationError):
+        task.save_base()
+    task.refresh_from_db()
+
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "GUARD-SAMPLE",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "owner": user.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="guard-sample-key",
+    )
+    assert response.status_code == 201
+    fulfillment = SampleFulfillment.objects.get(pk=response.data["data"]["id"])
+    fulfillment.status = SampleFulfillment.Status.PROCESSING
+    with pytest.raises(DjangoValidationError):
+        fulfillment.save()
+    fulfillment.refresh_from_db()
+    fulfillment.status = SampleFulfillment.Status.PROCESSING
+    with pytest.raises(DjangoValidationError):
+        fulfillment.save(update_fields=["status"])
+    fulfillment.refresh_from_db()
+
+    first_view = OutreachTask.objects.get(pk=task.pk)
+    stale_view = OutreachTask.objects.get(pk=task.pk)
+    transition_outreach_task(
+        user=user,
+        task=first_view,
+        status=OutreachTask.Status.IN_PROGRESS,
+        expected_version=1,
+    )
+    with pytest.raises(DRFValidationError) as stale_error:
+        transition_outreach_task(
+            user=user,
+            task=stale_view,
+            status=OutreachTask.Status.CANCELLED,
+            expected_version=1,
+        )
+    assert stale_error.value.get_codes() == {"version": "conflict"}
+
+    transition_sample_fulfillment(
+        user=user,
+        fulfillment=fulfillment,
+        status=SampleFulfillment.Status.PROCESSING,
+        expected_version=1,
+    )
+    assert fulfillment.status_events.filter(to_status=SampleFulfillment.Status.PROCESSING).exists()
+    assert OperationLog.objects.filter(tenant=tenant, action="outreach_status", object_id=str(task.pk)).exists()
+    assert OperationLog.objects.filter(tenant=tenant, action="sample_status", object_id=str(fulfillment.pk)).exists()
+
+
+def test_fulfillment_requires_matching_task_store_and_influencer_under_model_and_service_checks():
+    tenant = Tenant.objects.create(name="Tenant", code="task-relation-check")
+    user, client = user_with_permissions(tenant, "task-relation-user", "influencers.fulfillment.manage")
+    store_a, influencer_a, task_a = base_records(tenant, user, "relation-a")
+    store_b, influencer_b, _ = base_records(tenant, user, "relation-b")
+
+    mismatched_influencer = SampleFulfillment(
+        tenant=tenant,
+        fulfillment_no="MODEL-BAD-INFLUENCER",
+        request_key="model-bad-influencer",
+        request_hash="hash",
+        outreach_task=task_a,
+        influencer=influencer_b,
+        store=store_a,
+        owner=user,
+    )
+    with pytest.raises(DjangoValidationError):
+        mismatched_influencer.full_clean()
+
+    mismatched_store = SampleFulfillment(
+        tenant=tenant,
+        fulfillment_no="MODEL-BAD-STORE",
+        request_key="model-bad-store",
+        request_hash="hash",
+        outreach_task=task_a,
+        influencer=influencer_a,
+        store=store_b,
+        owner=user,
+    )
+    with pytest.raises(DjangoValidationError):
+        mismatched_store.full_clean()
+
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SERVICE-BAD-STORE",
+            "outreach_task": task_a.pk,
+            "influencer": influencer_a.pk,
+            "store": store_b.pk,
+            "owner": user.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="service-bad-store",
+    )
+    assert response.status_code == 400
+    assert not SampleFulfillment.objects.filter(fulfillment_no="SERVICE-BAD-STORE").exists()
+
+
+def test_idempotency_hash_uses_relation_primary_keys_and_scalar_values():
+    tenant = Tenant.objects.create(name="Tenant", code="canonical-hash")
+    user = CustomUser.objects.create_user(username="canonical-hash-user", tenant=tenant)
+    influencer = Influencer.objects.create(tenant=tenant, code="canonical-creator", name="Creator", platform="tiktok")
+
+    assert _payload_hash({"influencer": influencer, "owner": user, "items": [{"quantity": 1}]}) == _payload_hash(
+        {"influencer": influencer.pk, "owner": user.pk, "items": [{"quantity": 1}]}
+    )
 
 
 def test_blacklisted_influencer_cannot_receive_sample():
@@ -255,6 +409,50 @@ def test_sample_price_match_is_scoped_to_store_and_site():
     assert response.data["data"]["items"][0]["currency"] == "PHP"
 
 
+def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():
+    tenant = Tenant.objects.create(name="Tenant", code="requested-sku-null")
+    user, client = user_with_permissions(tenant, "requested-sku-user", "influencers.fulfillment.manage")
+    store, influencer, task = base_records(tenant, user, "requested-sku")
+
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SAMPLE-NULL-SKU",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "owner": user.pk,
+            "items": [
+                {"site_code": "PH", "requested_sku": "", "quantity": 1},
+                {"site_code": "PH", "requested_sku": "   ", "quantity": 1},
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="requested-sku-null-key",
+    )
+    assert response.status_code == 201
+    fulfillment = SampleFulfillment.objects.get(fulfillment_no="SAMPLE-NULL-SKU")
+    assert list(SampleItem.objects.filter(fulfillment=fulfillment).values_list("requested_sku", flat=True)) == [None, None]
+    assert response.data["data"]["items"][0]["requested_sku"] is None
+
+    duplicate = SampleItem(
+        tenant=tenant,
+        fulfillment=fulfillment,
+        site_code="PH",
+        requested_sku="NONEMPTY-SKU",
+        quantity=1,
+    )
+    duplicate.save()
+    with pytest.raises(IntegrityError), transaction.atomic():
+        SampleItem(
+            tenant=tenant,
+            fulfillment=fulfillment,
+            site_code="PH",
+            requested_sku="NONEMPTY-SKU",
+            quantity=1,
+        ).save_base(force_insert=True)
+
+
 def test_price_lookup_requires_tenant_store_site_and_returns_real_nulls():
     tenant = Tenant.objects.create(name="Tenant", code="price-lookup")
     other = Tenant.objects.create(name="Other", code="price-other")
@@ -312,7 +510,8 @@ def test_price_lookup_requires_tenant_store_site_and_returns_real_nulls():
     assert matched.data["data"]["matched"] is True
     assert len(matched.data["data"]["results"]) == 1
     assert matched.data["data"]["results"][0]["promotion_price"] is None
-    assert matched.data["data"]["results"][0]["inbound_cost"] is None
+    for field in ("inbound_cost", "stock", "cost_updated_at"):
+        assert field not in matched.data["data"]["results"][0]
     assert missing.data["data"] == {"matched": False, "reason": "data_source_not_imported", "results": []}
 
 
