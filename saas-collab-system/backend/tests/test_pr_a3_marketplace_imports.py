@@ -21,7 +21,7 @@ from apps.marketplace_imports.models import (
     import_service_write,
 )
 from apps.marketplace_imports.services import ImportRuleViolation
-from apps.permissions.models import DataScope
+from apps.permissions.models import DataScope, Permission
 from tests.test_pr_a2_store_mapping import client_for, grant, mapping_context
 
 
@@ -514,6 +514,14 @@ def test_stale_attempt_cannot_overwrite_completed_batch():
 def test_concurrent_failed_batch_retry_allows_at_most_one_mysql_commit(monkeypatch):
     if connection.vendor != "mysql":
         pytest.skip("MySQL failed-batch row-lock verification runs in Local Sandbox.")
+    for code, name, action in (
+        ("integrations.store.sync", "Synchronize marketplace stores", "store.sync"),
+        ("integrations.store.retry", "Retry marketplace store operations", "store.retry"),
+    ):
+        Permission.objects.get_or_create(
+            code=code,
+            defaults={"name": name, "module": "integrations", "action": action},
+        )
     tenant, user, mapping = context("a3-retry-mysql")
     payload = order_payload(mapping)
     from apps.marketplace_imports import services
@@ -539,7 +547,8 @@ def test_concurrent_failed_batch_retry_allows_at_most_one_mysql_commit(monkeypat
         try:
             actor = CustomUser.objects.get(pk=user.pk)
             response = client_for(actor).post(f"{BATCHES_URL}{batch.id}/retry/", payload, format="json")
-            duplicate = response.json().get("data", {}).get("duplicate")
+            data = response.json().get("data") or {}
+            duplicate = data.get("duplicate")
             return response.status_code, duplicate
         finally:
             close_old_connections()
