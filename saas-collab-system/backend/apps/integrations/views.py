@@ -1,3 +1,6 @@
+from urllib.parse import urlencode
+
+from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -33,6 +36,7 @@ from apps.permissions.ui_p6_scopes import (
 )
 
 from .credential_service import reject_raw_credential_fields, rotate_config_references
+from .capability import get_live_callback_result_uri, live_network_mode_enabled
 from .marketplace_oauth_service import (
     complete_marketplace_oauth_callback,
     refresh_marketplace_authorization,
@@ -49,6 +53,7 @@ from .models import (
     SyncJob,
     SyncRun,
 )
+from .oauth_errors import OAuthFlowError
 from .product_mapping_service import (
     confirm_product_mapping,
     create_product_mapping,
@@ -327,9 +332,27 @@ def start_marketplace_store_oauth(request):
     return success_response(result, status=201)
 
 
+def _live_callback_result_response(platform, result, error_code=""):
+    query = {"oauth": result, "platform": platform}
+    if error_code:
+        query["error_code"] = error_code
+    response = HttpResponseRedirect(f"{get_live_callback_result_uri()}?{urlencode(query)}")
+    response.status_code = 303
+    response["Cache-Control"] = "no-store"
+    response["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 def _marketplace_oauth_callback(request, platform):
-    authorization = complete_marketplace_oauth_callback(platform=platform, query_params=request.query_params)
-    return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+    if not live_network_mode_enabled():
+        authorization = complete_marketplace_oauth_callback(platform=platform, query_params=request.query_params)
+        return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+    get_live_callback_result_uri()
+    try:
+        complete_marketplace_oauth_callback(platform=platform, query_params=request.query_params)
+    except OAuthFlowError as exc:
+        return _live_callback_result_response(platform, "error", exc.controlled_code)
+    return _live_callback_result_response(platform, "success")
 
 
 @api_view(["GET"])

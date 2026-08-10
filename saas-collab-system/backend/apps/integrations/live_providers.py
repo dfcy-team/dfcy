@@ -136,9 +136,13 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
     def build_authorization_url(self, context):
         self.validate_start_configuration(context.get("redirect_uri"))
         auth_url = _required(self.config.get("auth_url"), "shopee.auth_url")
-        path = urllib.parse.urlparse(auth_url).path
-        query = self._signed_public_query(path)
-        query.update({"redirect": self.config["redirect_uri"], "state": context["state"]})
+        query = {
+            "partner_id": self._app_id(),
+            "auth_type": "seller",
+            "redirect_uri": self.config["redirect_uri"],
+            "response_type": "code",
+            "state": context["state"],
+        }
         return {"url": f"{auth_url}?{urllib.parse.urlencode(query)}", "provider_request_id": None}
 
     def validate_callback(self, params, context):

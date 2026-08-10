@@ -3,10 +3,11 @@ import os
 import socket
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from apps.integrations import capability
+from apps.integrations import capability, views as integration_views
 from apps.integrations.credential_service import build_reference_metadata
 from apps.integrations.custody import HttpCustodyBackend, RefusingCustodyBackend
 from apps.integrations.live_providers import ShopeeLiveOAuthProvider, TikTokLiveOAuthProvider, build_live_provider
@@ -91,6 +92,8 @@ def live_gate(monkeypatch, settings):
         "open-api.tiktokglobalshop.com",
     ]
     settings.LIVE_OAUTH_REDIRECT_ALLOWLIST = [SHOPEE_CALLBACK, TIKTOK_CALLBACK]
+    settings.LIVE_OAUTH_RESULT_REDIRECT_URI = "https://console.example.test/integrations/configs"
+    settings.LIVE_OAUTH_RESULT_REDIRECT_ALLOWLIST = [settings.LIVE_OAUTH_RESULT_REDIRECT_URI]
 
 
 def _secret_resolver(platform):
@@ -127,7 +130,7 @@ def _shopee_provider(http=None, custody=None, **overrides):
         "contract_approved": True,
         "app_id": "123456",
         "redirect_uri": SHOPEE_CALLBACK,
-        "auth_url": "https://partner.shopeemobile.com/api/v2/shop/auth_partner",
+        "auth_url": "https://open.shopee.com/auth",
         "api_host": "https://partner.shopeemobile.com",
         "token_path": "/api/v2/auth/token/get",
         "refresh_path": "/api/v2/auth/access_token/get",
@@ -158,6 +161,22 @@ def test_live_gate_requires_approved_http_custody(monkeypatch, settings):
     with pytest.raises(OAuthFlowError) as exc:
         capability.require_live_mode("test")
     assert exc.value.controlled_code == OAUTH_PROVIDER_UNAVAILABLE
+
+
+def test_live_gate_accepts_only_absolute_file_custody(monkeypatch, settings, tmp_path):
+    monkeypatch.setattr(capability, "live_network_mode_enabled", lambda: True)
+    monkeypatch.setattr(capability, "live_platform_security_approved", lambda: True)
+    settings.LIVE_CUSTODY_BACKEND = "file"
+    settings.CREDENTIAL_CUSTODY_PATH = "relative/custody"
+    settings.LIVE_PLATFORM_ALLOWED_HOSTS = ["partner.shopeemobile.com"]
+    settings.LIVE_OAUTH_RESULT_REDIRECT_URI = "https://console.example.test/integrations/configs"
+    settings.LIVE_OAUTH_RESULT_REDIRECT_ALLOWLIST = [settings.LIVE_OAUTH_RESULT_REDIRECT_URI]
+    settings.DEBUG = False
+    with pytest.raises(OAuthFlowError):
+        capability.require_live_mode("test")
+
+    settings.CREDENTIAL_CUSTODY_PATH = str(tmp_path / "credential-custody")
+    capability.require_live_mode("test")
 
 
 def test_capability_never_auto_reports_connected(live_gate):
@@ -275,6 +294,63 @@ def test_tiktok_authorization_url_uses_service_id_state_and_exact_redirect(live_
     assert query == {"service_id": ["synthetic-test-service-id"], "state": ["state-value"]}
     with pytest.raises(OAuthFlowError):
         provider.build_authorization_url({"state": "state-value", "redirect_uri": "https://other.example.test/cb"})
+
+
+def test_shopee_authorization_url_uses_current_contract_and_exact_redirect(live_gate):
+    provider = _shopee_provider()
+    result = provider.build_authorization_url({"state": "state-value", "redirect_uri": SHOPEE_CALLBACK})
+    parsed = urllib.parse.urlsplit(result["url"])
+    query = urllib.parse.parse_qs(parsed.query)
+
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == "https://open.shopee.com/auth"
+    assert query == {
+        "partner_id": ["123456"],
+        "auth_type": ["seller"],
+        "redirect_uri": [SHOPEE_CALLBACK],
+        "response_type": ["code"],
+        "state": ["state-value"],
+    }
+    assert provider.http.calls == []
+
+
+def test_live_callback_redirect_clears_raw_query(monkeypatch, live_gate):
+    monkeypatch.setattr(integration_views, "live_network_mode_enabled", lambda: True)
+    monkeypatch.setattr(
+        integration_views,
+        "complete_marketplace_oauth_callback",
+        lambda **kwargs: SimpleNamespace(),
+    )
+    request = SimpleNamespace(query_params={"code": "unit-code", "state": "unit-state", "shop_id": "1"})
+
+    response = integration_views._marketplace_oauth_callback(request, "shopee")
+
+    assert response.status_code == 303
+    assert response["Location"] == "https://console.example.test/integrations/configs?oauth=success&platform=shopee"
+    assert "unit-code" not in response["Location"]
+    assert "unit-state" not in response["Location"]
+    assert response["Cache-Control"] == "no-store"
+    assert response["Referrer-Policy"] == "no-referrer"
+
+
+def test_live_callback_redirect_reports_only_controlled_error(monkeypatch, live_gate):
+    monkeypatch.setattr(integration_views, "live_network_mode_enabled", lambda: True)
+
+    def reject(**kwargs):
+        raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "unit provider detail")
+
+    monkeypatch.setattr(integration_views, "complete_marketplace_oauth_callback", reject)
+    request = SimpleNamespace(query_params={"code": "unit-code", "state": "unit-state"})
+
+    response = integration_views._marketplace_oauth_callback(request, "tiktok")
+
+    assert response.status_code == 303
+    assert urllib.parse.parse_qs(urllib.parse.urlsplit(response["Location"]).query) == {
+        "oauth": ["error"],
+        "platform": ["tiktok"],
+        "error_code": [OAUTH_CALLBACK_REJECTED],
+    }
+    assert "unit-code" not in response["Location"]
+    assert "unit-state" not in response["Location"]
 
 
 def test_tiktok_callback_does_not_trust_shop_identity(live_gate):
@@ -395,3 +471,16 @@ def test_nginx_callback_query_is_not_logged(environment):
     ]
     assert callback_locations
     assert all("access_log off;" in block for block in callback_locations)
+    assert all('add_header Cache-Control "no-store" always;' in block for block in callback_locations)
+    assert all('add_header Referrer-Policy "no-referrer" always;' in block for block in callback_locations)
+
+
+def test_pilot_gunicorn_access_log_excludes_query_and_request_line():
+    repository_root = Path(__file__).resolve().parents[2]
+    compose = (repository_root / "deploy" / "pilot" / "application" / "docker-compose.pilot-app.yml").read_text(
+        encoding="utf-8"
+    )
+    format_line = next(line for line in compose.splitlines() if "--access-logformat" in line)
+    assert "%(U)s" in format_line
+    assert "%(q)s" not in format_line
+    assert "%(r)s" not in format_line

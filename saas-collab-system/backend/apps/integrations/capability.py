@@ -14,6 +14,9 @@ Design rules (from the task book):
   independently reviewed evidence record and is not configurable here.
 """
 
+from pathlib import Path
+from urllib.parse import urlsplit
+
 from django.conf import settings
 
 CAPABILITY_MOCK = "pending/mock"
@@ -21,6 +24,40 @@ CAPABILITY_LIVE_VALIDATION = "pending/live-validation"
 CAPABILITY_CONNECTED = "connected"
 
 LIVE_NETWORK_MODE = "approved-live-test"
+
+
+def _custody_configured():
+    backend = getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse")
+    if backend == "http":
+        return bool(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", ""))
+    if backend == "file":
+        path = str(getattr(settings, "CREDENTIAL_CUSTODY_PATH", "") or "").strip()
+        return bool(path) and Path(path).is_absolute()
+    return False
+
+
+def get_live_callback_result_uri():
+    """Return the approved query-free page used to clear callback credentials."""
+    from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE, OAuthFlowError
+
+    uri = str(getattr(settings, "LIVE_OAUTH_RESULT_REDIRECT_URI", "") or "").strip()
+    allowlist = set(getattr(settings, "LIVE_OAUTH_RESULT_REDIRECT_ALLOWLIST", []) or [])
+    parsed = urlsplit(uri)
+    if (
+        not uri
+        or uri not in allowlist
+        or parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise OAuthFlowError(
+            OAUTH_PROVIDER_UNAVAILABLE,
+            "Live OAuth result redirect is not an approved query-free HTTPS URI.",
+        )
+    return uri
 
 
 def live_network_mode_enabled():
@@ -38,11 +75,21 @@ def live_mode_allowed():
     return (
         live_network_mode_enabled()
         and live_platform_security_approved()
-        and getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") == "http"
-        and bool(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", ""))
+        and _custody_configured()
         and bool(getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []))
         and not bool(getattr(settings, "DEBUG", False))
+        and _live_callback_result_uri_configured()
     )
+
+
+def _live_callback_result_uri_configured():
+    from .oauth_errors import OAuthFlowError
+
+    try:
+        get_live_callback_result_uri()
+    except OAuthFlowError:
+        return False
+    return True
 
 
 def get_capability_status(platform=None):
@@ -76,14 +123,13 @@ def require_live_mode(context="real platform connection"):
             "Live platform interaction requires dedicated security approval (LIVE_PLATFORM_SECURITY_APPROVED). "
             f"Refusing {context}.",
         )
-    if getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") != "http":
+    if not _custody_configured():
         raise OAuthFlowError(
             OAUTH_PROVIDER_UNAVAILABLE,
-            "Live platform interaction requires the approved HTTP custody backend.",
+            "Live platform interaction requires an approved HTTP or local-file custody backend.",
         )
-    if not getattr(settings, "LIVE_CUSTODY_SERVICE_URL", ""):
-        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Credential custody service is not configured.")
     if not getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []):
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Live outbound host allowlist is empty.")
     if getattr(settings, "DEBUG", False):
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Live platform interaction is forbidden with DEBUG enabled.")
+    get_live_callback_result_uri()

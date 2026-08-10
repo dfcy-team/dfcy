@@ -38,9 +38,12 @@ services:
       gunicorn config.wsgi:application --bind 0.0.0.0:8000
       --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-60}
       --access-logfile - --error-logfile -
+      --access-logformat '%({x-forwarded-for}i)s %(m)s %(U)s %(s)s %(L)s'
     restart: unless-stopped
     ports:
       - "127.0.0.1:${PILOT_APP_PORT:-8000}:8000"
+    volumes:
+      - ${PILOT_CREDENTIAL_CUSTODY_HOST_PATH:?Set the operator-owned custody directory}:/var/lib/saas-collab/credential-custody
     networks:
       - pilot-internal
     depends_on:
@@ -52,6 +55,8 @@ services:
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: celery -A config worker --loglevel=info
+    volumes:
+      - ${PILOT_CREDENTIAL_CUSTODY_HOST_PATH:?Set the operator-owned custody directory}:/var/lib/saas-collab/credential-custody
     restart: unless-stopped
     networks:
       - pilot-internal
