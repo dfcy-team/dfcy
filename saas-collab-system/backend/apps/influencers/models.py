@@ -1,6 +1,3 @@
-from contextlib import contextmanager
-from contextvars import ContextVar
-
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -8,23 +5,6 @@ from django.db import models, transaction
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
-
-
-_state_machine_write_depth = ContextVar("influencer_state_machine_write_depth", default=0)
-
-
-@contextmanager
-def state_machine_write():
-    """Allow an influencer workflow service to persist a validated state change."""
-    token = _state_machine_write_depth.set(_state_machine_write_depth.get() + 1)
-    try:
-        yield
-    finally:
-        _state_machine_write_depth.reset(token)
-
-
-def _state_machine_write_allowed():
-    return _state_machine_write_depth.get() > 0
 
 
 class ProtectedInfluencerQuerySet(models.QuerySet):
@@ -104,21 +84,29 @@ class TenantValidatedModel(models.Model):
 
 
 class StateMachineTenantModel(TenantValidatedModel):
-    """Tenant-owned workflow records may only be persisted by workflow services."""
+    """Prevent ordinary ORM saves from changing audited workflow state."""
 
     class Meta:
         abstract = True
 
-    def _assert_state_machine_write(self):
-        if not _state_machine_write_allowed():
-            raise ValidationError("Workflow records must be changed through an audited state-machine service.")
+    protected_state_fields = ()
+
+    def _assert_state_fields_unchanged(self):
+        if self._state.adding or not self.pk:
+            return
+        persisted = type(self).objects.filter(pk=self.pk).values(*self.protected_state_fields).first()
+        if persisted is None:
+            return
+        changed = [field for field in self.protected_state_fields if getattr(self, field) != persisted[field]]
+        if changed:
+            raise ValidationError({field: "Use the audited state-machine service." for field in changed})
 
     def save(self, *args, **kwargs):
-        self._assert_state_machine_write()
+        self._assert_state_fields_unchanged()
         return super().save(*args, **kwargs)
 
     def save_base(self, *args, **kwargs):
-        self._assert_state_machine_write()
+        self._assert_state_fields_unchanged()
         return super().save_base(*args, **kwargs)
 
 
@@ -141,6 +129,8 @@ class InfluencerRestriction(TenantValidatedModel):
 
 
 class OutreachTask(StateMachineTenantModel):
+    protected_state_fields = ("status", "version", "started_at", "finalized_at")
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         IN_PROGRESS = "in_progress", "In progress"
@@ -174,6 +164,8 @@ class OutreachTask(StateMachineTenantModel):
 
 
 class SampleFulfillment(StateMachineTenantModel):
+    protected_state_fields = ("status", "version", "finalized_at")
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         PROCESSING = "processing", "Processing"

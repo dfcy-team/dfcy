@@ -4,6 +4,7 @@ import pytest
 from django.apps import apps as django_apps
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
+from django.db.migrations.exceptions import IrreversibleError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.test import APIClient
 
@@ -24,6 +25,7 @@ from apps.tenants.models import Tenant
 from apps.influencers.services import (
     _payload_hash,
     create_outreach_task,
+    create_sample_fulfillment,
     transition_outreach_task,
     transition_sample_fulfillment,
 )
@@ -336,6 +338,51 @@ def test_idempotency_hash_uses_relation_primary_keys_and_scalar_values():
     assert _payload_hash({"influencer": influencer, "owner": user, "items": [{"quantity": 1}]}) == _payload_hash(
         {"influencer": influencer.pk, "owner": user.pk, "items": [{"quantity": 1}]}
     )
+
+
+def test_fulfillment_number_race_is_reported_as_a_domain_conflict(monkeypatch):
+    tenant = Tenant.objects.create(name="Tenant", code="fulfillment-number-race")
+    user = CustomUser.objects.create_user(username="fulfillment-race-user", tenant=tenant)
+    store, influencer, task = base_records(tenant, user, "fulfillment-race")
+    existing, _ = create_sample_fulfillment(
+        user=user,
+        request_key="winner-key",
+        validated_data={
+            "fulfillment_no": "RACE-FULFILLMENT",
+            "outreach_task": task,
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+        },
+        item_payloads=[],
+    )
+    assert existing.fulfillment_no == "RACE-FULFILLMENT"
+
+    import apps.influencers.services as influencer_services
+
+    monkeypatch.setattr(influencer_services, "_save", lambda instance: (_ for _ in ()).throw(IntegrityError("race")))
+    with pytest.raises(DRFValidationError) as error:
+        create_sample_fulfillment(
+            user=user,
+            request_key="loser-key",
+            validated_data={
+                "fulfillment_no": "RACE-FULFILLMENT",
+                "outreach_task": task,
+                "influencer": influencer,
+                "store": store,
+                "owner": user,
+            },
+            item_payloads=[],
+        )
+    assert error.value.get_codes() == {"fulfillment_no": "conflict"}
+
+
+def test_requested_sku_nullable_migration_is_explicitly_irreversible():
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0003_sampleitem_requested_sku_nullable"
+    )
+    with pytest.raises(IrreversibleError, match="forward fix or restore a backup"):
+        migration.block_reverse(None, None)
 
 
 def test_blacklisted_influencer_cannot_receive_sample():

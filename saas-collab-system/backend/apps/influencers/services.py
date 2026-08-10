@@ -8,7 +8,7 @@ from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Model
+from django.db.models import Model, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -23,7 +23,6 @@ from .models import (
     SampleFulfillment,
     SampleItem,
     SkuPriceSnapshot,
-    state_machine_write,
 )
 
 
@@ -65,15 +64,24 @@ def _audit(user, action, object_type, instance, before=None, after=None):
     )
 
 
-def _save(instance, *, state_machine=False):
+def _save(instance):
     try:
-        if state_machine:
-            with state_machine_write():
-                instance.save()
-        else:
-            instance.save()
+        instance.save()
     except DjangoValidationError as exc:
         raise ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages) from exc
+
+
+def _cas_state_update(instance, *, tenant, expected_status, expected_version, **changes):
+    queryset = type(instance).objects.filter(
+        pk=instance.pk,
+        tenant=tenant,
+        status=expected_status,
+        version=expected_version,
+    )
+    updated = QuerySet.update(queryset, **changes)
+    if updated != 1:
+        raise ValidationError({"version": "Workflow record was changed by another request."}, code="conflict")
+    instance.refresh_from_db()
 
 
 def _pk(value):
@@ -129,7 +137,7 @@ def create_outreach_task(*, user, validated_data):
     validated_data["influencer"] = _locked_influencer(user, _pk(validated_data["influencer"]))
     validated_data["store"] = _locked_store(user, _pk(validated_data["store"]))
     task = OutreachTask(tenant=user.tenant, dispatcher=user, **validated_data)
-    _save(task, state_machine=True)
+    _save(task)
     _audit(user, "outreach_create", "outreach_task", task, after={"task_no": task.task_no, "status": task.status})
     return task
 
@@ -155,9 +163,18 @@ def transition_outreach_task(*, user, task, status, expected_version):
         task.started_at = now
     if status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}:
         task.finalized_at = now
-    task.status = status
-    task.version += 1
-    _save(task, state_machine=True)
+    changes = {"status": status, "version": task.version + 1, "updated_at": now}
+    if status == OutreachTask.Status.IN_PROGRESS and task.started_at is None:
+        changes["started_at"] = now
+    if status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}:
+        changes["finalized_at"] = now
+    _cas_state_update(
+        task,
+        tenant=user.tenant,
+        expected_status=before["status"],
+        expected_version=before["version"],
+        **changes,
+    )
     _audit(user, "outreach_status", "outreach_task", task, before=before, after={"status": task.status, "version": task.version})
     return task
 
@@ -210,14 +227,19 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
     )
     try:
         with transaction.atomic():
-            _save(fulfillment, state_machine=True)
-    except IntegrityError:
+            _save(fulfillment)
+    except IntegrityError as exc:
         existing = SampleFulfillment.objects.select_for_update().filter(tenant=user.tenant, request_key=request_key).first()
-        if existing is None:
-            raise
-        if existing.request_hash != request_hash:
-            raise ValidationError({"idempotency_key": "Key was already used with a different payload."}, code="conflict")
-        return existing, False
+        if existing is not None:
+            if existing.request_hash != request_hash:
+                raise ValidationError({"idempotency_key": "Key was already used with a different payload."}, code="conflict") from exc
+            return existing, False
+        if SampleFulfillment.objects.filter(
+            tenant=user.tenant,
+            fulfillment_no=fulfillment.fulfillment_no,
+        ).exists():
+            raise ValidationError({"fulfillment_no": "Fulfillment number already exists."}, code="conflict") from exc
+        raise
 
     for payload in item_payloads:
         snapshot = _price_for_item(user.tenant, fulfillment.store_id, payload)
@@ -261,11 +283,16 @@ def transition_sample_fulfillment(*, user, fulfillment, status, expected_version
     if status not in allowed[fulfillment.status]:
         raise ValidationError({"status": f"Transition from {fulfillment.status} to {status} is not allowed."})
     before_status = fulfillment.status
-    fulfillment.status = status
-    fulfillment.version += 1
+    changes = {"status": status, "version": fulfillment.version + 1, "updated_at": timezone.now()}
     if status in {SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED}:
-        fulfillment.finalized_at = timezone.now()
-    _save(fulfillment, state_machine=True)
+        changes["finalized_at"] = timezone.now()
+    _cas_state_update(
+        fulfillment,
+        tenant=user.tenant,
+        expected_status=before_status,
+        expected_version=expected_version,
+        **changes,
+    )
     FulfillmentStatusEvent.objects.create(
         tenant=user.tenant,
         fulfillment=fulfillment,

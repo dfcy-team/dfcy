@@ -13,12 +13,12 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
     VITE_USE_MOCK=${VITE_USE_MOCK}
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts --no-audit --fund=false
 
 # Build from source inside the image; frontend/dist is intentionally excluded.
 COPY frontend/ ./
-RUN VITE_USE_MOCK=true npm run test
-RUN npm run build
+RUN VITE_USE_MOCK=true npm run --ignore-scripts test
+RUN npm run --ignore-scripts build
 
 ARG FRONTEND_RUNTIME_IMAGE_DIGEST
 FROM ${FRONTEND_RUNTIME_IMAGE_DIGEST}
