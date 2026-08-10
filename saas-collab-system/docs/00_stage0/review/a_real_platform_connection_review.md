@@ -28,6 +28,7 @@ Developer: 开发A
 Architecture Reviewer:
 Security Reviewer:
 Test Reviewer:
+Data Reviewer:
 Release Reviewer:
 ```
 
@@ -43,7 +44,7 @@ Release Reviewer:
 - Shopee initiate 更新为当前官方 `open.shopee.com/auth` seller 合同，state 为顶层参数。
 - 增加业务数据库外的本地文件 custody，目录/文件权限、原子替换、跨进程锁、单调版本与幂等 revoke 已测试。
 - callback 在 live 模式完成后 303 到精确 allowlist 的无 query 结果页；Nginx 关闭 callback access log，Gunicorn 仅记录 path。
-- focused 34 PASS；backend 539 PASS / 3 skipped；frontend 163 PASS；production build PASS；fresh/upgrade SQLite PASS；CI guard PASS。
+- focused 37 PASS；backend 543 PASS / 3 skipped；frontend 163 PASS；production build PASS；fresh/upgrade SQLite PASS；CI guard PASS。
 - 未执行真实 OAuth 或平台 API。Docker daemon 超时，因此当前 SHA 的 MySQL 8.4、镜像 digest 和容器日志扫描未重建。
 
 复审人必须从固定远程 SHA 构建固定制品，完成 MySQL 8.4、Sandbox、CI、批准 custody、两平台真实 OAuth/authorized shop/minimal read/refresh/revoke/reauthorization、并发、隔离和 DB/log/browser/Git 扫描后重新填写。不得以本地未提交代码或临时 SQLite 作为证据。

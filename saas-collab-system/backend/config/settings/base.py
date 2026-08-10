@@ -87,6 +87,10 @@ LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH = os.getenv("LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH
 LIVE_TIKTOK_METADATA_PATH = os.getenv("LIVE_TIKTOK_METADATA_PATH", "/seller/202309/permissions")
 LIVE_TIKTOK_DEFAULT_SCOPE = os.getenv("LIVE_TIKTOK_DEFAULT_SCOPE", "")
 
+DEFAULT_EXCEPTION_REPORTER_FILTER = (
+    "apps.integrations.exception_reporting.MarketplaceOAuthExceptionReporterFilter"
+)
+DEFAULT_EXCEPTION_REPORTER = "apps.integrations.exception_reporting.MarketplaceOAuthExceptionReporter"
 
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")

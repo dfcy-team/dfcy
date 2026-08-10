@@ -26,17 +26,17 @@ PR-A1 architecture/security R2 recorded PASS for its fixed scope. PR-A2 review r
 | Area | Result | Evidence / blocker |
 |---|---|---|
 | PR-A2 state/replay/context baseline | PASS locally | A2 + focused regressions |
-| exact permissions and tenant/store isolation | PASS locally | included in 539-test backend suite |
+| exact permissions and tenant/store isolation | PASS locally | included in 543-test backend suite |
 | callback forbids token/tenant/user/internal store | PASS locally | negative tests |
 | synthetic/live separation and default fail closed | PASS locally | live gate tests; no connected override |
 | custody architecture | PASS offline / deployment pending | HTTP plus operator-owned file custody; atomic write, 0700/0600 modes, cross-process conflict test |
 | outbound allowlist/TLS/timeouts/retries | PASS in controlled tests | real egress not tested |
-| callback query log suppression | PASS offline | Nginx access off, Gunicorn path-only format, query-free 303 result; runtime log scan pending |
+| callback query log/report suppression | PASS offline | query-free 303; callback-aware Django exception reporter/filter; non-OAuth negative tests; Nginx access off and Gunicorn path-only format; runtime log scan pending |
 | refresh concurrency / revoke / reauthorization | PASS locally | current file custody dual-process conflict PASS; previous MySQL dual-worker PASS; real platform runs absent |
 | audit immutability | PASS regression | live-runtime audit inspection absent |
 | fresh/upgrade migration | PASS locally | current SQLite fresh/upgrade; previous MySQL 8.4.10 Sandbox migration not promoted to current SHA |
-| backend/frontend/build | PASS | local backend 539/3 skipped; local frontend 163; build 1957 modules |
-| Local Sandbox / remote CI | CONDITIONAL | previous Sandbox PASS; current-SHA Docker and final remote CI pending |
+| backend/frontend/build | PASS | local backend 543/3 skipped; local frontend 163; build 1957 modules |
+| Local Sandbox / remote CI | CONDITIONAL | previous Sandbox PASS; remote CI PASS at evidence HEAD `e4c0073cbb8620df0257048ddcf1433d08532772`; current-SHA Docker/MySQL and final freeze verification pending |
 | Shopee official/live flow | FAIL | contract/app/pilot/evidence absent |
 | TikTok official/live flow | FAIL | app/pilot/revoke contract/evidence absent |
 | DB/log/browser credential scans | FAIL | no fixed live deployment to scan |
@@ -50,8 +50,8 @@ Controlled tests cover 429 Retry-After with caps, 5xx, DNS, timeout and connecti
 ## Issues
 
 - P0: none observed in local synthetic evidence.
-- P1 closed offline: current Shopee initiate contract; TikTok current seller contract; business-DB-free local custody; local dual-process version conflict; callback Nginx/Gunicorn/browser-query suppression; Django/migrations/backend/frontend/build/CI guard.
-- P1 still open: immutable deployment image/digest; current-SHA MySQL 8.4 and remote CI; approved application/control-plane fields; TikTok platform revoke contract; both real pilot flows and post-live DB/log/browser scans; refresh saga recovery in deployed infrastructure; independent reviewer signatures.
+- P1 closed offline: current Shopee initiate contract; TikTok current seller contract; business-DB-free local custody; local dual-process version conflict; callback Django exception-report/log plus Nginx/Gunicorn/browser-query suppression; Django/migrations/backend/frontend/build/CI guard.
+- P1 still open: immutable deployment image/digest; current-SHA MySQL 8.4; approved application/control-plane fields; TikTok platform revoke contract; both real pilot flows and post-live DB/log/browser scans; refresh saga recovery in deployed infrastructure; independent reviewer signatures.
 - P2: local backend test key emits an existing short-HMAC warning; outside this task's marketplace scope.
 
 ## Capability and production decision
@@ -61,4 +61,4 @@ Controlled tests cover 429 Retry-After with caps, 5xx, DNS, timeout and connecti
 - Production: `[x] NOT APPROVED`; separate rollout review required.
 - PR-A3: NOT ALLOWED by this review result.
 
-Architecture, Security, Test and Release reviewer signatures remain blank until all P1 items are closed against one fixed remote SHA and artifact.
+Architecture, Security, Test, Data and Release reviewer signatures remain blank until all P1 items are closed against one fixed remote SHA and artifact.

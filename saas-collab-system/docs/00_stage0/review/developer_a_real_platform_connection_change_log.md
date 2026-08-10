@@ -9,7 +9,7 @@
 - 当前状态：实现、回归、提交、推送和 Draft stacked PR #42 创建完成；未执行真实平台请求。
 - Capability：Shopee 与 TikTok Shop 均保持 `pending/mock`；`production-enabled` 未设置。
 
-阻断原因：GitHub CLI 认证失效；Shopee 当前官方合同尚未从获批应用控制台冻结；TikTok revoke 合同未冻结；固定部署制品、批准的 Credential Custody、MySQL 8.4、Local Sandbox 和真实试点环境均未提供。完整 43 节复审任务书已于本轮补齐。
+当前阻断：当前代码 SHA 的 MySQL 8.4 复验与不可变运行镜像 digest 尚未生成；Shopee/TikTok 获批应用控制面字段、TikTok revoke 合同、两平台真实试点流程、真实流量后 DB/log/browser 扫描及 Architecture/Security/Test/Data/Release 独立签字尚未完成。Local Sandbox 与远程 CI 已有历史 PASS 证据，但最终冻结 SHA 仍需重新核对。GitHub CLI 认证失效、固定源码制品缺失及 Local Sandbox 未提供是早期状态，已由后续第 9 节及本次整改记录取代。
 
 ## 2. 编码前现场记录
 
@@ -152,3 +152,12 @@ git diff --stat
 - focused 34 passed；backend 539 passed / 3 skipped；frontend 163 passed；build 1957 modules；Django check、migration drift、SQLite fresh/upgrade、Compose config、CI guard、`git diff --check` 均 PASS。
 - Docker daemon 在只读检查时超时，当前 SHA 的 MySQL 8.4、容器镜像 digest 与容器日志扫描未生成，继续列为 P1。
 - Shopee/TikTok 真实 OAuth、authorized shop、minimal read、refresh/revoke/reauthorization 与真实流量后扫描全部 `NOT RUN`；两平台保持 `pending/mock`，Production synchronization 保持 OFF。
+
+## 10. Callback 异常报告 P1 整改（2026-08-10）
+
+- Django 默认异常报告器与过滤器替换为 callback-aware 实现；仅针对 Shopee/TikTok callback 精确路径清空原始 query，并掩码 GET、Authorization、Cookie/Session 与 traceback 中的请求/参数变量。
+- callback 在调用服务前复制一次性参数，随后立即脱敏 Django request；服务完成或失败后清空内存副本。非 `OAuthFlowError` 统一返回/抛出 `OAUTH_DATABASE_FAILURE`，响应不反射平台异常正文。
+- 新增非 OAuth 数据库/托管式异常负向测试，验证 exception report、Django 日志及 303 错误跳转中均不存在 code/state/sign/token/session 测试标记。
+- Django check、migration drift、focused 37 passed、backend 543 passed / 3 MySQL-only skipped、`git diff --check` 均 PASS。
+- 远程 CI 在先前证据 HEAD `e4c0073cbb8620df0257048ddcf1433d08532772` 的三套工作流全部 PASS；本次整改提交仍须按正常流程完成当前 HEAD CI 冻结。
+- 未调用 Shopee/TikTok 真实 API；两平台继续 `pending/mock`，Production synchronization 继续 OFF。
