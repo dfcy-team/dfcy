@@ -42,6 +42,19 @@ export const menuItems = [
     ]
   },
   {
+    label: '达人管理',
+    internal: true,
+    permissions: ['influencers.view', 'influencers.outreach.view', 'influencers.fulfillment.view', 'influencers.catalog.view'],
+    children: [
+      { path: '/influencers/outreach', label: '建联任务', permissions: ['influencers.outreach.view'] },
+      { path: '/influencers/fulfillment', label: '送样履约', permissions: ['influencers.fulfillment.view'] },
+      { path: '/influencers/videos', label: '视频结果', permissions: ['influencers.catalog.view'] },
+      { path: '/influencers/performance', label: 'BD绩效', permissions: ['influencers.catalog.view'] },
+      { path: '/influencers/orders', label: '店铺订单', permissions: ['influencers.catalog.view'] },
+      { path: '/influencers/library', label: '品牌达人资源库', permissions: ['influencers.view'] }
+    ]
+  },
+  {
     label: '流程协同',
     children: [
       { path: '/workflow/approvals', label: '审批中心', permissions: ['workflow.approvals.view'] },
@@ -118,19 +131,6 @@ export const menuItems = [
       { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
       { path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
       { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] }
-    ]
-  },
-  {
-    label: '达人管理',
-    internal: true,
-    permissions: ['influencers.view', 'influencers.outreach.view', 'influencers.fulfillment.view', 'influencers.catalog.view'],
-    children: [
-      { path: '/influencers/outreach', label: '建联任务', permissions: ['influencers.outreach.view'] },
-      { path: '/influencers/fulfillment', label: '送样履约', permissions: ['influencers.fulfillment.view'] },
-      { path: '/influencers/videos', label: '视频结果', permissions: ['influencers.catalog.view'] },
-      { path: '/influencers/performance', label: 'BD绩效', permissions: ['influencers.catalog.view'] },
-      { path: '/influencers/orders', label: '店铺订单', permissions: ['influencers.catalog.view'] },
-      { path: '/influencers/library', label: '品牌达人资源库', permissions: ['influencers.view'] }
     ]
   },
   {
