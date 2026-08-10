@@ -19,7 +19,7 @@ PR-A3 admission = NOT APPROVED
 Production synchronization = OFF
 ```
 
-阻断原因：两平台真实 OAuth、authorized shop、最小只读 API、refresh、revoke、reauthorization 尚未形成完整脱敏证据；真实流程后的数据库、日志和浏览器凭据扫描尚未完成；独立架构、安全、测试和发布复审尚未签字；公网 callback 路由和日志脱敏尚未形成可接受证据；当前 stacked PR 均为 Draft 且未合并。
+阻断原因：两平台真实 OAuth、authorized shop、最小只读 API、refresh、revoke、reauthorization 尚未形成完整脱敏证据；真实流程后的数据库、日志和浏览器凭据扫描尚未完成；独立架构、安全、测试、数据和发布复审尚未签字；公网 callback 路由和日志脱敏尚未形成可接受证据；当前 stacked PR 均为 Draft 且未合并。
 
 ## 2. 冻结证据身份
 
@@ -31,10 +31,10 @@ Production synchronization = OFF
 | 正式平台连接 PR | Draft [#42](https://github.com/dfcy-team/dfcy/pull/42) |
 | PR #42 base / head | `feature/module-a-marketplace-oauth` / `a276fa647081ccdec1484473450d2b0828479480` |
 | 配置 UI stacked PR | Draft [#43](https://github.com/dfcy-team/dfcy/pull/43) |
-| PR #43 base / head | `feature/module-a-real-platform-connection` / `d36be683668f819f9471c9af3195ab37f443a9f3` |
+| PR #43 base / Code Review SHA | `feature/module-a-real-platform-connection` / `d36be683668f819f9471c9af3195ab37f443a9f3` |
 | Code Review SHA | `d36be683668f819f9471c9af3195ab37f443a9f3` |
 | Artifact source SHA | `d36be683668f819f9471c9af3195ab37f443a9f3` |
-| Last fully passed evidence baseline SHA | `4b16a9af4490d26a70298a00e097452bcf48aced` |
+| Previous fully passed evidence baseline SHA | `d183f1870339af6517e29b2382e33a188f443757` |
 | Evidence HEAD SHA | 复审签字时从 PR #43 `headRefOid` 冻结；提交不能自包含其自身 SHA |
 | CI SHA | 必须等于复审签字时冻结的 Evidence HEAD SHA |
 | Evidence-only diff | 从 Code Review SHA 到 Evidence HEAD 仅允许修改本文档；用 `git diff --name-only` 复核 |
@@ -63,7 +63,7 @@ Production synchronization = OFF
 | 后端全量 pytest | PASS，550 passed / 3 skipped | 未替代真实平台测试 |
 | 前端全量测试 | PASS，166 passed | 未替代浏览器真实流程扫描 |
 | 前端 production build | PASS，1963 modules | 本机制品 |
-| PR #43 远程 CI | PASS at evidence baseline `4b16a9a` | 后续整改提交必须重新全绿；CI SHA 绑定 Evidence HEAD，不等于 Code Review SHA |
+| PR #43 远程 CI | PASS at previous evidence baseline `d183f18` | 后续整改提交必须重新全绿；CI SHA 绑定 Evidence HEAD，不等于 Code Review SHA |
 | 本机后端 health | PASS，HTTP 200 | 仅本机运行状态 |
 | 本机 Shopee callback 路由 | PASS，缺少参数时返回受控 HTTP 400 | 仅证明路由存在，不证明 OAuth 成功 |
 | Pilot loopback callback 限制 | PASS | 仅允许 `127.0.0.1:8000` 固定平台路径；Production 仍强制 HTTPS |
@@ -141,7 +141,7 @@ Production synchronization = OFF
 4. 真实流程后的数据库、Nginx、Django、Docker/Celery/CI 和浏览器扫描缺失。
 5. 公网 callback 路由与 query 日志脱敏未形成可接受证据。
 6. 容器镜像 digest 不可用；正式运行环境与 Code Review SHA 的构建链未完成。
-7. 架构、安全、测试和发布独立复审未签字。
+7. 架构、安全、测试、数据和发布独立复审未签字。
 8. PR #41、#42、#43 仍为 Draft，正式平台连接基线未合并或形成独立批准的固定基线。
 
 ### P2
@@ -183,7 +183,7 @@ PR-A3 ENTRY REVIEW
 
 Code Review SHA: d36be683668f819f9471c9af3195ab37f443a9f3
 Artifact Source SHA: d36be683668f819f9471c9af3195ab37f443a9f3
-Last Fully Passed Evidence Baseline SHA: 4b16a9af4490d26a70298a00e097452bcf48aced
+Previous Fully Passed Evidence Baseline SHA: d183f1870339af6517e29b2382e33a188f443757
 Evidence HEAD SHA: <freeze from PR #43 headRefOid at signing>
 CI SHA: <must equal Evidence HEAD SHA>
 Evidence-only Diff: docs/00_stage0/review/pr_a3_entry_admission_review_materials.md only
