@@ -15,6 +15,14 @@ INTEGRATION_PERMISSION_CODES = (
     "integrations.view",
     "integrations.rotate",
     "integrations.run",
+    "integrations.config.view",
+    "integrations.config.create",
+    "integrations.config.update",
+    "integrations.config.verify",
+    "integrations.config.disable",
+    "integrations.credential.rotate",
+    "integrations.credential.clear",
+    "integrations.audit.view",
 )
 
 INTEGRATION_ROLE_CODES = {"integration_admin", "tech_admin", "admin"}

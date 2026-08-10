@@ -66,12 +66,16 @@ def start_marketplace_oauth(*, actor, platform, integration_config, store, regio
         scopes=scopes,
     )
     url_payload = provider.build_authorization_url({"state": state_plaintext, "redirect_uri": session.redirect_uri})
-    return {
+    result = {
         "platform": platform,
         "authorization_url": url_payload["url"],
-        "state": state_plaintext,
         "expires_at": session.expires_at,
     }
+    from .capability import live_network_mode_enabled
+
+    if not live_network_mode_enabled():
+        result["state"] = state_plaintext
+    return result
 
 
 def _callback_audit(session, actor, result, result_code, authorization=None):

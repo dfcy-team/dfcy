@@ -8,7 +8,7 @@ const read = (path) => readFileSync(resolve(testDirectory, '..', path), 'utf8');
 
 describe('real marketplace connection UI boundary', () => {
   it('places OAuth and authorization APIs under connection configuration', () => {
-    const page = read('src/views/integrations/IntegrationConfigList.vue');
+    const page = read('src/views/integrations/IntegrationConfigEditor.vue');
     const panel = read('src/components/MarketplaceAuthorizationPanel.vue');
     const api = read('src/api/integrations.js');
 
@@ -17,6 +17,20 @@ describe('real marketplace connection UI boundary', () => {
     expect(api).toContain('/store-authorizations/oauth/start/');
     expect(api).toContain('/store-authorizations/${id}/refresh/');
     expect(api).toContain('/store-authorizations/${id}/revoke/');
+  });
+
+  it('keeps configuration secrets write-only and uses separate rotate and clear actions', () => {
+    const editor = read('src/views/integrations/IntegrationConfigEditor.vue');
+    const field = read('src/components/integrations/SecretField.vue');
+    const api = read('src/api/integrations.js');
+
+    expect(editor).toContain('SecretField');
+    expect(editor).toContain("integrations.credential.clear");
+    expect(field).toContain('********');
+    expect(field).toContain('autocomplete="new-password"');
+    expect(api).toContain('/credentials/rotate/');
+    expect(api).toContain('/credentials/clear/');
+    expect(api).toContain("'Idempotency-Key'");
   });
 
   it('uses exact permissions and never renders raw credential inputs', () => {
@@ -35,5 +49,18 @@ describe('real marketplace connection UI boundary', () => {
     expect(panel).toContain("value: 'MY'");
     expect(panel).toContain('/oauth/callback/shopee/');
     expect(panel).toContain('/oauth/callback/tiktok/');
+    expect(panel).toContain("selectedConfig.value?.scopes || []");
+    expect(panel).toContain('selectedConfig.value?.callback_url');
+    expect(panel).toContain("['localhost', '127.0.0.1', '::1']");
+  });
+
+  it('exposes the required configuration list filters and safe status columns', () => {
+    const list = read('src/views/integrations/IntegrationConfigList.vue');
+
+    expect(list).toContain('filters.region');
+    expect(list).toContain('filters.status');
+    expect(list).toContain('credential_reference_version');
+    expect(list).toContain('last_verified_at');
+    expect(list).toContain('********');
   });
 });

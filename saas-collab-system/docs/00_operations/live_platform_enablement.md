@@ -8,7 +8,7 @@
 
 1. `PLATFORM_NETWORK_MODE=approved-live-test`；
 2. `LIVE_PLATFORM_SECURITY_APPROVED=true`；
-3. `LIVE_CUSTODY_BACKEND=http`，且配置批准的 custody HTTPS 服务；
+3. `LIVE_CUSTODY_BACKEND=file` 且使用批准的独立绝对路径，或使用批准的 custody HTTPS 服务；
 4. `DEBUG=false`、平台/custody host allowlist 非空、平台合同批准开关为真。
 
 任一条件缺失即 fail closed，不发出真实请求。代码不提供 `connected` 或

@@ -144,6 +144,24 @@ def test_start_returns_synthetic_authorization_url_and_pending_state():
 
 
 @pytest.mark.django_db
+def test_start_binds_region_redirect_and_scopes_to_selected_config():
+    _tenant, user, store, config = marketplace_context("sp-start-config-binding")
+    grant(user, "integrations.store.authorize")
+    config.regions = ["SG"]
+    config.callback_url = "https://callback.example.test/oauth/return/"
+    config.scopes = ["orders.read"]
+    config.save(update_fields=["regions", "callback_url", "scopes", "updated_at"])
+    client = client_for(user)
+
+    assert start_oauth(client, store, config, region="PH").status_code == 400
+    assert start_oauth(client, store, config, redirect_uri="https://other.example.test/callback/").status_code == 400
+    assert start_oauth(client, store, config, scopes=[]).status_code == 400
+
+    accepted = start_oauth(client, store, config)
+    assert accepted.status_code == 201
+
+
+@pytest.mark.django_db
 def test_start_validates_store_platform_and_data_scope():
     tenant, user, store, config = marketplace_context("sp-start-scope")
     tiktok_platform = PlatformMaster.objects.create(

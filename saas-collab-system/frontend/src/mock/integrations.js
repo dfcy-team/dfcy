@@ -2,10 +2,24 @@ import { successResponse } from './index';
 
 const config = {
   id: 1,
-  platform: 'BigSeller',
-  account_alias: 'demo-account',
+  platform: 'shopee',
+  account_alias: 'Shopee 东南亚测试应用',
   environment: 'sandbox',
-  status: 'security_review_required',
+  status: 'configured',
+  regions: ['PH', 'TH', 'MY'],
+  contract_version: 'v2',
+  callback_url: 'https://dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/',
+  scopes: [],
+  platform_config: { partner_id: 'partner-***' },
+  connect_timeout_seconds: 3,
+  read_timeout_seconds: 8,
+  network_enabled: false,
+  sync_read_enabled: false,
+  sync_write_enabled: false,
+  config_version: 1,
+  credential_status: 'configured',
+  credential_mask: { configured: '********' },
+  credential_reference_version: 1,
   credential_fingerprint: '***demo-fingerprint',
   credential_key_version: 'demo-v1',
   last_verified_at: '',
@@ -52,6 +66,45 @@ export const mockIntegrationConfigDetail = () => successResponse({
   module: 'integrations.configs.detail',
   ...config
 });
+
+export const mockIntegrationConfigSchema = (platform = 'shopee', environment = 'sandbox') => successResponse({
+  platform,
+  environment,
+  contract_versions: platform === 'tiktok' ? ['202407'] : ['v2'],
+  environments: [
+    { value: 'sandbox', label: 'Sandbox' },
+    { value: 'pilot', label: 'Pilot' },
+    { value: 'production', label: 'Production（需审批）' }
+  ],
+  regions: [
+    { value: 'PH', label: '菲律宾 (PH)' },
+    { value: 'TH', label: '泰国 (TH)' },
+    { value: 'MY', label: '马来西亚 (MY)' }
+  ],
+  scope_options: platform === 'tiktok'
+    ? [{ value: 'seller.authorization.info', label: '店铺授权信息（只读）' }]
+    : [],
+  public_fields: platform === 'tiktok'
+    ? [{ key: 'app_key', label: 'App Key', required: true }]
+    : [{ key: 'partner_id', label: 'Partner ID', required: true }],
+  secret_fields: [
+    { key: 'app_secret', label: 'App Secret' },
+    { key: 'access_token', label: 'Access Token' },
+    { key: 'refresh_token', label: 'Refresh Token' }
+  ],
+  timeout_limits: { connect: { min: 1, max: 10 }, read: { min: 1, max: 30 } }
+});
+
+export const mockIntegrationAudit = () => successResponse([
+  {
+    id: 1,
+    action: 'rotate_credential',
+    actor_id: 1,
+    result: 'success',
+    masked_detail: { credential_mask: { configured: '********' }, reference_version: 1 },
+    created_at: '2026-08-08T00:00:00Z'
+  }
+]);
 
 export const mockMarketplaceStoreAuthorizations = () => successResponse({
   status: 'mock',

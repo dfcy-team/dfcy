@@ -1,10 +1,11 @@
 import json
 
 import pytest
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.integrations.models import IntegrationAuditLog, PlatformIntegrationConfig
+from apps.integrations.models import CredentialMutationRequest, IntegrationAuditLog, PlatformIntegrationConfig
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -15,7 +16,20 @@ def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
 
 def grant_integration_access(user):
     role = Role.objects.create(tenant=user.tenant, name="Tech Admin", code="tech_admin")
-    for permission_code in ("integrations.view", "integrations.manage", "integrations.rotate", "integrations.run"):
+    for permission_code in (
+        "integrations.view",
+        "integrations.manage",
+        "integrations.rotate",
+        "integrations.run",
+        "integrations.config.view",
+        "integrations.config.create",
+        "integrations.config.update",
+        "integrations.config.verify",
+        "integrations.config.disable",
+        "integrations.credential.rotate",
+        "integrations.credential.clear",
+        "integrations.audit.view",
+    ):
         action = permission_code.rsplit(".", 1)[-1]
         permission, _created = Permission.objects.get_or_create(
             code=permission_code,
@@ -33,7 +47,7 @@ def grant_integration_access(user):
 def grant_integration_view_only(user):
     role = Role.objects.create(tenant=user.tenant, name="Integration Viewer", code=f"integration-viewer-{user.id}")
     permission, _created = Permission.objects.get_or_create(
-        code="integrations.view",
+        code="integrations.config.view",
         defaults={
             "name": "View integrations",
             "module": "integrations",
@@ -65,6 +79,91 @@ def authenticated_client(user):
     client = APIClient()
     client.force_authenticate(user=user)
     return client
+
+
+SHOPEE_LOOPBACK_CALLBACK = (
+    "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/"
+)
+
+
+def shopee_pilot_payload(callback_url):
+    return {
+        "platform": "shopee",
+        "account_alias": "pilot-loopback",
+        "environment": "pilot",
+        "status": "draft",
+        "regions": ["PH"],
+        "contract_version": "v2",
+        "callback_url": callback_url,
+        "platform_config": {"partner_id": "approved-public-partner-id"},
+    }
+
+
+@pytest.mark.django_db
+@override_settings(
+    LIVE_OAUTH_REDIRECT_ALLOWLIST=[SHOPEE_LOOPBACK_CALLBACK],
+    LIVE_SHOPEE_REDIRECT_URI=SHOPEE_LOOPBACK_CALLBACK,
+)
+def test_pilot_accepts_exact_shopee_loopback_callback():
+    tenant = Tenant.objects.create(name="Tenant", code="pilot-loopback-callback")
+    user = create_user(tenant, "pilot-loopback-admin")
+    grant_integration_access(user)
+
+    response = authenticated_client(user).post(
+        "/api/internal/integrations/configs/",
+        shopee_pilot_payload(SHOPEE_LOOPBACK_CALLBACK),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["callback_url"] == SHOPEE_LOOPBACK_CALLBACK
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "environment,callback_url",
+    [
+        (
+            "production",
+            "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+        ),
+        (
+            "pilot",
+            "http://192.168.2.10:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+        ),
+        (
+            "pilot",
+            "http://127.0.0.1:8001/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+        ),
+        (
+            "pilot",
+            "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
+        ),
+        (
+            "pilot",
+            "http://127.0.0.1:8000/api/internal/integrations/store-authorizations/oauth/callback/shopee/?next=evil",
+        ),
+    ],
+)
+def test_marketplace_callback_rejects_unapproved_http_targets(environment, callback_url):
+    tenant = Tenant.objects.create(name="Tenant", code="reject-http-callback")
+    user = create_user(tenant, "reject-http-admin")
+    grant_integration_access(user)
+
+    with override_settings(
+        LIVE_OAUTH_REDIRECT_ALLOWLIST=[callback_url],
+        LIVE_SHOPEE_REDIRECT_URI=callback_url,
+    ):
+        payload = shopee_pilot_payload(callback_url)
+        payload["environment"] = environment
+        response = authenticated_client(user).post(
+            "/api/internal/integrations/configs/",
+            payload,
+            format="json",
+        )
+
+    assert response.status_code == 400
+    assert "callback_url" in json.dumps(response.json())
 
 
 def config_payload(account_alias="demo-account", environment="mock", status="active"):
@@ -108,8 +207,9 @@ def test_integration_config_crud_uses_tenant_scope_and_standard_response():
 def test_integration_exact_permission_scope_filters_details_and_request_bodies():
     tenant = Tenant.objects.create(name="Tenant", code="integration-exact-scope")
     user = create_user(tenant, "integration-scoped")
-    grant_integration_permission(user, "integrations.view", {"platforms": ["mock"]})
-    grant_integration_permission(user, "integrations.manage", {"platforms": ["mock"]})
+    grant_integration_permission(user, "integrations.config.view", {"platforms": ["mock"]})
+    grant_integration_permission(user, "integrations.config.create", {"platforms": ["mock"]})
+    grant_integration_permission(user, "integrations.config.update", {"platforms": ["mock"]})
     visible = PlatformIntegrationConfig.objects.create(
         tenant=tenant,
         platform="mock",
@@ -140,11 +240,10 @@ def test_integration_exact_permission_scope_filters_details_and_request_bodies()
 
     patch_denied = client.patch(
         f"/api/internal/integrations/configs/{visible.id}/",
-        {"platform": "other"},
+        {"platform": "other", "version": visible.config_version},
         format="json",
     )
-    assert patch_denied.status_code == 403
-    assert patch_denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"
+    assert patch_denied.status_code == 400
     visible.refresh_from_db()
     assert visible.platform == "mock"
 
@@ -161,7 +260,7 @@ def test_integration_exact_permission_scope_filters_details_and_request_bodies()
 def test_integration_scope_rejects_unknown_keys_and_invalid_values(scope_config):
     tenant = Tenant.objects.create(name="Tenant", code=f"invalid-integration-scope-{len(str(scope_config))}")
     user = create_user(tenant, f"invalid-integration-scope-{len(str(scope_config))}")
-    grant_integration_permission(user, "integrations.manage", scope_config)
+    grant_integration_permission(user, "integrations.config.create", scope_config)
 
     response = authenticated_client(user).post(
         "/api/internal/integrations/configs/",
@@ -357,3 +456,211 @@ def test_disable_endpoint_updates_status_without_exposing_credentials():
     assert response.status_code == 200
     assert response.json()["data"]["status"] == PlatformIntegrationConfig.Status.DISABLED
     assert "credential_ciphertext" not in response.json()["data"]
+
+
+class FakeCustody:
+    def __init__(self):
+        self.revoked = []
+        self.store_calls = 0
+        self.rotate_calls = 0
+
+    def store_secrets(self, **kwargs):
+        self.store_calls += 1
+        assert kwargs.get("app_secret")
+        return {
+            "credential_id": "custody/credential/abcdef12",
+            "token_id": "custody/token/abcdef12",
+            "credential_mask": {"configured": "custody-must-not-control-the-mask"},
+            "reference_version": kwargs["reference_version"],
+        }
+
+    def rotate_secrets(self, **kwargs):
+        self.rotate_calls += 1
+        return {
+            "credential_id": "custody/credential/rotated12",
+            "token_id": "custody/token/rotated12",
+            "credential_mask": {"configured": "********"},
+            "reference_version": kwargs["reference_version"],
+            "previous_reference_status": "revoked",
+        }
+
+    def revoke(self, credential_id, token_id):
+        self.revoked.append((credential_id, token_id))
+        return {"status": "revoked", "error_code": ""}
+
+
+@pytest.mark.django_db
+def test_platform_schema_and_write_only_credential_lifecycle(monkeypatch):
+    tenant = Tenant.objects.create(name="Tenant", code="platform-config-secrets")
+    user = create_user(tenant, "platform-config-admin")
+    grant_integration_access(user)
+    client = authenticated_client(user)
+
+    schema_response = client.get("/api/internal/integrations/platform-schemas/shopee/?environment=sandbox")
+    assert schema_response.status_code == 200
+    assert {field["key"] for field in schema_response.json()["data"]["secret_fields"]} >= {
+        "app_secret",
+        "access_token",
+        "refresh_token",
+    }
+
+    create_response = client.post(
+        "/api/internal/integrations/configs/",
+        {
+            "platform": "shopee",
+            "account_alias": "pilot-shop",
+            "environment": "sandbox",
+            "status": "draft",
+            "regions": ["PH", "TH", "MY"],
+            "contract_version": "v2",
+            "callback_url": "https://dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+            "platform_config": {"partner_id": "masked-partner"},
+        },
+        format="json",
+    )
+    assert create_response.status_code == 201
+    config_id = create_response.json()["data"]["id"]
+    secret_value = "not-a-real-secret-test-value"
+    custody = FakeCustody()
+    monkeypatch.setattr("apps.integrations.credential_service.get_custody_backend", lambda: custody)
+
+    rotate_payload = {
+        "version": 1,
+        "reason": "initial approved custody setup",
+        "credentials": {"app_secret": secret_value},
+    }
+    rotate_response = client.post(
+        f"/api/internal/integrations/configs/{config_id}/credentials/rotate/",
+        rotate_payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="platform-config-rotate-0001",
+    )
+    assert rotate_response.status_code == 200
+    assert rotate_response.json()["data"]["credential_mask"] == {"configured": "********"}
+    assert secret_value not in json.dumps(rotate_response.json())
+    assert secret_value not in json.dumps(IntegrationAuditLog.objects.filter(integration_config_id=config_id).values_list("masked_detail", flat=True), default=list)
+    operation = CredentialMutationRequest.objects.get(action="rotate")
+    assert secret_value not in json.dumps(operation.response_metadata)
+
+    replay = client.post(
+        f"/api/internal/integrations/configs/{config_id}/credentials/rotate/",
+        rotate_payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="platform-config-rotate-0001",
+    )
+    assert replay.status_code == 200
+    assert replay.json()["data"]["idempotent_replay"] is True
+    assert custody.store_calls == 1
+
+    changed_replay = client.post(
+        f"/api/internal/integrations/configs/{config_id}/credentials/rotate/",
+        {**rotate_payload, "reason": "different credential replacement request"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="platform-config-rotate-0001",
+    )
+    assert changed_replay.status_code == 409
+
+    stale = client.post(
+        f"/api/internal/integrations/configs/{config_id}/credentials/rotate/",
+        rotate_payload,
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="platform-config-rotate-stale-0002",
+    )
+    assert stale.status_code == 409
+    assert custody.rotate_calls == 0
+
+    clear_response = client.post(
+        f"/api/internal/integrations/configs/{config_id}/credentials/clear/",
+        {"version": 2, "reason": "operator confirmed credential removal"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="platform-config-clear-0001",
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["data"]["credential_status"] == "revoked"
+    assert clear_response.json()["data"]["credential_revoked_at"]
+    assert clear_response.json()["data"]["credential_mask"] == {}
+
+
+@pytest.mark.django_db
+def test_tiktok_platform_schema_requires_service_id():
+    tenant = Tenant.objects.create(name="Tenant", code="tiktok-schema-service-id")
+    user = create_user(tenant, "tiktok-schema-admin")
+    grant_integration_access(user)
+    client = authenticated_client(user)
+
+    schema = client.get("/api/internal/integrations/platform-schemas/tiktok/?environment=pilot")
+    assert schema.status_code == 200
+    assert {field["key"] for field in schema.json()["data"]["public_fields"]} >= {"app_key", "service_id"}
+
+    response = client.post(
+        "/api/internal/integrations/configs/",
+        {
+            "platform": "tiktok",
+            "account_alias": "pilot-tiktok",
+            "environment": "pilot",
+            "status": "draft",
+            "regions": ["PH"],
+            "contract_version": "202407",
+            "callback_url": "https://dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
+            "scopes": ["seller.authorization.info"],
+            "platform_config": {"app_key": "approved-public-app-key"},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "service_id" in json.dumps(response.json())
+
+
+@pytest.mark.django_db
+def test_config_exact_scope_filters_environment_and_regions():
+    tenant = Tenant.objects.create(name="Tenant", code="config-environment-region-scope")
+    user = create_user(tenant, "config-region-viewer")
+    scope = {"platforms": ["shopee"], "environments": ["sandbox"], "regions": ["PH"]}
+    grant_integration_permission(user, "integrations.config.view", scope)
+    grant_integration_permission(user, "integrations.config.create", scope)
+    visible = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="shopee",
+        account_alias="visible-ph",
+        environment="sandbox",
+        regions=["PH"],
+        created_by=user,
+    )
+    PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="shopee",
+        account_alias="hidden-th",
+        environment="sandbox",
+        regions=["TH"],
+        created_by=user,
+    )
+    PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="shopee",
+        account_alias="hidden-pilot",
+        environment="pilot",
+        regions=["PH"],
+        created_by=user,
+    )
+
+    listing = authenticated_client(user).get("/api/internal/integrations/configs/")
+    assert listing.status_code == 200
+    assert [row["id"] for row in listing.json()["data"]] == [visible.id]
+
+    denied = authenticated_client(user).post(
+        "/api/internal/integrations/configs/",
+        {
+            "platform": "shopee",
+            "account_alias": "denied-th",
+            "environment": "sandbox",
+            "status": "draft",
+            "regions": ["TH"],
+            "contract_version": "v2",
+            "callback_url": "https://dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
+            "platform_config": {"partner_id": "masked-partner"},
+        },
+        format="json",
+    )
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"

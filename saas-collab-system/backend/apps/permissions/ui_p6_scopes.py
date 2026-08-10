@@ -27,7 +27,14 @@ def _validate_non_empty_string_values(values, message):
         _invalid_scope(message)
 
 
-INTEGRATION_SCOPE_KEYS = {"platforms", "integration_config_ids", "resource_types", "store_ids"}
+INTEGRATION_SCOPE_KEYS = {
+    "platforms",
+    "environments",
+    "regions",
+    "integration_config_ids",
+    "resource_types",
+    "store_ids",
+}
 MARKETPLACE_PLATFORMS = {"shopee", "tiktok"}
 
 
@@ -143,7 +150,7 @@ def filter_integration_configs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        {"platforms", "integration_config_ids"},
+        {"platforms", "environments", "regions", "integration_config_ids"},
         allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
@@ -156,7 +163,18 @@ def filter_integration_configs(user, queryset, permission_code):
             condition &= Q(platform__in=[str(value) for value in config["platforms"]])
         if "integration_config_ids" in config:
             condition &= Q(pk__in=config["integration_config_ids"])
-        allowed |= condition
+        if "environments" in config:
+            condition &= Q(environment__in=config["environments"])
+        if "regions" in config:
+            allowed_regions = set(config["regions"])
+            scoped_ids = [
+                pk
+                for pk, regions in queryset.filter(condition).values_list("pk", "regions")
+                if set(regions or []).issubset(allowed_regions)
+            ]
+            allowed |= Q(pk__in=scoped_ids)
+        else:
+            allowed |= condition
     return queryset.filter(allowed).distinct()
 
 
@@ -236,7 +254,17 @@ def filter_store_mappings(user, queryset, permission_code):
     return queryset.filter(allowed).distinct()
 
 
-def integration_values_allowed(user, permission_code, *, platform=None, config_id=None, resource_type=None, store_id=None):
+def integration_values_allowed(
+    user,
+    permission_code,
+    *,
+    platform=None,
+    environment=None,
+    regions=None,
+    config_id=None,
+    resource_type=None,
+    store_id=None,
+):
     configs = permission_scope_configs(
         user,
         permission_code,
@@ -247,6 +275,10 @@ def integration_values_allowed(user, permission_code, *, platform=None, config_i
     _validate_integration_configs(configs)
     for config in configs:
         if "platforms" in config and platform not in set(config["platforms"]):
+            continue
+        if "environments" in config and environment not in set(config["environments"]):
+            continue
+        if "regions" in config and not set(regions or []).issubset(set(config["regions"])):
             continue
         if "integration_config_ids" in config and config_id not in set(config["integration_config_ids"]):
             continue
@@ -385,6 +417,17 @@ def _validate_integration_configs(configs):
     for config in configs:
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Integration data scope contains an invalid platform.")
+        if "environments" in config:
+            _validate_non_empty_string_values(
+                config["environments"],
+                "Integration data scope contains an invalid environment.",
+            )
+            if not set(config["environments"]) <= {"mock", "sandbox", "pilot", "production"}:
+                _invalid_scope("Integration data scope contains an unsupported environment.")
+        if "regions" in config:
+            _validate_non_empty_string_values(config["regions"], "Integration data scope contains an invalid region.")
+            if any(not re.fullmatch(r"[A-Z]{2,8}", region) for region in config["regions"]):
+                _invalid_scope("Integration data scope regions must be uppercase platform codes.")
         if "integration_config_ids" in config:
             _validate_positive_int_values(
                 config["integration_config_ids"],

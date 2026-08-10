@@ -3,6 +3,7 @@ import os
 import socket
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -160,6 +161,18 @@ def test_live_gate_requires_approved_http_custody(monkeypatch, settings):
     assert exc.value.controlled_code == OAUTH_PROVIDER_UNAVAILABLE
 
 
+def test_live_gate_accepts_explicit_file_custody(monkeypatch, settings, tmp_path):
+    monkeypatch.setattr(capability, "live_network_mode_enabled", lambda: True)
+    monkeypatch.setattr(capability, "live_platform_security_approved", lambda: True)
+    settings.LIVE_CUSTODY_BACKEND = "file"
+    settings.CREDENTIAL_CUSTODY_PATH = str(tmp_path / "credential-custody")
+    settings.LIVE_PLATFORM_ALLOWED_HOSTS = ["partner.shopeemobile.com"]
+    settings.DEBUG = False
+
+    capability.require_live_mode("test")
+    assert capability.get_capability_status("shopee") == "pending/live-validation"
+
+
 def test_capability_never_auto_reports_connected(live_gate):
     assert capability.get_capability_status("shopee") == "pending/live-validation"
 
@@ -170,6 +183,42 @@ def test_live_providers_use_separate_approved_redirects(settings):
 
     assert build_live_provider("shopee").config["redirect_uri"] == SHOPEE_CALLBACK
     assert build_live_provider("tiktok").config["redirect_uri"] == TIKTOK_CALLBACK
+
+
+@pytest.mark.parametrize(
+    ("platform", "platform_config", "expected"),
+    (
+        ("shopee", {"partner_id": "123456"}, {"app_id": "123456"}),
+        (
+            "tiktok",
+            {"app_key": "approved-app-key", "service_id": "approved-service-id"},
+            {"app_id": "approved-app-key", "service_id": "approved-service-id"},
+        ),
+    ),
+)
+def test_live_provider_uses_scoped_integration_config(settings, platform, platform_config, expected):
+    callback = SHOPEE_CALLBACK if platform == "shopee" else TIKTOK_CALLBACK
+    integration_config = SimpleNamespace(
+        platform=platform,
+        platform_config=platform_config,
+        callback_url=callback,
+        contract_version="v2" if platform == "shopee" else "202407",
+        environment="pilot",
+        network_enabled=True,
+        sync_read_enabled=False,
+        sync_write_enabled=False,
+        status="configured",
+        credential_status="configured",
+        credential_id="custody:credential:config-0001",
+    )
+
+    provider = build_live_provider(platform, integration_config=integration_config)
+
+    assert provider.config["app_secret_reference"] == integration_config.credential_id
+    assert provider.config["redirect_uri"] == callback
+    assert provider.config["integration_config_ready"] is True
+    for key, value in expected.items():
+        assert provider.config[key] == value
 
 
 def test_network_guard_rejects_http_and_unknown_host(settings):
@@ -277,6 +326,17 @@ def test_tiktok_authorization_url_uses_service_id_state_and_exact_redirect(live_
         provider.build_authorization_url({"state": "state-value", "redirect_uri": "https://other.example.test/cb"})
 
 
+def test_shopee_authorization_url_preserves_state_in_approved_redirect(live_gate):
+    provider = _shopee_provider()
+
+    result = provider.build_authorization_url({"state": "state-value", "redirect_uri": SHOPEE_CALLBACK})
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(result["url"]).query)
+    redirect_query = urllib.parse.parse_qs(urllib.parse.urlsplit(query["redirect"][0]).query)
+
+    assert "state" not in query
+    assert redirect_query == {"state": ["state-value"]}
+
+
 def test_tiktok_callback_does_not_trust_shop_identity(live_gate):
     provider = _tiktok_provider()
     payload = provider.validate_callback({"code": "synthetic-test-code", "state": "s"}, {"region": "SG"})
@@ -350,6 +410,34 @@ def test_tiktok_exchange_revokes_new_reference_when_identity_check_fails(live_ga
             "code": "synthetic-test-code", "region": "SG", "scopes": ["seller.authorization.info"]
         })
     assert custody.revoked == [("custody:credential:0001", "custody:token:0001")]
+
+
+def test_tiktok_token_response_may_omit_user_type_when_shop_identity_is_verified(live_gate):
+    http = FakeHttpClient()
+    custody = MemoryCustody()
+    http.add("/api/v2/token/get", {
+        "code": 0,
+        "data": {
+            "access_token": "synthetic-test-access",
+            "refresh_token": "synthetic-test-refresh",
+            "access_token_expire_in": 4102444800,
+            "open_id": "synthetic-test-open-id",
+            "granted_scopes": ["seller.authorization.info"],
+        },
+    })
+    http.add("/authorization/202309/shops", {
+        "code": 0,
+        "data": {"shops": [{"id": "shop-001", "cipher": "ROW_cipher_001", "region": "PH"}]},
+    })
+    http.add("/seller/202309/permissions", {"code": 0, "data": {}})
+
+    result = _tiktok_provider(http=http, custody=custody).exchange_authorization_code({
+        "code": "synthetic-test-code",
+        "region": "PH",
+        "scopes": ["seller.authorization.info"],
+    })
+
+    assert result["platform_store_records"][0]["platform_store_id"] == "shop-001"
 
 
 def test_shopee_refuses_unapproved_contract_before_network(live_gate):

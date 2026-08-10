@@ -1,9 +1,10 @@
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.error_codes import ErrorCode
-from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
+from apps.common.exceptions import DataScopeDenied, StateConflict, get_scoped_object_or_404
 from apps.common.responses import success_response
 from apps.common.query import pagination_query, positive_int
 from apps.common.responses import paginated_data
@@ -11,6 +12,12 @@ from apps.workflows.models import CollaborationEvent
 from apps.workflows.serializers import CollaborationEventSerializer
 from apps.workflows.services import receive_mock_collaboration_event
 from apps.permissions.api_permissions import (
+    IsIntegrationAuditViewer,
+    IsIntegrationConfigCollectionUser,
+    IsIntegrationConfigDetailUser,
+    IsIntegrationConfigDisabler,
+    IsIntegrationConfigVerifier,
+    IsIntegrationCredentialClearer,
     IsIntegrationCredentialRotator,
     IsIntegrationManager,
     IsIntegrationReadOrManage,
@@ -32,7 +39,12 @@ from apps.permissions.ui_p6_scopes import (
     filter_store_authorizations,
 )
 
-from .credential_service import reject_raw_credential_fields, rotate_config_references
+from .credential_service import (
+    clear_config_secrets,
+    reject_raw_credential_fields,
+    rotate_config_references,
+    rotate_config_secrets,
+)
 from .marketplace_oauth_service import (
     complete_marketplace_oauth_callback,
     refresh_marketplace_authorization,
@@ -49,6 +61,7 @@ from .models import (
     SyncJob,
     SyncRun,
 )
+from .platform_schema_service import get_platform_schema
 from .product_mapping_service import (
     confirm_product_mapping,
     create_product_mapping,
@@ -56,6 +69,9 @@ from .product_mapping_service import (
     suggest_product_mapping,
 )
 from .serializers import (
+    CredentialClearSerializer,
+    CredentialRotateWriteSerializer,
+    IntegrationAuditLogSerializer,
     MarketplaceOAuthStartSerializer,
     MarketplaceProductMappingSerializer,
     MarketplaceStoreAuthorizationSerializer,
@@ -144,14 +160,22 @@ def _get_config_for_user(request, pk, permission_code):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsIntegrationReadOrManage])
+@permission_classes([IsIntegrationConfigCollectionUser])
 def integration_config_collection(request):
     if request.method == "GET":
+        allowed_query = {"platform", "environment", "status", "region"}
+        if set(request.query_params) - allowed_query:
+            raise ValidationError("Unknown integration configuration query parameter.")
         queryset = filter_integration_configs(
             request.user,
             PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
-            "integrations.view",
+            "integrations.config.view",
         )
+        for field in ("platform", "environment", "status"):
+            if request.query_params.get(field):
+                queryset = queryset.filter(**{field: request.query_params[field]})
+        if request.query_params.get("region"):
+            queryset = queryset.filter(regions__contains=[request.query_params["region"].upper()])
         serializer = PlatformIntegrationConfigSerializer(queryset, many=True)
         return success_response(serializer.data)
 
@@ -160,8 +184,10 @@ def integration_config_collection(request):
     serializer.is_valid(raise_exception=True)
     if not integration_values_allowed(
         request.user,
-        "integrations.manage",
+        "integrations.config.create",
         platform=serializer.validated_data["platform"],
+        environment=serializer.validated_data["environment"],
+        regions=serializer.validated_data.get("regions", []),
     ):
         raise DataScopeDenied(
             "Integration configuration is outside the authorized data scope.",
@@ -183,40 +209,121 @@ def integration_config_collection(request):
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsIntegrationReadOrManage])
+@permission_classes([IsIntegrationConfigDetailUser])
 def integration_config_detail(request, pk):
-    permission_code = "integrations.view" if request.method == "GET" else "integrations.manage"
+    permission_code = "integrations.config.view" if request.method == "GET" else "integrations.config.update"
     config = _get_config_for_user(request, pk, permission_code)
     if request.method == "GET":
         return success_response(PlatformIntegrationConfigSerializer(config).data)
 
     reject_raw_credential_fields(request.data)
-    serializer = PlatformIntegrationConfigSerializer(config, data=request.data, partial=True)
-    serializer.is_valid(raise_exception=True)
-    candidate_platform = serializer.validated_data.get("platform", config.platform)
-    if not integration_values_allowed(
-        request.user,
-        "integrations.manage",
-        platform=candidate_platform,
-        config_id=config.id,
-    ):
-        raise DataScopeDenied(
-            "Integration configuration update is outside the authorized data scope.",
-            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+    expected_version = request.data.get("version")
+    if expected_version is None:
+        raise ValidationError({"version": "Configuration version is required."})
+    try:
+        expected_version = int(expected_version)
+    except (TypeError, ValueError):
+        raise ValidationError({"version": "Configuration version must be an integer."})
+    payload = {key: value for key, value in request.data.items() if key != "version"}
+    with transaction.atomic():
+        config = PlatformIntegrationConfig.objects.select_for_update().get(
+            pk=config.pk,
+            tenant=request.user.tenant,
         )
-    config = serializer.save()
-    _write_audit_log(
-        config,
-        request.user,
-        "update",
-        detail={
-            "platform": config.platform,
-            "account_alias": config.account_alias,
-            "environment": config.environment,
-            "status": config.status,
-        },
-    )
+        if expected_version != config.config_version:
+            raise StateConflict("The configuration version changed; reload before saving.")
+        serializer = PlatformIntegrationConfigSerializer(config, data=payload, partial=True)
+        serializer.is_valid(raise_exception=True)
+        candidate_platform = serializer.validated_data.get("platform", config.platform)
+        if not integration_values_allowed(
+            request.user,
+            "integrations.config.update",
+            platform=candidate_platform,
+            environment=serializer.validated_data.get("environment", config.environment),
+            regions=serializer.validated_data.get("regions", config.regions),
+            config_id=config.id,
+        ):
+            raise DataScopeDenied(
+                "Integration configuration update is outside the authorized data scope.",
+                error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+            )
+        config = serializer.save(config_version=config.config_version + 1)
+        _write_audit_log(
+            config,
+            request.user,
+            "update_non_secret",
+            detail={
+                "platform": config.platform,
+                "account_alias": config.account_alias,
+                "environment": config.environment,
+                "status": config.status,
+            },
+        )
     return success_response(PlatformIntegrationConfigSerializer(config).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationConfigCollectionUser])
+def platform_config_schema(request, platform):
+    if set(request.query_params) - {"environment", "region"}:
+        raise ValidationError("Unknown platform schema query parameter.")
+    return success_response(
+        get_platform_schema(
+            platform,
+            environment=request.query_params.get("environment"),
+            region=request.query_params.get("region"),
+        )
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsMarketplaceCredentialRotator])
+def rotate_integration_secret_values(request, pk):
+    config = _get_config_for_user(request, pk, "integrations.credential.rotate")
+    serializer = CredentialRotateWriteSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    config, repeated = rotate_config_secrets(
+        config,
+        credentials=dict(data["credentials"]),
+        version=data["version"],
+        reason=data["reason"],
+        actor=request.user,
+        idempotency_key=request.headers.get("Idempotency-Key"),
+    )
+    response = PlatformIntegrationConfigSerializer(config).data
+    response["idempotent_replay"] = repeated
+    return success_response(response)
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationCredentialClearer])
+def clear_integration_secret_values(request, pk):
+    config = _get_config_for_user(request, pk, "integrations.credential.clear")
+    serializer = CredentialClearSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    config, repeated = clear_config_secrets(
+        config,
+        version=data["version"],
+        reason=data["reason"],
+        actor=request.user,
+        idempotency_key=request.headers.get("Idempotency-Key"),
+    )
+    response = PlatformIntegrationConfigSerializer(config).data
+    response["idempotent_replay"] = repeated
+    return success_response(response)
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationAuditViewer])
+def integration_config_audit(request, pk):
+    config = _get_config_for_user(request, pk, "integrations.audit.view")
+    queryset = IntegrationAuditLog.objects.filter(
+        tenant=request.user.tenant,
+        integration_config=config,
+    ).select_related("integration_config")
+    return success_response(IntegrationAuditLogSerializer(queryset, many=True).data)
 
 
 @api_view(["POST"])
@@ -306,6 +413,12 @@ def start_marketplace_store_oauth(request):
         ),
         pk=data["integration_config_id"],
     )
+    if config.regions and data["region"] not in config.regions:
+        raise ValidationError({"region": "OAuth region is not approved by the selected configuration."})
+    if config.callback_url and data["redirect_uri"] != config.callback_url:
+        raise ValidationError({"redirect_uri": "OAuth redirect URI does not match the selected configuration."})
+    if config.scopes and set(data["scopes"]) != set(config.scopes):
+        raise ValidationError({"scopes": "OAuth scopes must exactly match the selected configuration."})
     from apps.masterdata.models import StoreMaster
 
     store = get_object_or_404(StoreMaster, tenant=request.user.tenant, pk=data["store_id"])
@@ -594,9 +707,9 @@ def product_mapping_detail(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsIntegrationManager])
+@permission_classes([IsIntegrationConfigDisabler])
 def disable_integration_config(request, pk):
-    config = _get_config_for_user(request, pk, "integrations.manage")
+    config = _get_config_for_user(request, pk, "integrations.config.disable")
     config.status = PlatformIntegrationConfig.Status.DISABLED
     config.save(update_fields=["status", "updated_at"])
     _write_audit_log(config, request.user, "disable", detail={"status": config.status})
@@ -604,9 +717,9 @@ def disable_integration_config(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([IsIntegrationManager])
+@permission_classes([IsIntegrationConfigVerifier])
 def verify_integration_config(request, pk):
-    config = _get_config_for_user(request, pk, "integrations.manage")
+    config = _get_config_for_user(request, pk, "integrations.config.verify")
     if config.environment == PlatformIntegrationConfig.Environment.PRODUCTION:
         _write_audit_log(
             config,

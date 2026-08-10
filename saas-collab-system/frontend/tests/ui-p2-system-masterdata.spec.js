@@ -61,6 +61,14 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(systemApi + masterApi).not.toContain('/api/finance/');
   });
 
+  it('loads active tenant platforms for store creation instead of assuming platform id 1', () => {
+    const storePage = read('src/views/masterdata/StoreMasterList.vue');
+    expect(storePage).toContain('fetchPlatforms');
+    expect(storePage).toContain("fetchPlatforms({ page: 1, page_size: 100, status: 'active' })");
+    expect(storePage).toContain('value: platform.id');
+    expect(storePage).not.toContain("default: 1, options: [{ label:");
+  });
+
   it('keeps mock supplier contacts and credential references masked', () => {
     const supplier = masterDataMocks.suppliers().data.results[0];
     const security = mockSecurityOperations().data;
