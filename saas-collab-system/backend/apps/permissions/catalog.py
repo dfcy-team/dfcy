@@ -592,6 +592,36 @@ PERMISSION_DEFINITIONS = (
         "code": "pilot.security_review.review", "name": "Review pilot security reviews", "module": "pilot",
         "action": "security_review.review", "description": "Approve or reject security reviews with separation of duties.",
     },
+    # Global listing workbench permissions.  Legacy profile/template codes are
+    # retained and accepted by the listings permission adapters.
+    {
+        "code": "listings.workbench.view", "name": "查看全球刊登工作台", "module": "listings",
+        "action": "workbench.view", "description": "查看租户范围内的全球刊登商品、店铺和模板选择器。",
+    },
+    {
+        "code": "listings.workbench.manage", "name": "管理全球刊登工作台", "module": "listings",
+        "action": "workbench.manage", "description": "批量生成租户范围内的刊登草稿。",
+    },
+    {
+        "code": "listings.mapping.view", "name": "查看平台类目与属性映射", "module": "listings",
+        "action": "mapping.view", "description": "查看租户范围内的平台类目及商品属性映射。",
+    },
+    {
+        "code": "listings.mapping.manage", "name": "维护平台类目与属性映射", "module": "listings",
+        "action": "mapping.manage", "description": "维护租户范围内的平台类目及商品属性映射。",
+    },
+    {
+        "code": "listings.task.view", "name": "查看刊登任务与日志", "module": "listings",
+        "action": "task.view", "description": "查看刊登任务、步骤日志和异常。",
+    },
+    {
+        "code": "listings.task.manage", "name": "管理刊登任务", "module": "listings",
+        "action": "task.manage", "description": "发起、重试或记录刊登执行任务；不代表已接通外部平台。",
+    },
+    {
+        "code": "listings.publish.production", "name": "确认生产刊登", "module": "listings",
+        "action": "publish.production", "description": "二次确认生产模式的刊登任务。",
+    },
     *(
         {
             "code": f"pilot.{resource}.{action}",
