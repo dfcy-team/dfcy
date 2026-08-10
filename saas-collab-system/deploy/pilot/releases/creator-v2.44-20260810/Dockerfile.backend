@@ -1,0 +1,10 @@
+FROM saas-collab-backend:product-detail-v2.43-20260808
+
+LABEL org.opencontainers.image.version="creator-v2.44-20260810"
+
+WORKDIR /app
+
+# This release is an additive layer over the validated VM morning image.
+COPY backend/apps/influencers/ /app/apps/influencers/
+COPY backend/apps/permissions/catalog.py /app/apps/permissions/catalog.py
+COPY backend/apps/permissions/migrations/0025_expand_influencer_permissions.py /app/apps/permissions/migrations/0025_expand_influencer_permissions.py
