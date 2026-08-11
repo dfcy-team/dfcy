@@ -46,11 +46,17 @@ iptables -A "$chain" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A "$chain" -s "$subnet" -d "$subnet" -j ACCEPT
 iptables -A "$chain" -s "$client_cidr" -d "$subnet" -p tcp -m multiport --dports 80,443 -j ACCEPT
 iptables -A "$chain" -d "$subnet" -p tcp -m multiport --dports 80,443 -j REJECT
-iptables -A "$chain" -s "$subnet" -d "$db_ip" -p tcp --dport "$db_port" -j ACCEPT
 if [ "$deployment_mode" = "single-host" ]; then
+  # Docker DNAT runs before DOCKER-USER, so a connection to the private host
+  # port is seen here as db-bridge:3306. Match the original host tuple to
+  # allow only the app bridge's published 3307 path; a direct bridge target
+  # has no matching original tuple and is rejected below.
+  iptables -A "$chain" -s "$subnet" -d "$db_container_subnet" -p tcp --dport 3306 -m conntrack --ctorigdst "$db_ip" --ctorigdstport "$db_port" -j ACCEPT
   # The app reaches MySQL only via the private host port; it is never attached
   # to the database bridge. Keep a separately inspectable deny rule as proof.
   iptables -A "$chain" -s "$subnet" -d "$db_container_subnet" -j REJECT
+else
+  iptables -A "$chain" -s "$subnet" -d "$db_ip" -p tcp --dport "$db_port" -j ACCEPT
 fi
 iptables -A "$chain" -s "$subnet" -j REJECT
 iptables -A "$chain" -j RETURN

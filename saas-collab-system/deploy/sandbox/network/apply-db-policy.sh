@@ -43,12 +43,12 @@ iptables -N "$chain" 2>/dev/null || true
 iptables -F "$chain"
 iptables -A "$chain" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 if [ "$deployment_mode" = "single-host" ]; then
-  # Docker DNAT can expose either the original host destination or the
-  # translated database bridge destination in DOCKER-USER. Allow only the app
-  # bridge in both representations, then reject every other source.
-  iptables -A "$chain" -s "$app_subnet" -d "$db_ip" -p tcp --dport "$db_port" -j ACCEPT
-  iptables -A "$chain" -s "$app_subnet" -d "$subnet" -p tcp --dport 3306 -j ACCEPT
-  iptables -A "$chain" -s "$app_subnet" -d "$subnet" -j REJECT
+  # Docker DNAT runs before DOCKER-USER. Match the original private host
+  # destination so only app-bridge traffic that requested 10.20.40.119:3307
+  # can reach the translated MySQL port; direct app->db-bridge:3306 traffic
+  # remains explicitly rejected.
+  iptables -A "$chain" -s "$app_subnet" -d "$subnet" -p tcp --dport 3306 -m conntrack --ctorigdst "$db_ip" --ctorigdstport "$db_port" -j ACCEPT
+  iptables -A "$chain" -s "$app_subnet" -d "$subnet" -p tcp --dport 3306 -j REJECT
   iptables -A "$chain" -d "$db_ip" -p tcp --dport "$db_port" -j REJECT
   iptables -A "$chain" -d "$subnet" -p tcp --dport 3306 -j REJECT
 else

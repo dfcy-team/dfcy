@@ -143,7 +143,12 @@ networks:
   sandbox-db-internal:
     name: saas-sandbox-db-network
     driver: bridge
-    internal: true
+    # Do not mark this bridge as Docker-internal. Docker 29 can omit a
+    # published host-port rule for an ``internal: true`` bridge, which makes
+    # the private 10.20.40.119:3307 endpoint unavailable to the app bridge
+    # and to the migration container. The bridge remains isolated from the
+    # app bridge, and the SAAS_SANDBOX_DB DOCKER-USER policy below blocks all
+    # database-bridge egress except the explicitly approved app path.
     ipam:
       config:
         - subnet: ${SANDBOX_DB_CONTAINER_SUBNET:?Set the database container subnet}

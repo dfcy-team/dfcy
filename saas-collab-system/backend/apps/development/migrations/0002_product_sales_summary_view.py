@@ -60,7 +60,15 @@ class Migration(migrations.Migration):
     dependencies = [("development", "0001_initial")]
 
     operations = [
-        migrations.RunPython(create_sales_summary_view, drop_sales_summary_view),
+        # MySQL doesn't support transactional DDL. Keep this operation out of
+        # Django's implicit RunPython transaction so DROP VIEW can execute
+        # before the replacement view is created. On PostgreSQL/SQLite the
+        # migration's normal schema-editor transaction semantics are retained.
+        migrations.RunPython(
+            create_sales_summary_view,
+            drop_sales_summary_view,
+            atomic=False,
+        ),
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.CreateModel(
