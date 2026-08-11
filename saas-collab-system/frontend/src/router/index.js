@@ -26,6 +26,7 @@ const ProductStatusRecommendationDetail = () => import('../views/products/Produc
 const ProductStatusTransitionHistory = () => import('../views/products/ProductStatusTransitionHistory.vue');
 const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
 const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
+const SupplyFlowConsole = () => import('../views/supply-chain/SupplyFlowConsole.vue');
 const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
 const SupplierTaskDetail = () => import('../views/suppliers/SupplierTaskDetail.vue');
 const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentList.vue');
@@ -38,6 +39,7 @@ const MySupplierPerformanceHistory = () => import('../views/suppliers/MySupplier
 const SiteProfileList = () => import('../views/listings/SiteProfileList.vue');
 const SiteProfileDetail = () => import('../views/listings/SiteProfileDetail.vue');
 const ListingTemplateList = () => import('../views/listings/ListingTemplateList.vue');
+const DevelopmentWorkspace = () => import('../views/development/DevelopmentWorkspace.vue');
 const PriceList = () => import('../views/pricing/PriceList.vue');
 const PriceDetail = () => import('../views/pricing/PriceDetail.vue');
 const RPATaskList = () => import('../views/rpa/RPATaskList.vue');
@@ -148,6 +150,8 @@ const routes = [
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'purchasing/orders', component: PurchaseOrderList },
       { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
+      { path: 'supply-chain/consolidations', component: SupplyFlowConsole, props: { initialTab: 'consolidations' } },
+      { path: 'supply-chain/shipments', component: SupplyFlowConsole, props: { initialTab: 'shipments' } },
       { path: 'suppliers/tasks', component: SupplierTaskList },
       { path: 'suppliers/tasks/:id', component: SupplierTaskDetail },
       { path: 'suppliers/shipments', component: SupplierShipmentList },
@@ -160,6 +164,13 @@ const routes = [
       { path: 'listings/sites', component: SiteProfileList },
       { path: 'listings/sites/:id', component: SiteProfileDetail },
       { path: 'listings/templates', component: ListingTemplateList },
+      { path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } },
+      { path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } },
+      { path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } },
+      { path: 'development/costs', component: DevelopmentWorkspace, props: { mode: 'costs' } },
+      { path: 'development/sales', component: DevelopmentWorkspace, props: { mode: 'sales' } },
+      { path: 'development/retrospectives', component: DevelopmentWorkspace, props: { mode: 'retrospectives' } },
+      { path: 'development/dashboard', component: DevelopmentWorkspace, props: { mode: 'dashboard' } },
       { path: 'pricing/prices', component: PriceList },
       { path: 'pricing/prices/:id', component: PriceDetail },
       { path: 'rpa/tasks', component: RPATaskList },

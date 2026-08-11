@@ -1,0 +1,62 @@
+<view class="page">
+  <view wx:if="{{state === 'ready'}}">
+    <view class="read-only-banner">只读详情 · 不提供状态变更操作</view>
+
+    <view class="card">
+      <view class="contract-header">
+        <view>
+          <view class="contract-no">{{contract.contract_no}}</view>
+          <view class="muted">{{contract.application_code}} · {{contract.environment}}</view>
+        </view>
+        <text class="contract-status">{{contract.status}}</text>
+      </view>
+      <view class="field"><text>候选提交</text><text>{{contract.commit_sha}}</text></view>
+      <view class="field"><text>API 合同</text><text>{{contract.api_contract_version}}</text></view>
+      <view class="field"><text>风险等级</text><text>{{contract.risk_level}}</text></view>
+      <view class="field"><text>回退版本</text><text>{{contract.rollback_version}}</text></view>
+      <view class="field"><text>观察窗口</text><text>{{contract.observation_minutes}} 分钟</text></view>
+      <view class="field"><text>对象版本</text><text>v{{contract.version}}</text></view>
+    </view>
+
+    <view class="section-title">门禁结果</view>
+    <view class="card gate-summary">
+      <text>通过 {{contract.gate_summary.passed_count}} / {{contract.gate_summary.required}}</text>
+      <text class="{{contract.gate_summary.passed ? 'passed' : 'blocked'}}">
+        {{contract.gate_summary.passed ? "全部通过" : "存在阻断"}}
+      </text>
+    </view>
+    <view wx:for="{{contract.gate_results}}" wx:key="code" class="card compact-card">
+      <view class="row">
+        <text>{{item.code}}</text>
+        <text class="{{item.status === 'passed' ? 'passed' : 'blocked'}}">{{item.status}}</text>
+      </view>
+      <view class="evidence">{{item.evidence_ref}}</view>
+    </view>
+
+    <view class="section-title">审批记录</view>
+    <view wx:if="{{!contract.approvals.length}}" class="card muted">暂无审批记录</view>
+    <view wx:for="{{contract.approvals}}" wx:key="approval_type" class="card compact-card">
+      <view class="row">
+        <text>{{item.approval_type}}</text>
+        <text class="{{item.decision === 'approved' ? 'passed' : 'blocked'}}">{{item.decision}}</text>
+      </view>
+      <view class="evidence">{{item.reason}}</view>
+    </view>
+  </view>
+
+  <state-view
+    wx:elif="{{state === 'error'}}"
+    state="error"
+    title="加载失败"
+    description="{{errorMessage}}"
+    action-text="重新加载"
+    bind:action="loadContract"
+  />
+
+  <state-view
+    wx:else
+    state="loading"
+    title="正在加载"
+    description="正在读取合同、门禁与审批记录。"
+  />
+</view>

@@ -1,0 +1,24 @@
+<view class="page safe-page">
+  <view wx:if="{{state === 'ready' && assignment}}">
+    <view class="card">
+      <view class="section-title">{{assignment.consolidation.consolidation_no}}</view>
+      <view class="status-line"><text>箱 {{assignment.allocation.box_no}}</text><text class="state">{{assignment.allocation.state}}</text></view>
+      <view class="meta-grid"><text>数量 {{assignment.allocation.quantity}}</text><text>版本 v{{assignment.allocation.version}}</text><text>证据 {{assignment.allocation.evidence_ids.length}} 项</text></view>
+    </view>
+    <view class="card site-card">
+      <view class="section-title">集货站点</view>
+      <view class="site-name">{{assignment.consolidation.site.name}}</view>
+      <view class="site-address">{{assignment.consolidation.site.country_code}} {{assignment.consolidation.site.province_state}} {{assignment.consolidation.site.city}} {{assignment.consolidation.site.address_line}}</view>
+      <view class="site-contact">联系人 {{assignment.consolidation.site.contact_name}} · {{assignment.consolidation.site.contact_phone}}</view>
+      <view class="site-address">{{assignment.consolidation.site.delivery_instructions}}</view>
+    </view>
+    <view class="card evidence-card">
+      <view class="section-title">证据与交接</view>
+      <view class="boundary" wx:if="{{!localUploadEnabled}}">附件上传和 download-ticket 当前未启用。只有后端返回 accepted 证据后才能交接；不会在 Mock/生产环境伪造成功。</view>
+      <button class="secondary-button" loading="{{uploading}}" disabled="{{uploading || !localUploadEnabled}}" bindtap="chooseEvidence">{{localUploadEnabled ? "开发开关：选择 JPEG/PNG" : "附件上传未启用"}}</button>
+      <button class="primary-button" loading="{{submitting}}" disabled="{{submitting || !assignment.allocation.evidence_ids.length}}" bindtap="submitHandover">提交交接（仅 accepted 证据）</button>
+    </view>
+  </view>
+  <state-view wx:elif="{{state === 'error'}}" state="error" title="加载失败" description="{{errorMessage}}" action-text="重新加载" bind:action="loadAssignment" />
+  <state-view wx:else state="loading" title="正在加载" description="正在读取 assignment 与站点联系信息。" />
+</view>

@@ -1,0 +1,17 @@
+<view class="page safe-page">
+  <view class="boundary card">
+    <view class="boundary-title">SC-FLOW · 供应商只读范围</view>
+    仅显示当前供应商 assignment 与本站联系信息；同柜其他供应商和内部绑定不会出现在 DTO。
+  </view>
+  <view wx:if="{{state === 'ready'}}">
+    <view class="assignment card" wx:for="{{assignments}}" wx:key="allocation.id" data-id="{{item.allocation.id}}" bindtap="openAssignment" role="button">
+      <view class="assignment-header"><text class="assignment-no">{{item.consolidation.consolidation_no}}</text><text class="assignment-state">{{item.allocation.state}}</text></view>
+      <view class="assignment-site">{{item.consolidation.site.name}} · {{item.consolidation.site.city}}</view>
+      <view class="assignment-meta"><text>箱号 {{item.allocation.box_no}}</text><text>数量 {{item.allocation.quantity}}</text><text>证据 {{item.allocation.evidence_ids.length}} 项</text></view>
+      <view class="assignment-address">{{item.consolidation.site.address_line}}</view>
+    </view>
+  </view>
+  <state-view wx:elif="{{state === 'empty'}}" state="empty" title="暂无集货 assignment" description="当前租户与供应商范围内没有可见箱分配。" />
+  <state-view wx:elif="{{state === 'error'}}" state="error" title="加载失败" description="{{errorMessage}}" action-text="重新加载" bind:action="loadAssignments" />
+  <state-view wx:else state="loading" title="正在加载" description="正在读取当前供应商的集货 assignment。" />
+</view>

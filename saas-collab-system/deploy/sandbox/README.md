@@ -1,5 +1,33 @@
 # Sandbox 部署包
 
+## Single-host Linux ECS mode
+
+Sandbox supports a one-host topology for an isolated Linux ECS instance. The
+application containers stay on `saas-sandbox-network` and MySQL stays on the
+separate `internal` `saas-sandbox-db-network`; both `DOCKER-USER` policies and
+bridge subnet hashes are recorded. The historical two-host flow remains
+available as `SANDBOX_DEPLOYMENT_MODE=dual-host`.
+
+For the one-host flow:
+
+1. Copy `single-host/env.sandbox.example` to `single-host/.env.sandbox`, replace every placeholder, and set `SANDBOX_DEPLOYMENT_MODE=single-host`.
+2. Copy `network/env.network.example` to `/etc/saas-collab/sandbox-network.env`; set `SANDBOX_NETWORK_APPLY=YES`, `SANDBOX_DEPLOYMENT_MODE=single-host`, both host IPs to `10.20.40.119`, and the same distinct app/database bridge CIDRs as the single-host env.
+3. Install Docker, `iptables-persistent`, `jq`, and OpenSSL. Create mode `0700` `/var/lib/saas-collab/evidence` and `/var/lib/saas-collab/network`, then run `sh single-host/install-single-host.sh`.
+
+The installer rejects any other database address or port: MySQL is published
+only as `10.20.40.119:3307`, and the only frontend entry is HTTPS
+`10.20.40.119:8543`. The app bridge may reach that private host port, while a
+direct app-bridge to DB-bridge path is rejected by both policy chains. Run both
+`collect-network-evidence.sh app ... post-reboot` and `collect-network-evidence.sh db ... post-reboot` after reboot; all five network evidence files remain mandatory for Sandbox PASS.
+
+Use the independent Windows machine only as an unapproved probe. Copy a
+reviewed policy file, set `SANDBOX_UNAPPROVED_SOURCE_PROBE=YES`, and run
+`powershell -File network/probe-db-source-denied.ps1 .\\sandbox-network.env .\\unapproved-db-source-evidence.json`.
+Copy its PASS JSON to the Linux evidence path and protect it with mode `0400`.
+The probe must report a rejected connection to `10.20.40.119:3307` from a
+source different from `SANDBOX_APP_HOST_IP`; it never joins either Docker
+network.
+
 本目录提供独立于开发环境和 `controlled-pilot` 的受控 Sandbox 部署基线。Sandbox 用于业务功能联调、权限回归、浏览器 E2E、故障与回滚演练，不是生产环境，也不授权真实平台连接或高风险自动化。
 
 ## 目录

@@ -1,0 +1,6 @@
+verify_sc_f2_font_bundle.py text eol=lf
+probe_sc_f2_font_pdf.py text eol=lf
+inspect_sc_f2_probe_pdf.py text eol=lf
+probe_sc_f2_font_memory.py text eol=lf
+run_sc_f2_font_ci_gate.py text eol=lf
+verify_sc_f2_label_renderer_contract.py text eol=lf

@@ -1,0 +1,13 @@
+<view class="state-view state-{{state}}" role="status">
+  <view class="state-indicator" aria-hidden="true"></view>
+  <view class="state-title">{{title}}</view>
+  <view class="state-description">{{description}}</view>
+  <button
+    wx:if="{{actionText}}"
+    class="state-action"
+    bindtap="handleAction"
+    aria-label="{{actionText}}"
+  >
+    {{actionText}}
+  </button>
+</view>

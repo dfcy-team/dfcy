@@ -1,6 +1,36 @@
 export const menuItems = [
   { path: '/', label: '工作台' },
   {
+    label: '\u4ea7\u54c1\u5f00\u53d1',
+    permissions: ['development.requirement.view','development.project.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view'],
+    children: [
+      { path: '/development/requirements', label: '\u9009\u54c1\u63d0\u62a5', permissions: ['development.requirement.view'] },
+      { path: '/development/review', label: '\u9700\u6c42\u5ba1\u6838', permissions: ['development.requirement.review'] },
+      { path: '/development/projects', label: '\u5f00\u53d1\u9879\u76ee', permissions: ['development.project.view'] },
+      { path: '/development/costs', label: '\u6210\u672c\u6838\u7b97', permissions: ['development.cost.view'] },
+      { path: '/development/sales', label: '\u9500\u552e\u6570\u636e', permissions: ['development.sales.view'] },
+      { path: '/development/retrospectives', label: '\u9009\u54c1\u590d\u76d8', permissions: ['development.review.view'] },
+      { path: '/development/dashboard', label: '\u6548\u80fd\u770b\u677f', permissions: ['development.dashboard.view'] }
+    ]
+  },
+  {
+    label: '供应链协同',
+    internal: true,
+    permissions: ['supply.consolidation.view', 'supply.shipment.view'],
+    children: [
+      { path: '/supply-chain/consolidations', label: '集货管理', permissions: ['supply.consolidation.view'] },
+      { path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] }
+    ]
+  },
+  {
+    label: '\u591a\u5e73\u53f0\u520a\u767b',
+    permissions: ['listings.profile.view','listings.template.view'],
+    children: [
+      { path: '/listings/sites', label: '\u520a\u767b\u8d44\u6599', permissions: ['listings.profile.view'] },
+      { path: '/listings/templates', label: '\u520a\u767b\u6a21\u677f', permissions: ['listings.template.view'] }
+    ]
+  },
+  {
     label: '经营分析',
     permissions: ['analytics.view'],
     children: [
@@ -130,6 +160,13 @@ export const menuItems = [
 export const routeCapabilities = [
   { path: '/', exact: true, userTypes: ['internal', 'external'] },
   { path: '/forbidden', exact: true },
+  { path: '/development/requirements', permissions: ['development.requirement.view'], userTypes: ['internal'] },
+  { path: '/development/review', permissions: ['development.requirement.review'], userTypes: ['internal'] },
+  { path: '/development/projects', permissions: ['development.project.view'], userTypes: ['internal'] },
+  { path: '/development/costs', permissions: ['development.cost.view'], userTypes: ['internal'] },
+  { path: '/development/sales', permissions: ['development.sales.view'], userTypes: ['internal'] },
+  { path: '/development/retrospectives', permissions: ['development.review.view'], userTypes: ['internal'] },
+  { path: '/development/dashboard', permissions: ['development.dashboard.view'], userTypes: ['internal'] },
   { path: '/analytics/overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
@@ -149,12 +186,14 @@ export const routeCapabilities = [
   { path: '/products/status-transitions', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/purchasing/orders', permissions: ['purchasing.orders.view'], userTypes: ['internal'] },
+  { path: '/supply-chain/consolidations', permissions: ['supply.consolidation.view'], userTypes: ['internal'] },
+  { path: '/supply-chain/shipments', permissions: ['supply.shipment.view'], userTypes: ['internal'] },
   { path: '/suppliers/my-performance', userTypes: ['external'] },
   { path: '/suppliers/performance', permissions: ['suppliers.performance.view'], userTypes: ['internal'] },
   { path: '/suppliers/tasks', userTypes: ['external'] },
   { path: '/suppliers/shipments', userTypes: ['external'] },
-  { path: '/listings/sites', userTypes: ['internal'] },
-  { path: '/listings/templates', userTypes: ['internal'] },
+  { path: '/listings/sites', permissions: ['listings.profile.view'], userTypes: ['internal'] },
+  { path: '/listings/templates', permissions: ['listings.template.view'], userTypes: ['internal'] },
   { path: '/pricing/prices', userTypes: ['internal'] },
   { path: '/rpa/tasks', permissions: ['rpa.tasks.view'], userTypes: ['internal'] },
   { path: '/rpa/runs', permissions: ['rpa.tasks.view'], userTypes: ['internal'] },

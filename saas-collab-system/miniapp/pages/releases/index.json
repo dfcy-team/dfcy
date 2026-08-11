@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "发布合同",
+  "usingComponents": {
+    "state-view": "/components/state-view/index"
+  }
+}

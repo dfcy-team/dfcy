@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "运行诊断",
+  "usingComponents": {
+    "state-view": "/components/state-view/index"
+  }
+}

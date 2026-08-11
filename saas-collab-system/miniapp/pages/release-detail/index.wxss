@@ -1,0 +1,80 @@
+.read-only-banner {
+  margin-bottom: 24rpx;
+  padding: 20rpx;
+  border-radius: 12rpx;
+  background: #edf5fc;
+  color: #31577d;
+  text-align: center;
+}
+
+.contract-header,
+.row,
+.gate-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.contract-no {
+  margin-bottom: 8rpx;
+  color: #173a63;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.contract-status {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #fff3d4;
+  color: #7a5a00;
+  font-size: 22rpx;
+}
+
+.field {
+  display: flex;
+  min-height: 78rpx;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28rpx;
+  border-bottom: 1rpx solid #edf1f5;
+}
+
+.field:last-child {
+  border-bottom: 0;
+}
+
+.field text:first-child {
+  flex: 0 0 auto;
+  color: #75869a;
+}
+
+.field text:last-child {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.section-title {
+  margin: 36rpx 0 20rpx;
+  color: #173a63;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.compact-card {
+  padding: 24rpx 28rpx;
+}
+
+.passed {
+  color: #267047;
+}
+
+.blocked {
+  color: #b62828;
+}
+
+.evidence {
+  margin-top: 12rpx;
+  color: #718398;
+  font-size: 24rpx;
+  overflow-wrap: anywhere;
+}

@@ -23,14 +23,22 @@ command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
 db_ip=$(value SANDBOX_DB_HOST_IP)
 db_port=$(value SANDBOX_DB_PORT)
 client_cidr=$(value SANDBOX_CLIENT_CIDR)
+deployment_mode=$(value SANDBOX_DEPLOYMENT_MODE)
 state_dir=$(value SANDBOX_NETWORK_STATE_DIR)
 case "$state_dir" in /*) ;; *) fail "SANDBOX_NETWORK_STATE_DIR must be absolute." ;; esac
 case "$db_ip" in 10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) ;; *) fail "Database IP must be private." ;; esac
 printf '%s' "$db_port" | grep -Eq '^[0-9]{1,5}$' || fail "Invalid database port."
 printf '%s' "$client_cidr" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' || fail "Invalid client CIDR."
+case "$deployment_mode" in dual-host|single-host) ;; *) fail "SANDBOX_DEPLOYMENT_MODE must be dual-host or single-host." ;; esac
 
 subnet=$(docker network inspect saas-sandbox-network --format '{{(index .IPAM.Config 0).Subnet}}')
 [ -n "$subnet" ] || fail "Cannot determine saas-sandbox-network subnet."
+if [ "$deployment_mode" = "single-host" ]; then
+  db_container_subnet=$(value SANDBOX_DB_CONTAINER_SUBNET)
+  case "$db_container_subnet" in */*) ;; *) fail "SANDBOX_DB_CONTAINER_SUBNET is required for single-host." ;; esac
+  [ "$db_container_subnet" != "$subnet" ] || fail "Application and database container networks must be different."
+  docker network inspect saas-sandbox-db-network >/dev/null 2>&1 || fail "Sandbox database container network is missing."
+fi
 iptables -S DOCKER-USER >/dev/null 2>&1 || fail "DOCKER-USER chain is unavailable."
 iptables -N "$chain" 2>/dev/null || true
 iptables -F "$chain"
@@ -39,6 +47,11 @@ iptables -A "$chain" -s "$subnet" -d "$subnet" -j ACCEPT
 iptables -A "$chain" -s "$client_cidr" -d "$subnet" -p tcp -m multiport --dports 80,443 -j ACCEPT
 iptables -A "$chain" -d "$subnet" -p tcp -m multiport --dports 80,443 -j REJECT
 iptables -A "$chain" -s "$subnet" -d "$db_ip" -p tcp --dport "$db_port" -j ACCEPT
+if [ "$deployment_mode" = "single-host" ]; then
+  # The app reaches MySQL only via the private host port; it is never attached
+  # to the database bridge. Keep a separately inspectable deny rule as proof.
+  iptables -A "$chain" -s "$subnet" -d "$db_container_subnet" -j REJECT
+fi
 iptables -A "$chain" -s "$subnet" -j REJECT
 iptables -A "$chain" -j RETURN
 iptables -C DOCKER-USER -j "$chain" 2>/dev/null || iptables -I DOCKER-USER 1 -j "$chain"
@@ -51,6 +64,7 @@ umask 077
 {
   printf 'SCHEMA_VERSION=1\n'
   printf 'MODE=app\n'
+  printf 'DEPLOYMENT_MODE=%s\n' "$deployment_mode"
   printf 'APPLIED_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'APPLIED_BOOT_ID=%s\n' "$(cat /proc/sys/kernel/random/boot_id)"
   printf 'POLICY_SHA256=%s\n' "$policy_hash"
