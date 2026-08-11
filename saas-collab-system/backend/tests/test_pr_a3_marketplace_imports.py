@@ -580,6 +580,16 @@ def test_attempt_bulk_create_is_rejected():
 
 
 @pytest.mark.django_db
+def test_attempt_base_manager_bulk_create_is_rejected():
+    tenant, user, mapping = context("a3-attempt-base-manager-bulk-create")
+    batch, _attempt_id = processing_batch(tenant, user, mapping)
+    attempt = MarketplaceImportBatchAttempt(**attempt_kwargs(batch, user))
+    with pytest.raises(ValidationError, match="audit service"):
+        MarketplaceImportBatchAttempt._base_manager.bulk_create([attempt])
+    assert not batch.attempts.exists()
+
+
+@pytest.mark.django_db
 def test_controlled_audit_entry_creates_and_restores_creation_guard():
     tenant, user, mapping = context("a3-attempt-controlled")
     batch, attempt_id = processing_batch(tenant, user, mapping)

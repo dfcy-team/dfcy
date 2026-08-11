@@ -251,6 +251,7 @@ class MarketplaceImportBatchAttempt(models.Model):
     objects = ImmutableImportAttemptQuerySet.as_manager()
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["created_at", "id"]
         constraints = [
             models.UniqueConstraint(
