@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import APIException, ValidationError
@@ -10,9 +10,10 @@ from apps.common.responses import paginated_data, success_response
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.ui_p2_scopes import require_all_scope
 
-from .models import Influencer, OutreachTask, SampleFulfillment, SkuPriceSnapshot
+from .models import Influencer, OutreachTarget, OutreachTask, SampleFulfillment, SkuPriceSnapshot
 from .serializers import (
     InfluencerSerializer,
+    OutreachTargetSerializer,
     OutreachTaskSerializer,
     SampleFulfillmentSerializer,
     SkuPriceSnapshotSerializer,
@@ -20,8 +21,13 @@ from .serializers import (
 from .services import (
     create_outreach_task,
     create_sample_fulfillment,
+    add_outreach_target,
+    outreach_task_progress,
+    soft_delete_outreach_target,
+    soft_delete_outreach_task,
     transition_outreach_task,
     transition_sample_fulfillment,
+    update_outreach_target,
 )
 
 
@@ -47,6 +53,10 @@ def _expected_version(request):
     if not raw.isdigit():
         raise ValidationError({"If-Match": "A numeric resource version is required."})
     return int(raw)
+
+
+def _optional_expected_version(request):
+    return _expected_version(request) if request.headers.get("If-Match") else None
 
 
 class InfluencerCollectionView(APIView):
@@ -158,7 +168,18 @@ class OutreachTaskCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        queryset = OutreachTask.objects.filter(tenant=request.user.tenant).select_related("influencer", "store", "owner", "dispatcher")
+        queryset = OutreachTask.objects.filter(
+            tenant=request.user.tenant, is_deleted=False
+        ).select_related("influencer", "store", "owner", "dispatcher", "spu").annotate(
+            active_linked_count=Count(
+                "targets",
+                filter=Q(
+                    targets__tenant=request.user.tenant,
+                    targets__is_deleted=False,
+                ),
+                distinct=True,
+            )
+        )
         status = request.query_params.get("status", "").strip()
         if status:
             queryset = queryset.filter(status=status)
@@ -173,6 +194,153 @@ class OutreachTaskCollectionView(APIView):
         return success_response(OutreachTaskSerializer(task).data, status=201)
 
 
+class OutreachTaskDetailView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def get(self, request, pk):
+        require_all_scope(request.user, self.read_permission_code)
+        task = get_object_or_404(
+            OutreachTask,
+            tenant=request.user.tenant,
+            pk=pk,
+            is_deleted=False,
+        )
+        return success_response(OutreachTaskSerializer(task).data)
+
+    def delete(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        task = get_object_or_404(
+            OutreachTask, tenant=request.user.tenant, pk=pk, is_deleted=False
+        )
+        task = soft_delete_outreach_task(user=request.user, task=task)
+        return success_response(OutreachTaskSerializer(task).data)
+
+
+class OutreachTaskProgressView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+
+    def get(self, request, pk):
+        require_all_scope(request.user, self.read_permission_code)
+        return success_response(
+            outreach_task_progress(
+                user=request.user,
+                task=get_object_or_404(
+                    OutreachTask,
+                    tenant=request.user.tenant,
+                    pk=pk,
+                    is_deleted=False,
+                ),
+            )
+        )
+
+
+class OutreachTargetCollectionView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def _task(self, request, pk):
+        return get_object_or_404(
+            OutreachTask,
+            tenant=request.user.tenant,
+            pk=pk,
+            is_deleted=False,
+        )
+
+    def get(self, request, pk):
+        require_all_scope(request.user, self.read_permission_code)
+        task = self._task(request, pk)
+        queryset = OutreachTarget.objects.filter(
+            tenant=request.user.tenant,
+            task=task,
+            is_deleted=False,
+        ).select_related("influencer")
+        page, page_size = _pagination(request)
+        return success_response(
+            paginated_data(
+                request,
+                queryset,
+                OutreachTargetSerializer,
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    def post(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        task = self._task(request, pk)
+        serializer = OutreachTargetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            target, created = add_outreach_target(
+                user=request.user,
+                task=task,
+                influencer=serializer.validated_data["influencer"],
+                notes=serializer.validated_data.get("notes", ""),
+                expected_version=_optional_expected_version(request),
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(OutreachTargetSerializer(target).data, status=201 if created else 200)
+
+
+class OutreachTargetDetailView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def _target(self, request, task_pk, target_pk):
+        return get_object_or_404(
+            OutreachTarget,
+            tenant=request.user.tenant,
+            task_id=task_pk,
+            pk=target_pk,
+            task__is_deleted=False,
+            is_deleted=False,
+        )
+
+    def patch(self, request, task_pk, target_pk):
+        require_all_scope(request.user, self.write_permission_code)
+        target = self._target(request, task_pk, target_pk)
+        serializer = OutreachTargetSerializer(target, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            target = update_outreach_target(
+                user=request.user,
+                task=task_pk,
+                target=target,
+                expected_version=_expected_version(request),
+                outreach_result=serializer.validated_data.get("outreach_result"),
+                notes=serializer.validated_data.get("notes"),
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(OutreachTargetSerializer(target).data)
+
+    def delete(self, request, task_pk, target_pk):
+        require_all_scope(request.user, self.write_permission_code)
+        target = self._target(request, task_pk, target_pk)
+        try:
+            target = soft_delete_outreach_target(
+                user=request.user,
+                task=task_pk,
+                target=target,
+                expected_version=_expected_version(request),
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(OutreachTargetSerializer(target).data)
+
+
 class OutreachTaskStatusView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
@@ -180,7 +348,9 @@ class OutreachTaskStatusView(APIView):
 
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        task = get_object_or_404(OutreachTask, tenant=request.user.tenant, pk=pk)
+        task = get_object_or_404(
+            OutreachTask, tenant=request.user.tenant, pk=pk, is_deleted=False
+        )
         try:
             task = transition_outreach_task(
                 user=request.user,
@@ -226,7 +396,10 @@ class SampleFulfillmentCollectionView(APIView):
                 item_payloads=items,
             )
         except ValidationError as exc:
-            if {"idempotency_key", "fulfillment_no"}.intersection(exc.detail):
+            if (
+                {"idempotency_key", "fulfillment_no"}.intersection(exc.detail)
+                or "conflict" in str(exc.get_codes())
+            ):
                 raise Conflict(exc.detail) from exc
             raise
         fulfillment = SampleFulfillment.objects.prefetch_related("items").get(pk=fulfillment.pk)

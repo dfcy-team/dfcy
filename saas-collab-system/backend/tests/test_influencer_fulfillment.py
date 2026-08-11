@@ -13,6 +13,7 @@ from apps.audit.models import OperationLog
 from apps.influencers.models import (
     Influencer,
     InfluencerRestriction,
+    OutreachTarget,
     OutreachTask,
     SampleFulfillment,
     SampleItem,
@@ -26,8 +27,12 @@ from apps.influencers.services import (
     _payload_hash,
     create_outreach_task,
     create_sample_fulfillment,
+    add_outreach_target,
+    outreach_task_progress,
+    soft_delete_outreach_target,
     transition_outreach_task,
     transition_sample_fulfillment,
+    update_outreach_target,
 )
 
 
@@ -84,6 +89,8 @@ def base_records(tenant, user, suffix="a"):
             "owner": user,
         },
     )
+    add_outreach_target(user=user, task=task, influencer=influencer)
+    task.refresh_from_db()
     return store, influencer, task
 
 
@@ -711,3 +718,149 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
     )
     assert first.status_code == 200
     assert stale.status_code == 409
+
+
+def test_outreach_task_supports_multiple_targets_linked_count_and_soft_delete():
+    tenant = Tenant.objects.create(name="Tenant", code="a2-multiple-targets")
+    user, client = user_with_permissions(
+        tenant,
+        "a2-target-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "a2-targets")
+    second = Influencer.objects.create(
+        tenant=tenant,
+        code="creator-a2-second",
+        name="Creator second",
+        platform="tiktok",
+    )
+    task.target_count = 2
+    task.save()
+
+    linked = client.post(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/",
+        {"influencer": second.pk},
+        format="json",
+    )
+    listed = client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/")
+
+    assert linked.status_code == 201
+    assert listed.status_code == 200
+    assert listed.data["data"]["count"] == 2
+    assert client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/").data["data"]["linked_count"] == 2
+
+    first_target = OutreachTarget.objects.get(task=task, influencer=influencer)
+    deleted = client.delete(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{first_target.pk}/",
+        HTTP_IF_MATCH='"1"',
+    )
+    hidden = client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/")
+    restored = client.post(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/",
+        {"influencer": influencer.pk},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+
+    assert deleted.status_code == 200
+    assert hidden.data["data"]["count"] == 1
+    assert restored.status_code == 200
+    assert OutreachTarget.objects.filter(pk=first_target.pk, is_deleted=False).exists()
+
+
+def test_single_target_terminal_result_auto_completes_task_once():
+    tenant = Tenant.objects.create(name="Tenant", code="a2-auto-complete")
+    user, client = user_with_permissions(
+        tenant,
+        "a2-auto-complete-user",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    _, influencer, task = base_records(tenant, user, "a2-auto")
+    task.target_count = 1
+    task.save()
+    target = OutreachTarget.objects.get(task=task, influencer=influencer)
+
+    first = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{target.pk}/",
+        {"outreach_result": "success"},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    task.refresh_from_db()
+    finalized_at = task.finalized_at
+    second = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{target.pk}/",
+        {"notes": "terminal target"},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+    task.refresh_from_db()
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert task.status == OutreachTask.Status.COMPLETED
+    assert task.finalized_at == finalized_at
+
+
+def test_blacklisted_influencer_cannot_be_added_to_outreach_task():
+    tenant = Tenant.objects.create(name="Tenant", code="target-blacklist")
+    user, client = user_with_permissions(
+        tenant,
+        "target-blacklist-manager",
+        "influencers.outreach.manage",
+    )
+    _, _, task = base_records(tenant, user, "target-blacklist")
+    blocked = Influencer.objects.create(
+        tenant=tenant,
+        code="blocked-target",
+        name="Blocked target",
+        platform="tiktok",
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=blocked,
+        is_blacklisted=True,
+        reason="risk",
+        created_by=user,
+    )
+
+    response = client.post(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/",
+        {"influencer": blocked.pk},
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert not OutreachTarget.objects.filter(task=task, influencer=blocked).exists()
+
+
+def test_sample_order_number_marks_new_fulfillment_as_shipped():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-order-shipped")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-order-manager",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "sample-order")
+    target = OutreachTarget.objects.get(task=task, influencer=influencer)
+
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SAMPLE-SHIPPED",
+            "outreach_task": task.pk,
+            "outreach_target": target.pk,
+            "sample_order_no": "ORDER-001",
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="sample-shipped-on-create",
+    )
+
+    assert response.status_code == 201
+    fulfillment = SampleFulfillment.objects.get(fulfillment_no="SAMPLE-SHIPPED")
+    assert fulfillment.store_id == store.pk
+    assert fulfillment.status == SampleFulfillment.Status.SHIPPED
+    assert fulfillment.shipped_at is not None
