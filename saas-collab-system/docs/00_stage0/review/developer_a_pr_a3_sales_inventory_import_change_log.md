@@ -2,7 +2,7 @@
 
 任务：`A-PR3-P1-FIX-R4-AUDIT-CREATION-GUARD`
 
-日期：2026-08-10
+日期：2026-08-11
 
 ```text
 Repository: dfcy-team/dfcy
@@ -11,12 +11,14 @@ PR URL: https://github.com/dfcy-team/dfcy/pull/45
 Branch: feature/module-a-sales-inventory-import
 Base Branch: feature/module-a-real-platform-connection
 Base SHA: 75995f74ec74a3315065ecfcec317edda8b1df73
-Previous Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
-Previous Evidence HEAD: ace63284395ce5a0a6ef3bbd3366b9b4f0d05558
-Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Original Previous Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
+Previous Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Previous Evidence HEAD: d52f11f8994ed7291baa67d5469c2b390787532c
+Code Review SHA: 4c75eda5458fafc9d1d9fb0833392c94ce106f2a
 Evidence HEAD: current evidence-only commit; exact SHA is recorded in the final R4 handoff
-Remote CI SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
-Migration Head: marketplace_imports.0002_marketplaceimportbatch_active_attempt_id_and_more
+Evidence Head CI: PENDING until the evidence-only commit is pushed
+Remote CI SHA: 4c75eda5458fafc9d1d9fb0833392c94ce106f2a
+Migration Head: marketplace_imports.0003_alter_marketplaceimportbatchattempt_options
 PR State: OPEN / Draft / Unmerged
 ```
 
@@ -85,7 +87,7 @@ R4 入场状态已更正为：`Open P1: 1`；`P2-003: REOPENED / escalated to P1
 - 将认领、started、业务保存点和 success/failed 审计纳入同一外层事务；审计失败不留下半完成业务记录、cursor/watermark 或 processing 认领。
 - 保持 failed retry `select_for_update()`、锁内重检、active attempt owner、completed duplicate、processing 409、stale attempt、cursor/watermark 和幂等规则不变。
 
-## 7. R4 验证与移交
+## 7. 上一版 R4 验证与移交历史
 
 - Django check：PASS，0 issues；migration drift：PASS，No changes detected；无新 migration。
 - SQLite focused：55 passed / 1 MySQL-only skipped；SQLite backend full：598 passed / 4 MySQL-only skipped。
@@ -94,16 +96,28 @@ R4 入场状态已更正为：`Open P1: 1`；`P2-003: REOPENED / escalated to P1
 - 前端：13 files / 163 tests PASS；production build 1957 modules PASS。`npm ci` 的 3 个 high 漏洞保留为未扩范围的供应链观察项。
 - CI guard、credential、forbidden artifact、API boundary、`git diff --check`、dist/node_modules/cache tracking：PASS，0 findings。
 - Code Review SHA remote CI：15/15 checks PASS。
-- R4 代码提交只修改 models、services、focused tests 与 PR-A3 API contract；未修改公共权限、统一异常、data scope、settings 或路由。
+- 上一版 R4 代码提交只修改 models、services、focused tests 与 PR-A3 API contract；未修改公共权限、统一异常、data scope、settings 或路由。
+
+## 8. R4 独立复审追加整改
+
+独立复审在 Evidence HEAD `d52f11f8994ed7291baa67d5469c2b390787532c` 结论为 `FAIL / REQUEST CHANGES`，追加 `Open P1: 1` 和 `Open P2: 1`：Django `_base_manager.bulk_create()` 可绕过默认 manager；PR 正文与测试报告仍引用 R3/上一版 R4 结果。
+
+- `MarketplaceImportBatchAttempt.Meta.base_manager_name = "objects"`，使 Django base manager 使用既有 append-only/service-only QuerySet；普通调用方不能通过 `_base_manager.bulk_create()` 追加伪造审计。
+- 新增 `_base_manager.bulk_create()` 负向测试；整改前稳定复现，整改后抛出 `ValidationError` 且 0 写入。
+- 新增仅含 `AlterModelOptions` 的 `marketplace_imports.0003`；MySQL 8.4.11 fresh 和 `0001 -> 0002 -> 0003` upgrade 均 PASS。
+- SQLite focused `56 passed / 1 skipped`，backend full `599 passed / 4 skipped`；MySQL focused `57 passed / 0 skipped`，backend full `603 passed / 0 skipped`。
+- failed retry 双 worker started/success 各最多 1 条；前端 13 files / 163 tests 与 1957 modules build PASS；credential、forbidden artifact、API boundary 和远端 Code Review SHA CI 15/15 PASS。
+- PR 正文将在 Evidence HEAD 固定后更新为本轮 SHA 和验证结果；不回复或关闭独立审查线程，由复审负责人重新判定。
 
 ```text
 Developer R4 Remediation Evidence: PASS
 Independent R4 Review: PENDING
-A-REAL-PLATFORM-CONNECTION: FAIL / REQUEST CHANGES
+Open Developer P1: 0
+Open Developer P2: 0
+PR #45: OPEN / Draft / Unmerged
 Shopee: pending/mock
 TikTok Shop: pending/mock
 Production synchronization: OFF
 Real platform API: NOT CALLED
-PR #45: OPEN / Draft / Unmerged
 Merge: FORBIDDEN pending independent review
 ```

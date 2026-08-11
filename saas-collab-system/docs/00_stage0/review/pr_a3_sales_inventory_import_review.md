@@ -2,7 +2,7 @@
 
 任务编号：`A-PR3-P1-FIX-R4-AUDIT-CREATION-GUARD`
 
-证据日期：2026-08-10
+证据日期：2026-08-11
 
 ## 1. 冻结对象
 
@@ -14,17 +14,19 @@ PR URL: https://github.com/dfcy-team/dfcy/pull/45
 PR State: OPEN / Draft / Unmerged
 Base Branch: feature/module-a-real-platform-connection
 Base SHA: 75995f74ec74a3315065ecfcec317edda8b1df73
-Previous Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
-Previous Evidence HEAD: ace63284395ce5a0a6ef3bbd3366b9b4f0d05558
-Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Original Previous Code Review SHA: 013da2c9efb7e8ace24a3582036702b3c786cbdd
+Previous Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Previous Evidence HEAD: d52f11f8994ed7291baa67d5469c2b390787532c
+Code Review SHA: 4c75eda5458fafc9d1d9fb0833392c94ce106f2a
 Evidence HEAD: current evidence-only commit; exact SHA is recorded in the final R4 handoff
-Remote CI SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
-Code Commit Count: 6
-Changed Files: 21
-Additions / Deletions: +3020 / -0
+Evidence Head CI: PENDING until the evidence-only commit is pushed
+Remote CI SHA: 4c75eda5458fafc9d1d9fb0833392c94ce106f2a
+Code Commit Count relative to Base: 8
+Changed Files at Code Review SHA: 23
+Additions / Deletions at Code Review SHA: +3258 / -0
 Deployment Environment: 未部署；本地 synthetic/offline + MySQL 8.4 验证
 Database Version: MySQL 8.4.11
-Migration Head: marketplace_imports.0002_marketplaceimportbatch_active_attempt_id_and_more
+Migration Head: marketplace_imports.0003_alter_marketplaceimportbatchattempt_options
 ```
 
 本文件及同步更新的测试报告、变更日志属于 evidence-only 文档提交，不改变上述代码复审对象。最终 Evidence HEAD 以 PR #45 远端 Head 为准，必须与 evidence-only 提交的远程 CI SHA 对齐。
@@ -146,17 +148,20 @@ Real Platform API: NOT CALLED
 Merge: FORBIDDEN pending independent review
 ```
 
-本证据只关闭开发侧 R4 P1，不替代架构、安全、测试、数据与发布负责人的独立签字；也不批准真实平台连接或 Production 同步。
+本证据只关闭开发侧 R4 P1/P2，不替代架构、安全、测试、数据与发布负责人的独立签字；也不批准真实平台连接或 Production 同步。
+
+独立复审随后在 Evidence HEAD `d52f11f8994ed7291baa67d5469c2b390787532c` 再次给出 `FAIL / REQUEST CHANGES`：`_base_manager.bulk_create()` 仍可伪造审计（Open P1: 1），PR 正文和测试报告仍引用旧 SHA/结果（Open P2: 1）。本次追加整改已在开发侧封住 base manager 并更新证据，但独立复审状态重新置为 `PENDING`，不得沿用上一轮结论。
 
 ## 8. R4 实现和验证证据
 
-- attempt audit 创建 ContextVar 与 context manager 为私有能力，只有 `_audit_attempt()` 使用；普通 manager/queryset/实例创建、更新、bulk 和删除入口均有负向测试。
+- attempt audit 创建 ContextVar 与 context manager 为私有能力，只有 `_audit_attempt()` 使用；默认 manager、Django `_base_manager`、queryset 和实例创建/更新/bulk/delete 入口均受保护。
+- `MarketplaceImportBatchAttempt.Meta.base_manager_name = "objects"`，`_base_manager.bulk_create()` 负向测试证明拒绝且 0 写入；`marketplace_imports.0003` 仅记录该 manager 元数据。
 - 合法状态组合、tenant/store/actor、attempt version、active owner 和 started 前置记录在模型层校验。
 - 业务执行使用内层保存点，attempt 生命周期使用外层事务；success audit 故障测试证明 records/cursor 回滚并形成受控 failed 状态。
-- MySQL 8.4.11 focused `56 passed / 0 skipped`、backend full `602 passed / 0 skipped`；双 worker retry started/success 各最多 1 条。
-- SQLite focused `55 passed / 1 skipped`、backend full `598 passed / 4 skipped`；SQLite skipped 仅为 MySQL-only 并发测试，不记为 MySQL PASS。
+- MySQL 8.4.11 fresh、`0001 -> 0002 -> 0003` upgrade、focused `57 passed / 0 skipped`、backend full `603 passed / 0 skipped`；双 worker retry started/success 各最多 1 条。
+- SQLite focused `56 passed / 1 skipped`、backend full `599 passed / 4 skipped`；SQLite skipped 仅为 MySQL-only 并发测试，不记为 MySQL PASS。
 - 前端 13 files / 163 tests、1957 modules build PASS；CI guard、credential、forbidden artifact、API boundary、生成物 tracking 和 `git diff --check` 全部 PASS。
-- Code Review SHA `69a623f52fe6e2e66c0ec83aebeceee767406819` 远端 CI 15/15 PASS。
+- Code Review SHA `4c75eda5458fafc9d1d9fb0833392c94ce106f2a` 远端 CI 15/15 PASS。
 
 ## 9. 独立 R4 复审表
 
@@ -167,7 +172,7 @@ Repository: dfcy-team/dfcy
 PR: #45
 Branch: feature/module-a-sales-inventory-import
 Base SHA: 75995f74ec74a3315065ecfcec317edda8b1df73
-Code Review SHA: 69a623f52fe6e2e66c0ec83aebeceee767406819
+Code Review SHA: 4c75eda5458fafc9d1d9fb0833392c94ce106f2a
 
 Draft / Unmerged: PASS
 Scope Boundary: PENDING REVIEW
@@ -180,8 +185,8 @@ Service-only Attempt Audit Creation: PENDING REVIEW
 Immutable Retry Audit: PENDING REVIEW
 SQLite Migration: DEVELOPER EVIDENCE PASS
 MySQL 8.4 Fresh / Upgrade: DEVELOPER EVIDENCE PASS
-MySQL Focused Tests: DEVELOPER EVIDENCE PASS, 56 passed / 0 skipped
-MySQL Backend Full: DEVELOPER EVIDENCE PASS, 602 passed / 0 skipped
+MySQL Focused Tests: DEVELOPER EVIDENCE PASS, 57 passed / 0 skipped
+MySQL Backend Full: DEVELOPER EVIDENCE PASS, 603 passed / 0 skipped
 Frontend Tests / Build: DEVELOPER EVIDENCE PASS
 Remote CI: DEVELOPER EVIDENCE PASS on Code Review SHA
 Real Platform Network: NOT CALLED
