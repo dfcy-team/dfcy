@@ -16,6 +16,7 @@ import {
   updateOutreachStatus,
   updateOutreachTarget
 } from '../src/api/influencers';
+import { canAccessPath, filterMenuItems, flattenMenuItems } from '../src/router/menu';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -34,6 +35,19 @@ describe('influencer integration workspace contracts', () => {
       expect(source, path).toMatch(/page:\s*page\.value,\s*page_size:\s*pageSize\.value/);
       expect(source, path).toContain('collectionTotal');
     }
+  });
+
+  it('registers outreach and fulfillment routes and exposes permission-scoped menu entries', () => {
+    const router = read('src/router/index.js');
+    expect(router).toContain("path: 'influencers/outreach-tasks', component: OutreachTaskList");
+    expect(router).toContain("path: 'influencers/sample-fulfillments', component: SampleFulfillmentList");
+
+    const outreachUser = { user_type: 'internal', permissions: ['influencers.outreach.view'] };
+    const paths = flattenMenuItems(filterMenuItems(outreachUser)).map((item) => item.path);
+    expect(paths).toContain('/influencers/outreach-tasks');
+    expect(paths).not.toContain('/influencers/sample-fulfillments');
+    expect(canAccessPath(outreachUser, '/influencers/outreach-tasks')).toBe(true);
+    expect(canAccessPath(outreachUser, '/influencers/sample-fulfillments')).toBe(false);
   });
 
   it('keeps task creation, progress, detail target and action contracts visible', () => {

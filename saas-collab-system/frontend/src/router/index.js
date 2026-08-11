@@ -87,6 +87,8 @@ const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
 const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
+const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
+const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
@@ -227,6 +229,8 @@ const routes = [
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
       { path: 'influencers', component: InfluencerList },
+      { path: 'influencers/outreach-tasks', component: OutreachTaskList },
+      { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

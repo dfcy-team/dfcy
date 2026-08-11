@@ -122,9 +122,11 @@ export const menuItems = [
   },
   {
     label: '达人管理',
-    permissions: ['influencers.view'],
+    permissions: ['influencers.view', 'influencers.outreach.view', 'influencers.fulfillment.view'],
     children: [
-      { path: '/influencers', label: '达人档案', permissions: ['influencers.view'] }
+      { path: '/influencers', label: '达人档案', permissions: ['influencers.view'] },
+      { path: '/influencers/outreach-tasks', label: '建联任务', permissions: ['influencers.outreach.view'] },
+      { path: '/influencers/sample-fulfillments', label: '送样履约', permissions: ['influencers.fulfillment.view'] }
     ]
   },
   {
@@ -240,6 +242,8 @@ export const routeCapabilities = [
   { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/influencers', permissions: ['influencers.view'], userTypes: ['internal'] },
+  { path: '/influencers/outreach-tasks', permissions: ['influencers.outreach.view'], userTypes: ['internal'] },
+  { path: '/influencers/sample-fulfillments', permissions: ['influencers.fulfillment.view'], userTypes: ['internal'] },
   { path: '/audit/operations', userTypes: ['internal'] },
   { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
