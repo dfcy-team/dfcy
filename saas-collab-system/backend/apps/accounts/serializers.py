@@ -9,8 +9,8 @@ from .models import CustomUser
 class InternalTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
-        if self.user.user_type != CustomUser.UserType.INTERNAL:
-            raise serializers.ValidationError("Only internal users can log in here.")
+        if self.user.user_type not in (CustomUser.UserType.INTERNAL, CustomUser.UserType.RPA):
+            raise serializers.ValidationError("Only internal or RPA users can log in here.")
         return data
 
 

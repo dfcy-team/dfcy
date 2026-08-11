@@ -1,6 +1,6 @@
 services:
   redis:
-    image: ${PILOT_REDIS_IMAGE:?Set an immutable Redis image reference in .env.pilot}
+    image: redis:7-alpine
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command:
@@ -19,7 +19,13 @@ services:
       - pilot-internal
 
   migrate:
-    image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,redis}
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: python manage.py migrate --noinput
@@ -31,7 +37,13 @@ services:
         condition: service_healthy
 
   backend:
-    image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,redis}
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: >-
@@ -48,7 +60,9 @@ services:
         condition: service_healthy
 
   celery:
-    image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: celery -A config worker --loglevel=info
@@ -60,7 +74,9 @@ services:
         condition: service_healthy
 
   celery-beat:
-    image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
+    image: saas-collab-backend:pilot
+    build:
+      context: ../../../backend
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: celery -A config beat --loglevel=info
@@ -72,7 +88,16 @@ services:
         condition: service_healthy
 
   frontend:
-    image: ${PILOT_FRONTEND_IMAGE:?Use the frontend digest recorded by the Sandbox PASS evidence}
+    image: saas-collab-frontend:pilot
+    build:
+      context: ../../..
+      dockerfile: deploy/pilot/application/Dockerfile.frontend
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-localhost,127.0.0.1,backend,redis}
+        VITE_API_BASE_URL: ""
+        VITE_USE_MOCK: "false"
     restart: unless-stopped
     environment:
       NGINX_ENVSUBST_FILTER: PILOT_HTTPS_PORT

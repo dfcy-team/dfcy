@@ -122,15 +122,9 @@ export const menuItems = [
   },
   {
     label: '达人管理',
-    internal: true,
-    permissions: ['influencers.view', 'influencers.outreach.view', 'influencers.fulfillment.view', 'influencers.catalog.view'],
+    permissions: ['influencers.view'],
     children: [
-      { path: '/influencers/outreach', label: '建联任务', permissions: ['influencers.outreach.view'] },
-      { path: '/influencers/fulfillment', label: '送样履约', permissions: ['influencers.fulfillment.view'] },
-      { path: '/influencers/videos', label: '视频结果', permissions: ['influencers.catalog.view'] },
-      { path: '/influencers/performance', label: 'BD绩效', permissions: ['influencers.catalog.view'] },
-      { path: '/influencers/orders', label: '店铺订单', permissions: ['influencers.catalog.view'] },
-      { path: '/influencers/library', label: '品牌达人资源库', permissions: ['influencers.view'] }
+      { path: '/influencers', label: '达人档案', permissions: ['influencers.view'] }
     ]
   },
   {
@@ -245,13 +239,7 @@ export const routeCapabilities = [
   { path: '/master-data/stores', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
-  { path: '/influencers/outreach', permissions: ['influencers.outreach.view'], userTypes: ['internal'] },
-  { path: '/influencers/fulfillment', permissions: ['influencers.fulfillment.view'], userTypes: ['internal'] },
-  { path: '/influencers/videos', permissions: ['influencers.catalog.view'], userTypes: ['internal'] },
-  { path: '/influencers/performance', permissions: ['influencers.catalog.view'], userTypes: ['internal'] },
-  { path: '/influencers/orders', permissions: ['influencers.catalog.view'], userTypes: ['internal'] },
-  { path: '/influencers/library', permissions: ['influencers.view'], userTypes: ['internal'] },
-  { path: '/influencers', exact: true, permissions: ['influencers.view'], userTypes: ['internal'] },
+  { path: '/influencers', permissions: ['influencers.view'], userTypes: ['internal'] },
   { path: '/audit/operations', userTypes: ['internal'] },
   { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },

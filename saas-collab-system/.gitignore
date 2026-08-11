@@ -23,8 +23,6 @@ htmlcov/
 .ruff_cache/
 .cache/
 *.egg-info/
-celerybeat-schedule
-celerybeat-schedule.*
 dist/
 build/
 

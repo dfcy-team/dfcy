@@ -214,6 +214,42 @@ def test_role_permission_and_data_scope_update_is_audited():
     ]
 
 
+def test_permission_catalog_returns_chinese_labels_for_legacy_seed_rows():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-permission-labels")
+    viewer = create_user(tenant, "permission-label-viewer")
+    grant(viewer, "system.roles.view")
+
+    client = client_for(viewer)
+    system_response = client.get("/api/internal/system/permissions/?module=system&page_size=100")
+    products_response = client.get("/api/internal/system/permissions/?module=products&page_size=100")
+
+    assert system_response.status_code == products_response.status_code == 200
+    system_permissions = {item["code"]: item for item in system_response.data["data"]["results"]}
+    product_permissions = {item["code"]: item for item in products_response.data["data"]["results"]}
+    assert system_permissions["system.users.view"]["name"] == "查看用户目录"
+    assert product_permissions["products.research.view"]["name"] == "查看商品调研"
+
+
+def test_tenant_administrator_permissions_are_catalog_managed():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-admin-role")
+    manager = create_user(tenant, "admin-role-manager")
+    grant(manager, "system.roles.view", "system.roles.manage")
+    administrator = Role.objects.create(tenant=tenant, code="administrator", name="管理员")
+    permission, _ = Permission.objects.get_or_create(
+        code="system.users.view",
+        defaults={"name": "查看用户目录", "module": "system", "action": "users.view"},
+    )
+    administrator.permissions.add(permission)
+
+    response = client_for(manager).put(
+        f"/api/internal/system/roles/{administrator.pk}/permissions/",
+        {"permission_codes": ["system.users.view"], "scope_type": "all", "scope_config": {}},
+        format="json",
+    )
+
+    assert response.status_code == 409
+
+
 def test_user_role_assignment_uses_users_manage_without_roles_view():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-role-assignment")
     manager = create_user(tenant, "user-role-manager")

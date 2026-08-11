@@ -1,6 +1,7 @@
 from django.db import transaction
 from rest_framework import serializers
 
+from apps.permissions.catalog import permission_display_name
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Department
 from apps.rpa.models import RPAAgent
@@ -203,10 +204,18 @@ class UserPasswordResetSerializer(serializers.Serializer):
 
 
 class PermissionAdminSerializer(serializers.ModelSerializer):
+    # Legacy migrations seeded English ``Permission.name`` values.  The
+    # permission code remains the trusted API value, while this read-only
+    # presentation field consistently exposes the Chinese administration label.
+    name = serializers.SerializerMethodField()
+
     class Meta:
         model = Permission
         fields = ("id", "code", "name", "module", "action", "description")
         read_only_fields = fields
+
+    def get_name(self, obj):
+        return permission_display_name(obj.code, obj.name)
 
 
 class RoleAdminSerializer(serializers.ModelSerializer):

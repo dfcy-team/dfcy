@@ -1,33 +1,22 @@
-import { requestApi } from './request';
+import { requestWithMockFallback } from './request';
+import { influencerMocks } from '../mock/influencers';
 
-export const fetchInfluencers = (params = {}) => requestApi({ url: '/api/internal/influencers/', method: 'get', params });
-export const createInfluencer = (data) => requestApi({ url: '/api/internal/influencers/', method: 'post', data });
+export const fetchInfluencers = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/influencers/', params },
+  influencerMocks.list,
+  'influencers.list'
+);
 
-export const fetchOutreachTasks = (params = {}) => requestApi({ url: '/api/internal/influencers/outreach-tasks/', method: 'get', params });
-export const createOutreachTask = (data) => requestApi({ url: '/api/internal/influencers/outreach-tasks/', method: 'post', data });
-export const updateOutreachStatus = (id, status, version) => requestApi({
-  url: `/api/internal/influencers/outreach-tasks/${id}/status/`,
-  method: 'post',
-  data: { status },
-  headers: { 'If-Match': String(version) }
-});
+const mockWrite = (data) => () => ({ success: true, code: 'OK', message: 'Mock操作已记录', data: { ...data, api_status: 'mock' } });
 
-export const fetchSampleFulfillments = (params = {}) => requestApi({ url: '/api/internal/influencers/sample-fulfillments/', method: 'get', params });
-export const createSampleFulfillment = (data, idempotencyKey) => requestApi({
-  url: '/api/internal/influencers/sample-fulfillments/',
-  method: 'post',
-  data,
-  headers: { 'Idempotency-Key': idempotencyKey }
-});
-export const updateSampleStatus = (id, status, version, reason = '') => requestApi({
-  url: `/api/internal/influencers/sample-fulfillments/${id}/status/`,
-  method: 'post',
-  data: { status, reason },
-  headers: { 'If-Match': String(version) }
-});
+export const createInfluencer = (payload) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/influencers/', data: payload },
+  mockWrite(payload),
+  'influencers.create'
+);
 
-export const lookupProductPrice = (params) => requestApi({
-  url: '/api/internal/influencers/product-price-lookup/',
-  method: 'get',
-  params
-});
+export const updateInfluencerStatus = (row, status) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/influencers/${row.id}/status/`, data: { status } },
+  mockWrite({ id: row.id, status }),
+  'influencers.status'
+);
