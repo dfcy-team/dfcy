@@ -44,7 +44,7 @@
       </el-table-column>
       <el-table-column label="操作" width="130">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed ? '配置权限' : '查看权限' }}</el-button>
+          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -64,9 +64,17 @@
         <div><strong>{{ selectedRole.name }}</strong><span>{{ selectedRole.code }}</span></div>
         <el-tag effect="plain">tenant {{ selectedRole.tenant_id }}</el-tag>
       </div>
+      <el-alert
+        v-if="isBuiltInAdministrator"
+        class="administrator-note"
+        type="info"
+        :closable="false"
+        show-icon
+        title="管理员角色由权限目录自动同步，不能手工修改权限或数据范围。"
+      />
       <el-form label-position="top">
         <el-form-item label="数据范围">
-          <el-radio-group v-model="roleForm.scope_type" :disabled="!manageAccess.allowed">
+          <el-radio-group v-model="roleForm.scope_type" :disabled="!manageAccess.allowed || isBuiltInAdministrator">
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="department">本部门</el-radio-button>
             <el-radio-button value="own">本人</el-radio-button>
@@ -74,11 +82,11 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="权限码">
-          <el-checkbox-group v-model="roleForm.permission_codes" :disabled="!manageAccess.allowed" class="permission-groups">
+          <el-checkbox-group v-model="roleForm.permission_codes" :disabled="!manageAccess.allowed || isBuiltInAdministrator" class="permission-groups">
             <section v-for="group in permissionGroups" :key="group.module" class="permission-group">
-              <strong>{{ group.module }}</strong>
+              <strong>{{ group.label }}</strong>
               <el-checkbox v-for="permission in group.items" :key="permission.code" :value="permission.code">
-                <span>{{ permission.name }}</span><small>{{ permission.code }}</small>
+                <span>{{ permissionLabel(permission) }}</span><small>{{ permission.code }}</small>
               </el-checkbox>
             </section>
           </el-checkbox-group>
@@ -86,7 +94,7 @@
       </el-form>
       <template #footer>
         <el-button @click="drawerOpen = false">关闭</el-button>
-        <el-button v-if="manageAccess.visible" type="primary" :disabled="!manageAccess.allowed" :loading="saving" @click="saveRole">保存配置</el-button>
+        <el-button v-if="manageAccess.visible && !isBuiltInAdministrator" type="primary" :disabled="!manageAccess.allowed" :loading="saving" @click="saveRole">保存配置</el-button>
       </template>
     </el-drawer>
 
@@ -113,6 +121,7 @@ import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
 import { statusFromApiResponse } from '../../utils/uiState';
+import { permissionLabel, permissionModuleLabel } from '../../utils/permissionLabels';
 
 const auth = useAuthStore();
 const roles = ref([]);
@@ -131,6 +140,7 @@ const selectedRole = ref({});
 const roleForm = reactive({ permission_codes: [], scope_type: 'own', scope_config: {} });
 const newRole = reactive({ name: '', code: '', status: 'active' });
 const manageAccess = computed(() => getActionAccess(auth, { permission: 'system.roles.manage' }));
+const isBuiltInAdministrator = computed(() => selectedRole.value.code === 'administrator');
 
 const layers = [
   { title: 'Tenant', note: '租户隔离' }, { title: '用户类型', note: 'internal / external / RPA' },
@@ -144,7 +154,7 @@ const permissionGroups = computed(() => {
     if (!grouped.has(permission.module)) grouped.set(permission.module, []);
     grouped.get(permission.module).push(permission);
   }
-  return [...grouped.entries()].map(([module, items]) => ({ module, items }));
+  return [...grouped.entries()].map(([module, items]) => ({ module, label: permissionModuleLabel(module), items }));
 });
 
 function unpack(response) {
@@ -192,6 +202,10 @@ function openRole(role) {
 }
 async function saveRole() {
   if (!manageAccess.value.allowed) return;
+  if (isBuiltInAdministrator.value) {
+    ElMessage.info('管理员角色由权限目录自动同步，不能手工修改。');
+    return;
+  }
   saving.value = true;
   const response = await updateRolePermissions(selectedRole.value.id, { ...roleForm });
   saving.value = false;
