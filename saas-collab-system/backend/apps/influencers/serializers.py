@@ -44,6 +44,19 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     dispatcher_id = serializers.IntegerField(read_only=True)
     linked_count = serializers.SerializerMethodField()
+    store_name = serializers.CharField(source="store.name", read_only=True)
+    owner_name = serializers.SerializerMethodField()
+    dispatcher_name = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _user_name(user):
+        return (getattr(user, "full_name", "") or getattr(user, "username", "")) if user else ""
+
+    def get_owner_name(self, obj):
+        return self._user_name(obj.owner)
+
+    def get_dispatcher_name(self, obj):
+        return self._user_name(obj.dispatcher)
 
     def get_linked_count(self, obj):
         annotated = getattr(obj, "active_linked_count", None)
@@ -52,9 +65,9 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = OutreachTask
         fields = (
-            "id", "tenant_id", "task_no", "task_name", "influencer", "store", "spu",
+            "id", "tenant_id", "task_no", "task_name", "influencer", "store", "store_name", "spu",
             "external_product_id", "sku_prefix", "target_count", "linked_count", "dispatcher_id",
-            "owner", "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
+            "owner", "owner_name", "dispatcher_name", "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
             "created_at", "updated_at",
         )
@@ -131,12 +144,35 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     items = SampleItemSerializer(many=True, required=False)
+    outreach_task_no = serializers.CharField(source="outreach_task.task_no", read_only=True)
+    outreach_task_name = serializers.CharField(source="outreach_task.task_name", read_only=True)
+    store_name = serializers.CharField(source="store.name", read_only=True)
+    influencer_name = serializers.SerializerMethodField()
+    owner_name = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _display_name(value):
+        if not value:
+            return ""
+        return (
+            getattr(value, "name", "")
+            or getattr(value, "handle", "")
+            or getattr(value, "full_name", "")
+            or getattr(value, "username", "")
+        )
+
+    def get_influencer_name(self, obj):
+        return self._display_name(obj.influencer)
+
+    def get_owner_name(self, obj):
+        return self._display_name(obj.owner)
 
     class Meta:
         model = SampleFulfillment
         fields = (
-            "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_target", "influencer",
-            "store", "owner", "product_name_snapshot", "external_product_id", "sample_order_no",
+            "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
+            "outreach_target", "influencer", "influencer_name", "store", "store_name", "owner", "owner_name",
+            "product_name_snapshot", "external_product_id", "sample_order_no",
             "sample_sent_at", "shipped_at", "status", "source", "external_id", "version",
             "notes", "finalized_at", "items", "created_at", "updated_at",
         )

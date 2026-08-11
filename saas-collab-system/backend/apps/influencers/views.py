@@ -185,6 +185,20 @@ class OutreachTaskCollectionView(APIView):
         status = request.query_params.get("status", "").strip()
         if status:
             queryset = queryset.filter(status=status)
+        store_id = request.query_params.get("store", "").strip()
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(task_no__icontains=search)
+                | Q(task_name__icontains=search)
+                | Q(store__name__icontains=search)
+                | Q(external_product_id__icontains=search)
+                | Q(sku_prefix__icontains=search)
+                | Q(owner__full_name__icontains=search)
+                | Q(owner__username__icontains=search)
+            )
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size))
 
@@ -463,10 +477,28 @@ class SampleFulfillmentCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).prefetch_related("items")
+        queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).select_related(
+            "outreach_task", "influencer", "store", "owner"
+        ).prefetch_related("items")
         status = request.query_params.get("status", "").strip()
         if status:
             queryset = queryset.filter(status=status)
+        store_id = request.query_params.get("store", "").strip()
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(fulfillment_no__icontains=search)
+                | Q(outreach_task__task_no__icontains=search)
+                | Q(outreach_task__task_name__icontains=search)
+                | Q(influencer__name__icontains=search)
+                | Q(influencer__handle__icontains=search)
+                | Q(store__name__icontains=search)
+                | Q(product_name_snapshot__icontains=search)
+                | Q(external_product_id__icontains=search)
+                | Q(sample_order_no__icontains=search)
+            )
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 

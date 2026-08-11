@@ -72,15 +72,15 @@ describe('influencer integration workspace contracts', () => {
   it('requires task and target selection, supports multiple nullable-SKU rows, and labels missing prices', () => {
     const page = read('src/views/influencers/SampleFulfillmentList.vue');
     for (const field of ['form.outreach_task', 'form.outreach_target', 'inheritedTask.store', 'inheritedTask.external_product_id', 'inheritedTask.owner', 'requested_sku', 'quantity', 'sample_order_no']) expect(page).toContain(field);
-    expect(page).toContain('添加 SKU 行');
-    expect(page).toContain('价格未导入');
+    expect(page).toContain('添加 SKU');
+    expect(page).toContain('价格未匹配');
     expect(page).toContain('statusLabel(FULFILLMENT_STATUS_LABELS');
     expect(page).not.toContain('inbound_cost');
     expect(page).not.toContain('unit_cost');
     expect(page).not.toContain('cost_updated_at');
     expect(page).not.toContain('stock');
-    expect(page).toContain('draftIdempotencyKey.value=newDraftKey()');
-    expect(page).toContain('createSampleFulfillment(payload,draftIdempotencyKey.value)');
+    expect(page).toContain('draftKey.value=newKey()');
+    expect(page).toContain('createSampleFulfillment(payload,draftKey.value)');
     expect(page).toContain("if(!r.success)return ElMessage.error");
   });
 
