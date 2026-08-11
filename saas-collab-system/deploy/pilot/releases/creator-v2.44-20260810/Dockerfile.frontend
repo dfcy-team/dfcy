@@ -1,0 +1,38 @@
+# Both build and runtime images must be supplied as immutable references.
+ARG FRONTEND_BUILD_IMAGE_DIGEST
+FROM ${FRONTEND_BUILD_IMAGE_DIGEST} AS build
+
+ARG FRONTEND_BUILD_IMAGE_DIGEST
+RUN case "${FRONTEND_BUILD_IMAGE_DIGEST}" in *@sha256:*) ;; *) echo "FRONTEND_BUILD_IMAGE_DIGEST must contain @sha256:" >&2; exit 1 ;; esac
+
+WORKDIR /app
+
+ARG VITE_API_BASE_URL=""
+ARG VITE_USE_MOCK="false"
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_USE_MOCK=${VITE_USE_MOCK}
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --fund=false
+
+# Build from source inside the image; frontend/dist is intentionally excluded.
+COPY frontend/ ./
+RUN VITE_USE_MOCK=true npm run --ignore-scripts test
+RUN npm run --ignore-scripts build
+
+ARG FRONTEND_RUNTIME_IMAGE_DIGEST
+FROM ${FRONTEND_RUNTIME_IMAGE_DIGEST}
+
+ARG FRONTEND_RUNTIME_IMAGE_DIGEST
+RUN case "${FRONTEND_RUNTIME_IMAGE_DIGEST}" in *@sha256:*) ;; *) echo "FRONTEND_RUNTIME_IMAGE_DIGEST must contain @sha256:" >&2; exit 1 ;; esac
+
+ARG RELEASE_REVISION
+RUN test "${#RELEASE_REVISION}" -eq 40 && case "${RELEASE_REVISION}" in *[!0-9a-f]*) exit 1 ;; *) exit 0 ;; esac
+
+LABEL org.opencontainers.image.version="creator-v2.44-20260810" \
+      org.opencontainers.image.revision="${RELEASE_REVISION}"
+
+COPY deploy/pilot/application/nginx.conf /etc/nginx/templates/default.conf.template
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80 443

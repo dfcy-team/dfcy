@@ -49,3 +49,12 @@ if INTEGRATION_ENCRYPTION_PROVIDER == "test-only":
 
 # UI-P4 only defines a mock callback contract. Production enablement requires a separate review.
 UI_P4_COLLABORATION_MODE = "disabled"
+
+# Platform mode is opt-in and fails closed unless server-side credentials exist.
+MINIAPP_AUTH_MODE = os.getenv("MINIAPP_AUTH_MODE", "disabled")
+if MINIAPP_AUTH_MODE not in {"disabled", "platform"}:
+    raise ImproperlyConfigured("Production MINIAPP_AUTH_MODE must be disabled or platform.")
+if MINIAPP_AUTH_MODE == "platform" and (not MINIAPP_APP_ID or not MINIAPP_APP_SECRET):
+    raise ImproperlyConfigured(
+        "MINIAPP_APP_ID and MINIAPP_APP_SECRET are required when platform authentication is enabled."
+    )

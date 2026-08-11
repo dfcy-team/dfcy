@@ -8,6 +8,12 @@ class StatusChoices(models.TextChoices):
     INACTIVE = "inactive", "Inactive"
 
 
+class SupplierStatusChoices(models.TextChoices):
+    ACTIVE = "active", "Active"
+    TRIAL = "trial", "Trial cooperation"
+    INACTIVE = "inactive", "Inactive"
+
+
 class PlatformMaster(models.Model):
     class PlatformType(models.TextChoices):
         BIGSELLER = "bigseller", "BigSeller"
@@ -72,7 +78,11 @@ class SupplierMaster(models.Model):
     contact_alias = models.CharField(max_length=80, blank=True)
     contact_email = models.EmailField(blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
-    status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.ACTIVE)
+    status = models.CharField(
+        max_length=20,
+        choices=SupplierStatusChoices.choices,
+        default=SupplierStatusChoices.ACTIVE,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

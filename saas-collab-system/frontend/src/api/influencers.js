@@ -1,0 +1,216 @@
+import { requestWithMockFallback } from './request';
+import { influencerMocks } from '../mock/influencers';
+
+const API_ROOT = '/api/internal/influencers';
+
+export const OUTREACH_STATUS_LABELS = Object.freeze({
+  pending: '待开始',
+  in_progress: '进行中',
+  completed: '已完成',
+  cancelled: '已取消'
+});
+
+export const OUTREACH_RESULT_LABELS = Object.freeze({
+  pending: '待处理',
+  success: '已成功',
+  rejected: '已拒绝',
+  no_response: '无响应',
+  blocked: '已阻断'
+});
+
+export const FULFILLMENT_STATUS_LABELS = Object.freeze({
+  pending: '待处理',
+  processing: '处理中',
+  shipped: '已发货',
+  delivered: '已送达',
+  completed: '已完成',
+  cancelled: '已取消',
+  creating: '创建中',
+  published: '已发布',
+  live_creator: '达人直播中',
+  overdue: '已逾期',
+  blank: '空白'
+});
+
+export const statusLabel = (labels, value) => labels[value] || value || '—';
+
+const mockWrite = (data = {}) => () => ({
+  success: true,
+  code: 'OK',
+  message: 'Mock操作已记录',
+  data: { ...data, api_status: 'mock' }
+});
+
+const mockCollection = () => ({
+  success: true,
+  code: 'OK',
+  message: 'success',
+  data: { status: 'mock', count: 0, next: null, previous: null, results: [] }
+});
+
+const mockDetail = (data = {}) => () => ({
+  success: true,
+  code: 'OK',
+  message: 'success',
+  data: { ...data, api_status: 'mock' }
+});
+
+const ifMatchHeaders = (version) => {
+  if (version === undefined || version === null || version === '') return {};
+  const value = String(version).replace(/^"|"$/g, '');
+  return { headers: { 'If-Match': `"${value}"` } };
+};
+
+const requestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+
+export function formatInfluencerError(response, fallback = '操作失败，请稍后重试。') {
+  const message = response?.message || '';
+  if (response?.http_status === 409 || response?.code === 'STATE_CONFLICT' || response?.code === 'CONFLICT') {
+    if (/blacklist|黑名单/i.test(message)) return `达人在黑名单中，无法执行本次操作。${message ? ` ${message}` : ''}`;
+    if (/terminal|completed|cancelled|终态/i.test(message)) return `任务已进入终态，不能再修改目标或送样。${message ? ` ${message}` : ''}`;
+    return `数据已被其他操作更新（409），请刷新后重试。${message ? ` ${message}` : ''}`;
+  }
+  if (response?.http_status === 403) return '当前角色或数据范围无权执行此操作。';
+  return message || fallback;
+}
+
+export const fetchInfluencers = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/`, params },
+  influencerMocks.list,
+  'influencers.list'
+);
+
+export const createInfluencer = (payload) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/`, data: payload },
+  mockWrite(payload),
+  'influencers.create'
+);
+
+export const updateInfluencerStatus = (row, status) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/${row.id}/status/`, data: { status }, ...ifMatchHeaders(row.updated_at) },
+  mockWrite({ id: row.id, status }),
+  'influencers.status'
+);
+
+export const fetchOutreachTasks = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-tasks/`, params },
+  mockCollection,
+  'influencers.outreach.list'
+);
+
+export const fetchOutreachTaskOptions = () => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-task-options/` },
+  () => ({ success: true, data: { stores: [], bd_users: [] } }),
+  'influencers.outreach.options'
+);
+
+export const matchOutreachProduct = (productId) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-product-match/`, params: { product_id: productId } },
+  () => ({ success: true, data: { matched: false, unique: false, reason: 'data_source_not_imported', candidates: [] } }),
+  'influencers.outreach.product_match'
+);
+
+export const fetchOutreachTask = (id) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-tasks/${id}/` },
+  mockDetail({ id }),
+  'influencers.outreach.detail'
+);
+
+export const fetchOutreachProgress = (id) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-tasks/${id}/progress/` },
+  mockDetail({ task_id: id, linked_count: 0, target_count: 0, remaining_count: 0, result_counts: {} }),
+  'influencers.outreach.progress'
+);
+
+export const fetchOutreachTargets = (taskId, params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-tasks/${taskId}/targets/`, params },
+  mockCollection,
+  'influencers.outreach.targets'
+);
+
+export const createOutreachTask = (payload) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/outreach-tasks/`, data: payload },
+  mockWrite(payload),
+  'influencers.outreach.create'
+);
+
+export const updateOutreachStatus = (id, status, version) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/outreach-tasks/${id}/status/`, data: { status }, ...ifMatchHeaders(version) },
+  mockWrite({ id, status, version: Number(version || 1) + 1 }),
+  'influencers.outreach.status'
+);
+
+export const deleteOutreachTask = (id) => requestWithMockFallback(
+  { method: 'delete', url: `${API_ROOT}/outreach-tasks/${id}/` },
+  mockWrite({ id, is_deleted: true }),
+  'influencers.outreach.delete'
+);
+
+export const addOutreachTarget = (taskId, influencer, version, notes = '') => requestWithMockFallback(
+  {
+    method: 'post',
+    url: `${API_ROOT}/outreach-tasks/${taskId}/targets/`,
+    data: { influencer, ...(notes ? { notes } : {}) },
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ task: taskId, influencer, version: Number(version || 1) + 1 }),
+  'influencers.outreach.target.add'
+);
+
+export const updateOutreachTarget = (taskId, targetId, payload, version) => requestWithMockFallback(
+  {
+    method: 'patch',
+    url: `${API_ROOT}/outreach-tasks/${taskId}/targets/${targetId}/`,
+    data: payload,
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id: targetId, task: taskId, ...payload, version: Number(version || 1) + 1 }),
+  'influencers.outreach.target.update'
+);
+
+export const deleteOutreachTarget = (taskId, targetId, version) => requestWithMockFallback(
+  {
+    method: 'delete',
+    url: `${API_ROOT}/outreach-tasks/${taskId}/targets/${targetId}/`,
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id: targetId, task: taskId, is_deleted: true, version: Number(version || 1) + 1 }),
+  'influencers.outreach.target.delete'
+);
+
+export const restoreOutreachTarget = (taskId, target, version, notes = '') =>
+  addOutreachTarget(taskId, target.influencer, version, notes || target.notes || '');
+
+export const fetchSampleFulfillments = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/sample-fulfillments/`, params },
+  mockCollection,
+  'influencers.fulfillment.list'
+);
+
+export const createSampleFulfillment = (payload, idempotencyKey = requestKey()) => requestWithMockFallback(
+  {
+    method: 'post',
+    url: `${API_ROOT}/sample-fulfillments/`,
+    data: payload,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  },
+  mockWrite(payload),
+  'influencers.fulfillment.create'
+);
+
+export const updateSampleFulfillmentStatus = (id, status, version, reason = '') => requestWithMockFallback(
+  {
+    method: 'post',
+    url: `${API_ROOT}/sample-fulfillments/${id}/status/`,
+    data: { status, ...(reason ? { reason } : {}) },
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id, status, version: Number(version || 1) + 1 }),
+  'influencers.fulfillment.status'
+);
+
+export const lookupProductPrice = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/product-price-lookup/`, params },
+  mockDetail({ matched: false, reason: 'data_source_not_imported', results: [] }),
+  'influencers.catalog.price_lookup'
+);

@@ -1,0 +1,7 @@
+*.ttf binary
+*.otf binary
+*.ttc binary
+*.woff binary
+*.woff2 binary
+*.json text eol=lf
+*.txt text eol=lf

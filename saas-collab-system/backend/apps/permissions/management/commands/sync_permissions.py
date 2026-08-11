@@ -1,7 +1,8 @@
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.permissions.catalog import PERMISSION_DEFINITIONS, permission_defaults
-from apps.permissions.models import Permission
+from apps.permissions.models import Permission, Role
+from apps.permissions.role_catalog import TENANT_ADMIN_ROLE_CODE
 
 
 class Command(BaseCommand):
@@ -33,6 +34,24 @@ class Command(BaseCommand):
                     for field, value in defaults.items():
                         setattr(permission, field, value)
                     permission.save(update_fields=list(defaults))
+
+        # The tenant administrator is a catalog-managed role.  New permission
+        # definitions must be granted to it automatically; otherwise a newly
+        # added capability can make the UI appear incomplete until a manual
+        # role edit (which is intentionally blocked for this built-in role).
+        all_permissions = Permission.objects.all()
+        for role in Role.objects.filter(code=TENANT_ADMIN_ROLE_CODE):
+            current_codes = set(role.permissions.values_list("code", flat=True))
+            catalog_codes = set(all_permissions.values_list("code", flat=True))
+            missing_codes = catalog_codes - current_codes
+            stale_codes = current_codes - catalog_codes
+            if missing_codes or stale_codes:
+                issues.append(
+                    f"administrator_permissions:{role.tenant_id}:"
+                    f"missing={','.join(sorted(missing_codes))}:stale={','.join(sorted(stale_codes))}"
+                )
+                if not options["check"]:
+                    role.permissions.set(all_permissions)
 
         if options["check"] and issues:
             raise CommandError("Permission catalog is incomplete or stale: " + "; ".join(issues))

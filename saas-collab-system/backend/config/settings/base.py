@@ -45,7 +45,10 @@ INSTALLED_APPS = [
     "apps.audit",
     "apps.files",
     "apps.products",
+    "apps.development",
+    "apps.listings",
     "apps.purchasing",
+    "apps.packing",
     "apps.suppliers",
     "apps.finance",
     "apps.reports",
@@ -53,9 +56,11 @@ INSTALLED_APPS = [
     "apps.replenishment",
     "apps.configcenter",
     "apps.masterdata",
+    "apps.influencers",
     "apps.workflows",
     "apps.governance",
     "apps.pilot",
+    "apps.releases",
     "apps.common",
 ]
 
@@ -154,4 +159,14 @@ UI_P4_MOCK_WEBHOOK_SECRET = os.getenv("UI_P4_MOCK_WEBHOOK_SECRET", "not-a-real-u
 INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "INTEGRATION_ENCRYPTION_PROVIDER",
     "unconfigured-production",
+)
+
+# Mini Program authentication fails closed by default. The sandbox mode never
+# calls WeChat and only accepts pre-bound, hashed development identities.
+MINIAPP_AUTH_MODE = os.getenv("MINIAPP_AUTH_MODE", "disabled")
+MINIAPP_APP_ID = os.getenv("MINIAPP_APP_ID", "")
+MINIAPP_APP_SECRET = os.getenv("MINIAPP_APP_SECRET", "")
+MINIAPP_PROVIDER_TIMEOUT_SECONDS = max(
+    2,
+    min(int(os.getenv("MINIAPP_PROVIDER_TIMEOUT_SECONDS", "8")), 15),
 )
