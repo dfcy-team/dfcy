@@ -4,8 +4,12 @@
 
 Sandbox supports a one-host topology for an isolated Linux ECS instance. The
 application containers stay on `saas-sandbox-network` and MySQL stays on the
-separate `internal` `saas-sandbox-db-network`; both `DOCKER-USER` policies and
-bridge subnet hashes are recorded. The historical two-host flow remains
+separate `saas-sandbox-db-network`; both `DOCKER-USER` policies and bridge
+subnet hashes are recorded. The database bridge is deliberately not marked
+Docker `internal`: Docker 29 may omit the published private `3307` host-port
+rule for an internal bridge. The bridges are still independent, and the
+database `DOCKER-USER` chain denies database-bridge egress while allowing only
+the approved app-to-host path. The historical two-host flow remains
 available as `SANDBOX_DEPLOYMENT_MODE=dual-host`.
 
 For the one-host flow:
@@ -17,7 +21,11 @@ For the one-host flow:
 The installer rejects any other database address or port: MySQL is published
 only as `10.20.40.119:3307`, and the only frontend entry is HTTPS
 `10.20.40.119:8543`. The app bridge may reach that private host port, while a
-direct app-bridge to DB-bridge path is rejected by both policy chains. Run both
+direct app-bridge to DB-bridge path is rejected by both policy chains. Because
+Docker DNAT is evaluated before `DOCKER-USER`, the single-host rules match the
+original destination (`--ctorigdst 10.20.40.119 --ctorigdstport 3307`) and then
+allow only the translated MySQL connection; they do not allow generic app to
+DB-bridge `3306`. Run both
 `collect-network-evidence.sh app ... post-reboot` and `collect-network-evidence.sh db ... post-reboot` after reboot; all five network evidence files remain mandatory for Sandbox PASS.
 
 Use the independent Windows machine only as an unapproved probe. Copy a
