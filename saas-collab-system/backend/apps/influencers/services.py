@@ -9,13 +9,13 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Model, QuerySet
+from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import write_operation_log
 from apps.masterdata.models import StoreMaster
-from apps.products.models import ProductSPU
+from apps.products.models import ProductSKU, ProductSPU
 
 from .models import (
     FulfillmentStatusEvent,
@@ -166,6 +166,20 @@ def _locked_user(user, user_id, field="owner"):
         raise ValidationError(
             {field: f"{field.capitalize()} does not exist in the current tenant."}
         ) from exc
+
+
+def _assert_active_bd_owner(user, owner):
+    if (
+        not owner.is_active
+        or owner.user_type != owner.UserType.INTERNAL
+        or not owner.user_roles.filter(
+            tenant=user.tenant,
+            role__tenant=user.tenant,
+            role__code="bd",
+            role__status="active",
+        ).exists()
+    ):
+        raise ValidationError({"owner": "Owner must be an active BD user in the current tenant."})
 
 
 def _locked_spu(user, spu_id):
@@ -337,6 +351,89 @@ def _price_for_item(tenant, store_id, payload):
     return queryset.order_by("-source_updated_at", "-imported_at", "-id").first()
 
 
+def _normalize_sku(value):
+    return "-".join(part for part in str(value or "").strip().upper().replace("_", "-").split("-") if part)
+
+
+def _purchase_cost_for_item(tenant, requested_sku):
+    normalized = _normalize_sku(requested_sku)
+    if not normalized:
+        return normalized, None, "pending"
+    exact_new = ProductSKU.objects.filter(
+        tenant=tenant, is_active=True, sku_code__iexact=str(requested_sku).strip()
+    ).order_by("id")
+    if exact_new.count() == 1:
+        sku = exact_new.first()
+        return normalized, sku, "matched_new_sku" if sku.purchase_price is not None else "not_priced"
+    exact_old = ProductSKU.objects.filter(
+        tenant=tenant, is_active=True, legacy_sku_code__iexact=str(requested_sku).strip()
+    ).order_by("id")
+    if exact_old.count() == 1:
+        sku = exact_old.first()
+        return normalized, sku, "matched_legacy_sku" if sku.purchase_price is not None else "not_priced"
+    candidates = list(ProductSKU.objects.filter(tenant=tenant, is_active=True).filter(
+        Q(sku_code__iexact=normalized)
+        | Q(legacy_sku_code__iexact=normalized)
+        | Q(sku_code__iexact=normalized.replace("-", "_"))
+        | Q(legacy_sku_code__iexact=normalized.replace("-", "_"))
+    ).order_by("id")[:2])
+    if len(candidates) == 1:
+        sku = candidates[0]
+        return normalized, sku, "matched_normalized" if sku.purchase_price is not None else "not_priced"
+    return normalized, None, "ambiguous" if candidates else "not_found"
+
+
+def _purchase_cost_for_payload(tenant, payload):
+    selected_sku = payload.get("sku")
+    requested_sku = payload.get("requested_sku")
+    if selected_sku is not None:
+        if selected_sku.tenant_id != tenant.id or not selected_sku.is_active:
+            raise ValidationError({"sku": "SKU must be active and belong to the current tenant."})
+        requested_normalized = _normalize_sku(requested_sku)
+        new_normalized = _normalize_sku(selected_sku.sku_code)
+        legacy_normalized = _normalize_sku(selected_sku.legacy_sku_code)
+        if requested_normalized and requested_normalized not in {new_normalized, legacy_normalized}:
+            raise ValidationError({"requested_sku": "Requested SKU must match the selected SKU."})
+        matched_status = (
+            "matched_legacy_sku"
+            if requested_normalized and requested_normalized == legacy_normalized
+            else "matched_new_sku"
+        )
+        status = matched_status if selected_sku.purchase_price is not None else "not_priced"
+        return _normalize_sku(selected_sku.sku_code), selected_sku, status
+    return _purchase_cost_for_item(tenant, requested_sku)
+
+
+def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_name):
+    external_product_id = str(external_product_id or "").strip()
+    listing = (
+        StoreProductListing.objects.filter(
+            tenant=tenant,
+            store=store,
+            external_product_id=external_product_id,
+        )
+        .order_by("-source_updated_at", "-updated_at", "-id")
+        .first()
+        if external_product_id
+        else None
+    )
+    if listing:
+        return {
+            "external_product_id": external_product_id,
+            "product_name_snapshot": listing.product_name,
+            "product_match_status": "matched",
+            "product_match_source": listing.source,
+            "product_matched_at": timezone.now(),
+        }
+    return {
+        "external_product_id": external_product_id,
+        "product_name_snapshot": str(fallback_name or "").strip(),
+        "product_match_status": "manual" if external_product_id else "pending",
+        "product_match_source": "manual" if external_product_id else "",
+        "product_matched_at": None,
+    }
+
+
 @transaction.atomic
 def create_outreach_task(*, user, validated_data):
     data = dict(validated_data)
@@ -347,17 +444,7 @@ def create_outreach_task(*, user, validated_data):
     store = _locked_store(user, _pk(data["store"]))
     if store.status != "active":
         raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
-    if (
-        not owner.is_active
-        or owner.user_type != owner.UserType.INTERNAL
-        or not owner.user_roles.filter(
-            tenant=user.tenant,
-            role__tenant=user.tenant,
-            role__code="bd",
-            role__status="active",
-        ).exists()
-    ):
-        raise ValidationError({"owner": "Owner must be an active BD user in the current tenant."})
+    _assert_active_bd_owner(user, owner)
     influencer = None
     if "influencer" in data and data["influencer"] is not None:
         influencer = _locked_influencer(user, _pk(data["influencer"]))
@@ -370,6 +457,14 @@ def create_outreach_task(*, user, validated_data):
     data["external_id"] = data.get("external_id") or None
     data["external_product_id"] = str(data.get("external_product_id") or "").strip()
     data["sku_prefix"] = str(data.get("sku_prefix") or "").strip()
+    data.update(
+        _product_snapshot_fields(
+            tenant=user.tenant,
+            store=store,
+            external_product_id=data["external_product_id"],
+            fallback_name=data.get("product_name_snapshot") or data.get("task_name"),
+        )
+    )
     data["dispatch_time"] = timezone.now()
     task = OutreachTask(tenant=user.tenant, **data)
     _save(task)
@@ -386,6 +481,119 @@ def create_outreach_task(*, user, validated_data):
             "dispatcher_id": user.pk,
             "dispatch_time": task.dispatch_time.isoformat(),
         },
+    )
+    return task
+
+
+@transaction.atomic
+def update_outreach_task(*, user, task, validated_data, expected_version):
+    """Safely edit mutable task facts without touching workflow state timestamps."""
+    task = _locked_task(user, _pk(task))
+    if task.is_deleted:
+        raise ValidationError({"outreach_task": "Deleted outreach tasks cannot be updated."})
+    if task.version != expected_version:
+        raise ValidationError(
+            {"version": "Task was changed by another request."},
+            code="conflict",
+        )
+
+    data = dict(validated_data)
+    if not data:
+        raise ValidationError({"detail": "At least one editable task field is required."})
+
+    changes = {}
+    if "task_name" in data:
+        changes["task_name"] = str(data["task_name"] or "").strip()
+    if "priority" in data:
+        changes["priority"] = data["priority"]
+    if "sku_prefix" in data:
+        changes["sku_prefix"] = str(data["sku_prefix"] or "").strip()
+
+    store = task.store
+    if "store" in data:
+        store = _locked_store(user, _pk(data["store"]))
+        if store.status != "active":
+            raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
+        changes["store"] = store
+
+    if "owner" in data:
+        owner = _locked_user(user, _pk(data["owner"]))
+        _assert_active_bd_owner(user, owner)
+        changes["owner"] = owner
+
+    if "target_count" in data:
+        target_count = int(data["target_count"])
+        linked_count = OutreachTarget.objects.filter(
+            tenant=user.tenant,
+            task=task,
+            is_deleted=False,
+        ).count()
+        if target_count < linked_count:
+            raise ValidationError(
+                {"target_count": "Target count cannot be lower than the linked influencer count."}
+            )
+        changes["target_count"] = target_count
+
+    product_changed = "store" in data or "external_product_id" in data
+    if product_changed:
+        external_product_id = (
+            str(data["external_product_id"] or "").strip()
+            if "external_product_id" in data
+            else task.external_product_id
+        )
+        changes.update(
+            _product_snapshot_fields(
+                tenant=user.tenant,
+                store=store,
+                external_product_id=external_product_id,
+                fallback_name=changes.get("task_name", task.task_name),
+            )
+        )
+
+    before = {
+        "task_name": task.task_name,
+        "priority": task.priority,
+        "store": task.store_id,
+        "external_product_id": task.external_product_id,
+        "sku_prefix": task.sku_prefix,
+        "target_count": task.target_count,
+        "owner": task.owner_id,
+        "version": task.version,
+    }
+    after = {
+        "task_name": changes.get("task_name", task.task_name),
+        "priority": changes.get("priority", task.priority),
+        "store": _pk(changes.get("store", task.store_id)),
+        "external_product_id": changes.get("external_product_id", task.external_product_id),
+        "sku_prefix": changes.get("sku_prefix", task.sku_prefix),
+        "target_count": changes.get("target_count", task.target_count),
+        "owner": _pk(changes.get("owner", task.owner_id)),
+        "version": task.version + 1,
+    }
+    now = timezone.now()
+    changes.update(version=task.version + 1, updated_at=now)
+    updated = QuerySet.update(
+        OutreachTask.objects.filter(
+            pk=task.pk,
+            tenant=user.tenant,
+            is_deleted=False,
+            version=expected_version,
+        ),
+        **changes,
+    )
+    if updated != 1:
+        raise ValidationError(
+            {"version": "Task was changed by another request."},
+            code="conflict",
+        )
+    task.refresh_from_db()
+    _audit(
+        user,
+        "outreach_update",
+        "outreach_task",
+        task,
+        before=before,
+        after=after,
     )
     return task
 
@@ -807,19 +1015,71 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
         )
         fulfillment.refresh_from_db()
 
+    sku_quantity = 0
+    sales_total = Decimal("0")
+    cost_total = Decimal("0")
+    all_prices_matched = True
+    all_costs_matched = True
+    any_price_matched = False
+    any_cost_matched = False
     for payload in item_payloads:
         payload = _inherit_item_product(payload, product_id=product_id, product_name=product_name)
         snapshot = _price_for_item(user.tenant, fulfillment.store_id, payload)
+        normalized_sku, cost_sku, cost_status = _purchase_cost_for_payload(user.tenant, payload)
+        quantity = payload.get("quantity", 1)
+        unit_price = snapshot.effective_price if snapshot else None
+        unit_cost = cost_sku.purchase_price if cost_sku else None
+        sales_amount = unit_price * quantity if unit_price is not None else None
+        cost_amount = unit_cost * quantity if unit_cost is not None else None
         item = SampleItem(
             tenant=user.tenant,
             fulfillment=fulfillment,
-            unit_price=snapshot.effective_price if snapshot else None,
-            unit_cost=snapshot.inbound_cost if snapshot else None,
+            unit_price=unit_price,
+            unit_cost=unit_cost,
             currency=snapshot.currency if snapshot else "",
             price_match_status="matched" if snapshot else "not_imported",
+            normalized_sku=normalized_sku,
+            matched_sku_code=cost_sku.sku_code if cost_sku else "",
+            matched_legacy_sku_code=cost_sku.legacy_sku_code if cost_sku else "",
+            sales_amount=sales_amount,
+            cost_amount=cost_amount,
+            cost_match_status=cost_status,
+            price_source=snapshot.source if snapshot else "",
+            cost_source="products_productsku" if cost_sku else "",
+            price_snapshot_at=timezone.now() if snapshot else None,
+            cost_snapshot_at=timezone.now() if cost_sku else None,
             **payload,
         )
         _save(item)
+        sku_quantity += quantity
+        if sales_amount is None:
+            all_prices_matched = False
+        else:
+            sales_total += sales_amount
+            any_price_matched = True
+        if cost_amount is None:
+            all_costs_matched = False
+        else:
+            cost_total += cost_amount
+            any_cost_matched = True
+    has_items = sku_quantity > 0
+    if not has_items:
+        pricing_status = "pending"
+    elif all_prices_matched and all_costs_matched:
+        pricing_status = "full"
+    elif any_price_matched or any_cost_matched:
+        pricing_status = "partial"
+    else:
+        pricing_status = "not_found"
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk, tenant=user.tenant),
+        sku_quantity=sku_quantity,
+        sales_amount=sales_total if any_price_matched else None,
+        calculated_cost=cost_total if any_cost_matched else None,
+        pricing_status=pricing_status,
+        priced_at=timezone.now() if has_items else None,
+    )
+    fulfillment.refresh_from_db()
     FulfillmentStatusEvent.objects.create(
         tenant=user.tenant,
         fulfillment=fulfillment,

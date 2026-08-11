@@ -10,6 +10,13 @@ export const OUTREACH_STATUS_LABELS = Object.freeze({
   cancelled: '已取消'
 });
 
+export const OUTREACH_PRIORITY_LABELS = Object.freeze({
+  low: '低',
+  normal: '普通',
+  high: '高',
+  urgent: '紧急'
+});
+
 export const OUTREACH_RESULT_LABELS = Object.freeze({
   pending: '待处理',
   success: '已成功',
@@ -30,6 +37,28 @@ export const FULFILLMENT_STATUS_LABELS = Object.freeze({
   live_creator: '达人直播中',
   overdue: '已逾期',
   blank: '空白'
+});
+
+export const PRICING_STATUS_LABELS = Object.freeze({
+  pending: '待匹配',
+  full: '完整匹配',
+  partial: '部分匹配',
+  not_found: '未匹配'
+});
+
+export const PRICE_MATCH_STATUS_LABELS = Object.freeze({
+  matched: '销售价已匹配',
+  not_imported: '销售价未导入'
+});
+
+export const COST_MATCH_STATUS_LABELS = Object.freeze({
+  pending: '采购成本待匹配',
+  matched_new_sku: '采购成本已匹配',
+  matched_legacy_sku: '采购成本已匹配',
+  matched_normalized: '采购成本已匹配',
+  not_priced: 'SKU 无采购价',
+  ambiguous: 'SKU 匹配有歧义',
+  not_found: 'SKU 未匹配'
 });
 
 export const statusLabel = (labels, value) => labels[value] || value || '—';
@@ -100,7 +129,7 @@ export const fetchOutreachTasks = (params = {}) => requestWithMockFallback(
 
 export const fetchOutreachTaskOptions = () => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/outreach-task-options/` },
-  () => ({ success: true, data: { stores: [], bd_users: [] } }),
+  () => ({ success: true, data: { stores: [], bd_users: [], influencers: [] } }),
   'influencers.outreach.options'
 );
 
@@ -138,6 +167,17 @@ export const updateOutreachStatus = (id, status, version) => requestWithMockFall
   { method: 'post', url: `${API_ROOT}/outreach-tasks/${id}/status/`, data: { status }, ...ifMatchHeaders(version) },
   mockWrite({ id, status, version: Number(version || 1) + 1 }),
   'influencers.outreach.status'
+);
+
+export const updateOutreachTask = (id, payload, version) => requestWithMockFallback(
+  {
+    method: 'patch',
+    url: `${API_ROOT}/outreach-tasks/${id}/`,
+    data: payload,
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id, ...payload, version: Number(version || 1) + 1 }),
+  'influencers.outreach.update'
 );
 
 export const deleteOutreachTask = (id) => requestWithMockFallback(

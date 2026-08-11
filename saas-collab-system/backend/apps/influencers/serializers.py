@@ -66,14 +66,15 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
         model = OutreachTask
         fields = (
             "id", "tenant_id", "task_no", "task_name", "influencer", "store", "store_name", "spu",
-            "external_product_id", "sku_prefix", "target_count", "linked_count", "dispatcher_id",
+            "external_product_id", "sku_prefix", "product_name_snapshot", "product_match_status",
+            "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
             "owner", "owner_name", "dispatcher_name", "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
             "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "tenant_id", "dispatcher_id", "linked_count", "status", "dispatch_time", "outreach_at",
-            "started_at", "finalized_at", "is_deleted", "deleted_at", "version",
+            "started_at", "finalized_at", "product_matched_at", "is_deleted", "deleted_at", "version",
             "created_at", "updated_at",
         )
 
@@ -89,14 +90,52 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     def validate_external_id(self, value):
         return value or None
 
+    def validate_priority(self, value):
+        allowed = {"low", "normal", "high", "urgent"}
+        if value not in allowed:
+            raise serializers.ValidationError("Priority must be low, normal, high, or urgent.")
+        return value
+
+
+class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
+    """Allow-list for task detail edits; workflow state is service-owned."""
+
+    class Meta:
+        model = OutreachTask
+        fields = (
+            "task_name",
+            "priority",
+            "store",
+            "external_product_id",
+            "sku_prefix",
+            "target_count",
+            "owner",
+        )
+        extra_kwargs = {
+            "task_name": {"required": False, "allow_blank": True},
+            "external_product_id": {"required": False, "allow_blank": True},
+            "sku_prefix": {"required": False, "allow_blank": True},
+            "target_count": {"required": False, "min_value": 0},
+        }
+
+    def validate_priority(self, value):
+        allowed = {"low", "normal", "high", "urgent"}
+        if value not in allowed:
+            raise serializers.ValidationError("Priority must be low, normal, high, or urgent.")
+        return value
+
 
 class OutreachTargetSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
+    influencer_code = serializers.CharField(source="influencer.code", read_only=True)
+    influencer_name = serializers.CharField(source="influencer.name", read_only=True)
+    influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
 
     class Meta:
         model = OutreachTarget
         fields = (
-            "id", "tenant_id", "task", "influencer", "first_linked_at", "outreach_result",
+            "id", "tenant_id", "task", "influencer", "influencer_code", "influencer_name",
+            "influencer_platform", "first_linked_at", "outreach_result",
             "version", "notes", "is_deleted", "deleted_at", "created_at", "updated_at",
         )
         read_only_fields = (
@@ -115,10 +154,16 @@ class SampleItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = SampleItem
         fields = (
-            "id", "sku", "external_product_id", "site_code", "requested_sku", "product_name", "quantity",
-            "unit_price", "currency", "price_match_status", "created_at", "updated_at",
+            "id", "sku", "external_product_id", "site_code", "requested_sku", "normalized_sku",
+            "matched_sku_code", "matched_legacy_sku_code", "product_name", "quantity", "unit_price", "unit_cost",
+            "sales_amount", "cost_amount", "currency", "price_match_status", "cost_match_status", "price_source",
+            "cost_source", "price_snapshot_at", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
         )
-        read_only_fields = ("id", "unit_price", "currency", "price_match_status", "created_at", "updated_at")
+        read_only_fields = (
+            "id", "normalized_sku", "matched_sku_code", "matched_legacy_sku_code", "unit_price", "unit_cost",
+            "sales_amount", "cost_amount", "currency", "price_match_status", "cost_match_status", "price_source",
+            "cost_source", "price_snapshot_at", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
+        )
 
     def validate_requested_sku(self, value):
         return value.strip() or None if value is not None else None
@@ -174,11 +219,13 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             "outreach_target", "influencer", "influencer_name", "store", "store_name", "owner", "owner_name",
             "product_name_snapshot", "external_product_id", "sample_order_no",
             "sample_sent_at", "shipped_at", "status", "source", "external_id", "version",
-            "notes", "finalized_at", "items", "created_at", "updated_at",
+            "notes", "finalized_at", "sku_quantity", "sales_amount", "calculated_cost", "pricing_status",
+            "priced_at", "items", "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "tenant_id", "product_name_snapshot", "sample_sent_at", "shipped_at", "status",
-            "version", "finalized_at", "created_at", "updated_at",
+            "version", "finalized_at", "sku_quantity", "sales_amount", "calculated_cost", "pricing_status",
+            "priced_at", "created_at", "updated_at",
         )
 
         extra_kwargs = {

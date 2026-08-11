@@ -17,6 +17,7 @@ from .serializers import (
     InfluencerSerializer,
     OutreachTargetSerializer,
     OutreachTaskSerializer,
+    OutreachTaskUpdateSerializer,
     SampleFulfillmentSerializer,
     SkuPriceSnapshotSerializer,
 )
@@ -29,6 +30,7 @@ from .services import (
     soft_delete_outreach_task,
     transition_outreach_task,
     transition_sample_fulfillment,
+    update_outreach_task,
     update_outreach_target,
 )
 
@@ -229,6 +231,10 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
+        influencers = Influencer.objects.filter(
+            tenant=request.user.tenant,
+            status=Influencer.Status.ACTIVE,
+        ).order_by("name", "code")[:500]
         stores = stores[:200]
         return success_response({
             "stores": [
@@ -244,6 +250,15 @@ class OutreachTaskOptionsView(APIView):
             "bd_users": [
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
+            ],
+            "influencers": [
+                {
+                    "id": influencer.id,
+                    "code": influencer.code,
+                    "name": influencer.name,
+                    "platform": influencer.platform,
+                }
+                for influencer in influencers
             ],
         })
 
@@ -312,6 +327,29 @@ class OutreachTaskDetailView(APIView):
             pk=pk,
             is_deleted=False,
         )
+        return success_response(OutreachTaskSerializer(task).data)
+
+    def patch(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        task = get_object_or_404(
+            OutreachTask,
+            tenant=request.user.tenant,
+            pk=pk,
+            is_deleted=False,
+        )
+        serializer = OutreachTaskUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            task = update_outreach_task(
+                user=request.user,
+                task=task,
+                validated_data=serializer.validated_data,
+                expected_version=_expected_version(request),
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
         return success_response(OutreachTaskSerializer(task).data)
 
     def delete(self, request, pk):
