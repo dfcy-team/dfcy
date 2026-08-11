@@ -62,6 +62,9 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('按店铺名称搜索');
     expect(page).toContain('目标建联人数');
     expect(page).toContain('按姓名或账号搜索');
+    expect(page).toContain('matchOutreachProduct');
+    expect(page).toContain('商品数据未导入');
+    expect(page).toContain('已匹配店铺');
   });
 
   it('requires task and target selection, supports multiple nullable-SKU rows, and labels missing prices', () => {

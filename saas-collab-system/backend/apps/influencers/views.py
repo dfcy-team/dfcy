@@ -12,7 +12,7 @@ from apps.masterdata.models import StatusChoices, StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.ui_p2_scopes import require_all_scope
 
-from .models import Influencer, OutreachTarget, OutreachTask, SampleFulfillment, SkuPriceSnapshot
+from .models import Influencer, OutreachTarget, OutreachTask, SampleFulfillment, SkuPriceSnapshot, StoreProductListing
 from .serializers import (
     InfluencerSerializer,
     OutreachTargetSerializer,
@@ -231,6 +231,57 @@ class OutreachTaskOptionsView(APIView):
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
             ],
+        })
+
+
+class OutreachProductMatchView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        product_id = request.query_params.get("product_id", "").strip()
+        if not product_id:
+            raise ValidationError({"product_id": "Product ID is required."})
+        base_queryset = StoreProductListing.objects.filter(
+            tenant=request.user.tenant,
+            external_product_id=product_id,
+            store__status=StatusChoices.ACTIVE,
+        )
+        store_ids = list(base_queryset.order_by("store_id").values_list("store_id", flat=True).distinct()[:201])
+        truncated = len(store_ids) > 200
+        store_ids = store_ids[:200]
+        listings = base_queryset.filter(store_id__in=store_ids).select_related(
+            "store", "store__platform"
+        ).prefetch_related("sku_prices").order_by("store__name", "id")
+        grouped = {}
+        for listing in listings:
+            prefixes = {listing.parent_sku.strip()} if listing.parent_sku.strip() else set()
+            prefixes.update(
+                price.external_sku.split("-", 1)[0]
+                for price in listing.sku_prices.all()
+                if price.external_sku
+            )
+            candidate = grouped.setdefault(listing.store_id, {
+                "store_id": listing.store_id,
+                "store_name": listing.store.name,
+                "store_code": listing.store.code,
+                "country_code": listing.store.country_code,
+                "product_name": listing.product_name,
+                "sku_prefixes": set(),
+            })
+            candidate["sku_prefixes"].update(prefix for prefix in prefixes if prefix)
+        candidates = [
+            {**candidate, "sku_prefixes": sorted(candidate["sku_prefixes"])}
+            for candidate in grouped.values()
+        ]
+        return success_response({
+            "product_id": product_id,
+            "matched": bool(candidates),
+            "unique": len(candidates) == 1 and not truncated,
+            "truncated": truncated,
+            "reason": "" if candidates else "data_source_not_imported",
+            "candidates": candidates,
         })
 
 

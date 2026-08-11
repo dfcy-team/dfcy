@@ -104,6 +104,12 @@ export const fetchOutreachTaskOptions = () => requestWithMockFallback(
   'influencers.outreach.options'
 );
 
+export const matchOutreachProduct = (productId) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-product-match/`, params: { product_id: productId } },
+  () => ({ success: true, data: { matched: false, unique: false, reason: 'data_source_not_imported', candidates: [] } }),
+  'influencers.outreach.product_match'
+);
+
 export const fetchOutreachTask = (id) => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/outreach-tasks/${id}/` },
   mockDetail({ id }),

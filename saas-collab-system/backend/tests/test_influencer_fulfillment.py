@@ -149,6 +149,83 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
     assert rejected_store.status_code == 400
 
 
+def test_outreach_product_match_groups_listings_by_store_and_returns_sku_prefixes():
+    tenant = Tenant.objects.create(name="Product Match Tenant", code="product-match-tenant")
+    _, client = user_with_permissions(tenant, "product-match-manager", "influencers.outreach.view")
+    store = store_for(tenant, "matched-store")
+    for site_code, parent_sku, external_sku in (("PH", "HY107", "HY107-RED"), ("PH-ALT", "", "HY107-BLUE")):
+        listing = StoreProductListing.objects.create(
+            tenant=tenant,
+            store=store,
+            external_product_id="1733134199243507606",
+            parent_sku=parent_sku,
+            product_name="Matched Product",
+            site_code=site_code,
+            source="test",
+        )
+        SkuPriceSnapshot.objects.create(
+            tenant=tenant,
+            listing=listing,
+            external_sku=external_sku,
+            currency="PHP",
+            source="test",
+        )
+
+    response = client.get(
+        "/api/internal/influencers/outreach-product-match/",
+        {"product_id": "1733134199243507606"},
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["unique"] is True
+    assert response.data["data"]["candidates"] == [{
+        "store_id": store.id,
+        "store_name": store.name,
+        "store_code": store.code,
+        "country_code": "PH",
+        "product_name": "Matched Product",
+        "sku_prefixes": ["HY107"],
+    }]
+
+
+def test_outreach_product_match_does_not_cross_tenants_or_auto_select_multiple_stores():
+    tenant = Tenant.objects.create(name="Match Boundary Tenant", code="match-boundary-tenant")
+    other_tenant = Tenant.objects.create(name="Other Match Tenant", code="other-match-tenant")
+    _, client = user_with_permissions(tenant, "match-boundary-manager", "influencers.outreach.view")
+    product_id = "1733134199243507606"
+    for store in (store_for(tenant, "first-store"), store_for(tenant, "second-store")):
+        StoreProductListing.objects.create(
+            tenant=tenant,
+            store=store,
+            external_product_id=product_id,
+            parent_sku=f"PREFIX-{store.code}",
+            product_name="Tenant Product",
+            site_code="PH",
+            source="test",
+        )
+    other_store = store_for(other_tenant, "other-store")
+    StoreProductListing.objects.create(
+        tenant=other_tenant,
+        store=other_store,
+        external_product_id=product_id,
+        parent_sku="OTHER",
+        product_name="Other Tenant Product",
+        site_code="PH",
+        source="test",
+    )
+
+    response = client.get("/api/internal/influencers/outreach-product-match/", {"product_id": product_id})
+
+    assert response.status_code == 200
+    assert response.data["data"]["unique"] is False
+    assert {candidate["store_id"] for candidate in response.data["data"]["candidates"]} == {
+        store.id for store in StoreMaster.objects.filter(tenant=tenant)
+    }
+    assert other_store.id not in {
+        candidate["store_id"] for candidate in response.data["data"]["candidates"]
+    }
+
+
 def base_records(tenant, user, suffix="a"):
     make_bd_owner(tenant, user)
     store = store_for(tenant, f"store-{suffix}")
