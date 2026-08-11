@@ -11,6 +11,7 @@ env_file=${SANDBOX_RUNTIME_ENV_FILE:-$script_dir/.env.sandbox}
 compose_file="$script_dir/docker-compose.sandbox-single-host.yml"
 network_dir="$sandbox_root/network"
 app_verify="$sandbox_root/application/verify-sandbox.sh"
+register_environment="$sandbox_root/application/register-sandbox-environment.sh"
 network_verify="$network_dir/verify-network-policy.sh"
 
 fail() {
@@ -98,6 +99,7 @@ root_password=$(env_value MYSQL_ROOT_PASSWORD)
 [ "$db_password" != "$root_password" ] || fail "Application and root database passwords must be different."
 
 db_host=$(env_value DB_HOST)
+db_port=$(env_value DB_PORT)
 db_bind_ip=$(env_value SANDBOX_DB_BIND_IP)
 app_host_ip=$(env_value SANDBOX_APP_HOST_IP)
 public_bind_ip=$(env_value SANDBOX_PUBLIC_BIND_IP)
@@ -105,7 +107,7 @@ public_bind_ip=$(env_value SANDBOX_PUBLIC_BIND_IP)
 [ "$db_bind_ip" = "10.20.40.119" ] || fail "Single-host MySQL must bind only to 10.20.40.119."
 [ "$app_host_ip" = "$db_bind_ip" ] || fail "Single-host SANDBOX_APP_HOST_IP must equal SANDBOX_DB_BIND_IP."
 [ "$public_bind_ip" = "$db_bind_ip" ] || fail "Single-host HTTPS must bind to the ECS private address."
-[ "$(env_value DB_PORT)" = "3307" ] || fail "Single-host DB_PORT must be 3307."
+[ "$db_port" = "3307" ] || fail "Single-host DB_PORT must be 3307."
 [ "$(env_value SANDBOX_DB_PORT)" = "3307" ] || fail "Single-host SANDBOX_DB_PORT must be 3307."
 [ "$(env_value SANDBOX_HTTPS_PORT)" = "8543" ] || fail "Single-host HTTPS entry must be 8543."
 
@@ -176,6 +178,8 @@ run_privileged "$network_dir/apply-app-policy.sh" "$network_policy_file"
 
 docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 mysql redis
 docker compose --env-file "$env_file" -f "$compose_file" run --rm migrate
+[ -x "$register_environment" ] || fail "Missing Sandbox environment registration script."
+SANDBOX_RUNTIME_ENV_FILE="$env_file" SANDBOX_RUNTIME_COMPOSE_FILE="$compose_file" "$register_environment"
 docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 backend celery celery-beat frontend
 [ -x "$network_verify" ] || fail "Missing executable network verification script."
 run_privileged "$network_verify" db "$network_policy_file"
