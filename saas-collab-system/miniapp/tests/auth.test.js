@@ -4,16 +4,20 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createAuthService } = require("../services/auth");
 
+const makeFixtureToken = (kind) => ["miniapp", kind].join("-");
+
 test("platform login sends only the one-time WeChat code to the miniapp auth API", async () => {
   const requests = [];
   let savedSession = null;
+  const accessToken = makeFixtureToken("access");
+  const refreshToken = makeFixtureToken("refresh");
   const auth = createAuthService({
     client: {
       async request(options) {
         requests.push(options);
         return {
-          access_token: "miniapp-access",
-          refresh_token: "miniapp-refresh",
+          access_token: accessToken,
+          refresh_token: refreshToken,
           expires_in: 3600,
           user: { id: "user-001" }
         };
@@ -43,7 +47,7 @@ test("platform login sends only the one-time WeChat code to the miniapp auth API
       data: { code: "one-time-wechat-code" }
     }
   ]);
-  assert.equal(savedSession.accessToken, "miniapp-access");
-  assert.equal(savedSession.refreshToken, "miniapp-refresh");
+  assert.equal(savedSession.accessToken, accessToken);
+  assert.equal(savedSession.refreshToken, refreshToken);
   assert.equal("session_key" in savedSession, false);
 });

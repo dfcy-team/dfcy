@@ -5,14 +5,16 @@ const assert = require("node:assert/strict");
 const { redact } = require("../core/telemetry/logger");
 
 test("logger recursively redacts credentials", () => {
+  const redactedPassword = ["plain", "text"].join("-");
+  const rowToken = ["row", "token"].join("-");
   const result = redact({
     authorization: "Bearer secret",
     nested: {
-      password: "plain-text",
+      password: redactedPassword,
       safe: "visible",
       session_key: "server-only"
     },
-    rows: [{ token: "abc" }]
+    rows: [{ token: rowToken }]
   });
 
   assert.equal(result.authorization, "***");

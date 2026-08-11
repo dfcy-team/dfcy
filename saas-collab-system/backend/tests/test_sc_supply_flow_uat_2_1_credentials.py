@@ -1,6 +1,7 @@
 import io
 import importlib
 import json
+import secrets
 from datetime import timedelta
 from decimal import Decimal
 
@@ -85,6 +86,11 @@ def _capture_secret(_credentials):
 
 
 _capture_secret.values = []
+
+
+def _test_password():
+    """Return an unpredictable password for users created directly in tests."""
+    return secrets.token_urlsafe(24)
 
 
 def test_activate_defaults_to_dry_run_and_metadata_has_no_secret():
@@ -261,16 +267,17 @@ def test_supplier_web_refresh_rejects_stale_binding_and_expired_lease():
 def test_ordinary_external_supplier_with_empty_lease_fields_can_use_new_channel():
     tenant = Tenant.objects.create(name="Ordinary supplier web", code="ordinary-supplier-web")
     supplier = SupplierMaster.objects.create(tenant=tenant, code="ordinary-supplier", name="Ordinary supplier")
+    ordinary_password = _test_password()
     user = CustomUser.objects.create_user(
         username="ordinary-external",
-        password="Ordinary-external-123!",
+        password=ordinary_password,
         tenant=tenant,
         user_type=CustomUser.UserType.EXTERNAL,
     )
     ExternalUserProfile.objects.create(user=user, tenant=tenant, supplier_id=supplier.id)
     response = APIClient().post(
         "/api/external/auth/login/",
-        {"username": user.username, "password": "Ordinary-external-123!"},
+        {"username": user.username, "password": ordinary_password},
         format="json",
     )
     assert response.status_code == 200
@@ -280,28 +287,31 @@ def test_ordinary_external_supplier_with_empty_lease_fields_can_use_new_channel(
 def test_supplier_web_endpoint_rejects_internal_rpa_and_other_token_channels():
     tenant = Tenant.objects.create(name="Supplier channel matrix", code="supplier-channel-matrix")
     supplier = SupplierMaster.objects.create(tenant=tenant, code="supplier-channel", name="Supplier channel")
+    external_password = _test_password()
     external = CustomUser.objects.create_user(
         username="supplier-channel-external",
-        password="Supplier-channel-123!",
+        password=external_password,
         tenant=tenant,
         user_type=CustomUser.UserType.EXTERNAL,
     )
     ExternalUserProfile.objects.create(user=external, tenant=tenant, supplier_id=supplier.id)
+    internal_password = _test_password()
     internal = CustomUser.objects.create_user(
         username="supplier-channel-internal",
-        password="Internal-channel-123!",
+        password=internal_password,
         tenant=tenant,
         user_type=CustomUser.UserType.INTERNAL,
     )
+    rpa_password = _test_password()
     rpa = CustomUser.objects.create_user(
         username="supplier-channel-rpa",
-        password="Rpa-channel-123!",
+        password=rpa_password,
         tenant=tenant,
         user_type=CustomUser.UserType.RPA,
     )
     for username, password in (
-        (internal.username, "Internal-channel-123!"),
-        (rpa.username, "Rpa-channel-123!"),
+        (internal.username, internal_password),
+        (rpa.username, rpa_password),
     ):
         assert APIClient().post(
             "/api/external/auth/login/",
@@ -324,9 +334,10 @@ def test_supplier_web_endpoint_rejects_internal_rpa_and_other_token_channels():
 def test_revoke_is_exact_and_does_not_touch_non_uat_account():
     activate_credentials(_context(), ["SC-UAT-A-procurement"], apply=True, secret_sink=_capture_secret)
     other_tenant = Tenant.objects.create(code="ordinary-tenant", name="Ordinary tenant")
+    ordinary_password = _test_password()
     ordinary = CustomUser.objects.create_user(
         username="ordinary-user",
-        password="Ordinary-password-123!",
+        password=ordinary_password,
         tenant=other_tenant,
         user_type=CustomUser.UserType.INTERNAL,
     )
@@ -335,7 +346,7 @@ def test_revoke_is_exact_and_does_not_touch_non_uat_account():
     assert uat_user.uat_credential_status == "revoked"
     assert not uat_user.has_usable_password()
     ordinary.refresh_from_db()
-    assert ordinary.check_password("Ordinary-password-123!")
+    assert ordinary.check_password(ordinary_password)
 
 
 def test_expired_lease_rejects_login_refresh_and_existing_access_token():
