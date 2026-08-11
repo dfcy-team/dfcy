@@ -345,6 +345,19 @@ def create_outreach_task(*, user, validated_data):
         raise ValidationError({"owner": "Owner is required."})
     owner = _locked_user(user, _pk(owner_value))
     store = _locked_store(user, _pk(data["store"]))
+    if store.status != "active":
+        raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
+    if (
+        not owner.is_active
+        or owner.user_type != owner.UserType.INTERNAL
+        or not owner.user_roles.filter(
+            tenant=user.tenant,
+            role__tenant=user.tenant,
+            role__code="bd",
+            role__status="active",
+        ).exists()
+    ):
+        raise ValidationError({"owner": "Owner must be an active BD user in the current tenant."})
     influencer = None
     if "influencer" in data and data["influencer"] is not None:
         influencer = _locked_influencer(user, _pk(data["influencer"]))

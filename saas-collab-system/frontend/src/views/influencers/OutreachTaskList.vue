@@ -10,7 +10,10 @@
     </el-table><el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="load"/></el-card>
 
     <el-dialog v-model="createVisible" title="新建建联任务" width="580px"><el-form label-width="110px">
-      <el-form-item label="任务编号" required><el-input v-model="form.task_no"/></el-form-item><el-form-item label="任务名称" required><el-input v-model="form.task_name"/></el-form-item><el-form-item label="店铺 ID" required><el-input-number v-model="form.store" :min="1"/></el-form-item><el-form-item label="商品 ID"><el-input v-model="form.external_product_id"/></el-form-item><el-form-item label="SKU 前缀"><el-input v-model="form.sku_prefix"/></el-form-item><el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :min="1"/></el-form-item><el-form-item label="负责 BD ID" required><el-input-number v-model="form.owner" :min="1"/></el-form-item>
+      <el-form-item label="任务编号" required><el-input v-model="form.task_no"/></el-form-item><el-form-item label="任务名称" required><el-input v-model="form.task_name"/></el-form-item>
+      <el-form-item label="店铺" required><el-select v-model="form.store" filterable placeholder="按店铺名称搜索"><el-option v-for="store in storeOptions" :key="store.id" :label="`${store.name}（${store.code} / ${store.country_code}）`" :value="store.id"/></el-select></el-form-item>
+      <el-form-item label="商品 ID"><el-input v-model="form.external_product_id"/></el-form-item><el-form-item label="SKU 前缀"><el-input v-model="form.sku_prefix"/></el-form-item><el-form-item label="目标建联人数" required><el-input-number v-model="form.target_count" :min="1" :step="1" step-strictly/></el-form-item>
+      <el-form-item label="负责 BD" required><el-select v-model="form.owner" filterable placeholder="按姓名或账号搜索"><el-option v-for="user in bdOptions" :key="user.id" :label="`${user.full_name||user.username}（${user.username}）`" :value="user.id"/></el-select></el-form-item>
     </el-form><template #footer><el-button @click="createVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="submit">创建</el-button></template></el-dialog>
 
     <el-dialog v-model="targetsVisible" :title="`达人目标 · ${activeTask?.task_name||''}`" width="760px"><div class="target-bar"><el-input-number v-model="targetForm.influencer" :min="1" placeholder="达人 ID"/><el-input v-model="targetForm.notes" placeholder="备注（可选）"/><el-button type="primary" :disabled="!canManage||isTerminal(activeTask)" @click="addTarget">添加达人目标</el-button></div>
@@ -23,16 +26,17 @@
 import { computed,onMounted,reactive,ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
-import { addOutreachTarget,createOutreachTask,deleteOutreachTarget,fetchOutreachTargets,fetchOutreachTasks,formatInfluencerError,OUTREACH_RESULT_LABELS,OUTREACH_STATUS_LABELS,restoreOutreachTarget,statusLabel,updateOutreachStatus,updateOutreachTarget } from '../../api/influencers';
+import { addOutreachTarget,createOutreachTask,deleteOutreachTarget,fetchOutreachTargets,fetchOutreachTaskOptions,fetchOutreachTasks,formatInfluencerError,OUTREACH_RESULT_LABELS,OUTREACH_STATUS_LABELS,restoreOutreachTarget,statusLabel,updateOutreachStatus,updateOutreachTarget } from '../../api/influencers';
 import { collectionRows,collectionTotal,detailData } from '../../utils/businessResponse';
 const auth=useAuthStore(),rows=ref([]),total=ref(0),page=ref(1),pageSize=ref(20),loading=ref(false),saving=ref(false),createVisible=ref(false),targetsVisible=ref(false),targetLoading=ref(false),activeTask=ref(null),targets=ref([]),deletedTargets=ref([]);
 const displayTargets=computed(()=>[...targets.value,...deletedTargets.value]);
 const canManage=computed(()=>auth.hasPermission('influencers.outreach.manage'));
 const form=reactive({task_no:'',task_name:'',store:null,external_product_id:'',sku_prefix:'',target_count:1,owner:null});
 const targetForm=reactive({influencer:null,notes:''});
+const storeOptions=ref([]),bdOptions=ref([]);
 const isTerminal=(row)=>['completed','cancelled'].includes(row?.status);const isTargetTerminal=(row)=>['success','rejected','no_response','blocked'].includes(row?.outreach_result);const progress=(row)=>row.target_count?Math.min(100,Math.round((row.linked_count||0)*100/row.target_count)):0;
 async function load(){loading.value=true;const r=await fetchOutreachTasks({page:page.value,page_size:pageSize.value});loading.value=false;if(r.success){rows.value=collectionRows(r.data);total.value=collectionTotal(r.data)}else ElMessage.error(formatInfluencerError(r,'任务加载失败'))}
-function openCreate(){Object.assign(form,{task_no:`DRJL${Date.now().toString().slice(-6)}`,task_name:'',store:null,external_product_id:'',sku_prefix:'',target_count:1,owner:null});createVisible.value=true}
+async function openCreate(){Object.assign(form,{task_no:`DRJL${Date.now().toString().slice(-6)}`,task_name:'',store:null,external_product_id:'',sku_prefix:'',target_count:1,owner:null});const r=await fetchOutreachTaskOptions();if(!r.success)return ElMessage.error(formatInfluencerError(r,'店铺和 BD 选项加载失败'));storeOptions.value=r.data?.stores||[];bdOptions.value=r.data?.bd_users||[];createVisible.value=true}
 async function submit(){if(!form.task_no||!form.task_name||!form.store||!form.owner)return ElMessage.warning('请填写必填字段');saving.value=true;const r=await createOutreachTask({...form});saving.value=false;if(!r.success)return ElMessage.error(formatInfluencerError(r));createVisible.value=false;ElMessage.success('任务已创建');load()}
 async function changeStatus(row,status){const r=await updateOutreachStatus(row.id,status,row.version);if(!r.success)return ElMessage.error(formatInfluencerError(r));ElMessage.success('状态已更新');load()}
 async function openTargets(row){activeTask.value=row;targetsVisible.value=true;deletedTargets.value=[];await loadTargets()}

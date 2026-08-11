@@ -72,7 +72,85 @@ def store_for(tenant, code):
     )
 
 
+def make_bd_owner(tenant, user):
+    user.user_type = CustomUser.UserType.INTERNAL
+    user.is_active = True
+    user.save(update_fields=["user_type", "is_active"])
+    role, _ = Role.objects.get_or_create(
+        tenant=tenant,
+        code="bd",
+        defaults={"name": "BD", "status": Role.Status.ACTIVE},
+    )
+    if role.status != Role.Status.ACTIVE:
+        role.status = Role.Status.ACTIVE
+        role.save(update_fields=["status", "updated_at"])
+    UserRole.objects.get_or_create(tenant=tenant, user=user, role=role)
+    return user
+
+
+def test_outreach_options_return_active_stores_and_bd_users_only():
+    tenant = Tenant.objects.create(name="Options Tenant", code="options-tenant")
+    _, client = user_with_permissions(
+        tenant,
+        "options-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    store = store_for(tenant, "creator-store")
+    bd_role = Role.objects.create(tenant=tenant, code="bd", name="BD")
+    bd_user = CustomUser.objects.create_user(
+        username="liyejun",
+        full_name="李烨君",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    other_user = CustomUser.objects.create_user(
+        username="not-bd",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    UserRole.objects.create(tenant=tenant, user=bd_user, role=bd_role)
+
+    response = client.get("/api/internal/influencers/outreach-task-options/")
+
+    assert response.status_code == 200
+    assert response.data["data"]["stores"] == [{
+        "id": store.id,
+        "name": store.name,
+        "code": store.code,
+        "country_code": "PH",
+        "platform_name": "TikTok Shop",
+    }]
+    assert response.data["data"]["bd_users"] == [{
+        "id": bd_user.id,
+        "username": "liyejun",
+        "full_name": "李烨君",
+    }]
+    assert other_user.id not in {item["id"] for item in response.data["data"]["bd_users"]}
+
+    rejected_owner = client.post("/api/internal/influencers/outreach-tasks/", {
+        "task_no": "OPTIONS-NON-BD",
+        "task_name": "Reject non-BD owner",
+        "store": store.id,
+        "owner": other_user.id,
+        "target_count": 1,
+    }, format="json")
+    assert rejected_owner.status_code == 400
+
+    store.status = "inactive"
+    store.save(update_fields=["status"])
+    rejected_store = client.post("/api/internal/influencers/outreach-tasks/", {
+        "task_no": "OPTIONS-INACTIVE-STORE",
+        "task_name": "Reject inactive store",
+        "store": store.id,
+        "owner": bd_user.id,
+        "target_count": 1,
+    }, format="json")
+    assert rejected_store.status_code == 400
+
+
 def base_records(tenant, user, suffix="a"):
+    make_bd_owner(tenant, user)
     store = store_for(tenant, f"store-{suffix}")
     influencer = Influencer.objects.create(
         tenant=tenant,
@@ -97,6 +175,7 @@ def base_records(tenant, user, suffix="a"):
 def test_outreach_external_id_allows_multiple_nulls_but_rejects_duplicates():
     tenant = Tenant.objects.create(name="Tenant", code="outreach-external-id")
     user = CustomUser.objects.create_user(username="external-id-user", tenant=tenant)
+    make_bd_owner(tenant, user)
     store = store_for(tenant, "external-id-store")
     influencer = Influencer.objects.create(tenant=tenant, code="external-id-creator", name="Creator", platform="tiktok")
 

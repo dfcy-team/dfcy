@@ -6,7 +6,9 @@ from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.views import APIView
 
 from apps.audit.services import write_operation_log
+from apps.accounts.models import CustomUser
 from apps.common.responses import paginated_data, success_response
+from apps.masterdata.models import StatusChoices, StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.ui_p2_scopes import require_all_scope
 
@@ -192,6 +194,44 @@ class OutreachTaskCollectionView(APIView):
         serializer.is_valid(raise_exception=True)
         task = create_outreach_task(user=request.user, validated_data=serializer.validated_data)
         return success_response(OutreachTaskSerializer(task).data, status=201)
+
+
+class OutreachTaskOptionsView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        stores = StoreMaster.objects.filter(
+            tenant=request.user.tenant,
+            status=StatusChoices.ACTIVE,
+        ).select_related("platform").order_by("name", "code")
+        bd_users = CustomUser.objects.filter(
+            tenant=request.user.tenant,
+            user_type=CustomUser.UserType.INTERNAL,
+            is_active=True,
+            user_roles__tenant=request.user.tenant,
+            user_roles__role__tenant=request.user.tenant,
+            user_roles__role__code="bd",
+            user_roles__role__status="active",
+        ).distinct().order_by("full_name", "username")[:200]
+        stores = stores[:200]
+        return success_response({
+            "stores": [
+                {
+                    "id": store.id,
+                    "name": store.name,
+                    "code": store.code,
+                    "country_code": store.country_code,
+                    "platform_name": store.platform.name,
+                }
+                for store in stores
+            ],
+            "bd_users": [
+                {"id": user.id, "username": user.username, "full_name": user.full_name}
+                for user in bd_users
+            ],
+        })
 
 
 class OutreachTaskDetailView(APIView):

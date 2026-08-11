@@ -58,6 +58,10 @@ describe('influencer integration workspace contracts', () => {
     expect(read('src/api/influencers.js')).toContain('终态');
     expect(page).toContain("row.status !== 'pending'");
     expect(page).toContain("row.status !== 'in_progress'");
+    expect(page).toContain('fetchOutreachTaskOptions');
+    expect(page).toContain('按店铺名称搜索');
+    expect(page).toContain('目标建联人数');
+    expect(page).toContain('按姓名或账号搜索');
   });
 
   it('requires task and target selection, supports multiple nullable-SKU rows, and labels missing prices', () => {
