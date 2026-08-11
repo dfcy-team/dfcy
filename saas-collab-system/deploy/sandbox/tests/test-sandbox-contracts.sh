@@ -30,6 +30,7 @@ fi
 single_host="$root_dir/single-host"
 grep -q 'SANDBOX_DEPLOYMENT_MODE=single-host' "$single_host/env.sandbox.example"
 grep -q 'SANDBOX_DB_BIND_IP.*SANDBOX_DB_PORT.*3306' "$single_host/docker-compose.sandbox-single-host.yml"
+grep -q "headers={'Host':'localhost','X-Forwarded-Proto':'https'}" "$single_host/docker-compose.sandbox-single-host.yml"
 grep -q 'SANDBOX_HTTPS_PORT.*8543' "$single_host/env.sandbox.example"
 grep -q 'saas-sandbox-network' "$single_host/docker-compose.sandbox-single-host.yml"
 grep -q 'saas-sandbox-db-network' "$single_host/docker-compose.sandbox-single-host.yml"
