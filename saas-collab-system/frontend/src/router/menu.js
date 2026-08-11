@@ -14,6 +14,15 @@ export const menuItems = [
     ]
   },
   {
+    label: '供应链协同',
+    internal: true,
+    permissions: ['supply.consolidation.view', 'supply.shipment.view'],
+    children: [
+      { path: '/supply-chain/consolidations', label: '集货管理', permissions: ['supply.consolidation.view'] },
+      { path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] }
+    ]
+  },
+  {
     label: '\u591a\u5e73\u53f0\u520a\u767b',
     permissions: ['listings.profile.view','listings.template.view'],
     children: [
@@ -59,15 +68,6 @@ export const menuItems = [
       { path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] },
       { path: '/listings/sites', label: '多国家刊登', internal: true },
       { path: '/pricing/prices', label: '价格中心', internal: true }
-    ]
-  },
-  {
-    label: '供应链协同',
-    internal: true,
-    permissions: ['supply.consolidation.view', 'supply.shipment.view'],
-    children: [
-      { path: '/supply-chain/consolidations', label: '集货管理', permissions: ['supply.consolidation.view'] },
-      { path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] }
     ]
   },
   {

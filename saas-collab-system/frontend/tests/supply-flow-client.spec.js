@@ -2,13 +2,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { canAccessPath } from '../src/router/menu';
+import { canAccessPath, menuItems } from '../src/router/menu';
 import { idempotencyKey } from '../src/api/supplyFlow';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 describe('SC-FLOW client contract', () => {
+  it('places supply chain collaboration between product development and multi-platform listings', () => {
+    const labels = menuItems.map((item) => item.label);
+    const developmentIndex = labels.indexOf('\u4ea7\u54c1\u5f00\u53d1');
+    expect(labels[developmentIndex + 1]).toBe('供应链协同');
+    expect(labels[developmentIndex + 2]).toBe('\u591a\u5e73\u53f0\u520a\u767b');
+  });
+
   it('registers internal routes with exact view permissions and denies supplier users', () => {
     const internal = { user_type: 'internal', permissions: ['supply.consolidation.view'] };
     expect(canAccessPath(internal, '/supply-chain/consolidations')).toBe(true);
