@@ -1,6 +1,16 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import Influencer, OutreachTask, SampleFulfillment, SampleItem, SkuPriceSnapshot
+from apps.masterdata.models import StoreMaster
+
+from .models import (
+    Influencer,
+    OutreachTarget,
+    OutreachTask,
+    SampleFulfillment,
+    SampleItem,
+    SkuPriceSnapshot,
+)
 
 
 class InfluencerSerializer(serializers.ModelSerializer):
@@ -17,7 +27,6 @@ class InfluencerSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id", "tenant_id", "cooperation_status", "status", "created_at", "updated_at", "is_blacklisted",
         )
-
     def validate_code(self, value):
         request = self.context["request"]
         queryset = Influencer.objects.filter(tenant=request.user.tenant, code=value)
@@ -34,21 +43,72 @@ class InfluencerSerializer(serializers.ModelSerializer):
 class OutreachTaskSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     dispatcher_id = serializers.IntegerField(read_only=True)
+    linked_count = serializers.SerializerMethodField()
+    store_name = serializers.CharField(source="store.name", read_only=True)
+    owner_name = serializers.SerializerMethodField()
+    dispatcher_name = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _user_name(user):
+        return (getattr(user, "full_name", "") or getattr(user, "username", "")) if user else ""
+
+    def get_owner_name(self, obj):
+        return self._user_name(obj.owner)
+
+    def get_dispatcher_name(self, obj):
+        return self._user_name(obj.dispatcher)
+
+    def get_linked_count(self, obj):
+        annotated = getattr(obj, "active_linked_count", None)
+        return annotated if annotated is not None else obj.linked_count
 
     class Meta:
         model = OutreachTask
         fields = (
-            "id", "tenant_id", "task_no", "influencer", "store", "spu", "dispatcher_id",
-            "owner", "status", "started_at", "finalized_at", "source", "external_id",
-            "version", "created_at", "updated_at",
+            "id", "tenant_id", "task_no", "task_name", "influencer", "store", "store_name", "spu",
+            "external_product_id", "sku_prefix", "target_count", "linked_count", "dispatcher_id",
+            "owner", "owner_name", "dispatcher_name", "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
+            "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
+            "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "dispatcher_id", "status", "started_at", "finalized_at",
-            "version", "created_at", "updated_at",
+            "id", "tenant_id", "dispatcher_id", "linked_count", "status", "dispatch_time", "outreach_at",
+            "started_at", "finalized_at", "is_deleted", "deleted_at", "version",
+            "created_at", "updated_at",
         )
+
+        extra_kwargs = {
+            "influencer": {"required": False, "allow_null": True},
+            "task_name": {"required": False, "allow_blank": True},
+            "external_product_id": {"required": False, "allow_blank": True},
+            "sku_prefix": {"required": False, "allow_blank": True},
+            "target_count": {"required": False, "min_value": 0},
+            "notes": {"required": False, "allow_blank": True},
+        }
 
     def validate_external_id(self, value):
         return value or None
+
+
+class OutreachTargetSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = OutreachTarget
+        fields = (
+            "id", "tenant_id", "task", "influencer", "first_linked_at", "outreach_result",
+            "version", "notes", "is_deleted", "deleted_at", "created_at", "updated_at",
+        )
+        read_only_fields = (
+            "id", "tenant_id", "task", "first_linked_at", "version", "is_deleted", "deleted_at",
+            "created_at", "updated_at",
+        )
+
+        extra_kwargs = {
+            "influencer": {"required": True},
+            "notes": {"required": False, "allow_blank": True},
+            "outreach_result": {"required": False},
+        }
 
 
 class SampleItemSerializer(serializers.ModelSerializer):
@@ -66,18 +126,69 @@ class SampleItemSerializer(serializers.ModelSerializer):
 
 class SampleFulfillmentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
+    outreach_task = serializers.PrimaryKeyRelatedField(queryset=OutreachTask.objects.all())
+    outreach_target = serializers.PrimaryKeyRelatedField(
+        queryset=OutreachTarget.objects.all(), required=False, allow_null=True
+    )
+    influencer = serializers.PrimaryKeyRelatedField(
+        queryset=Influencer.objects.all(), required=False, allow_null=True
+    )
+    store = serializers.PrimaryKeyRelatedField(
+        queryset=StoreMaster.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    owner = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.all(),
+        required=False,
+        allow_null=True,
+    )
     items = SampleItemSerializer(many=True, required=False)
+    outreach_task_no = serializers.CharField(source="outreach_task.task_no", read_only=True)
+    outreach_task_name = serializers.CharField(source="outreach_task.task_name", read_only=True)
+    store_name = serializers.CharField(source="store.name", read_only=True)
+    influencer_name = serializers.SerializerMethodField()
+    owner_name = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _display_name(value):
+        if not value:
+            return ""
+        return (
+            getattr(value, "name", "")
+            or getattr(value, "handle", "")
+            or getattr(value, "full_name", "")
+            or getattr(value, "username", "")
+        )
+
+    def get_influencer_name(self, obj):
+        return self._display_name(obj.influencer)
+
+    def get_owner_name(self, obj):
+        return self._display_name(obj.owner)
 
     class Meta:
         model = SampleFulfillment
         fields = (
-            "id", "tenant_id", "fulfillment_no", "outreach_task", "influencer", "store",
-            "owner", "status", "source", "external_id", "version", "finalized_at",
-            "items", "created_at", "updated_at",
+            "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
+            "outreach_target", "influencer", "influencer_name", "store", "store_name", "owner", "owner_name",
+            "product_name_snapshot", "external_product_id", "sample_order_no",
+            "sample_sent_at", "shipped_at", "status", "source", "external_id", "version",
+            "notes", "finalized_at", "items", "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "status", "version", "finalized_at", "created_at", "updated_at",
+            "id", "tenant_id", "product_name_snapshot", "sample_sent_at", "shipped_at", "status",
+            "version", "finalized_at", "created_at", "updated_at",
         )
+
+        extra_kwargs = {
+            "fulfillment_no": {"required": True},
+            "external_product_id": {"required": False, "allow_blank": True},
+            "sample_order_no": {"required": False, "allow_blank": True},
+            "source": {"required": False},
+            "external_id": {"required": False, "allow_null": True, "allow_blank": True},
+            "notes": {"required": False, "allow_blank": True},
+        }
 
     def validate_external_id(self, value):
         return value or None

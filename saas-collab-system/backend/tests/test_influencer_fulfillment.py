@@ -13,6 +13,7 @@ from apps.audit.models import OperationLog
 from apps.influencers.models import (
     Influencer,
     InfluencerRestriction,
+    OutreachTarget,
     OutreachTask,
     SampleFulfillment,
     SampleItem,
@@ -26,8 +27,12 @@ from apps.influencers.services import (
     _payload_hash,
     create_outreach_task,
     create_sample_fulfillment,
+    add_outreach_target,
+    outreach_task_progress,
+    soft_delete_outreach_target,
     transition_outreach_task,
     transition_sample_fulfillment,
+    update_outreach_target,
 )
 
 
@@ -67,7 +72,162 @@ def store_for(tenant, code):
     )
 
 
+def make_bd_owner(tenant, user):
+    user.user_type = CustomUser.UserType.INTERNAL
+    user.is_active = True
+    user.save(update_fields=["user_type", "is_active"])
+    role, _ = Role.objects.get_or_create(
+        tenant=tenant,
+        code="bd",
+        defaults={"name": "BD", "status": Role.Status.ACTIVE},
+    )
+    if role.status != Role.Status.ACTIVE:
+        role.status = Role.Status.ACTIVE
+        role.save(update_fields=["status", "updated_at"])
+    UserRole.objects.get_or_create(tenant=tenant, user=user, role=role)
+    return user
+
+
+def test_outreach_options_return_active_stores_and_bd_users_only():
+    tenant = Tenant.objects.create(name="Options Tenant", code="options-tenant")
+    _, client = user_with_permissions(
+        tenant,
+        "options-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    store = store_for(tenant, "creator-store")
+    bd_role = Role.objects.create(tenant=tenant, code="bd", name="BD")
+    bd_user = CustomUser.objects.create_user(
+        username="liyejun",
+        full_name="李烨君",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    other_user = CustomUser.objects.create_user(
+        username="not-bd",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    UserRole.objects.create(tenant=tenant, user=bd_user, role=bd_role)
+
+    response = client.get("/api/internal/influencers/outreach-task-options/")
+
+    assert response.status_code == 200
+    assert response.data["data"]["stores"] == [{
+        "id": store.id,
+        "name": store.name,
+        "code": store.code,
+        "country_code": "PH",
+        "platform_name": "TikTok Shop",
+    }]
+    assert response.data["data"]["bd_users"] == [{
+        "id": bd_user.id,
+        "username": "liyejun",
+        "full_name": "李烨君",
+    }]
+    assert other_user.id not in {item["id"] for item in response.data["data"]["bd_users"]}
+
+    rejected_owner = client.post("/api/internal/influencers/outreach-tasks/", {
+        "task_no": "OPTIONS-NON-BD",
+        "task_name": "Reject non-BD owner",
+        "store": store.id,
+        "owner": other_user.id,
+        "target_count": 1,
+    }, format="json")
+    assert rejected_owner.status_code == 400
+
+    store.status = "inactive"
+    store.save(update_fields=["status"])
+    rejected_store = client.post("/api/internal/influencers/outreach-tasks/", {
+        "task_no": "OPTIONS-INACTIVE-STORE",
+        "task_name": "Reject inactive store",
+        "store": store.id,
+        "owner": bd_user.id,
+        "target_count": 1,
+    }, format="json")
+    assert rejected_store.status_code == 400
+
+
+def test_outreach_product_match_groups_listings_by_store_and_returns_sku_prefixes():
+    tenant = Tenant.objects.create(name="Product Match Tenant", code="product-match-tenant")
+    _, client = user_with_permissions(tenant, "product-match-manager", "influencers.outreach.view")
+    store = store_for(tenant, "matched-store")
+    for site_code, parent_sku, external_sku in (("PH", "HY107", "HY107-RED"), ("PH-ALT", "", "HY107-BLUE")):
+        listing = StoreProductListing.objects.create(
+            tenant=tenant,
+            store=store,
+            external_product_id="1733134199243507606",
+            parent_sku=parent_sku,
+            product_name="Matched Product",
+            site_code=site_code,
+            source="test",
+        )
+        SkuPriceSnapshot.objects.create(
+            tenant=tenant,
+            listing=listing,
+            external_sku=external_sku,
+            currency="PHP",
+            source="test",
+        )
+
+    response = client.get(
+        "/api/internal/influencers/outreach-product-match/",
+        {"product_id": "1733134199243507606"},
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["unique"] is True
+    assert response.data["data"]["candidates"] == [{
+        "store_id": store.id,
+        "store_name": store.name,
+        "store_code": store.code,
+        "country_code": "PH",
+        "product_name": "Matched Product",
+        "sku_prefixes": ["HY107"],
+    }]
+
+
+def test_outreach_product_match_does_not_cross_tenants_or_auto_select_multiple_stores():
+    tenant = Tenant.objects.create(name="Match Boundary Tenant", code="match-boundary-tenant")
+    other_tenant = Tenant.objects.create(name="Other Match Tenant", code="other-match-tenant")
+    _, client = user_with_permissions(tenant, "match-boundary-manager", "influencers.outreach.view")
+    product_id = "1733134199243507606"
+    for store in (store_for(tenant, "first-store"), store_for(tenant, "second-store")):
+        StoreProductListing.objects.create(
+            tenant=tenant,
+            store=store,
+            external_product_id=product_id,
+            parent_sku=f"PREFIX-{store.code}",
+            product_name="Tenant Product",
+            site_code="PH",
+            source="test",
+        )
+    other_store = store_for(other_tenant, "other-store")
+    StoreProductListing.objects.create(
+        tenant=other_tenant,
+        store=other_store,
+        external_product_id=product_id,
+        parent_sku="OTHER",
+        product_name="Other Tenant Product",
+        site_code="PH",
+        source="test",
+    )
+
+    response = client.get("/api/internal/influencers/outreach-product-match/", {"product_id": product_id})
+
+    assert response.status_code == 200
+    assert response.data["data"]["unique"] is False
+    assert {candidate["store_id"] for candidate in response.data["data"]["candidates"]} == {
+        store.id for store in StoreMaster.objects.filter(tenant=tenant)
+    }
+    assert other_store.id not in {
+        candidate["store_id"] for candidate in response.data["data"]["candidates"]
+    }
+
+
 def base_records(tenant, user, suffix="a"):
+    make_bd_owner(tenant, user)
     store = store_for(tenant, f"store-{suffix}")
     influencer = Influencer.objects.create(
         tenant=tenant,
@@ -84,12 +244,15 @@ def base_records(tenant, user, suffix="a"):
             "owner": user,
         },
     )
+    add_outreach_target(user=user, task=task, influencer=influencer)
+    task.refresh_from_db()
     return store, influencer, task
 
 
 def test_outreach_external_id_allows_multiple_nulls_but_rejects_duplicates():
     tenant = Tenant.objects.create(name="Tenant", code="outreach-external-id")
     user = CustomUser.objects.create_user(username="external-id-user", tenant=tenant)
+    make_bd_owner(tenant, user)
     store = store_for(tenant, "external-id-store")
     influencer = Influencer.objects.create(tenant=tenant, code="external-id-creator", name="Creator", platform="tiktok")
 
@@ -711,3 +874,149 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
     )
     assert first.status_code == 200
     assert stale.status_code == 409
+
+
+def test_outreach_task_supports_multiple_targets_linked_count_and_soft_delete():
+    tenant = Tenant.objects.create(name="Tenant", code="a2-multiple-targets")
+    user, client = user_with_permissions(
+        tenant,
+        "a2-target-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "a2-targets")
+    second = Influencer.objects.create(
+        tenant=tenant,
+        code="creator-a2-second",
+        name="Creator second",
+        platform="tiktok",
+    )
+    task.target_count = 2
+    task.save()
+
+    linked = client.post(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/",
+        {"influencer": second.pk},
+        format="json",
+    )
+    listed = client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/")
+
+    assert linked.status_code == 201
+    assert listed.status_code == 200
+    assert listed.data["data"]["count"] == 2
+    assert client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/").data["data"]["linked_count"] == 2
+
+    first_target = OutreachTarget.objects.get(task=task, influencer=influencer)
+    deleted = client.delete(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{first_target.pk}/",
+        HTTP_IF_MATCH='"1"',
+    )
+    hidden = client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/")
+    restored = client.post(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/",
+        {"influencer": influencer.pk},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+
+    assert deleted.status_code == 200
+    assert hidden.data["data"]["count"] == 1
+    assert restored.status_code == 200
+    assert OutreachTarget.objects.filter(pk=first_target.pk, is_deleted=False).exists()
+
+
+def test_single_target_terminal_result_auto_completes_task_once():
+    tenant = Tenant.objects.create(name="Tenant", code="a2-auto-complete")
+    user, client = user_with_permissions(
+        tenant,
+        "a2-auto-complete-user",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    _, influencer, task = base_records(tenant, user, "a2-auto")
+    task.target_count = 1
+    task.save()
+    target = OutreachTarget.objects.get(task=task, influencer=influencer)
+
+    first = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{target.pk}/",
+        {"outreach_result": "success"},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    task.refresh_from_db()
+    finalized_at = task.finalized_at
+    second = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{target.pk}/",
+        {"notes": "terminal target"},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+    task.refresh_from_db()
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert task.status == OutreachTask.Status.COMPLETED
+    assert task.finalized_at == finalized_at
+
+
+def test_blacklisted_influencer_cannot_be_added_to_outreach_task():
+    tenant = Tenant.objects.create(name="Tenant", code="target-blacklist")
+    user, client = user_with_permissions(
+        tenant,
+        "target-blacklist-manager",
+        "influencers.outreach.manage",
+    )
+    _, _, task = base_records(tenant, user, "target-blacklist")
+    blocked = Influencer.objects.create(
+        tenant=tenant,
+        code="blocked-target",
+        name="Blocked target",
+        platform="tiktok",
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=blocked,
+        is_blacklisted=True,
+        reason="risk",
+        created_by=user,
+    )
+
+    response = client.post(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/",
+        {"influencer": blocked.pk},
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert not OutreachTarget.objects.filter(task=task, influencer=blocked).exists()
+
+
+def test_sample_order_number_marks_new_fulfillment_as_shipped():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-order-shipped")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-order-manager",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "sample-order")
+    target = OutreachTarget.objects.get(task=task, influencer=influencer)
+
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SAMPLE-SHIPPED",
+            "outreach_task": task.pk,
+            "outreach_target": target.pk,
+            "sample_order_no": "ORDER-001",
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="sample-shipped-on-create",
+    )
+
+    assert response.status_code == 201
+    fulfillment = SampleFulfillment.objects.get(fulfillment_no="SAMPLE-SHIPPED")
+    assert fulfillment.store_id == store.pk
+    assert fulfillment.status == SampleFulfillment.Status.SHIPPED
+    assert fulfillment.shipped_at is not None

@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.utils import timezone
 
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
@@ -137,8 +138,25 @@ class InfluencerRestriction(TenantValidatedModel):
 
 
 class OutreachTask(StateMachineTenantModel):
-    protected_state_fields = ("status", "version", "started_at", "finalized_at")
-    initial_state_values = {"status": "pending", "version": 1, "started_at": None, "finalized_at": None}
+    protected_state_fields = (
+        "status",
+        "version",
+        "started_at",
+        "finalized_at",
+        "dispatch_time",
+        "outreach_at",
+        "is_deleted",
+        "deleted_at",
+    )
+    initial_state_values = {
+        "status": "pending",
+        "version": 1,
+        "started_at": None,
+        "finalized_at": None,
+        "outreach_at": None,
+        "is_deleted": False,
+        "deleted_at": None,
+    }
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -147,18 +165,32 @@ class OutreachTask(StateMachineTenantModel):
         CANCELLED = "cancelled", "Cancelled"
 
     task_no = models.CharField(max_length=80)
-    influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="outreach_tasks")
+    task_name = models.CharField(max_length=160, blank=True)
+    influencer = models.ForeignKey(
+        Influencer,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="outreach_tasks",
+    )
     store = models.ForeignKey(StoreMaster, on_delete=models.PROTECT, related_name="influencer_outreach_tasks")
     spu = models.ForeignKey(ProductSPU, on_delete=models.PROTECT, null=True, blank=True, related_name="influencer_outreach_tasks")
+    external_product_id = models.CharField(max_length=120, blank=True)
+    sku_prefix = models.CharField(max_length=120, blank=True)
+    target_count = models.PositiveIntegerField(default=0)
     dispatcher = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="dispatched_outreach_tasks")
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="owned_outreach_tasks")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    dispatch_time = models.DateTimeField(default=timezone.now)
+    outreach_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finalized_at = models.DateTimeField(null=True, blank=True)
     source = models.CharField(max_length=40, default="manual")
     external_id = models.CharField(max_length=160, blank=True, null=True)
     version = models.PositiveIntegerField(default=1)
     notes = models.TextField(blank=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     tenant_relation_fields = ("influencer", "store", "spu", "dispatcher", "owner")
@@ -171,10 +203,94 @@ class OutreachTask(StateMachineTenantModel):
         ]
         indexes = [models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status")]
 
+    @property
+    def linked_count(self):
+        if not self.pk:
+            return 0
+        return self.targets.filter(tenant_id=self.tenant_id, is_deleted=False).count()
+
+
+class OutreachTarget(StateMachineTenantModel):
+    """A tenant-scoped influencer link owned by one outreach task."""
+
+    protected_state_fields = (
+        "first_linked_at",
+        "outreach_result",
+        "version",
+        "is_deleted",
+        "deleted_at",
+    )
+    initial_state_values = {
+        "outreach_result": "pending",
+        "version": 1,
+        "is_deleted": False,
+        "deleted_at": None,
+    }
+
+    class OutreachResult(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCESS = "success", "Success"
+        REJECTED = "rejected", "Rejected"
+        NO_RESPONSE = "no_response", "No response"
+        BLOCKED = "blocked", "Blocked"
+
+    task = models.ForeignKey(OutreachTask, on_delete=models.PROTECT, related_name="targets")
+    influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="outreach_targets")
+    first_linked_at = models.DateTimeField(default=timezone.now)
+    outreach_result = models.CharField(
+        max_length=20, choices=OutreachResult.choices, default=OutreachResult.PENDING
+    )
+    version = models.PositiveIntegerField(default=1)
+    notes = models.TextField(blank=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    tenant_relation_fields = ("task", "influencer")
+
+    class Meta:
+        ordering = ["tenant_id", "task_id", "first_linked_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "task", "influencer"],
+                name="uniq_outreach_target_relation",
+            )
+        ]
+        indexes = [models.Index(fields=["tenant", "task", "is_deleted"], name="idx_target_task_active")]
+
+    def clean(self):
+        super().clean()
+        if self._state.adding and self.task_id:
+            task = OutreachTask.objects.filter(pk=self.task_id).values(
+                "is_deleted", "status"
+            ).first()
+            if task is not None and task["is_deleted"]:
+                raise ValidationError({"task": "Deleted outreach tasks cannot receive targets."})
+            if task is not None and task["status"] in {
+                OutreachTask.Status.COMPLETED,
+                OutreachTask.Status.CANCELLED,
+            }:
+                raise ValidationError({"task": "Terminal outreach tasks cannot receive targets."})
+        if self.is_deleted and self.deleted_at is None:
+            raise ValidationError({"deleted_at": "Deleted outreach targets require deleted_at."})
+        if not self.is_deleted and self.deleted_at is not None:
+            raise ValidationError({"deleted_at": "Active outreach targets cannot have deleted_at."})
+        if self.task_id and not self._state.adding:
+            task_status = OutreachTask.objects.filter(pk=self.task_id).values_list(
+                "status", flat=True
+            ).first()
+            if task_status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}:
+                raise ValidationError({"task": "Terminal outreach tasks cannot change targets."})
+
 
 class SampleFulfillment(StateMachineTenantModel):
-    protected_state_fields = ("status", "version", "finalized_at")
-    initial_state_values = {"status": "pending", "version": 1, "finalized_at": None}
+    protected_state_fields = ("status", "version", "finalized_at", "sample_sent_at", "shipped_at")
+    initial_state_values = {
+        "status": "pending",
+        "version": 1,
+        "finalized_at": None,
+        "shipped_at": None,
+    }
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -183,13 +299,30 @@ class SampleFulfillment(StateMachineTenantModel):
         DELIVERED = "delivered", "Delivered"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
+        CREATING = "creating", "Creating"
+        PUBLISHED = "published", "Published"
+        LIVE_CREATOR = "live_creator", "Live creator"
+        OVERDUE = "overdue", "Overdue"
+        BLANK = "blank", "Blank"
 
     fulfillment_no = models.CharField(max_length=80)
     request_key = models.CharField(max_length=128)
     request_hash = models.CharField(max_length=64)
     outreach_task = models.ForeignKey(OutreachTask, on_delete=models.PROTECT, related_name="sample_fulfillments")
+    outreach_target = models.ForeignKey(
+        OutreachTarget,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sample_fulfillments",
+    )
     influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="sample_fulfillments")
     store = models.ForeignKey(StoreMaster, on_delete=models.PROTECT, related_name="influencer_sample_fulfillments")
+    product_name_snapshot = models.CharField(max_length=240, blank=True)
+    external_product_id = models.CharField(max_length=120, blank=True)
+    sample_order_no = models.CharField(max_length=120, blank=True)
+    sample_sent_at = models.DateTimeField(default=timezone.now)
+    shipped_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="owned_sample_fulfillments")
     source = models.CharField(max_length=40, default="manual")
@@ -199,7 +332,7 @@ class SampleFulfillment(StateMachineTenantModel):
     finalized_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    tenant_relation_fields = ("outreach_task", "influencer", "store", "owner")
+    tenant_relation_fields = ("outreach_task", "outreach_target", "influencer", "store", "owner")
 
     class Meta:
         ordering = ["tenant_id", "-created_at", "-id"]
@@ -212,19 +345,40 @@ class SampleFulfillment(StateMachineTenantModel):
 
     def clean(self):
         super().clean()
+        if self._state.adding and not self.outreach_target_id:
+            raise ValidationError({"outreach_target": "A target is required for new sample fulfillments."})
         if not self.outreach_task_id:
             return
         task = OutreachTask.objects.filter(pk=self.outreach_task_id).values(
-            "tenant_id", "influencer_id", "store_id"
+            "tenant_id", "influencer_id", "store_id", "owner_id", "external_product_id",
+            "is_deleted", "status"
         ).first()
         if task is None:
             raise ValidationError({"outreach_task": "Outreach task does not exist."})
         if task["tenant_id"] != self.tenant_id:
             raise ValidationError({"outreach_task": "Outreach task must belong to the same tenant."})
-        if self.influencer_id and task["influencer_id"] != self.influencer_id:
-            raise ValidationError({"influencer": "Influencer must match the outreach task."})
+        if task["is_deleted"] and self._state.adding:
+            raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive samples."})
+        if task["status"] in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED} and self._state.adding:
+            raise ValidationError({"outreach_task": "Terminal outreach tasks cannot receive samples."})
         if self.store_id and task["store_id"] != self.store_id:
             raise ValidationError({"store": "Store must match the outreach task."})
+        if self.owner_id and task["owner_id"] != self.owner_id:
+            raise ValidationError({"owner": "Owner must match the outreach task."})
+        if task["external_product_id"] and self.external_product_id != task["external_product_id"]:
+            raise ValidationError({"external_product_id": "Product must match the outreach task."})
+        if self.outreach_target_id:
+            target = OutreachTarget.objects.filter(pk=self.outreach_target_id).values(
+                "tenant_id", "task_id", "influencer_id", "is_deleted"
+            ).first()
+            if target is None or target["tenant_id"] != self.tenant_id:
+                raise ValidationError({"outreach_target": "Outreach target must belong to the same tenant."})
+            if target["task_id"] != self.outreach_task_id:
+                raise ValidationError({"outreach_target": "Outreach target must belong to the outreach task."})
+            if target["influencer_id"] != self.influencer_id:
+                raise ValidationError({"influencer": "Influencer must match the outreach target."})
+            if target["is_deleted"] and self._state.adding:
+                raise ValidationError({"outreach_target": "Deleted outreach targets cannot receive samples."})
 
 
 class SampleItem(TenantValidatedModel):

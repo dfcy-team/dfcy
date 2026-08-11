@@ -1,18 +1,21 @@
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.views import APIView
 
 from apps.audit.services import write_operation_log
+from apps.accounts.models import CustomUser
 from apps.common.responses import paginated_data, success_response
+from apps.masterdata.models import StatusChoices, StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.ui_p2_scopes import require_all_scope
 
-from .models import Influencer, OutreachTask, SampleFulfillment, SkuPriceSnapshot
+from .models import Influencer, OutreachTarget, OutreachTask, SampleFulfillment, SkuPriceSnapshot, StoreProductListing
 from .serializers import (
     InfluencerSerializer,
+    OutreachTargetSerializer,
     OutreachTaskSerializer,
     SampleFulfillmentSerializer,
     SkuPriceSnapshotSerializer,
@@ -20,8 +23,13 @@ from .serializers import (
 from .services import (
     create_outreach_task,
     create_sample_fulfillment,
+    add_outreach_target,
+    outreach_task_progress,
+    soft_delete_outreach_target,
+    soft_delete_outreach_task,
     transition_outreach_task,
     transition_sample_fulfillment,
+    update_outreach_target,
 )
 
 
@@ -47,6 +55,10 @@ def _expected_version(request):
     if not raw.isdigit():
         raise ValidationError({"If-Match": "A numeric resource version is required."})
     return int(raw)
+
+
+def _optional_expected_version(request):
+    return _expected_version(request) if request.headers.get("If-Match") else None
 
 
 class InfluencerCollectionView(APIView):
@@ -158,10 +170,35 @@ class OutreachTaskCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        queryset = OutreachTask.objects.filter(tenant=request.user.tenant).select_related("influencer", "store", "owner", "dispatcher")
+        queryset = OutreachTask.objects.filter(
+            tenant=request.user.tenant, is_deleted=False
+        ).select_related("influencer", "store", "owner", "dispatcher", "spu").annotate(
+            active_linked_count=Count(
+                "targets",
+                filter=Q(
+                    targets__tenant=request.user.tenant,
+                    targets__is_deleted=False,
+                ),
+                distinct=True,
+            )
+        )
         status = request.query_params.get("status", "").strip()
         if status:
             queryset = queryset.filter(status=status)
+        store_id = request.query_params.get("store", "").strip()
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(task_no__icontains=search)
+                | Q(task_name__icontains=search)
+                | Q(store__name__icontains=search)
+                | Q(external_product_id__icontains=search)
+                | Q(sku_prefix__icontains=search)
+                | Q(owner__full_name__icontains=search)
+                | Q(owner__username__icontains=search)
+            )
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size))
 
@@ -173,6 +210,242 @@ class OutreachTaskCollectionView(APIView):
         return success_response(OutreachTaskSerializer(task).data, status=201)
 
 
+class OutreachTaskOptionsView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        stores = StoreMaster.objects.filter(
+            tenant=request.user.tenant,
+            status=StatusChoices.ACTIVE,
+        ).select_related("platform").order_by("name", "code")
+        bd_users = CustomUser.objects.filter(
+            tenant=request.user.tenant,
+            user_type=CustomUser.UserType.INTERNAL,
+            is_active=True,
+            user_roles__tenant=request.user.tenant,
+            user_roles__role__tenant=request.user.tenant,
+            user_roles__role__code="bd",
+            user_roles__role__status="active",
+        ).distinct().order_by("full_name", "username")[:200]
+        stores = stores[:200]
+        return success_response({
+            "stores": [
+                {
+                    "id": store.id,
+                    "name": store.name,
+                    "code": store.code,
+                    "country_code": store.country_code,
+                    "platform_name": store.platform.name,
+                }
+                for store in stores
+            ],
+            "bd_users": [
+                {"id": user.id, "username": user.username, "full_name": user.full_name}
+                for user in bd_users
+            ],
+        })
+
+
+class OutreachProductMatchView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        product_id = request.query_params.get("product_id", "").strip()
+        if not product_id:
+            raise ValidationError({"product_id": "Product ID is required."})
+        base_queryset = StoreProductListing.objects.filter(
+            tenant=request.user.tenant,
+            external_product_id=product_id,
+            store__status=StatusChoices.ACTIVE,
+        )
+        store_ids = list(base_queryset.order_by("store_id").values_list("store_id", flat=True).distinct()[:201])
+        truncated = len(store_ids) > 200
+        store_ids = store_ids[:200]
+        listings = base_queryset.filter(store_id__in=store_ids).select_related(
+            "store", "store__platform"
+        ).prefetch_related("sku_prices").order_by("store__name", "id")
+        grouped = {}
+        for listing in listings:
+            prefixes = {listing.parent_sku.strip()} if listing.parent_sku.strip() else set()
+            prefixes.update(
+                price.external_sku.split("-", 1)[0]
+                for price in listing.sku_prices.all()
+                if price.external_sku
+            )
+            candidate = grouped.setdefault(listing.store_id, {
+                "store_id": listing.store_id,
+                "store_name": listing.store.name,
+                "store_code": listing.store.code,
+                "country_code": listing.store.country_code,
+                "product_name": listing.product_name,
+                "sku_prefixes": set(),
+            })
+            candidate["sku_prefixes"].update(prefix for prefix in prefixes if prefix)
+        candidates = [
+            {**candidate, "sku_prefixes": sorted(candidate["sku_prefixes"])}
+            for candidate in grouped.values()
+        ]
+        return success_response({
+            "product_id": product_id,
+            "matched": bool(candidates),
+            "unique": len(candidates) == 1 and not truncated,
+            "truncated": truncated,
+            "reason": "" if candidates else "data_source_not_imported",
+            "candidates": candidates,
+        })
+
+
+class OutreachTaskDetailView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def get(self, request, pk):
+        require_all_scope(request.user, self.read_permission_code)
+        task = get_object_or_404(
+            OutreachTask,
+            tenant=request.user.tenant,
+            pk=pk,
+            is_deleted=False,
+        )
+        return success_response(OutreachTaskSerializer(task).data)
+
+    def delete(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        task = get_object_or_404(
+            OutreachTask, tenant=request.user.tenant, pk=pk, is_deleted=False
+        )
+        task = soft_delete_outreach_task(user=request.user, task=task)
+        return success_response(OutreachTaskSerializer(task).data)
+
+
+class OutreachTaskProgressView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+
+    def get(self, request, pk):
+        require_all_scope(request.user, self.read_permission_code)
+        return success_response(
+            outreach_task_progress(
+                user=request.user,
+                task=get_object_or_404(
+                    OutreachTask,
+                    tenant=request.user.tenant,
+                    pk=pk,
+                    is_deleted=False,
+                ),
+            )
+        )
+
+
+class OutreachTargetCollectionView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def _task(self, request, pk):
+        return get_object_or_404(
+            OutreachTask,
+            tenant=request.user.tenant,
+            pk=pk,
+            is_deleted=False,
+        )
+
+    def get(self, request, pk):
+        require_all_scope(request.user, self.read_permission_code)
+        task = self._task(request, pk)
+        queryset = OutreachTarget.objects.filter(
+            tenant=request.user.tenant,
+            task=task,
+            is_deleted=False,
+        ).select_related("influencer")
+        page, page_size = _pagination(request)
+        return success_response(
+            paginated_data(
+                request,
+                queryset,
+                OutreachTargetSerializer,
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    def post(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        task = self._task(request, pk)
+        serializer = OutreachTargetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            target, created = add_outreach_target(
+                user=request.user,
+                task=task,
+                influencer=serializer.validated_data["influencer"],
+                notes=serializer.validated_data.get("notes", ""),
+                expected_version=_optional_expected_version(request),
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(OutreachTargetSerializer(target).data, status=201 if created else 200)
+
+
+class OutreachTargetDetailView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.outreach.view"
+    write_permission_code = "influencers.outreach.manage"
+
+    def _target(self, request, task_pk, target_pk):
+        return get_object_or_404(
+            OutreachTarget,
+            tenant=request.user.tenant,
+            task_id=task_pk,
+            pk=target_pk,
+            task__is_deleted=False,
+            is_deleted=False,
+        )
+
+    def patch(self, request, task_pk, target_pk):
+        require_all_scope(request.user, self.write_permission_code)
+        target = self._target(request, task_pk, target_pk)
+        serializer = OutreachTargetSerializer(target, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            target = update_outreach_target(
+                user=request.user,
+                task=task_pk,
+                target=target,
+                expected_version=_expected_version(request),
+                outreach_result=serializer.validated_data.get("outreach_result"),
+                notes=serializer.validated_data.get("notes"),
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(OutreachTargetSerializer(target).data)
+
+    def delete(self, request, task_pk, target_pk):
+        require_all_scope(request.user, self.write_permission_code)
+        target = self._target(request, task_pk, target_pk)
+        try:
+            target = soft_delete_outreach_target(
+                user=request.user,
+                task=task_pk,
+                target=target,
+                expected_version=_expected_version(request),
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
+        return success_response(OutreachTargetSerializer(target).data)
+
+
 class OutreachTaskStatusView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
@@ -180,7 +453,9 @@ class OutreachTaskStatusView(APIView):
 
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        task = get_object_or_404(OutreachTask, tenant=request.user.tenant, pk=pk)
+        task = get_object_or_404(
+            OutreachTask, tenant=request.user.tenant, pk=pk, is_deleted=False
+        )
         try:
             task = transition_outreach_task(
                 user=request.user,
@@ -202,10 +477,28 @@ class SampleFulfillmentCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).prefetch_related("items")
+        queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).select_related(
+            "outreach_task", "influencer", "store", "owner"
+        ).prefetch_related("items")
         status = request.query_params.get("status", "").strip()
         if status:
             queryset = queryset.filter(status=status)
+        store_id = request.query_params.get("store", "").strip()
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(fulfillment_no__icontains=search)
+                | Q(outreach_task__task_no__icontains=search)
+                | Q(outreach_task__task_name__icontains=search)
+                | Q(influencer__name__icontains=search)
+                | Q(influencer__handle__icontains=search)
+                | Q(store__name__icontains=search)
+                | Q(product_name_snapshot__icontains=search)
+                | Q(external_product_id__icontains=search)
+                | Q(sample_order_no__icontains=search)
+            )
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
@@ -226,7 +519,10 @@ class SampleFulfillmentCollectionView(APIView):
                 item_payloads=items,
             )
         except ValidationError as exc:
-            if {"idempotency_key", "fulfillment_no"}.intersection(exc.detail):
+            if (
+                {"idempotency_key", "fulfillment_no"}.intersection(exc.detail)
+                or "conflict" in str(exc.get_codes())
+            ):
                 raise Conflict(exc.detail) from exc
             raise
         fulfillment = SampleFulfillment.objects.prefetch_related("items").get(pk=fulfillment.pk)
