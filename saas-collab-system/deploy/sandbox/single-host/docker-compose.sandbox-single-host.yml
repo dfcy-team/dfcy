@@ -1,0 +1,155 @@
+services:
+  mysql:
+    image: ${SANDBOX_MYSQL_IMAGE:?Set an immutable MySQL image reference in .env.sandbox}
+    restart: unless-stopped
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    # The database is reachable only through the ECS private address and port.
+    ports:
+      - "${SANDBOX_DB_BIND_IP:?The single-host database bind IP is required}:${SANDBOX_DB_PORT:?The single-host database port is required}:3306"
+    volumes:
+      - sandbox-mysql-data:/var/lib/mysql
+    networks:
+      - sandbox-db-internal
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  redis:
+    image: ${SANDBOX_REDIS_IMAGE:?Set an immutable Redis image reference in .env.sandbox}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - sandbox-redis-data:/data
+    networks:
+      - sandbox-app-internal
+
+  migrate:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: python manage.py migrate --noinput
+    restart: "no"
+    networks:
+      - sandbox-app-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  backend:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: >-
+      gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-60}
+      --access-logfile - --error-logfile -
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SANDBOX_APP_PORT:-8100}:8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/api/internal/health/', headers={'Host':'localhost'}); raise SystemExit(0 if urllib.request.urlopen(r, timeout=5).status == 200 else 1)"
+      interval: 15s
+      timeout: 8s
+      retries: 12
+      start_period: 30s
+    networks:
+      - sandbox-app-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: celery -A config worker --loglevel=info
+    restart: unless-stopped
+    networks:
+      - sandbox-app-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: celery -A config beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - sandbox-app-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: ${SANDBOX_FRONTEND_IMAGE:?Set the immutable frontend image from the approved CI manifest}
+    restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_FILTER: SANDBOX_HTTPS_PORT
+      SANDBOX_HTTPS_PORT: ${SANDBOX_HTTPS_PORT:?The single-host HTTPS entry port is required}
+    ports:
+      - "${SANDBOX_PUBLIC_BIND_IP:?The single-host HTTPS bind address is required}:${SANDBOX_HTTPS_PORT:?The single-host HTTPS entry port is required}:443"
+    volumes:
+      - ${SANDBOX_TLS_CERT_PATH:?Set SANDBOX_TLS_CERT_PATH in .env.sandbox}:/etc/nginx/tls/tls.crt:ro
+      - ${SANDBOX_TLS_KEY_PATH:?Set SANDBOX_TLS_KEY_PATH in .env.sandbox}:/etc/nginx/tls/tls.key:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - sandbox-app-internal
+
+networks:
+  # Application and database intentionally have different Linux bridge networks.
+  sandbox-app-internal:
+    name: saas-sandbox-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SANDBOX_APP_CONTAINER_SUBNET:?Set the application container subnet}
+  sandbox-db-internal:
+    name: saas-sandbox-db-network
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${SANDBOX_DB_CONTAINER_SUBNET:?Set the database container subnet}
+
+volumes:
+  sandbox-mysql-data:
+    name: saas-sandbox-mysql-data
+  sandbox-redis-data:
+    name: saas-sandbox-redis-data

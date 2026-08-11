@@ -19,8 +19,18 @@ state_dir=$(value SANDBOX_NETWORK_STATE_DIR)
 case "$state_dir" in /*) ;; *) fail "SANDBOX_NETWORK_STATE_DIR must be absolute." ;; esac
 subnet=$(docker network inspect saas-sandbox-db-network --format '{{(index .IPAM.Config 0).Subnet}}')
 [ -n "$subnet" ] || fail "Cannot determine the Sandbox database subnet."
+deployment_mode=$(value SANDBOX_DEPLOYMENT_MODE)
+db_port=$(value SANDBOX_DB_PORT)
+case "$deployment_mode" in dual-host|single-host) ;; *) fail "SANDBOX_DEPLOYMENT_MODE must be dual-host or single-host." ;; esac
 reject_packets() {
-  iptables -L SAAS_SANDBOX_DB -v -x -n | awk -v subnet="$subnet" '$3 == "REJECT" && $9 == subnet && /tcp dpt:3306/ {total += $1} END {print total + 0}'
+  if [ "$deployment_mode" = "single-host" ]; then
+    # On one host an external probe is rejected at the published 3307 host
+    # port before Docker DNAT; count both that rule and the translated 3306
+    # rule so the evidence proves the actual probe was rejected.
+    iptables -L SAAS_SANDBOX_DB -v -x -n | awk -v subnet="$subnet" -v db_port="$db_port" '$3 == "REJECT" && (($9 == subnet && /tcp dpt:3306/) || index($0, "tcp dpt:" db_port)) {total += $1} END {print total + 0}'
+  else
+    iptables -L SAAS_SANDBOX_DB -v -x -n | awk -v subnet="$subnet" '$3 == "REJECT" && $9 == subnet && /tcp dpt:3306/ {total += $1} END {print total + 0}'
+  fi
 }
 install -d -m 0700 "$state_dir"
 baseline_file="$state_dir/db-source-reject-baseline.env"

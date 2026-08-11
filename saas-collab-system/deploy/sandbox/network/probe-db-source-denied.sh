@@ -21,6 +21,12 @@ command -v ip >/dev/null 2>&1 || fail "iproute2 is required."
 db_ip=$(value SANDBOX_DB_HOST_IP)
 db_port=$(value SANDBOX_DB_PORT)
 approved_app_ip=$(value SANDBOX_APP_HOST_IP)
+deployment_mode=$(value SANDBOX_DEPLOYMENT_MODE)
+case "$deployment_mode" in dual-host|single-host) ;; *) fail "SANDBOX_DEPLOYMENT_MODE must be dual-host or single-host." ;; esac
+if [ "$deployment_mode" = "single-host" ]; then
+  [ "$db_ip" = "10.20.40.119" ] || fail "Single-host database IP must be 10.20.40.119."
+  [ "$db_port" = "3307" ] || fail "Single-host database port must be 3307."
+fi
 source_ip=$(ip route get "$db_ip" | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -n 1)
 [ -n "$source_ip" ] || fail "Cannot determine the probe source IP."
 [ "$source_ip" != "$approved_app_ip" ] || fail "This host is the approved application source; use an independent unapproved host."

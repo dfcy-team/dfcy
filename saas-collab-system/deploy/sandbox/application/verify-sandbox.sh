@@ -2,8 +2,8 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-env_file="$script_dir/.env.sandbox"
-compose_file="$script_dir/docker-compose.sandbox-app.yml"
+env_file=${SANDBOX_RUNTIME_ENV_FILE:-$script_dir/.env.sandbox}
+compose_file=${SANDBOX_RUNTIME_COMPOSE_FILE:-$script_dir/docker-compose.sandbox-app.yml}
 network_verify="$script_dir/../network/verify-network-policy.sh"
 runtime_network_probe="$script_dir/probe-runtime-network.sh"
 
@@ -32,6 +32,9 @@ running=$(docker compose --env-file "$env_file" -f "$compose_file" ps --services
 for service in redis backend celery celery-beat frontend; do
   echo "$running" | grep -qx "$service" || fail "$service is not running."
 done
+if [ "$(env_value SANDBOX_DEPLOYMENT_MODE)" = "single-host" ]; then
+  echo "$running" | grep -qx mysql || fail "mysql is not running on the single Sandbox host."
+fi
 
 docker compose --env-file "$env_file" -f "$compose_file" exec -T backend python manage.py check --deploy
 docker compose --env-file "$env_file" -f "$compose_file" exec -T backend python manage.py makemigrations --check --dry-run
@@ -58,6 +61,9 @@ PY
 policy_file=$(env_value SANDBOX_NETWORK_POLICY_FILE)
 [ -x "$network_verify" ] || fail "Network verification script is missing."
 run_privileged "$network_verify" app "$policy_file"
+if [ "$(env_value SANDBOX_DEPLOYMENT_MODE)" = "single-host" ]; then
+  run_privileged "$network_verify" db "$policy_file"
+fi
 [ -x "$runtime_network_probe" ] || fail "Runtime network probe script is missing."
 run_privileged "$runtime_network_probe" "$env_file"
 
@@ -65,9 +71,14 @@ command -v curl >/dev/null 2>&1 || fail "curl is required for HTTPS verification
 public_host=$(env_value SANDBOX_PUBLIC_HOST)
 https_port=$(env_value SANDBOX_HTTPS_PORT)
 ca_cert_path=$(env_value SANDBOX_CA_CERT_PATH)
+curl_target=127.0.0.1
+if [ "$(env_value SANDBOX_DEPLOYMENT_MODE)" = "single-host" ]; then
+  curl_target=$(env_value SANDBOX_PUBLIC_BIND_IP)
+  [ -n "$curl_target" ] || fail "SANDBOX_PUBLIC_BIND_IP is required for single-host HTTPS verification."
+fi
 health_response=$(curl --fail --silent --show-error \
   --cacert "$ca_cert_path" \
-  --resolve "$public_host:$https_port:127.0.0.1" \
+  --resolve "$public_host:$https_port:$curl_target" \
   "https://$public_host:$https_port/api/internal/health/")
 echo "$health_response" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true' || fail "Health response does not use the success envelope."
 
