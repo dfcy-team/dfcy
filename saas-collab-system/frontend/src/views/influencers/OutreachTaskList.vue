@@ -35,7 +35,17 @@ const form=reactive({task_no:'',task_name:'',store:null,external_product_id:'',s
 const targetForm=reactive({influencer:null,notes:''});
 const storeOptions=ref([]),bdOptions=ref([]);
 const matchedStoreIds=ref([]),matchedCandidates=ref([]),matchedSkuPrefixes=ref([]),productMatching=ref(false),productMatchHint=ref(''),productMatchType=ref('info'),productMatchSeq=ref(0);
-const visibleStoreOptions=computed(()=>matchedStoreIds.value.length?storeOptions.value.filter(store=>matchedStoreIds.value.includes(store.id)):storeOptions.value);
+const visibleStoreOptions=computed(()=>{
+  if(!matchedStoreIds.value.length)return storeOptions.value;
+  const optionsById=new Map(storeOptions.value.map(store=>[store.id,store]));
+  matchedCandidates.value.forEach(candidate=>optionsById.set(candidate.store_id,{
+    id:candidate.store_id,
+    name:candidate.store_name,
+    code:candidate.store_code,
+    country_code:candidate.country_code,
+  }));
+  return matchedStoreIds.value.map(storeId=>optionsById.get(storeId)).filter(Boolean);
+});
 const isTerminal=(row)=>['completed','cancelled'].includes(row?.status);const isTargetTerminal=(row)=>['success','rejected','no_response','blocked'].includes(row?.outreach_result);const progress=(row)=>row.target_count?Math.min(100,Math.round((row.linked_count||0)*100/row.target_count)):0;
 async function load(){loading.value=true;const r=await fetchOutreachTasks({page:page.value,page_size:pageSize.value});loading.value=false;if(r.success){rows.value=collectionRows(r.data);total.value=collectionTotal(r.data)}else ElMessage.error(formatInfluencerError(r,'任务加载失败'))}
 async function openCreate(){Object.assign(form,{task_no:`DRJL${Date.now().toString().slice(-6)}`,task_name:'',store:null,external_product_id:'',sku_prefix:'',target_count:1,owner:null});matchedStoreIds.value=[];matchedCandidates.value=[];matchedSkuPrefixes.value=[];productMatchHint.value='';const r=await fetchOutreachTaskOptions();if(!r.success)return ElMessage.error(formatInfluencerError(r,'店铺和 BD 选项加载失败'));storeOptions.value=r.data?.stores||[];bdOptions.value=r.data?.bd_users||[];createVisible.value=true}
