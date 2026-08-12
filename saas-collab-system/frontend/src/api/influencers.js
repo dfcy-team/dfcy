@@ -39,6 +39,20 @@ export const FULFILLMENT_STATUS_LABELS = Object.freeze({
   blank: '空白'
 });
 
+export const FULFILLMENT_STATUS_TRANSITIONS = Object.freeze({
+  pending: Object.freeze(['processing', 'creating', 'blank', 'cancelled']),
+  creating: Object.freeze(['published', 'blank', 'cancelled']),
+  published: Object.freeze(['live_creator', 'overdue', 'cancelled']),
+  live_creator: Object.freeze(['overdue', 'completed', 'cancelled']),
+  overdue: Object.freeze(['completed', 'cancelled']),
+  blank: Object.freeze(['creating', 'cancelled']),
+  processing: Object.freeze(['shipped', 'cancelled']),
+  shipped: Object.freeze(['delivered', 'cancelled']),
+  delivered: Object.freeze(['completed', 'cancelled']),
+  completed: Object.freeze([]),
+  cancelled: Object.freeze([])
+});
+
 export const PRICING_STATUS_LABELS = Object.freeze({
   pending: '待匹配',
   full: '完整匹配',
@@ -129,7 +143,7 @@ export const fetchOutreachTasks = (params = {}) => requestWithMockFallback(
 
 export const fetchOutreachTaskOptions = () => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/outreach-task-options/` },
-  () => ({ success: true, data: { stores: [], bd_users: [], influencers: [] } }),
+  () => ({ success: true, data: { stores: [], bd_users: [] } }),
   'influencers.outreach.options'
 );
 

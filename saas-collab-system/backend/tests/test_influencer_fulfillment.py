@@ -5,6 +5,7 @@ from django.apps import apps as django_apps
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.migrations.exceptions import IrreversibleError
+from django.db.models.query import QuerySet
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.test import APIClient
 
@@ -22,9 +23,12 @@ from apps.influencers.models import (
 )
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 from apps.influencers.services import (
     _payload_hash,
+    _purchase_cost_for_item,
+    _purchase_cost_for_payload,
     create_outreach_task,
     create_sample_fulfillment,
     add_outreach_target,
@@ -37,6 +41,53 @@ from apps.influencers.services import (
 
 
 pytestmark = pytest.mark.django_db
+
+
+def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
+    tenant = Tenant.objects.create(name="Cost Tenant", code="cost-tenant")
+    other_tenant = Tenant.objects.create(name="Other Cost Tenant", code="other-cost-tenant")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="COST-SPU", product_name="Cost Product")
+    sku = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=spu,
+        sku_code="101010004-blue-120X200CM",
+        legacy_sku_code="DFYL003-B-B",
+        purchase_price="27.1200",
+    )
+    other_spu = ProductSPU.objects.create(
+        tenant=other_tenant, spu_code="OTHER-COST-SPU", product_name="Other Cost Product"
+    )
+    ProductSKU.objects.create(
+        tenant=other_tenant,
+        spu=other_spu,
+        sku_code=sku.sku_code,
+        legacy_sku_code=sku.legacy_sku_code,
+        purchase_price="99.0000",
+    )
+
+    _, matched_new, new_status = _purchase_cost_for_item(tenant, "101010004-blue-120X200CM")
+    _, matched_old, old_status = _purchase_cost_for_item(tenant, "dfyl003-b-b")
+
+    assert matched_new == sku
+    assert new_status == "matched_new_sku"
+    assert matched_old == sku
+    assert old_status == "matched_legacy_sku"
+    assert str(matched_new.purchase_price) == "27.1200"
+
+    normalized, selected, selected_status = _purchase_cost_for_payload(
+        tenant, {"sku": sku, "requested_sku": None}
+    )
+    assert normalized == "101010004-BLUE-120X200CM"
+    assert selected == sku
+    assert selected_status == "matched_new_sku"
+
+    with pytest.raises(DRFValidationError):
+        _purchase_cost_for_payload(tenant, {"sku": sku, "requested_sku": "DIFFERENT-SKU"})
+
+    sku.is_active = False
+    sku.save(update_fields=["is_active"])
+    with pytest.raises(DRFValidationError):
+        _purchase_cost_for_payload(tenant, {"sku": sku, "requested_sku": sku.sku_code})
 
 
 def user_with_permissions(tenant, username, *codes, scope=DataScope.ScopeType.ALL):
@@ -110,6 +161,27 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
         user_type=CustomUser.UserType.INTERNAL,
     )
     UserRole.objects.create(tenant=tenant, user=bd_user, role=bd_role)
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="creator-active",
+        name="Active Creator",
+        platform="tiktok",
+        handle="active.creator",
+    )
+    Influencer.objects.create(
+        tenant=tenant,
+        code="creator-inactive",
+        name="Inactive Creator",
+        platform="tiktok",
+        status=Influencer.Status.INACTIVE,
+    )
+    other_tenant = Tenant.objects.create(name="Other Options Tenant", code="other-options-tenant")
+    Influencer.objects.create(
+        tenant=other_tenant,
+        code="creator-other",
+        name="Other Creator",
+        platform="tiktok",
+    )
 
     response = client.get("/api/internal/influencers/outreach-task-options/")
 
@@ -127,6 +199,22 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
         "full_name": "李烨君",
     }]
     assert other_user.id not in {item["id"] for item in response.data["data"]["bd_users"]}
+    assert response.data["data"]["influencers"] == [{
+        "id": influencer.id,
+        "code": "creator-active",
+        "name": "Active Creator",
+        "platform": "tiktok",
+    }]
+
+    invalid_priority = client.post("/api/internal/influencers/outreach-tasks/", {
+        "task_no": "OPTIONS-BAD-PRIORITY",
+        "task_name": "Reject invalid priority",
+        "store": store.id,
+        "owner": bd_user.id,
+        "priority": "immediate",
+        "target_count": 1,
+    }, format="json")
+    assert invalid_priority.status_code == 400
 
     rejected_owner = client.post("/api/internal/influencers/outreach-tasks/", {
         "task_no": "OPTIONS-NON-BD",
@@ -247,6 +335,49 @@ def base_records(tenant, user, suffix="a"):
     add_outreach_target(user=user, task=task, influencer=influencer)
     task.refresh_from_db()
     return store, influencer, task
+
+
+def test_sample_pricing_data_migration_backfills_historical_values():
+    tenant = Tenant.objects.create(name="Backfill Tenant", code="backfill-tenant")
+    user = CustomUser.objects.create_user(username="backfill-user", tenant=tenant)
+    _, _, task = base_records(tenant, user, "backfill")
+    target = OutreachTarget.objects.get(task=task, is_deleted=False)
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="backfill-request",
+        validated_data={
+            "fulfillment_no": "BACKFILL-SAMPLE",
+            "outreach_task": task,
+            "outreach_target": target,
+        },
+        item_payloads=[{"site_code": "PH", "requested_sku": "HISTORICAL-SKU", "quantity": 2}],
+    )
+    QuerySet.update(
+        SampleItem.objects.filter(fulfillment=fulfillment),
+        unit_price="10.0000",
+        unit_cost="4.0000",
+        sales_amount=None,
+        cost_amount=None,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        sku_quantity=0,
+        sales_amount=None,
+        calculated_cost=None,
+        pricing_status="pending",
+    )
+
+    migration = importlib.import_module("apps.influencers.migrations.0006_backfill_sample_pricing")
+    migration.backfill_sample_pricing(django_apps, None)
+
+    fulfillment.refresh_from_db()
+    item = SampleItem.objects.get(fulfillment=fulfillment)
+    assert fulfillment.sku_quantity == 2
+    assert fulfillment.sales_amount == 20
+    assert fulfillment.calculated_cost == 8
+    assert fulfillment.pricing_status == "full"
+    assert item.sales_amount == 20
+    assert item.cost_amount == 8
 
 
 def test_outreach_external_id_allows_multiple_nulls_but_rejects_duplicates():
@@ -795,6 +926,99 @@ def test_illegal_status_transition_and_stale_version_are_rejected():
     assert illegal.status_code == 400
     assert started.status_code == 200
     assert stale.status_code == 409
+
+
+def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
+    tenant = Tenant.objects.create(name="Task Edit Tenant", code="task-edit-tenant")
+    other_tenant = Tenant.objects.create(name="Other Task Edit Tenant", code="other-task-edit-tenant")
+    user, client = user_with_permissions(
+        tenant,
+        "task-edit-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    store, _, task = base_records(tenant, user, "task-edit")
+    replacement_store = store_for(tenant, "replacement-store")
+    foreign_store = store_for(other_tenant, "foreign-store")
+    original_times = {
+        "dispatch_time": task.dispatch_time,
+        "outreach_at": task.outreach_at,
+        "started_at": task.started_at,
+        "finalized_at": task.finalized_at,
+    }
+
+    updated = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {
+            "task_name": "Edited task",
+            "priority": "high",
+            "store": replacement_store.id,
+            "external_product_id": "EDITED-PRODUCT",
+            "sku_prefix": "EDITED-SKU",
+            "target_count": 2,
+            "owner": user.id,
+        },
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+
+    assert updated.status_code == 200
+    task.refresh_from_db()
+    assert task.task_name == "Edited task"
+    assert task.priority == "high"
+    assert task.store_id == replacement_store.id
+    assert task.external_product_id == "EDITED-PRODUCT"
+    assert task.sku_prefix == "EDITED-SKU"
+    assert task.target_count == 2
+    assert task.owner_id == user.id
+    assert task.version == 2
+    for field, value in original_times.items():
+        assert getattr(task, field) == value
+
+    stale = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"task_name": "Stale edit"},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    assert stale.status_code == 409
+    task.refresh_from_db()
+    assert task.task_name == "Edited task"
+
+    state_override = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"status": "completed", "started_at": "2026-08-11T00:00:00Z"},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+    assert state_override.status_code == 400
+
+    foreign_relation = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"store": foreign_store.id},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+    assert foreign_relation.status_code == 400
+
+    _, view_only_client = user_with_permissions(
+        tenant,
+        "task-edit-viewer",
+        "influencers.outreach.view",
+    )
+    forbidden = view_only_client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"task_name": "Forbidden edit"},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+    assert forbidden.status_code == 403
+
+    deleted = client.delete(f"/api/internal/influencers/outreach-tasks/{task.pk}/")
+    assert deleted.status_code == 200
+    task.refresh_from_db()
+    assert task.is_deleted is True
+    assert client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/").status_code == 404
 
 
 def test_bulk_tenant_owned_writes_are_disabled():
