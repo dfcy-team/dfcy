@@ -1,6 +1,8 @@
 from django.db import models
+from django.core.exceptions import ValidationError
 
 from apps.tenants.models import Tenant
+from apps.common.validated_models import ValidatedWriteModel
 from django.conf import settings
 
 
@@ -10,6 +12,22 @@ class PlatformChoices(models.TextChoices):
     TIKTOK = "tiktok", "TikTok"
     MOCK = "mock", "Mock"
     OTHER = "other", "Other"
+
+
+PAYLOAD_RESOURCE_FAMILIES = {
+    "sales_order": "sales_order",
+    "order_list": "sales_order",
+    "order_detail": "sales_order",
+    "refund_return": "refund_return",
+    "refund": "refund_return",
+    "return": "refund_return",
+    "refund_detail": "refund_return",
+    "inventory": "inventory",
+}
+
+
+def payload_resource_family(resource_type):
+    return PAYLOAD_RESOURCE_FAMILIES.get(resource_type)
 
 
 class PlatformIntegrationConfig(models.Model):
@@ -85,6 +103,7 @@ class IntegrationAuditLog(models.Model):
 class SyncJob(models.Model):
     class ResourceType(models.TextChoices):
         SALES_ORDER = "sales_order", "Sales order"
+        REFUND_RETURN = "refund_return", "Refund or return"
         INVENTORY = "inventory", "Inventory"
         SETTLEMENT_BILL = "settlement_bill", "Settlement bill"
         WITHDRAWAL = "withdrawal", "Withdrawal"
@@ -189,6 +208,107 @@ class SyncCursor(models.Model):
 
     def __str__(self):
         return f"{self.sync_job_id}:{self.cursor_key}"
+
+
+class RawPayload(ValidatedWriteModel):
+    class PIIClassification(models.TextChoices):
+        NONE = "none", "None"
+        MASKED = "masked", "Masked"
+        RESTRICTED = "restricted", "Restricted"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="integration_raw_payloads")
+    sync_run = models.ForeignKey(SyncRun, on_delete=models.SET_NULL, related_name="raw_payloads", null=True, blank=True)
+    store = models.ForeignKey(
+        "masterdata.StoreMaster",
+        on_delete=models.PROTECT,
+        related_name="integration_raw_payloads",
+    )
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    resource_type = models.CharField(max_length=40)
+    external_id = models.CharField(max_length=191, blank=True)
+    schema_version = models.CharField(max_length=40)
+    content_hash = models.CharField(max_length=64)
+    object_reference = models.CharField(max_length=500, blank=True)
+    pii_classification = models.CharField(
+        max_length=20,
+        choices=PIIClassification.choices,
+        default=PIIClassification.RESTRICTED,
+    )
+    fetched_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fetched_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "platform", "store", "resource_type", "external_id", "content_hash"],
+                name="uniq_raw_payload_identity",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "resource_type", "fetched_at"], name="idx_raw_payload_resource"),
+            models.Index(fields=["tenant", "expires_at"], name="idx_raw_payload_expiry"),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.store_id and self.store.tenant_id != self.tenant_id:
+            errors["store"] = "Store must belong to the payload tenant."
+        if self.store_id and self.store.platform.platform_type != self.platform:
+            errors["platform"] = "Payload platform must match the store platform."
+        if self.sync_run_id and self.sync_run.tenant_id != self.tenant_id:
+            errors["sync_run"] = "Sync run must belong to the payload tenant."
+        if self.sync_run_id and self.sync_run.sync_job.integration_config.platform != self.platform:
+            errors["sync_run"] = "Sync run platform must match the payload platform."
+        resource_family = payload_resource_family(self.resource_type)
+        if self.sync_run_id and resource_family != self.sync_run.sync_job.resource_type:
+            errors["resource_type"] = "Payload resource must match the sync job resource type."
+        if errors:
+            raise ValidationError(errors)
+
+
+class SyncQualityResult(ValidatedWriteModel):
+    class Status(models.TextChoices):
+        PASS = "pass", "Pass"
+        WARN = "warn", "Warn"
+        FAIL = "fail", "Fail"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="integration_quality_results")
+    sync_run = models.ForeignKey(SyncRun, on_delete=models.CASCADE, related_name="quality_results")
+    resource_type = models.CharField(max_length=40)
+    check_code = models.CharField(max_length=80)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    expected_count = models.PositiveBigIntegerField(default=0)
+    actual_count = models.PositiveBigIntegerField(default=0)
+    missing_count = models.PositiveBigIntegerField(default=0)
+    duplicate_count = models.PositiveBigIntegerField(default=0)
+    invalid_count = models.PositiveBigIntegerField(default=0)
+    detail = models.JSONField(default=dict, blank=True)
+    checked_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-checked_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "sync_run", "resource_type", "check_code"],
+                name="uniq_sync_quality_check",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status", "checked_at"], name="idx_sync_quality_status"),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.sync_run_id and self.sync_run.tenant_id != self.tenant_id:
+            errors["sync_run"] = "Sync run must belong to the quality-result tenant."
+        if self.sync_run_id and self.sync_run.sync_job.resource_type != self.resource_type:
+            errors["resource_type"] = "Quality-result resource must match the sync job."
+        if errors:
+            raise ValidationError(errors)
 
 
 class WebhookEvent(models.Model):
