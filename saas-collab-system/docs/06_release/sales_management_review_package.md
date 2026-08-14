@@ -8,7 +8,7 @@
 - 工作项：A-SM-01 至 A-SM-06
 - 模块定位：只读销售分析（L1）；不执行改价、退款、库存调整、订单状态写回或平台凭据配置。
 - 发布状态：仅供业务与架构审查，未声明生产启用。
-- 当前评审对象状态：工作树尚未提交和推送；生成 Code Review SHA、Evidence HEAD 与 PR 后方可发起正式复审。
+- 当前评审对象状态：Code Review SHA 已冻结为 `7d1e6c145f3a7c9a2fbdeb959f207875e4311a9c`；本文件的后续纯文档提交作为 Evidence HEAD，推送后以分支 HEAD 的完整 SHA 记录。正式独立复审仍待 PR 与远程 CI。
 
 ## 2. 交付内容
 
@@ -122,7 +122,7 @@ docker run --name codex-sales-mysql-evidence --network codex-sales-evidence-net 
 - 前端当前使用模块级 Mock 数据展示设计与状态；真实 API 接入前不标记为 `connected`。
 - Shopee、TikTok Shop 的真实平台接口、授权、调度、字段映射和凭据由 API 数据接入模块负责；销售模块只消费标准化契约和安全授权引用。
 - 正式下载文件存储、任务执行器和同步调度器需在后续联调中接入；当前 API 只保留受控任务和审计边界。
-- 当前变更尚未提交或推送，因此还没有可冻结的 Code Review SHA、Evidence HEAD 或 PR；正式复审前必须先生成这些对象。
+- Code Review SHA 已冻结为 `7d1e6c145f3a7c9a2fbdeb959f207875e4311a9c`；Evidence HEAD 相对该提交仅更新本审查包，不改变可执行代码。PR 与远程 CI 状态在推送后记录于审查结论。
 
 ## 8. 回退策略
 
