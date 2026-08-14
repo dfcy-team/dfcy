@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "apps.governance",
     "apps.pilot",
     "apps.releases",
+    "apps.sales_management",
     "apps.common",
 ]
 

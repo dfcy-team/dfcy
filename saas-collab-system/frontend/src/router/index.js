@@ -15,6 +15,7 @@ const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList
 const LifecycleReviewHistory = () => import('../views/lifecycle/LifecycleReviewHistory.vue');
 const ClearanceRequestList = () => import('../views/lifecycle/ClearanceRequestList.vue');
 const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
+const SalesWorkspace = () => import('../views/sales-management/SalesWorkspace.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
@@ -128,6 +129,13 @@ const routes = [
       { path: 'lifecycle/history', component: LifecycleReviewHistory },
       { path: 'lifecycle/clearance-requests', component: ClearanceRequestList },
       { path: 'alerts/business', component: BusinessAlertList },
+      { path: 'sales-management/overview', component: SalesWorkspace, props: { mode: 'overview' } },
+      { path: 'sales-management/orders', component: SalesWorkspace, props: { mode: 'orders' } },
+      { path: 'sales-management/returns', component: SalesWorkspace, props: { mode: 'returns' } },
+      { path: 'sales-management/stores', component: SalesWorkspace, props: { mode: 'stores' } },
+      { path: 'sales-management/skus', component: SalesWorkspace, props: { mode: 'skus' } },
+      { path: 'sales-management/exports', component: SalesWorkspace, props: { mode: 'exports' } },
+      { path: 'sales-management/data-quality', component: SalesWorkspace, props: { mode: 'data-quality' } },
       { path: 'workflow/approvals', component: ApprovalList },
       { path: 'workflow/approvals/:id', component: ApprovalDetail },
       { path: 'workflow/exceptions', component: ExceptionList },

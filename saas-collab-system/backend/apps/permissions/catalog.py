@@ -327,6 +327,42 @@ PERMISSION_DEFINITIONS = (
         "description": "Create audited versions of tenant-scoped analytics metric definitions.",
     },
     {
+        "code": "sales_management.view", "name": "View sales overview", "module": "sales_management",
+        "action": "view", "description": "View tenant and data-scope filtered sales metrics and anomalies.",
+    },
+    {
+        "code": "sales_management.orders.view", "name": "View sales orders", "module": "sales_management",
+        "action": "orders.view", "description": "View masked tenant and data-scope filtered sales orders.",
+    },
+    {
+        "code": "sales_management.returns.view", "name": "View sales returns", "module": "sales_management",
+        "action": "returns.view", "description": "View tenant and data-scope filtered refunds and returns.",
+    },
+    {
+        "code": "sales_management.stores.view", "name": "View store sales", "module": "sales_management",
+        "action": "stores.view", "description": "View tenant and data-scope filtered store sales facts.",
+    },
+    {
+        "code": "sales_management.skus.view", "name": "View SKU sales", "module": "sales_management",
+        "action": "skus.view", "description": "View tenant and data-scope filtered SKU sales facts.",
+    },
+    {
+        "code": "sales_management.export", "name": "Export sales details", "module": "sales_management",
+        "action": "export", "description": "Request and download audited masked sales exports within the active scope.",
+    },
+    {
+        "code": "sales_management.data_quality.view", "name": "View sales data quality", "module": "sales_management",
+        "action": "data_quality.view", "description": "View tenant and data-scope filtered sales data quality issues.",
+    },
+    {
+        "code": "sales_management.sync.view", "name": "View sales sync state", "module": "sales_management",
+        "action": "sync.view", "description": "View tenant and data-scope filtered safe sync references.",
+    },
+    {
+        "code": "sales_management.sync.rerun", "name": "Request sales sync rerun", "module": "sales_management",
+        "action": "sync.rerun", "description": "Request an audited idempotent rerun within the active data scope.",
+    },
+    {
         "code": "finance.view",
         "name": "View finance data",
         "module": "finance",
@@ -726,6 +762,15 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "analytics.view": "查看分析数据",
     "analytics.calculate": "计算分析数据",
     "analytics.manage": "管理分析定义",
+    "sales_management.view": "查看销售总览",
+    "sales_management.orders.view": "查看销售订单",
+    "sales_management.returns.view": "查看退款退货",
+    "sales_management.stores.view": "查看门店销售",
+    "sales_management.skus.view": "查看 SKU 销售",
+    "sales_management.export": "导出销售明细",
+    "sales_management.data_quality.view": "查看销售数据质量",
+    "sales_management.sync.view": "查看销售同步状态",
+    "sales_management.sync.rerun": "申请销售同步重跑",
     "finance.view": "查看财务数据",
     "finance.export": "导出财务数据",
     "finance.import": "导入财务数据",
@@ -798,6 +843,7 @@ _PERMISSION_MODULE_NAMES_ZH = {
     "replenishment": "补货",
     "alerts": "预警",
     "analytics": "分析",
+    "sales_management": "销售管理",
     "finance": "财务",
     "integrations": "集成",
     "suppliers": "供应商",
