@@ -49,6 +49,32 @@ export const menuItems = [
     ]
   },
   {
+    label: '销售管理',
+    permissions: [
+      'sales_management.view',
+      'sales_management.orders.view',
+      'sales_management.returns.view',
+      'sales_management.stores.view',
+      'sales_management.skus.view',
+      'sales_management.export',
+      'sales_management.data_quality.view',
+      'sales_management.sync.view'
+    ],
+    children: [
+      { path: '/sales-management/overview', label: '销售总览', permissions: ['sales_management.view'] },
+      { path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
+      { path: '/sales-management/returns', label: '退款退货', permissions: ['sales_management.returns.view'] },
+      { path: '/sales-management/stores', label: '门店销售', permissions: ['sales_management.stores.view'] },
+      { path: '/sales-management/skus', label: 'SKU 销售', permissions: ['sales_management.skus.view'] },
+      { path: '/sales-management/exports', label: '销售明细导出', permissions: ['sales_management.export'] },
+      {
+        path: '/sales-management/data-quality',
+        label: '数据同步与质量',
+        permissions: ['sales_management.data_quality.view', 'sales_management.sync.view']
+      }
+    ]
+  },
+  {
     label: '达人管理',
     permissions: ['influencers.view', 'influencers.outreach.view', 'influencers.fulfillment.view'],
     children: [
@@ -190,6 +216,17 @@ export const routeCapabilities = [
   { path: '/lifecycle/history', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
   { path: '/lifecycle/clearance-requests', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
   { path: '/alerts/business', permissions: ['alerts.view'], userTypes: ['internal'] },
+  { path: '/sales-management/overview', permissions: ['sales_management.view'], userTypes: ['internal'] },
+  { path: '/sales-management/orders', permissions: ['sales_management.orders.view'], userTypes: ['internal'] },
+  { path: '/sales-management/returns', permissions: ['sales_management.returns.view'], userTypes: ['internal'] },
+  { path: '/sales-management/stores', permissions: ['sales_management.stores.view'], userTypes: ['internal'] },
+  { path: '/sales-management/skus', permissions: ['sales_management.skus.view'], userTypes: ['internal'] },
+  { path: '/sales-management/exports', permissions: ['sales_management.export'], userTypes: ['internal'] },
+  {
+    path: '/sales-management/data-quality',
+    permissions: ['sales_management.data_quality.view', 'sales_management.sync.view'],
+    userTypes: ['internal']
+  },
   { path: '/workflow/approvals', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
   { path: '/workflow/exceptions', permissions: ['workflow.exceptions.view'], userTypes: ['internal'] },
   { path: '/workflow/collaboration-events', permissions: ['workflow.collaboration.view'], userTypes: ['internal'] },
