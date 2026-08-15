@@ -33,3 +33,24 @@ export const freezeProductCode = (id = 1) =>
 
 export const fetchProductStatusList = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/spus/', params }, mockProductStatusList, 'products.status');
+
+export const fetchProductCategories = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/categories/', params }, () => ({ success: true, data: [] }), 'products.categories');
+
+export const fetchProductColors = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/colors/', params }, () => ({ success: true, data: [] }), 'products.colors');
+
+export const fetchProductAttributes = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/attributes/', params }, () => ({ success: true, data: [] }), 'products.attributes');
+
+export const fetchLegacyProductItems = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/legacy-items/', params }, () => ({ success: true, data: [] }), 'products.legacy_items');
+
+export const importLegacyProductItems = (csv) =>
+  requestWithMockFallback({ method: 'post', url: '/api/internal/products/legacy-items/', data: { csv } }, () => ({ success: false }), 'products.legacy_items.import');
+
+export const updateLegacyProductItem = (id, data) =>
+  requestWithMockFallback({ method: 'patch', url: `/api/internal/products/legacy-items/${id}/`, data }, () => ({ success: false }), 'products.legacy_items.update');
+
+export const generateLegacyProductItem = (id) =>
+  requestWithMockFallback({ method: 'post', url: `/api/internal/products/legacy-items/${id}/generate/` }, () => ({ success: false }), 'products.legacy_items.generate');

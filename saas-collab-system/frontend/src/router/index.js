@@ -19,6 +19,8 @@ const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
 const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
+const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
+const PlatformProductDetailList = () => import('../views/masterdata/PlatformProductDetailList.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
 const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
@@ -26,7 +28,6 @@ const ProductStatusRecommendationDetail = () => import('../views/products/Produc
 const ProductStatusTransitionHistory = () => import('../views/products/ProductStatusTransitionHistory.vue');
 const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
 const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
-const SupplyFlowConsole = () => import('../views/supply-chain/SupplyFlowConsole.vue');
 const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
 const SupplierTaskDetail = () => import('../views/suppliers/SupplierTaskDetail.vue');
 const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentList.vue');
@@ -39,7 +40,6 @@ const MySupplierPerformanceHistory = () => import('../views/suppliers/MySupplier
 const SiteProfileList = () => import('../views/listings/SiteProfileList.vue');
 const SiteProfileDetail = () => import('../views/listings/SiteProfileDetail.vue');
 const ListingTemplateList = () => import('../views/listings/ListingTemplateList.vue');
-const DevelopmentWorkspace = () => import('../views/development/DevelopmentWorkspace.vue');
 const PriceList = () => import('../views/pricing/PriceList.vue');
 const PriceDetail = () => import('../views/pricing/PriceDetail.vue');
 const RPATaskList = () => import('../views/rpa/RPATaskList.vue');
@@ -80,9 +80,11 @@ const UserDirectory = () => import('../views/system/UserDirectory.vue');
 const RolePermissionMatrix = () => import('../views/system/RolePermissionMatrix.vue');
 const SecurityOperations = () => import('../views/system/SecurityOperations.vue');
 const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.vue');
+const CountrySiteMasterList = () => import('../views/masterdata/CountrySiteMasterList.vue');
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
+const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
@@ -143,6 +145,8 @@ const routes = [
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
+      { path: 'products/details', component: ProductDetailData },
+      { path: 'products/platform-details', component: PlatformProductDetailList },
       { path: 'products/status', component: ProductStatusList },
       { path: 'products/status-dashboard', component: ProductStatusDashboard },
       { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
@@ -150,8 +154,6 @@ const routes = [
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'purchasing/orders', component: PurchaseOrderList },
       { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
-      { path: 'supply-chain/consolidations', component: SupplyFlowConsole, props: { initialTab: 'consolidations' } },
-      { path: 'supply-chain/shipments', component: SupplyFlowConsole, props: { initialTab: 'shipments' } },
       { path: 'suppliers/tasks', component: SupplierTaskList },
       { path: 'suppliers/tasks/:id', component: SupplierTaskDetail },
       { path: 'suppliers/shipments', component: SupplierShipmentList },
@@ -164,13 +166,6 @@ const routes = [
       { path: 'listings/sites', component: SiteProfileList },
       { path: 'listings/sites/:id', component: SiteProfileDetail },
       { path: 'listings/templates', component: ListingTemplateList },
-      { path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } },
-      { path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } },
-      { path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } },
-      { path: 'development/costs', component: DevelopmentWorkspace, props: { mode: 'costs' } },
-      { path: 'development/sales', component: DevelopmentWorkspace, props: { mode: 'sales' } },
-      { path: 'development/retrospectives', component: DevelopmentWorkspace, props: { mode: 'retrospectives' } },
-      { path: 'development/dashboard', component: DevelopmentWorkspace, props: { mode: 'dashboard' } },
       { path: 'pricing/prices', component: PriceList },
       { path: 'pricing/prices/:id', component: PriceDetail },
       { path: 'rpa/tasks', component: RPATaskList },
@@ -212,9 +207,11 @@ const routes = [
       { path: 'system/roles', component: RolePermissionMatrix },
       { path: 'system/security-operations', component: SecurityOperations },
       { path: 'master-data/platforms', component: PlatformMasterList },
+      { path: 'master-data/sites', component: CountrySiteMasterList },
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
+      { path: 'influencers', component: InfluencerList },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

@@ -9,19 +9,18 @@ const root = path.resolve(import.meta.dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 describe('SC-FLOW client contract', () => {
-  it('places supply chain collaboration between product development and multi-platform listings', () => {
+  it('places multi-platform listings directly after product development', () => {
     const labels = menuItems.map((item) => item.label);
     const developmentIndex = labels.indexOf('\u4ea7\u54c1\u5f00\u53d1');
-    expect(labels[developmentIndex + 1]).toBe('供应链协同');
-    expect(labels[developmentIndex + 2]).toBe('\u591a\u5e73\u53f0\u520a\u767b');
+    expect(labels[developmentIndex + 1]).toBe('\u591a\u5e73\u53f0\u520a\u767b');
+    expect(labels).not.toContain('供应链协同');
   });
 
-  it('registers internal routes with exact view permissions and denies supplier users', () => {
-    const internal = { user_type: 'internal', permissions: ['supply.consolidation.view'] };
-    expect(canAccessPath(internal, '/supply-chain/consolidations')).toBe(true);
+  it('does not expose supply chain routes', () => {
+    const internal = { user_type: 'internal', permissions: ['supply.consolidation.view', 'supply.shipment.view'] };
+    expect(canAccessPath(internal, '/supply-chain/consolidations')).toBe(false);
     expect(canAccessPath(internal, '/supply-chain/shipments')).toBe(false);
-    expect(canAccessPath({ ...internal, permissions: ['supply.shipment.view'] }, '/supply-chain/shipments')).toBe(true);
-    expect(canAccessPath({ user_type: 'external', permissions: ['supply.consolidation.view'] }, '/supply-chain/consolidations')).toBe(false);
+    expect(canAccessPath({ user_type: 'external', permissions: ['supply.consolidation.view', 'supply.shipment.view'] }, '/supply-chain/consolidations')).toBe(false);
   });
 
   it('uses API2 paths, exact action permissions and stable idempotency keys', () => {
