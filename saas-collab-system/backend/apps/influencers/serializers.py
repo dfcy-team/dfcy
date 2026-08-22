@@ -17,18 +17,95 @@ from .models import (
 )
 
 
+def _mask_text(value, *, suffix_length=2):
+    text = str(value or "")
+    if not text:
+        return ""
+    if len(text) <= suffix_length + 1:
+        return "*" * len(text)
+    return f"{text[:1]}***{text[-suffix_length:]}"
+
+
+def mask_handle(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    prefix = "@" if text.startswith("@") else ""
+    return prefix + _mask_text(text[len(prefix):])
+
+
+def mask_contact_value(value, channel=""):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if channel == "email" and "@" in text:
+        local, domain = text.split("@", 1)
+        return f"{local[:1]}***@{domain}"
+    if channel == "phone":
+        return f"***{text[-4:]}"
+    return _mask_text(text)
+
+
+def mask_profile_value(value):
+    return _mask_text(value, suffix_length=4)
+
+
+def safe_influencer_name(value):
+    name = str(getattr(value, "name", "") or "").strip()
+    handle = str(getattr(value, "handle", "") or "").strip()
+    if name and handle and name.casefold() == handle.casefold():
+        return mask_handle(name)
+    return name
+
+
 class InfluencerProfileSerializer(serializers.ModelSerializer):
+    external_influencer_id = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    external_influencer_id_masked = serializers.SerializerMethodField()
+    profile_url = serializers.URLField(write_only=True, required=False, allow_blank=True)
+    profile_url_masked = serializers.SerializerMethodField()
+    profile_notes = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    profile_notes_masked = serializers.SerializerMethodField()
+
     class Meta:
         model = InfluencerProfile
-        exclude = ("tenant", "influencer")
-        read_only_fields = ("created_at", "updated_at")
+        fields = (
+            "id", "display_name", "external_influencer_id", "external_influencer_id_masked",
+            "level", "tier", "average_video_views", "average_live_views", "is_active", "market",
+            "platforms", "content_types", "profile_url", "profile_url_masked", "duplicate_reason",
+            "product_cooperation_count", "first_cooperation_at", "cooperation_count",
+            "completed_cooperation_count", "fulfilled_cooperation_count", "fulfillment_rate",
+            "content_completion_rate", "historical_gmv", "historical_orders", "historical_performance",
+            "profile_notes", "profile_notes_masked", "created_at", "updated_at",
+        )
+        read_only_fields = (
+            "id", "external_influencer_id_masked", "profile_url_masked", "profile_notes_masked",
+            "created_at", "updated_at",
+        )
+
+    def get_external_influencer_id_masked(self, obj):
+        return mask_profile_value(obj.external_influencer_id)
+
+    def get_profile_url_masked(self, obj):
+        return mask_profile_value(obj.profile_url)
+
+    def get_profile_notes_masked(self, obj):
+        return "***" if obj.profile_notes else ""
 
 
 class InfluencerContactSerializer(serializers.ModelSerializer):
+    value = serializers.CharField(write_only=True, required=False, allow_blank=False)
+    masked_value = serializers.SerializerMethodField()
+
     class Meta:
         model = InfluencerContact
-        fields = ("id", "channel", "value", "label", "is_primary", "is_active", "created_at", "updated_at")
-        read_only_fields = ("id", "created_at", "updated_at")
+        fields = (
+            "id", "channel", "value", "masked_value", "label", "is_primary", "is_active",
+            "created_at", "updated_at",
+        )
+        read_only_fields = ("id", "masked_value", "created_at", "updated_at")
+
+    def get_masked_value(self, obj):
+        return mask_contact_value(obj.value, obj.channel)
 
 
 class InfluencerRestrictEventSerializer(serializers.ModelSerializer):
@@ -44,6 +121,15 @@ class InfluencerRestrictEventSerializer(serializers.ModelSerializer):
 
 class InfluencerSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
+    handle = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    handle_masked = serializers.SerializerMethodField()
+    contact_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    contact_name_masked = serializers.SerializerMethodField()
+    contact_phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    contact_phone_masked = serializers.SerializerMethodField()
+    contact_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    contact_email_masked = serializers.SerializerMethodField()
+    notes = serializers.CharField(write_only=True, required=False, allow_blank=True)
     is_blacklisted = serializers.SerializerMethodField()
     video_metrics = serializers.SerializerMethodField()
     profile = InfluencerProfileSerializer(required=False)
@@ -53,14 +139,38 @@ class InfluencerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Influencer
         fields = (
-            "id", "tenant_id", "code", "name", "platform", "handle", "category",
+            "id", "tenant_id", "code", "name", "platform", "handle", "handle_masked", "category",
+            "contact_name", "contact_name_masked", "contact_phone", "contact_phone_masked",
+            "contact_email", "contact_email_masked", "notes",
             "follower_count", "cooperation_status", "status", "is_blacklisted", "video_metrics",
             "profile", "contacts", "blacklist_history",
             "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "tenant_id", "status", "created_at", "updated_at", "is_blacklisted",
+            "handle_masked", "contact_name_masked", "contact_phone_masked", "contact_email_masked",
         )
+
+    def get_handle_masked(self, obj):
+        return mask_handle(obj.handle)
+
+    def get_contact_name_masked(self, obj):
+        return _mask_text(obj.contact_name)
+
+    def get_contact_phone_masked(self, obj):
+        return f"***{obj.contact_phone[-4:]}" if obj.contact_phone else ""
+
+    def get_contact_email_masked(self, obj):
+        value = obj.contact_email
+        if not value or "@" not in value:
+            return ""
+        local, domain = value.split("@", 1)
+        return f"{local[:1]}***@{domain}"
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["name"] = safe_influencer_name(instance)
+        return data
 
 
     def validate_code(self, value):
@@ -114,7 +224,10 @@ class InfluencerListSerializer(InfluencerSerializer):
     class Meta(InfluencerSerializer.Meta):
         fields = tuple(
             field for field in InfluencerSerializer.Meta.fields
-            if field not in {"handle", "profile", "contacts", "blacklist_history"}
+            if field not in {
+                "handle", "profile", "contacts", "blacklist_history", "contact_name_masked",
+                "contact_phone_masked", "contact_email_masked",
+            }
         )
 
 
@@ -392,9 +505,10 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     def _display_name(value):
         if not value:
             return ""
+        if hasattr(value, "handle"):
+            return safe_influencer_name(value) or mask_handle(value.handle)
         return (
             getattr(value, "name", "")
-            or getattr(value, "handle", "")
             or getattr(value, "full_name", "")
             or getattr(value, "username", "")
         )

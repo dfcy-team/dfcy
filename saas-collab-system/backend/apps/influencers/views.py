@@ -44,6 +44,8 @@ from .serializers import (
     InfluencerSerializer,
     InfluencerContactSerializer,
     InfluencerRestrictEventSerializer,
+    mask_handle,
+    safe_influencer_name,
     OutreachTargetSerializer,
     OutreachTaskSerializer,
     OutreachTaskUpdateSerializer,
@@ -274,11 +276,16 @@ class InfluencerContactsView(APIView):
         serializers = [InfluencerContactSerializer(data=item) for item in payload]
         for serializer in serializers:
             serializer.is_valid(raise_exception=True)
-        existing = {
-            (row.channel, row.value): row
-            for row in influencer.contacts.filter(tenant=request.user.tenant)
-        }
-        influencer.contacts.filter(tenant=request.user.tenant).update(is_active=False, is_primary=False)
+        existing_rows = list(
+            influencer.contacts.select_for_update()
+            .filter(tenant=request.user.tenant)
+            .order_by("id")
+        )
+        existing = {(row.channel, row.value): row for row in existing_rows}
+        for row in existing_rows:
+            row.is_active = False
+            row.is_primary = False
+            row.save(update_fields=["is_active", "is_primary", "updated_at"])
         created = []
         for serializer in serializers:
             values = serializer.validated_data
@@ -370,14 +377,14 @@ class InfluencerResolveView(APIView):
                 {
                     "id": influencer.id,
                     "code": influencer.code,
-                    "name": influencer.name,
-                    "handle": influencer.handle,
+                    "name": safe_influencer_name(influencer),
+                    "handle_masked": mask_handle(influencer.handle),
                     "platform": influencer.platform,
                     "status": influencer.status,
                     "is_blacklisted": influencer.is_blacklisted,
                 }
             )
-        return success_response({"query": query, "candidates": rows, "results": rows})
+        return success_response({"query": mask_handle(query), "candidates": rows, "results": rows})
 
     @transaction.atomic
     def post(self, request):
@@ -418,15 +425,15 @@ class InfluencerResolveView(APIView):
                     action="create_from_fulfillment",
                     object_type="influencer",
                     object_id=influencer.pk,
-                    after_data={"code": influencer.code, "handle": influencer.handle},
+                    after_data={"code": influencer.code},
                 )
 
         is_blacklisted = influencer.restrictions.filter(is_blacklisted=True).exists()
         payload = {
             "id": influencer.id,
             "code": influencer.code,
-            "name": influencer.name,
-            "handle": influencer.handle,
+            "name": safe_influencer_name(influencer),
+            "handle_masked": mask_handle(influencer.handle),
             "platform": influencer.platform,
             "status": influencer.status,
             "is_blacklisted": is_blacklisted,
@@ -555,7 +562,7 @@ class OutreachTaskOptionsView(APIView):
                 {
                     "id": influencer.id,
                     "code": influencer.code,
-                    "name": influencer.name,
+                    "name": safe_influencer_name(influencer),
                     "platform": influencer.platform,
                 }
                 for influencer in influencers
@@ -605,8 +612,8 @@ class SampleFulfillmentOptionsView(APIView):
                 {
                     "id": influencer.id,
                     "code": influencer.code,
-                    "name": influencer.name,
-                    "handle": influencer.handle,
+                    "name": safe_influencer_name(influencer),
+                    "handle_masked": mask_handle(influencer.handle),
                     "platform": influencer.platform,
                 }
                 for influencer in influencers

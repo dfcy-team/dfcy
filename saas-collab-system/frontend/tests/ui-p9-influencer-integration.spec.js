@@ -117,6 +117,52 @@ describe('influencer integration workspace contracts', () => {
     confirm.mockRestore();
   });
 
+  it('does not patch unloaded handle/profile or replace contacts when editing a list row', async () => {
+    const calls = [];
+    requestMock.mockImplementation((config) => {
+      calls.push(config);
+      if (config.method === 'patch' && config.url.endsWith('/17/')) {
+        return { success: true, code: 'OK', message: 'success', data: { id: 17, updated_at: 'v2' } };
+      }
+      return {
+        success: true,
+        code: 'OK',
+        message: 'success',
+        data: {
+          count: 1,
+          results: [{
+            id: 17,
+            name: 'Safe Creator',
+            code: 'SAFE-17',
+            platform: 'TikTok',
+            handle_masked: 's***le',
+            category: '生活方式',
+            follower_count: 100,
+            cooperation_status: 'prospect',
+            status: 'active',
+            updated_at: 'v1'
+          }]
+        }
+      };
+    });
+    const wrapper = mount(InfluencerResourceLibrary, { global: { stubs: resourceLibraryStubs } });
+
+    await flushPromises();
+    const editButton = wrapper.findAll('button').find((button) => button.text() === '编辑');
+    await editButton.trigger('click');
+    const nameInput = wrapper.findAll('input').find((input) => input.element.value === 'Safe Creator');
+    await nameInput.setValue('Renamed Creator');
+    const saveButton = wrapper.findAll('button').find((button) => button.text() === '保存档案');
+    await saveButton.trigger('click');
+    await flushPromises();
+
+    const patch = calls.find((config) => config.method === 'patch' && config.url.endsWith('/17/'));
+    expect(patch.data).toEqual({ name: 'Renamed Creator' });
+    expect(patch.data).not.toHaveProperty('handle');
+    expect(patch.data).not.toHaveProperty('profile');
+    expect(calls.some((config) => config.url.includes('/contacts/'))).toBe(false);
+  });
+
   it('requests and renders pagination on all influencer workspaces', () => {
     for (const path of [
       'src/views/influencers/InfluencerResourceLibrary.vue',

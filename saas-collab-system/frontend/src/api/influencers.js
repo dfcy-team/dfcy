@@ -122,6 +122,29 @@ const mockWrite = (data = {}) => () => ({
   data: { ...data, api_status: 'mock' }
 });
 
+const maskInfluencerHandle = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const prefix = text.startsWith('@') ? '@' : '';
+  const body = text.slice(prefix.length);
+  return `${prefix}${body.length <= 3 ? '*'.repeat(body.length) : `${body[0]}***${body.slice(-2)}`}`;
+};
+
+const mockInfluencerWrite = (data = {}) => {
+  const safe = { ...data };
+  if (Object.prototype.hasOwnProperty.call(safe, 'handle')) {
+    safe.handle_masked = maskInfluencerHandle(safe.handle);
+    delete safe.handle;
+  }
+  delete safe.profile;
+  delete safe.contacts;
+  delete safe.contact_name;
+  delete safe.contact_phone;
+  delete safe.contact_email;
+  delete safe.notes;
+  return mockWrite(safe);
+};
+
 const mockCollection = () => ({
   success: true,
   code: 'OK',
@@ -199,7 +222,7 @@ export const updateInfluencer = (id, payload, version) => requestWithMockFallbac
     data: payload,
     ...ifMatchHeaders(version)
   },
-  mockWrite({ id, ...payload, updated_at: version }),
+  mockInfluencerWrite({ id, ...payload, updated_at: version }),
   'influencers.update'
 );
 
@@ -216,7 +239,7 @@ export const updateInfluencerContacts = (id, contacts, version) => requestWithMo
     data: { contacts },
     ...ifMatchHeaders(version)
   },
-  mockWrite({ id, contacts, updated_at: version }),
+  mockWrite({ id, updated_at: version }),
   'influencers.contacts.update'
 );
 
@@ -246,7 +269,7 @@ export const fetchInfluencerRestrictionHistory = fetchInfluencerBlacklistHistory
 
 export const createInfluencer = (payload) => requestWithMockFallback(
   { method: 'post', url: `${API_ROOT}/`, data: payload },
-  mockWrite(payload),
+  mockInfluencerWrite(payload),
   'influencers.create'
 );
 
@@ -329,13 +352,13 @@ export const restoreOutreachTask = (id, version) => requestWithMockFallback(
 
 export const fetchInfluencerResolve = (query = '') => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/resolve/`, params: { q: query } },
-  () => ({ success: true, data: { query, candidates: [], results: [] } }),
+  () => ({ success: true, data: { query: maskInfluencerHandle(query), candidates: [], results: [] } }),
   'influencers.resolve'
 );
 
 export const resolveOrCreateInfluencer = (handle) => requestWithMockFallback(
   { method: 'post', url: `${API_ROOT}/resolve/`, data: { handle } },
-  mockDetail({ id: `mock-${handle}`, handle, name: handle, platform: 'TikTok', is_blacklisted: false, created: true }),
+  mockDetail({ id: `mock-${handle}`, handle_masked: maskInfluencerHandle(handle), name: maskInfluencerHandle(handle), platform: 'TikTok', is_blacklisted: false, created: true }),
   'influencers.resolve.create'
 );
 

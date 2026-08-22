@@ -25,7 +25,7 @@
       </div>
 
       <el-table v-loading="loading" :data="rows" empty-text="暂无达人档案" @row-click="openDetail">
-        <el-table-column label="达人" min-width="190"><template #default="{ row }"><b>{{ displayValue(row.name) }}</b><small>{{ displayValue(row.code) }} · {{ displayValue(row.handle) }}</small></template></el-table-column>
+        <el-table-column label="达人" min-width="190"><template #default="{ row }"><b>{{ displayValue(row.name) }}</b><small>{{ displayValue(row.code) }} · {{ displayValue(row.handle_masked) }}</small></template></el-table-column>
         <el-table-column prop="platform" label="平台" width="100" />
         <el-table-column prop="category" label="内容赛道" min-width="125" />
         <el-table-column label="粉丝数" min-width="110"><template #default="{ row }">{{ formatCount(row.follower_count) }}</template></el-table-column>
@@ -81,9 +81,9 @@
       <el-alert v-else-if="detailError" type="error" :title="detailError" show-icon :closable="false" />
       <template v-else-if="detail">
         <div class="drawer-actions"><el-button v-if="canManage" type="primary" plain @click="openEdit(detail)">编辑档案</el-button><el-button v-if="canManage" :type="detail.is_blacklisted ? 'success' : 'danger'" plain @click="toggleBlacklist(detail)">{{ detail.is_blacklisted ? '解除黑名单' : '加入黑名单' }}</el-button></div>
-        <el-descriptions :column="2" border><el-descriptions-item label="达人编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="平台账号">{{ displayValue(detail.handle) }}</el-descriptions-item><el-descriptions-item label="内容赛道">{{ displayValue(detail.category) }}</el-descriptions-item><el-descriptions-item label="粉丝数">{{ formatCount(detail.follower_count) }}</el-descriptions-item><el-descriptions-item label="合作分层">{{ cooperationLabel(detail.cooperation_status) }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ detail.status === 'active' ? '正常' : '停用' }}</el-descriptions-item></el-descriptions>
-        <h3>扩展档案</h3><el-descriptions v-if="detail.profile" :column="2" border><el-descriptions-item label="展示名称">{{ displayValue(detail.profile.display_name) }}</el-descriptions-item><el-descriptions-item label="外部达人 ID">{{ displayValue(detail.profile.external_influencer_id) }}</el-descriptions-item><el-descriptions-item label="等级">{{ displayValue(detail.profile.level) }}</el-descriptions-item><el-descriptions-item label="层级">{{ displayValue(detail.profile.tier) }}</el-descriptions-item><el-descriptions-item label="市场">{{ displayValue(detail.profile.market) }}</el-descriptions-item><el-descriptions-item label="档案平台">{{ displayValue(detail.profile.platforms?.join?.(', ') || detail.profile.platforms) }}</el-descriptions-item><el-descriptions-item label="内容类型">{{ displayValue(detail.profile.content_types?.join?.(', ') || detail.profile.content_types) }}</el-descriptions-item><el-descriptions-item label="档案链接">{{ displayValue(detail.profile.profile_url) }}</el-descriptions-item><el-descriptions-item label="平均视频播放">{{ formatCount(detail.profile.average_video_views) }}</el-descriptions-item><el-descriptions-item label="平均直播观看">{{ formatCount(detail.profile.average_live_views) }}</el-descriptions-item><el-descriptions-item label="档案启用">{{ detail.profile.is_active ? '是' : '否' }}</el-descriptions-item><el-descriptions-item label="重复说明">{{ displayValue(detail.profile.duplicate_reason) }}</el-descriptions-item><el-descriptions-item label="商品合作次数">{{ displayValue(detail.profile.product_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="首次合作时间">{{ displayValue(detail.profile.first_cooperation_at) }}</el-descriptions-item><el-descriptions-item label="合作次数">{{ displayValue(detail.profile.cooperation_count) }}</el-descriptions-item><el-descriptions-item label="完成合作次数">{{ displayValue(detail.profile.completed_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="完成履约次数">{{ displayValue(detail.profile.fulfilled_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="履约率">{{ displayValue(detail.profile.fulfillment_rate) }}</el-descriptions-item><el-descriptions-item label="内容完成率">{{ displayValue(detail.profile.content_completion_rate) }}</el-descriptions-item><el-descriptions-item label="历史 GMV">{{ displayValue(detail.profile.historical_gmv) }}</el-descriptions-item><el-descriptions-item label="历史订单数">{{ displayValue(detail.profile.historical_orders) }}</el-descriptions-item><el-descriptions-item label="档案备注">{{ displayValue(detail.profile.profile_notes) }}</el-descriptions-item><el-descriptions-item label="历史表现 JSON">{{ formatJson(detail.profile.historical_performance) }}</el-descriptions-item><el-descriptions-item label="创建时间">{{ displayValue(detail.profile.created_at) }}</el-descriptions-item><el-descriptions-item label="更新时间">{{ displayValue(detail.profile.updated_at) }}</el-descriptions-item></el-descriptions>
-        <h3>联系渠道</h3><div v-if="detail.contacts?.length" class="contact-list"><div v-for="contact in detail.contacts" :key="contact.id || contact.key"><b>{{ INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel }}</b><span>{{ displayValue(contact.masked_value || contact.value) }}</span><small>{{ contact.label || (contact.is_primary ? '主渠道' : '') }}</small></div></div><p v-else class="muted">暂无联系渠道</p>
+        <el-descriptions :column="2" border><el-descriptions-item label="达人编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="平台账号">{{ displayValue(detail.handle_masked) }}</el-descriptions-item><el-descriptions-item label="内容赛道">{{ displayValue(detail.category) }}</el-descriptions-item><el-descriptions-item label="粉丝数">{{ formatCount(detail.follower_count) }}</el-descriptions-item><el-descriptions-item label="合作分层">{{ cooperationLabel(detail.cooperation_status) }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ detail.status === 'active' ? '正常' : '停用' }}</el-descriptions-item></el-descriptions>
+        <h3>扩展档案</h3><el-descriptions v-if="detail.profile" :column="2" border><el-descriptions-item label="展示名称">{{ displayValue(detail.profile.display_name) }}</el-descriptions-item><el-descriptions-item label="外部达人 ID">{{ displayValue(detail.profile.external_influencer_id_masked) }}</el-descriptions-item><el-descriptions-item label="等级">{{ displayValue(detail.profile.level) }}</el-descriptions-item><el-descriptions-item label="层级">{{ displayValue(detail.profile.tier) }}</el-descriptions-item><el-descriptions-item label="市场">{{ displayValue(detail.profile.market) }}</el-descriptions-item><el-descriptions-item label="档案平台">{{ displayValue(detail.profile.platforms?.join?.(', ') || detail.profile.platforms) }}</el-descriptions-item><el-descriptions-item label="内容类型">{{ displayValue(detail.profile.content_types?.join?.(', ') || detail.profile.content_types) }}</el-descriptions-item><el-descriptions-item label="档案链接">{{ displayValue(detail.profile.profile_url_masked) }}</el-descriptions-item><el-descriptions-item label="平均视频播放">{{ formatCount(detail.profile.average_video_views) }}</el-descriptions-item><el-descriptions-item label="平均直播观看">{{ formatCount(detail.profile.average_live_views) }}</el-descriptions-item><el-descriptions-item label="档案启用">{{ detail.profile.is_active ? '是' : '否' }}</el-descriptions-item><el-descriptions-item label="重复说明">{{ displayValue(detail.profile.duplicate_reason) }}</el-descriptions-item><el-descriptions-item label="商品合作次数">{{ displayValue(detail.profile.product_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="首次合作时间">{{ displayValue(detail.profile.first_cooperation_at) }}</el-descriptions-item><el-descriptions-item label="合作次数">{{ displayValue(detail.profile.cooperation_count) }}</el-descriptions-item><el-descriptions-item label="完成合作次数">{{ displayValue(detail.profile.completed_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="完成履约次数">{{ displayValue(detail.profile.fulfilled_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="履约率">{{ displayValue(detail.profile.fulfillment_rate) }}</el-descriptions-item><el-descriptions-item label="内容完成率">{{ displayValue(detail.profile.content_completion_rate) }}</el-descriptions-item><el-descriptions-item label="历史 GMV">{{ displayValue(detail.profile.historical_gmv) }}</el-descriptions-item><el-descriptions-item label="历史订单数">{{ displayValue(detail.profile.historical_orders) }}</el-descriptions-item><el-descriptions-item label="档案备注">{{ displayValue(detail.profile.profile_notes_masked) }}</el-descriptions-item><el-descriptions-item label="历史表现 JSON">{{ formatJson(detail.profile.historical_performance) }}</el-descriptions-item><el-descriptions-item label="创建时间">{{ displayValue(detail.profile.created_at) }}</el-descriptions-item><el-descriptions-item label="更新时间">{{ displayValue(detail.profile.updated_at) }}</el-descriptions-item></el-descriptions>
+        <h3>联系渠道</h3><div v-if="detail.contacts?.length" class="contact-list"><div v-for="contact in detail.contacts" :key="contact.id || contact.key"><b>{{ INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel }}</b><span>{{ displayValue(contact.masked_value) }}</span><small>{{ contact.label || (contact.is_primary ? '主渠道' : '') }}</small></div></div><p v-else class="muted">暂无联系渠道</p>
         <h3>黑名单历史</h3><el-timeline v-if="detail.blacklist_history?.length"><el-timeline-item v-for="event in detail.blacklist_history" :key="event.id || `${event.action}-${event.occurred_at}`" :timestamp="formatTime(event.occurred_at || event.created_at)">{{ event.action === 'blacklist' ? '加入黑名单' : '解除黑名单' }}：{{ event.reason || '未填写原因' }}</el-timeline-item></el-timeline><p v-else class="muted">暂无黑名单历史</p>
       </template>
     </el-drawer>
@@ -113,11 +113,20 @@ const auth = useAuthStore();
 const rows = ref([]); const total = ref(0); const page = ref(1); const pageSize = ref(20); const loading = ref(false); const saving = ref(false);
 const editVisible = ref(false); const detailVisible = ref(false); const detailLoading = ref(false); const detailError = ref(''); const detail = ref(null); const editing = ref(null);
 const blankProfile = () => ({ display_name: '', external_influencer_id: '', level: '', tier: '', average_video_views: 0, average_live_views: 0, is_active: true, market: '', platforms: '', content_types: '', profile_url: '', duplicate_reason: '', product_cooperation_count: 0, first_cooperation_at: null, cooperation_count: 0, completed_cooperation_count: 0, fulfilled_cooperation_count: 0, fulfillment_rate: null, content_completion_rate: null, historical_gmv: '0.0000', historical_orders: 0, historical_performance: {}, profile_notes: '' });
+const INFLUENCER_FORM_FIELDS = Object.freeze(['code', 'name', 'platform', 'handle', 'category', 'follower_count', 'cooperation_status']);
+const PROFILE_FORM_FIELDS = Object.freeze(['display_name', 'external_influencer_id', 'level', 'tier', 'market', 'platforms', 'content_types', 'profile_url', 'duplicate_reason', 'profile_notes']);
 const filters = reactive({ search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' });
 const blankContact = () => ({ key: `contact-${Date.now()}-${Math.random()}`, channel: 'email', value: '', label: '', is_primary: false });
-const profileForm = (profile = {}) => ({ ...blankProfile(), ...profile, platforms: Array.isArray(profile.platforms) ? profile.platforms.join(', ') : (profile.platforms || ''), content_types: Array.isArray(profile.content_types) ? profile.content_types.join(', ') : (profile.content_types || '') });
+const profileForm = (profile = {}) => {
+  const next = blankProfile();
+  for (const field of PROFILE_FORM_FIELDS) if (Object.prototype.hasOwnProperty.call(profile, field)) next[field] = profile[field];
+  next.platforms = Array.isArray(next.platforms) ? next.platforms.join(', ') : (next.platforms || '');
+  next.content_types = Array.isArray(next.content_types) ? next.content_types.join(', ') : (next.content_types || '');
+  return next;
+};
 const blankForm = () => ({ code: '', name: '', platform: 'TikTok', handle: '', category: '', follower_count: 0, cooperation_status: 'prospect', profile: profileForm(), contacts: [blankContact()] });
 const form = reactive(blankForm());
+const formSnapshot = ref(null); const contactsSnapshot = ref(null);
 const canManage = computed(() => auth.hasPermission('influencers.manage'));
 const activeCount = computed(() => rows.value.filter((row) => row.status === 'active').length); const cooperatingCount = computed(() => rows.value.filter((row) => row.cooperation_status === 'cooperating').length); const blacklistedCount = computed(() => rows.value.filter((row) => row.is_blacklisted).length);
 const displayValue = (value) => value === undefined || value === null || value === '' ? '—' : String(value);
@@ -136,14 +145,45 @@ async function load() {
 function applyFilters() { page.value = 1; load(); }
 function resetFilters() { Object.assign(filters, { search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
 function changePageSize() { page.value = 1; load(); }
-function resetForm() { Object.assign(form, blankForm()); }
+function resetForm() { Object.assign(form, blankForm()); formSnapshot.value = null; contactsSnapshot.value = null; }
 function addContact() { form.contacts.push(blankContact()); }
 function removeContact(index) { if (form.contacts.length === 1) return; form.contacts.splice(index, 1); }
-function openCreate() { if (!canManage.value) return; editing.value = null; resetForm(); editVisible.value = true; }
-function openEdit(row) { if (!canManage.value) return; editing.value = row; Object.assign(form, { ...blankForm(), ...row, profile: profileForm(row.profile), contacts: (row.contacts || []).map((contact) => ({ ...contact, key: contact.id || `${contact.channel}-${contact.value}` })) }); editVisible.value = true; }
+function openCreate() {
+  if (!canManage.value) return;
+  editing.value = null;
+  resetForm();
+  formSnapshot.value = formPayload();
+  contactsSnapshot.value = contactsPayload();
+  editVisible.value = true;
+}
+function openEdit(row) {
+  if (!canManage.value) return;
+  editing.value = row;
+  const next = blankForm();
+  for (const field of INFLUENCER_FORM_FIELDS) if (Object.prototype.hasOwnProperty.call(row, field)) next[field] = row[field];
+  next.profile = profileForm(row.profile);
+  const rawContacts = Array.isArray(row.contacts) && row.contacts.every((contact) => Object.prototype.hasOwnProperty.call(contact, 'value') && !Object.prototype.hasOwnProperty.call(contact, 'masked_value'));
+  next.contacts = rawContacts ? row.contacts.map((contact) => ({ ...contact, key: contact.id || `${contact.channel}-${contact.value}` })) : [blankContact()];
+  Object.assign(form, next);
+  formSnapshot.value = formPayload();
+  contactsSnapshot.value = rawContacts ? contactsPayload() : null;
+  editVisible.value = true;
+}
 function profilePayload() { const profile = form.profile; return { display_name: profile.display_name.trim(), external_influencer_id: profile.external_influencer_id.trim(), level: profile.level.trim(), tier: profile.tier.trim(), average_video_views: Number(profile.average_video_views || 0), average_live_views: Number(profile.average_live_views || 0), is_active: Boolean(profile.is_active), market: profile.market.trim(), platforms: profile.platforms.split(',').map((item) => item.trim()).filter(Boolean), content_types: profile.content_types.split(',').map((item) => item.trim()).filter(Boolean), profile_url: profile.profile_url.trim(), duplicate_reason: profile.duplicate_reason.trim(), profile_notes: profile.profile_notes.trim() }; }
-function payload() { return { code: form.code.trim(), name: form.name.trim(), platform: form.platform.trim(), handle: form.handle.trim(), category: form.category.trim(), follower_count: Number(form.follower_count || 0), cooperation_status: form.cooperation_status, profile: profilePayload() }; }
-function contactsPayload() { return form.contacts.filter((contact) => contact.value.trim()).map(({ key, id, ...contact }) => ({ ...contact, value: contact.value.trim() })); }
+function formPayload() { return { code: form.code.trim(), name: form.name.trim(), platform: form.platform.trim(), handle: form.handle.trim(), category: form.category.trim(), follower_count: Number(form.follower_count || 0), cooperation_status: form.cooperation_status, profile: profilePayload() }; }
+function fullPayload() { return formPayload(); }
+function changedPayload() {
+  const current = formPayload(); const initial = formSnapshot.value || {}; const next = {};
+  const sameValue = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  for (const field of INFLUENCER_FORM_FIELDS) if (!sameValue(current[field], initial[field])) next[field] = current[field];
+  const profile = {};
+  for (const field of PROFILE_FORM_FIELDS) if (!sameValue(current.profile[field], initial.profile?.[field])) profile[field] = current.profile[field];
+  if (Object.keys(profile).length) next.profile = profile;
+  return next;
+}
+function payload() { return editing.value ? changedPayload() : fullPayload(); }
+function contactsPayload() { return form.contacts.filter((contact) => contact.value.trim()).map(({ key, id, masked_value, ...contact }) => ({ ...contact, value: contact.value.trim() })); }
+function contactsChanged() { return contactsSnapshot.value !== null && JSON.stringify(contactsPayload()) !== JSON.stringify(contactsSnapshot.value); }
 async function save() {
   if (!canManage.value) return;
   if (!form.code.trim() || !form.name.trim() || !form.platform.trim()) return ElMessage.warning('请填写达人编码、名称和平台');
@@ -151,7 +191,9 @@ async function save() {
   const response = wasEditing ? await updateInfluencer(editing.value.id, payload(), editing.value.updated_at) : await createInfluencer(payload());
   if (!response?.success) { saving.value = false; return ElMessage.error(response?.message || '达人档案保存失败'); }
   const influencerId = response.data?.id || editing.value?.id;
-  const contactsResponse = await updateInfluencerContacts(influencerId, contactsPayload(), response.data?.updated_at || editing.value?.updated_at);
+  const contactsResponse = contactsChanged()
+    ? await updateInfluencerContacts(influencerId, contactsPayload(), response.data?.updated_at || editing.value?.updated_at)
+    : { success: true };
   saving.value = false;
   if (!contactsResponse?.success) return ElMessage.error(`达人档案已保存，但联系渠道保存失败：${contactsResponse?.message || '请重试'}`);
   editVisible.value = false; ElMessage.success(wasEditing ? '达人档案已更新' : '达人档案已创建'); await load();

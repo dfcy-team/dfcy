@@ -771,7 +771,7 @@ async function refreshActiveTask() {
 
 function influencerOptionLabel(influencer) {
   const primary = influencer.name || influencer.code || `达人 ${influencer.id}`;
-  const account = [influencer.platform, influencer.handle].filter(Boolean).join(' · ');
+  const account = [influencer.platform, influencer.handle_masked].filter(Boolean).join(' · ');
   return account ? `${primary}（${account}）` : primary;
 }
 
@@ -831,7 +831,7 @@ async function searchTargetInfluencers(search) {
 async function resolveSelectedTargetInfluencer(id) {
   const selected = influencerOptions.value.find((item) => String(item.id) === String(id));
   if (!selected) return;
-  const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
+  const response = await fetchInfluencerResolve(selected.handle_masked || selected.code || selected.name);
   if (!response.success) return;
   const resolved = (response.data?.candidates || response.data?.results || []).find((item) => String(item.id) === String(id));
   if (resolved) influencerOptions.value = influencerOptions.value.map((item) => String(item.id) === String(id) ? resolved : item);

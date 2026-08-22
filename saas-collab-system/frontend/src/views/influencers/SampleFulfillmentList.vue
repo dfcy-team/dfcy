@@ -421,7 +421,7 @@ async function selectTask(id) {
 }
 
 function influencerLabel(influencer) {
-  const account = influencer.handle || influencer.code || `达人 ${influencer.id}`;
+  const account = influencer.handle_masked || influencer.code || `达人 ${influencer.id}`;
   const suffix = [influencer.name, influencer.platform].filter(hasValue).join(' · ');
   return suffix ? `${account}（${suffix}）` : account;
 }
@@ -452,7 +452,7 @@ async function resolveSelectedInfluencer(id) {
     if (resolved.created) ElMessage.success('已自动建立达人档案');
     return;
   }
-  const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
+  const response = await fetchInfluencerResolve(selected.handle_masked || selected.code || selected.name);
   if (!response.success) return;
   const resolved = (response.data?.candidates || response.data?.results || []).find((item) => String(item.id) === String(id));
   if (resolved) influencerOptions.value = influencerOptions.value.map((item) => String(item.id) === String(id) ? resolved : item);
@@ -528,7 +528,7 @@ async function openEdit(row) {
     id: row.influencer,
     name: row.influencer_name,
     code: row.influencer_code,
-    handle: row.influencer_handle,
+    handle_masked: row.influencer_handle_masked,
     platform: row.influencer_platform,
     is_blacklisted: row.is_blacklisted
   }];
