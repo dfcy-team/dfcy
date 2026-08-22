@@ -339,6 +339,33 @@ def test_contacts_patch_rejects_replayed_parent_version_without_mutating_rows():
     assert not InfluencerContact.objects.filter(influencer=influencer, value="stale@example.test").exists()
 
 
+def test_stale_profile_patch_cannot_refresh_version_and_overwrite_contacts():
+    tenant, user, client, influencer = _contact_client("profile-cas")
+    stale_version = influencer.updated_at.isoformat()
+
+    first = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {"contacts": [{"channel": "phone", "value": "13800138000", "is_primary": True}]},
+        format="json",
+        HTTP_IF_MATCH=stale_version,
+    )
+    assert first.status_code == 200
+
+    stale_profile = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {},
+        format="json",
+        HTTP_IF_MATCH=stale_version,
+    )
+    assert stale_profile.status_code == 409
+    assert InfluencerContact.objects.filter(
+        influencer=influencer,
+        value="13800138000",
+        is_active=True,
+        is_primary=True,
+    ).exists()
+
+
 def test_contacts_patch_empty_collection_deactivates_existing_rows_without_bulk_update():
     tenant, user, client, influencer = _contact_client("empty")
     contact = InfluencerContact.objects.create(

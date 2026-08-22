@@ -188,7 +188,13 @@ async function save() {
   if (!canManage.value) return;
   if (!form.code.trim() || !form.name.trim() || !form.platform.trim()) return ElMessage.warning('请填写达人编码、名称和平台');
   const wasEditing = Boolean(editing.value); saving.value = true;
-  const response = wasEditing ? await updateInfluencer(editing.value.id, payload(), editing.value.updated_at) : await createInfluencer(payload());
+  const influencerPayload = payload();
+  const profileChanged = Object.keys(influencerPayload).length > 0;
+  const response = wasEditing && !profileChanged
+    ? { success: true, data: { id: editing.value.id, updated_at: editing.value.updated_at } }
+    : (wasEditing
+      ? await updateInfluencer(editing.value.id, influencerPayload, editing.value.updated_at)
+      : await createInfluencer(influencerPayload));
   if (!response?.success) { saving.value = false; return ElMessage.error(response?.message || '达人档案保存失败'); }
   const influencerId = response.data?.id || editing.value?.id;
   const contactsResponse = contactsChanged()

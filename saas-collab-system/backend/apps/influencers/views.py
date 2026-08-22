@@ -204,6 +204,12 @@ class InfluencerDetailView(APIView):
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
         instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        raw_version = request.headers.get("If-Match", "").strip().strip('"')
+        expected_updated_at = parse_datetime(raw_version)
+        if expected_updated_at is None:
+            raise ValidationError({"If-Match": "The current updated_at timestamp is required."})
+        if expected_updated_at != instance.updated_at:
+            raise Conflict({"If-Match": "Influencer was changed by another request."})
         before = {"code": instance.code, "status": instance.status}
         serializer = InfluencerSerializer(instance, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
