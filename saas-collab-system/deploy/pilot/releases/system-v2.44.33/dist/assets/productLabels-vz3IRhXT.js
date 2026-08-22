@@ -1,0 +1,1 @@
+const e=Object.freeze({draft:"草稿",active:"在售",discontinued:"已停产"}),c=Object.freeze({not_listed:"未刊登",on_sale:"销售中",paused:"已暂停",stopped:"已停止"});function n(t){return e[t]||t||"-"}function s(t){return c[t]||t||"-"}export{s as a,n as p};

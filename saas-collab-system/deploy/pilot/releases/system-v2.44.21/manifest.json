@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.21",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-14",
+  "parent_release": "2.44.20",
+  "scope": "optimize only the product master header copy and SKU generation rule guidance",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "frontend_image": "saas-collab-frontend:v2.44.21@sha256:67487a97906824e68f581251f92731615e910a371999ead2d18238b5b8e83af2",
+  "backend_image": "saas-collab-backend:v2.44.19",
+  "frontend_entry": "index-6ipj0GPl.js",
+  "frontend_entry_sha256": "12c3c480d104d3baba16a5f1f645ba7b2fab23a3e09b498e411d06a8b2e146cb",
+  "product_master_bundle": "ProductMasterList-CNP-PTov.js",
+  "product_master_bundle_sha256": "b949b3b4c6bff4d0f59078244d84b2f207475bdf25f3e87c38a3b4b2a26bce82",
+  "product_master_css": "ProductMasterList-C5QdAiAT.css",
+  "product_master_css_sha256": "e6d5d933f82f1a553ea19f6ee6a372ec3a3a70b50671ff9d900b118eacdabe9f",
+  "product_master_source_sha256": "93e123d0903fa3313357a8e8c9423de26e67953ec02a410899d863969a905bb5",
+  "checks": {
+    "targeted_frontend_tests": "10 passed",
+    "frontend_build": "passed",
+    "site_http_status": 200,
+    "product_master_page_http_status": 200,
+    "product_master_bundle_http_status": 200,
+    "product_master_css_http_status": 200,
+    "frontend_container": "running",
+    "backend_container": "running"
+  },
+  "release_notes": "docs/06_release/system_v2.44.21.md"
+}

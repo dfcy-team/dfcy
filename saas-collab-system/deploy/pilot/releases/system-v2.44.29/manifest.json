@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.29",
+  "status": "deployed",
+  "registered_at": "2026-08-15",
+  "parent_release": "2.44.28",
+  "current_deployed_base": "2.44.28",
+  "scope": "extend product detail single/bulk editing fields and align role permission selection with the latest menu architecture",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "router_sha256": "10d9e134611817f433e7553d86c802b6ed0473321f32ab911cc5ed536c0369f6",
+  "main_layout_sha256": "63c2092d2fa1265608cc29ba4ae0fa28245bedc822c081bcc982cad56b135619",
+  "top_level_menu_count": 15,
+  "menu_node_count": 104,
+  "route_capability_count": 102,
+  "top_level_menu_labels": [
+    "工作台",
+    "产品开发",
+    "全球刊登",
+    "经营分析",
+    "经营决策",
+    "达人管理",
+    "流程协同",
+    "业务协同",
+    "RPA协同",
+    "API数据接入",
+    "财务中心",
+    "报表中心",
+    "基础档案",
+    "系统治理",
+    "治理与试点"
+  ],
+  "database_migration_required": false,
+  "build_environment": {
+    "VITE_USE_MOCK": "false",
+    "VITE_API_BASE_URL": ""
+  },
+  "target_frontend_image": "saas-collab-frontend:v2.44.29",
+  "target_backend_image": "saas-collab-backend:v2.44.29",
+  "frontend_index_html_sha256": "ff63acd155eb9212ee9d68e65ea5be27e1ac703f38f02e069b5d15a18fa9aaa7",
+  "frontend_entry": "index-Do5aK0Dt.js",
+  "frontend_entry_sha256": "0721213d977960443e1348c3271bff0c78c33b6341db51ed2f8f470dffae5df6",
+  "product_detail_bundle": "ProductDetailData-KvuZxKPz.js",
+  "product_detail_bundle_sha256": "2016f2039c047dabf01f894cac852f0fe5587ada6982ea38b4b81cab618d7fc0",
+  "product_detail_css": "ProductDetailData-cP3s0Hi3.css",
+  "product_detail_css_sha256": "d34fb04396642de4533c2a4579b3580d4eb1489e0daadb14736c38032333b2c5",
+  "role_permission_bundle": "RolePermissionMatrix-CvrYWEbN.js",
+  "role_permission_bundle_sha256": "3d5263eaf5d20ca7bbc833de95870fc7ab8bd90ed5302a58f302217ef371d9cf",
+  "role_permission_css": "RolePermissionMatrix-B3260y1r.css",
+  "role_permission_css_sha256": "fd1207cb834ecdce4128741ee1bf4e8af499284bd145b72c49bac792b6fa127d",
+  "source_hashes": {
+    "backend_products_serializers": "91938d061f96c818cae068c8e68c9956b28c587c389d502feb8843a796b49614",
+    "backend_products_views": "980955f1fc7652fe2eab603dcf8572b2a4036c6b41eb8b1e8a65a861db00e65f",
+    "backend_product_detail_test": "5992ae426a2a278365aaedfe58bed63ceb53738ac798b545f7a13c1d90cc6cd6",
+    "frontend_product_detail": "9d3b7707e0ea37d5ebfcb33947ca4aaf8c386a08aa52990881032d61cb54ab56",
+    "frontend_role_permission": "b3355e10f34f3c335f9315460fac189cad4fbf64ca0e31839bc11b19957e366c",
+    "frontend_product_detail_test": "44360cd3456033a8bd7b920dba05e8a1ae684710ce886e5d89f2e7a1660c3493",
+    "frontend_ui_p2_test": "2d108af85d5fabe5a5db2ab4738564328cd60641da9b0037c29bab24c05996b6"
+  },
+  "product_detail_contract": {
+    "single_edit_fields": [
+      "product_name",
+      "purchase_price",
+      "is_active",
+      "category_node",
+      "package_weight",
+      "package_volume",
+      "package_length_cm",
+      "package_width_cm",
+      "package_height_cm",
+      "origin_country",
+      "hs_code"
+    ],
+    "bulk_extended_fields": [
+      "package_weight",
+      "package_volume",
+      "package_length_cm",
+      "package_width_cm",
+      "package_height_cm",
+      "origin_country",
+      "hs_code"
+    ],
+    "blank_value_behavior": "does_not_overwrite",
+    "explicit_clear_parameter": "clear_fields",
+    "preview_writes_data": false
+  },
+  "permission_contract": {
+    "catalog_definition_count": 123,
+    "catalog_loading": "all pages with page_size 100",
+    "menu_source": "frontend/src/router/menu.js",
+    "route_capabilities_merged": true,
+    "unmapped_action_permissions_group": "其他操作权限",
+    "save_real_permission_codes_only": true,
+    "administrator_role_protected": true
+  },
+  "scope_guard": {
+    "allowed_pages": [
+      "/products/details",
+      "/system/roles"
+    ],
+    "menu_unchanged": true,
+    "router_unchanged": true,
+    "main_layout_unchanged": true,
+    "models_and_migrations_unchanged": true,
+    "mock_build": false
+  },
+  "checks": {
+    "product_detail_backend_tests": "8 passed",
+    "django_check": "passed",
+    "product_detail_frontend_tests": "6 passed",
+    "role_permission_targeted_tests": "3 passed",
+    "frontend_build": "passed",
+    "git_diff_check": "passed with existing line-ending warnings",
+    "menu_hash_matches_v2_44_28": true,
+    "top_level_menu_structure_matches_v2_44_28": true,
+    "known_unrelated_test_failure": "ui-p2 StoreMasterList platform label source contract",
+    "deployment_performed": true,
+    "runtime_django_check": "passed",
+    "runtime_nginx_check": "passed",
+    "https_pages": "root, products/master, products/details, products/platform-details and system/roles returned 200",
+    "api_health": "200",
+    "protected_api_routes": "products/details and system/permissions returned 401 without authentication (not 404)",
+    "runtime_asset_hashes_match": true,
+    "runtime_menu_labels_match": true,
+    "celery_beat_redis_restarted": false
+  },
+  "deployment": {
+    "deployed_at": "2026-08-15T14:59:40+08:00",
+    "target": "192.168.174.131:8443",
+    "audit_directory": "/home/dfcy01/releases/system-v2.44.29-build-20260815",
+    "backend_image_id": "sha256:2803d532de10a08a76e9ddfff10ed4d305fe35497ad7df1d3a88ee0dfb8436d0",
+    "frontend_image_id": "sha256:681766e8b9af9bcca0132d3a3948dcfa2cf444b686cba17d2ca4553c07cba8fe",
+    "backend_container_id": "b8afaf6e55f98e843449452d059100f86fff28ee8a9e8589082d7bb0b9e54fbd",
+    "frontend_container_id": "ffa2a6ab016e5c1dfa3266e89c8a73205c1553df4bb120d472214743620dbd80",
+    "switch_command_scope": "docker compose up -d --no-deps backend frontend",
+    "database_migration_performed": false,
+    "unchanged_service_container_ids": {
+      "celery": "d4a72e47d72e92f82691bd749c2ba2e46798e5f049da4190aca08187212a3a3d",
+      "celery_beat": "847621107cc4a214024c18d59a01cdba5133ae71638d2d93fb9573fbf22d5d09",
+      "redis": "e9c5d3a028c12d234e121da4d6e794b725625884279ff1062dd6f57c90f35ef7"
+    }
+  },
+  "rollback": {
+    "release": "2.44.28",
+    "frontend_image": "saas-collab-frontend:v2.44.28",
+    "backend_image": "saas-collab-backend:v2.44.28"
+  },
+  "release_notes": "docs/06_release/system_v2.44.29.md"
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.18",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-14",
+  "parent_release": "2.44.17",
+  "scope": "normalize platform product detail SKU matching and import valid rows while reporting invalid rows",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "frontend_image": "saas-collab-frontend:v2.44.16",
+  "backend_image": "saas-collab-backend:v2.44.18@sha256:146b9fa3852289192462561987711403153ef93dab8b0c8093385ad29a55508b",
+  "import_module_sha256": "58b247244f8fb2b5ea039198259e39310d77c57fc26c9e219df789b290d21eb9",
+  "attachment_verification": {
+    "sha256": "0150691787a12388ffbbceeeb9e1db68f40eb36f0fce4f4af09920746957803b",
+    "total": 48746,
+    "valid_before": 35374,
+    "errors_before": 13372,
+    "valid_after": 35461,
+    "errors_after": 13285,
+    "recovered": 87,
+    "duplicate_import_keys": 0
+  },
+  "checks": {
+    "backend_tests_passed": 12,
+    "backend_manage_check_local": "passed",
+    "backend_manage_check_production": "passed",
+    "auth_route_status": 401,
+    "production_attachment_dry_run": "passed"
+  },
+  "release_notes": "docs/06_release/system_v2.44.18.md"
+}

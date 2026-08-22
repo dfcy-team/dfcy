@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.27",
+  "status": "registered-pending-deployment",
+  "registered_at": "2026-08-15",
+  "parent_release": "2.44.26",
+  "scope": "platform product detail pagination display and request behavior only",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "database_migration_required": false,
+  "backend_changed": false,
+  "build_environment": {
+    "VITE_USE_MOCK": "false",
+    "VITE_API_BASE_URL": ""
+  },
+  "target_frontend_image": "saas-collab-frontend:v2.44.27",
+  "target_backend_image": "saas-collab-backend:v2.44.26",
+  "frontend_index_html_sha256": "0b3e9298b3952b51dbbb88a8aa7d749cecae136de1bff741f89f7c7044f76138",
+  "frontend_entry": "index-B0UMwBF5.js",
+  "frontend_entry_sha256": "f545a546bb7e20c82df32349a25a97ad13c5ce14a5dc030a52a68553803d9325",
+  "platform_detail_bundle": "PlatformProductDetailList-DKkK8G4u.js",
+  "platform_detail_bundle_sha256": "4c0bccb0b2dab19169590c31732c0b95eaa6dde3ebaee04425d4c98181456468",
+  "platform_detail_css": "PlatformProductDetailList-BN-1_HjP.css",
+  "platform_detail_css_sha256": "ef306868cf64449230081a158431b2bb07a65b494669447f16a220f40213eeec",
+  "source_hashes": {
+    "frontend_platform_detail": "a27da5dd41b85817a046a279e3510b34f38bf946c2afd7cb7360ea499acdc82b",
+    "frontend_platform_details_api": "fa1e58e4a3534dd142ae10432c40c0eb52590e47ac18de8326dcbaf1f1a3db57",
+    "frontend_platform_detail_test": "73b408c57b586c2fee72f8a10e87efdd29e48436303724035ed48e4da8e9f0a2"
+  },
+  "scope_guard": {
+    "allowed_page": "/products/platform-details",
+    "menu_unchanged": true,
+    "router_unchanged": true,
+    "main_layout_unchanged": true,
+    "backend_unchanged": true,
+    "mock_build": false
+  },
+  "checks": {
+    "platform_pagination_contract_tests": "4 passed",
+    "frontend_build": "passed",
+    "git_diff_check": "passed",
+    "menu_hash_unchanged": true,
+    "deployment_performed": false,
+    "known_unrelated_test_failure": "ui-p2 store platform label source contract"
+  },
+  "rollback": {
+    "release": "2.44.26",
+    "frontend_image": "saas-collab-frontend:v2.44.26",
+    "backend_image": "saas-collab-backend:v2.44.26"
+  },
+  "release_notes": "docs/06_release/system_v2.44.27.md"
+}

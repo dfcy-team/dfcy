@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.13",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-13",
+  "parent_release": "2.44.12",
+  "scope": "platform product detail import supports either legacy SKU or new SKU; new SKU wins",
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "menu_changed": false,
+  "frontend_bundle_entry": "frontend/dist/assets/index-CoowVWqQ.js",
+  "frontend_bundle_sha256": "668fa25da01674707466b33c37a28e31ed1ad9c86ea99cea09b22542604b76c3",
+  "frontend_image": "saas-collab-frontend:v2.44.13@sha256:3c93ffc2beb80b17d1f1151c189347c6927fc0ddc3663752c9390b8fc080951b",
+  "backend_image": "saas-collab-backend:v2.44.8@sha256:a6a41bfb585454b844376ba770ef4695c27ac7ec1d8dcfadcfeca729535fdb13",
+  "release_notes": "docs/06_release/system_v2.44.13.md"
+}

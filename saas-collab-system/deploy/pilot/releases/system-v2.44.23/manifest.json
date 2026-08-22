@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.23",
+  "status": "registered-pending-deployment",
+  "registered_at": "2026-08-14",
+  "parent_release": "2.44.22",
+  "scope": "upgrade only product detail data category navigation, incremental legacy import, SKU naming, row actions and active status",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "target_frontend_image": "saas-collab-frontend:v2.44.23",
+  "target_backend_image": "saas-collab-backend:v2.44.23",
+  "database_migration_required": false,
+  "frontend_entry": "index-BMTO0khG.js",
+  "frontend_entry_sha256": "5b4dbf1f147bfdeae5284cb05bdb12feb5c97d28bde2b2c35e9deb0cdbcddd46",
+  "product_detail_bundle": "ProductDetailData-BIynum51.js",
+  "product_detail_bundle_sha256": "95c30dd48184b7ccde925e380a8b1da59086f94e70d855babe9ffe0050e79bf4",
+  "product_detail_css": "ProductDetailData-B8d23oU0.css",
+  "product_detail_css_sha256": "a50dae2fd861a27c9317a699eeb428955e443a4d8c3d5eb87e0b58027ab72989",
+  "product_detail_source_sha256": "bd142f9acbaabf3d47cf650c3e45e87f7afb3b18eab5a014252d3d26397dfb16",
+  "products_api_source_sha256": "908e825b4c37df489adbf0280dab0d5b637be43c9a312e7e80ecbebc6a1b4318",
+  "backend_views_sha256": "3f5dbe385b4b7204d52ca9dddbb14bb4c64b13557f6da9cedf2ca2a2f0ae548f",
+  "backend_serializers_sha256": "0b75100047bb7c0a685c788e58adff5e929f012e2659eac6b8e2a75422a9836f",
+  "backend_urls_sha256": "918bca0cd0e1cc35d4750b858f223e7ae333f2cc619b5467667fd63ccdbaa1a4",
+  "checks": {
+    "targeted_frontend_tests": "13 passed",
+    "targeted_backend_tests": "10 passed",
+    "frontend_build": "passed",
+    "django_check": "passed",
+    "python_compile": "passed"
+  },
+  "release_notes": "docs/06_release/system_v2.44.23.md"
+}

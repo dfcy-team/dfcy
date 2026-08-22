@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.8",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-13",
+  "parent_release": "2.44.7",
+  "parent_commit": "76ba2c151efa59c4a3a8f153e2d9ca04fd0f8a0e",
+  "menu_baseline": "V2.44.7; first-level order unchanged",
+  "authorized_changes": [
+    "master-data/country-information",
+    "master-data/platform-product-details",
+    "table-display-fix",
+    "api-base-url-fix",
+    "dynamic-store-platform-options",
+    "backend-independent-lazada-temu-types"
+  ],
+  "frontend_image": "saas-collab-frontend:v2.44.8@sha256:15a9fb4452afec69801457d1e12a64fddf52bcea0913253e02661dcf3fe60b74",
+  "backend_image": "saas-collab-backend:v2.44.8@sha256:070722258a836db97aab598e1bc402cad72ea34b235d141b3ee51d61a0401e47",
+  "migration_sha256": "pending-approval",
+  "release_commit": "pending-approval",
+  "release_notes": "docs/06_release/system_v2.44.8.md"
+}

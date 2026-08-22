@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.16",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-14",
+  "parent_release": "2.44.15",
+  "scope": "deploy only the product detail data page and its tenant-scoped collection API",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "frontend_entry": "index-BGEaSsQ3.js",
+  "frontend_entry_sha256": "e19e1c83f151cb4cb607e2771b4237827b6c04dce9d191643c5b030cc5950dbc",
+  "product_detail_bundle": "ProductDetailData-_IH1ASm5.js",
+  "product_detail_bundle_sha256": "0b4bae93bb95ae23e65aa59549352fa92b77c660a54fb6dcac06c4f6c89ab249",
+  "frontend_image": "saas-collab-frontend:v2.44.16@sha256:ad0221f7e96ad5c7e667f0be95a78c1a0f91e48e87eb72091b54ed361f81de22",
+  "backend_image": "saas-collab-backend:v2.44.16@sha256:aaed8026846cb63932de00f342f007c78d87c18e245fb0b25750b8cb9a9963fa",
+  "checks": {
+    "frontend_build": "passed",
+    "backend_manage_check": "passed",
+    "site_http_status": 200,
+    "product_detail_page_http_status": 200,
+    "unauthenticated_product_detail_api_status": 401
+  },
+  "release_notes": "docs/06_release/system_v2.44.16.md"
+}

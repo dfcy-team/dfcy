@@ -1,0 +1,1 @@
+import{s as i,h as s}from"./index-XzChYA1L.js";const e=()=>i({status:"mock",module:"pricing.prices",items:[{sku:"MOCK-SKU-001",currency:"USD",suggested_price:"0.00",approval_status:"pending"}]}),t=()=>s(e,"pricing.prices"),p=(c=1)=>s(e,`pricing.prices.detail:${c}`);export{p as a,t as f};

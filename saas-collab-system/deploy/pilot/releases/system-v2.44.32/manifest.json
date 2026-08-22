@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.32",
+  "status": "deployed",
+  "registered_at": "2026-08-17",
+  "parent_release": "2.44.31",
+  "current_deployed_base": "2.44.31",
+  "scope": "add Developer A sales-management frontend shell to the V2.44.31 VM menu baseline and seed its permission catalog",
+  "functional_boundary": "seven pending frontend placeholder pages only; no sales business models, APIs, or live sales data",
+  "menu_changed": true,
+  "parent_menu_sha256": "0dd6ecd67bd874bc97322f5e7d3d4cdbbbb3f71e4897724d69ad07d09f0b611a",
+  "menu_sha256": "a627102d58d29eb5db7cea5d92d82000137193efb25ba5396ad470769a872071",
+  "parent_router_sha256": "96edff0b40945180d2e4f3fda19ca47a7aa12de61512c497fb45ea24cbf9a98d",
+  "router_sha256": "a4fd1fd8ac188be19479d702b7673a7a8968881a00b2f227f606f605ca1d6aee",
+  "parent_main_layout_sha256": "63c2092d2fa1265608cc29ba4ae0fa28245bedc822c081bcc982cad56b135619",
+  "main_layout_sha256": "63c2092d2fa1265608cc29ba4ae0fa28245bedc822c081bcc982cad56b135619",
+  "top_level_menu_count": 16,
+  "menu_node_count": 113,
+  "route_capability_count": 110,
+  "authorized_menu_addition": {
+    "position": "between 经营决策 and 达人管理",
+    "label": "销售管理",
+    "children": [
+      {"path": "/sales-management/overview", "label": "销售总览", "permissions": ["sales_management.view"]},
+      {"path": "/sales-management/orders", "label": "销售订单", "permissions": ["sales_management.orders.view"]},
+      {"path": "/sales-management/returns", "label": "退款退货", "permissions": ["sales_management.returns.view"]},
+      {"path": "/sales-management/stores", "label": "门店销售", "permissions": ["sales_management.stores.view"]},
+      {"path": "/sales-management/skus", "label": "SKU销售", "permissions": ["sales_management.skus.view"]},
+      {"path": "/sales-management/exports", "label": "销售明细导出", "permissions": ["sales_management.export"]},
+      {"path": "/sales-management/data-quality", "label": "数据同步与质量", "permissions": ["sales_management.data_quality.view", "sales_management.sync.view"]}
+    ]
+  },
+  "database_migration_required": true,
+  "database_migrations": [
+    {
+      "app": "permissions",
+      "name": "0030_seed_sales_management_permissions",
+      "sha256": "e32c5f3b73d8c1504f5b32598895c222f32337560eae9198c55423c80ace14c7",
+      "depends_on": "permissions.0029_sync_development_product_archive_permission_metadata"
+    }
+  ],
+  "permission_codes": [
+    "sales_management.view",
+    "sales_management.orders.view",
+    "sales_management.returns.view",
+    "sales_management.stores.view",
+    "sales_management.skus.view",
+    "sales_management.export",
+    "sales_management.data_quality.view",
+    "sales_management.sync.view"
+  ],
+  "image_source_whitelist": {
+    "backend": [
+      {"path": "backend/apps/permissions/catalog.py", "sha256": "4e7ab91fecb41794178a2c8872dab8c094891caf60219ca2ccfdc5410b8feb1a"},
+      {"path": "backend/apps/permissions/migrations/0030_seed_sales_management_permissions.py", "sha256": "e32c5f3b73d8c1504f5b32598895c222f32337560eae9198c55423c80ace14c7"}
+    ],
+    "frontend": [
+      {"path": "frontend/src/router/menu.js", "sha256": "a627102d58d29eb5db7cea5d92d82000137193efb25ba5396ad470769a872071"},
+      {"path": "frontend/src/router/index.js", "sha256": "a4fd1fd8ac188be19479d702b7673a7a8968881a00b2f227f606f605ca1d6aee"},
+      {"path": "frontend/src/views/sales-management/SalesOverview.vue", "sha256": "3ef9341f75214557c9146ba29d0d991e42b60a5c2b915b9102aba53047ec4b12"},
+      {"path": "frontend/src/views/sales-management/SalesOrderList.vue", "sha256": "a492800c54a2925388669c64a405e4e82ddc25065623e0bbab2095d516631bd3"},
+      {"path": "frontend/src/views/sales-management/SalesReturnList.vue", "sha256": "e5257185bdd8ba5cd943e129279606f5c42a56a765b7ca5832a46d02e9b3ccc2"},
+      {"path": "frontend/src/views/sales-management/StoreSalesList.vue", "sha256": "d90307037ae5935d46cc3532a53ec4bbefb2eb6618a78cc58e2bd19b96922b3c"},
+      {"path": "frontend/src/views/sales-management/SkuSalesList.vue", "sha256": "8fbcef5c49f91a793d0a445250fbb4bc10821cb8e2ef515fef796fd0615e465f"},
+      {"path": "frontend/src/views/sales-management/SalesExportList.vue", "sha256": "9988cf4434026990003e4a925083029432398bf18293cdef781762ff8b916373"},
+      {"path": "frontend/src/views/sales-management/SalesDataQualityList.vue", "sha256": "58a979a3cde36e2850b303f5daa53b5d1e7c5a4cb600041a8104fff0314af582"}
+    ]
+  },
+  "build_environment": {"VITE_USE_MOCK": "false", "VITE_API_BASE_URL": ""},
+  "target_frontend_image": "saas-collab-frontend:v2.44.32",
+  "target_backend_image": "saas-collab-backend:v2.44.32",
+  "frontend_index_html_sha256": "2d1ada97e2a921e6f5a565957cf3ffeea748c7c800f8fd1a0328c359bf0f1575",
+  "frontend_entry": "index-C_Tr7WJt.js",
+  "frontend_entry_sha256": "09f9c8e536c117c27ec857625f08eb121c7aef3dea9332b1ad278d0da237f283",
+  "checks": {
+    "frontend_sales_tests": "3 passed",
+    "backend_permission_tests": "5 passed",
+    "django_check": "passed",
+    "makemigrations_check": "no changes detected",
+    "frontend_build": "passed",
+    "mock_build": false,
+    "menu_structure": "16 top-level groups, 113 total nodes, 110 route capabilities",
+    "main_layout_unchanged": true,
+    "deployment_performed": true,
+    "runtime_django_check": "passed",
+    "runtime_nginx_check": "passed",
+    "runtime_migration": "permissions.0030 applied",
+    "runtime_sales_permissions": "8 permission rows present; both active administrator roles have all 8 codes",
+    "runtime_asset_hashes_match": true,
+    "runtime_menu_structure": "16 top-level groups, 113 total nodes, 110 route capabilities; only 销售管理 and its seven children were added",
+    "runtime_role_permission_matrix": "full permission pagination and menu/route grouping tests passed; sales nodes and exact permission filters verified",
+    "https_pages": "root, system roles and all seven sales-management routes returned 200",
+    "api_health": "200",
+    "celery_beat_redis_restarted": false
+  },
+  "rollback": {
+    "release": "2.44.31",
+    "frontend_image": "saas-collab-frontend:v2.44.31",
+    "backend_image": "saas-collab-backend:v2.44.31"
+  },
+  "deployment": {
+    "deployed_at": "2026-08-17T15:11:52+08:00",
+    "target": "192.168.174.131:8443",
+    "audit_directory": "/home/dfcy01/releases/system-v2.44.32-build-20260817",
+    "database_backup": "pre-migration-v2.44.32.sql.gz",
+    "database_backup_sha256": "c130c93ced1aaa6d441ec9e35ce4e7f8183f3a714a9585cd8a5ea3221c858f98",
+    "database_backup_validation": "gzip integrity passed",
+    "release_archive_sha256": "df0b2a4cf5d1a2449b04c9393d9f12004c15471948cda21de0cbabc97cba1ba4",
+    "backend_image_id": "sha256:b0d1063da500aa90b23ef8305587beb1ac007b155d1b4b5e9d936c4e0626f952",
+    "frontend_image_id": "sha256:f4ca9d00f3668408547a3503fb2a9a51a02651e6c290d0507e0dd4f2303eb922",
+    "backend_container_id": "864518c99d7221f007b123bb782adac60fac91689037a295a8cd446fef25eaaf",
+    "frontend_container_id": "80f19bb7c448897299634d52b851a9205944135d9c6ff2b7bc0071b72d498a88",
+    "switch_command_scope": "docker compose up -d --no-deps backend frontend",
+    "unchanged_service_container_ids": {
+      "celery": "d4a72e47d72e92f82691bd749c2ba2e46798e5f049da4190aca08187212a3a3d",
+      "celery_beat": "847621107cc4a214024c18d59a01cdba5133ae71638d2d93fb9573fbf22d5d09",
+      "redis": "e9c5d3a028c12d234e121da4d6e794b725625884279ff1062dd6f57c90f35ef7"
+    }
+  },
+  "release_notes": "docs/06_release/system_v2.44.32.md"
+}

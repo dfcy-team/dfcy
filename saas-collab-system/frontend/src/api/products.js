@@ -24,8 +24,27 @@ export const fetchProductMasterDetail = (id = 1) =>
 export const fetchProductSkuList = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/skus/', params }, mockProductSkuList, 'products.skus');
 
+export const fetchProductDetailList = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/internal/products/details/', params }, [], 'products.details');
+export const bulkUpdateProductDetails = (data) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/products/details/bulk-update/', data },
+  {},
+  'products.details.bulk_update'
+);
+export const bulkCacheProductImages = (data) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/products/details/images/bulk-cache/', data, timeout: 120000 },
+  {},
+  'products.details.images.bulk_cache'
+);
+
 export const createProductSpu = (data) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/products/spus/', data }, {}, 'products.spus.create'
+);
+export const updateProductSpu = (id, data) => requestWithMockFallback(
+  { method: 'patch', url: `/api/internal/products/spus/${id}/`, data }, {}, 'products.spus.update'
+);
+export const bulkUpdateProductSpus = (data) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/products/spus/bulk-update/', data }, {}, 'products.spus.bulk_update'
 );
 export const createProductSku = (data) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/products/skus/', data }, {}, 'products.skus.create'
@@ -55,7 +74,11 @@ export const updateProductAttribute = (id, data) => requestWithMockFallback({ me
 export const deleteProductAttribute = (id) => requestWithMockFallback({ method: 'delete', url: `${dictionaryApi('attributes')}${id}/` }, {}, 'products.attributes.delete');
 
 export const fetchLegacyProductItems = (params = {}) => requestWithMockFallback({ method: 'get', url: dictionaryApi('legacy-items'), params }, [], 'products.legacy');
-export const importLegacyProductItems = (csvText) => requestWithMockFallback({ method: 'post', url: dictionaryApi('legacy-items'), data: { csv_text: csvText } }, {}, 'products.legacy.import');
+export const importLegacyProductItems = (csvText) => requestWithMockFallback(
+  { method: 'post', url: dictionaryApi('legacy-items'), data: { csv_text: csvText }, timeout: 120000 },
+  {},
+  'products.legacy.import'
+);
 export const updateLegacyProductItem = (id, data) => requestWithMockFallback({ method: 'patch', url: `${dictionaryApi('legacy-items')}${id}/`, data }, {}, 'products.legacy.update');
 export const generateLegacyProductItem = (id) => requestWithMockFallback({ method: 'post', url: `${dictionaryApi('legacy-items')}${id}/generate/` }, {}, 'products.legacy.generate');
 export const createBundleComponent = (data) => requestWithMockFallback({ method: 'post', url: dictionaryApi('bundle-components'), data }, {}, 'products.bundle_components.create');

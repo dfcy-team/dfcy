@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.19",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-14",
+  "parent_release": "2.44.18",
+  "scope": "bound platform product detail upserts, skip unchanged rows, and paginate the collection endpoint",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "frontend_image": "saas-collab-frontend:v2.44.16",
+  "backend_image": "saas-collab-backend:v2.44.19@sha256:14bd9da9f8fba3ec72a66cd1d46f1fef9f0161e7abe76550744e4139a74c38fa",
+  "import_module_sha256": "656f3d649dc9c73f24bb126c37cf4cb66e668c94782cc6fbc9277b6ff5d32b05",
+  "listings_views_sha256": "70e7c8c697c6448c52db549111fc1f30f541e9aca8521b5a30e6c06bcac93a93",
+  "production_verification": {
+    "database_rows": 36000,
+    "attachment_total": 48746,
+    "valid": 35461,
+    "unchanged": 35461,
+    "skipped": 13285,
+    "rollback_elapsed_seconds": 9.761,
+    "rows_before_rollback_test": 36000,
+    "rows_after_rollback_test": 36000,
+    "page_count": 36000,
+    "page_results": 20,
+    "page_response_bytes": 15395
+  },
+  "checks": {
+    "backend_tests_passed": 14,
+    "backend_manage_check_local": "passed",
+    "backend_manage_check_production": "passed",
+    "production_import_rollback_test": "passed",
+    "production_pagination_test": "passed"
+  },
+  "release_notes": "docs/06_release/system_v2.44.19.md"
+}

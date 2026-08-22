@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.30",
+  "status": "deployed",
+  "registered_at": "2026-08-15",
+  "parent_release": "2.44.29",
+  "current_deployed_base": "2.44.29",
+  "scope": "add the development product archive lifecycle to the existing product development module",
+  "menu_changed": true,
+  "menu_change_scope": "one child under 产品开发: 开发产品档案",
+  "parent_menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "menu_sha256": "0dd6ecd67bd874bc97322f5e7d3d4cdbbbb3f71e4897724d69ad07d09f0b611a",
+  "parent_router_sha256": "10d9e134611817f433e7553d86c802b6ed0473321f32ab911cc5ed536c0369f6",
+  "router_sha256": "96edff0b40945180d2e4f3fda19ca47a7aa12de61512c497fb45ea24cbf9a98d",
+  "main_layout_sha256": "63c2092d2fa1265608cc29ba4ae0fa28245bedc822c081bcc982cad56b135619",
+  "top_level_menu_count": 15,
+  "menu_node_count": 105,
+  "route_capability_count": 103,
+  "authorized_menu_addition": {
+    "parent": "产品开发",
+    "path": "/development/projects/archives",
+    "label": "开发产品档案",
+    "permissions": [
+      "development.product_archive.view",
+      "development.project.view"
+    ]
+  },
+  "database_migration_required": true,
+  "database_migrations": [
+    "development.0002_product_sales_summary_view",
+    "development.0004_development_product_archives",
+    "permissions.0028_seed_development_product_archive_permissions"
+  ],
+  "database_migration_execution": {
+    "development.0002_product_sales_summary_view": "fake-applied because the production database account has no CREATE VIEW privilege; the view remains absent as in V2.44.29",
+    "development.0004_development_product_archives": "applied",
+    "permissions.0028_seed_development_product_archive_permissions": "applied",
+    "unrelated_purchasing.0005_shipping_route": "not applied"
+  },
+  "permission_codes": [
+    "development.product_archive.view",
+    "development.product_archive.manage",
+    "development.product_archive.confirm"
+  ],
+  "build_environment": {
+    "VITE_USE_MOCK": "false",
+    "VITE_API_BASE_URL": ""
+  },
+  "target_frontend_image": "saas-collab-frontend:v2.44.30",
+  "target_backend_image": "saas-collab-backend:v2.44.30",
+  "frontend_index_html_sha256": "863592a2a7229e980117c69a560091cb9ff4fcb7b9f61daea34198607e00593e",
+  "frontend_entry": "index-B7iTp8hS.js",
+  "frontend_entry_sha256": "8cc3cecede0d5c1839e012d7571abc52a02d23d106202b6191df0cb5e9c04662",
+  "development_archive_bundle": "DevelopmentProductArchiveList-Cm1CqhOV.js",
+  "development_archive_bundle_sha256": "35a28945be3bfbad047f9d1e2cf0df1e31ebe24b938228f1c425e30081a8772c",
+  "development_archive_css": "DevelopmentProductArchiveList-CyCJPyBb.css",
+  "development_archive_css_sha256": "c68ec729b9dafe5d5a023e84a9c57df045bcee166ee8272bf2523a0c811c467d",
+  "source_hashes": {
+    "backend_development_models": "dfbf4631b0eb68ae5242c3c80e9aa32c189868bd42fc2f44823d5c2c7fb1af4f",
+    "backend_development_permissions": "b71cd8d1ee88cc180b472d0d06bbdcef4ab49547da3b37c25248215ad9089898",
+    "backend_development_serializers": "e06b36f868c509b215d08edc656191c7f734de5f3d521fa42fbdc0127d34c0e6",
+    "backend_development_services": "01ded1e7be7833e691a957cfde4c253adcce35b08dd8f037a546dc61bb83e284",
+    "backend_development_views": "15705db1e70454551b81e7104dec9e01d19969b8f2f1aa77fb68513345380b71",
+    "backend_development_urls": "f1a14973e7b294a6d1458cd7885a0163fcfc1719272884d8df410bf27dc18b28",
+    "backend_development_view_migration": "37c8e29513549816293652f2f659f8cda3eb3ea49156e6cfeea793a402bc4182",
+    "backend_development_migration": "f8001f9982b2dd7a495d5b540f4203f3a2e79fcd356c2f250acb348aecf0ff42",
+    "backend_permission_catalog": "c555b4ce0390f3ce7629ae58535bdceb9d8751e4965adc135a11bb54fb4e3b1d",
+    "backend_permission_migration": "fbaf2e0d688f8bca4e3d081d109e983907173c171ebfacf79ad76aa586cc7d99",
+    "frontend_development_api": "57af68b620710b554326c29aa331689daa0f4adcfa35ed610d61e2b74de20e15",
+    "frontend_development_archive": "50a68d840a8644beaf4a993821345ee7d5a504cb0371f2ce4b70deec61580e23"
+  },
+  "checks": {
+    "backend_tests": "8 passed",
+    "frontend_tests": "5 passed",
+    "django_check": "passed",
+    "makemigrations_check": "no changes detected",
+    "mysql_view_migration_atomicity": "fixed with atomic=false after pre-deployment gate blocked the original migration",
+    "frontend_build": "passed",
+    "parent_menu_reconstruction_hash_matches": true,
+    "parent_router_reconstruction_hash_matches": true,
+    "top_level_menu_structure_unchanged": true,
+    "main_layout_unchanged": true,
+    "mock_build": false,
+    "deployment_performed": true,
+    "runtime_django_check": "passed",
+    "runtime_nginx_check": "passed",
+    "runtime_migrations": "development 0004 and permissions 0028 applied; development 0002 fake-applied",
+    "runtime_permission_codes": 3,
+    "https_pages": "root, development archives, products/master, products/details, products/platform-details and system/roles returned 200",
+    "api_health": "200",
+    "protected_archive_api": "403 without authentication (route exists and is not 404)",
+    "runtime_asset_hashes_match": true,
+    "runtime_menu_labels_match": true,
+    "celery_beat_redis_restarted": false
+  },
+  "scope_guard": {
+    "allowed_page": "/development/projects/archives",
+    "allowed_menu_parent": "产品开发",
+    "other_menu_nodes_unchanged": true,
+    "other_routes_unchanged": true,
+    "main_layout_unchanged": true
+  },
+  "deployment": {
+    "deployed_at": "2026-08-15T18:17:51+08:00",
+    "target": "192.168.174.131:8443",
+    "audit_directory": "/home/dfcy01/releases/system-v2.44.30-build-20260815",
+    "database_backup": "pre-migration-v2.44.30.sql.gz",
+    "database_backup_sha256": "20f947aed20a7677154f34b86b72100f2a9c83dd4fd46ff5b92c1155d429e080",
+    "backend_image_id": "sha256:57a785208d1c108e0f974e67c65c3a7c57491bae1a33fa1f935afb92598dc000",
+    "frontend_image_id": "sha256:450f0340fe5577fe5f11f566d664a3dc57b414c926572b07d05637b8827c4f01",
+    "backend_container_id": "d026f79b6ab56ef3813d4a31cd9d44ea3113742783c34660cddb210f15283b2f",
+    "frontend_container_id": "98667771fce66a5116c9b8c1dc28af3ef79cdde684de603cbbc33b44fbbd6db7",
+    "switch_command_scope": "docker compose up -d --no-deps backend frontend",
+    "unchanged_service_container_ids": {
+      "celery": "d4a72e47d72e92f82691bd749c2ba2e46798e5f049da4190aca08187212a3a3d",
+      "celery_beat": "847621107cc4a214024c18d59a01cdba5133ae71638d2d93fb9573fbf22d5d09",
+      "redis": "e9c5d3a028c12d234e121da4d6e794b725625884279ff1062dd6f57c90f35ef7"
+    }
+  },
+  "rollback": {
+    "release": "2.44.29",
+    "frontend_image": "saas-collab-frontend:v2.44.29",
+    "backend_image": "saas-collab-backend:v2.44.29",
+    "migration_policy": "application rollback is compatible with additive archive tables and permission rows"
+  },
+  "release_notes": "docs/06_release/system_v2.44.30.md"
+}

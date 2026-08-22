@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.9",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-13",
+  "parent_release": "2.44.7",
+  "menu_baseline_commit": "76ba2c151efa59c4a3a8f153e2d9ca04fd0f8a0e",
+  "creator_feature_commit": "938986e",
+  "scope": ["creator-management-reviewed", "master-data-authorized-increments"],
+  "menu_policy": "V2.44.7 structure unchanged; only two authorized master-data entries added",
+  "frontend_image": "saas-collab-frontend:v2.44.9@sha256:4421905b19d44aace1acdcaf0b3cb91badac7c47ef71f6510a4dd78c7e0b7705",
+  "backend_image": "saas-collab-backend:v2.44.8@sha256:070722258a836db97aab598e1bc402cad72ea34b235d141b3ee51d61a0401e47",
+  "release_notes": "docs/06_release/system_v2.44.9.md"
+}

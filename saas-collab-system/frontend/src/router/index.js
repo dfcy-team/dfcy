@@ -15,11 +15,19 @@ const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList
 const LifecycleReviewHistory = () => import('../views/lifecycle/LifecycleReviewHistory.vue');
 const ClearanceRequestList = () => import('../views/lifecycle/ClearanceRequestList.vue');
 const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
+const SalesOverview = () => import('../views/sales-management/SalesOverview.vue');
+const SalesOrderList = () => import('../views/sales-management/SalesOrderList.vue');
+const SalesReturnList = () => import('../views/sales-management/SalesReturnList.vue');
+const StoreSalesList = () => import('../views/sales-management/StoreSalesList.vue');
+const SkuSalesList = () => import('../views/sales-management/SkuSalesList.vue');
+const SalesExportList = () => import('../views/sales-management/SalesExportList.vue');
+const SalesDataQualityList = () => import('../views/sales-management/SalesDataQualityList.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
 const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
 const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
+const PlatformProductDetailList = () => import('../views/masterdata/PlatformProductDetailList.vue');
 const ProductDictionarySettings = () => import('../views/products/ProductDictionarySettings.vue');
 const ProductBundleManager = () => import('../views/products/ProductBundleManager.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
@@ -48,6 +56,7 @@ const ListingMappingList = () => import('../views/listings/ListingMappingList.vu
 const ListingLogList = () => import('../views/listings/ListingLogList.vue');
 const ListingExceptionList = () => import('../views/listings/ListingExceptionList.vue');
 const DevelopmentWorkspace = () => import('../views/development/DevelopmentWorkspace.vue');
+const DevelopmentProductArchiveList = () => import('../views/development/DevelopmentProductArchiveList.vue');
 const PriceList = () => import('../views/pricing/PriceList.vue');
 const PriceDetail = () => import('../views/pricing/PriceDetail.vue');
 const RPATaskList = () => import('../views/rpa/RPATaskList.vue');
@@ -88,6 +97,7 @@ const UserDirectory = () => import('../views/system/UserDirectory.vue');
 const RolePermissionMatrix = () => import('../views/system/RolePermissionMatrix.vue');
 const SecurityOperations = () => import('../views/system/SecurityOperations.vue');
 const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.vue');
+const CountrySiteMasterList = () => import('../views/masterdata/CountrySiteMasterList.vue');
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
@@ -128,6 +138,13 @@ const routes = [
       { path: 'lifecycle/history', component: LifecycleReviewHistory },
       { path: 'lifecycle/clearance-requests', component: ClearanceRequestList },
       { path: 'alerts/business', component: BusinessAlertList },
+      { path: 'sales-management/overview', component: SalesOverview },
+      { path: 'sales-management/orders', component: SalesOrderList },
+      { path: 'sales-management/returns', component: SalesReturnList },
+      { path: 'sales-management/stores', component: StoreSalesList },
+      { path: 'sales-management/skus', component: SkuSalesList },
+      { path: 'sales-management/exports', component: SalesExportList },
+      { path: 'sales-management/data-quality', component: SalesDataQualityList },
       { path: 'workflow/approvals', component: ApprovalList },
       { path: 'workflow/approvals/:id', component: ApprovalDetail },
       { path: 'workflow/exceptions', component: ExceptionList },
@@ -157,6 +174,7 @@ const routes = [
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
       { path: 'products/details', component: ProductDetailData },
+      { path: 'products/platform-details', component: PlatformProductDetailList },
       { path: 'products/categories', component: ProductDictionarySettings, props: { mode: 'category' } },
       { path: 'products/colors', component: ProductDictionarySettings, props: { mode: 'color' } },
       { path: 'products/attributes', component: ProductDictionarySettings, props: { mode: 'attribute' } },
@@ -192,6 +210,7 @@ const routes = [
       { path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } },
       { path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } },
       { path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } },
+      { path: 'development/projects/archives', component: DevelopmentProductArchiveList },
       { path: 'development/costs', component: DevelopmentWorkspace, props: { mode: 'costs' } },
       { path: 'development/sales', component: DevelopmentWorkspace, props: { mode: 'sales' } },
       { path: 'development/retrospectives', component: DevelopmentWorkspace, props: { mode: 'retrospectives' } },
@@ -237,6 +256,7 @@ const routes = [
       { path: 'system/roles', component: RolePermissionMatrix },
       { path: 'system/security-operations', component: SecurityOperations },
       { path: 'master-data/platforms', component: PlatformMasterList },
+      { path: 'master-data/sites', component: CountrySiteMasterList },
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },

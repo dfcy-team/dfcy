@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.31",
+  "status": "deployed",
+  "registered_at": "2026-08-15",
+  "parent_release": "2.44.30",
+  "current_deployed_base": "2.44.30",
+  "scope": "extend the development product archive with tenant-scoped platform/site/store references, manual development SPU and three-segment trial SKU codes, and distinct official SPU/SKU mapping after confirmation",
+  "menu_changed": false,
+  "parent_menu_sha256": "0dd6ecd67bd874bc97322f5e7d3d4cdbbbb3f71e4897724d69ad07d09f0b611a",
+  "menu_sha256": "0dd6ecd67bd874bc97322f5e7d3d4cdbbbb3f71e4897724d69ad07d09f0b611a",
+  "parent_router_sha256": "96edff0b40945180d2e4f3fda19ca47a7aa12de61512c497fb45ea24cbf9a98d",
+  "router_sha256": "96edff0b40945180d2e4f3fda19ca47a7aa12de61512c497fb45ea24cbf9a98d",
+  "parent_main_layout_sha256": "63c2092d2fa1265608cc29ba4ae0fa28245bedc822c081bcc982cad56b135619",
+  "main_layout_sha256": "63c2092d2fa1265608cc29ba4ae0fa28245bedc822c081bcc982cad56b135619",
+  "top_level_menu_count": 15,
+  "menu_node_count": 105,
+  "route_capability_count": 103,
+  "authorized_scope": {
+    "page": "/development/projects/archives",
+    "features": [
+      "tenant-enabled platform/country-site/store master-data selection with PlatformMaster/StoreMaster references, site snapshot compatibility, and platform/site/store validation",
+      "manual development SPU code normalized to NFKC uppercase A-Z/0-9 and tenant-unique",
+      "deterministic three-segment development SKU: development SPU-color-specification, with STD when no specification",
+      "draft/not-listed trial ProductSPU/ProductSKU generation with idempotent retries",
+      "confirmed archive formalization creates separate official ProductSPU/ProductSKU and preserves trial/formal mapping"
+    ],
+    "permission_codes": [
+      "development.product_archive.view",
+      "development.product_archive.manage",
+      "development.product_archive.confirm"
+    ]
+  },
+  "database_migration_required": true,
+  "database_migrations": [
+    {
+      "app": "development",
+      "name": "0004_development_product_archives",
+      "sha256": "f8001f9982b2dd7a495d5b540f4203f3a2e79fcd356c2f250acb348aecf0ff42",
+      "depends_on": "development.0002_product_sales_summary_view (already registered by V2.44.30)"
+    },
+    {
+      "app": "development",
+      "name": "0005_product_archive_trial_products_and_master_data",
+      "sha256": "1e0b012a72714157a0a8165ea23b9ffa040b99345d67504158e8e8f50e13e97f",
+      "depends_on": "development.0004_development_product_archives, masterdata.0001_initial, products.0013_productsku_product_name"
+    },
+    {
+      "app": "development",
+      "name": "0006_development_product_archive_codes",
+      "sha256": "ca687b63ceec9736b0f4bd85fdcf8b2334a7eeb3aabc3af69d588d629f221d4b",
+      "depends_on": "development.0005_product_archive_trial_products_and_master_data, products.0013_productsku_product_name"
+    },
+    {
+      "app": "permissions",
+      "name": "0028_seed_development_product_archive_permissions",
+      "sha256": "fbaf2e0d688f8bca4e3d081d109e983907173c171ebfacf79ad76aa586cc7d99",
+      "depends_on": "permissions.0027_sync_tenant_administrator_permissions"
+    },
+    {
+      "app": "permissions",
+      "name": "0029_sync_development_product_archive_permission_metadata",
+      "sha256": "ffba55cbb48fcfc5a70b608456d8b938e4c5c1026c8cf94c355c273e798b69bd",
+      "depends_on": "permissions.0028_seed_development_product_archive_permissions"
+    }
+  ],
+  "parent_migration_dependencies": {
+    "development.0002_product_sales_summary_view": {
+      "sha256": "37c8e29513549816293652f2f659f8cda3eb3ea49156e6cfeea793a402bc4182",
+      "status": "already registered by V2.44.30; not part of the V2.44.31 allowlist"
+    },
+    "masterdata.0001_initial": "pre-existing dependency",
+    "products.0013_productsku_product_name": "pre-existing dependency",
+    "permissions.0027_sync_tenant_administrator_permissions": "pre-existing dependency"
+  },
+  "image_source_whitelist": {
+    "backend": [
+      {
+        "path": "backend/apps/development/models.py",
+        "sha256": "8217c6ba69d81d371c191d53fd240e4e43e0415cd629566659ae726029ecea0f"
+      },
+      {
+        "path": "backend/apps/development/permissions.py",
+        "sha256": "0b78dc9e68202f0a53071dd1e04fb8dc21eabdb0c25ffad99d843e0635866237"
+      },
+      {
+        "path": "backend/apps/development/serializers.py",
+        "sha256": "ce40d95bf08eaa5a9e2e64b0464fc4a69dff5756e1b3b1359ed2a1792ba40fb4"
+      },
+      {
+        "path": "backend/apps/development/services.py",
+        "sha256": "c6df996c32d671a516a2f7f06bcb6b609e954cd3c05be480a1d9f545099cea5a"
+      },
+      {
+        "path": "backend/apps/development/views.py",
+        "sha256": "4b3fc12b1000c37f3c2c34fb54fa67eff9ca38f8073b59e3b6bd211156f2d9b8"
+      },
+      {
+        "path": "backend/apps/development/urls.py",
+        "sha256": "226d01ec29f8bc49d1150d6ff4da384ef33e41b35f8459ba84af9e65cad46a92"
+      },
+      {
+        "path": "backend/apps/development/migrations/0004_development_product_archives.py",
+        "sha256": "f8001f9982b2dd7a495d5b540f4203f3a2e79fcd356c2f250acb348aecf0ff42"
+      },
+      {
+        "path": "backend/apps/development/migrations/0005_product_archive_trial_products_and_master_data.py",
+        "sha256": "1e0b012a72714157a0a8165ea23b9ffa040b99345d67504158e8e8f50e13e97f"
+      },
+      {
+        "path": "backend/apps/development/migrations/0006_development_product_archive_codes.py",
+        "sha256": "ca687b63ceec9736b0f4bd85fdcf8b2334a7eeb3aabc3af69d588d629f221d4b"
+      },
+      {
+        "path": "backend/apps/permissions/catalog.py",
+        "sha256": "c555b4ce0390f3ce7629ae58535bdceb9d8751e4965adc135a11bb54fb4e3b1d"
+      },
+      {
+        "path": "backend/apps/permissions/migrations/0028_seed_development_product_archive_permissions.py",
+        "sha256": "fbaf2e0d688f8bca4e3d081d109e983907173c171ebfacf79ad76aa586cc7d99"
+      },
+      {
+        "path": "backend/apps/permissions/migrations/0029_sync_development_product_archive_permission_metadata.py",
+        "sha256": "ffba55cbb48fcfc5a70b608456d8b938e4c5c1026c8cf94c355c273e798b69bd"
+      }
+    ],
+    "frontend": [
+      {
+        "path": "frontend/src/api/development.js",
+        "sha256": "4758740568b7fc8b0440bd701af02f8eb1f82394d4372e371107f4d66d535f68"
+      },
+      {
+        "path": "frontend/src/api/masterData.js",
+        "sha256": "037ef96a701a568f06cf9c116bca3c0fa13b8d96d140341219876755ebe54fe8"
+      },
+      {
+        "path": "frontend/src/views/development/DevelopmentProductArchiveList.vue",
+        "sha256": "790bfc254e640c0135b1b28f2c913a0d45c3492990aa9edf425cbeb86eea3da6"
+      }
+    ]
+  },
+  "build_environment": {
+    "VITE_USE_MOCK": "false",
+    "VITE_API_BASE_URL": ""
+  },
+  "target_frontend_image": "saas-collab-frontend:v2.44.31",
+  "target_backend_image": "saas-collab-backend:v2.44.31",
+  "frontend_index_html_sha256": "611fa92cd6feef63831ef566bc6f8778e5e19df6997309248aec271322bd7296",
+  "frontend_entry": "index-DiYp8saB.js",
+  "frontend_entry_sha256": "b59be530e8275c2ff39d0579abeeb05b78f61c72d430c1c36559679b04f8f171",
+  "development_archive_bundle": "DevelopmentProductArchiveList-C2NbQw51.js",
+  "development_archive_bundle_sha256": "85c2f131a1a6e92ce12b235f7c436e7058c84898988de5b66a590cc56a2f7ebf",
+  "development_archive_css": "DevelopmentProductArchiveList-CsPJZ8yd.css",
+  "development_archive_css_sha256": "ada3fcb0cb54429fbf1ebe0d181925ffd591f1b8cbe1a2c60507953c13d1d64b",
+  "source_hashes": {
+    "backend_development_models": "8217c6ba69d81d371c191d53fd240e4e43e0415cd629566659ae726029ecea0f",
+    "backend_development_permissions": "0b78dc9e68202f0a53071dd1e04fb8dc21eabdb0c25ffad99d843e0635866237",
+    "backend_development_serializers": "ce40d95bf08eaa5a9e2e64b0464fc4a69dff5756e1b3b1359ed2a1792ba40fb4",
+    "backend_development_services": "c6df996c32d671a516a2f7f06bcb6b609e954cd3c05be480a1d9f545099cea5a",
+    "backend_development_views": "4b3fc12b1000c37f3c2c34fb54fa67eff9ca38f8073b59e3b6bd211156f2d9b8",
+    "backend_development_urls": "226d01ec29f8bc49d1150d6ff4da384ef33e41b35f8459ba84af9e65cad46a92",
+    "backend_development_migration_0004": "f8001f9982b2dd7a495d5b540f4203f3a2e79fcd356c2f250acb348aecf0ff42",
+    "backend_development_migration_0005": "1e0b012a72714157a0a8165ea23b9ffa040b99345d67504158e8e8f50e13e97f",
+    "backend_development_migration_0006": "ca687b63ceec9736b0f4bd85fdcf8b2334a7eeb3aabc3af69d588d629f221d4b",
+    "backend_permission_catalog": "c555b4ce0390f3ce7629ae58535bdceb9d8751e4965adc135a11bb54fb4e3b1d",
+    "backend_permission_migration_0028": "fbaf2e0d688f8bca4e3d081d109e983907173c171ebfacf79ad76aa586cc7d99",
+    "backend_permission_migration_0029": "ffba55cbb48fcfc5a70b608456d8b938e4c5c1026c8cf94c355c273e798b69bd",
+    "frontend_development_api": "4758740568b7fc8b0440bd701af02f8eb1f82394d4372e371107f4d66d535f68",
+    "frontend_master_data_api": "037ef96a701a568f06cf9c116bca3c0fa13b8d96d140341219876755ebe54fe8",
+    "frontend_development_archive": "790bfc254e640c0135b1b28f2c913a0d45c3492990aa9edf425cbeb86eea3da6",
+    "backend_development_trial_test": "254529d0b533479f9b2c12af85e19793f376f9bbeb04aa8aba0fcad3f2c02cfa",
+    "backend_development_archive_test": "c401772b95fffb9756b2c4c063e8deba97eac376adbfdbacdcfedf5c24c407a5",
+    "backend_development_category_test": "e0bd23ff5e1f1bbfb6fd5436fb5e1fd73f21dbba6175601e6609e2bbef518a32",
+    "frontend_development_archive_test": "a4096a31058313d5acd38bbb7c3c4d38e4fdf39684ba79c48f88067df6cef634",
+    "frontend_development_category_test": "b912948bbeb81cfc1ce754caf81b05b3603d98f54a8ec704635dc8f3469dcc4c"
+  },
+  "checks": {
+    "backend_targeted_tests": "16 passed (including permission catalog metadata)",
+    "frontend_targeted_tests": "6 passed",
+    "django_check": "passed",
+    "makemigrations_check": "no changes detected",
+    "frontend_build": "passed",
+    "frontend_build_command": "VITE_USE_MOCK=false VITE_API_BASE_URL='' npm run build",
+    "mock_build": false,
+    "development_archive_source_encoding": "passed; no U+FFFD or mojibake markers",
+    "menu_router_main_layout_unchanged": true,
+    "deployment_performed": true,
+    "unrelated_worktree_changes_included": false,
+    "runtime_django_check": "passed",
+    "runtime_nginx_check": "passed",
+    "runtime_migrations": "development 0005/0006 and permissions 0029 applied; development 0004 and permissions 0028 remained applied",
+    "runtime_permission_metadata": "three development.product_archive permission rows match the catalog",
+    "runtime_permission_matrix": "full permission pagination and menu/route grouping verified; archive view permission is visible under 产品开发",
+    "runtime_development_coding_contract": "model mapping fields present and DEV001-BLUE-STD three-segment normalization passed",
+    "runtime_asset_hashes_match": true,
+    "runtime_menu_structure": "15 top-level groups, 105 total nodes, 103 route capabilities; protected source hashes unchanged from V2.44.30",
+    "compiled_route_sequence": "327 path entries, byte-for-byte sequence equal to V2.44.30",
+    "https_pages": "root, development archives and system roles returned 200",
+    "api_health": "200",
+    "protected_archive_api": "403 without authentication (route exists and is not 404)",
+    "celery_beat_redis_restarted": false
+  },
+  "scope_guard": {
+    "allowlist_enforced": true,
+    "allowed_page": "/development/projects/archives",
+    "allowed_backend_paths": [
+      "backend/apps/development/models.py",
+      "backend/apps/development/permissions.py",
+      "backend/apps/development/serializers.py",
+      "backend/apps/development/services.py",
+      "backend/apps/development/views.py",
+      "backend/apps/development/urls.py",
+      "backend/apps/development/migrations/0004_development_product_archives.py",
+      "backend/apps/development/migrations/0005_product_archive_trial_products_and_master_data.py",
+      "backend/apps/development/migrations/0006_development_product_archive_codes.py",
+      "backend/apps/permissions/catalog.py",
+      "backend/apps/permissions/migrations/0028_seed_development_product_archive_permissions.py",
+      "backend/apps/permissions/migrations/0029_sync_development_product_archive_permission_metadata.py"
+    ],
+    "allowed_frontend_paths": [
+      "frontend/src/api/development.js",
+      "frontend/src/api/masterData.js",
+      "frontend/src/views/development/DevelopmentProductArchiveList.vue"
+    ],
+    "menu_unchanged": true,
+    "router_unchanged": true,
+    "main_layout_unchanged": true,
+    "unrelated_product_detail_changes_excluded": true,
+    "mock_build": false
+  },
+  "rollback": {
+    "release": "2.44.30",
+    "frontend_image": "saas-collab-frontend:v2.44.30",
+    "backend_image": "saas-collab-backend:v2.44.30",
+    "migration_policy": "apply only the five allowlisted additive migrations; application rollback requires preserving trial/formal archive rows"
+  },
+  "deployment": {
+    "deployed_at": "2026-08-15T20:54:00+08:00",
+    "target": "192.168.174.131:8443",
+    "audit_directory": "/home/dfcy01/releases/system-v2.44.31-build-20260815",
+    "database_backup": "pre-migration-v2.44.31.sql.gz",
+    "database_backup_sha256": "368062895d5513be285e6742c777dddaae49d8bf18a49ba7e529920207438dcd",
+    "database_backup_validation": "gzip integrity passed and dump completion marker present",
+    "backend_image_id": "sha256:852d329f4729779042c081cf60d5360ce61d3e1d82d0d1d79f12970047a5087a",
+    "frontend_image_id": "sha256:dcada5a0ae805bb43bdbf06aa85448193399264092bb594dd4f699c8c4e9ae64",
+    "backend_container_id": "8a9547cd0661cd3f85cf2dd84576558b592d7ec8909c3e06da5e969f7614eb59",
+    "frontend_container_id": "089213856a55f1ae9426dcafaafefc85b7d8a20bdd0bdc7b031b44f3ea1d019f",
+    "switch_command_scope": "docker compose up -d --no-deps backend frontend",
+    "unchanged_service_container_ids": {
+      "celery": "d4a72e47d72e92f82691bd749c2ba2e46798e5f049da4190aca08187212a3a3d",
+      "celery_beat": "847621107cc4a214024c18d59a01cdba5133ae71638d2d93fb9573fbf22d5d09",
+      "redis": "e9c5d3a028c12d234e121da4d6e794b725625884279ff1062dd6f57c90f35ef7"
+    }
+  },
+  "release_notes": "docs/06_release/system_v2.44.31.md"
+}

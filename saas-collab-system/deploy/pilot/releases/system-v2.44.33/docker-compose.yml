@@ -1,0 +1,12 @@
+services:
+  backend:
+    image: saas-collab-backend:v2.44.33
+    volumes:
+      - product-media:/app/media
+  frontend:
+    image: saas-collab-frontend:v2.44.33
+    volumes:
+      - product-media:/usr/share/nginx/html/media:ro
+
+volumes:
+  product-media:

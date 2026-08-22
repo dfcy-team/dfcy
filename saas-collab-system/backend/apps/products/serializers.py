@@ -21,6 +21,7 @@ from .models import (
     ProductStatusTransition,
 )
 from .coding_services import SEASON_CODES, allocate_spu_code, build_sku_code, category_path
+from .category_metadata import category_metadata_from_spu
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -148,6 +149,10 @@ class ProductSPUSerializer(serializers.ModelSerializer):
     sku_codes = serializers.SerializerMethodField()
     sku_count = serializers.SerializerMethodField()
     sales_status_display = serializers.SerializerMethodField()
+    category_node_id = serializers.IntegerField(read_only=True)
+    category_l2_id = serializers.SerializerMethodField()
+    category_l2_code = serializers.SerializerMethodField()
+    category_l2_name = serializers.SerializerMethodField()
 
     SALES_STATUS_LABELS = {
         ProductSPU.SalesStatus.NOT_LISTED: "未刊登",
@@ -165,6 +170,21 @@ class ProductSPUSerializer(serializers.ModelSerializer):
     def get_sales_status_display(self, obj):
         return self.SALES_STATUS_LABELS.get(obj.sales_status, obj.sales_status)
 
+    def _category_metadata(self, obj):
+        # The list view selects category_node and category_node__parent.  The
+        # helper also handles detail/create responses when the relation is not
+        # already cached.
+        return category_metadata_from_spu(obj)
+
+    def get_category_l2_id(self, obj):
+        return self._category_metadata(obj)["category_l2_id"]
+
+    def get_category_l2_code(self, obj):
+        return self._category_metadata(obj)["category_l2_code"]
+
+    def get_category_l2_name(self, obj):
+        return self._category_metadata(obj)["category_l2_name"]
+
     class Meta:
         model = ProductSPU
         fields = (
@@ -178,6 +198,10 @@ class ProductSPUSerializer(serializers.ModelSerializer):
             "brand",
             "category",
             "category_node",
+            "category_node_id",
+            "category_l2_id",
+            "category_l2_code",
+            "category_l2_name",
             "product_type",
             "l1_code",
             "l2_code",
@@ -265,10 +289,100 @@ class ProductSPUSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-class ProductSKUSerializer(serializers.ModelSerializer):
+DETAIL_EDIT_CLEARABLE_FIELDS = {
+    "purchase_price",
+    "package_weight",
+    "package_volume",
+    "package_length_cm",
+    "package_width_cm",
+    "package_height_cm",
+    "origin_country",
+    "hs_code",
+    "unit",
+    "image_url",
+    "product_description",
+}
+DETAIL_EDIT_FIELD_ALIASES = {
+    "sku_product_name": "product_name",
+    "sku_status": "is_active",
+}
+
+
+class ProductDetailEditMixin:
+    """Shared safe update semantics for the legacy/SKU detail endpoints.
+
+    Empty strings and nulls are intentionally treated as no-ops for nullable
+    detail fields.  A caller that really wants to remove a value must include
+    its canonical name in ``clear_fields``.  This keeps a partially populated
+    form or CSV follow-up from erasing audited source data by accident.
+    """
+
+    clear_fields = serializers.ListField(
+        child=serializers.CharField(max_length=80),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
+
+    def _clear_field_names(self, data):
+        raw = data.get("clear_fields") if hasattr(data, "get") else None
+        if raw in (None, ""):
+            return set()
+        if not isinstance(raw, (list, tuple, set)):
+            return set()
+        names = set()
+        for value in raw:
+            name = DETAIL_EDIT_FIELD_ALIASES.get(str(value).strip(), str(value).strip())
+            names.add(name)
+        return names
+
+    def to_internal_value(self, data):
+        # Do not mutate request.data (it can be a QueryDict shared by other
+        # middleware).  ``dict`` also preserves JSON key order for predictable
+        # audit output.
+        incoming = data.copy() if hasattr(data, "copy") else dict(data)
+        clear_names = self._clear_field_names(incoming)
+        for field in DETAIL_EDIT_CLEARABLE_FIELDS:
+            if field in incoming and field not in clear_names:
+                value = incoming[field]
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    incoming.pop(field, None)
+        return super().to_internal_value(incoming)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        clear_names = {
+            DETAIL_EDIT_FIELD_ALIASES.get(str(value).strip(), str(value).strip())
+            for value in attrs.pop("clear_fields", [])
+        }
+        unknown = clear_names - DETAIL_EDIT_CLEARABLE_FIELDS
+        if unknown:
+            raise serializers.ValidationError(
+                {"clear_fields": f"Unsupported clear fields: {', '.join(sorted(unknown))}."}
+            )
+        overlap = clear_names.intersection(attrs)
+        if overlap:
+            raise serializers.ValidationError(
+                {"clear_fields": f"A field cannot be updated and cleared together: {', '.join(sorted(overlap))}."}
+            )
+        for field in clear_names:
+            attrs[field] = None
+        return attrs
+
+
+class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    # Declared on the concrete serializer because DRF does not collect fields
+    # declared only on a plain mixin into ModelSerializer._declared_fields.
+    clear_fields = serializers.ListField(
+        child=serializers.CharField(max_length=80),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
     # This is the SKU/variant display name, independent from the SPU base name.
     product_name = serializers.CharField(label="SKU商品名称", required=False, allow_blank=True)
+    status_name = serializers.SerializerMethodField()
     purchase_price = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True, min_value=Decimal("0"))
     package_weight = serializers.DecimalField(
         max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"),
@@ -281,6 +395,7 @@ class ProductSKUSerializer(serializers.ModelSerializer):
     package_length_cm = serializers.DecimalField(max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"))
     package_width_cm = serializers.DecimalField(max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"))
     package_height_cm = serializers.DecimalField(max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"))
+    origin_country = serializers.CharField(max_length=80, required=False, allow_blank=True, allow_null=True)
     image_url = serializers.CharField(max_length=500, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
@@ -291,6 +406,7 @@ class ProductSKUSerializer(serializers.ModelSerializer):
             "spu",
             "sku_code",
             "product_name",
+            "status_name",
             "legacy_sku_code",
             "color_code",
             "specification",
@@ -309,6 +425,7 @@ class ProductSKUSerializer(serializers.ModelSerializer):
             "origin_country",
             "hs_code",
             "product_description",
+            "clear_fields",
             "is_code_frozen",
             "is_active",
             "created_at",
@@ -319,6 +436,9 @@ class ProductSKUSerializer(serializers.ModelSerializer):
             "sku_code": {"required": False, "allow_blank": False},
             "specification": {"read_only": True},
         }
+
+    def get_status_name(self, obj):
+        return "在售" if obj.is_active else "下架"
 
     def validate_spu(self, value):
         request = self.context["request"]
@@ -337,6 +457,14 @@ class ProductSKUSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Image URL must be an http(s) URL or an uploaded /media/ URL.")
         return value
 
+    def validate_origin_country(self, value):
+        if value in (None, ""):
+            return value
+        value = str(value).strip()
+        if len(value) > 80:
+            raise serializers.ValidationError("Origin country must be at most 80 characters.")
+        return value
+
     def validate_hs_code(self, value):
         if value in (None, ""):
             return value
@@ -346,6 +474,7 @@ class ProductSKUSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        attrs = super().validate(attrs)
         instance = self.instance
         if instance and instance.is_code_frozen and "sku_code" in attrs and attrs["sku_code"] != instance.sku_code:
             raise serializers.ValidationError({"sku_code": "Code is frozen and cannot be changed."})
@@ -422,31 +551,71 @@ class ProductSKUSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-class ProductLegacyItemSerializer(serializers.ModelSerializer):
+class ProductLegacyItemSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     # This is deliberately the complete imported 商品名称, unlike the SPU
     # field above which is normalized to a family/base name.
     product_name = serializers.CharField(label="商品名称")
+    clear_fields = serializers.ListField(
+        child=serializers.CharField(max_length=80),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
     category_name = serializers.CharField(source="category_node.name", read_only=True)
     generated_spu_code = serializers.CharField(source="generated_spu.spu_code", read_only=True)
     generated_sku_code = serializers.CharField(source="generated_sku.sku_code", read_only=True)
+    spu_product_name = serializers.SerializerMethodField()
+    sku_product_name = serializers.SerializerMethodField()
+    sku_is_active = serializers.SerializerMethodField()
+    sku_status_name = serializers.SerializerMethodField()
+    conversion_status_name = serializers.SerializerMethodField()
     purchase_price = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True, min_value=Decimal("0"))
     package_weight = serializers.DecimalField(max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"))
     package_volume = serializers.DecimalField(max_digits=12, decimal_places=6, required=False, allow_null=True, min_value=Decimal("0"))
     package_length_cm = serializers.DecimalField(max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"))
     package_width_cm = serializers.DecimalField(max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"))
     package_height_cm = serializers.DecimalField(max_digits=10, decimal_places=3, required=False, allow_null=True, min_value=Decimal("0"))
+    origin_country = serializers.CharField(max_length=80, required=False, allow_blank=True, allow_null=True)
     image_url = serializers.CharField(max_length=500, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = ProductLegacyItem
-        fields = ("id", "legacy_spu_code", "legacy_sku_code", "product_name", "category_node", "category_name",
+        fields = ("id", "legacy_spu_code", "legacy_sku_code", "product_name", "spu_product_name",
+                  "sku_product_name", "sku_is_active", "sku_status_name", "conversion_status_name",
+                  "category_node", "category_name",
                   "attribute_code", "color_code", "specification", "purchase_price", "unit", "image_url",
                   "package_weight", "package_volume", "package_length_cm", "package_width_cm", "package_height_cm",
-                  "origin_country", "hs_code", "product_description", "status", "generated_spu_code",
+                  "origin_country", "hs_code", "product_description", "clear_fields", "status", "generated_spu_code",
                   "generated_sku_code", "error_message", "created_at", "updated_at")
         read_only_fields = ("id", "status", "generated_spu_code", "generated_sku_code", "error_message", "created_at", "updated_at")
 
+    def get_sku_status_name(self, obj):
+        sku = getattr(obj, "generated_sku", None)
+        if sku is None:
+            return "未生成"
+        return "在售" if sku.is_active else "下架"
+
+    def get_spu_product_name(self, obj):
+        spu = getattr(obj, "generated_spu", None)
+        return spu.product_name if spu is not None else ""
+
+    def get_sku_product_name(self, obj):
+        sku = getattr(obj, "generated_sku", None)
+        return sku.product_name if sku is not None and sku.product_name else obj.product_name
+
+    def get_sku_is_active(self, obj):
+        sku = getattr(obj, "generated_sku", None)
+        return sku.is_active if sku is not None else None
+
+    def get_conversion_status_name(self, obj):
+        return {
+            ProductLegacyItem.Status.PENDING: "待调整",
+            ProductLegacyItem.Status.GENERATED: "已生成",
+            ProductLegacyItem.Status.ERROR: "生成失败",
+        }.get(obj.status, obj.status)
+
     def validate(self, attrs):
+        attrs = super().validate(attrs)
         if self.instance and self.instance.status == ProductLegacyItem.Status.GENERATED:
             immutable = {"category_node", "attribute_code", "color_code", "specification"}
             attempted = immutable.intersection(self.initial_data)
@@ -467,6 +636,20 @@ class ProductLegacyItemSerializer(serializers.ModelSerializer):
             return value
         raise serializers.ValidationError("Image URL must be an http(s) URL or an uploaded /media/ URL.")
 
+    def validate_category_node(self, value):
+        request = self.context.get("request")
+        if value is not None and request is not None and value.tenant_id != request.user.tenant_id:
+            raise serializers.ValidationError("Category does not belong to current tenant.")
+        return value
+
+    def validate_origin_country(self, value):
+        if value in (None, ""):
+            return value
+        value = str(value).strip()
+        if len(value) > 80:
+            raise serializers.ValidationError("Origin country must be at most 80 characters.")
+        return value
+
     def validate_hs_code(self, value):
         if value in (None, ""):
             return value
@@ -479,6 +662,171 @@ class ProductLegacyItemSerializer(serializers.ModelSerializer):
         if "unit" not in validated_data:
             validated_data["unit"] = "件"
         return super().create(validated_data)
+
+
+class ProductSPUBulkUpdateSerializer(serializers.Serializer):
+    """Validate a tenant-scoped bulk edit for SPU master data.
+
+    Codes and generated SKU relationships are deliberately excluded.  Moving an
+    SPU changes its catalog placement/labels only; it does not silently rewrite
+    an existing product code or any generated SKU.
+    """
+
+    ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+        required=True,
+    )
+    fields = serializers.DictField(required=False, default=dict)
+    preview = serializers.BooleanField(required=False, default=False)
+
+    SAFE_FIELDS = {
+        "product_name",
+        "brand",
+        "category_node",
+    }
+
+    def _validate_field(self, field, value):
+        if field == "product_name":
+            return serializers.CharField(max_length=200, allow_blank=False).run_validation(value).strip()
+        if field == "brand":
+            return serializers.CharField(max_length=120, allow_blank=True).run_validation(value).strip()
+        if field == "category_node":
+            return serializers.IntegerField(min_value=1).run_validation(value)
+        raise serializers.ValidationError({field: "Unsupported SPU bulk update field."})
+
+    def validate_fields(self, value):
+        unknown = set(value) - self.SAFE_FIELDS
+        if unknown:
+            raise serializers.ValidationError({field: "该字段不支持批量修改。" for field in sorted(unknown)})
+        cleaned = {}
+        for field, raw_value in value.items():
+            # Empty strings are no-ops for optional batch forms.  Boolean/zero
+            # values are not relevant to this allow-list and are not discarded.
+            if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+                continue
+            cleaned[field] = self._validate_field(field, raw_value)
+        return cleaned
+
+    def validate(self, attrs):
+        ids = list(dict.fromkeys(attrs.get("ids") or []))
+        if not ids:
+            raise serializers.ValidationError({"ids": "至少选择一条商品记录。"})
+        attrs["ids"] = ids
+        attrs["fields"] = attrs.get("fields") or {}
+        return attrs
+
+
+class ProductDetailBulkUpdateSerializer(serializers.Serializer):
+    """Validate a tenant-scoped bulk update for the product-detail bridge.
+
+    The endpoint deliberately accepts a small allow-list of SKU business
+    fields.  Identifiers, generated codes and legacy mappings never pass
+    through this serializer, so a bulk edit cannot break an existing relation.
+    """
+
+    match_type = serializers.ChoiceField(choices=("old_spu", "new_spu", "legacy_spu", "spu"))
+    spu_code = serializers.CharField(max_length=120, allow_blank=False, trim_whitespace=True)
+    ids = serializers.ListField(child=serializers.JSONField(), required=False, allow_empty=True)
+    fields = serializers.DictField(required=False, default=dict)
+    preview = serializers.BooleanField(required=False, default=False)
+
+    SAFE_FIELDS = {
+        "product_name", "sku_product_name", "purchase_price", "is_active", "sku_status", "category_node",
+        "package_weight", "package_volume", "package_length_cm", "package_width_cm", "package_height_cm",
+        "origin_country", "hs_code", "unit", "image_url", "product_description",
+    }
+    CLEARABLE_FIELDS = DETAIL_EDIT_CLEARABLE_FIELDS
+    FIELD_ALIASES = DETAIL_EDIT_FIELD_ALIASES
+    clear_fields = serializers.ListField(
+        child=serializers.CharField(max_length=80), required=False, allow_empty=True, default=list,
+    )
+
+    @staticmethod
+    def _validate_image_url(value):
+        if value in (None, ""):
+            return value
+        value = str(value).strip()
+        if value.startswith("/media/product-images/") and ".." not in value.split("/"):
+            return value
+        if re.match(r"^https?://[^\s]+$", value, flags=re.IGNORECASE):
+            return value
+        raise serializers.ValidationError("Image URL must be an http(s) URL or an uploaded /media/ URL.")
+
+    @staticmethod
+    def _validate_hs(value):
+        value = str(value).strip()
+        if len(value) < 2 or len(value) > 20 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.\- ]*", value):
+            raise serializers.ValidationError("HS code must be 2-20 letters/digits (dots, hyphens and spaces allowed).")
+        return value
+
+    def _validate_field(self, field, value):
+        if field == "purchase_price":
+            return serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0")).run_validation(value)
+        if field == "package_weight":
+            return serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0")).run_validation(value)
+        if field == "package_volume":
+            return serializers.DecimalField(max_digits=12, decimal_places=6, min_value=Decimal("0")).run_validation(value)
+        if field in {"package_length_cm", "package_width_cm", "package_height_cm"}:
+            return serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0")).run_validation(value)
+        if field == "product_name":
+            return serializers.CharField(max_length=200, allow_blank=False).run_validation(value).strip()
+        if field == "category_node":
+            return serializers.IntegerField(min_value=1).run_validation(value)
+        if field == "is_active":
+            return serializers.BooleanField().run_validation(value)
+        if field == "origin_country":
+            return serializers.CharField(max_length=80, allow_blank=False).run_validation(value).strip()
+        if field == "hs_code":
+            return self._validate_hs(serializers.CharField(max_length=20, allow_blank=False).run_validation(value))
+        if field == "unit":
+            return serializers.CharField(max_length=30, allow_blank=False).run_validation(value).strip()
+        if field == "image_url":
+            return self._validate_image_url(value)
+        if field == "product_description":
+            return serializers.CharField(max_length=10000, allow_blank=False).run_validation(value).strip()
+        raise serializers.ValidationError({field: "Unsupported bulk update field."})
+
+    def validate_fields(self, value):
+        unknown = set(value) - self.SAFE_FIELDS
+        if unknown:
+            raise serializers.ValidationError(
+                {field: "该字段不支持批量修改。" for field in sorted(unknown)}
+            )
+        cleaned = {}
+        for raw_field, raw_value in value.items():
+            field = self.FIELD_ALIASES.get(raw_field, raw_field)
+            if field in cleaned:
+                raise serializers.ValidationError({raw_field: "Duplicate field alias in bulk update."})
+            if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+                continue
+            cleaned[field] = self._validate_field(field, raw_value)
+        return cleaned
+
+    def validate_clear_fields(self, value):
+        names = []
+        for raw_field in value or []:
+            names.append(self.FIELD_ALIASES.get(str(raw_field).strip(), str(raw_field).strip()))
+        names = list(dict.fromkeys(names))
+        unknown = set(names) - self.CLEARABLE_FIELDS
+        if unknown:
+            raise serializers.ValidationError(f"Unsupported clear fields: {', '.join(sorted(unknown))}.")
+        return names
+
+    def validate(self, attrs):
+        # An empty string/None means "leave unchanged".  Boolean false and
+        # numeric zero remain valid updates and are intentionally preserved.
+        cleaned = attrs.get("fields") or {}
+        clear_fields = attrs.get("clear_fields") or []
+        overlap = set(clear_fields).intersection(cleaned)
+        if overlap:
+            raise serializers.ValidationError(
+                {"clear_fields": f"A field cannot be updated and cleared together: {', '.join(sorted(overlap))}."}
+            )
+        attrs["fields"] = cleaned
+        attrs["clear_fields"] = clear_fields
+        attrs["match_type"] = {"legacy_spu": "old_spu", "spu": "new_spu"}.get(attrs["match_type"], attrs["match_type"])
+        return attrs
 
 
 class ProductBundleComponentSerializer(serializers.ModelSerializer):

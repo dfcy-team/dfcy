@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.17",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-14",
+  "parent_release": "2.44.16",
+  "scope": "deduplicate legacy SKU generation and repair all existing duplicate-code failures",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "frontend_image": "saas-collab-frontend:v2.44.16",
+  "backend_image": "saas-collab-backend:v2.44.17@sha256:209e17f77e8a6c65951dc005104fd7b37408d4acf23af4c49b87572a486dbd7f",
+  "repair": {
+    "before_failed": 547,
+    "repaired": 547,
+    "remaining_failed": 0,
+    "generated_after": 6602,
+    "sku_count_after": 6604,
+    "mapping_log_sha256": "9db7771e28e7788fbc84ff5125869b1dd7f3781b6808de7200bdfbf5eebaea9a"
+  },
+  "checks": {
+    "new_tests_passed": 3,
+    "existing_tests_passed": 10,
+    "backend_manage_check": "passed",
+    "product_detail_api_status": 200,
+    "product_detail_api_count": 6604
+  },
+  "release_notes": "docs/06_release/system_v2.44.17.md"
+}

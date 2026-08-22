@@ -1,0 +1,1 @@
+function u(t,i=!0){var a;return!i||(t==null?void 0:t.code)==="HTTP_NETWORK_ERROR"?"offline":t!=null&&t.success&&((a=t==null?void 0:t.data)!=null&&a.partial)?"partial":t!=null&&t.success?"ready":{401:"unauthenticated",403:"forbidden",404:"not_found",409:"conflict",422:"invalid"}[t==null?void 0:t.http_status]||"error"}export{u as s};

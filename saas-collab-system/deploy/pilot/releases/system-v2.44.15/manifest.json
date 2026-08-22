@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.15",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-13",
+  "parent_release": "2.44.14",
+  "scope": "remove N+1 reference and SKU queries and batch platform detail writes",
+  "menu_changed": false,
+  "backend_image": "saas-collab-backend:v2.44.15@sha256:82dc08c8e23690069ad92ca936683b28aad2a50c1219e799c3d72964f99983ce",
+  "performance_check": {"rows": 1000, "dry_run_seconds": 1.242, "valid": 1000},
+  "release_notes": "docs/06_release/system_v2.44.15.md"
+}

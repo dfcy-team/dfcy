@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.33",
+  "status": "deployed",
+  "registered_at": "2026-08-21",
+  "parent_release": "2.44.32",
+  "current_deployed_base": "2.44.32",
+  "scope": "enhance product master, product detail and platform product detail lists without changing the V2.44.32 menu structure",
+  "menu_changed": false,
+  "menu_sha256": "a627102d58d29eb5db7cea5d92d82000137193efb25ba5396ad470769a872071",
+  "router_sha256": "a4fd1fd8ac188be19479d702b7673a7a8968881a00b2f227f606f605ca1d6aee",
+  "main_layout_sha256": "63c2092d2fa1265608cc29ba4ae0fa28245bedc822c081bcc982cad56b135619",
+  "top_level_menu_count": 16,
+  "menu_node_count": 113,
+  "route_capability_count": 110,
+  "database_migration_required": false,
+  "image_source_whitelist": {
+    "backend": [
+      {"path": "backend/apps/products/category_metadata.py", "sha256": "79ae1830597b7c20e7c37dfbf7e7dde765f334d7fdc1ff69bff6489b030b1ec7"},
+      {"path": "backend/apps/products/serializers.py", "sha256": "4cd30cd5610d389f0c73a692d7c12e70ca3f46404e0254bcaa801fad5493ed0a"},
+      {"path": "backend/apps/products/views.py", "sha256": "ed338b03242c12618e2ebfd4208369c8bfe8d04bc6fc4ea45216a551dd70b778"},
+      {"path": "backend/apps/products/urls.py", "sha256": "4e77a1463d5c362a4105f8feaf2c1a09863fa490dfbcd26ce05555c041d2dce8"}
+    ],
+    "frontend": [
+      {"path": "frontend/src/api/products.js", "sha256": "890a2907d13b8fdb5f29883952ccffa572181a78951c78fd5397b0b245aacf2d"},
+      {"path": "frontend/src/utils/productCategoryPresentation.js", "sha256": "f3f7f4bb1e4c48c151e4994db31b204e1fd8ac22c31697f6c0bfc405f8683cf3"},
+      {"path": "frontend/src/views/products/ProductMasterList.vue", "sha256": "4e811deb66491581cad65c2d12fa27da69a2042fded05fee0799a69f04571b5b"},
+      {"path": "frontend/src/views/products/ProductDetailData.vue", "sha256": "4e3d81d900921a055e64414bfee78f2ca578322a9c40928ca2b874e497c6177f"},
+      {"path": "frontend/src/views/masterdata/PlatformProductDetailList.vue", "sha256": "87f8eb267d5869804c30d382cb6a64626761391092d5e62cc7e9896f0a4e50e8"}
+    ],
+    "deployment": [
+      {"path": "deploy/pilot/releases/system-v2.44.33/nginx.conf", "sha256": "d8db22d8274d94dcb4f443da8a38e6d31229532839fa43b27b5ba9ddd56b5e72"},
+      {"path": "deploy/pilot/releases/system-v2.44.33/docker-compose.yml", "sha256": "9ba45564a99eee4ff1ea32c942f2c8f415ecf606b24e35d8fc8e15d7c96befd7"}
+    ]
+  },
+  "build_environment": {"VITE_USE_MOCK": "false", "VITE_API_BASE_URL": ""},
+  "target_frontend_image": "saas-collab-frontend:v2.44.33",
+  "target_backend_image": "saas-collab-backend:v2.44.33",
+  "frontend_index_html_sha256": "57529edc8aa7bb259ce3003240cc7ff6a3c9b02115dd86397e7b7e004628701b",
+  "frontend_entry": "index-XzChYA1L.js",
+  "frontend_entry_sha256": "942123ff99babb360f4784eb6f6a5eab998289d0f5a9651d2a240d4ff520ce59",
+  "checks": {
+    "frontend_targeted_tests": "24 passed",
+    "backend_targeted_tests": "20 passed",
+    "django_check": "passed",
+    "makemigrations_check": "no changes detected",
+    "frontend_build": "passed",
+    "browser_product_master": "sequence starts at 1; selection enables bulk edit and category move; no console errors",
+    "browser_product_detail": "image batch dialog rendered; no console errors",
+    "protected_navigation_hashes_match_v2_44_32": true,
+    "deployment_performed": true,
+    "post_deploy_pages": "6/6 returned HTTP 200",
+    "post_deploy_protected_endpoints": "3/3 returned HTTP 401 and none returned 404",
+    "post_deploy_navigation": "16/16 top-level labels and 7/7 sales-management routes present",
+    "post_deploy_logs": "no backend traceback/internal error/critical and no frontend emerg/alert/crit",
+    "post_deploy_database": "permissions, administrator grants and product counts verified"
+  },
+  "persistent_product_media": {
+    "volume": "application_product-media",
+    "backend_mount": "/app/media",
+    "frontend_mount": "/usr/share/nginx/html/media:ro",
+    "public_path": "/media/"
+  },
+  "rollback": {
+    "release": "2.44.32",
+    "frontend_image": "saas-collab-frontend:v2.44.32",
+    "backend_image": "saas-collab-backend:v2.44.32"
+  },
+  "deployment": {
+    "performed_at": "2026-08-21 10:41:44 CST",
+    "audit_directory": "/home/dfcy01/releases/system-v2.44.33-build-20260821",
+    "audit_archive": "/home/dfcy01/releases/system-v2.44.33-build-20260821.tar.gz",
+    "audit_archive_sha256": "cd54f461d82bb461835f5b478be559897d40a147ddef3b88402b008d3aa0af1b",
+    "database_backup": "/home/dfcy01/releases/system-v2.44.33-build-20260821/pre-deploy-v2.44.33.sql.gz",
+    "database_backup_sha256": "e9514b9790b4bb88148736f7748bbf66e866856e2f3d5b1e029abc515ea82eb2",
+    "backend_image_id": "sha256:fff3fbaa07d64ea36746110542476fc66d25e7e39c5cd884ea2b5bc3270c946b",
+    "frontend_image_id": "sha256:de1194837e91e39d79717979172abed3b08b6072e06183b377a2937ce5980e67",
+    "backend_container_id": "caa5940bc476ce28f9fe28d9f2312e3d867c4795cd631c767a1eb3d225ce1738",
+    "frontend_container_id": "f96b3748260d5bf57a58c0a16324dc3aa45e94c02a89f7fb51b5c14bfb60e2d6",
+    "unchanged_containers": {
+      "celery": "d4a72e47d72e92f82691bd749c2ba2e46798e5f049da4190aca08187212a3a3d",
+      "celery_beat": "847621107cc4a214024c18d59a01cdba5133ae71638d2d93fb9573fbf22d5d09",
+      "redis": "e9c5d3a028c12d234e121da4d6e794b725625884279ff1062dd6f57c90f35ef7"
+    },
+    "validation": "passed"
+  },
+  "release_notes": "docs/06_release/system_v2.44.33.md"
+}

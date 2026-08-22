@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.14",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-13",
+  "parent_release": "2.44.13",
+  "scope": "platform product import dedicated timeout and visible import lifecycle status",
+  "menu_changed": false,
+  "menu_sha256": "c4919748b05f596ede323f0dfc86e7d58bcae40abb366b952ffb00889a4b3ab9",
+  "frontend_bundle_entry": "frontend/dist/assets/index-VVfflGnU.js",
+  "frontend_bundle_sha256": "52a361723762485aad64b93c7dafa897aae5ef8638cfcc7e52932b83d830b938",
+  "frontend_image": "saas-collab-frontend:v2.44.14@sha256:6535091b67f907a7b29ee42fbd5fc8f37084b4c7dd9eaa00e49708dfd03bfea0",
+  "release_notes": "docs/06_release/system_v2.44.14.md"
+}

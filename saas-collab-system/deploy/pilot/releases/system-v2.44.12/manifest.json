@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.12",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-13",
+  "parent_release": "2.44.11",
+  "menu_baseline_commit": "76ba2c151efa59c4a3a8f153e2d9ca04fd0f8a0e",
+  "menu_top_level_count": 15,
+  "menu_policy": "Restore the SPU-SKU-fix deployment menu; preserve all existing entries and retain only authorized platform product detail and country information additions under master data",
+  "authorized_menu_additions": [
+    "/products/platform-details",
+    "/master-data/sites"
+  ],
+  "frontend_image": "saas-collab-frontend:v2.44.12",
+  "frontend_container": "application-frontend-1",
+  "frontend_menu_bundle": "index-JtV9_d_m.js",
+  "frontend_menu_bundle_sha256": "df255267267c9e8910e7ee363ce49dd3b770f6e58b7de69be9e76cdc28d9a9ba",
+  "product_master_bundle": "ProductMasterList-BpPylCSL.js",
+  "product_master_bundle_sha256": "4577f5fb48df3ac9a8152d6d145fff6def56f1a36556ddd9b1bfc1ded16cb38a",
+  "release_notes": "docs/06_release/system_v2.44.12.md"
+}

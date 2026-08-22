@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.11",
+  "status": "registered-deployed",
+  "registered_at": "2026-08-13",
+  "parent_release": "2.44.10",
+  "menu_baseline_commit": "76ba2c151efa59c4a3a8f153e2d9ca04fd0f8a0e",
+  "menu_top_level_count": 15,
+  "menu_policy": "V2.44.7 structure unchanged; only authorized master-data child entries retained",
+  "build_parameters": {
+    "VITE_USE_MOCK": "false",
+    "VITE_API_BASE_URL": ""
+  },
+  "frontend_bundle_entry": "frontend/dist/assets/index-DMpkarLV.js",
+  "frontend_bundle_sha256": "92a79ca08fe1cc8af02e26a69e1bbb4dde6b4bf3b9e9231f613ade6c6b7ed41c",
+  "frontend_image": "saas-collab-frontend:v2.44.11@sha256:51697ae417666daefbdd4925b260639f2645de0ff001a2b90539c5a5998f930e",
+  "release_notes": "docs/06_release/system_v2.44.11.md"
+}
