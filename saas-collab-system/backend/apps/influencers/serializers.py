@@ -109,10 +109,17 @@ class InfluencerSerializer(serializers.ModelSerializer):
 
 
 class InfluencerListSerializer(InfluencerSerializer):
-    """Collection response without account/contact details from the legacy model."""
+    """Collection response without account, contact, note, or history details."""
 
     class Meta(InfluencerSerializer.Meta):
-        fields = tuple(field for field in InfluencerSerializer.Meta.fields if field != "handle")
+        fields = tuple(
+            field for field in InfluencerSerializer.Meta.fields
+            if field not in {"handle", "profile", "contacts", "blacklist_history"}
+        )
+
+
+class InfluencerSafeDetailSerializer(InfluencerListSerializer):
+    """Read-only detail safe for users without influencer management access."""
 
 
 class OutreachTaskSerializer(serializers.ModelSerializer):

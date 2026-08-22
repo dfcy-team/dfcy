@@ -40,6 +40,7 @@ from .models import (
 )
 from .serializers import (
     InfluencerListSerializer,
+    InfluencerSafeDetailSerializer,
     InfluencerSerializer,
     InfluencerContactSerializer,
     InfluencerRestrictEventSerializer,
@@ -190,7 +191,12 @@ class InfluencerDetailView(APIView):
 
     def get(self, request, pk):
         require_all_scope(request.user, self.read_permission_code)
-        return success_response(InfluencerSerializer(self.get_object(request, pk)).data)
+        serializer_class = (
+            InfluencerSerializer
+            if check_user_permission(request.user, self.write_permission_code)
+            else InfluencerSafeDetailSerializer
+        )
+        return success_response(serializer_class(self.get_object(request, pk)).data)
 
     @transaction.atomic
     def patch(self, request, pk):
@@ -253,7 +259,7 @@ class InfluencerContactsView(APIView):
     write_permission_code = "influencers.manage"
 
     def get(self, request, pk):
-        require_all_scope(request.user, self.read_permission_code)
+        require_all_scope(request.user, self.write_permission_code)
         influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
         rows = influencer.contacts.filter(tenant=request.user.tenant, is_active=True).order_by("-is_primary", "id")
         return success_response(InfluencerContactSerializer(rows, many=True).data)
@@ -297,7 +303,10 @@ class InfluencerBlacklistView(APIView):
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
         influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
-        blacklisted = bool(request.data.get("is_blacklisted", request.data.get("blacklisted", True)))
+        raw_blacklisted = request.data.get("is_blacklisted", request.data.get("blacklisted", True))
+        if not isinstance(raw_blacklisted, bool):
+            raise ValidationError({"is_blacklisted": "Must be a boolean."})
+        blacklisted = raw_blacklisted
         reason = str(request.data.get("reason", "")).strip()
         restriction, _ = InfluencerRestriction.objects.update_or_create(
             tenant=request.user.tenant,
@@ -1123,14 +1132,10 @@ class ProductPriceLookupView(APIView):
 
 class BdPerformanceView(APIView):
     permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "influencers.outreach.view"
+    read_permission_code = "influencers.view"
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        fulfillment_permission = "influencers.fulfillment.view"
-        if not check_user_permission(request.user, fulfillment_permission):
-            raise PermissionDenied("Both outreach and fulfillment view permissions are required.")
-        require_all_scope(request.user, fulfillment_permission)
 
         default_start, default_end = default_performance_dates(tenant=request.user.tenant)
         start_date = parse_performance_date(
@@ -1168,7 +1173,7 @@ class BdPerformanceExportView(APIView):
     """Export only the already-authorized aggregate, never raw affiliate facts."""
 
     permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "influencers.outreach.view"
+    read_permission_code = "influencers.view"
 
     def get(self, request):
         response = BdPerformanceView().get(request)
@@ -1200,7 +1205,7 @@ class BdPerformanceExportView(APIView):
 
 class BdPerformanceDiagnosticView(APIView):
     permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "influencers.outreach.view"
+    read_permission_code = "influencers.view"
 
     def get(self, request):
         response = BdPerformanceView().get(request)

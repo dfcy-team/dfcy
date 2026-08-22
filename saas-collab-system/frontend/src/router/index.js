@@ -225,7 +225,7 @@ const routes = [
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
-      { path: 'influencers', component: InfluencerList },
+      { path: 'influencers', component: InfluencerList, beforeEnter: redirectLegacyInfluencerTab },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

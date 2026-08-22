@@ -24,6 +24,8 @@ from apps.influencers.models import (
     BdOrderAttributionSnapshot,
     BdSampleAttributionSnapshot,
     Influencer,
+    InfluencerContact,
+    InfluencerProfile,
     InfluencerRestriction,
     OutreachTarget,
     OutreachTask,
@@ -1170,7 +1172,7 @@ def test_0025_grants_new_permissions_to_manager_and_administrator_roles():
 
 def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_is_versioned():
     tenant = Tenant.objects.create(name="Tenant", code="sensitive-profile")
-    _, client = user_with_permissions(
+    user, client = user_with_permissions(
         tenant,
         "profile-manager",
         "influencers.view",
@@ -1188,12 +1190,31 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
         notes="private note",
     )
 
+    InfluencerProfile.objects.create(
+        tenant=tenant, influencer=influencer,
+        external_influencer_id="private-platform-id", profile_notes="private profile note",
+    )
+    InfluencerContact.objects.create(
+        tenant=tenant, influencer=influencer, channel="email",
+        value="private-contact@example.test", created_by=user,
+    )
+
     listed = client.get("/api/internal/influencers/")
     searched = client.get("/api/internal/influencers/", {"search": "secret-handle"})
     item = listed.data["data"]["results"][0]
     for field in ("handle", "contact_name", "contact_phone", "contact_email", "notes"):
         assert field not in item
+    for field in ("profile", "contacts", "blacklist_history"):
+        assert field not in item
     assert searched.data["data"]["count"] == 0
+
+    _, read_client = user_with_permissions(tenant, "profile-reader", "influencers.view")
+    safe_detail = read_client.get(f"/api/internal/influencers/{influencer.pk}/")
+    assert safe_detail.status_code == 200
+    assert "handle" not in safe_detail.data["data"]
+    assert "profile" not in safe_detail.data["data"]
+    assert "contacts" not in safe_detail.data["data"]
+    assert read_client.get(f"/api/internal/influencers/{influencer.pk}/contacts/").status_code == 403
 
     version = influencer.updated_at.isoformat()
     first = client.post(
@@ -1707,13 +1728,12 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.sku_id == order.sku_id
 
 
-def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():
+def test_bd_performance_requires_influencer_view_and_empty_tenant_is_not_imported():
     tenant = Tenant.objects.create(name="Performance tenant", code="performance-empty")
     _, client = user_with_permissions(
         tenant,
         "performance-viewer",
-        "influencers.outreach.view",
-        "influencers.fulfillment.view",
+        "influencers.view",
     )
     response = client.get("/api/internal/influencers/bd-performance/", {"currency": "PHP"})
     assert response.status_code == 200
@@ -1724,7 +1744,7 @@ def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_import
 
     _, denied_client = user_with_permissions(
         tenant,
-        "performance-outreach-only",
+        "performance-without-view",
         "influencers.outreach.view",
     )
     assert denied_client.get("/api/internal/influencers/bd-performance/").status_code == 403
@@ -1735,8 +1755,7 @@ def test_bd_performance_export_and_zero_gmv_diagnostic_are_authorized_and_safe()
     _, client = user_with_permissions(
         tenant,
         "performance-export-viewer",
-        "influencers.outreach.view",
-        "influencers.fulfillment.view",
+        "influencers.view",
     )
     export = client.get("/api/internal/influencers/bd-performance/export/")
     assert export.status_code == 200
