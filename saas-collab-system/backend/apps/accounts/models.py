@@ -38,11 +38,20 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
         RPA = "rpa", "RPA"
 
     username = models.CharField(max_length=150, unique=True)
+    full_name = models.CharField(max_length=100, blank=True)
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=32, blank=True)
     user_type = models.CharField(max_length=20, choices=UserType.choices)
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="users")
     is_active = models.BooleanField(default=True)
+    # These fields are intentionally nullable and inert for ordinary accounts.
+    # The local UAT credential tool uses them as a non-secret lease marker;
+    # authentication rejects a UAT account unless the marker is active and
+    # unexpired.  No plaintext password or token is ever stored here.
+    uat_credential_activated_at = models.DateTimeField(null=True, blank=True)
+    uat_credential_expires_at = models.DateTimeField(null=True, blank=True)
+    uat_credential_batch_digest = models.CharField(max_length=64, blank=True, default="")
+    uat_credential_status = models.CharField(max_length=16, default="never")
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -69,6 +78,11 @@ class InternalUserProfile(models.Model):
         blank=True,
         related_name="internal_profiles",
     )
+    departments = models.ManyToManyField(
+        Department,
+        blank=True,
+        related_name="assigned_internal_profiles",
+    )
     employee_no = models.CharField(max_length=50, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -88,3 +102,32 @@ class ExternalUserProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} external profile"
+
+
+class MiniAppIdentity(models.Model):
+    class Provider(models.TextChoices):
+        WECHAT = "wechat", "WeChat"
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.WECHAT)
+    subject_digest = models.CharField(max_length=64)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="miniapp_identities")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    last_login_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider", "user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("provider", "subject_digest"),
+                name="uniq_miniapp_provider_subject",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.provider}:{self.user.username}"

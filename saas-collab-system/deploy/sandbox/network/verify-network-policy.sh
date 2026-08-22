@@ -19,6 +19,8 @@ value() {
 case "$phase" in current|post-reboot) ;; *) fail "Verification phase must be current or post-reboot." ;; esac
 state_dir=$(value SANDBOX_NETWORK_STATE_DIR)
 case "$state_dir" in /*) ;; *) fail "SANDBOX_NETWORK_STATE_DIR must be absolute." ;; esac
+deployment_mode=$(value SANDBOX_DEPLOYMENT_MODE)
+case "$deployment_mode" in dual-host|single-host) ;; *) fail "SANDBOX_DEPLOYMENT_MODE must be dual-host or single-host." ;; esac
 case "$mode" in
   app)
     chain=SAAS_SANDBOX_RUNTIME
@@ -29,15 +31,40 @@ case "$mode" in
     iptables -C DOCKER-USER -j "$chain" || fail "Application policy is not attached."
     iptables -C "$chain" -s "$subnet" -d "$subnet" -j ACCEPT || fail "Internal traffic rule is missing."
     iptables -C "$chain" -s "$client_cidr" -d "$subnet" -p tcp -m multiport --dports 80,443 -j ACCEPT || fail "Client ingress rule is missing."
-    iptables -C "$chain" -s "$subnet" -d "$db_ip" -p tcp --dport "$db_port" -j ACCEPT || fail "Database allow rule is missing."
+    if [ "$deployment_mode" = "single-host" ]; then
+      db_subnet=$(docker network inspect saas-sandbox-db-network --format '{{(index .IPAM.Config 0).Subnet}}')
+      expected_db_subnet=$(value SANDBOX_DB_CONTAINER_SUBNET)
+      [ -n "$db_subnet" ] || fail "Cannot determine the Sandbox database subnet."
+      [ "$db_subnet" = "$expected_db_subnet" ] || fail "Database network subnet differs from the approved policy."
+      [ "$subnet" != "$db_subnet" ] || fail "Application and database networks must be different."
+      iptables -C "$chain" -s "$subnet" -d "$db_subnet" -p tcp --dport 3306 -m conntrack --ctorigdst "$db_ip" --ctorigdstport "$db_port" -j ACCEPT || fail "Original published database allow rule is missing."
+      iptables -C "$chain" -s "$subnet" -d "$db_subnet" -j REJECT || fail "Direct application-to-database bridge traffic is not rejected."
+    else
+      iptables -C "$chain" -s "$subnet" -d "$db_ip" -p tcp --dport "$db_port" -j ACCEPT || fail "Database allow rule is missing."
+    fi
     iptables -C "$chain" -s "$subnet" -j REJECT || fail "Default runtime egress reject is missing."
     ;;
   db)
     chain=SAAS_SANDBOX_DB
     subnet=$(docker network inspect saas-sandbox-db-network --format '{{(index .IPAM.Config 0).Subnet}}')
     app_ip=$(value SANDBOX_APP_HOST_IP)
+    db_ip=$(value SANDBOX_DB_HOST_IP)
+    db_port=$(value SANDBOX_DB_PORT)
     iptables -C DOCKER-USER -j "$chain" || fail "Database policy is not attached."
-    iptables -C "$chain" -s "$app_ip" -d "$subnet" -p tcp --dport 3306 -j ACCEPT || fail "Application allow rule is missing."
+    if [ "$deployment_mode" = "single-host" ]; then
+      app_subnet=$(value SANDBOX_APP_CONTAINER_SUBNET)
+      app_network_subnet=$(docker network inspect saas-sandbox-network --format '{{(index .IPAM.Config 0).Subnet}}')
+      [ "$app_subnet" = "$app_network_subnet" ] || fail "Application network subnet differs from the approved policy."
+      [ "$app_subnet" != "$subnet" ] || fail "Application and database networks must be different."
+      [ "$app_ip" = "$db_ip" ] || fail "Single-host app and DB host IPs must be identical."
+      [ "$db_ip" = "10.20.40.119" ] || fail "Single-host database IP must be 10.20.40.119."
+      [ "$db_port" = "3307" ] || fail "Single-host database port must be 3307."
+      iptables -C "$chain" -s "$app_subnet" -d "$subnet" -p tcp --dport 3306 -m conntrack --ctorigdst "$db_ip" --ctorigdstport "$db_port" -j ACCEPT || fail "Single-host original published database allow rule is missing."
+      iptables -C "$chain" -s "$app_subnet" -d "$subnet" -p tcp --dport 3306 -j REJECT || fail "Direct application-to-database bridge traffic is not rejected."
+      iptables -C "$chain" -d "$db_ip" -p tcp --dport "$db_port" -j REJECT || fail "Single-host database host-port reject is missing."
+    else
+      iptables -C "$chain" -s "$app_ip" -d "$subnet" -p tcp --dport 3306 -j ACCEPT || fail "Application allow rule is missing."
+    fi
     iptables -C "$chain" -d "$subnet" -p tcp --dport 3306 -j REJECT || fail "Database default reject is missing."
     ;;
   *) fail "Usage: verify-network-policy.sh app|db [policy-file] [current|post-reboot]" ;;

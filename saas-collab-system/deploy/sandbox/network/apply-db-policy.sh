@@ -21,17 +21,40 @@ command -v netfilter-persistent >/dev/null 2>&1 || fail "netfilter-persistent is
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
 
 app_ip=$(value SANDBOX_APP_HOST_IP)
+db_ip=$(value SANDBOX_DB_HOST_IP)
+db_port=$(value SANDBOX_DB_PORT)
+deployment_mode=$(value SANDBOX_DEPLOYMENT_MODE)
 state_dir=$(value SANDBOX_NETWORK_STATE_DIR)
 case "$state_dir" in /*) ;; *) fail "SANDBOX_NETWORK_STATE_DIR must be absolute." ;; esac
 case "$app_ip" in 10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) ;; *) fail "Application IP must be private." ;; esac
+case "$db_ip" in 10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) ;; *) fail "Database IP must be private." ;; esac
+case "$deployment_mode" in dual-host|single-host) ;; *) fail "SANDBOX_DEPLOYMENT_MODE must be dual-host or single-host." ;; esac
+printf '%s' "$db_port" | grep -Eq '^[0-9]{1,5}$' || fail "Invalid database port."
 subnet=$(docker network inspect saas-sandbox-db-network --format '{{(index .IPAM.Config 0).Subnet}}')
 [ -n "$subnet" ] || fail "Cannot determine saas-sandbox-db-network subnet."
+if [ "$deployment_mode" = "single-host" ]; then
+  app_subnet=$(value SANDBOX_APP_CONTAINER_SUBNET)
+  case "$app_subnet" in */*) ;; *) fail "SANDBOX_APP_CONTAINER_SUBNET is required for single-host." ;; esac
+  [ "$app_subnet" != "$subnet" ] || fail "Application and database container networks must be different."
+  docker network inspect saas-sandbox-network >/dev/null 2>&1 || fail "Sandbox application container network is missing."
+fi
 iptables -S DOCKER-USER >/dev/null 2>&1 || fail "DOCKER-USER chain is unavailable."
 iptables -N "$chain" 2>/dev/null || true
 iptables -F "$chain"
 iptables -A "$chain" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-iptables -A "$chain" -s "$app_ip" -d "$subnet" -p tcp --dport 3306 -j ACCEPT
-iptables -A "$chain" -d "$subnet" -p tcp --dport 3306 -j REJECT
+if [ "$deployment_mode" = "single-host" ]; then
+  # Docker DNAT runs before DOCKER-USER. Match the original private host
+  # destination so only app-bridge traffic that requested 10.20.40.119:3307
+  # can reach the translated MySQL port; direct app->db-bridge:3306 traffic
+  # remains explicitly rejected.
+  iptables -A "$chain" -s "$app_subnet" -d "$subnet" -p tcp --dport 3306 -m conntrack --ctorigdst "$db_ip" --ctorigdstport "$db_port" -j ACCEPT
+  iptables -A "$chain" -s "$app_subnet" -d "$subnet" -p tcp --dport 3306 -j REJECT
+  iptables -A "$chain" -d "$db_ip" -p tcp --dport "$db_port" -j REJECT
+  iptables -A "$chain" -d "$subnet" -p tcp --dport 3306 -j REJECT
+else
+  iptables -A "$chain" -s "$app_ip" -d "$subnet" -p tcp --dport 3306 -j ACCEPT
+  iptables -A "$chain" -d "$subnet" -p tcp --dport 3306 -j REJECT
+fi
 iptables -A "$chain" -s "$subnet" -j REJECT
 iptables -A "$chain" -j RETURN
 iptables -C DOCKER-USER -j "$chain" 2>/dev/null || iptables -I DOCKER-USER 1 -j "$chain"
@@ -44,6 +67,7 @@ umask 077
 {
   printf 'SCHEMA_VERSION=1\n'
   printf 'MODE=db\n'
+  printf 'DEPLOYMENT_MODE=%s\n' "$deployment_mode"
   printf 'APPLIED_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'APPLIED_BOOT_ID=%s\n' "$(cat /proc/sys/kernel/random/boot_id)"
   printf 'POLICY_SHA256=%s\n' "$policy_hash"

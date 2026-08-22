@@ -2,8 +2,8 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-env_file="$script_dir/.env.sandbox"
-compose_file="$script_dir/docker-compose.sandbox-app.yml"
+env_file=${SANDBOX_RUNTIME_ENV_FILE:-$script_dir/.env.sandbox}
+compose_file=${SANDBOX_RUNTIME_COMPOSE_FILE:-$script_dir/docker-compose.sandbox-app.yml}
 
 fail() {
   echo "Sandbox JWT/API verification failed: $*" >&2
@@ -47,6 +47,11 @@ probe_created=$(printf '%s\n' "$probe_result" | sed -n 's/.*SCOPE_PROBE_CREATED=
 public_host=$(env_value SANDBOX_PUBLIC_HOST)
 https_port=$(env_value SANDBOX_HTTPS_PORT)
 ca_cert_path=$(env_value SANDBOX_CA_CERT_PATH)
+curl_target=127.0.0.1
+if [ "$(env_value SANDBOX_DEPLOYMENT_MODE)" = "single-host" ]; then
+  curl_target=$(env_value SANDBOX_PUBLIC_BIND_IP)
+  [ -n "$curl_target" ] || fail "SANDBOX_PUBLIC_BIND_IP is required for single-host HTTPS verification."
+fi
 base_url="https://$public_host:$https_port"
 tmp_dir=$(mktemp -d)
 
@@ -69,7 +74,7 @@ trap cleanup EXIT HUP INT TERM
 
 login_payload=$(jq -n --arg username "$SANDBOX_E2E_USERNAME" --arg password "$password" '{username:$username,password:$password}')
 login_status=$(printf '%s' "$login_payload" | curl --silent --show-error --cacert "$ca_cert_path" \
-  --resolve "$public_host:$https_port:127.0.0.1" \
+  --resolve "$public_host:$https_port:$curl_target" \
   -H 'Content-Type: application/json' -o "$tmp_dir/login.json" -w '%{http_code}' \
   --data-binary @- "$base_url/api/internal/auth/login/")
 [ "$login_status" = "200" ] || fail "Login returned HTTP $login_status."
@@ -78,7 +83,7 @@ printf 'header = "Authorization: Bearer %s"\n' "$access" > "$tmp_dir/auth.conf"
 chmod 600 "$tmp_dir/auth.conf"
 
 me_status=$(curl --silent --show-error --cacert "$ca_cert_path" \
-  --resolve "$public_host:$https_port:127.0.0.1" \
+  --resolve "$public_host:$https_port:$curl_target" \
   --config "$tmp_dir/auth.conf" -o "$tmp_dir/me.json" -w '%{http_code}' \
   "$base_url/api/internal/auth/me/")
 [ "$me_status" = "200" ] || fail "auth/me returned HTTP $me_status."
@@ -94,14 +99,14 @@ jq -e '
 ' "$tmp_dir/me.json" >/dev/null || fail "E2E user must be non-superuser with only pilot.readiness.view and sandbox-only custom scope."
 
 readiness_status=$(curl --silent --show-error --cacert "$ca_cert_path" \
-  --resolve "$public_host:$https_port:127.0.0.1" \
+  --resolve "$public_host:$https_port:$curl_target" \
   --config "$tmp_dir/auth.conf" -o "$tmp_dir/readiness.json" -w '%{http_code}' \
   "$base_url/api/internal/pilot/readiness/?environment_id=sandbox")
 [ "$readiness_status" = "200" ] || fail "Sandbox readiness returned HTTP $readiness_status."
 jq -e '.success == true and .data.environment_id == "sandbox" and .data.api_status == "sandbox"' "$tmp_dir/readiness.json" >/dev/null || fail "Sandbox readiness identity is invalid."
 
 wrong_status=$(curl --silent --show-error --cacert "$ca_cert_path" \
-  --resolve "$public_host:$https_port:127.0.0.1" \
+  --resolve "$public_host:$https_port:$curl_target" \
   --config "$tmp_dir/auth.conf" -o "$tmp_dir/wrong-environment.json" -w '%{http_code}' \
   "$base_url/api/internal/pilot/readiness/?environment_id=$probe_code")
 [ "$wrong_status" = "403" ] || fail "Registered out-of-scope environment was not rejected with 403; HTTP $wrong_status."

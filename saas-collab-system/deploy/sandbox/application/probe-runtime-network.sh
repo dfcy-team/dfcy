@@ -3,7 +3,9 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 env_file=${1:-$script_dir/.env.sandbox}
+env_file=${SANDBOX_RUNTIME_ENV_FILE:-$env_file}
 compose_file="$script_dir/docker-compose.sandbox-app.yml"
+compose_file=${SANDBOX_RUNTIME_COMPOSE_FILE:-$compose_file}
 
 fail() {
   echo "Sandbox application network probe failed: $*" >&2
@@ -22,6 +24,12 @@ policy_value() {
 [ -r "$env_file" ] || fail "Sandbox environment file is missing."
 policy_file=$(env_value SANDBOX_NETWORK_POLICY_FILE)
 [ -r "$policy_file" ] || fail "Sandbox network policy file is missing."
+deployment_mode=$(env_value SANDBOX_DEPLOYMENT_MODE)
+case "$deployment_mode" in dual-host|single-host) ;; *) fail "SANDBOX_DEPLOYMENT_MODE must be dual-host or single-host." ;; esac
+if [ "$deployment_mode" = "single-host" ]; then
+  [ "$(env_value DB_HOST)" = "10.20.40.119" ] || fail "Single-host DB_HOST must be 10.20.40.119."
+  [ "$(env_value DB_PORT)" = "3307" ] || fail "Single-host DB_PORT must be 3307."
+fi
 state_dir=$(policy_value SANDBOX_NETWORK_STATE_DIR)
 case "$state_dir" in /*) ;; *) fail "SANDBOX_NETWORK_STATE_DIR must be absolute." ;; esac
 subnet=$(docker network inspect saas-sandbox-network --format '{{(index .IPAM.Config 0).Subnet}}')

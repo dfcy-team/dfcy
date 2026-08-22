@@ -1,0 +1,9 @@
+.bootstrap-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+state-view {
+  width: 100%;
+}

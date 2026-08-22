@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "供应链采购单",
+  "usingComponents": {
+    "state-view": "/components/state-view/index"
+  }
+}

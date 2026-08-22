@@ -1,0 +1,10 @@
+.safe-page { padding-bottom: calc(48rpx + env(safe-area-inset-bottom)); }
+.boundary { border-color: #f1d496; background: #fff9ea; color: #6f571d; line-height: 1.6; }
+.boundary-title { margin-bottom: 8rpx; color: #8a6200; font-weight: 700; }
+.assignment { margin-top: 20rpx; }
+.assignment-header { display: flex; justify-content: space-between; gap: 16rpx; }
+.assignment-no { color: #173a63; font-weight: 700; }
+.assignment-state { padding: 6rpx 12rpx; border-radius: 999rpx; background: #eaf3fc; color: #245d91; font-size: 22rpx; }
+.assignment-site { margin-top: 16rpx; color: #53677d; font-size: 27rpx; }
+.assignment-meta { display: flex; flex-wrap: wrap; gap: 22rpx; margin-top: 16rpx; color: #718398; font-size: 23rpx; }
+.assignment-address { margin-top: 12rpx; color: #718398; line-height: 1.6; overflow-wrap: anywhere; }

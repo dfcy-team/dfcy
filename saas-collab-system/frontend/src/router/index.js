@@ -19,6 +19,8 @@ const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
 const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
+const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
+const PlatformProductDetailList = () => import('../views/masterdata/PlatformProductDetailList.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
 const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
@@ -82,9 +84,11 @@ const UserDirectory = () => import('../views/system/UserDirectory.vue');
 const RolePermissionMatrix = () => import('../views/system/RolePermissionMatrix.vue');
 const SecurityOperations = () => import('../views/system/SecurityOperations.vue');
 const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.vue');
+const CountrySiteMasterList = () => import('../views/masterdata/CountrySiteMasterList.vue');
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
+const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
@@ -145,6 +149,8 @@ const routes = [
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
+      { path: 'products/details', component: ProductDetailData },
+      { path: 'products/platform-details', component: PlatformProductDetailList },
       { path: 'products/status', component: ProductStatusList },
       { path: 'products/status-dashboard', component: ProductStatusDashboard },
       { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
@@ -211,9 +217,11 @@ const routes = [
       { path: 'system/roles', component: RolePermissionMatrix },
       { path: 'system/security-operations', component: SecurityOperations },
       { path: 'master-data/platforms', component: PlatformMasterList },
+      { path: 'master-data/sites', component: CountrySiteMasterList },
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
+      { path: 'influencers', component: InfluencerList },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

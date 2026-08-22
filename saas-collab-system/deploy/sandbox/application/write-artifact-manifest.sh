@@ -2,8 +2,8 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-env_file="$script_dir/.env.sandbox"
-compose_file="$script_dir/docker-compose.sandbox-app.yml"
+env_file=${SANDBOX_RUNTIME_ENV_FILE:-$script_dir/.env.sandbox}
+compose_file=${SANDBOX_RUNTIME_COMPOSE_FILE:-$script_dir/docker-compose.sandbox-app.yml}
 verification_status=${1:-runtime-verified}
 
 fail() {

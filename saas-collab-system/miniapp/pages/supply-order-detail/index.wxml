@@ -1,0 +1,110 @@
+<view class="page">
+  <view wx:if="{{state === 'ready' && order}}">
+    <view class="order-heading card">
+      <view>
+        <view class="muted">{{order.supplier_name}}</view>
+        <view class="page-title">{{order.order_no}}</view>
+      </view>
+      <text class="order-status status-{{order.status}}">{{order.status_label}}</text>
+    </view>
+
+    <view class="boundary card">
+      本页面只执行 SC-F1 接单和生产进度动作；装箱、物流、结算及真实通知尚未开放。
+    </view>
+
+    <view class="card">
+      <view class="detail-row"><text>采购日期</text><text>{{order.order_date}}</text></view>
+      <view class="detail-row"><text>预计交期</text><text>{{order.expected_delivery_date}}</text></view>
+      <view class="detail-row"><text>采购数量</text><text>{{order.total_quantity}}</text></view>
+      <view class="detail-row"><text>已完成</text><text>{{order.completed_quantity}}</text></view>
+      <view class="detail-row"><text>版本</text><text>v{{order.version}}</text></view>
+      <view class="progress-track">
+        <view class="progress-value" style="width: {{order.progress_percent}}%;"></view>
+      </view>
+      <view class="progress-label">生产进度 {{order.progress_percent}}%</view>
+    </view>
+
+    <view class="section-title">采购明细</view>
+    <view wx:for="{{order.lines}}" wx:key="id" class="line card">
+      <view class="line-title">{{item.sku_code_snapshot}}</view>
+      <view class="muted">{{item.product_name_snapshot}}</view>
+      <view class="detail-row"><text>数量</text><text>{{item.quantity}}</text></view>
+      <view class="detail-row"><text>交期</text><text>{{item.expected_delivery_date}}</text></view>
+    </view>
+
+    <button
+      wx:if="{{order.status === 'pending'}}"
+      class="primary-button"
+      loading="{{submitting}}"
+      data-action="accept"
+      bindtap="confirmAction"
+    >
+      确认接单
+    </button>
+    <button
+      wx:if="{{order.status === 'accepted'}}"
+      class="primary-button"
+      loading="{{submitting}}"
+      data-action="start-production"
+      bindtap="confirmAction"
+    >
+      开始生产
+    </button>
+
+    <view wx:if="{{order.status === 'in_production'}}" class="progress-form card">
+      <view class="section-title form-title">更新生产进度</view>
+      <input
+        class="field"
+        type="number"
+        value="{{completedQuantity}}"
+        placeholder="已完成数量"
+        bindinput="onQuantityInput"
+      />
+      <textarea
+        class="field note-field"
+        value="{{note}}"
+        placeholder="进度说明（选填）"
+        bindinput="onNoteInput"
+      ></textarea>
+      <button class="primary-button" loading="{{submitting}}" bindtap="submitProgress">
+        提交进度
+      </button>
+      <button
+        class="secondary-button complete-button"
+        disabled="{{order.completed_quantity !== order.total_quantity}}"
+        loading="{{submitting}}"
+        data-action="complete-production"
+        bindtap="confirmAction"
+      >
+        确认生产完成
+      </button>
+    </view>
+
+    <view class="section-title">进度记录</view>
+    <view wx:if="{{order.progress_entries.length}}">
+      <view wx:for="{{order.progress_entries}}" wx:key="id" class="progress-entry card">
+        <view class="detail-row">
+          <text>完成 {{item.completed_quantity}}</text>
+          <text>{{item.progress_percent}}%</text>
+        </view>
+        <view wx:if="{{item.note}}" class="muted progress-note">{{item.note}}</view>
+      </view>
+    </view>
+    <view wx:else class="card muted">尚无生产进度记录</view>
+  </view>
+
+  <state-view
+    wx:elif="{{state === 'error'}}"
+    state="error"
+    title="加载失败"
+    description="{{errorMessage}}"
+    action-text="重新加载"
+    bind:action="loadOrder"
+  />
+  <state-view
+    wx:else
+    state="loading"
+    title="正在加载"
+    description="正在读取采购单和生产进度。"
+  />
+</view>

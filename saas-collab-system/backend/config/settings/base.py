@@ -47,6 +47,9 @@ INSTALLED_APPS = [
     "apps.products",
     "apps.influencers",
     "apps.purchasing",
+    "apps.packing",
+    "apps.consolidation",
+    "apps.shipping",
     "apps.suppliers",
     "apps.finance",
     "apps.reports",
@@ -57,6 +60,7 @@ INSTALLED_APPS = [
     "apps.workflows",
     "apps.governance",
     "apps.pilot",
+    "apps.releases",
     "apps.common",
 ]
 
@@ -122,7 +126,7 @@ AUTH_USER_MODEL = "accounts.CustomUser"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.accounts.authentication.UATAwareJWTAuthentication",
     ],
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
     "DEFAULT_RENDERER_CLASSES": [
@@ -156,3 +160,17 @@ INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "INTEGRATION_ENCRYPTION_PROVIDER",
     "unconfigured-production",
 )
+
+# Competitor analysis is an external, read-only dependency.  The empty URL is
+# intentional: without explicit deployment configuration, report access fails
+# closed rather than falling back to a local crawler or guessed endpoint.
+COMPETITOR_REPORT_BASE_URL = os.getenv(
+    "COMPETITOR_REPORT_BASE_URL",
+    os.getenv("COMPETITOR_REPORT_API_BASE_URL", ""),
+).strip().rstrip("/")
+COMPETITOR_REPORT_TIMEOUT_SECONDS = max(
+    1,
+    min(int(os.getenv("COMPETITOR_REPORT_TIMEOUT_SECONDS", "5")), 60),
+)
+COMPETITOR_REPORT_API_BASE_URL = COMPETITOR_REPORT_BASE_URL
+COMPETITOR_REPORT_API_TIMEOUT_SECONDS = COMPETITOR_REPORT_TIMEOUT_SECONDS

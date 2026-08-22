@@ -69,6 +69,9 @@ grep -Eq 'change-me|example\.(internal|com)|not-a-real' "$env_file" && fail "Pla
 chmod 600 "$env_file"
 
 [ "$(env_value SANDBOX_ENVIRONMENT_CODE)" = "sandbox" ] || fail "SANDBOX_ENVIRONMENT_CODE must be sandbox."
+deployment_mode=$(env_value SANDBOX_DEPLOYMENT_MODE)
+[ -n "$deployment_mode" ] || deployment_mode=dual-host
+[ "$deployment_mode" = "dual-host" ] || fail "Use single-host/install-single-host.sh for SANDBOX_DEPLOYMENT_MODE=single-host."
 git_sha=$(env_value SANDBOX_RELEASE_GIT_SHA)
 printf '%s' "$git_sha" | grep -Eq '^[0-9a-f]{40}$' || fail "SANDBOX_RELEASE_GIT_SHA must be a full 40-character commit SHA."
 

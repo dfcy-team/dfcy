@@ -40,6 +40,9 @@ grep -Eq 'change-me|example\.(internal|com)|not-a-real' "$env_file" && fail "Pla
 chmod 600 "$env_file"
 
 [ "$(env_value SANDBOX_ENVIRONMENT_CODE)" = "sandbox" ] || fail "SANDBOX_ENVIRONMENT_CODE must be sandbox."
+deployment_mode=$(env_value SANDBOX_DEPLOYMENT_MODE)
+[ -n "$deployment_mode" ] || deployment_mode=dual-host
+[ "$deployment_mode" = "dual-host" ] || fail "Use single-host/install-single-host.sh for SANDBOX_DEPLOYMENT_MODE=single-host."
 mysql_image=$(env_value SANDBOX_MYSQL_IMAGE)
 valid_digest_image "$mysql_image" || fail "SANDBOX_MYSQL_IMAGE must use an immutable sha256 digest."
 case "$mysql_image" in mysql@sha256:*|docker.io/library/mysql@sha256:*) ;; *) fail "MySQL image is not an approved official digest reference." ;; esac
