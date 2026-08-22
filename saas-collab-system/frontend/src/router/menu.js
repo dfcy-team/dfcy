@@ -60,6 +60,19 @@ export const menuItems = [
     ]
   },
   {
+    label: '达人管理',
+    internal: true,
+    permissions: ['influencers.view', 'influencers.outreach.view', 'influencers.fulfillment.view', 'influencers.catalog.view'],
+    children: [
+      { path: '/influencers/outreach-tasks', label: '建联任务', permissions: ['influencers.outreach.view'] },
+      { path: '/influencers/sample-fulfillments', label: '送样履约', permissions: ['influencers.fulfillment.view'] },
+      { path: '/influencers/videos', label: '视频结果', permissions: ['influencers.catalog.view'] },
+      { path: '/influencers/bd-performance', label: 'BD绩效', permissions: ['influencers.view'] },
+      { path: '/influencers/orders', label: '店铺订单', permissions: ['influencers.catalog.view'] },
+      { path: '/influencers/library', label: '品牌达人资源库', permissions: ['influencers.view'] }
+    ]
+  },
+  {
     label: 'RPA协同',
     internal: true,
     children: [
@@ -198,6 +211,15 @@ export const routeCapabilities = [
   { path: '/products/status-transitions', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/purchasing/orders', permissions: ['purchasing.orders.view'], userTypes: ['internal'] },
+  { path: '/influencers/outreach', permissions: ['influencers.outreach.view'], userTypes: ['internal'] },
+  { path: '/influencers/fulfillment', permissions: ['influencers.fulfillment.view'], userTypes: ['internal'] },
+  { path: '/influencers/outreach-tasks', permissions: ['influencers.outreach.view'], userTypes: ['internal'] },
+  { path: '/influencers/sample-fulfillments', permissions: ['influencers.fulfillment.view'], userTypes: ['internal'] },
+  { path: '/influencers/videos', permissions: ['influencers.catalog.view'], userTypes: ['internal'] },
+  { path: '/influencers/bd-performance', permissions: ['influencers.view'], userTypes: ['internal'] },
+  { path: '/influencers/performance', permissions: ['influencers.view'], userTypes: ['internal'] },
+  { path: '/influencers/orders', permissions: ['influencers.catalog.view'], userTypes: ['internal'] },
+  { path: '/influencers/library', permissions: ['influencers.view'], userTypes: ['internal'] },
   { path: '/suppliers/my-performance', userTypes: ['external'] },
   { path: '/suppliers/performance', permissions: ['suppliers.performance.view'], userTypes: ['internal'] },
   { path: '/suppliers/tasks', userTypes: ['external'] },

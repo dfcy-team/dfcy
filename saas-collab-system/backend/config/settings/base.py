@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "apps.products",
     "apps.development",
     "apps.listings",
+    "apps.influencers",
     "apps.purchasing",
     "apps.packing",
     "apps.consolidation",
