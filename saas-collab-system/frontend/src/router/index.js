@@ -30,6 +30,7 @@ const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue
 const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
 const InfluencerResourceLibrary = () => import('../views/influencers/InfluencerResourceLibrary.vue');
 const InfluencerReadOnlyPage = () => import('../views/influencers/InfluencerReadOnlyPage.vue');
+const BdPerformance = () => import('../views/influencers/BdPerformance.vue');
 const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
 const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
 const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
@@ -158,8 +159,11 @@ const routes = [
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'influencers/outreach', component: OutreachTaskList },
       { path: 'influencers/fulfillment', component: SampleFulfillmentList },
+      { path: 'influencers/outreach-tasks', component: OutreachTaskList },
+      { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },
       { path: 'influencers/videos', component: InfluencerReadOnlyPage, props: { title: '视频结果', description: '达人视频与店铺、商品、建联任务的关联结果。' } },
-      { path: 'influencers/performance', component: InfluencerReadOnlyPage, props: { title: 'BD绩效', description: '联盟订单、送样和视频事实将在后台归因后展示。' } },
+      { path: 'influencers/bd-performance', component: BdPerformance },
+      { path: 'influencers/performance', redirect: '/influencers/bd-performance' },
       { path: 'influencers/orders', component: InfluencerReadOnlyPage, props: { title: '店铺订单', description: '联盟订单作为数据源并入店铺订单，不单独建菜单。' } },
       { path: 'influencers/library', component: InfluencerResourceLibrary },
       { path: 'purchasing/orders', component: PurchaseOrderList },
@@ -226,6 +230,12 @@ const routes = [
     ]
   }
 ];
+
+export function redirectLegacyInfluencerTab(to) {
+  if (to.query?.tab !== 'bd-performance') return true;
+  const { tab, ...query } = to.query;
+  return { path: '/influencers/bd-performance', query, hash: to.hash, replace: true };
+}
 
 const router = createRouter({
   history: createWebHistory(),

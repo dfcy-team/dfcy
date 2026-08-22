@@ -61,6 +61,8 @@ class InfluencerSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id", "tenant_id", "status", "created_at", "updated_at", "is_blacklisted",
         )
+
+
     def validate_code(self, value):
         request = self.context["request"]
         queryset = Influencer.objects.filter(tenant=request.user.tenant, code=value)
@@ -104,6 +106,13 @@ class InfluencerSerializer(serializers.ModelSerializer):
             profile.full_clean()
             profile.save()
         return instance
+
+
+class InfluencerListSerializer(InfluencerSerializer):
+    """Collection response without account/contact details from the legacy model."""
+
+    class Meta(InfluencerSerializer.Meta):
+        fields = tuple(field for field in InfluencerSerializer.Meta.fields if field != "handle")
 
 
 class OutreachTaskSerializer(serializers.ModelSerializer):

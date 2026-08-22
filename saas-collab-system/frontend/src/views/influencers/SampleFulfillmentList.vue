@@ -193,7 +193,7 @@
                 <el-button link type="danger" :disabled="items.length === 1" @click="items.splice(index, 1)">删除</el-button>
               </div>
               <el-button link type="primary" @click="items.push(newItem())">+ 添加 SKU</el-button>
-              <el-alert class="price-note" type="warning" :closable="false" title="采购成本未匹配不会阻止送样记录保存。" />
+              <el-alert class="price-note" type="warning" :closable="false" title="价格未匹配：采购成本未匹配不会阻止送样记录保存。" />
             </div>
           </el-form-item>
           <el-form-item label="备注" class="form-span-2">
@@ -225,7 +225,12 @@
           <div><span>发货时间</span><b>{{ displayValue(detailSample.shipped_at) }}</b></div>
           <div><span>视频截止</span><b>{{ displayValue(detailSample.video_deadline_at) }}</b></div>
           <div><span>视频匹配</span><b>{{ detailSample.video_match_count || 0 }} 条</b></div>
+          <div><span>销售金额</span><b>{{ displayAmount(detailSample.sales_amount, detailSample) }}</b></div>
+          <div><span>采购成本</span><b>{{ displayAmount(detailSample.calculated_cost, detailSample) }}</b></div>
+          <div><span>价格匹配</span><b>{{ statusLabel(PRICING_STATUS_LABELS, detailSample.pricing_status) }}</b></div>
+          <div><span>定价时间</span><b>{{ displayValue(detailSample.priced_at) }}</b></div>
         </div><div class="tag-row"><el-tag v-for="tag in detailSample.quick_tags || []" :key="tag" size="small">{{ tag }}</el-tag></div><p class="detail-note">{{ displayValue(detailSample.notes) }}</p></section>
+        <section class="detail-section"><h3>SKU 匹配</h3><div v-if="detailSample.items?.length" class="video-list"><p v-for="item in detailSample.items" :key="item.id || item.requested_sku">{{ displayValue(item.requested_sku) }} · {{ statusLabel(COST_MATCH_STATUS_LABELS, item.cost_match_status) }} · {{ displayValue(item.price_match_status) }}</p></div><div v-else class="empty-state">暂无 SKU 匹配明细</div></section>
         <section class="detail-section"><h3>视频匹配结果</h3><div v-if="detailSample.video_matches?.length" class="video-list"><p v-for="video in detailSample.video_matches" :key="video.id">{{ displayValue(video.title || video.external_content_id) }} · {{ displayValue(video.published_at) }}</p></div><div v-else class="empty-state">暂无已发布匹配视频</div></section>
       </div>
     </el-drawer>
@@ -251,6 +256,7 @@ import {
   FULFILLMENT_LINK_TYPE_LABELS,
   FULFILLMENT_STATUS_LABELS,
   FULFILLMENT_STATUS_TRANSITIONS,
+  PRICING_STATUS_LABELS,
   restoreSampleFulfillment,
   resolveOrCreateInfluencer,
   statusLabel,

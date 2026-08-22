@@ -39,6 +39,7 @@ from .models import (
     VideoResult,
 )
 from .serializers import (
+    InfluencerListSerializer,
     InfluencerSerializer,
     InfluencerContactSerializer,
     InfluencerRestrictEventSerializer,
@@ -127,7 +128,6 @@ class InfluencerCollectionView(APIView):
             queryset = queryset.filter(
                 Q(code__icontains=search)
                 | Q(name__icontains=search)
-                | Q(handle__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__display_name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__external_influencer_id__icontains=search)
             )
@@ -156,7 +156,7 @@ class InfluencerCollectionView(APIView):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
         page, page_size = _pagination(request)
-        return success_response(paginated_data(request, queryset, InfluencerSerializer, page=page, page_size=page_size))
+        return success_response(paginated_data(request, queryset, InfluencerListSerializer, page=page, page_size=page_size))
 
     @transaction.atomic
     def post(self, request):

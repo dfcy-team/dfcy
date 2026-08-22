@@ -34,6 +34,13 @@ RATE_SOURCE_DESCRIPTION = (
     "active base_currency->CNY rate effective on the business date."
 )
 PERFORMANCE_CURRENCIES = frozenset(currency for currency, _ in SUPPORTED_CURRENCY_CHOICES)
+COMPATIBILITY_RATES_TO_CNY = {
+    "CNY": "1.0000",
+    "PHP": "0.1300",
+    "MYR": "1.6500",
+    "THB": "0.2000",
+    "USD": "7.2000",
+}
 COMPLETED_ORDER_STATUSES = frozenset({"completed", "已完成"})
 REFUND_MARKERS = frozenset({"是", "yes", "true", "1", "y"})
 SHIPPED_SAMPLE_STATUSES = frozenset(
@@ -798,7 +805,9 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
             detail.get("id", 0),
         ),
     )
-    rates = {}
+    # Keep the V2.44.31 response shape before tenant rates are imported.
+    # Monetary calculations still use _RateResolver and report missing rates.
+    rates = dict(COMPATIBILITY_RATES_TO_CNY)
     for detail in rate_details:
         if detail.get("rate") is None:
             continue

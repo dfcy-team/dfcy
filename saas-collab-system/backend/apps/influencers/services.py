@@ -831,6 +831,7 @@ def add_outreach_target(
         user=user,
         influencer=influencer,
         message="Blacklisted influencers cannot be linked to outreach tasks.",
+        code="conflict",
     )
     if task.target_count and OutreachTarget.objects.filter(
         tenant=user.tenant, task=task, is_deleted=False
@@ -1232,7 +1233,7 @@ def recompute_outreach_task_completion(*, user, task):
     return task
 
 
-def _assert_influencer_not_blacklisted(*, user, influencer, message=None):
+def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=None):
     # Serialize restriction changes with sample/target creation and re-read the
     # event log while holding the influencer row lock.
     locked = Influencer.objects.select_for_update().get(
@@ -1252,9 +1253,10 @@ def _assert_influencer_not_blacklisted(*, user, influencer, message=None):
         ).exists()
     )
     if blacklisted:
+        kwargs = {"code": code} if code else {}
         raise ValidationError(
             {"influencer": message or "Blacklisted influencers cannot receive samples."},
-            code="conflict",
+            **kwargs,
         )
     return locked
 

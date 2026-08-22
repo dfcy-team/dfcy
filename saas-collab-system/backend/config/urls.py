@@ -23,6 +23,8 @@ urlpatterns = [
     path("api/internal/governance/", include("apps.governance.urls")),
     path("api/internal/pilot/", include("apps.pilot.urls")),
     path("api/internal/products/", include("apps.products.urls")),
+    path("api/internal/development/", include("apps.development.urls")),
+    path("api/internal/listings/", include("apps.listings.urls")),
     path("api/internal/influencers/", include("apps.influencers.urls")),
     path("api/internal/purchasing/", include("apps.purchasing.urls")),
     path("api/internal/packing/", include("apps.packing.urls_internal")),
