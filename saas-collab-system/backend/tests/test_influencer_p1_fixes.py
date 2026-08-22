@@ -7,8 +7,9 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.audit.models import OperationLog
-from apps.influencers.models import Influencer, InfluencerContact, InfluencerProfile
+from apps.influencers.models import Influencer, InfluencerContact, InfluencerProfile, OutreachTask
 from apps.influencers.serializers import mask_handle
+from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.services import check_user_permission
 from apps.tenants.models import Tenant
@@ -189,6 +190,75 @@ def test_influencer_detail_contacts_and_resolve_responses_are_masked_and_audit_i
     assert "handle" not in audit.after_data
 
 
+def test_resolved_influencer_name_is_masked_in_outreach_target_list_and_detail():
+    tenant = Tenant.objects.create(name="Target privacy tenant", code="target-privacy-p1")
+    user, client = grant_permissions(
+        tenant,
+        "target-privacy-p1-user",
+        "influencers.fulfillment.manage",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+
+    created = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "target-secret-account"},
+        format="json",
+    )
+    assert created.status_code == 201
+    influencer = Influencer.objects.get(pk=created.data["data"]["id"])
+    assert influencer.name == influencer.handle == "target-secret-account"
+
+    platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="target-privacy-platform",
+        name="TikTok Shop",
+        platform_type=PlatformMaster.PlatformType.TIKTOK,
+    )
+    store = StoreMaster.objects.create(
+        tenant=tenant,
+        platform=platform,
+        code="target-privacy-store",
+        name="Target privacy store",
+        country_code="PH",
+        currency="PHP",
+    )
+    task = OutreachTask.objects.create(
+        tenant=tenant,
+        task_no="TARGET-PRIVACY-TASK",
+        store=store,
+        dispatcher=user,
+        owner=user,
+        target_count=1,
+    )
+
+    linked = client.post(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/",
+        {"influencer": influencer.pk},
+        format="json",
+    )
+    assert linked.status_code == 201
+    assert linked.data["data"]["influencer_name"] == mask_handle(influencer.handle)
+    assert "target-secret-account" not in json.dumps(linked.data, ensure_ascii=False)
+
+    listed = client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/")
+    assert listed.status_code == 200
+    target_payload = listed.data["data"]["results"][0]
+    assert target_payload["influencer_name"] == mask_handle(influencer.handle)
+    assert "target-secret-account" not in json.dumps(listed.data, ensure_ascii=False)
+
+    target_id = target_payload["id"]
+    detail = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{target_id}/",
+        {"notes": "target note"},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    assert detail.status_code == 200
+    assert detail.data["data"]["influencer_name"] == mask_handle(influencer.handle)
+    assert "target-secret-account" not in json.dumps(detail.data, ensure_ascii=False)
+
+
 def _contact_client(code):
     tenant = Tenant.objects.create(name=f"Contact tenant {code}", code=f"contact-{code}")
     user, client = grant_permissions(tenant, f"contact-user-{code}", "influencers.view", "influencers.manage")
@@ -211,16 +281,22 @@ def test_contacts_patch_updates_rows_with_locks_and_masked_response():
         is_primary=True,
         created_by=user,
     )
+    version = influencer.updated_at.isoformat()
 
     response = client.patch(
         f"/api/internal/influencers/{influencer.pk}/contacts/",
         {"contacts": [{"channel": "phone", "value": "13800138000", "is_primary": True}]},
         format="json",
+        HTTP_IF_MATCH=version,
     )
 
     assert response.status_code == 200
-    assert "value" not in response.data["data"][0]
-    assert response.data["data"][0]["masked_value"] == "***8000"
+    response_payload = response.data["data"]
+    assert "value" not in response_payload["contacts"][0]
+    assert response_payload["contacts"][0]["masked_value"] == "***8000"
+    influencer.refresh_from_db()
+    assert response_payload["updated_at"] == influencer.updated_at.isoformat()
+    assert response_payload["updated_at"] != version
     old.refresh_from_db()
     assert old.is_active is False
     assert old.is_primary is False
@@ -230,6 +306,37 @@ def test_contacts_patch_updates_rows_with_locks_and_masked_response():
         is_active=True,
         is_primary=True,
     ).exists()
+
+
+def test_contacts_patch_rejects_replayed_parent_version_without_mutating_rows():
+    tenant, user, client, influencer = _contact_client("conflict")
+    version = influencer.updated_at.isoformat()
+
+    first = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {"contacts": [{"channel": "phone", "value": "13800138000", "is_primary": True}]},
+        format="json",
+        HTTP_IF_MATCH=version,
+    )
+    assert first.status_code == 200
+    new_version = first.data["data"]["updated_at"]
+
+    second = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {"contacts": [{"channel": "email", "value": "stale@example.test", "is_primary": True}]},
+        format="json",
+        HTTP_IF_MATCH=version,
+    )
+    assert second.status_code == 409
+    influencer.refresh_from_db()
+    assert influencer.updated_at.isoformat() == new_version
+    assert InfluencerContact.objects.filter(
+        influencer=influencer,
+        value="13800138000",
+        is_active=True,
+        is_primary=True,
+    ).exists()
+    assert not InfluencerContact.objects.filter(influencer=influencer, value="stale@example.test").exists()
 
 
 def test_contacts_patch_empty_collection_deactivates_existing_rows_without_bulk_update():
@@ -242,15 +349,19 @@ def test_contacts_patch_empty_collection_deactivates_existing_rows_without_bulk_
         is_primary=True,
         created_by=user,
     )
+    version = influencer.updated_at.isoformat()
 
     response = client.patch(
         f"/api/internal/influencers/{influencer.pk}/contacts/",
         {"contacts": []},
         format="json",
+        HTTP_IF_MATCH=version,
     )
 
     assert response.status_code == 200
-    assert response.data["data"] == []
+    assert response.data["data"]["contacts"] == []
+    influencer.refresh_from_db()
+    assert response.data["data"]["updated_at"] == influencer.updated_at.isoformat()
     contact.refresh_from_db()
     assert contact.is_active is False
     assert contact.is_primary is False
@@ -266,6 +377,7 @@ def test_contacts_patch_rolls_back_deactivation_and_new_rows_on_model_validation
         is_primary=True,
         created_by=user,
     )
+    version = influencer.updated_at.isoformat()
 
     response = client.patch(
         f"/api/internal/influencers/{influencer.pk}/contacts/",
@@ -276,9 +388,12 @@ def test_contacts_patch_rolls_back_deactivation_and_new_rows_on_model_validation
             ]
         },
         format="json",
+        HTTP_IF_MATCH=version,
     )
 
     assert response.status_code == 422
+    influencer.refresh_from_db()
+    assert influencer.updated_at.isoformat() == version
     existing.refresh_from_db()
     assert existing.is_active is True
     assert existing.is_primary is True

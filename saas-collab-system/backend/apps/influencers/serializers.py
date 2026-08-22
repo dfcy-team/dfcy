@@ -429,8 +429,12 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
 class OutreachTargetSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     influencer_code = serializers.CharField(source="influencer.code", read_only=True)
-    influencer_name = serializers.CharField(source="influencer.name", read_only=True)
+    influencer_name = serializers.SerializerMethodField()
     influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
+
+    def get_influencer_name(self, obj):
+        influencer = getattr(obj, "influencer", None)
+        return safe_influencer_name(influencer) or mask_handle(getattr(influencer, "handle", ""))
 
     class Meta:
         model = OutreachTarget
