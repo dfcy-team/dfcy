@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
   "release_version": "2.44.37",
-  "status": "registered_not_deployed",
+  "status": "deployed_server_verified",
   "registered_at": "2026-08-23",
+  "deployed_at": "2026-08-23T20:06:57+08:00",
   "parent_release": "2.44.36",
   "current_deployed_base": "2.44.35",
   "menu_baseline": "2.44.33",
@@ -21,7 +22,17 @@
   "role_permission_css_sha256": "9f98c1af3131a0c28c8c04b7edb5cfb83a15070b7093c952a861065f6227ee3a",
   "frontend_context_sha256": "e7e500acfe0a2592890720136ea4dc924333a970514846100ac3bc341c704f51",
   "target_frontend_image": "saas-collab-frontend:v2.44.37",
+  "deployed_frontend_image_id": "sha256:bea152d602c27b856bdf1938eba1eaabe5a78c31aae8cab1788df582c97a9619",
+  "deployed_frontend_container_id": "a2f1208cc7dc28966fa2aaca6b33e987be58ea42e7ec095cb25dbe322842fd72",
   "unchanged_backend_image": "saas-collab-backend:v2.44.34",
+  "unchanged_runtime_ids": {
+    "backend": "6c194f23a0dd15259bc75a64aae2067920c21fefe58db625197c4175837bbabd",
+    "celery": "3eb0d81d5f1d2341a061e84e889edb2a3a80470d1241a9a67a12e9ce5baa0fe0",
+    "celery_beat": "162342a0501ca06e4e4b389a5aa7d154d3a8401ab328664ba3835f7a150c2879",
+    "redis": "e9c5d3a028c12d234e121da4d6e794b725625884279ff1062dd6f57c90f35ef7"
+  },
+  "audit_archive": "/home/dfcy01/releases/system-v2.44.37-build-20260823-audit.tar.gz",
+  "audit_archive_sha256": "45f58e02989416c2667ce101f26bc0d54c49dfe087530534d25a3c1007a9b493",
   "database_migration_required": false,
   "permission_contract": {
     "baseline": "V2.44.29",
@@ -38,8 +49,11 @@
     "menu_diff": "none relative to V2.44.36",
     "role_permission_source": "V2.44.29 registered menu-based implementation restored; normalized content diff is zero",
     "navigation_css": "V2.44.33 dark desktop and mobile palette retained",
-    "deployment_performed": false,
-    "deployment_blocker": "remote SSH/scp execution unavailable because the approval service reported the account execution limit was exhausted"
+    "deployment_performed": true,
+    "deployment_validation": "passed: nginx config, runtime image, immutable non-frontend container IDs, menu labels, dark navigation CSS and role permission assets",
+    "page_status": "/, /products/master, /products/details, /influencers/bd-performance and /system/roles returned HTTP 200",
+    "runtime_logs": "no frontend critical log entries during deployment validation; backend emitted no entries during the independent ten-minute check",
+    "browser_ui_verification": "authentication required after the frontend container replacement; pending an authenticated browser session"
   },
   "rollback": {
     "frontend_image": "saas-collab-frontend:v2.44.35",
