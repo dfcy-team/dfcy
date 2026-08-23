@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.37",
+  "status": "registered_not_deployed",
+  "registered_at": "2026-08-23",
+  "parent_release": "2.44.36",
+  "current_deployed_base": "2.44.35",
+  "menu_baseline": "2.44.33",
+  "scope": "frontend-only correction: retain V2.44.33 navigation and restore the V2.44.29 menu-based role permission tree",
+  "menu_change_scope": "none",
+  "top_level_menu_count": 16,
+  "target_menu_node_count": 99,
+  "target_route_capability_count": 111,
+  "menu_sha256": "41188b3be0e39809e0a2530ab8d7438781bc83af5f8b91e47dc4f5f7326de1c8",
+  "router_sha256": "0f00ba73f8df8c69c1c386843d37124bdbbde4b7d9ecc4c0e870df2feb2252c9",
+  "role_permission_source_sha256": "f7df5f146ede148b8a541f9802a22a280fa4f210b0dc3d3c14bc05b0a27470ce",
+  "navigation_css_sha256": "e2544744eefbd844c4f468096815bf8ce0ea16c0396e6e8398f17d7432960883",
+  "role_permission_bundle": "RolePermissionMatrix-BH8lYGIv.js",
+  "role_permission_bundle_sha256": "c23a4f9666a9755b3e9722030fa0c2fb8dc91284b3ead87d3e9e3d1f9b3ef006",
+  "role_permission_css": "RolePermissionMatrix-1MYV9R8E.css",
+  "role_permission_css_sha256": "9f98c1af3131a0c28c8c04b7edb5cfb83a15070b7093c952a861065f6227ee3a",
+  "frontend_context_sha256": "e7e500acfe0a2592890720136ea4dc924333a970514846100ac3bc341c704f51",
+  "target_frontend_image": "saas-collab-frontend:v2.44.37",
+  "unchanged_backend_image": "saas-collab-backend:v2.44.34",
+  "database_migration_required": false,
+  "permission_contract": {
+    "baseline": "V2.44.29",
+    "catalog_loading": "all pages with page_size 100",
+    "menu_source": "frontend/src/router/menu.js",
+    "route_capabilities_merged": true,
+    "unmapped_action_permissions_group": "其他操作权限",
+    "save_real_permission_codes_only": true,
+    "administrator_role_protected": true
+  },
+  "checks": {
+    "frontend_all_tests": "212 passed",
+    "frontend_build": "passed with VITE_USE_MOCK=false",
+    "menu_diff": "none relative to V2.44.36",
+    "role_permission_source": "V2.44.29 registered menu-based implementation restored; normalized content diff is zero",
+    "navigation_css": "V2.44.33 dark desktop and mobile palette retained",
+    "deployment_performed": false,
+    "deployment_blocker": "remote SSH/scp execution unavailable because the approval service reported the account execution limit was exhausted"
+  },
+  "rollback": {
+    "frontend_image": "saas-collab-frontend:v2.44.35",
+    "database_restore_required": false
+  },
+  "release_notes": "docs/06_release/system_v2.44.37.md"
+}

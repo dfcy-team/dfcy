@@ -59,6 +59,17 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(rolePage).toContain('manageAccess.visible && !isBuiltInAdministrator');
   });
 
+  it('builds the permission matrix from the current menu and route capability tree', () => {
+    const rolePage = read('src/views/system/RolePermissionMatrix.vue');
+    expect(rolePage).toContain("import { menuItems, routeCapabilities } from '../../router/menu';");
+    expect(rolePage).toContain('async function loadAllPermissions()');
+    expect(rolePage).toContain('const routeOnlyCodes = new Set(routeCapabilities.flatMap((item) => item.permissions || []));');
+    expect(rolePage).toContain("label: '其他操作权限'");
+    expect(rolePage).toContain('permission.unavailable');
+    expect(rolePage).toContain('const realPermissionCodes = new Set(');
+    expect(rolePage).toContain('filter((code) => realPermissionCodes.has(code))');
+  });
+
   it('uses only the frozen internal system and master-data API partitions', () => {
     const systemApi = read('src/api/systemAdmin.js');
     const masterApi = read('src/api/masterData.js');

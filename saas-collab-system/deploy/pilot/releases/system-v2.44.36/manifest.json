@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_version": "2.44.36",
-  "status": "registered_not_deployed",
+  "status": "superseded_by_2.44.37_before_deployment",
   "registered_at": "2026-08-23",
   "parent_release": "2.44.35",
   "menu_baseline": "2.44.33",
