@@ -1,0 +1,4 @@
+FROM saas-collab-backend:v2.44.33
+
+COPY backend/apps/influencers /app/apps/influencers
+COPY backend/apps/development/serializers.py /app/apps/development/serializers.py

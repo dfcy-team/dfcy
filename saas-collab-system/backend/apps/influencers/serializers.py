@@ -5,27 +5,64 @@ from apps.masterdata.models import StoreMaster
 
 from .models import (
     Influencer,
+    InfluencerContact,
+    InfluencerProfile,
+    InfluencerRestrictEvent,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
     SampleItem,
     SkuPriceSnapshot,
+    VideoResult,
 )
 
 
+class InfluencerProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InfluencerProfile
+        exclude = ("tenant", "influencer")
+        read_only_fields = ("created_at", "updated_at")
+
+
+class InfluencerContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InfluencerContact
+        fields = ("id", "channel", "value", "label", "is_primary", "is_active", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class InfluencerRestrictEventSerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InfluencerRestrictEvent
+        fields = ("id", "action", "reason", "actor_id", "actor_name", "occurred_at", "source")
+
+    def get_actor_name(self, obj):
+        return obj.actor.full_name or obj.actor.username
+
+
 class InfluencerSerializer(serializers.ModelSerializer):
+    # Handles are accepted on controlled writes but are not exposed by the
+    # public collection/detail representation.
+    handle = serializers.CharField(write_only=True, required=False, allow_blank=True)
     tenant_id = serializers.IntegerField(read_only=True)
     is_blacklisted = serializers.SerializerMethodField()
+    video_metrics = serializers.SerializerMethodField()
+    profile = InfluencerProfileSerializer(required=False)
+    contacts = InfluencerContactSerializer(many=True, read_only=True)
+    blacklist_history = InfluencerRestrictEventSerializer(source="restrict_events", many=True, read_only=True)
 
     class Meta:
         model = Influencer
         fields = (
-            "id", "tenant_id", "code", "name", "platform", "category",
-            "follower_count", "cooperation_status", "status", "is_blacklisted",
+            "id", "tenant_id", "code", "name", "platform", "handle", "category",
+            "follower_count", "cooperation_status", "status", "is_blacklisted", "video_metrics",
+            "profile", "contacts", "blacklist_history",
             "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "cooperation_status", "status", "created_at", "updated_at", "is_blacklisted",
+            "id", "tenant_id", "status", "created_at", "updated_at", "is_blacklisted",
         )
     def validate_code(self, value):
         request = self.context["request"]
@@ -37,13 +74,52 @@ class InfluencerSerializer(serializers.ModelSerializer):
         return value
 
     def get_is_blacklisted(self, obj):
+        prefetched = getattr(obj, "_restriction_events", None)
+        if prefetched:
+            return prefetched[0].action == InfluencerRestrictEvent.Action.BLACKLIST
+        restrictions = getattr(obj, "_restriction_rows", None)
+        if restrictions is not None:
+            return bool(restrictions and restrictions[0].is_blacklisted)
+        latest = obj.restrict_events.order_by("-occurred_at", "-id").values_list("action", flat=True).first()
+        if latest is not None:
+            return latest == "blacklist"
         return obj.restrictions.filter(is_blacklisted=True).exists()
+
+    def get_video_metrics(self, obj):
+        # Raw video results can contain millions of rows. Online list/detail
+        # requests must use the future daily aggregate rather than scan them.
+        return {"status": "pending_precompute", "views": None, "live_views": None, "orders": None, "gmv": None}
+
+    def create(self, validated_data):
+        profile_data = validated_data.pop("profile", None)
+        instance = super().create(validated_data)
+        if profile_data is not None:
+            InfluencerProfile.objects.create(tenant=instance.tenant, influencer=instance, **profile_data)
+        return instance
+
+    def update(self, instance, validated_data):
+        profile_data = validated_data.pop("profile", None)
+        instance = super().update(instance, validated_data)
+        if profile_data is not None:
+            profile, _ = InfluencerProfile.objects.get_or_create(tenant=instance.tenant, influencer=instance)
+            for field, value in profile_data.items():
+                setattr(profile, field, value)
+            profile.full_clean()
+            profile.save()
+        return instance
 
 
 class OutreachTaskSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     dispatcher_id = serializers.IntegerField(read_only=True)
     linked_count = serializers.SerializerMethodField()
+    sample_status_summary = serializers.SerializerMethodField()
+    sample_fulfillment_status_summary = serializers.SerializerMethodField()
+    sample_fulfillment_count = serializers.SerializerMethodField()
+    sample_fulfillment_completed_count = serializers.SerializerMethodField()
+    sample_fulfillment_video_match_count = serializers.SerializerMethodField()
+    video_match_count = serializers.SerializerMethodField()
+    completion_validation = serializers.SerializerMethodField()
     store_name = serializers.CharField(source="store.name", read_only=True)
     owner_name = serializers.SerializerMethodField()
     dispatcher_name = serializers.SerializerMethodField()
@@ -62,6 +138,103 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
         annotated = getattr(obj, "active_linked_count", None)
         return annotated if annotated is not None else obj.linked_count
 
+    def _sample_summary(self, obj):
+        cached = getattr(obj, "_sample_status_summary", None)
+        if cached is not None:
+            return cached
+        counts = {status: 0 for status, _ in SampleFulfillment.Status.choices}
+        prefetched_samples = getattr(obj, "_active_samples", None)
+        if prefetched_samples is None:
+            sample_rows = list(
+                obj.sample_fulfillments.filter(
+                    tenant_id=obj.tenant_id,
+                    is_deleted=False,
+                ).values_list("id", "status")
+            )
+            sample_ids = [sample_id for sample_id, _ in sample_rows]
+            published_video_rows = VideoResult.objects.filter(
+                tenant_id=obj.tenant_id,
+                sample_fulfillment_id__in=sample_ids,
+                published_at__isnull=False,
+            )
+            matched_videos = published_video_rows.count()
+            matched_sample_ids = set(
+                published_video_rows.values_list("sample_fulfillment_id", flat=True)
+            )
+        else:
+            sample_rows = [(sample.id, sample.status) for sample in prefetched_samples]
+            sample_ids = [sample_id for sample_id, _ in sample_rows]
+            matched_videos = sum(
+                len(getattr(sample, "_published_video_results", []))
+                for sample in prefetched_samples
+            )
+            matched_sample_ids = {
+                sample.id
+                for sample in prefetched_samples
+                if getattr(sample, "_published_video_results", [])
+            }
+        protected_statuses = {
+            SampleFulfillment.Status.PUBLISHED,
+            SampleFulfillment.Status.LIVE_CREATOR,
+            SampleFulfillment.Status.COMPLETED,
+            SampleFulfillment.Status.CANCELLED,
+        }
+        for sample_id, status in sample_rows:
+            if sample_id in matched_sample_ids and status not in protected_statuses:
+                status = SampleFulfillment.Status.PUBLISHED
+            counts[status] = counts.get(status, 0) + 1
+        completed = sum(
+            counts.get(status, 0)
+            for status in (
+                SampleFulfillment.Status.PUBLISHED,
+                SampleFulfillment.Status.COMPLETED,
+                SampleFulfillment.Status.LIVE_CREATOR,
+            )
+        )
+        summary = {
+            "counts": counts,
+            "status_counts": counts,
+            "total": len(sample_ids),
+            "completed": completed,
+            "video_match_count": matched_videos,
+        }
+        setattr(obj, "_sample_status_summary", summary)
+        return summary
+
+    def get_sample_status_summary(self, obj):
+        return self._sample_summary(obj)
+
+    def get_sample_fulfillment_status_summary(self, obj):
+        return self._sample_summary(obj)["status_counts"]
+
+    def get_sample_fulfillment_count(self, obj):
+        return self._sample_summary(obj)["total"]
+
+    def get_sample_fulfillment_completed_count(self, obj):
+        return self._sample_summary(obj)["completed"]
+
+    def get_sample_fulfillment_video_match_count(self, obj):
+        return self._sample_summary(obj)["video_match_count"]
+
+    def get_video_match_count(self, obj):
+        return self._sample_summary(obj)["video_match_count"]
+
+    def get_completion_validation(self, obj):
+        summary = self._sample_summary(obj)
+        target_count = obj.target_count
+        target_reached = target_count > 0 and summary["completed"] >= target_count
+        return {
+            "target_count": target_count,
+            "completed_count": summary["completed"],
+            "target_positive": target_count > 0,
+            "target_reached": target_reached,
+            "task_completed": obj.status == OutreachTask.Status.COMPLETED,
+            "status_consistent": (
+                not target_reached
+                or obj.status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}
+            ),
+        }
+
     class Meta:
         model = OutreachTask
         fields = (
@@ -70,10 +243,12 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
             "owner", "owner_name", "dispatcher_name", "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
-            "created_at", "updated_at",
+            "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
+            "sample_fulfillment_completed_count", "sample_fulfillment_video_match_count", "video_match_count",
+            "completion_validation", "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "dispatcher_id", "linked_count", "status", "dispatch_time", "outreach_at",
+            "id", "tenant_id", "task_no", "dispatcher_id", "linked_count", "status", "dispatch_time", "outreach_at",
             "started_at", "finalized_at", "product_matched_at", "is_deleted", "deleted_at", "version",
             "created_at", "updated_at",
         )
@@ -171,7 +346,9 @@ class SampleItemSerializer(serializers.ModelSerializer):
 
 class SampleFulfillmentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
-    outreach_task = serializers.PrimaryKeyRelatedField(queryset=OutreachTask.objects.all())
+    outreach_task = serializers.PrimaryKeyRelatedField(
+        queryset=OutreachTask.objects.all(), required=False, allow_null=True
+    )
     outreach_target = serializers.PrimaryKeyRelatedField(
         queryset=OutreachTarget.objects.all(), required=False, allow_null=True
     )
@@ -194,6 +371,9 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     store_name = serializers.CharField(source="store.name", read_only=True)
     influencer_name = serializers.SerializerMethodField()
     owner_name = serializers.SerializerMethodField()
+    deleted_by_name = serializers.SerializerMethodField()
+    video_match_count = serializers.SerializerMethodField()
+    video_matches = serializers.SerializerMethodField()
 
     @staticmethod
     def _display_name(value):
@@ -212,24 +392,71 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     def get_owner_name(self, obj):
         return self._display_name(obj.owner)
 
+    def get_deleted_by_name(self, obj):
+        return self._display_name(obj.deleted_by)
+
+    @staticmethod
+    def _published_videos(obj):
+        cached = getattr(obj, "_published_video_results", None)
+        if cached is not None:
+            return cached
+        cached = list(
+            obj.video_results.filter(
+                tenant_id=obj.tenant_id,
+                published_at__isnull=False,
+            ).order_by(
+                "-published_at", "-id"
+            )[:50]
+        )
+        setattr(obj, "_published_video_results", cached)
+        return cached
+
+    def get_video_match_count(self, obj):
+        return len(self._published_videos(obj))
+
+    def get_video_matches(self, obj):
+        return [
+            {
+                "id": video.id,
+                "content_type": video.content_type,
+                "platform": video.platform,
+                "external_content_id": video.external_content_id,
+                "url": video.url,
+                "title": video.title,
+                "published_at": video.published_at,
+                "metric_date": video.metric_date,
+            }
+            for video in self._published_videos(obj)
+        ]
+
+    def validate(self, attrs):
+        # Legacy target payloads may derive influencer from the target; targetless creates cannot.
+        if attrs.get("outreach_target") is None and attrs.get("influencer") is None:
+            raise serializers.ValidationError(
+                {"influencer": "This field is required when outreach_target is omitted."}
+            )
+        return attrs
+
     class Meta:
         model = SampleFulfillment
         fields = (
             "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
             "outreach_target", "influencer", "influencer_name", "store", "store_name", "owner", "owner_name",
             "product_name_snapshot", "external_product_id", "sample_order_no",
-            "sample_sent_at", "shipped_at", "status", "source", "external_id", "version",
+            "link_type", "quick_tags", "sample_sent_at", "shipped_at", "video_deadline_at", "status", "source", "external_id", "version",
             "notes", "finalized_at", "sku_quantity", "sales_amount", "calculated_cost", "pricing_status",
-            "priced_at", "items", "created_at", "updated_at",
+            "priced_at", "is_deleted", "deleted_at", "deleted_by", "deleted_by_name", "video_match_count", "video_matches",
+            "items", "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "product_name_snapshot", "sample_sent_at", "shipped_at", "status",
+            "id", "tenant_id", "sample_sent_at", "shipped_at", "status",
             "version", "finalized_at", "sku_quantity", "sales_amount", "calculated_cost", "pricing_status",
-            "priced_at", "created_at", "updated_at",
+            "priced_at", "video_deadline_at", "is_deleted", "deleted_at", "deleted_by", "deleted_by_name",
+            "video_match_count", "video_matches", "created_at", "updated_at",
         )
 
         extra_kwargs = {
-            "fulfillment_no": {"required": True},
+            "fulfillment_no": {"required": False, "allow_blank": True},
             "external_product_id": {"required": False, "allow_blank": True},
             "sample_order_no": {"required": False, "allow_blank": True},
             "source": {"required": False},
@@ -239,6 +466,72 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
 
     def validate_external_id(self, value):
         return value or None
+
+    def validate_quick_tags(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Quick tags must be a list.")
+        normalized = []
+        for raw_tag in value:
+            tag = str(raw_tag or "").strip()
+            if not tag:
+                raise serializers.ValidationError("Quick tags cannot be empty.")
+            if len(tag) > 80:
+                raise serializers.ValidationError("Each quick tag must be at most 80 characters.")
+            if tag not in normalized:
+                normalized.append(tag)
+        if len(normalized) > 20:
+            raise serializers.ValidationError("At most 20 quick tags are allowed.")
+        return normalized
+
+
+class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
+    """Allow-list for fact edits; status and lifecycle metadata remain service-owned."""
+
+    items = SampleItemSerializer(many=True, required=False)
+    append_items = SampleItemSerializer(many=True, required=False, write_only=True)
+    items_mode = serializers.ChoiceField(
+        choices=("replace", "append"), required=False, write_only=True
+    )
+
+    class Meta:
+        model = SampleFulfillment
+        fields = (
+            "sample_order_no",
+            "notes",
+            "link_type",
+            "quick_tags",
+            "items",
+            "append_items",
+            "items_mode",
+        )
+        extra_kwargs = {
+            "sample_order_no": {"required": False, "allow_blank": True},
+            "notes": {"required": False, "allow_blank": True},
+            "quick_tags": {"required": False},
+        }
+
+    def validate_quick_tags(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Quick tags must be a list.")
+        normalized = []
+        for raw_tag in value:
+            tag = str(raw_tag or "").strip()
+            if not tag:
+                raise serializers.ValidationError("Quick tags cannot be empty.")
+            if len(tag) > 80:
+                raise serializers.ValidationError("Each quick tag must be at most 80 characters.")
+            if tag not in normalized:
+                normalized.append(tag)
+        if len(normalized) > 20:
+            raise serializers.ValidationError("At most 20 quick tags are allowed.")
+        return normalized
+
+    def validate(self, attrs):
+        if "items" in attrs and "append_items" in attrs:
+            raise serializers.ValidationError(
+                {"items": "Use either items replacement or append_items, not both."}
+            )
+        return attrs
 
 
 class SkuPriceSnapshotSerializer(serializers.ModelSerializer):

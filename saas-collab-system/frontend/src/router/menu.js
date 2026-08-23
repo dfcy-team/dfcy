@@ -2,16 +2,19 @@ export const menuItems = [
   { path: '/', label: '工作台' },
   {
     label: '产品开发',
-    permissions: ['development.requirement.view','development.project.view','development.product_archive.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view'],
+    permissions: ['development.requirement.view','development.project.view','development.product_archive.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view','development.candidate.view','development.competitor.view','development.sample.view','development.quotation.view','development.listing_decision.view','development.trial.view','development.reorder.view','development.elimination.view','development.settings.view'],
     children: [
-      { path: '/development/requirements', label: '选品提报', permissions: ['development.requirement.view'] },
-      { path: '/development/review', label: '需求审核', permissions: ['development.requirement.review'] },
-      { path: '/development/projects', label: '开发项目', permissions: ['development.project.view'] },
-      { path: '/development/projects/archives', label: '开发产品档案', permissions: ['development.product_archive.view', 'development.project.view'] },
+      { path: '/development/candidates', label: '候选款登记', permissions: ['development.candidate.view', 'development.requirement.view', 'development.project.view'] },
+      { path: '/development/competitors', label: '竞品监控', permissions: ['development.competitor.view', 'development.candidate.view', 'development.project.view'] },
+      { path: '/development/samples', label: '样品/打样管理', permissions: ['development.sample.view', 'development.project.view'] },
+      { path: '/development/quotations', label: '比价管理', permissions: ['development.quotation.view', 'development.cost.view'] },
       { path: '/development/costs', label: '成本核算', permissions: ['development.cost.view'] },
-      { path: '/development/sales', label: '销售数据', permissions: ['development.sales.view'] },
-      { path: '/development/retrospectives', label: '选品复盘', permissions: ['development.review.view'] },
-      { path: '/development/dashboard', label: '效能看板', permissions: ['development.dashboard.view'] }
+      { path: '/development/listing-decisions', label: '上架决策', permissions: ['development.listing_decision.view', 'development.project.view'] },
+      { path: '/development/projects/archives', label: '开发档案/转正', permissions: ['development.product_archive.view', 'development.project.view'] },
+      { path: '/development/trials', label: '首单与试销', permissions: ['development.trial.view', 'development.sales.view'] },
+      { path: '/development/reorders', label: '返单决策', permissions: ['development.reorder.view', 'development.trial.view', 'development.project.view'] },
+      { path: '/development/eliminations', label: '淘汰库', permissions: ['development.elimination.view', 'development.review.view', 'development.project.view'] },
+      { path: '/development/settings', label: '开发设置', permissions: ['development.settings.view', 'development.project.view'] }
     ]
   },
   {
@@ -81,7 +84,13 @@ export const menuItems = [
     children: [
       { path: '/influencers', label: '达人档案', permissions: ['influencers.view'] },
       { path: '/influencers/outreach-tasks', label: '建联任务', permissions: ['influencers.outreach.view'] },
-      { path: '/influencers/sample-fulfillments', label: '送样履约', permissions: ['influencers.fulfillment.view'] }
+      { path: '/influencers/sample-fulfillments', label: '送样履约', permissions: ['influencers.fulfillment.view'] },
+      {
+        path: '/influencers/bd-performance',
+        label: 'BD绩效',
+        permissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
+        allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view']
+      }
     ]
   },
   {
@@ -203,14 +212,25 @@ export const menuItems = [
 export const routeCapabilities = [
   { path: '/', exact: true, userTypes: ['internal', 'external'] },
   { path: '/forbidden', exact: true },
-  { path: '/development/requirements', permissions: ['development.requirement.view'], userTypes: ['internal'] },
-  { path: '/development/review', permissions: ['development.requirement.review'], userTypes: ['internal'] },
-  { path: '/development/projects', permissions: ['development.project.view'], userTypes: ['internal'] },
-  { path: '/development/projects/archives', permissions: ['development.product_archive.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/candidates', permissions: ['development.candidate.view', 'development.requirement.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/competitors', permissions: ['development.competitor.view', 'development.candidate.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/samples', permissions: ['development.sample.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/quotations', permissions: ['development.quotation.view', 'development.cost.view'], userTypes: ['internal'] },
   { path: '/development/costs', permissions: ['development.cost.view'], userTypes: ['internal'] },
-  { path: '/development/sales', permissions: ['development.sales.view'], userTypes: ['internal'] },
-  { path: '/development/retrospectives', permissions: ['development.review.view'], userTypes: ['internal'] },
-  { path: '/development/dashboard', permissions: ['development.dashboard.view'], userTypes: ['internal'] },
+  { path: '/development/listing-decisions', permissions: ['development.listing_decision.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/projects/archives', permissions: ['development.product_archive.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/trials', permissions: ['development.trial.view', 'development.sales.view'], userTypes: ['internal'] },
+  { path: '/development/reorders', permissions: ['development.reorder.view', 'development.trial.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/eliminations', permissions: ['development.elimination.view', 'development.review.view', 'development.project.view'], userTypes: ['internal'] },
+  { path: '/development/settings', permissions: ['development.settings.view', 'development.project.view'], userTypes: ['internal'] },
+  // Legacy links are kept in the capability contract while their routes below
+  // redirect to the corresponding new workflow entry.
+  { path: '/development/requirements', permissions: ['development.requirement.view', 'development.candidate.view'], userTypes: ['internal'] },
+  { path: '/development/review', permissions: ['development.requirement.review', 'development.candidate.view'], userTypes: ['internal'] },
+  { path: '/development/projects', permissions: ['development.project.view', 'development.candidate.view'], userTypes: ['internal'] },
+  { path: '/development/sales', permissions: ['development.sales.view', 'development.trial.view'], userTypes: ['internal'] },
+  { path: '/development/retrospectives', permissions: ['development.review.view', 'development.elimination.view'], userTypes: ['internal'] },
+  { path: '/development/dashboard', permissions: ['development.dashboard.view', 'development.candidate.view'], userTypes: ['internal'] },
   { path: '/analytics/overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
@@ -301,6 +321,12 @@ export const routeCapabilities = [
   { path: '/influencers', permissions: ['influencers.view'], userTypes: ['internal'] },
   { path: '/influencers/outreach-tasks', permissions: ['influencers.outreach.view'], userTypes: ['internal'] },
   { path: '/influencers/sample-fulfillments', permissions: ['influencers.fulfillment.view'], userTypes: ['internal'] },
+  {
+    path: '/influencers/bd-performance',
+    permissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
+    allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
+    userTypes: ['internal']
+  },
   { path: '/audit/operations', userTypes: ['internal'] },
   { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
@@ -340,6 +366,9 @@ function canAccessCapability(user, capability) {
   if (user.is_superuser) return true;
   if (!capability.permissions?.length) return true;
   const permissions = new Set(user.permissions || []);
+  if (capability.allPermissions?.length && !capability.allPermissions.every((code) => permissions.has(code))) {
+    return false;
+  }
   return capability.permissions.some((code) => permissions.has(code));
 }
 

@@ -3,21 +3,21 @@
     <header class="workspace-heading">
       <div>
         <span>CREATOR OPERATIONS</span>
-        <h1>品牌达人等级资源库</h1>
-        <p>集中维护达人平台身份、内容赛道、粉丝规模与合作状态。</p>
+        <h1>BD 绩效</h1>
+        <p>按日期范围查看达人开拓、送样投入与合作产出。</p>
       </div>
       <div class="source-note">
         <i />
-        SaaS 达人档案
+        绩效聚合数据已接入
       </div>
     </header>
 
-    <InfluencerResourceLibrary />
+    <BdPerformancePanel />
   </section>
 </template>
 
 <script setup>
-import InfluencerResourceLibrary from './InfluencerResourceLibrary.vue';
+import BdPerformancePanel from './BdPerformancePanel.vue';
 </script>
 
 <style scoped>

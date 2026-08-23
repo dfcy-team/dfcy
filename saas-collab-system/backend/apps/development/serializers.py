@@ -128,8 +128,8 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "product_name": {"required": False},
             "category": {"required": False, "allow_blank": True},
-            "platform": {"required": False},
-            "site": {"required": False},
+            "platform": {"required": False, "allow_null": True},
+            "site": {"required": False, "allow_null": True},
             "platform_master": {"required": False, "allow_null": True},
             "store_master": {"required": False, "allow_null": True},
             "virtual_inventory_qty": {"required": False, "min_value": 0},

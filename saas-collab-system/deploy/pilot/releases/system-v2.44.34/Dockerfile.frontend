@@ -1,0 +1,3 @@
+FROM saas-collab-frontend:v2.44.33
+
+COPY dist/ /usr/share/nginx/html/

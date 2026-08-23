@@ -17,23 +17,25 @@
 
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
-        <el-input v-model="filters.search" clearable placeholder="搜索达人/建联编号/产品/订单" @keyup.enter="applyFilters" />
+        <el-input v-model="filters.search" clearable placeholder="搜索达人/送样编号/建联编号/产品/订单" @keyup.enter="applyFilters" />
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺">
           <el-option v-for="store in rowStores" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
         <el-select v-model="filters.status" clearable placeholder="全部状态">
           <el-option v-for="(label, value) in FULFILLMENT_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
+        <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
       </div>
 
-      <el-table v-loading="loading" :data="rows" empty-text="暂无送样履约">
-        <el-table-column label="建联编号" min-width="155">
+      <el-table v-loading="loading" :data="rows" empty-text="暂无送样履约" @row-click="openDetail">
+        <el-table-column label="送样 / 建联编号" min-width="175">
           <template #default="{ row }">
-            <b>{{ displayValue(row.outreach_task_no || row.outreach_task) }}</b>
-            <small>{{ displayValue(row.outreach_task_name) }}</small>
+            <b>{{ displayValue(row.fulfillment_no) }}</b>
+            <small v-if="hasValue(row.outreach_task_no)">建联 {{ row.outreach_task_no }}</small>
+            <small v-if="hasValue(row.outreach_task_name)">{{ row.outreach_task_name }}</small>
           </template>
         </el-table-column>
         <el-table-column label="任务 ID" width="100">
@@ -50,12 +52,11 @@
         </el-table-column>
         <el-table-column label="产品 / SKU / 数量" min-width="220">
           <template #default="{ row }">
-            <b>{{ displayValue(row.product_name_snapshot) }}</b>
             <template v-if="row.items?.length">
               <div v-for="item in row.items" :key="item.id || item.requested_sku" class="sku-match">
                 <small>{{ displayValue(item.requested_sku || item.matched_sku_code) }} × {{ displayValue(item.quantity) }}</small>
                 <div>
-                  <el-tag size="small" :type="matchTagType(item.price_match_status)">{{ statusLabel(PRICE_MATCH_STATUS_LABELS, item.price_match_status) }}</el-tag>
+                  <el-tag size="small" :type="matchTagType(item.price_match_status)">{{ priceMatchLabel(item.price_match_status) }}</el-tag>
                   <el-tag size="small" :type="matchTagType(item.cost_match_status)">{{ statusLabel(COST_MATCH_STATUS_LABELS, item.cost_match_status) }}</el-tag>
                 </div>
               </div>
@@ -69,16 +70,30 @@
         <el-table-column prop="sample_order_no" label="样品订单" min-width="135">
           <template #default="{ row }">{{ displayValue(row.sample_order_no) }}</template>
         </el-table-column>
-        <el-table-column label="成本" min-width="125">
+        <el-table-column label="销售额" min-width="125">
+          <template #default="{ row }">
+            <b>{{ displayAmount(row.sales_amount, row) }}</b>
+            <small>{{ pricingStatusLabel(row.pricing_status) }}</small>
+          </template>
+        </el-table-column>
+        <el-table-column label="采购成本" min-width="125">
           <template #default="{ row }">
             <b>{{ displayAmount(row.calculated_cost, row) }}</b>
-            <small v-if="hasValue(row.sales_amount)">销售额 {{ displayAmount(row.sales_amount, row) }}</small>
-            <small><el-tag size="small" :type="pricingTagType(row.pricing_status)">{{ statusLabel(PRICING_STATUS_LABELS, row.pricing_status) }}</el-tag></small>
+            <small>{{ costMatchLabel(row) }}</small>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="送样负责人" min-width="130">
+          <template #default="{ row }">{{ displayValue(row.owner_name || row.owner) }}</template>
+        </el-table-column>
+        <el-table-column label="截止 / 视频匹配" min-width="170">
+          <template #default="{ row }">
+            <small>截止 {{ displayValue(row.video_deadline_at) }}</small>
+            <small v-if="row.video_match_count">匹配 {{ row.video_match_count }} 条</small>
           </template>
         </el-table-column>
         <el-table-column label="备注" min-width="160">
@@ -87,9 +102,13 @@
         <el-table-column label="建联日期" min-width="155">
           <template #default="{ row }">{{ displayValue(outreachDate(row)) }}</template>
         </el-table-column>
-        <el-table-column label="操作" min-width="140" fixed="right">
+        <el-table-column label="操作" min-width="220" fixed="right">
           <template #default="{ row }">
-            <el-dropdown v-if="canManage && nextStatuses(row).length" :disabled="statusUpdatingId === row.id" @command="(nextStatus) => changeStatus(row, nextStatus)">
+            <el-button link @click.stop="openDetail(row)">详情</el-button>
+            <el-button v-if="canManage && !row.is_deleted" link @click.stop="openEdit(row)">编辑</el-button>
+            <el-button v-if="canManage && !row.is_deleted" link type="danger" @click.stop="removeSample(row)">删除</el-button>
+            <el-button v-if="canManage && row.is_deleted" link type="primary" @click.stop="restoreSample(row)">恢复</el-button>
+            <el-dropdown v-if="canManage && !row.is_deleted && nextStatuses(row).length" :disabled="statusUpdatingId === row.id" @command="(nextStatus) => changeStatus(row, nextStatus)">
               <el-button link type="primary">流转</el-button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -110,45 +129,70 @@
       <template #header>
         <div class="dialog-heading">
           <span>送样履约</span>
-          <h2>新增送样记录</h2>
+          <h2>{{ editingSample ? '编辑送样记录' : '新增送样记录' }}</h2>
         </div>
       </template>
       <el-form class="sample-form" label-position="top">
         <div class="form-grid">
-          <el-form-item label="建联任务" required class="form-span-2">
-            <el-select v-model="form.outreach_task" filterable placeholder="请选择建联任务" @change="selectTask">
-              <el-option v-for="task in tasks" :key="task.id" :label="`${task.task_name || task.task_no}（${task.task_no}）`" :value="task.id" />
+          <el-form-item label="送样类型" required class="form-span-2">
+            <el-select v-model="form.link_type" :disabled="!!editingSample" placeholder="请选择送样类型">
+              <el-option v-for="(label, value) in selectableLinkTypes" :key="value" :label="`${label}（${value}）`" :value="value" />
             </el-select>
+            <small class="field-hint">送样编号由系统按类型自动生成，不需要选择建联任务。</small>
           </el-form-item>
           <el-form-item label="送样日期">
             <el-input :model-value="todayLabel" readonly />
           </el-form-item>
           <el-form-item label="达人账号" required>
-            <el-select v-if="!form.outreach_target" v-model="form.outreach_target" :disabled="!form.outreach_task" filterable placeholder="请选择达人账号">
-              <el-option v-for="target in targets" :key="target.id" :label="targetLabel(target)" :value="target.id" />
+            <el-select
+              v-model="form.influencer"
+              filterable
+              remote
+              allow-create
+              default-first-option
+              reserve-keyword
+              :remote-method="searchInfluencers"
+              :loading="influencerLoading"
+              :disabled="!!editingSample"
+              @change="resolveSelectedInfluencer"
+              placeholder="搜索达人账号或名称"
+            >
+              <el-option v-for="influencer in influencerOptions" :key="influencer.id" :label="influencerLabel(influencer)" :value="influencer.id" />
             </el-select>
-            <el-input v-else :model-value="targetAccount(selectedTarget)" readonly />
+            <el-alert v-if="selectedInfluencer?.is_blacklisted" class="blacklist-alert" type="error" :closable="false" title="该达人在黑名单中，不能保存送样。" />
           </el-form-item>
           <el-form-item label="达人 ID">
-            <el-input :model-value="displayValue(selectedTarget?.influencer)" readonly />
+            <el-input :model-value="displayValue(selectedInfluencer?.id)" readonly />
           </el-form-item>
-          <el-form-item label="店铺">
-            <el-input :model-value="displayValue(inheritedTask?.store_name || inheritedTask?.store)" readonly />
+          <el-form-item label="店铺" required>
+            <el-select v-if="!inheritedTask" v-model="form.store" filterable placeholder="请选择店铺">
+              <el-option v-for="store in storeOptions" :key="store.id" :label="store.name" :value="store.id" />
+            </el-select>
+            <el-input v-else :model-value="displayValue(inheritedTask.store_name || inheritedTask.store)" readonly />
           </el-form-item>
           <el-form-item label="样品订单">
             <el-input v-model="form.sample_order_no" placeholder="可填写样品订单号" />
           </el-form-item>
-          <el-form-item label="产品名称">
-            <el-input :model-value="displayValue(inheritedTask?.product_name_snapshot)" readonly />
-          </el-form-item>
-          <el-form-item label="产品 ID">
-            <el-input :model-value="displayValue(inheritedTask?.external_product_id)" readonly />
+          <el-form-item label="产品 ID" required>
+            <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="请输入产品 ID" />
           </el-form-item>
           <el-form-item label="状态">
-            <el-input model-value="待发样" readonly />
+            <el-input :model-value="editingSample ? statusLabel(FULFILLMENT_STATUS_LABELS, editingSample.status) : '待发样'" readonly />
+          </el-form-item>
+          <el-form-item label="快捷备注标签">
+            <el-select v-model="form.quick_tags" multiple filterable allow-create default-first-option placeholder="输入后回车添加标签">
+              <el-option v-for="tag in quickTagOptions" :key="tag" :label="tag" :value="tag" />
+            </el-select>
           </el-form-item>
           <el-form-item label="SKU 与数量" class="form-span-2">
             <div class="sku-editor">
+              <el-alert
+                v-if="inheritedTask?.sku_prefix"
+                class="price-note"
+                type="info"
+                :closable="false"
+                :title="`任务 SKU 前缀：${inheritedTask.sku_prefix}。请填写实际送样 SKU。`"
+              />
               <div class="sku-header"><span>站点</span><span>SKU</span><span>数量</span><span /></div>
               <div v-for="(item, index) in items" :key="index" class="sku-row">
                 <el-input v-model="item.site_code" placeholder="站点" />
@@ -157,7 +201,7 @@
                 <el-button link type="danger" :disabled="items.length === 1" @click="items.splice(index, 1)">删除</el-button>
               </div>
               <el-button link type="primary" @click="items.push(newItem())">+ 添加 SKU</el-button>
-              <el-alert class="price-note" type="warning" :closable="false" title="价格未匹配不会阻止送样记录保存。" />
+              <el-alert class="price-note" type="warning" :closable="false" title="采购成本未匹配不会阻止送样记录保存。" />
             </div>
           </el-form-item>
           <el-form-item label="备注" class="form-span-2">
@@ -167,50 +211,97 @@
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存送样</el-button>
+        <el-button type="primary" :disabled="selectedInfluencer?.is_blacklisted" :loading="saving" @click="submit">{{ editingSample ? '保存修改' : '保存送样' }}</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="detailVisible" direction="rtl" size="560px" :with-header="false">
+      <div class="detail-drawer" v-if="detailSample">
+        <div class="drawer-heading"><div><span>送样履约详情</span><h2>{{ displayValue(detailSample.fulfillment_no) }}</h2><small>{{ displayValue(detailSample.outreach_task_name || detailSample.outreach_task_no) }}</small></div><el-button text @click="detailVisible = false">×</el-button></div>
+        <div class="drawer-actions">
+          <el-button :disabled="!canManage || detailSample.is_deleted" @click="openEdit(detailSample)">编辑</el-button>
+          <el-button v-if="!detailSample.is_deleted" type="danger" plain :disabled="!canManage" @click="removeSample(detailSample)">删除</el-button>
+          <el-button v-else type="primary" :disabled="!canManage" @click="restoreSample(detailSample)">恢复</el-button>
+          <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, detailSample.status) }}</el-tag>
+        </div>
+        <section class="detail-section"><h3>送样事实</h3><div class="detail-facts">
+          <div><span>达人</span><b>{{ displayValue(detailSample.influencer_name || detailSample.influencer) }}</b></div>
+          <div><span>送样负责人</span><b>{{ displayValue(detailSample.owner_name || detailSample.owner) }}</b></div>
+          <div><span>样品订单</span><b>{{ displayValue(detailSample.sample_order_no) }}</b></div>
+          <div><span>建联类型</span><b>{{ statusLabel(FULFILLMENT_LINK_TYPE_LABELS, detailSample.link_type) }}</b></div>
+          <div><span>送样时间</span><b>{{ displayValue(detailSample.sample_sent_at) }}</b></div>
+          <div><span>发货时间</span><b>{{ displayValue(detailSample.shipped_at) }}</b></div>
+          <div><span>视频截止</span><b>{{ displayValue(detailSample.video_deadline_at) }}</b></div>
+          <div><span>视频匹配</span><b>{{ detailSample.video_match_count || 0 }} 条</b></div>
+        </div><div class="tag-row"><el-tag v-for="tag in detailSample.quick_tags || []" :key="tag" size="small">{{ tag }}</el-tag></div><p class="detail-note">{{ displayValue(detailSample.notes) }}</p></section>
+        <section class="detail-section"><h3>价格与成本</h3><div class="detail-facts">
+          <div><span>销售额</span><b>{{ displayAmount(detailSample.sales_amount, detailSample) }}</b></div>
+          <div><span>采购成本</span><b>{{ displayAmount(detailSample.calculated_cost, detailSample) }}</b></div>
+          <div><span>价格匹配</span><b>{{ pricingStatusLabel(detailSample.pricing_status) }}</b></div>
+          <div><span>成本匹配</span><b>{{ costMatchLabel(detailSample) }}</b></div>
+        </div><p v-if="pricingStatusLabel(detailSample.pricing_status) === '价格未匹配'" class="detail-note">价格未匹配，销售额暂不计入已匹配金额。</p></section>
+        <section class="detail-section"><h3>视频匹配结果</h3><div v-if="detailSample.video_matches?.length" class="video-list"><p v-for="video in detailSample.video_matches" :key="video.id">{{ displayValue(video.title || video.external_content_id) }} · {{ displayValue(video.published_at) }}</p></div><div v-else class="empty-state">暂无已发布匹配视频</div></section>
+      </div>
+    </el-drawer>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import {
   COST_MATCH_STATUS_LABELS,
   createSampleFulfillment,
+  deleteSampleFulfillment,
   fetchOutreachTask,
-  fetchOutreachTargets,
-  fetchOutreachTasks,
+  fetchOutreachTaskOptions,
+  fetchInfluencerResolve,
+  fetchSampleFulfillment,
+  fetchSampleFulfillmentOptions,
   fetchSampleFulfillments,
   formatInfluencerError,
+  FULFILLMENT_LINK_TYPE_LABELS,
   FULFILLMENT_STATUS_LABELS,
   FULFILLMENT_STATUS_TRANSITIONS,
   PRICE_MATCH_STATUS_LABELS,
   PRICING_STATUS_LABELS,
+  restoreSampleFulfillment,
+  resolveOrCreateInfluencer,
   statusLabel,
+  updateSampleFulfillment,
   updateSampleFulfillmentStatus
 } from '../../api/influencers';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
 const route = useRoute();
+const router = useRouter();
 const rows = ref([]);
 const tasks = ref([]);
-const targets = ref([]);
+const storeOptions = ref([]);
+const influencerOptions = ref([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
 const loading = ref(false);
 const saving = ref(false);
+const influencerLoading = ref(false);
 const visible = ref(false);
+const detailVisible = ref(false);
+const detailSample = ref(null);
+const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
 const statusUpdatingId = ref(null);
-const filters = reactive({ search: '', status: '', store: null });
-const form = reactive({ fulfillment_no: '', outreach_task: null, outreach_target: null, sample_order_no: '', notes: '' });
+const filters = reactive({ search: '', status: '', store: null, includeDeleted: false });
+const form = reactive({ outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
+const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '直播达人', '已完成', '已拉黑']);
+const quickTagOptions = computed(() => [...new Set([...QUICK_TAG_PRESETS, ...form.quick_tags])]);
+const selectableLinkTypes = computed(() => inheritedTask.value
+  ? { DRJL: FULFILLMENT_LINK_TYPE_LABELS.DRJL }
+  : Object.fromEntries(Object.entries(FULFILLMENT_LINK_TYPE_LABELS).filter(([value]) => value !== 'DRJL')));
 const newItem = () => ({ site_code: 'PH', external_product_id: '', requested_sku: null, quantity: 1 });
 const items = ref([newItem()]);
 const canManage = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -221,7 +312,7 @@ const exceptionCount = computed(() => rows.value.filter((row) => ['overdue', 'ca
 const rowStores = computed(() => [...new Map(rows.value.filter((row) => row.store).map((row) => [row.store, { id: row.store, name: row.store_name || `店铺 ${row.store}` }])).values()]);
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
-const selectedTarget = computed(() => targets.value.find((target) => String(target.id) === String(form.outreach_target)) || null);
+const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
 const todayLabel = (() => {
   const today = new Date();
   const pad = (value) => String(value).padStart(2, '0');
@@ -230,7 +321,9 @@ const todayLabel = (() => {
 
 async function load() {
   loading.value = true;
-  const r = await fetchSampleFulfillments({ page: page.value, page_size: pageSize.value, ...filters });
+  const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store };
+  if (filters.includeDeleted) params.include_deleted = 'true';
+  const r = await fetchSampleFulfillments(params);
   loading.value = false;
   if (r.success) {
     rows.value = collectionRows(r.data);
@@ -246,12 +339,18 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null });
+  Object.assign(filters, { search: '', status: '', store: null, includeDeleted: false });
   applyFilters();
 }
 
 const newKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-function discardDraft() { draftKey.value = ''; }
+function discardDraft() { draftKey.value = ''; clearEditor(); }
+
+function clearEditor() {
+  editingSample.value = null;
+  inheritedTask.value = null;
+  items.value = [newItem()];
+}
 
 function queryValue(primary, fallback) {
   const value = route.query?.[primary] ?? route.query?.[fallback];
@@ -260,9 +359,16 @@ function queryValue(primary, fallback) {
 
 function querySelection() {
   return {
-    taskId: queryValue('outreach_task', 'task'),
-    targetId: queryValue('outreach_target', 'target')
+    taskId: queryValue('outreach_task', 'task')
   };
+}
+
+async function consumeTaskQuery() {
+  if (!queryValue('outreach_task', 'task')) return;
+  const query = { ...route.query };
+  delete query.outreach_task;
+  delete query.task;
+  await router.replace({ query });
 }
 
 async function findTask(taskId) {
@@ -277,29 +383,37 @@ async function findTask(taskId) {
 }
 
 async function openCreate(selection = {}) {
+  editingSample.value = null;
   Object.assign(form, {
-    fulfillment_no: `SAMPLE-${Date.now()}`,
     outreach_task: null,
-    outreach_target: null,
+    influencer: null,
+    store: null,
+    product_name_snapshot: '',
+    external_product_id: '',
     sample_order_no: '',
-    notes: ''
+    notes: '',
+    link_type: 'YYJL',
+    quick_tags: []
   });
   inheritedTask.value = null;
-  targets.value = [];
   items.value = [newItem()];
   draftKey.value = newKey();
-  const r = await fetchOutreachTasks({ page: 1, page_size: 100, status: 'in_progress' });
-  tasks.value = r.success ? collectionRows(r.data) : [];
-  const requested = { ...querySelection(), ...selection };
+  const [optionResponse, taskOptionResponse] = await Promise.all([
+    fetchSampleFulfillmentOptions(),
+    fetchOutreachTaskOptions()
+  ]);
+  tasks.value = optionResponse.success ? (optionResponse.data?.tasks || []) : [];
+  storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
+  influencerOptions.value = optionResponse.success ? (optionResponse.data?.influencers || []) : [];
+  if (!optionResponse.success) ElMessage.error(formatInfluencerError(optionResponse, '达人账号加载失败'));
+  const routeSelection = querySelection();
+  const requested = { ...routeSelection, ...(selection?.taskId ? selection : {}) };
+  if (routeSelection.taskId) await consumeTaskQuery();
   if (requested.taskId) {
     const task = await findTask(requested.taskId);
     if (task) {
       form.outreach_task = task.id;
       await selectTask(task.id);
-      if (requested.targetId) {
-        const target = targets.value.find((item) => String(item.id) === String(requested.targetId));
-        if (target) form.outreach_target = target.id;
-      }
     }
   }
   visible.value = true;
@@ -307,26 +421,51 @@ async function openCreate(selection = {}) {
 
 async function selectTask(id) {
   inheritedTask.value = tasks.value.find((item) => String(item.id) === String(id)) || null;
-  form.outreach_target = null;
-  if (!id) {
-    targets.value = [];
+  if (!id) inheritedTask.value = null;
+  if (inheritedTask.value) {
+    form.link_type = 'DRJL';
+    form.store = inheritedTask.value.store;
+    form.product_name_snapshot = inheritedTask.value.task_name || inheritedTask.value.external_product_id || '';
+    form.external_product_id = inheritedTask.value.external_product_id || '';
+  }
+}
+
+function influencerLabel(influencer) {
+  const account = influencer.handle || influencer.code || `达人 ${influencer.id}`;
+  const suffix = [influencer.name, influencer.platform].filter(hasValue).join(' · ');
+  return suffix ? `${account}（${suffix}）` : account;
+}
+
+async function searchInfluencers(search) {
+  influencerLoading.value = true;
+  const response = await fetchInfluencerResolve(String(search || '').trim());
+  influencerLoading.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '达人账号搜索失败'));
+  influencerOptions.value = response.data?.candidates || response.data?.results || [];
+}
+
+async function resolveSelectedInfluencer(id) {
+  const selected = influencerOptions.value.find((item) => String(item.id) === String(id));
+  if (!selected) {
+    const account = String(id || '').trim().replace(/^@+/, '');
+    if (!account) return;
+    influencerLoading.value = true;
+    const created = await resolveOrCreateInfluencer(account);
+    influencerLoading.value = false;
+    if (!created.success) {
+      form.influencer = null;
+      return ElMessage.error(formatInfluencerError(created, '达人账号解析失败'));
+    }
+    const resolved = created.data;
+    influencerOptions.value = [resolved, ...influencerOptions.value.filter((item) => String(item.id) !== String(resolved.id))];
+    form.influencer = resolved.id;
+    if (resolved.created) ElMessage.success('已自动建立达人档案');
     return;
   }
-  const r = await fetchOutreachTargets(id, { page: 1, page_size: 100 });
-  targets.value = r.success ? collectionRows(r.data) : [];
-  if (!r.success) ElMessage.error(formatInfluencerError(r, '关联达人加载失败'));
-}
-
-function targetLabel(target) {
-  const name = target.influencer_name || target.influencer_code || `达人 ${displayValue(target.influencer)}`;
-  const account = [target.influencer_platform, target.influencer_handle].filter(Boolean).join(' · ');
-  return account ? `${name}（${account}）` : name;
-}
-
-function targetAccount(target) {
-  if (!target) return '—';
-  const account = [target.influencer_name, target.influencer_code, target.influencer_platform].filter(hasValue).join(' · ');
-  return account || displayValue(target.influencer);
+  const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
+  if (!response.success) return;
+  const resolved = (response.data?.candidates || response.data?.results || []).find((item) => String(item.id) === String(id));
+  if (resolved) influencerOptions.value = influencerOptions.value.map((item) => String(item.id) === String(id) ? resolved : item);
 }
 
 function outreachDate(row) {
@@ -339,8 +478,20 @@ function displayAmount(value, row) {
   return currency ? `${value} ${currency}` : String(value);
 }
 
-function pricingTagType(status) {
-  return { full: 'success', partial: 'warning', not_found: 'danger', pending: 'info' }[status] || 'info';
+function priceMatchLabel(status) {
+  return status === 'matched' ? statusLabel(PRICE_MATCH_STATUS_LABELS, status) : '价格未匹配';
+}
+
+function pricingStatusLabel(status) {
+  if (!hasValue(status) || status === 'not_found') return '价格未匹配';
+  return statusLabel(PRICING_STATUS_LABELS, status);
+}
+
+function costMatchLabel(row) {
+  const statuses = (row?.items || []).map((item) => item.cost_match_status).filter(hasValue);
+  if (!statuses.length) return '价格未匹配';
+  const unmatched = statuses.find((status) => !String(status).startsWith('matched'));
+  return statusLabel(COST_MATCH_STATUS_LABELS, unmatched || statuses[0]);
 }
 
 function matchTagType(status) {
@@ -371,21 +522,84 @@ async function changeStatus(row, status) {
       return;
     }
     Object.assign(row, detailData(r.data));
+    if (detailSample.value?.id === row.id) await openDetail(row);
     ElMessage.success('送样状态已更新');
   } finally {
     statusUpdatingId.value = null;
   }
 }
 
+async function openDetail(row) {
+  const response = await fetchSampleFulfillment(row.id, { include_deleted: row.is_deleted ? 'true' : undefined });
+  detailSample.value = response.success ? detailData(response.data) : { ...row };
+  detailVisible.value = true;
+  if (!response.success) ElMessage.error(formatInfluencerError(response, '送样详情加载失败'));
+}
+
+async function openEdit(row) {
+  if (!canManage.value || row.is_deleted) return;
+  editingSample.value = { ...row };
+  Object.assign(form, {
+    outreach_task: row.outreach_task,
+    influencer: row.influencer,
+    store: row.store,
+    product_name_snapshot: row.product_name_snapshot || '',
+    external_product_id: row.external_product_id || '',
+    sample_order_no: row.sample_order_no || '',
+    notes: row.notes || '',
+    link_type: row.link_type || 'DRJL',
+    quick_tags: [...(row.quick_tags || [])]
+  });
+  influencerOptions.value = [{
+    id: row.influencer,
+    name: row.influencer_name,
+    code: row.influencer_code,
+    handle: row.influencer_handle,
+    platform: row.influencer_platform,
+    is_blacklisted: row.is_blacklisted
+  }];
+  inheritedTask.value = row;
+  items.value = row.items?.length ? row.items.map((item) => ({ ...item })) : [newItem()];
+  visible.value = true;
+}
+
+async function removeSample(row) {
+  if (!canManage.value || row.is_deleted) return;
+  try {
+    await ElMessageBox.confirm('删除后可在“显示已删除”中恢复，确认删除该送样吗？', '确认删除', { type: 'warning' });
+  } catch {
+    return;
+  }
+  const response = await deleteSampleFulfillment(row.id, row.version);
+  if (!response.success) return ElMessage.error(formatInfluencerError(response));
+  ElMessage.success('送样已删除');
+  detailVisible.value = false;
+  await load();
+}
+
+async function restoreSample(row) {
+  if (!canManage.value || !row.is_deleted) return;
+  const response = await restoreSampleFulfillment(row.id, row.version);
+  if (!response.success) return ElMessage.error(formatInfluencerError(response));
+  ElMessage.success('送样已恢复');
+  await load();
+}
+
 async function submit() {
-  if (!form.fulfillment_no || !form.outreach_task || !form.outreach_target) return ElMessage.warning('请选择任务和达人');
+  if (!form.influencer || !form.store || !form.external_product_id.trim()) return ElMessage.warning('请填写达人、店铺和产品 ID');
+  if (selectedInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能保存送样');
+  if (editingSample.value) return submitEdit();
   saving.value = true;
   const payload = {
-    fulfillment_no: form.fulfillment_no,
-    outreach_task: form.outreach_task,
-    outreach_target: form.outreach_target,
+    ...(form.outreach_task ? { outreach_task: form.outreach_task } : {}),
+    influencer: form.influencer,
+    store: form.store,
+    product_name_snapshot: form.product_name_snapshot.trim() || form.external_product_id.trim(),
+    external_product_id: form.external_product_id.trim(),
     sample_order_no: form.sample_order_no,
     notes: form.notes,
+    link_type: form.link_type,
+    quick_tags: form.quick_tags,
     items: items.value.map((item) => ({
       ...item,
       external_product_id: inheritedTask.value?.external_product_id || '',
@@ -401,11 +615,34 @@ async function submit() {
   load();
 }
 
+async function submitEdit() {
+  saving.value = true;
+  const response = await updateSampleFulfillment(editingSample.value.id, {
+    sample_order_no: form.sample_order_no,
+    notes: form.notes,
+    link_type: form.link_type,
+    quick_tags: form.quick_tags,
+    items: items.value.map((item) => ({
+      site_code: item.site_code,
+      requested_sku: item.requested_sku?.trim() || null,
+      quantity: item.quantity,
+      external_product_id: editingSample.value.external_product_id || ''
+    })),
+    items_mode: 'replace'
+  }, editingSample.value.version);
+  saving.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '送样修改失败'));
+  visible.value = false;
+  detailVisible.value = false;
+  ElMessage.success('送样已修改');
+  await load();
+}
+
 onMounted(async () => {
   await load();
   if (canManage.value) {
     const selection = querySelection();
-    if (selection.taskId && selection.targetId) await openCreate(selection);
+    if (selection.taskId) await openCreate(selection);
   }
 });
 </script>
@@ -442,6 +679,21 @@ onMounted(async () => {
 .sku-row { margin-bottom: 8px; }
 .sku-row .el-button { padding: 0; }
 .price-note { margin-top: 12px; }
+.blacklist-alert { margin-top: 8px; }
+.detail-drawer { min-height: 100%; padding: 4px 2px 24px; }
+.drawer-heading, .drawer-actions { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.drawer-heading { padding-bottom: 16px; border-bottom: 1px solid #eef0f3; }
+.drawer-heading span { color: #167d68; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.drawer-heading h2 { margin: 5px 0; color: #1f2937; font-size: 22px; }
+.drawer-actions { align-items: center; flex-wrap: wrap; padding: 14px 0; }
+.detail-section { padding: 16px 0; border-top: 1px solid #eef0f3; }
+.detail-section h3 { margin: 0 0 14px; color: #1f2937; font-size: 16px; }
+.detail-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.detail-facts span { display: block; color: #84909c; font-size: 12px; }
+.detail-facts b { display: block; margin-top: 4px; overflow-wrap: anywhere; color: #1f2937; font-size: 13px; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.detail-note { margin: 14px 0 0; color: #4b5563; white-space: pre-wrap; }
+.video-list p { margin: 8px 0; color: #4b5563; font-size: 13px; }
 @media (max-width: 760px) {
   .sample-page .page-hero { align-items: stretch; flex-direction: column; gap: 16px; }
   .metrics { grid-template-columns: 1fr 1fr; }
@@ -451,5 +703,6 @@ onMounted(async () => {
   .form-span-2 { grid-column: auto; }
   .sku-header, .sku-row { grid-template-columns: 1fr; gap: 5px; }
   .sku-header { display: none; }
+  .detail-facts { grid-template-columns: 1fr; }
 }
 </style>

@@ -1,94 +1,342 @@
 <template>
   <section class="dev-page">
     <header class="dev-header">
-      <div><h1>{{ meta.title }}</h1><p>{{ meta.subtitle }}</p></div>
+      <div>
+        <h1>{{ meta.title }}</h1>
+        <p>{{ meta.subtitle }}</p>
+      </div>
       <div class="dev-actions">
         <el-button @click="refresh">刷新</el-button>
-        <el-button v-if="mode === 'requirements'" type="primary" @click="requirementOpen = true">新建提报</el-button>
-        <el-button v-if="mode === 'projects'" type="primary" @click="projectOpen = true">新建项目</el-button>
-        <el-button v-if="mode === 'sales'" type="primary" @click="salesOpen = true">导入 CSV</el-button>
+        <el-button v-if="canonicalMode === 'candidates'" type="primary" @click="openCandidateForm">
+          新建候选款
+        </el-button>
       </div>
     </header>
 
-    <div class="metric-strip">
-      <div v-for="item in metrics" :key="item.label" class="metric"><span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>{{ item.note }}</small></div>
-    </div>
+    <el-alert v-if="meta.notice" :title="meta.notice" type="info" :closable="false" show-icon class="dev-notice" />
 
-    <div v-if="mode === 'projects'" class="stage-rail">
-      <div v-for="(stage, index) in stages" :key="stage.key" class="stage" :class="{ active: index < 3 }">
-        <i>{{ index + 1 }}</i><div><strong>{{ stage.label }}</strong><span>{{ stageCounts[stage.key] || 0 }} 个项目</span></div>
+    <div class="metric-strip">
+      <div v-for="metric in metrics" :key="metric.label" class="metric">
+        <span>{{ metric.label }}</span>
+        <strong>{{ metric.value }}</strong>
+        <small>{{ metric.note }}</small>
       </div>
     </div>
 
     <section class="work-panel">
       <div class="filter-row">
-        <el-input v-model="search" clearable placeholder="搜索编号或商品名称" style="width:260px" />
-        <el-select v-model="stageFilter" clearable placeholder="全部阶段" style="width:150px">
-          <el-option v-for="stage in stages" :key="stage.key" :label="stage.label" :value="stage.key" />
+        <el-input v-model="search" clearable placeholder="搜索编号、商品名称或供应商" @keyup.enter="refresh" />
+        <el-select v-model="statusFilter" clearable placeholder="全部状态" @change="refresh">
+          <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-select v-model="siteFilter" clearable placeholder="全部站点" style="width:140px">
-          <el-option v-for="site in sites" :key="site" :label="site" :value="site" />
-        </el-select>
-        <span class="filter-spacer" /><span class="result-count">共 {{ filteredRows.length }} 条</span>
+        <span class="filter-spacer" />
+        <span class="result-count">共 {{ filteredRows.length }} 条</span>
       </div>
 
-      <el-table :data="filteredRows" v-loading="loading" height="520" @row-click="selectRow">
-        <el-table-column prop="project_no" label="项目编号" width="170" />
-        <el-table-column prop="product_name" label="商品名称" min-width="220"><template #default="{ row }"><div class="product-cell"><span class="product-avatar">{{ row.product_name?.slice(0,1) }}</span><strong>{{ row.product_name }}</strong></div></template></el-table-column>
-        <el-table-column prop="assigned_to_name" label="负责人" width="100" />
-        <el-table-column label="目标站点" min-width="150"><template #default="{ row }"><span class="site-list">{{ (row.target_sites || []).join(' · ') }}</span></template></el-table-column>
-        <el-table-column label="当前阶段" width="110"><template #default="{ row }"><el-tag effect="plain" :type="stageType(row.stage)">{{ stageLabel(row.stage) }}</el-tag></template></el-table-column>
-        <el-table-column label="预计毛利率" width="110"><template #default="{ row }"><strong class="margin">{{ percent(row.estimated_margin_rate) }}</strong></template></el-table-column>
-        <el-table-column prop="planned_launch_date" label="计划上架" width="120" />
-        <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.status === 'completed' ? 'success' : 'primary'">{{ row.status === 'completed' ? '已完成' : '进行中' }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" fixed="right" width="100"><template #default="{ row }"><el-button link type="primary" @click.stop="selectRow(row)">查看</el-button></template></el-table-column>
+      <el-table :data="filteredRows" v-loading="loading" row-key="id" class="dev-table" @row-click="selectRow">
+        <el-table-column v-for="column in activeConfig.columns" :key="column.key" :label="column.label" :prop="column.key" :min-width="column.minWidth || 130">
+          <template #default="{ row }">
+            <el-tag v-if="column.key === 'status' || column.key === 'trial_status'" :type="statusType(valueFor(row, column.key))" effect="plain">
+              {{ formatStatus(valueFor(row, column.key)) }}
+            </el-tag>
+            <span v-else>{{ formatCell(valueFor(row, column.key)) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" fixed="right" width="90">
+          <template #default="{ row }">
+            <el-button link type="primary" @click.stop="selectRow(row)">查看</el-button>
+          </template>
+        </el-table-column>
       </el-table>
+      <el-empty v-if="!loading && !filteredRows.length" :description="emptyDescription" />
     </section>
 
-    <el-drawer v-model="drawerOpen" title="项目详情" size="440px">
+    <el-drawer v-model="drawerOpen" :title="`${meta.title}详情`" size="480px">
       <template v-if="selected">
-        <div class="drawer-title"><span class="product-avatar large">{{ selected.product_name?.slice(0,1) }}</span><div><h3>{{ selected.product_name }}</h3><p>{{ selected.project_no }}</p></div></div>
-        <el-descriptions :column="2" border><el-descriptions-item label="当前阶段">{{ stageLabel(selected.stage) }}</el-descriptions-item><el-descriptions-item label="负责人">{{ selected.assigned_to_name }}</el-descriptions-item><el-descriptions-item label="目标站点">{{ selected.target_sites?.join(' / ') }}</el-descriptions-item><el-descriptions-item label="预计毛利">{{ percent(selected.estimated_margin_rate) }}</el-descriptions-item></el-descriptions>
-        <div class="detail-block"><h4>打样评估</h4><div class="status-line"><span>样品版本 V2 · 已完成评估</span><el-tag type="success">评估通过</el-tag></div><p>尺寸、材质与包装符合预期，可进入下一阶段。</p></div>
-        <div class="detail-block"><h4>多站点成本汇总</h4><div v-for="site in selected.target_sites" :key="site" class="cost-line"><span>{{ site }}</span><span>单位成本 $8.35</span><strong>{{ percent(selected.estimated_margin_rate) }}</strong></div></div>
-        <div class="detail-block"><h4>上市准备度</h4><el-progress :percentage="selected.stage === 'finalized' ? 100 : 75" status="success" /></div>
-        <div class="drawer-footer"><el-button>退回修改</el-button><el-button type="primary">同意进入下一阶段</el-button></div>
+        <div class="drawer-title">
+          <span class="record-avatar">{{ String(valueFor(selected, 'product_name') || valueFor(selected, 'name') || '?').slice(0, 1) }}</span>
+          <div>
+            <h3>{{ valueFor(selected, 'product_name') || valueFor(selected, 'name') || '未命名记录' }}</h3>
+            <p>{{ valueFor(selected, 'candidate_no') || valueFor(selected, 'project_no') || `#${selected.id || '—'}` }}</p>
+          </div>
+        </div>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item v-for="item in detailRows" :key="item.key" :label="item.label">
+            <el-tag v-if="item.key === 'status' || item.key === 'trial_status'" :type="statusType(item.value)">{{ formatStatus(item.value) }}</el-tag>
+            <span v-else>{{ formatCell(item.value) }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
       </template>
+      <el-empty v-else description="暂无详情" />
     </el-drawer>
 
-    <el-dialog v-model="requirementOpen" title="新建选品提报" width="600px"><el-form label-position="top"><el-form-item label="商品名称"><el-input v-model="requirement.product_name" /></el-form-item><div class="form-grid"><el-form-item label="品类"><el-input v-model="requirement.category" /></el-form-item><el-form-item label="目标站点"><el-select v-model="requirement.target_sites" multiple><el-option v-for="site in sites" :key="site" :value="site" /></el-select></el-form-item></div><el-collapse><el-collapse-item title="补充市场数据（选填）"><el-form-item label="参考链接"><el-input v-model="requirement.reference_link" /></el-form-item><el-form-item label="提报理由"><el-input v-model="requirement.reason" type="textarea" /></el-form-item></el-collapse-item></el-collapse></el-form><template #footer><el-button @click="requirementOpen=false">取消</el-button><el-button>保存草稿</el-button><el-button type="primary" @click="requirementOpen=false">提交审核</el-button></template></el-dialog>
-    <el-dialog v-model="projectOpen" title="新建开发项目" width="620px"><el-form label-position="top"><el-form-item label="商品名称"><el-input v-model="newProject.product_name" /></el-form-item><div class="form-grid"><el-form-item label="负责人 ID"><el-input-number v-model="newProject.assigned_to" :min="1" /></el-form-item><el-form-item label="目标站点"><el-select v-model="newProject.target_sites" multiple><el-option v-for="site in sites" :key="site" :value="site" /></el-select></el-form-item></div><el-form-item label="计划上架日期"><el-date-picker v-model="newProject.planned_launch_date" type="date" value-format="YYYY-MM-DD" /></el-form-item></el-form><template #footer><el-button @click="projectOpen=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveProject">创建项目</el-button></template></el-dialog>
-    <el-dialog v-model="salesOpen" title="导入销售数据" width="620px"><el-alert title="以 SPU + 站点 + 日期作为幂等键，重复导入会更新原记录。" type="info" :closable="false" /><el-input v-model="csvText" type="textarea" :rows="9" class="csv-box" /><template #footer><el-button @click="salesOpen=false">取消</el-button><el-button type="primary" @click="importCsv">开始导入</el-button></template></el-dialog>
+    <el-dialog v-model="candidateOpen" title="新建候选款" width="680px" destroy-on-close>
+      <el-alert title="前期仅做完整性校验和分类归属，不设置独立强制需求审核；保存后可继续样品、比价和成本流程。" type="info" :closable="false" show-icon class="form-notice" />
+      <el-form ref="candidateFormRef" :model="candidate" :rules="candidateRules" label-position="top">
+        <div class="form-grid">
+          <el-form-item label="商品名称" prop="product_name" required>
+            <el-input v-model="candidate.product_name" placeholder="请输入候选商品名称" />
+          </el-form-item>
+          <el-form-item label="开发类型" prop="development_type" required>
+            <el-select v-model="candidate.development_type" style="width: 100%" @change="onDevelopmentTypeChange">
+              <el-option v-for="item in developmentTypes" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="测款模式" prop="trial_mode" required>
+            <el-select v-model="candidate.trial_mode" style="width: 100%">
+              <el-option v-for="item in trialModes" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="商品分类（允许 L2/L3）" prop="category_node" required>
+            <el-select v-model="candidate.category_node" filterable clearable style="width: 100%" placeholder="请选择 L2 或 L3 分类">
+              <el-option v-for="item in categoryOptions" :key="item.id" :label="item.path" :value="Number(item.id)" />
+            </el-select>
+            <small class="field-help">可先归属 L2，后续开发中再细化到 L3；不会增加前期审核。</small>
+          </el-form-item>
+          <el-form-item v-if="candidate.development_type !== 'self_design'" label="工厂原型号" prop="original_model" required>
+            <el-input v-model="candidate.original_model" placeholder="工厂选款/微改款时必填" />
+          </el-form-item>
+          <el-form-item v-else label="工厂原型号">
+            <el-input v-model="candidate.original_model" disabled placeholder="无（自有设计）" />
+          </el-form-item>
+          <el-form-item v-if="candidate.development_type === 'self_design'" label="设计附件" prop="design_files" required>
+            <el-input v-model="candidate.design_file_reference" placeholder="附件地址或文件标识，多个用逗号分隔" />
+          </el-form-item>
+          <el-form-item v-if="candidate.development_type === 'self_design'" label="设计稿发送日期" prop="design_sent_date" required>
+            <el-date-picker v-model="candidate.design_sent_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="来源工厂">
+            <el-select v-model="candidate.supplier" filterable clearable style="width: 100%" placeholder="可在样品/比价阶段补充">
+              <el-option v-for="item in supplierOptions" :key="item.id" :label="`${item.name || item.code} · ${item.code || ''}`" :value="Number(item.id)" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="计划上架日期">
+            <el-date-picker v-model="candidate.planned_launch_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          </el-form-item>
+        </div>
+        <el-form-item label="选款理由/设计说明">
+          <el-input v-model="candidate.development_reason" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="candidateOpen = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveCandidate">保存候选款</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { createDevelopmentProject, fetchDevelopmentProjects, importDevelopmentSales } from '../../api/development';
+import {
+  createDevelopmentCandidate,
+  fetchDevelopmentCandidate,
+  fetchDevelopmentCandidates,
+  fetchDevelopmentCompetitors,
+  fetchDevelopmentElimination,
+  fetchDevelopmentEliminations,
+  fetchDevelopmentListingDecision,
+  fetchDevelopmentListingDecisions,
+  fetchDevelopmentQuotation,
+  fetchDevelopmentQuotations,
+  fetchDevelopmentReorderDecision,
+  fetchDevelopmentReorderDecisions,
+  fetchDevelopmentSample,
+  fetchDevelopmentSamples,
+  fetchDevelopmentSettings,
+  fetchDevelopmentSetting,
+  fetchDevelopmentTrial,
+  fetchDevelopmentTrials,
+  fetchDevelopmentProjects
+} from '../../api/development';
+import { fetchProductCategories } from '../../api/products';
+import { fetchSupplierMasters } from '../../api/masterData';
+import { collectionRows } from '../../utils/businessResponse';
 
-const props = defineProps({ mode: { type: String, default: 'projects' } });
-const mode = computed(() => props.mode);
-const metas = { requirements:['选品提报','快速提报、自动去重并跟踪审核状态'], review:['需求审核','集中处理待审核需求与疑似重复项'], projects:['开发项目','从立项到定型，统一管理样品、成本和上市准备'], costs:['成本核算','按站点维护成本版本并对比预计毛利'], sales:['销售数据','幂等导入销售快照并查看单品表现'], retrospectives:['选品复盘','对照预估与实际结果沉淀开发经验'], dashboard:['效能看板','查看命中率、周期、品类和站点表现'] };
-const meta = computed(() => ({ title: metas[mode.value]?.[0] || '产品开发', subtitle: metas[mode.value]?.[1] || '' }));
-const rows = ref([]); const loading = ref(false); const saving = ref(false); const search = ref(''); const stageFilter = ref(''); const siteFilter = ref('');
-const drawerOpen = ref(false); const selected = ref(null); const requirementOpen = ref(false); const projectOpen = ref(false); const salesOpen = ref(false);
-const requirement = reactive({ product_name:'', category:'', target_sites:[], reference_link:'', reason:'' });
-const newProject = reactive({ product_name:'', assigned_to:1, target_sites:[], planned_launch_date:'', development_source:'internal', project_no:`DEV-${Date.now()}` });
-const csvText = ref('spu_code,site,platform,snapshot_date,daily_sales_qty,daily_sales_amount_usd,ad_spend\n');
-const sites = ['ID','TH','VN','PH','MY','SG'];
-const stages = [{key:'initiated',label:'立项'},{key:'design',label:'设计'},{key:'sampling',label:'打样'},{key:'review',label:'评审'},{key:'finalized',label:'定型'}];
-const stageCounts = computed(() => Object.fromEntries(stages.map(s => [s.key, rows.value.filter(r => r.stage === s.key).length])));
-const filteredRows = computed(() => rows.value.filter(r => (!search.value || `${r.project_no}${r.product_name}`.toLowerCase().includes(search.value.toLowerCase())) && (!stageFilter.value || r.stage === stageFilter.value) && (!siteFilter.value || r.target_sites?.includes(siteFilter.value))));
-const metrics = computed(() => [{label:'开发项目总数',value:rows.value.length,note:'全链路项目'},{label:'本月立项',value:rows.value.filter(r=>r.stage==='initiated').length,note:'等待设计'},{label:'平均开发周期',value:'42 天',note:'较上月 -5.6%'},{label:'平均毛利率',value:'34.1%',note:'目标 32%'},{label:'定型待发布',value:rows.value.filter(r=>r.stage==='finalized').length,note:'需完成刊登'}]);
-function stageLabel(value){ return stages.find(s=>s.key===value)?.label || value; } function stageType(v){ return v==='finalized'?'success':v==='review'?'warning':'primary'; } function percent(v){ return v == null ? '—' : `${(Number(v)*100).toFixed(1)}%`; }
-function selectRow(row){ selected.value=row; drawerOpen.value=true; }
-async function refresh(){ loading.value=true; const res=await fetchDevelopmentProjects(); rows.value=Array.isArray(res.data)?res.data:(res.data?.results||[]); loading.value=false; }
-async function saveProject(){ saving.value=true; const res=await createDevelopmentProject(newProject); saving.value=false; if(res.success){ ElMessage.success('项目已创建'); projectOpen.value=false; refresh(); } else ElMessage.error(res.message); }
-async function importCsv(){ const res=await importDevelopmentSales(csvText.value); if(res.success){ ElMessage.success(`导入完成：${res.data.total} 条`); salesOpen.value=false; } }
+const props = defineProps({ mode: { type: String, default: 'candidates' } });
+
+const modeAliases = { requirements: 'candidates', review: 'candidates', projects: 'candidates', sales: 'trials', retrospectives: 'eliminations', dashboard: 'candidates' };
+const modeConfigs = {
+  candidates: {
+    title: '候选款登记',
+    subtitle: '统一登记工厂选款和自有设计，后续并行进入样品、比价与成本流程。',
+    notice: '候选款只做完整性校验、分类归属和重复提醒，不设置独立强制需求审核。',
+    fetch: fetchDevelopmentCandidates,
+    detail: fetchDevelopmentCandidate,
+    columns: [
+      { key: 'candidate_no', label: '开发编码', minWidth: 170 }, { key: 'product_name', label: '商品名称', minWidth: 190 },
+      { key: 'development_type', label: '开发类型' }, { key: 'trial_mode', label: '测款模式' },
+      { key: 'category_path', label: '商品分类', minWidth: 220 }, { key: 'status', label: '状态' }, { key: 'created_at', label: '登记时间', minWidth: 150 }
+    ]
+  },
+  competitors: {
+    title: '竞品监控', subtitle: '维护竞品关联、价格和销量快照，为候选款决策提供可追溯依据。', notice: '外部竞品采集服务尚未接入；当前接口边界已保留，不会用候选款数据冒充竞品观测。',
+    fetch: fetchDevelopmentCompetitors,
+    columns: [
+      { key: 'competitor_name', label: '竞品名称', minWidth: 190 }, { key: 'platform', label: '平台' }, { key: 'country', label: '国家站点' },
+      { key: 'price', label: '价格' }, { key: 'sales', label: '销量' }, { key: 'status', label: '监控状态' }, { key: 'updated_at', label: '最近更新', minWidth: 150 }
+    ]
+  },
+  samples: {
+    title: '样品/打样管理', subtitle: '统一收样评级与设计打样确认，支持多轮样品记录和逆向改样。', fetch: fetchDevelopmentSamples, detail: fetchDevelopmentSample,
+    columns: [
+      { key: 'sample_no', label: '样品编号', minWidth: 170 }, { key: 'project_no', label: '开发编码', minWidth: 170 }, { key: 'supplier_name', label: '供应商', minWidth: 150 },
+      { key: 'round', label: '打样轮次' }, { key: 'evaluation_result', label: '确认结论' }, { key: 'status', label: '状态' }, { key: 'received_at', label: '收样日期', minWidth: 140 }
+    ]
+  },
+  quotations: {
+    title: '比价管理', subtitle: '一个候选款可挂多家报价，并明确主供与备供。', fetch: fetchDevelopmentQuotations, detail: fetchDevelopmentQuotation,
+    columns: [
+      { key: 'project_no', label: '开发编码', minWidth: 170 }, { key: 'supplier_name', label: '供应商', minWidth: 160 }, { key: 'quoted_cost', label: '报价' },
+      { key: 'moq', label: 'MOQ' }, { key: 'is_primary', label: '供货角色' }, { key: 'status', label: '状态' }, { key: 'created_at', label: '报价时间', minWidth: 150 }
+    ]
+  },
+  costs: {
+    title: '成本核算', subtitle: '按开发方式和测款模式核算落地成本、目标毛利及开发投入分摊。', fetch: (params) => fetchDevelopmentProjects({ ...params, view: 'costs' }),
+    columns: [
+      { key: 'project_no', label: '开发编码', minWidth: 170 }, { key: 'product_name', label: '商品名称', minWidth: 190 }, { key: 'landed_cost', label: '落地成本' },
+      { key: 'development_cost', label: '开发投入' }, { key: 'estimated_margin_rate', label: '预计毛利率' }, { key: 'status', label: '状态' }, { key: 'updated_at', label: '更新时间', minWidth: 150 }
+    ]
+  },
+  listingDecisions: {
+    title: '上架决策', subtitle: '汇总样品、比价和成本信息后形成一次明确的上架决策。', fetch: fetchDevelopmentListingDecisions, detail: fetchDevelopmentListingDecision,
+    columns: [
+      { key: 'project_no', label: '开发编码', minWidth: 170 }, { key: 'product_name', label: '商品名称', minWidth: 190 }, { key: 'decision', label: '决策结论' },
+      { key: 'estimated_margin_rate', label: '预计毛利率' }, { key: 'decided_by_name', label: '决策人' }, { key: 'status', label: '状态' }, { key: 'decided_at', label: '决策时间', minWidth: 150 }
+    ]
+  },
+  trials: {
+    title: '首单与试销', subtitle: '按实际小单和虚拟库存两种模式记录试销，并按模式应用不同指标基准。', notice: '实际小单测款达标可直接转正；虚拟库存测款达标后先进入上新计划，实际准备上新时再转正。', fetch: fetchDevelopmentTrials, detail: fetchDevelopmentTrial,
+    columns: [
+      { key: 'project_no', label: '开发编码', minWidth: 170 }, { key: 'product_name', label: '商品名称', minWidth: 190 }, { key: 'trial_mode', label: '测款模式' },
+      { key: 'trial_period', label: '试销周期' }, { key: 'conversion_rate', label: '下单转化' }, { key: 'trial_status', label: '试销状态' }, { key: 'updated_at', label: '更新时间', minWidth: 150 }
+    ]
+  },
+  reorderDecisions: {
+    title: '返单决策', subtitle: '记录追单、放弃和观察决策，并跟踪交期窗口。', fetch: fetchDevelopmentReorderDecisions, detail: fetchDevelopmentReorderDecision,
+    columns: [
+      { key: 'project_no', label: '开发编码', minWidth: 170 }, { key: 'product_name', label: '商品名称', minWidth: 190 }, { key: 'decision', label: '返单结论' },
+      { key: 'suggested_qty', label: '建议数量' }, { key: 'lead_time_days', label: '交期（天）' }, { key: 'status', label: '状态' }, { key: 'decided_at', label: '决策时间', minWidth: 150 }
+    ]
+  },
+  eliminations: {
+    title: '淘汰库', subtitle: '永久保留各阶段淘汰记录、原因和关联事件，用于开发复盘。', fetch: fetchDevelopmentEliminations, detail: fetchDevelopmentElimination,
+    columns: [
+      { key: 'project_no', label: '开发编码', minWidth: 170 }, { key: 'product_name', label: '商品名称', minWidth: 190 }, { key: 'elimination_stage', label: '淘汰阶段' },
+      { key: 'reason', label: '淘汰原因', minWidth: 220 }, { key: 'development_type', label: '开发类型' }, { key: 'eliminated_by_name', label: '操作人' }, { key: 'eliminated_at', label: '淘汰时间', minWidth: 150 }
+    ]
+  },
+  settings: {
+    title: '开发设置', subtitle: '维护编码规则、成本公式、测款指标、事件规则和流程模板。', fetch: fetchDevelopmentSettings, detail: fetchDevelopmentSetting,
+    columns: [
+      { key: 'key', label: '配置项', minWidth: 190 }, { key: 'label', label: '名称', minWidth: 190 }, { key: 'value', label: '当前值', minWidth: 220 },
+      { key: 'scope', label: '适用范围' }, { key: 'status', label: '状态' }, { key: 'updated_at', label: '更新时间', minWidth: 150 }
+    ]
+  }
+};
+
+const canonicalMode = computed(() => modeAliases[props.mode] || props.mode || 'candidates');
+const activeConfig = computed(() => modeConfigs[canonicalMode.value] || modeConfigs.candidates);
+const meta = computed(() => activeConfig.value);
+const rows = ref([]); const loading = ref(false); const saving = ref(false); const search = ref(''); const statusFilter = ref('');
+const drawerOpen = ref(false); const selected = ref(null); const candidateOpen = ref(false); const candidateFormRef = ref(null); const categories = ref([]); const suppliers = ref([]);
+const candidate = reactive({ product_name: '', development_type: 'factory_selection', trial_mode: 'small_order', category_node: null, original_model: '', design_file_reference: '', design_sent_date: '', supplier: null, planned_launch_date: '', development_reason: '' });
+const developmentTypes = [{ value: 'factory_selection', label: '工厂选款' }, { value: 'self_design', label: '自有设计（轻量）' }, { value: 'micro_revision', label: '微改款（预留）' }];
+const trialModes = [{ value: 'small_order', label: '实际小单测款' }, { value: 'virtual', label: '虚拟库存测款' }];
+const statusLabels = { draft: '草稿', pending: '待处理', pending_review: '待评审', active: '进行中', in_progress: '进行中', approved: '已通过', passed: '已通过', completed: '已完成', confirmed: '已确认', rejected: '已退回', eliminated: '已淘汰', cancelled: '已取消', suspended: '已挂起', terminated: '已终止', virtual: '虚拟测款', formalized: '已转正' };
+const fieldLabels = { candidate_no: '开发编码', project_no: '开发编码', product_name: '商品名称', name: '名称', development_type: '开发类型', trial_mode: '测款模式', category_node: '分类 ID', category_path: '商品分类', category_name: '分类', original_model: '工厂原型号', supplier: '来源工厂', supplier_name: '供应商', quoted_cost: '报价', landed_cost: '落地成本', development_cost: '开发投入', estimated_margin_rate: '预计毛利率', status: '状态', trial_status: '试销状态', decision: '决策结论', reason: '原因', development_reason: '开发理由', elimination_stage: '淘汰阶段', created_at: '创建时间', updated_at: '更新时间', received_at: '收样日期', decided_at: '决策时间', eliminated_at: '淘汰时间', scope: '适用范围', value: '当前值' };
+
+const categoryOptions = computed(() => {
+  const byId = new Map(categories.value.map((item) => [Number(item.id), item]));
+  const pathFor = (item) => {
+    const parts = []; const seen = new Set(); let current = item;
+    while (current && !seen.has(Number(current.id))) { seen.add(Number(current.id)); parts.unshift(`L${current.level} ${current.code || ''} ${current.name || ''}`.trim()); current = byId.get(Number(current.parent)); }
+    return parts.join(' / ');
+  };
+  return categories.value.filter((item) => item.is_active !== false && [2, 3].includes(Number(item.level))).map((item) => ({ ...item, path: pathFor(item) }));
+});
+const supplierOptions = computed(() => suppliers.value.filter((item) => item.status ? item.status === 'active' : item.is_active !== false));
+const statusOptions = computed(() => [...new Set(rows.value.map((row) => valueFor(row, 'status') || valueFor(row, 'trial_status')).filter(Boolean))].map((value) => ({ value, label: formatStatus(value) })));
+const filteredRows = computed(() => {
+  const keyword = search.value.trim().toLowerCase();
+  return rows.value.filter((row) => {
+    const text = [row.candidate_no, row.project_no, row.product_name, row.name, row.supplier_name, row.competitor_name].filter(Boolean).join(' ').toLowerCase();
+    const rowStatus = valueFor(row, 'status') || valueFor(row, 'trial_status');
+    return (!keyword || text.includes(keyword)) && (!statusFilter.value || rowStatus === statusFilter.value);
+  });
+});
+const metrics = computed(() => {
+  const values = rows.value.map((row) => valueFor(row, 'status') || valueFor(row, 'trial_status'));
+  const activeCount = values.filter((value) => ['active', 'in_progress', 'pending', 'pending_review', 'draft'].includes(value)).length;
+  const completedCount = values.filter((value) => ['completed', 'approved', 'passed', 'confirmed', 'formalized'].includes(value)).length;
+  return [{ label: '当前记录', value: rows.value.length, note: '当前筛选范围' }, { label: '待处理', value: activeCount, note: '需继续推进' }, { label: '已完成', value: completedCount, note: '已形成结果' }];
+});
+const detailRows = computed(() => {
+  if (!selected.value) return [];
+  const hidden = new Set(['id', 'events', 'created_by', 'updated_by', 'tenant', 'project', 'category_node']);
+  return Object.entries(selected.value).filter(([key, value]) => !hidden.has(key) && value !== null && value !== undefined && value !== '').slice(0, 28).map(([key, value]) => ({ key, label: fieldLabels[key] || key, value }));
+});
+const emptyDescription = computed(() => loading.value ? '正在加载' : `${meta.value.title}暂无记录`);
+const candidateRules = {
+  product_name: [{ required: true, message: '请输入商品名称', trigger: 'blur' }], development_type: [{ required: true, message: '请选择开发类型', trigger: 'change' }], trial_mode: [{ required: true, message: '请选择测款模式', trigger: 'change' }], category_node: [{ required: true, message: '请选择 L2 或 L3 分类', trigger: 'change' }],
+  original_model: [{ validator: (_rule, value, callback) => candidate.development_type !== 'self_design' && !String(value || '').trim() ? callback(new Error('工厂选款/微改款必须填写原型号')) : callback(), trigger: 'blur' }],
+  design_files: [{ validator: (_rule, value, callback) => candidate.development_type === 'self_design' && !String(candidate.design_file_reference || '').trim() ? callback(new Error('自有设计必须填写设计附件')) : callback(), trigger: 'blur' }],
+  design_sent_date: [{ validator: (_rule, value, callback) => candidate.development_type === 'self_design' && !value ? callback(new Error('自有设计必须填写设计稿发送日期')) : callback(), trigger: 'change' }]
+};
+
+function collectionFrom(response) {
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.data?.results)) return response.data.results;
+  if (Array.isArray(response?.data?.items)) return response.data.items;
+  if (Array.isArray(response?.results)) return response.results;
+  if (response?.data && typeof response.data === 'object' && response.data.id) return [response.data];
+  return [];
+}
+function valueFor(row, key) {
+  if (!row || !key) return undefined;
+  const aliases = { category_path: ['category_path', 'category_name', 'category'], product_name: ['product_name', 'name', 'title'], project_no: ['project_no', 'candidate_no', 'development_no'], supplier_name: ['supplier_name', 'supplier', 'factory_name'], status: ['status', 'state'] };
+  return (aliases[key] || [key]).map((candidateKey) => row[candidateKey]).find((value) => value !== null && value !== undefined && value !== '');
+}
+function formatStatus(value) { if (value === 'factory_selection') return '工厂选款'; if (value === 'self_design') return '自有设计'; if (value === 'micro_revision') return '微改款'; if (value === 'small_order') return '实际小单测款'; if (value === 'virtual') return '虚拟库存测款'; return statusLabels[value] || value || '—'; }
+function formatCell(value) { if (value === null || value === undefined || value === '') return '—'; if (typeof value === 'boolean') return value ? '是' : '否'; if (Array.isArray(value)) return value.join(' / '); if (typeof value === 'object') return JSON.stringify(value); return String(value); }
+function statusType(value) { if (['completed', 'approved', 'passed', 'confirmed', 'formalized'].includes(value)) return 'success'; if (['rejected', 'eliminated', 'terminated', 'cancelled'].includes(value)) return 'danger'; if (['pending', 'pending_review', 'active', 'in_progress', 'draft', 'suspended'].includes(value)) return 'warning'; return 'info'; }
+async function refresh() { loading.value = true; const response = await activeConfig.value.fetch({ search: search.value.trim(), status: statusFilter.value, page: 1, page_size: 100 }); rows.value = collectionFrom(response); loading.value = false; if (!response?.success) ElMessage.error(response?.message || `${meta.value.title}加载失败`); }
+async function selectRow(row) { selected.value = row; drawerOpen.value = true; if (activeConfig.value.detail && row?.id) { const response = await activeConfig.value.detail(row.id); if (response?.success && response.data) selected.value = response.data; } }
+async function loadCategories() { const response = await fetchProductCategories({ page: 1, page_size: 100 }); if (response?.success) categories.value = collectionRows(response.data); }
+async function loadSuppliers() { const response = await fetchSupplierMasters({ page: 1, page_size: 100, status: 'active' }); if (response?.success) suppliers.value = collectionRows(response.data); }
+function openCandidateForm() { Object.assign(candidate, { product_name: '', development_type: 'factory_selection', trial_mode: 'small_order', category_node: null, original_model: '', design_file_reference: '', design_sent_date: '', supplier: null, planned_launch_date: '', development_reason: '' }); candidateOpen.value = true; loadCategories(); loadSuppliers(); }
+function onDevelopmentTypeChange(value) { if (value === 'self_design') candidate.original_model = '无（自有设计）'; else if (candidate.original_model === '无（自有设计）') candidate.original_model = ''; }
+async function saveCandidate() { const valid = await candidateFormRef.value?.validate().catch(() => false); if (!valid) return; saving.value = true; const payload = { product_name: String(candidate.product_name || '').trim(), development_type: candidate.development_type, trial_mode: candidate.trial_mode, category_node: Number(candidate.category_node), original_model: candidate.development_type === 'self_design' ? '无（自有设计）' : String(candidate.original_model || '').trim(), design_files: candidate.development_type === 'self_design' ? String(candidate.design_file_reference || '').split(',').map((item) => item.trim()).filter(Boolean) : [], design_sent_date: candidate.development_type === 'self_design' ? candidate.design_sent_date : null, supplier: candidate.supplier ? Number(candidate.supplier) : null, planned_launch_date: candidate.planned_launch_date || null, development_reason: String(candidate.development_reason || '').trim() }; const response = await createDevelopmentCandidate(payload); saving.value = false; if (!response?.success) return ElMessage.error(response?.message || '候选款保存失败'); candidateOpen.value = false; ElMessage.success('候选款已保存'); await refresh(); }
 onMounted(refresh);
 </script>
 
 <style scoped>
-.dev-page{min-width:980px;color:#172033}.dev-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}.dev-header h1{margin:0;font-size:26px}.dev-header p{margin:7px 0 0;color:#64748b}.dev-actions{display:flex;gap:10px}.metric-strip{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid #dbe3ee;border-radius:8px;background:#fff;margin-bottom:16px}.metric{padding:18px 20px;border-right:1px solid #e6ebf2}.metric:last-child{border-right:0}.metric span,.metric small{display:block;color:#718096;font-size:12px}.metric strong{display:block;margin:7px 0 5px;font-size:25px;color:#172033}.stage-rail{display:grid;grid-template-columns:repeat(5,1fr);padding:18px 22px;border:1px solid #dbe3ee;border-radius:8px;background:#fff;margin-bottom:16px}.stage{position:relative;display:flex;align-items:center;gap:10px}.stage:not(:last-child):after{content:'';position:absolute;right:18px;width:42%;height:1px;background:#dbe3ee}.stage i{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#edf1f6;color:#64748b;font-style:normal;font-weight:700}.stage.active i{background:#2563eb;color:white}.stage div{display:flex;flex-direction:column}.stage strong{font-size:14px}.stage span{margin-top:4px;color:#718096;font-size:11px}.work-panel{border:1px solid #dbe3ee;border-radius:8px;background:#fff;overflow:hidden}.filter-row{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #e6ebf2}.filter-spacer{flex:1}.result-count{color:#718096;font-size:12px}.product-cell{display:flex;align-items:center;gap:10px}.product-avatar{display:grid;place-items:center;width:34px;height:34px;border:1px solid #dbe3ee;border-radius:7px;background:#f5f8fc;color:#2563eb}.product-avatar.large{width:52px;height:52px;font-size:20px}.site-list{font-size:12px;color:#475569}.margin{color:#16a36a}.drawer-title{display:flex;gap:12px;align-items:center;margin-bottom:20px}.drawer-title h3,.drawer-title p{margin:0}.drawer-title p{margin-top:5px;color:#718096}.detail-block{padding:16px 0;border-bottom:1px solid #e6ebf2}.detail-block h4{margin:0 0 12px}.detail-block p{color:#64748b;font-size:13px;line-height:1.6}.status-line,.cost-line{display:flex;justify-content:space-between;gap:12px;align-items:center}.cost-line{padding:9px 0;font-size:13px}.cost-line strong{color:#16a36a}.drawer-footer{position:absolute;right:20px;bottom:20px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.csv-box{margin-top:16px;font-family:monospace}@media(max-width:1100px){.metric-strip{grid-template-columns:repeat(3,1fr)}.metric:nth-child(3){border-right:0}.stage-rail{padding:14px}.stage:not(:last-child):after{display:none}}@media(max-width:900px){.dev-page{min-width:0}.dev-header{gap:12px}.metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{padding:14px}.stage-rail{display:flex;gap:24px;overflow-x:auto}.stage{min-width:112px}.filter-row{flex-wrap:wrap}.filter-spacer{display:none}.form-grid{grid-template-columns:1fr}.work-panel{overflow-x:auto}}
+.dev-page { min-width: 980px; color: #172033; }
+.dev-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+.dev-header h1 { margin: 0; font-size: 26px; }
+.dev-header p { margin: 7px 0 0; color: #64748b; }
+.dev-actions { display: flex; gap: 10px; }
+.dev-notice { margin-bottom: 16px; }
+.metric-strip { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; margin-bottom: 16px; }
+.metric { padding: 18px 20px; border-right: 1px solid #e6ebf2; }
+.metric:last-child { border-right: 0; }
+.metric span, .metric small { display: block; color: #718096; font-size: 12px; }
+.metric strong { display: block; margin: 7px 0 5px; font-size: 25px; color: #172033; }
+.work-panel { border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; overflow: hidden; }
+.filter-row { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #e6ebf2; }
+.filter-row .el-input { width: 300px; }
+.filter-row .el-select { width: 160px; }
+.filter-spacer { flex: 1; }
+.result-count { color: #718096; font-size: 12px; }
+.dev-table { width: 100%; }
+.drawer-title { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+.drawer-title h3, .drawer-title p { margin: 0; }
+.drawer-title p { margin-top: 5px; color: #718096; }
+.record-avatar { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid #dbe3ee; border-radius: 7px; background: #f5f8fc; color: #2563eb; font-size: 20px; font-weight: 700; }
+.form-notice { margin-bottom: 18px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.field-help { display: block; margin-top: 4px; color: #64748b; line-height: 1.4; }
+@media (max-width: 1100px) { .dev-page { min-width: 0; } }
+@media (max-width: 800px) { .metric-strip { grid-template-columns: 1fr; } .metric { border-right: 0; border-bottom: 1px solid #e6ebf2; } .metric:last-child { border-bottom: 0; } .dev-header { gap: 12px; } .filter-row { flex-wrap: wrap; } .filter-row .el-input, .filter-row .el-select { width: 100%; } .filter-spacer { display: none; } .form-grid { grid-template-columns: 1fr; } }
 </style>

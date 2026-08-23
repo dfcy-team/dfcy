@@ -104,6 +104,7 @@ const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.
 const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
 const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
 const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
+const BdPerformance = () => import('../views/influencers/BdPerformance.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
@@ -207,14 +208,23 @@ const routes = [
       { path: 'listings/attribute-mappings', component: ListingMappingList, props: { mode: 'attribute' } },
       { path: 'listings/logs', component: ListingLogList },
       { path: 'listings/exceptions', component: ListingExceptionList },
-      { path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } },
-      { path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } },
-      { path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } },
+      { path: 'development/candidates', component: DevelopmentWorkspace, props: { mode: 'candidates' } },
+      { path: 'development/competitors', component: DevelopmentWorkspace, props: { mode: 'competitors' } },
+      { path: 'development/samples', component: DevelopmentWorkspace, props: { mode: 'samples' } },
+      { path: 'development/quotations', component: DevelopmentWorkspace, props: { mode: 'quotations' } },
       { path: 'development/projects/archives', component: DevelopmentProductArchiveList },
       { path: 'development/costs', component: DevelopmentWorkspace, props: { mode: 'costs' } },
-      { path: 'development/sales', component: DevelopmentWorkspace, props: { mode: 'sales' } },
-      { path: 'development/retrospectives', component: DevelopmentWorkspace, props: { mode: 'retrospectives' } },
-      { path: 'development/dashboard', component: DevelopmentWorkspace, props: { mode: 'dashboard' } },
+      { path: 'development/listing-decisions', component: DevelopmentWorkspace, props: { mode: 'listingDecisions' } },
+      { path: 'development/trials', component: DevelopmentWorkspace, props: { mode: 'trials' } },
+      { path: 'development/reorders', component: DevelopmentWorkspace, props: { mode: 'reorderDecisions' } },
+      { path: 'development/eliminations', component: DevelopmentWorkspace, props: { mode: 'eliminations' } },
+      { path: 'development/settings', component: DevelopmentWorkspace, props: { mode: 'settings' } },
+      { path: 'development/requirements', redirect: '/development/candidates' },
+      { path: 'development/review', redirect: '/development/candidates' },
+      { path: 'development/projects', redirect: '/development/candidates' },
+      { path: 'development/sales', redirect: '/development/trials' },
+      { path: 'development/retrospectives', redirect: '/development/eliminations' },
+      { path: 'development/dashboard', redirect: '/development/candidates' },
       { path: 'pricing/prices', component: PriceList },
       { path: 'pricing/prices/:id', component: PriceDetail },
       { path: 'rpa/tasks', component: RPATaskList },
@@ -263,6 +273,7 @@ const routes = [
       { path: 'influencers', component: InfluencerList },
       { path: 'influencers/outreach-tasks', component: OutreachTaskList },
       { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },
+      { path: 'influencers/bd-performance', component: BdPerformance },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

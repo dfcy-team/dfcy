@@ -39,6 +39,14 @@ export const FULFILLMENT_STATUS_LABELS = Object.freeze({
   blank: '空白'
 });
 
+export const FULFILLMENT_LINK_TYPE_LABELS = Object.freeze({
+  DRJL: 'BD建联',
+  YYJL: '运营建联',
+  PKDJ: '品库达人',
+  ZBDR: '直播达人',
+  TKOne: 'TikTokOne建联'
+});
+
 export const FULFILLMENT_STATUS_TRANSITIONS = Object.freeze({
   pending: Object.freeze(['processing', 'creating', 'blank', 'cancelled']),
   creating: Object.freeze(['published', 'blank', 'cancelled']),
@@ -76,6 +84,36 @@ export const COST_MATCH_STATUS_LABELS = Object.freeze({
 });
 
 export const statusLabel = (labels, value) => labels[value] || value || '—';
+
+export const BD_PERFORMANCE_ATTRIBUTION_LABELS = Object.freeze({
+  strict: '方式一',
+  fallback: '方式二'
+});
+
+export const BD_PERFORMANCE_CURRENCIES = Object.freeze([
+  { value: 'CNY', label: '人民币 CNY' },
+  { value: 'PHP', label: '菲律宾比索 PHP' },
+  { value: 'MYR', label: '马来西亚令吉 MYR' },
+  { value: 'THB', label: '泰铢 THB' },
+  { value: 'USD', label: '美元 USD' }
+]);
+
+export const INFLUENCER_COOPERATION_STATUS_LABELS = Object.freeze({
+  prospect: '待接洽',
+  contacted: '已联系',
+  cooperating: '合作中',
+  paused: '已暂停'
+});
+
+export const INFLUENCER_CONTACT_CHANNEL_LABELS = Object.freeze({
+  email: '邮箱',
+  phone: '电话',
+  whatsapp: 'WhatsApp',
+  wechat: '微信',
+  telegram: 'Telegram',
+  tiktok: 'TikTok 私信',
+  other: '其他'
+});
 
 const mockWrite = (data = {}) => () => ({
   success: true,
@@ -123,6 +161,89 @@ export const fetchInfluencers = (params = {}) => requestWithMockFallback(
   'influencers.list'
 );
 
+const emptyPerformance = () => ({
+  success: true,
+  code: 'OK',
+  message: 'success',
+  data: {
+    source_status: 'not_imported',
+    rows: [],
+    results: [],
+    totals: {},
+    video_status: 'unavailable',
+    data_as_of: null,
+    updated_at: null,
+    api_status: 'mock'
+  }
+});
+
+export const fetchBdPerformance = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/bd-performance/`, params },
+  emptyPerformance,
+  'influencers.bd_performance'
+);
+
+// Keep the acronym spelling available to callers that use the backend name.
+export const fetchBDPerformance = fetchBdPerformance;
+
+export const fetchInfluencer = (id) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/` },
+  () => mockDetail({ id, contacts: [], blacklist_history: [] })(),
+  'influencers.detail'
+);
+
+export const updateInfluencer = (id, payload, version) => requestWithMockFallback(
+  {
+    method: 'patch',
+    url: `${API_ROOT}/${encodeURIComponent(id)}/`,
+    data: payload,
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id, ...payload, updated_at: version }),
+  'influencers.update'
+);
+
+export const fetchInfluencerContacts = (id) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/contacts/` },
+  mockCollection,
+  'influencers.contacts.list'
+);
+
+export const updateInfluencerContacts = (id, contacts, version) => requestWithMockFallback(
+  {
+    method: 'patch',
+    url: `${API_ROOT}/${encodeURIComponent(id)}/contacts/`,
+    data: { contacts },
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id, contacts, updated_at: version }),
+  'influencers.contacts.update'
+);
+
+export const updateInfluencerBlacklist = (id, payload, version) => requestWithMockFallback(
+  {
+    method: 'post',
+    url: `${API_ROOT}/${encodeURIComponent(id)}/blacklist/`,
+    data: payload,
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id, ...payload, updated_at: version }),
+  'influencers.blacklist.update'
+);
+
+export const fetchInfluencerBlacklistHistory = (id, params = {}) => requestWithMockFallback(
+  {
+    method: 'get',
+    url: `${API_ROOT}/${encodeURIComponent(id)}/blacklist-history/`,
+    params
+  },
+  mockCollection,
+  'influencers.blacklist.history'
+);
+
+export const updateInfluencerRestriction = updateInfluencerBlacklist;
+export const fetchInfluencerRestrictionHistory = fetchInfluencerBlacklistHistory;
+
 export const createInfluencer = (payload) => requestWithMockFallback(
   { method: 'post', url: `${API_ROOT}/`, data: payload },
   mockWrite(payload),
@@ -153,8 +274,8 @@ export const matchOutreachProduct = (productId) => requestWithMockFallback(
   'influencers.outreach.product_match'
 );
 
-export const fetchOutreachTask = (id) => requestWithMockFallback(
-  { method: 'get', url: `${API_ROOT}/outreach-tasks/${id}/` },
+export const fetchOutreachTask = (id, params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-tasks/${id}/`, params },
   mockDetail({ id }),
   'influencers.outreach.detail'
 );
@@ -194,10 +315,34 @@ export const updateOutreachTask = (id, payload, version) => requestWithMockFallb
   'influencers.outreach.update'
 );
 
-export const deleteOutreachTask = (id) => requestWithMockFallback(
-  { method: 'delete', url: `${API_ROOT}/outreach-tasks/${id}/` },
-  mockWrite({ id, is_deleted: true }),
+export const deleteOutreachTask = (id, version) => requestWithMockFallback(
+  { method: 'delete', url: `${API_ROOT}/outreach-tasks/${id}/`, ...ifMatchHeaders(version) },
+  mockWrite({ id, is_deleted: true, version: Number(version || 1) + 1 }),
   'influencers.outreach.delete'
+);
+
+export const restoreOutreachTask = (id, version) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/outreach-tasks/${id}/restore/`, ...ifMatchHeaders(version) },
+  mockWrite({ id, is_deleted: false, version: Number(version || 1) + 1 }),
+  'influencers.outreach.restore'
+);
+
+export const fetchInfluencerResolve = (query = '') => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/resolve/`, params: { q: query } },
+  () => ({ success: true, data: { query, candidates: [], results: [] } }),
+  'influencers.resolve'
+);
+
+export const resolveOrCreateInfluencer = (handle) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/resolve/`, data: { handle } },
+  mockDetail({ id: `mock-${handle}`, handle, name: handle, platform: 'TikTok', is_blacklisted: false, created: true }),
+  'influencers.resolve.create'
+);
+
+export const fetchSampleFulfillmentOptions = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/sample-fulfillment-options/`, params },
+  () => ({ success: true, data: { tasks: [], influencers: [] } }),
+  'influencers.fulfillment.options'
 );
 
 export const addOutreachTarget = (taskId, influencer, version, notes = '') => requestWithMockFallback(
@@ -241,6 +386,12 @@ export const fetchSampleFulfillments = (params = {}) => requestWithMockFallback(
   'influencers.fulfillment.list'
 );
 
+export const fetchSampleFulfillment = (id, params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/sample-fulfillments/${id}/`, params },
+  mockDetail({ id }),
+  'influencers.fulfillment.detail'
+);
+
 export const createSampleFulfillment = (payload, idempotencyKey = requestKey()) => requestWithMockFallback(
   {
     method: 'post',
@@ -261,6 +412,29 @@ export const updateSampleFulfillmentStatus = (id, status, version, reason = '') 
   },
   mockWrite({ id, status, version: Number(version || 1) + 1 }),
   'influencers.fulfillment.status'
+);
+
+export const updateSampleFulfillment = (id, payload, version) => requestWithMockFallback(
+  {
+    method: 'patch',
+    url: `${API_ROOT}/sample-fulfillments/${id}/`,
+    data: payload,
+    ...ifMatchHeaders(version)
+  },
+  mockWrite({ id, ...payload, version: Number(version || 1) + 1 }),
+  'influencers.fulfillment.update'
+);
+
+export const deleteSampleFulfillment = (id, version) => requestWithMockFallback(
+  { method: 'delete', url: `${API_ROOT}/sample-fulfillments/${id}/`, ...ifMatchHeaders(version) },
+  mockWrite({ id, is_deleted: true, version: Number(version || 1) + 1 }),
+  'influencers.fulfillment.delete'
+);
+
+export const restoreSampleFulfillment = (id, version) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/sample-fulfillments/${id}/restore/`, ...ifMatchHeaders(version) },
+  mockWrite({ id, is_deleted: false, version: Number(version || 1) + 1 }),
+  'influencers.fulfillment.restore'
 );
 
 export const lookupProductPrice = (params = {}) => requestWithMockFallback(
