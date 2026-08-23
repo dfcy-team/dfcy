@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.36",
+  "status": "registered_not_deployed",
+  "registered_at": "2026-08-23",
+  "parent_release": "2.44.35",
+  "menu_baseline": "2.44.33",
+  "scope": "frontend-only correction: restore the V2.44.33 dark navigation CSS",
+  "menu_change_scope": "none",
+  "top_level_menu_count": 16,
+  "target_menu_node_count": 99,
+  "target_route_capability_count": 111,
+  "menu_sha256": "41188b3be0e39809e0a2530ab8d7438781bc83af5f8b91e47dc4f5f7326de1c8",
+  "router_sha256": "0f00ba73f8df8c69c1c386843d37124bdbbde4b7d9ecc4c0e870df2feb2252c9",
+  "navigation_css_sha256": "e2544744eefbd844c4f468096815bf8ce0ea16c0396e6e8398f17d7432960883",
+  "frontend_context_sha256": "bba08485bd5d8a28d1d4d76d894575d856b3d5e9ff152afeb719adbefdd15a42",
+  "target_frontend_image": "saas-collab-frontend:v2.44.36",
+  "unchanged_backend_image": "saas-collab-backend:v2.44.34",
+  "database_migration_required": false,
+  "checks": {
+    "frontend_all_tests": "211 passed",
+    "frontend_build": "passed with VITE_USE_MOCK=false",
+    "menu_diff": "none relative to V2.44.35",
+    "navigation_css": "V2.44.33 dark desktop and mobile palette restored",
+    "deployment_performed": false,
+    "deployment_blocker": "remote SSH/scp execution unavailable because the approval service reported the account execution limit was exhausted"
+  },
+  "rollback": {
+    "frontend_image": "saas-collab-frontend:v2.44.35",
+    "database_restore_required": false
+  },
+  "release_notes": "docs/06_release/system_v2.44.36.md"
+}

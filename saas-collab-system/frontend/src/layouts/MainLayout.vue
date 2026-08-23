@@ -109,8 +109,8 @@ const AppMenu = defineComponent({
 .app-workspace { min-width: 0; }
 
 .app-sidebar {
-  border-right: 1px solid #d9e2ec;
-  background: #fff;
+  border-right: 1px solid #0f2438;
+  background: #173550;
 }
 
 .brand {
@@ -119,12 +119,28 @@ const AppMenu = defineComponent({
   justify-content: center;
   height: 64px;
   padding: 0 20px;
-  border-bottom: 1px solid #d9e2ec;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: #173550;
 }
 
-.brand strong { color: #172033; font-size: 16px; }
-.brand span { margin-top: 3px; color: #718096; font-size: 11px; }
-.menu { border-right: 0; }
+.brand strong { color: #fff; font-size: 16px; }
+.brand span { margin-top: 3px; color: #a9bfd2; font-size: 11px; }
+.menu {
+  --el-menu-bg-color: #173550;
+  --el-menu-text-color: #dce8f2;
+  --el-menu-hover-bg-color: #234866;
+  --el-menu-active-color: #fff;
+  border-right: 0;
+  background: #173550;
+}
+
+.menu :deep(.el-menu-item),
+.menu :deep(.el-sub-menu__title) { color: #dce8f2; }
+.menu :deep(.el-menu-item:hover),
+.menu :deep(.el-sub-menu__title:hover) { background: #234866; color: #fff; }
+.menu :deep(.el-menu-item.is-active) { background: #2f6f9f; color: #fff; font-weight: 600; }
+.menu :deep(.el-sub-menu .el-menu) { background: #122c43; }
+.menu :deep(.el-sub-menu__icon-arrow) { color: #a9bfd2; }
 
 .app-header {
   display: flex;
@@ -172,4 +188,23 @@ const AppMenu = defineComponent({
   .header-user__identity { width: 76px; min-width: 0; }
   .header-user .el-button { min-width: 36px; padding: 4px; }
 }
+</style>
+
+<style>
+.mobile-sidebar-drawer .el-drawer__body { padding: 0; background: #173550; }
+.mobile-sidebar-drawer .brand { border-bottom-color: rgba(255, 255, 255, 0.14); background: #173550; }
+.mobile-sidebar-drawer .menu {
+  --el-menu-bg-color: #173550;
+  --el-menu-text-color: #dce8f2;
+  --el-menu-hover-bg-color: #234866;
+  --el-menu-active-color: #fff;
+  border-right: 0;
+  background: #173550;
+}
+.mobile-sidebar-drawer .el-menu-item,
+.mobile-sidebar-drawer .el-sub-menu__title { color: #dce8f2; }
+.mobile-sidebar-drawer .el-menu-item:hover,
+.mobile-sidebar-drawer .el-sub-menu__title:hover { background: #234866; color: #fff; }
+.mobile-sidebar-drawer .el-menu-item.is-active { background: #2f6f9f; color: #fff; font-weight: 600; }
+.mobile-sidebar-drawer .el-sub-menu .el-menu { background: #122c43; }
 </style>

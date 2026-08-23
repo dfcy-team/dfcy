@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { flattenMenuItems, menuItems } from '../src/router/menu';
 
 describe('V2.44.33 menu baseline', () => {
@@ -19,5 +21,14 @@ describe('V2.44.33 menu baseline', () => {
       '达人档案', '建联任务', '送样履约', 'BD绩效'
     ]);
     expect(flattenMenuItems(menuItems)).toHaveLength(99);
+  });
+
+  it('keeps the V2.44.33 dark desktop and mobile navigation palette', () => {
+    const layout = fs.readFileSync(path.resolve(process.cwd(), 'src/layouts/MainLayout.vue'), 'utf8');
+    expect(layout).toContain('background: #173550');
+    expect(layout).toContain('--el-menu-text-color: #dce8f2');
+    expect(layout).toContain('background: #2f6f9f');
+    expect(layout).toContain('.mobile-sidebar-drawer .el-drawer__body');
+    expect(layout).not.toContain('background: #fff;\n}\n\n.brand');
   });
 });
