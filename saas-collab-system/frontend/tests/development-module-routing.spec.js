@@ -5,19 +5,19 @@ import { describe, expect, it } from 'vitest';
 const read = (file) => fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
 
 describe('product development workflow contract', () => {
-  it('exposes exactly the reviewed eleven workflow menu entries', () => {
+  it('preserves the V2.44.33 development menu entries', () => {
     const menu = read('src/router/menu.js');
-    const labels = ['候选款登记', '竞品监控', '样品/打样管理', '比价管理', '成本核算', '上架决策', '开发档案/转正', '首单与试销', '返单决策', '淘汰库', '开发设置'];
+    const labels = ['选品提报', '需求审核', '开发项目', '开发产品档案', '成本核算', '销售数据', '选品复盘', '效能看板'];
     labels.forEach((label) => expect(menu).toContain(`label: '${label}'`));
-    expect(menu).not.toContain("label: '需求审核'");
+    expect(menu).not.toContain("label: '候选款登记'");
   });
 
-  it('keeps legacy links routable while redirecting them to the new workflow', () => {
+  it('keeps the V2.44.33 development routes directly routable', () => {
     const router = read('src/router/index.js');
-    expect(router).toContain("{ path: 'development/requirements', redirect: '/development/candidates' }");
-    expect(router).toContain("{ path: 'development/review', redirect: '/development/candidates' }");
-    expect(router).toContain("{ path: 'development/projects', redirect: '/development/candidates' }");
-    expect(router).toContain("{ path: 'development/sales', redirect: '/development/trials' }");
+    expect(router).toContain("{ path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } }");
+    expect(router).toContain("{ path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } }");
+    expect(router).toContain("{ path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } }");
+    expect(router).toContain("{ path: 'development/sales', component: DevelopmentWorkspace, props: { mode: 'sales' } }");
   });
 
   it('provides the candidate conditional fields and keeps review out of the early form', () => {

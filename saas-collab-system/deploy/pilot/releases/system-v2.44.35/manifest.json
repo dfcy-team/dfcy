@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.35",
+  "status": "deployed",
+  "registered_at": "2026-08-23",
+  "parent_release": "2.44.34",
+  "menu_baseline": "2.44.33",
+  "scope": "frontend-only correction: exact V2.44.33 menu baseline plus Developer B BD performance increment",
+  "menu_change_scope": "restore V2.44.33 menu/router; add only /influencers/bd-performance",
+  "top_level_menu_count": 16,
+  "baseline_menu_node_count": 98,
+  "target_menu_node_count": 99,
+  "baseline_route_capability_count": 110,
+  "target_route_capability_count": 111,
+  "menu_sha256": "41188b3be0e39809e0a2530ab8d7438781bc83af5f8b91e47dc4f5f7326de1c8",
+  "router_sha256": "0f00ba73f8df8c69c1c386843d37124bdbbde4b7d9ecc4c0e870df2feb2252c9",
+  "request_mode_sha256": "9672b7c9d9fe93d0f086863647736a6d0ddeaa115e54fc774543e95a60ddbef1",
+  "frontend_context_sha256": "79d46c84b493de48b3a548ca2c08b61478c05de0a20f1a32683fc18036359267",
+  "target_frontend_image": "saas-collab-frontend:v2.44.35",
+  "frontend_image_id": "sha256:a95a3772f32f6dddd5c8e11bd240219b306b52a7ff5aaa6e9b74b14334676b54",
+  "unchanged_backend_image": "saas-collab-backend:v2.44.34",
+  "database_migration_required": false,
+  "checks": {
+    "frontend_all_tests": "210 passed",
+    "frontend_build": "passed with VITE_USE_MOCK=false",
+    "menu_diff": "only Developer B BD performance relative to V2.44.33",
+    "deployment_performed": true,
+    "post_deploy_pages": "8/8 returned HTTP 200",
+    "post_deploy_auth_mode": "Pilot API login rendered; no automatic Mock/stage0 session",
+    "post_deploy_bd_endpoints": "2/2 returned HTTP 401 and none returned 404",
+    "post_deploy_menu": "16 top-level groups; 99 menu nodes; only BD performance added to V2.44.33",
+    "post_deploy_permissions": "backend unchanged from reviewed V2.44.34; role page returned HTTP 200",
+    "post_deploy_logs": "no backend traceback/internal server error/critical and no frontend nginx critical errors"
+  },
+  "rollback": {
+    "frontend_image": "saas-collab-frontend:v2.44.34",
+    "database_restore_required": false
+  },
+  "deployment": {
+    "performed_at": "2026-08-23 16:07:41 CST",
+    "audit_directory": "/home/dfcy01/releases/system-v2.44.35-build-20260823",
+    "frontend_container_id": "8d6168f814050700fa1a69ba834a0f82ca731d228bcc7defda5ba151ea4bdf23",
+    "unchanged_backend_container_id": "6c194f23a0dd15259bc75a64aae2067920c21fefe58db625197c4175837bbabd",
+    "unchanged_celery_container_id": "3eb0d81d5f1d2341a061e84e889edb2a3a80470d1241a9a67a12e9ce5baa0fe0",
+    "unchanged_celery_beat_container_id": "162342a0501ca06e4e4b389a5aa7d154d3a8401ab328664ba3835f7a150c2879",
+    "unchanged_redis_container_id": "e9c5d3a028c12d234e121da4d6e794b725625884279ff1062dd6f57c90f35ef7",
+    "validation": "passed"
+  },
+  "release_notes": "docs/06_release/system_v2.44.35.md"
+}
