@@ -1,0 +1,19 @@
+FROM saas-collab-backend:v2.44.34
+
+COPY backend/apps/commerce /app/apps/commerce
+COPY backend/apps/sales_management /app/apps/sales_management
+COPY backend/apps/common/validated_models.py /app/apps/common/validated_models.py
+COPY backend/apps/integrations /app/apps/integrations
+COPY backend/apps/permissions/api_permissions.py /app/apps/permissions/api_permissions.py
+COPY backend/apps/permissions/catalog.py /app/apps/permissions/catalog.py
+COPY backend/apps/permissions/services.py /app/apps/permissions/services.py
+COPY backend/apps/permissions/ui_p6_scopes.py /app/apps/permissions/ui_p6_scopes.py
+COPY backend/apps/permissions/migrations/0031_seed_integration_custody_permissions.py /app/apps/permissions/migrations/0031_seed_integration_custody_permissions.py
+COPY backend/apps/reports/export_services.py /app/apps/reports/export_services.py
+COPY backend/apps/reports/models.py /app/apps/reports/models.py
+COPY backend/apps/reports/views.py /app/apps/reports/views.py
+COPY backend/apps/reports/migrations/0006_sales_details_export.py /app/apps/reports/migrations/0006_sales_details_export.py
+COPY backend/config/settings/base.py /app/config/settings/base.py
+COPY backend/config/urls.py /app/config/urls.py
+COPY backend/tests /app/tests
+COPY backend/pytest.ini /app/pytest.ini

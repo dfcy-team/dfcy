@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.38",
+  "status": "deployed_server_verified",
+  "registered_at": "2026-08-24",
+  "deployed_at": "2026-08-24T12:12:58+08:00",
+  "source_tag": "v2.44.38-deployed",
+  "parent_release": "2.44.37",
+  "current_deployed_base": "2.44.37",
+  "menu_baseline": "2.44.33",
+  "permission_ui_baseline": "2.44.29",
+  "scope": "incremental commerce, sales-management, marketplace integration custody/OAuth/mapping and sales export capabilities on V2.44.37",
+  "menu_change_scope": "none",
+  "top_level_menu_count": 16,
+  "target_menu_node_count": 99,
+  "target_route_capability_count": 111,
+  "menu_sha256": "41188b3be0e39809e0a2530ab8d7438781bc83af5f8b91e47dc4f5f7326de1c8",
+  "router_sha256": "0f00ba73f8df8c69c1c386843d37124bdbbde4b7d9ecc4c0e870df2feb2252c9",
+  "navigation_source_sha256": "0192cf6b70ad3351d9adfb07c7064c371a913770a0e127a7285e91c11e2685d9",
+  "target_backend_image": "saas-collab-backend:v2.44.38",
+  "deployed_backend_image_id": "sha256:079d5e783bb386711919e2490ee0ec2484291f03e968b26a6f0221d850392f77",
+  "deployed_backend_container_id": "d5e091888157f70a085fb9fda828ee9a537f7de2343d4fbefa656960b82b1f2a",
+  "target_frontend_image": "saas-collab-frontend:v2.44.38",
+  "deployed_frontend_image_id": "sha256:a56d39866b50685d25f091d83fd1c5f74ae69a8dc326c7cc2e8103792c9692a0",
+  "deployed_frontend_container_id": "ecd8c5f32e2d6be9841901bd78eae5c4caf1cbc8875c065adbb60a4dbc803a0c",
+  "database_migration_required": true,
+  "migration_heads": {
+    "commerce": "0001_fact_tables_v1",
+    "integrations": "0016_commerce_platform_and_resource_choices",
+    "permissions": "0031_seed_integration_custody_permissions",
+    "reports": "0006_sales_details_export"
+  },
+  "source_handoff": {
+    "path": "D:/开发A/20260824/saas-major-modules-upgrade-20260824",
+    "package_verification": "passed",
+    "handoff_base": "2.44.32",
+    "merge_strategy": "module-by-module additive merge; no tree or image replacement"
+  },
+  "checks": {
+    "menu_router_navigation_diff": "none relative to v2.44.37-deployed",
+    "frontend_all_tests": "23 files, 216 passed",
+    "frontend_build": "passed",
+    "backend_compileall": "passed",
+    "backend_runtime_tests": "21 passed in isolated SQLite test database with --nomigrations; production-config manage.py check and makemigrations --check passed",
+    "migration_plan": "only integrations 0016, commerce 0001, permissions 0031 and reports 0006 were planned and applied; unrelated purchasing 0005 was excluded",
+    "deployment_performed": true,
+    "deployment_validation": "passed: immutable image IDs, four target migrations, nginx, 11 page paths, menu labels, dark navigation CSS, permission asset, API routes and logs",
+    "database_contract": "7 commerce fact tables and 13 integration permissions verified",
+    "browser_ui_verification": "frontend replacement invalidated the prior browser login session; authenticated visual verification requires sign-in",
+    "runtime_logs": "no backend Traceback/Internal Server Error/CRITICAL and no frontend emerg/alert/crit during post-deploy verification"
+  },
+  "audit": {
+    "release_directory": "/home/dfcy01/releases/system-v2.44.38-build-20260824",
+    "database_backup": "/home/dfcy01/releases/system-v2.44.38-build-20260824/pre-deploy-v2.44.38.sql.gz",
+    "database_backup_sha256": "67627904daa67f808e0f31df95c9c57f112b80f0fa29442e9d9808a0326a5466"
+  },
+  "rollback": {
+    "frontend_image": "saas-collab-frontend:v2.44.37",
+    "backend_image": "saas-collab-backend:v2.44.34",
+    "database_restore_required_after_migration": true
+  },
+  "release_notes": "docs/06_release/system_v2.44.38.md"
+}

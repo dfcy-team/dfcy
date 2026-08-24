@@ -28,6 +28,57 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 DEBUG = env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 
+# Marketplace access remains fail-closed until every production control is
+# explicitly configured by the operator.  These settings expose the handoff
+# capability without enabling live network traffic or embedding credentials.
+PLATFORM_NETWORK_MODE = os.getenv("PLATFORM_NETWORK_MODE", "")
+LIVE_PLATFORM_SECURITY_APPROVED = env_bool("LIVE_PLATFORM_SECURITY_APPROVED", False)
+LIVE_PLATFORM_ALLOWED_HOSTS = env_list("LIVE_PLATFORM_ALLOWED_HOSTS")
+LIVE_PLATFORM_CONNECT_TIMEOUT = float(os.getenv("LIVE_PLATFORM_CONNECT_TIMEOUT", "3"))
+LIVE_PLATFORM_READ_TIMEOUT = float(os.getenv("LIVE_PLATFORM_READ_TIMEOUT", "8"))
+LIVE_PLATFORM_MAX_RETRIES = int(os.getenv("LIVE_PLATFORM_MAX_RETRIES", "2"))
+LIVE_PLATFORM_BACKOFF_BASE = float(os.getenv("LIVE_PLATFORM_BACKOFF_BASE", "0.5"))
+LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "8"))
+LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
+
+LIVE_CUSTODY_BACKEND = os.getenv("LIVE_CUSTODY_BACKEND", "refuse")
+LIVE_CUSTODY_SERVICE_URL = os.getenv("LIVE_CUSTODY_SERVICE_URL", "")
+LIVE_CUSTODY_SERVICE_HOST = os.getenv("LIVE_CUSTODY_SERVICE_HOST", "")
+CREDENTIAL_CUSTODY_PATH = os.getenv("CREDENTIAL_CUSTODY_PATH", "")
+LIVE_OAUTH_REDIRECT_ALLOWLIST = env_list("LIVE_OAUTH_REDIRECT_ALLOWLIST")
+
+LIVE_SHOPEE_PARTNER_ID = os.getenv("LIVE_SHOPEE_PARTNER_ID", "")
+LIVE_SHOPEE_APP_SECRET_REFERENCE = os.getenv("LIVE_SHOPEE_APP_SECRET_REFERENCE", "")
+LIVE_SHOPEE_REDIRECT_URI = os.getenv("LIVE_SHOPEE_REDIRECT_URI", "")
+LIVE_SHOPEE_CONTRACT_APPROVED = env_bool("LIVE_SHOPEE_CONTRACT_APPROVED", False)
+LIVE_SHOPEE_AUTH_URL = os.getenv("LIVE_SHOPEE_AUTH_URL", "https://partner.shopeemobile.com/api/v2/shop/auth_partner")
+LIVE_SHOPEE_TOKEN_PATH = os.getenv("LIVE_SHOPEE_TOKEN_PATH", "/api/v2/auth/token/get")
+LIVE_SHOPEE_REFRESH_PATH = os.getenv("LIVE_SHOPEE_REFRESH_PATH", "/api/v2/auth/access_token/get")
+LIVE_SHOPEE_REVOKE_PATH = os.getenv("LIVE_SHOPEE_REVOKE_PATH", "/api/v2/shop/cancel_auth_partner")
+LIVE_SHOPEE_SHOP_PATH = os.getenv("LIVE_SHOPEE_SHOP_PATH", "/api/v2/shop/get_shop_info")
+LIVE_SHOPEE_SIGN_SCHEME = os.getenv("LIVE_SHOPEE_SIGN_SCHEME", "v2")
+LIVE_SHOPEE_DEFAULT_REGION = os.getenv("LIVE_SHOPEE_DEFAULT_REGION", "")
+LIVE_SHOPEE_DEFAULT_HOST = os.getenv("LIVE_SHOPEE_DEFAULT_HOST", "https://partner.shopeemobile.com")
+LIVE_SHOPEE_API_HOSTS = {}
+
+LIVE_TIKTOK_APP_KEY = os.getenv("LIVE_TIKTOK_APP_KEY", "")
+LIVE_TIKTOK_APP_SECRET_REFERENCE = os.getenv("LIVE_TIKTOK_APP_SECRET_REFERENCE", "")
+LIVE_TIKTOK_REDIRECT_URI = os.getenv("LIVE_TIKTOK_REDIRECT_URI", "")
+LIVE_TIKTOK_CONTRACT_APPROVED = env_bool("LIVE_TIKTOK_CONTRACT_APPROVED", False)
+LIVE_TIKTOK_SERVICE_ID = os.getenv("LIVE_TIKTOK_SERVICE_ID", "")
+LIVE_TIKTOK_MARKET = os.getenv("LIVE_TIKTOK_MARKET", "ROW")
+LIVE_TIKTOK_DEFAULT_AUTH_URL = os.getenv("LIVE_TIKTOK_DEFAULT_AUTH_URL", "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY")
+LIVE_TIKTOK_DEFAULT_OPEN_HOST = os.getenv("LIVE_TIKTOK_DEFAULT_OPEN_HOST", "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY")
+LIVE_TIKTOK_TOKEN_HOST = os.getenv("LIVE_TIKTOK_TOKEN_HOST", "https://auth.tiktok-shops.com")
+LIVE_TIKTOK_AUTH_URLS = {}
+LIVE_TIKTOK_OPEN_API_HOSTS = {}
+LIVE_TIKTOK_TOKEN_PATH = os.getenv("LIVE_TIKTOK_TOKEN_PATH", "/api/v2/token/get")
+LIVE_TIKTOK_REFRESH_PATH = os.getenv("LIVE_TIKTOK_REFRESH_PATH", "/api/v2/token/refresh")
+LIVE_TIKTOK_REVOKE_PATH = os.getenv("LIVE_TIKTOK_REVOKE_PATH", "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY")
+LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH = os.getenv("LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH", "/authorization/202309/shops")
+LIVE_TIKTOK_METADATA_PATH = os.getenv("LIVE_TIKTOK_METADATA_PATH", "/seller/202309/permissions")
+LIVE_TIKTOK_DEFAULT_SCOPE = os.getenv("LIVE_TIKTOK_DEFAULT_SCOPE", "")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -52,6 +103,11 @@ INSTALLED_APPS = [
     "apps.suppliers",
     "apps.finance",
     "apps.reports",
+    # Sales-management facts are registered additively on top of the V2.44.37
+    # application set.  Keep the existing apps/order intact so this upgrade
+    # does not alter the baseline menu or permission modules.
+    "apps.commerce",
+    "apps.sales_management",
     "apps.alerts",
     "apps.replenishment",
     "apps.configcenter",

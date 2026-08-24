@@ -15,6 +15,19 @@ INTEGRATION_PERMISSION_CODES = (
     "integrations.view",
     "integrations.rotate",
     "integrations.run",
+    "integrations.store.view",
+    "integrations.store.authorize",
+    "integrations.store.revoke",
+    "integrations.store.sync",
+    "integrations.store.retry",
+    "integrations.credential.rotate",
+    "integrations.config.view",
+    "integrations.config.create",
+    "integrations.config.update",
+    "integrations.config.verify",
+    "integrations.config.disable",
+    "integrations.credential.clear",
+    "integrations.audit.view",
 )
 
 INTEGRATION_ROLE_CODES = {"integration_admin", "tech_admin", "admin"}
@@ -60,7 +73,6 @@ def get_permission_data_scopes(user, permission_code):
         .distinct()
         .values("scope_type", "config", "role_id")
     )
-
 
 def user_has_finance_access(user):
     if not user or not getattr(user, "is_active", False):
