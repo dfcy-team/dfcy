@@ -18,8 +18,8 @@
       <el-table-column prop="spu_code" label="SPU" min-width="150" />
       <el-table-column prop="product_name" label="商品名称" min-width="160" />
       <el-table-column prop="category" label="类目" min-width="120" />
-      <el-table-column prop="lifecycle_status" label="生命周期状态" min-width="130" />
-      <el-table-column prop="sales_status" label="销售状态" min-width="120" />
+      <el-table-column label="生命周期状态" min-width="130"><template #default="{ row }">{{ productLifecycleStatusLabel(row.lifecycle_status) }}</template></el-table-column>
+      <el-table-column label="销售状态" min-width="120"><template #default="{ row }">{{ productSalesStatusLabel(row.sales_status) }}</template></el-table-column>
       <el-table-column label="编码冻结" min-width="100">
         <template #default="{ row }">{{ row.is_code_frozen ? '是' : '否' }}</template>
       </el-table-column>
@@ -33,6 +33,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { fetchProductStatusList } from '../../api/products';
 import { apiState, collectionRows } from '../../utils/businessResponse';
+import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
 
 const rows = ref([]);
 const loading = ref(false);

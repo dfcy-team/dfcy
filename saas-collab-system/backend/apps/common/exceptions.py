@@ -101,14 +101,29 @@ def _get_error_code(exc, response):
 
 
 def _get_message(response):
+    def first_message(value):
+        if isinstance(value, dict):
+            for item in value.values():
+                message = first_message(item)
+                if message:
+                    return message
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                message = first_message(item)
+                if message:
+                    return message
+        elif value:
+            return str(value)
+        return ""
+
     if isinstance(response.data, dict):
         detail = response.data.get("detail")
         if detail:
             return str(detail)
-        return "error message"
+        return first_message(response.data) or "请求参数有误。"
     if isinstance(response.data, list):
-        return "error message"
-    return str(response.data) if response.data else "error message"
+        return first_message(response.data) or "请求参数有误。"
+    return str(response.data) if response.data else "请求处理失败。"
 
 
 def custom_exception_handler(exc, context):

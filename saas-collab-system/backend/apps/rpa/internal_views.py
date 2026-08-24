@@ -23,6 +23,7 @@ from apps.rpa.internal_serializers import (
     RPAPageSignatureSerializer,
     RPARunSerializer,
     RPATaskDetailSerializer,
+    RPATaskCreateSerializer,
     RPATaskListSerializer,
 )
 from apps.rpa.models import RPAAccountLock, RPAAgent, RPAPageSignature, RPATask, RPATaskAttempt
@@ -55,6 +56,7 @@ def _audit(request, action, object_type, object_id, after_data):
 class TaskCollectionView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "rpa.tasks.view"
+    write_permission_code = "rpa.tasks.manage"
 
     def get(self, request):
         queryset = RPATask.objects.filter(tenant=request.user.tenant).select_related("claimed_by", "manual_assignee")
@@ -65,6 +67,25 @@ class TaskCollectionView(APIView):
             queryset = queryset.filter(task_type=request.query_params["task_type"])
         page, page_size = _page_params(request)
         return success_response(paginated_data(request, queryset, RPATaskListSerializer, page=page, page_size=page_size))
+
+    def post(self, request):
+        serializer = RPATaskCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        task = serializer.save(tenant=request.user.tenant)
+        _audit(
+            request,
+            "task.create",
+            "RPATask",
+            task.id,
+            {
+                "task_type": task.task_type,
+                "business_type": task.business_type,
+                "business_id": task.business_id,
+                "execution_mode": task.execution_mode,
+                "status": task.status,
+            },
+        )
+        return success_response(RPATaskDetailSerializer(task).data, status=201)
 
 
 class TaskDetailView(APIView):
@@ -119,6 +140,30 @@ class DeviceDetailView(APIView):
     def get(self, request, device_id):
         queryset = RPAAgent.objects.filter(tenant=request.user.tenant).select_related("user")
         device = get_object_or_404(filter_rpa_devices(request.user, queryset, self.read_permission_code), pk=device_id)
+        return success_response(RPADeviceSerializer(device).data)
+
+
+class DeviceExecutionModeView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    write_permission_code = "rpa.tasks.manage"
+
+    def post(self, request, device_id):
+        device = get_object_or_404(RPAAgent.objects.filter(tenant=request.user.tenant), pk=device_id)
+        mode = request.data.get("execution_mode")
+        allowed = {
+            RPAAgent.ExecutionMode.MOCK,
+            RPAAgent.ExecutionMode.DRY_RUN,
+            RPAAgent.ExecutionMode.PRODUCTION,
+            RPAAgent.ExecutionMode.PRODUCTION_DISABLED,
+        }
+        if mode not in allowed:
+            raise ValidationError({"execution_mode": "Invalid RPA execution mode."})
+        if mode == RPAAgent.ExecutionMode.PRODUCTION and request.data.get("confirm_production") is not True:
+            raise ValidationError({"confirm_production": "Production mode requires explicit confirmation."})
+        before = device.execution_mode
+        device.execution_mode = mode
+        device.save(update_fields=["execution_mode", "updated_at"])
+        _audit(request, "device.execution_mode.change", "RPAAgent", device.id, {"before": before, "after": mode})
         return success_response(RPADeviceSerializer(device).data)
 
 

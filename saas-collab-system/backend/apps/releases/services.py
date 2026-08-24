@@ -27,11 +27,19 @@ REQUIRED_GATE_CODES = (
     "release-readiness",
     "evidence-integrity",
 )
+MINIAPP_FILING_GATE_CODE = "miniapp-filing-approved"
+RECORDABLE_GATE_CODES = (*REQUIRED_GATE_CODES, MINIAPP_FILING_GATE_CODE)
 REQUIRED_APPROVAL_TYPES = (
     ReleaseApproval.ApprovalType.BUSINESS,
     ReleaseApproval.ApprovalType.TECHNICAL,
     ReleaseApproval.ApprovalType.SECURITY,
 )
+
+
+def required_gate_codes(contract):
+    if contract.environment == ReleaseContract.Environment.PRODUCTION:
+        return RECORDABLE_GATE_CODES
+    return REQUIRED_GATE_CODES
 
 
 def key_hash(value):
@@ -157,7 +165,8 @@ def gate_status(contract):
     now = timezone.now()
     rows = {gate.code: gate for gate in contract.gate_results.all()}
     blockers = []
-    for code in REQUIRED_GATE_CODES:
+    required_codes = required_gate_codes(contract)
+    for code in required_codes:
         gate = rows.get(code)
         if gate is None:
             blockers.append({"code": code, "reason": "missing"})
@@ -167,8 +176,8 @@ def gate_status(contract):
             blockers.append({"code": code, "reason": "expired"})
     return {
         "passed": not blockers,
-        "required": len(REQUIRED_GATE_CODES),
-        "passed_count": len(REQUIRED_GATE_CODES) - len(blockers),
+        "required": len(required_codes),
+        "passed_count": len(required_codes) - len(blockers),
         "blockers": blockers,
     }
 

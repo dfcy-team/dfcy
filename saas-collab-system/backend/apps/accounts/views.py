@@ -1,18 +1,12 @@
 from rest_framework.decorators import api_view
 from rest_framework.decorators import permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from apps.common.responses import error_response, success_response
 
-from .serializers import (
-    CurrentUserSerializer,
-    InternalTokenObtainPairSerializer,
-    SupplierWebTokenObtainPairSerializer,
-    SupplierWebTokenRefreshSerializer,
-    UATAwareTokenRefreshSerializer,
-)
+from .serializers import CurrentUserSerializer, InternalTokenObtainPairSerializer
 
 
 def health_response(service):
@@ -31,22 +25,6 @@ def external_health(request):
 
 class InternalLoginView(TokenObtainPairView):
     serializer_class = InternalTokenObtainPairSerializer
-
-
-class InternalTokenRefreshView(TokenRefreshView):
-    serializer_class = UATAwareTokenRefreshSerializer
-
-
-class SupplierWebLoginView(TokenObtainPairView):
-    authentication_classes = []
-    permission_classes = [AllowAny]
-    serializer_class = SupplierWebTokenObtainPairSerializer
-
-
-class SupplierWebRefreshView(TokenRefreshView):
-    authentication_classes = []
-    permission_classes = [AllowAny]
-    serializer_class = SupplierWebTokenRefreshSerializer
 
 
 @api_view(["GET"])

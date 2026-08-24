@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from .models import ReleaseApproval, ReleaseArtifact, ReleaseAuditEvent, ReleaseContract, ReleaseGateResult
-from .services import REQUIRED_GATE_CODES, gate_status
+from .services import RECORDABLE_GATE_CODES, gate_status
 
 
 class ReleaseArtifactSerializer(serializers.ModelSerializer):
@@ -126,6 +126,82 @@ class ReleaseContractDetailSerializer(serializers.ModelSerializer):
         return gate_status(obj)
 
 
+class MiniAppReleaseArtifactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReleaseArtifact
+        fields = (
+            "build_no",
+            "commit_sha",
+            "artifact_hash",
+            "config_version",
+            "manifest",
+            "created_at",
+        )
+
+
+class MiniAppReleaseGateResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReleaseGateResult
+        fields = (
+            "code",
+            "category",
+            "status",
+            "evidence_ref",
+            "evaluated_at",
+            "expires_at",
+            "version",
+            "updated_at",
+        )
+
+
+class MiniAppReleaseApprovalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReleaseApproval
+        fields = (
+            "approval_type",
+            "decision",
+            "reason",
+            "decided_at",
+        )
+
+
+class MiniAppReleaseContractDetailSerializer(serializers.ModelSerializer):
+    artifact = MiniAppReleaseArtifactSerializer(read_only=True)
+    gate_results = MiniAppReleaseGateResultSerializer(many=True, read_only=True)
+    approvals = MiniAppReleaseApprovalSerializer(many=True, read_only=True)
+    gate_summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReleaseContract
+        fields = (
+            "id",
+            "contract_no",
+            "application_code",
+            "environment",
+            "commit_sha",
+            "api_contract_version",
+            "scope",
+            "risk_level",
+            "rollback_version",
+            "rollback_point",
+            "stop_conditions",
+            "observation_minutes",
+            "status",
+            "scheduled_at",
+            "completed_at",
+            "version",
+            "artifact",
+            "gate_results",
+            "approvals",
+            "gate_summary",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_gate_summary(self, obj):
+        return gate_status(obj)
+
+
 class ReleaseContractCreateSerializer(serializers.Serializer):
     application_code = serializers.SlugField(max_length=80)
     environment = serializers.ChoiceField(choices=ReleaseContract.Environment.choices)
@@ -141,7 +217,7 @@ class ReleaseContractCreateSerializer(serializers.Serializer):
 
 class ReleaseGateRecordSerializer(serializers.Serializer):
     version = serializers.IntegerField(min_value=1)
-    code = serializers.ChoiceField(choices=REQUIRED_GATE_CODES)
+    code = serializers.ChoiceField(choices=RECORDABLE_GATE_CODES)
     category = serializers.CharField(min_length=1, max_length=40)
     status = serializers.ChoiceField(choices=ReleaseGateResult.Status.choices)
     evidence_ref = serializers.CharField(min_length=1, max_length=240)

@@ -44,7 +44,7 @@
       </el-table-column>
       <el-table-column label="操作" width="130">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed ? '配置权限' : '查看权限' }}</el-button>
+          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -64,9 +64,17 @@
         <div><strong>{{ selectedRole.name }}</strong><span>{{ selectedRole.code }}</span></div>
         <el-tag effect="plain">tenant {{ selectedRole.tenant_id }}</el-tag>
       </div>
+      <el-alert
+        v-if="isBuiltInAdministrator"
+        class="administrator-note"
+        type="info"
+        :closable="false"
+        show-icon
+        title="管理员角色由权限目录自动同步，不能手工修改权限或数据范围。"
+      />
       <el-form label-position="top">
         <el-form-item label="数据范围">
-          <el-radio-group v-model="roleForm.scope_type" :disabled="!manageAccess.allowed">
+          <el-radio-group v-model="roleForm.scope_type" :disabled="!manageAccess.allowed || isBuiltInAdministrator">
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="department">本部门</el-radio-button>
             <el-radio-button value="own">本人</el-radio-button>
@@ -74,19 +82,36 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="权限码">
-          <el-checkbox-group v-model="roleForm.permission_codes" :disabled="!manageAccess.allowed" class="permission-groups">
+          <el-checkbox-group v-model="roleForm.permission_codes" :disabled="!manageAccess.allowed || isBuiltInAdministrator" class="permission-groups">
             <section v-for="group in permissionGroups" :key="group.module" class="permission-group">
-              <strong>{{ group.module }}</strong>
-              <el-checkbox v-for="permission in group.items" :key="permission.code" :value="permission.code">
-                <span>{{ permission.name }}</span><small>{{ permission.code }}</small>
-              </el-checkbox>
+              <strong>{{ group.label }}</strong>
+              <template v-for="permission in group.items" :key="permission.key">
+                <div
+                  v-if="permission.type === 'menu'"
+                  class="permission-menu-node"
+                  :class="{ 'permission-menu-other': permission.other }"
+                  :style="{ paddingLeft: `${12 + permission.depth * 18}px` }"
+                >
+                  <span>{{ permission.label }}</span>
+                  <small v-if="permission.path">{{ permission.path }}</small>
+                </div>
+                <el-checkbox
+                  v-else
+                  class="permission-leaf"
+                  :style="{ marginLeft: `${permission.depth * 18}px` }"
+                  :value="permission.code"
+                  :disabled="permission.unavailable"
+                >
+                  <span>{{ permissionLabel(permission) }}</span><small>{{ permission.code }}<template v-if="permission.unavailable">（目录未返回）</template></small>
+                </el-checkbox>
+              </template>
             </section>
           </el-checkbox-group>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="drawerOpen = false">关闭</el-button>
-        <el-button v-if="manageAccess.visible" type="primary" :disabled="!manageAccess.allowed" :loading="saving" @click="saveRole">保存配置</el-button>
+        <el-button v-if="manageAccess.visible && !isBuiltInAdministrator" type="primary" :disabled="!manageAccess.allowed" :loading="saving" @click="saveRole">保存配置</el-button>
       </template>
     </el-drawer>
 
@@ -113,6 +138,8 @@ import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
 import { statusFromApiResponse } from '../../utils/uiState';
+import { permissionLabel } from '../../utils/permissionLabels';
+import { menuItems, routeCapabilities } from '../../router/menu';
 
 const auth = useAuthStore();
 const roles = ref([]);
@@ -131,6 +158,7 @@ const selectedRole = ref({});
 const roleForm = reactive({ permission_codes: [], scope_type: 'own', scope_config: {} });
 const newRole = reactive({ name: '', code: '', status: 'active' });
 const manageAccess = computed(() => getActionAccess(auth, { permission: 'system.roles.manage' }));
+const isBuiltInAdministrator = computed(() => selectedRole.value.code === 'administrator');
 
 const layers = [
   { title: 'Tenant', note: '租户隔离' }, { title: '用户类型', note: 'internal / external / RPA' },
@@ -139,16 +167,120 @@ const layers = [
 ];
 
 const permissionGroups = computed(() => {
-  const grouped = new Map();
-  for (const permission of permissions.value) {
-    if (!grouped.has(permission.module)) grouped.set(permission.module, []);
-    grouped.get(permission.module).push(permission);
+  const byCode = new Map(
+    permissions.value
+      .filter((permission) => permission?.code)
+      .map((permission) => [permission.code, permission]),
+  );
+  const seenCodes = new Set();
+  const mappedCodes = new Set();
+  const groups = [];
+  const routePermissions = (path) => routeCapabilities
+    .filter((capability) => capability.path === path)
+    .flatMap((capability) => capability.permissions || []);
+  const codesFor = (item) => [...new Set([...(item.permissions || []), ...routePermissions(item.path)])];
+  const descendantCodes = (item) => new Set((item.children || []).flatMap((child) => [
+    ...codesFor(child), ...[...descendantCodes(child)],
+  ]));
+
+  function appendMenuNode(items, item, depth, key) {
+    const children = item.children || [];
+    const descendantCodeSet = descendantCodes(item);
+    const ownCodes = codesFor(item).filter((code) => !descendantCodeSet.has(code));
+    items.push({
+      type: 'menu',
+      key: `menu:${key}`,
+      label: item.label || item.path || '未命名菜单',
+      path: item.path || '',
+      depth,
+    });
+    for (const code of ownCodes) {
+      mappedCodes.add(code);
+      if (seenCodes.has(code)) continue;
+      seenCodes.add(code);
+      items.push({
+        ...(byCode.get(code) || { code, name: code, module: '', action: '', unavailable: true }),
+        type: 'permission',
+        key: `permission:${code}`,
+        code,
+        depth: depth + 1,
+        unavailable: !byCode.has(code),
+      });
+    }
+    children.forEach((child, index) => appendMenuNode(items, child, depth + 1, `${key}.${index}`));
   }
-  return [...grouped.entries()].map(([module, items]) => ({ module, items }));
+
+  menuItems.forEach((root, index) => {
+    const items = [];
+    appendMenuNode(items, root, 0, String(index));
+    groups.push({ module: `menu:${index}`, label: root.label || `菜单 ${index + 1}`, items });
+  });
+
+  // Keep every catalog permission configurable, including management/action
+  // codes that do not have a visible menu route.  Route capabilities that are
+  // not represented in menu.js are also retained here (as disabled entries if
+  // the backend catalog has not caught up yet).
+  const routeOnlyCodes = new Set(routeCapabilities.flatMap((item) => item.permissions || []));
+  const otherItems = [];
+  for (const permission of permissions.value) {
+    if (permission?.code && !mappedCodes.has(permission.code)) {
+      otherItems.push({ ...permission, type: 'permission', key: `permission:${permission.code}`, depth: 1 });
+      mappedCodes.add(permission.code);
+    }
+  }
+  for (const code of routeOnlyCodes) {
+    if (seenCodes.has(code) || mappedCodes.has(code)) continue;
+    otherItems.push({
+      ...(byCode.get(code) || { code, name: code, module: '', action: '', unavailable: true }),
+      type: 'permission',
+      key: `permission:${code}`,
+      code,
+      depth: 1,
+      unavailable: !byCode.has(code),
+    });
+    mappedCodes.add(code);
+  }
+  if (otherItems.length) {
+    groups.push({ module: 'other', label: '其他操作权限', items: [
+      { type: 'menu', key: 'menu:other', label: '其他操作权限', path: '', depth: 0, other: true },
+      ...otherItems,
+    ] });
+  }
+  return groups;
 });
 
 function unpack(response) {
   return response?.data?.results || response?.data?.items || [];
+}
+async function loadAllPermissions() {
+  const pageSize = 100;
+  const collected = [];
+  let pageNumber = 1;
+  let totalCount = null;
+  let firstResponse = null;
+  while (pageNumber <= 1000) {
+    const response = await fetchPermissions({ page: pageNumber, page_size: pageSize });
+    if (!firstResponse) firstResponse = response;
+    if (!response.success) return response;
+    const batch = unpack(response);
+    collected.push(...batch);
+    const responseTotal = Number(response.data?.count);
+    if (Number.isFinite(responseTotal)) totalCount = responseTotal;
+    const next = response.data?.next;
+    if (!batch.length) break;
+    if (!next && ((totalCount !== null && collected.length >= totalCount) || batch.length < pageSize)) break;
+    pageNumber += 1;
+  }
+  return {
+    ...firstResponse,
+    data: {
+      ...(firstResponse?.data || {}),
+      count: totalCount ?? collected.length,
+      results: collected,
+      next: null,
+      previous: null,
+    },
+  };
 }
 function responseCapability(response) {
   const status = response?.data?.api_status || response?.data?.status;
@@ -164,7 +296,7 @@ async function load() {
   state.value = 'loading';
   const [roleResponse, permissionResponse] = await Promise.all([
     fetchRoles({ search: search.value.trim(), page: page.value, page_size: pageSize }),
-    fetchPermissions({ page_size: 100 })
+    loadAllPermissions(),
   ]);
   if (!roleResponse.success || !permissionResponse.success) {
     const failed = !roleResponse.success ? roleResponse : permissionResponse;
@@ -185,15 +317,26 @@ function searchRoles() {
 }
 function openRole(role) {
   selectedRole.value = role;
-  roleForm.permission_codes = [...(role.permission_codes || [])];
+  roleForm.permission_codes = [...new Set((role.permission_codes || []).filter(Boolean))];
   roleForm.scope_type = role.data_scopes?.[0]?.scope_type || 'own';
   roleForm.scope_config = role.data_scopes?.[0]?.config || {};
   drawerOpen.value = true;
 }
 async function saveRole() {
   if (!manageAccess.value.allowed) return;
+  if (isBuiltInAdministrator.value) {
+    ElMessage.info('管理员角色由权限目录自动同步，不能手工修改。');
+    return;
+  }
   saving.value = true;
-  const response = await updateRolePermissions(selectedRole.value.id, { ...roleForm });
+  const realPermissionCodes = new Set(
+    permissions.value.map((permission) => permission?.code).filter(Boolean),
+  );
+  const payload = {
+    ...roleForm,
+    permission_codes: [...new Set(roleForm.permission_codes)].filter((code) => realPermissionCodes.has(code)),
+  };
+  const response = await updateRolePermissions(selectedRole.value.id, payload);
   saving.value = false;
   if (!response.success) return ElMessage.error(response.message || '保存失败');
   ElMessage.success('角色权限已保存并记录审计');
@@ -241,6 +384,10 @@ load();
 .permission-group .el-checkbox { height: auto; min-height: 36px; margin-right: 0; }
 .permission-group span, .permission-group small { display: block; }
 .permission-group small { color: #64748b; font-size: 10px; }
+.permission-menu-node { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; min-height: 28px; padding-top: 4px; color: #315c78; font-size: 12px; font-weight: 600; }
+.permission-menu-node small { color: #94a3b8; font-size: 10px; font-weight: 400; }
+.permission-menu-other { color: #9a6700; }
+.permission-leaf { min-width: 0; }
 @media (max-width: 980px) { .access-layers { grid-template-columns: repeat(3, 1fr); } .access-layer:nth-child(3) { border-right: 0; } .access-layer:nth-child(-n + 3) { border-bottom: 1px solid #e5eaf0; } }
 @media (max-width: 640px) { .access-layers { grid-template-columns: repeat(2, 1fr); } .access-layer:nth-child(3) { border-right: 1px solid #e5eaf0; } .access-layer:nth-child(even) { border-right: 0; } .permission-group { grid-template-columns: 1fr; } .matrix-toolbar { grid-template-columns: 1fr auto; } .matrix-toolbar span { display: none; } }
 </style>

@@ -431,6 +431,7 @@ class ReportExportRequest(models.Model):
         LIFECYCLE = "lifecycle", "Lifecycle reviews"
         BUSINESS_ALERTS = "business_alerts", "Business alerts"
         FINANCE_SUMMARY = "finance_summary", "Finance summary"
+        SALES_DETAILS = "sales_details", "Sales details"
 
     class Status(models.TextChoices):
         COMPLETED = "completed", "Completed placeholder"
@@ -482,7 +483,6 @@ class ReportExportRequest(models.Model):
 class ReportExportAuditLogQuerySet(models.QuerySet):
     def update(self, **kwargs):
         raise ValidationError("Report export audit logs are immutable.")
-
     def bulk_update(self, objs, fields, batch_size=None):
         raise ValidationError("Report export audit logs are immutable.")
 

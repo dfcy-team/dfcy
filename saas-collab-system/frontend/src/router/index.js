@@ -15,12 +15,21 @@ const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList
 const LifecycleReviewHistory = () => import('../views/lifecycle/LifecycleReviewHistory.vue');
 const ClearanceRequestList = () => import('../views/lifecycle/ClearanceRequestList.vue');
 const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
+const SalesOverview = () => import('../views/sales-management/SalesOverview.vue');
+const SalesOrderList = () => import('../views/sales-management/SalesOrderList.vue');
+const SalesReturnList = () => import('../views/sales-management/SalesReturnList.vue');
+const StoreSalesList = () => import('../views/sales-management/StoreSalesList.vue');
+const SkuSalesList = () => import('../views/sales-management/SkuSalesList.vue');
+const SalesExportList = () => import('../views/sales-management/SalesExportList.vue');
+const SalesDataQualityList = () => import('../views/sales-management/SalesDataQualityList.vue');
 const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
 const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
 const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
 const PlatformProductDetailList = () => import('../views/masterdata/PlatformProductDetailList.vue');
+const ProductDictionarySettings = () => import('../views/products/ProductDictionarySettings.vue');
+const ProductBundleManager = () => import('../views/products/ProductBundleManager.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
 const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
@@ -28,6 +37,7 @@ const ProductStatusRecommendationDetail = () => import('../views/products/Produc
 const ProductStatusTransitionHistory = () => import('../views/products/ProductStatusTransitionHistory.vue');
 const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
 const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
+const SupplyPurchaseOrderConsole = () => import('../views/purchasing/SupplyPurchaseOrderConsole.vue');
 const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
 const SupplierTaskDetail = () => import('../views/suppliers/SupplierTaskDetail.vue');
 const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentList.vue');
@@ -40,6 +50,13 @@ const MySupplierPerformanceHistory = () => import('../views/suppliers/MySupplier
 const SiteProfileList = () => import('../views/listings/SiteProfileList.vue');
 const SiteProfileDetail = () => import('../views/listings/SiteProfileDetail.vue');
 const ListingTemplateList = () => import('../views/listings/ListingTemplateList.vue');
+const ListingWorkbench = () => import('../views/listings/ListingWorkbench.vue');
+const ListingTaskList = () => import('../views/listings/ListingTaskList.vue');
+const ListingMappingList = () => import('../views/listings/ListingMappingList.vue');
+const ListingLogList = () => import('../views/listings/ListingLogList.vue');
+const ListingExceptionList = () => import('../views/listings/ListingExceptionList.vue');
+const DevelopmentWorkspace = () => import('../views/development/DevelopmentWorkspace.vue');
+const DevelopmentProductArchiveList = () => import('../views/development/DevelopmentProductArchiveList.vue');
 const PriceList = () => import('../views/pricing/PriceList.vue');
 const PriceDetail = () => import('../views/pricing/PriceDetail.vue');
 const RPATaskList = () => import('../views/rpa/RPATaskList.vue');
@@ -85,6 +102,9 @@ const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
 const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
+const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
+const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
+const BdPerformance = () => import('../views/influencers/BdPerformance.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
@@ -100,6 +120,7 @@ const PilotSecurityReviews = () => import('../views/pilot/SecurityReviewWorkspac
 const PilotVerificationRuns = () => import('../views/pilot/VerificationRunWorkspace.vue');
 const PilotPerformanceRuns = () => import('../views/pilot/PerformanceRunWorkspace.vue');
 const PilotEntryDecisions = () => import('../views/pilot/EntryDecisionWorkspace.vue');
+const ReleaseContractConsole = () => import('../views/releases/ReleaseContractConsole.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -118,6 +139,13 @@ const routes = [
       { path: 'lifecycle/history', component: LifecycleReviewHistory },
       { path: 'lifecycle/clearance-requests', component: ClearanceRequestList },
       { path: 'alerts/business', component: BusinessAlertList },
+      { path: 'sales-management/overview', component: SalesOverview },
+      { path: 'sales-management/orders', component: SalesOrderList },
+      { path: 'sales-management/returns', component: SalesReturnList },
+      { path: 'sales-management/stores', component: StoreSalesList },
+      { path: 'sales-management/skus', component: SkuSalesList },
+      { path: 'sales-management/exports', component: SalesExportList },
+      { path: 'sales-management/data-quality', component: SalesDataQualityList },
       { path: 'workflow/approvals', component: ApprovalList },
       { path: 'workflow/approvals/:id', component: ApprovalDetail },
       { path: 'workflow/exceptions', component: ExceptionList },
@@ -141,12 +169,18 @@ const routes = [
       { path: 'pilot/performance-runs/:id', component: PilotPerformanceRuns },
       { path: 'pilot/entry-decisions', component: PilotEntryDecisions },
       { path: 'pilot/entry-decisions/:id', component: PilotEntryDecisions },
+      { path: 'releases/contracts', component: ReleaseContractConsole },
       { path: 'products/research', component: ResearchList },
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
       { path: 'products/details', component: ProductDetailData },
       { path: 'products/platform-details', component: PlatformProductDetailList },
+      { path: 'products/categories', component: ProductDictionarySettings, props: { mode: 'category' } },
+      { path: 'products/colors', component: ProductDictionarySettings, props: { mode: 'color' } },
+      { path: 'products/attributes', component: ProductDictionarySettings, props: { mode: 'attribute' } },
+      { path: 'products/specifications', component: ProductDictionarySettings, props: { mode: 'specification' } },
+      { path: 'products/bundles', component: ProductBundleManager },
       { path: 'products/status', component: ProductStatusList },
       { path: 'products/status-dashboard', component: ProductStatusDashboard },
       { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
@@ -154,6 +188,7 @@ const routes = [
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'purchasing/orders', component: PurchaseOrderList },
       { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
+      { path: 'supply-chain/purchase-orders', component: SupplyPurchaseOrderConsole },
       { path: 'suppliers/tasks', component: SupplierTaskList },
       { path: 'suppliers/tasks/:id', component: SupplierTaskDetail },
       { path: 'suppliers/shipments', component: SupplierShipmentList },
@@ -166,6 +201,21 @@ const routes = [
       { path: 'listings/sites', component: SiteProfileList },
       { path: 'listings/sites/:id', component: SiteProfileDetail },
       { path: 'listings/templates', component: ListingTemplateList },
+      { path: 'listings/workbench', component: ListingWorkbench },
+      { path: 'listings/tasks', component: ListingTaskList },
+      { path: 'listings/online-products', component: SiteProfileList, props: { initialStatus: 'published' } },
+      { path: 'listings/category-mappings', component: ListingMappingList, props: { mode: 'category' } },
+      { path: 'listings/attribute-mappings', component: ListingMappingList, props: { mode: 'attribute' } },
+      { path: 'listings/logs', component: ListingLogList },
+      { path: 'listings/exceptions', component: ListingExceptionList },
+      { path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } },
+      { path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } },
+      { path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } },
+      { path: 'development/projects/archives', component: DevelopmentProductArchiveList },
+      { path: 'development/costs', component: DevelopmentWorkspace, props: { mode: 'costs' } },
+      { path: 'development/sales', component: DevelopmentWorkspace, props: { mode: 'sales' } },
+      { path: 'development/retrospectives', component: DevelopmentWorkspace, props: { mode: 'retrospectives' } },
+      { path: 'development/dashboard', component: DevelopmentWorkspace, props: { mode: 'dashboard' } },
       { path: 'pricing/prices', component: PriceList },
       { path: 'pricing/prices/:id', component: PriceDetail },
       { path: 'rpa/tasks', component: RPATaskList },
@@ -212,6 +262,9 @@ const routes = [
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
       { path: 'influencers', component: InfluencerList },
+      { path: 'influencers/outreach-tasks', component: OutreachTaskList },
+      { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },
+      { path: 'influencers/bd-performance', component: BdPerformance },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

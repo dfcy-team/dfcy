@@ -1,41 +1,34 @@
 <template>
-  <AdminResourcePage
-    eyebrow="CREATOR CRM"
-    title="达人管理"
-    subtitle="集中维护达人平台身份、内容赛道、粉丝规模与合作状态。"
-    boundary-note="数据按租户隔离；联系方式仅脱敏回显，新增与停用需达人管理权限。"
-    entity-label="达人"
-    :loader="fetchInfluencers"
-    :columns="columns"
-    :form-fields="formFields"
-    :create-handler="createInfluencer"
-    :status-handler="updateInfluencerStatus"
-    create-permission="influencers.manage"
-    manage-permission="influencers.manage"
-  />
+  <section class="influencer-workspace">
+    <header class="workspace-heading">
+      <div>
+        <span>CREATOR OPERATIONS</span>
+        <h1>品牌达人等级资源库</h1>
+        <p>集中维护达人平台身份、内容赛道、粉丝规模与合作状态。</p>
+      </div>
+      <div class="source-note">
+        <i />
+        SaaS 达人档案
+      </div>
+    </header>
+
+    <InfluencerResourceLibrary />
+  </section>
 </template>
 
 <script setup>
-import AdminResourcePage from '../../components/AdminResourcePage.vue';
-import { createInfluencer, fetchInfluencers, updateInfluencerStatus } from '../../api/influencers';
-
-const columns = [
-  { prop: 'code', label: '达人编码', width: 150 }, { prop: 'name', label: '达人名称', width: 150 },
-  { prop: 'platform', label: '平台', width: 110 }, { prop: 'handle', label: '账号', width: 150 },
-  { prop: 'category', label: '内容赛道', width: 130 }, { prop: 'follower_count', label: '粉丝数', width: 110 },
-  { prop: 'cooperation_status', label: '合作状态', width: 120 },
-  { prop: 'contact_phone_masked', label: '联系电话', width: 130 }, { prop: 'status', label: '状态', type: 'status' }
-];
-const formFields = [
-  { key: 'code', label: '达人编码', required: true }, { key: 'name', label: '达人名称', required: true },
-  { key: 'platform', label: '平台', required: true }, { key: 'handle', label: '平台账号' },
-  { key: 'category', label: '内容赛道' }, { key: 'follower_count', label: '粉丝数', type: 'number' },
-  { key: 'contact_name', label: '商务联系人' }, { key: 'contact_phone', label: '联系电话' },
-  { key: 'contact_email', label: '联系邮箱' },
-  { key: 'cooperation_status', label: '合作状态', type: 'select', options: [
-    { label: '待接洽', value: 'prospect' }, { label: '已联系', value: 'contacted' },
-    { label: '合作中', value: 'cooperating' }, { label: '已暂停', value: 'paused' }
-  ] },
-  { key: 'notes', label: '备注', type: 'textarea' }
-];
+import InfluencerResourceLibrary from './InfluencerResourceLibrary.vue';
 </script>
+
+<style scoped>
+.influencer-workspace { display: grid; gap: 16px; min-width: 0; }
+.workspace-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.workspace-heading span { color: #5e6f7c; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.workspace-heading h1 { margin: 3px 0 4px; color: #16232d; font-size: 24px; line-height: 1.2; }
+.workspace-heading p { margin: 0; color: #687884; font-size: 13px; }
+.source-note { display: inline-flex; align-items: center; gap: 7px; margin-top: 7px; padding: 6px 10px; border: 1px solid #dce4e9; border-radius: 7px; background: #fff; color: #60717d; font-size: 12px; white-space: nowrap; }
+.source-note i { width: 7px; height: 7px; border-radius: 50%; background: #14936f; box-shadow: 0 0 0 3px #e0f3ed; }
+@media (max-width: 760px) {
+  .workspace-heading { display: grid; gap: 8px; }
+}
+</style>

@@ -1,45 +1,45 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 
 from apps.common.responses import success_response
 from apps.products.models import ProductResearch
 
-from .models import (
-    DevelopmentCostEstimate,
-    DevelopmentProject,
-    DevelopmentRequirementCompetitorLink,
-    ProductSalesSummary,
-)
+from .models import DevelopmentCostEstimate, DevelopmentProductArchive, DevelopmentProject, ProductSalesSummary
 from .permissions import (
     CanApproveCosts,
     CanFinalizeProjects,
     CanImportSales,
+    CanGenerateProductArchives,
     CanManageCosts,
     CanManageProjects,
-    CanManageCompetitorLinks,
+    CanManageProductArchives,
+    CanConfirmProductArchives,
     CanReviewRequirements,
-    CanViewCompetitorReports,
     CanViewProjects,
+    CanViewProductArchives,
     CanViewSales,
 )
 from .serializers import (
-    CompetitorReportSelectionSerializer,
     DevelopmentCostEstimateSerializer,
+    DevelopmentProductArchiveConfirmationSerializer,
+    DevelopmentProductArchiveSerializer,
     DevelopmentProjectSerializer,
-    DevelopmentRequirementCompetitorLinkSerializer,
     ProductSalesSummarySerializer,
 )
 from .services import (
     advance_project_stage,
     calculate_cost_summary,
     check_duplicate_requirement,
-    create_competitor_link,
+    confirm_product_archive,
+    create_product_archive,
     finalize_product,
-    get_competitor_report_client,
+    formalize_product_archive,
+    generate_trial_product,
     import_sales_csv,
-    list_competitor_links,
     review_reminder_candidates,
+    update_product_archive,
 )
 
 
@@ -69,6 +69,134 @@ def project_collection(request):
 def project_detail(request, pk):
     item = get_object_or_404(DevelopmentProject, pk=pk, tenant=request.user.tenant)
     return success_response(DevelopmentProjectSerializer(item).data)
+
+
+def _archive_queryset(request):
+    return (
+        DevelopmentProductArchive.objects.filter(tenant=request.user.tenant)
+        .select_related(
+            "project",
+            "project__category_node",
+            "category_node",
+            "category_node__parent__parent",
+            "formal_product",
+            "formal_sku",
+            "trial_product",
+            "trial_sku",
+            "platform_master",
+            "store_master",
+            "created_by",
+            "updated_by",
+        )
+        .prefetch_related("events__actor")
+    )
+
+
+@api_view(["GET", "POST"])
+def product_archive_collection(request):
+    permission = CanViewProductArchives() if request.method == "GET" else CanManageProductArchives()
+    if not permission.has_permission(request, product_archive_collection):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied()
+    if request.method == "GET":
+        queryset = _archive_queryset(request)
+        status = request.query_params.get("status", "").strip()
+        search = request.query_params.get("search", "").strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        if search:
+            queryset = queryset.filter(
+                Q(archive_no__icontains=search)
+                | Q(product_name__icontains=search)
+                | Q(project__project_no__icontains=search)
+                | Q(virtual_inventory_sku__icontains=search)
+            )
+        return success_response(DevelopmentProductArchiveSerializer(queryset, many=True).data)
+
+    serializer = DevelopmentProductArchiveSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    project = serializer.validated_data.pop("project", None)
+    if project is None:
+        raise ValidationError({"project": "A development project is required."})
+    archive, created = create_product_archive(project_id=project.id, actor=request.user, data=serializer.validated_data)
+    return success_response(DevelopmentProductArchiveSerializer(archive).data, status=201 if created else 200)
+
+
+@api_view(["GET", "PATCH"])
+def product_archive_detail(request, pk):
+    permission = CanViewProductArchives() if request.method == "GET" else CanManageProductArchives()
+    if not permission.has_permission(request, product_archive_detail):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied()
+    archive = get_object_or_404(_archive_queryset(request), pk=pk)
+    if request.method == "GET":
+        return success_response(DevelopmentProductArchiveSerializer(archive).data)
+    serializer = DevelopmentProductArchiveSerializer(
+        archive,
+        data=request.data,
+        partial=True,
+        context={"request": request},
+    )
+    serializer.is_valid(raise_exception=True)
+    updated = update_product_archive(archive_id=archive.id, actor=request.user, data=serializer.validated_data)
+    return success_response(DevelopmentProductArchiveSerializer(_archive_queryset(request).get(pk=updated.pk)).data)
+
+
+@api_view(["POST"])
+@permission_classes([CanConfirmProductArchives])
+def product_archive_confirm(request, pk):
+    serializer = DevelopmentProductArchiveConfirmationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    archive, changed = confirm_product_archive(
+        archive_id=pk,
+        actor=request.user,
+        test_result=serializer.validated_data.get("test_result"),
+        test_notes=serializer.validated_data.get("test_notes"),
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    )
+    return success_response({"archive": DevelopmentProductArchiveSerializer(archive).data, "changed": changed})
+
+
+@api_view(["POST"])
+@permission_classes([CanGenerateProductArchives])
+def product_archive_generate_trial(request, pk):
+    archive, changed = generate_trial_product(
+        archive_id=pk,
+        actor=request.user,
+        data=request.data,
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    )
+    return success_response({
+        "archive": DevelopmentProductArchiveSerializer(_archive_queryset(request).get(pk=archive.pk)).data,
+        "changed": changed,
+        "development_spu_code": archive.development_spu_code,
+        "trial_product_id": archive.trial_product_id,
+        "trial_spu_code": archive.trial_product.spu_code if archive.trial_product_id else "",
+        "trial_sku_id": archive.trial_sku_id,
+        "trial_sku_code": archive.trial_sku.sku_code if archive.trial_sku_id else "",
+        "formal_product_id": archive.formal_product_id,
+        "formal_sku_id": archive.formal_sku_id,
+        "formal_sku_code": archive.formal_sku.sku_code if archive.formal_sku_id else "",
+    })
+
+
+@api_view(["POST"])
+@permission_classes([CanConfirmProductArchives])
+def product_archive_formalize(request, pk):
+    product, created = formalize_product_archive(
+        archive_id=pk,
+        actor=request.user,
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    )
+    archive = _archive_queryset(request).get(pk=pk)
+    return success_response({
+        "archive": DevelopmentProductArchiveSerializer(archive).data,
+        "product_id": product.id,
+        "spu_code": product.spu_code,
+        "formal_sku_id": archive.formal_sku_id,
+        "formal_sku_code": archive.formal_sku.sku_code if archive.formal_sku_id else "",
+        "created": created,
+    })
 
 
 @api_view(["POST"])
@@ -127,99 +255,3 @@ def sales_summary(request):
 @permission_classes([CanViewProjects])
 def review_reminders(request):
     return success_response({"results": review_reminder_candidates(tenant=request.user.tenant)})
-
-
-def _competitor_params(request):
-    allowed = ("platform", "site", "product_id", "search", "page", "page_size")
-    return {
-        key: request.query_params[key]
-        for key in allowed
-        if request.query_params.get(key) not in (None, "")
-    }
-
-
-@api_view(["GET"])
-@permission_classes([CanViewCompetitorReports])
-def competitor_report_collection(request):
-    """Read-only proxy for reports owned by the competitor service."""
-
-    payload = get_competitor_report_client().list_reports(
-        tenant=request.user.tenant,
-        params=_competitor_params(request),
-    )
-    return success_response(payload)
-
-
-@api_view(["GET"])
-@permission_classes([CanViewCompetitorReports])
-def competitor_report_detail(request, report_id):
-    payload = get_competitor_report_client().get_report(report_id, tenant=request.user.tenant)
-    return success_response(payload)
-
-
-@api_view(["GET"])
-@permission_classes([CanViewCompetitorReports])
-def competitor_report_evidence(request, report_id):
-    payload = get_competitor_report_client().list_evidence(
-        report_id,
-        tenant=request.user.tenant,
-        page=request.query_params.get("page", 1),
-        page_size=request.query_params.get("page_size", 20),
-    )
-    return success_response(payload)
-
-
-def _requirement_for_user(request, requirement_id):
-    return get_object_or_404(
-        ProductResearch,
-        pk=requirement_id,
-        tenant=request.user.tenant,
-    )
-
-
-@api_view(["GET", "POST"])
-def requirement_competitor_collection(request, requirement_id):
-    permission = (
-        CanViewCompetitorReports()
-        if request.method == "GET"
-        else CanManageCompetitorLinks()
-    )
-    if not permission.has_permission(request, requirement_competitor_collection):
-        from rest_framework.exceptions import PermissionDenied
-
-        raise PermissionDenied()
-
-    requirement = _requirement_for_user(request, requirement_id)
-    if request.method == "GET":
-        links = list_competitor_links(requirement=requirement, tenant=request.user.tenant)
-        return success_response(DevelopmentRequirementCompetitorLinkSerializer(links, many=True).data)
-
-    # The URL/body report ID identifies which upstream report to read.  All
-    # metadata in the response is sourced by the server-side GET client.
-    report_id = request.data.get("report_id")
-    if not isinstance(report_id, (str, int)) or not str(report_id).strip():
-        raise ValidationError({"report_id": "A competitor report ID is required."})
-    serializer = CompetitorReportSelectionSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    link = create_competitor_link(
-        requirement=requirement,
-        actor=request.user,
-        report_id=str(report_id).strip(),
-        selection=serializer.validated_data,
-        client=get_competitor_report_client(),
-    )
-    return success_response(DevelopmentRequirementCompetitorLinkSerializer(link).data, status=201)
-
-
-@api_view(["DELETE"])
-@permission_classes([CanManageCompetitorLinks])
-def requirement_competitor_detail(request, requirement_id, link_id):
-    requirement = _requirement_for_user(request, requirement_id)
-    link = get_object_or_404(
-        DevelopmentRequirementCompetitorLink,
-        pk=link_id,
-        requirement=requirement,
-        tenant=request.user.tenant,
-    )
-    link.delete()
-    return success_response({"deleted": True})

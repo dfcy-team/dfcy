@@ -156,3 +156,4 @@ def test_category_and_color_are_tenant_isolated():
         format="json",
     )
     assert denied.status_code == 400
+

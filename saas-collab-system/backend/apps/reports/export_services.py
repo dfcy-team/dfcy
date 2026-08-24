@@ -1,7 +1,10 @@
 import json
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
@@ -55,6 +58,11 @@ REPORT_CATALOG = {
         "required_permission": "finance.export",
         "contains_sensitive_data": True,
     },
+    ReportExportRequest.ReportType.SALES_DETAILS: {
+        "name": "Sales details",
+        "required_permission": "sales_management.export",
+        "contains_sensitive_data": False,
+    },
 }
 
 REPORT_FILTERS = {
@@ -80,6 +88,19 @@ REPORT_FILTERS = {
         "severity": "severity",
     },
     ReportExportRequest.ReportType.FINANCE_SUMMARY: {"currency": "currency"},
+    ReportExportRequest.ReportType.SALES_DETAILS: {
+        "store_id": "store_id",
+        "store_ids": "store_id__in",
+        "platform": "platform__platform_type",
+        "platforms": "platform__platform_type__in",
+        "region": "region",
+        "regions": "region__in",
+        "currency": "currency",
+        "date_from": "created_at_utc__gte",
+        "date_to": "created_at_utc__lt",
+        "order_status": "normalized_status",
+        "sku": "items__seller_sku",
+    },
 }
 
 
@@ -120,6 +141,15 @@ def _source_queryset(user, report_type):
         return filter_business_alerts(user, BusinessAlert.objects.filter(tenant=user.tenant))
     if report_type == ReportExportRequest.ReportType.FINANCE_SUMMARY:
         return PlatformStatement.objects.filter(tenant=user.tenant)
+    if report_type == ReportExportRequest.ReportType.SALES_DETAILS:
+        from apps.commerce.models import SalesOrder
+        from apps.sales_management.scopes import filter_sales_queryset
+
+        return filter_sales_queryset(
+            user,
+            "sales_management.export",
+            SalesOrder.objects.filter(tenant=user.tenant),
+        )
     raise ValidationError("Unsupported report type.")
 
 
@@ -128,9 +158,51 @@ def _apply_filters(queryset, report_type, filters):
     unsupported = set(filters) - set(allowed)
     if unsupported:
         raise ValidationError(f"Unsupported report filters: {', '.join(sorted(unsupported))}.")
+    if report_type == ReportExportRequest.ReportType.SALES_DETAILS:
+        return _apply_sales_detail_filters(queryset, filters)
     for key, value in filters.items():
         queryset = queryset.filter(**{allowed[key]: value})
     return queryset
+
+
+def _apply_sales_detail_filters(queryset, filters):
+    for key, value in filters.items():
+        if key in {"date_from", "date_to"}:
+            continue
+        if key == "sku":
+            queryset = queryset.filter(
+                Q(items__seller_sku__icontains=value)
+                | Q(items__internal_sku__sku_code__icontains=value)
+            )
+            continue
+        queryset = queryset.filter(**{REPORT_FILTERS[ReportExportRequest.ReportType.SALES_DETAILS][key]: value})
+
+    try:
+        start_date = date.fromisoformat(filters["date_from"]) if filters.get("date_from") else None
+        end_date = date.fromisoformat(filters["date_to"]) if filters.get("date_to") else None
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("Sales export dates must use YYYY-MM-DD.") from exc
+    if not start_date and not end_date:
+        return queryset.distinct()
+
+    from apps.masterdata.models import StoreMaster
+
+    date_scope = Q(pk__in=[])
+    stores = StoreMaster.objects.filter(pk__in=queryset.values_list("store_id", flat=True).distinct())
+    for store in stores:
+        try:
+            store_timezone = ZoneInfo(store.timezone)
+        except Exception as exc:
+            raise ValidationError("A sales export store has an invalid timezone.") from exc
+        branch = Q(store_id=store.id)
+        if start_date:
+            start = datetime.combine(start_date, time.min, tzinfo=store_timezone).astimezone(UTC)
+            branch &= Q(created_at_utc__gte=start)
+        if end_date:
+            end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=store_timezone).astimezone(UTC)
+            branch &= Q(created_at_utc__lt=end)
+        date_scope |= branch
+    return queryset.filter(date_scope).distinct()
 
 
 def _write_audit(export_request, actor, action, result):
@@ -152,13 +224,23 @@ def _reject_download(export_request, actor, result, exception):
 
 
 @transaction.atomic
-def create_export_request(*, user, report_type, filters):
-    if not user or not user.is_active or user.user_type != "internal" or not check_user_permission(user, "reports.export"):
+def create_export_request(*, user, report_type, filters, permission_code="reports.export"):
+    """Create a scoped placeholder export using the caller's export permission.
+
+    Existing report callers keep the ``reports.export`` default.  Feature-owned
+    exports may provide their own permission (for example
+    ``sales_management.export``) so a role does not need an unrelated global
+    report permission just to use that feature's export action.
+    """
+    if not user or not user.is_active or user.user_type != "internal" or not check_user_permission(user, permission_code):
         raise PermissionDenied("Report export permission is required.")
     metadata = REPORT_CATALOG.get(report_type)
     if metadata is None:
         raise ValidationError("Unsupported report type.")
-    if not report_type_allowed(user, "reports.export", report_type):
+    # The general report permission carries report-type scopes.  Feature-owned
+    # permissions carry their own data scope (store/platform/etc.) and must not
+    # be interpreted as a report-type scope.
+    if permission_code == "reports.export" and not report_type_allowed(user, permission_code, report_type):
         raise DataScopeDenied(
             "The selected report type is outside the export data scope.",
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
@@ -168,7 +250,7 @@ def create_export_request(*, user, report_type, filters):
     sanitized_filters = sanitize_sensitive_data(filters or {})
     if sanitized_filters != (filters or {}):
         raise ValidationError("Sensitive credentials are not allowed in report filters.")
-    scope_snapshot = _scope_snapshot(user, "reports.export")
+    scope_snapshot = _scope_snapshot(user, permission_code)
     queryset = _apply_filters(_source_queryset(user, report_type), report_type, sanitized_filters)
     limited_count = queryset.values_list("pk", flat=True)[: MAX_EXPORT_ROWS + 1].count()
     rejected = limited_count > MAX_EXPORT_ROWS
@@ -201,6 +283,8 @@ def create_export_request(*, user, report_type, filters):
 def visible_export_requests(user, permission_code="reports.view"):
     queryset = ReportExportRequest.objects.filter(tenant=user.tenant)
     queryset = queryset if user.is_superuser else queryset.filter(requested_by=user)
+    if permission_code == "sales_management.export":
+        return queryset.filter(report_type=ReportExportRequest.ReportType.SALES_DETAILS)
     return filter_report_exports(user, queryset, permission_code)
 
 

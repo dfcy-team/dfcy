@@ -5,13 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN printf '%s\n' \
-        'Acquire::Retries "5";' \
-        'Acquire::http::Pipeline-Depth "0";' \
-        'Acquire::http::Timeout "60";' \
-        'Acquire::https::Timeout "60";' \
-        > /etc/apt/apt.conf.d/80-retry-no-pipeline \
-    && apt-get update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         default-libmysqlclient-dev \

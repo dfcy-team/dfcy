@@ -3,10 +3,6 @@ import { successResponse } from './index';
 const page = (results) => ({ status: 'mock', count: results.length, next: null, previous: null, results });
 
 export const masterDataMocks = {
-  sites: () => successResponse(page([
-    { id: 1, tenant_id: 1, code: 'TH-SHOPEE', name: '泰国 Shopee', country_code: 'TH', platform: 'shopee', status: 'active' },
-    { id: 2, tenant_id: 1, code: 'MY-SHOPEE', name: '马来西亚 Shopee', country_code: 'MY', platform: 'shopee', status: 'active' }
-  ])),
   platforms: () => successResponse(page([
     { id: 1, tenant_id: 1, code: 'demo-marketplace', name: '示例平台', platform_type: 'other', status: 'active' }
   ])),

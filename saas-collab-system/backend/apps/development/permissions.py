@@ -22,8 +22,6 @@ def permission_class(code):
 
 
 def any_permission_class(*codes):
-    """Permission class for a capability shared by requirement/project roles."""
-
     class AnyNamedPermission(BasePermission):
         permission_codes = codes
 
@@ -53,16 +51,16 @@ CanApproveCosts = permission_class("development.cost.approve")
 CanImportSales = permission_class("development.sales.import")
 CanViewSales = permission_class("development.sales.view")
 CanReviewRequirements = permission_class("development.requirement.review")
-
-# Competitor reports are read-only upstream data.  Requirement viewers and
-# product-project viewers may inspect them; creating/removing a link requires
-# a requirement manage/review or project manage permission.
-CanViewCompetitorReports = any_permission_class(
-    "development.requirement.view",
+CanViewProductArchives = any_permission_class(
+    "development.product_archive.view",
     "development.project.view",
 )
-CanManageCompetitorLinks = any_permission_class(
-    "development.requirement.manage",
-    "development.requirement.review",
+CanManageProductArchives = any_permission_class(
+    "development.product_archive.manage",
     "development.project.manage",
+)
+CanGenerateProductArchives = permission_class("development.product_archive.manage")
+CanConfirmProductArchives = any_permission_class(
+    "development.product_archive.confirm",
+    "development.project.approve",
 )

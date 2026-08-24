@@ -27,3 +27,14 @@ export const updateMasterData = (resource, id, payload) => requestWithMockFallba
   { method: 'patch', url: `/api/internal/master-data/${resource}/${id}/`, data: payload },
   mockWrite({ id, ...payload }), `masterdata.${resource}.update`
 );
+
+export const importStores = (file, { dryRun = false } = {}) => {
+  const data = new FormData();
+  data.append('file', file);
+  if (dryRun) data.append('dry_run', 'true');
+  return requestWithMockFallback(
+    { method: 'post', url: '/api/internal/master-data/stores/', data, headers: { 'Content-Type': 'multipart/form-data' } },
+    () => ({ success: true, code: 'OK', message: '导入完成', data: { total: 0, valid: 0, created: 0, updated: 0, errors: [], api_status: 'mock' } }),
+    'masterdata.stores.import'
+  );
+};

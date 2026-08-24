@@ -44,14 +44,6 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     user_type = models.CharField(max_length=20, choices=UserType.choices)
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="users")
     is_active = models.BooleanField(default=True)
-    # These fields are intentionally nullable and inert for ordinary accounts.
-    # The local UAT credential tool uses them as a non-secret lease marker;
-    # authentication rejects a UAT account unless the marker is active and
-    # unexpired.  No plaintext password or token is ever stored here.
-    uat_credential_activated_at = models.DateTimeField(null=True, blank=True)
-    uat_credential_expires_at = models.DateTimeField(null=True, blank=True)
-    uat_credential_batch_digest = models.CharField(max_length=64, blank=True, default="")
-    uat_credential_status = models.CharField(max_length=16, default="never")
     is_staff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

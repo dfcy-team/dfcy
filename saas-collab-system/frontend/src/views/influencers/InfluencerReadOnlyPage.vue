@@ -1,0 +1,3 @@
+<template><section class="readonly"><span>READ-ONLY SOURCE</span><h1>{{title}}</h1><p>{{description}}</p><el-alert title="数据源未导入" description="该页面导航已按最终信息架构挂载；联盟订单仅作为后台数据源，不单独显示菜单。完成导入校验后再开放业务数据。" type="info" show-icon :closable="false"/></section></template>
+<script setup>defineProps({title:{type:String,required:true},description:{type:String,default:''}})</script>
+<style scoped>.readonly{padding:32px;border:1px solid #dbe3ea;border-radius:18px;background:radial-gradient(circle at 90% 0,#dcecf0,transparent 40%),#f8fbfc}.readonly>span{font-size:11px;letter-spacing:.18em;color:#49727b}h1{margin:8px 0;font-size:32px;color:#18333a}p{margin:0 0 24px;color:#5c7378}</style>
