@@ -1,0 +1,21 @@
+{
+  "release_version": "2.44.41",
+  "release_type": "tenant_data_increment",
+  "base_release": "v2.44.40-deployed",
+  "released_at": "2026-08-24",
+  "target_environment": "Pilot API",
+  "target_tenant_id": 1,
+  "target_tenant_code": "pilot",
+  "application_images_changed": false,
+  "menu_changed": false,
+  "router_changed": false,
+  "navigation_css_changed": false,
+  "permission_catalog_changed": false,
+  "database_schema_changed": false,
+  "data_source": "D:/开发B达人模块/20260824",
+  "remote_release_directory": "/home/dfcy01/releases/influencers-tenant1-import-20260824",
+  "backup_sha256": "dd4539133dd4f9897031e4463bfc92596f99fc6b0d7a7b01682e54a4f1e3d3a9",
+  "apply_report_sha256": "2e7bd1499761073e233c5535424079febaf9c87983faeb0c2c27deb47e9a7fad",
+  "verify_report_sha256": "483de0cd153a5f1a29a4f356f189012aa9bdcaed9b2636f0548ecb7471068fbb",
+  "verification_status": "PASS"
+}
