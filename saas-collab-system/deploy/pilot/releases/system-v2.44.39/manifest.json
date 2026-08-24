@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.39",
+  "status": "deployed_server_verified",
+  "registered_at": "2026-08-24",
+  "parent_release": "2.44.38",
+  "current_deployed_base": "2.44.38",
+  "menu_baseline": "2.44.33",
+  "permission_ui_baseline": "2.44.29",
+  "scope": "incremental platform product detail import by tenant-scoped platform variant ID",
+  "menu_change_scope": "none",
+  "top_level_menu_count": 16,
+  "target_menu_node_count": 99,
+  "target_route_capability_count": 111,
+  "menu_sha256": "41188b3be0e39809e0a2530ab8d7438781bc83af5f8b91e47dc4f5f7326de1c8",
+  "router_sha256": "0f00ba73f8df8c69c1c386843d37124bdbbde4b7d9ecc4c0e870df2feb2252c9",
+  "navigation_source_sha256": "0192cf6b70ad3351d9adfb07c7064c371a913770a0e127a7285e91c11e2685d9",
+  "target_backend_image": "saas-collab-backend:v2.44.39",
+  "backend_image_base": "saas-collab-backend:v2.44.38",
+  "target_frontend_image": "saas-collab-frontend:v2.44.39",
+  "frontend_image_base": "saas-collab-frontend:v2.44.38",
+  "deployed_backend_image_id": "sha256:530316ab224e7006ceefe4581d4a47b4b79d2646192c165f5e8a0d2ddbbce7d4",
+  "deployed_backend_container_id": "f010971fac3148eb686cb4cb9dd9ff095192e987503da788afea266dd79d38ff",
+  "deployed_frontend_image_id": "sha256:0f80c1c4cee068cd042a8f55e86587ddc2aeecd66c7fa239a8b7609c0b0fa5e1",
+  "deployed_frontend_container_id": "e69afa161706c5661adff351e4639d1a92a7d435113fd1219d137d3a17458e17",
+  "database_migration_required": false,
+  "database_migration_plan": "none; makemigrations --check is a release gate",
+  "baseline_verification": {
+    "verified_at": "2026-08-24",
+    "vm": "192.168.174.131:8443",
+    "backend_image": "saas-collab-backend:v2.44.38",
+    "frontend_image": "saas-collab-frontend:v2.44.38",
+    "listings_platformproductdetail_migration": "0003_platformproductdetail applied",
+    "platform_product_detail_table_present": true,
+    "tenant1_platform_product_details": 36000,
+    "tenant1_empty_platform_product_id": 36000,
+    "tenant1_variant_duplicate_groups": 0
+  },
+  "feature_contract": {
+    "endpoint": "/api/internal/listings/product-details/import-platform-product-ids/",
+    "match_key": ["tenant", "platform_variant_id"],
+    "ambiguous_match_policy": "skip when one tenant has the same variant ID on multiple platform/store rows",
+    "platform_product_id_unique": false,
+    "business_import_during_deploy": false,
+    "deployment_validation_tenant_id": 1,
+    "tenant1_expected_before": {
+      "platform_product_details": 36000,
+      "empty_platform_product_id": 36000,
+      "variant_duplicate_groups": 0
+    }
+  },
+  "checks": {
+    "menu_router_navigation_diff": "pass; no source diff relative to v2.44.38",
+    "backend_targeted_tests": "pass; 4 passed in candidate image",
+    "backend_compileall": "pass",
+    "frontend_build": "pass",
+    "frontend_targeted_and_regression_tests": "pass; 17 passed",
+    "django_check": "pass before and after deployment",
+    "makemigrations_check": "pass; no changes detected",
+    "tenant1_before_after_counts": "pass; 36000 total, 36000 empty platform product IDs, 0 duplicate variant groups",
+    "unauthenticated_api_contract": "pass; list and import both return 401",
+    "browser_platform_detail": "pass; signed-in page shows new import button and 36000 rows",
+    "browser_permission_catalog": "pass; 189 catalog items and administrator permissions",
+    "browser_navigation_style": "pass; computed sidebar background rgb(23, 53, 80)",
+    "deployment_performed": true,
+    "deployment_validation": "pass",
+    "runtime_logs": "pass; no critical backend/frontend errors"
+  },
+  "deployment": {
+    "release_directory": "/home/dfcy01/releases/system-v2.44.39-build-20260824",
+    "script": "deploy/pilot/releases/system-v2.44.39/deploy-v24439.sh",
+    "preflight_requires_current_images": [
+      "saas-collab-backend:v2.44.38",
+      "saas-collab-frontend:v2.44.38"
+    ],
+    "redis_replacement": false,
+    "real_business_import": false,
+    "verified_at": "2026-08-24T15:57:22+08:00",
+    "database_backup": "/home/dfcy01/releases/system-v2.44.39-build-20260824/pre-deploy-v2.44.39.sql.gz",
+    "database_backup_sha256": "a37c99df9ef6df1a38ecb25d56ff73e66c7339f3fa86788994428f83028d299b",
+    "database_backup_bytes": 1352103
+  },
+  "rollback": {
+    "backend_image": "saas-collab-backend:v2.44.38",
+    "frontend_image": "saas-collab-frontend:v2.44.38",
+    "database_restore_required": false
+  },
+  "release_notes": "docs/06_release/system_v2.44.39.md"
+}

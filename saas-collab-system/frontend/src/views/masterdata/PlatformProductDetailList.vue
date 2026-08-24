@@ -10,7 +10,9 @@
       <el-button class="template-button" @click="downloadTemplate">下载导入模板</el-button>
       <el-button class="format-button" @click="templateDialog = true">字段说明</el-button>
       <el-button class="import-button" type="primary" :loading="importing" :disabled="importing" @click="fileInput?.click()">{{ importing ? '正在导入' : '导入 CSV/XLSX' }}</el-button>
+      <el-button class="variant-id-import-button" :loading="importing" :disabled="importing" @click="variantProductIdFileInput?.click()">按变体ID导入平台商品ID</el-button>
       <input ref="fileInput" hidden type="file" accept=".csv,.xlsx" @change="onImport" />
+      <input ref="variantProductIdFileInput" hidden type="file" accept=".csv,.xlsx" @change="onVariantProductIdImport" />
     </template>
 
     <el-alert
@@ -161,8 +163,17 @@
         <el-table-column prop="description" label="填写说明" min-width="360" show-overflow-tooltip />
         <el-table-column prop="example" label="示例" min-width="150" show-overflow-tooltip />
       </el-table>
+      <el-divider content-position="left">按变体ID导入平台商品ID</el-divider>
+      <p class="template-help">该模式只更新已有明细的“平台商品ID”，文件必须包含“变体ID”和“平台商品ID”两列。系统按当前租户匹配；同一变体ID对应多个平台/店铺时会报冲突并跳过，平台商品ID允许多个变体共用。</p>
+      <el-table :data="variantProductIdImportFields" border size="small" class="template-fields">
+        <el-table-column prop="field" label="字段" min-width="160" />
+        <el-table-column prop="required" label="必填" width="70" />
+        <el-table-column prop="description" label="填写说明" min-width="420" />
+        <el-table-column prop="example" label="示例" min-width="160" />
+      </el-table>
       <template #footer>
         <el-button @click="templateDialog = false">关闭</el-button>
+        <el-button @click="downloadVariantProductIdTemplate">下载变体ID模板</el-button>
         <el-button type="primary" @click="downloadTemplate">再次下载 CSV 模板</el-button>
       </template>
     </el-dialog>
@@ -223,13 +234,14 @@ import { ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import { fetchPlatforms, fetchStores } from '../../api/masterData';
-import { fetchPlatformProductDetails, importPlatformProductDetails, updatePlatformProductDetail, bulkUpdatePlatformProductDetails } from '../../api/platformProductDetails';
+import { fetchPlatformProductDetails, importPlatformProductDetails, importPlatformProductIds, updatePlatformProductDetail, bulkUpdatePlatformProductDetails } from '../../api/platformProductDetails';
 import { fetchProductCategories } from '../../api/products';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
 import { statusFromApiResponse } from '../../utils/uiState';
 
 const fileInput = ref(null);
+const variantProductIdFileInput = ref(null);
 const rows = ref([]);
 const allRows = ref([]);
 const total = ref(0);
@@ -290,6 +302,10 @@ const importFields = [
   { field: '销售状态', required: '否', description: '在售、停售、草稿等状态文本。', example: '在售' },
   { field: '负责人 / 组长', required: '否', description: '店铺负责人及组长文本。', example: '张三 / 李四' },
   { field: '平台创建时间 / 平台更新时间', required: '否', description: '支持 ISO 或 YYYY-MM-DD[ HH:mm:ss] 格式。', example: '2026-08-13 10:00:00' },
+];
+const variantProductIdImportFields = [
+  { field: '变体ID', required: '是', description: '平台变体标识；必须能在当前租户内唯一匹配一条平台商品明细。', example: 'V-1001' },
+  { field: '平台商品ID', required: '是', description: '平台商品（SPU）标识；允许多个变体使用同一个平台商品ID。', example: 'P-1001' },
 ];
 
 const templateHeaders = [
@@ -558,6 +574,36 @@ async function onImport(event) {
   } finally { importing.value = false; importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); clearInterval(importTimer); importTimer = null; }
 }
 
+function downloadVariantProductIdTemplate() {
+  const headers = ['变体ID', '平台商品ID'];
+  const example = ['V-1001', 'P-1001'];
+  const csv = `\ufeff${headers.map(csvCell).join(',')}\r\n${example.map(csvCell).join(',')}\r\n`;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = '平台商品ID按变体ID导入模板.csv';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function onVariantProductIdImport(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  importDialog.value = true;
+  importing.value = true; importStep.value = 1; importStatus.value = '正在按变体ID匹配并更新平台商品ID，请勿关闭页面。'; importFileName.value = file.name; importElapsedSeconds.value = 0; importResult.value = null;
+  const startedAt = Date.now(); clearInterval(importTimer); importTimer = setInterval(() => { importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); }, 1000);
+  try {
+    const response = await importPlatformProductIds(file, { dryRun: false });
+    importResult.value = response?.data || response;
+    if (response?.success) { importStep.value = 3; importStatus.value = '变体ID导入完成，列表数据已刷新。'; message.value = `变体ID导入完成：更新 ${response.data?.updated || 0} 条`; messageType.value = response.data?.errors?.length || response.data?.unmatched ? 'warning' : 'success'; filters.page = 1; await loadData(); }
+    else { importStatus.value = response?.message || '导入失败，请根据结果信息修正文件后重试。'; message.value = importStatus.value; messageType.value = 'error'; }
+  } finally { importing.value = false; importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); clearInterval(importTimer); importTimer = null; }
+}
+
 onMounted(async () => {
   await Promise.all([loadReferenceOptions(), loadCategories()]);
   await loadData();
@@ -567,8 +613,9 @@ onUnmounted(() => clearInterval(importTimer));
 
 <style scoped>
 .page-message { margin-bottom: 16px; }
-.template-button, .format-button, .import-button { min-width: 116px; height: 36px; padding: 0 14px; }
+.template-button, .format-button, .import-button, .variant-id-import-button { min-width: 116px; height: 36px; padding: 0 14px; }
 .import-button { min-width: 144px; }
+.variant-id-import-button { min-width: 190px; }
 .template-help { margin: 0 0 14px; color: #475569; line-height: 1.6; }
 .template-fields :deep(.cell) { line-height: 1.45; }
 .detail-workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }

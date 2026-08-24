@@ -1,0 +1,13 @@
+FROM saas-collab-backend:v2.44.38
+
+# V2.44.39 is an additive listings-only release.  The base image carries the
+# full V2.44.38 application; only the platform-product-detail endpoint and
+# its focused tests are overlaid here.
+COPY backend/apps/listings/models.py /app/apps/listings/models.py
+COPY backend/apps/listings/permissions.py /app/apps/listings/permissions.py
+COPY backend/apps/listings/platform_product_details.py /app/apps/listings/platform_product_details.py
+COPY backend/apps/listings/serializers.py /app/apps/listings/serializers.py
+COPY backend/apps/listings/urls.py /app/apps/listings/urls.py
+COPY backend/apps/listings/views.py /app/apps/listings/views.py
+COPY backend/tests/test_platform_product_id_import.py /app/tests/test_platform_product_id_import.py
+COPY backend/pytest.ini /app/pytest.ini

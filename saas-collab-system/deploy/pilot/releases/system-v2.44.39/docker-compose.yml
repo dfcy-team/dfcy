@@ -1,0 +1,18 @@
+services:
+  migrate:
+    image: saas-collab-backend:v2.44.39
+  backend:
+    image: saas-collab-backend:v2.44.39
+    volumes:
+      - product-media:/app/media
+  celery:
+    image: saas-collab-backend:v2.44.39
+  celery-beat:
+    image: saas-collab-backend:v2.44.39
+  frontend:
+    image: saas-collab-frontend:v2.44.39
+    volumes:
+      - product-media:/usr/share/nginx/html/media:ro
+
+volumes:
+  product-media:

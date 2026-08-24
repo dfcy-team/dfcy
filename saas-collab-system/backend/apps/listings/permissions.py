@@ -38,3 +38,11 @@ CanManageListingProfiles = any_permission_class("listings.profile.manage", "list
 # New task-management permission is accepted for the publish endpoint while
 # keeping the original profile.publish code valid for existing roles.
 CanPublishListings = any_permission_class("listings.profile.publish", "listings.task.manage")
+
+# Platform product-detail permissions are kept separate from listing-profile
+# permissions so the master-data page can be granted independently.  These
+# codes already exist in the deployed 2.44.38 permission catalog; this module
+# only restores the permission classes used by the endpoint.
+CanViewPlatformProductDetails = permission_class("listings.product_detail.view")
+CanManagePlatformProductDetails = permission_class("listings.product_detail.manage")
+CanImportPlatformProductDetails = permission_class("listings.product_detail.import")

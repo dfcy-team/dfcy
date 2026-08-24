@@ -37,4 +37,9 @@ urlpatterns = [
     path("tasks/exceptions/", views.task_exception_collection),
     path("publication-logs/", views.task_log_collection),
     path("publication-exceptions/", views.task_exception_collection),
+    path("product-details/", views.PlatformProductDetailCollectionView.as_view()),
+    path("product-details/<int:pk>/", views.PlatformProductDetailView.as_view()),
+    path("product-details/bulk-update/", views.platform_product_detail_bulk_update),
+    path("product-details/import/", views.PlatformProductDetailImportView.as_view()),
+    path("product-details/import-platform-product-ids/", views.PlatformProductIdImportView.as_view()),
 ]

@@ -18,3 +18,7 @@ export const importPlatformProductDetails = (file, { dryRun = false, platform = 
   const data = new FormData(); data.append('file', file); data.append('dry_run', String(dryRun)); if (platform) data.append('platform', platform);
   return requestApi({ method: 'post', url: '/api/internal/listings/product-details/import/', data, timeout: 120000 });
 };
+export const importPlatformProductIds = (file, { dryRun = false } = {}) => {
+  const data = new FormData(); data.append('file', file); data.append('dry_run', String(dryRun));
+  return requestApi({ method: 'post', url: '/api/internal/listings/product-details/import-platform-product-ids/', data, timeout: 120000 });
+};

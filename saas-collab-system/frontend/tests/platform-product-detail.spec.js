@@ -54,4 +54,14 @@ describe('平台商品明细编辑与批量修改契约', () => {
     expect(page).not.toContain(':disabled="!selectedRows.length"');
     expect(api).toContain('/api/internal/listings/product-details/bulk-update/');
   });
+
+  it('提供按变体ID导入平台商品ID的独立模式', () => {
+    expect(page).toContain('按变体ID导入平台商品ID');
+    expect(page).toContain('onVariantProductIdImport');
+    expect(page).toContain('variantProductIdImportFields');
+    expect(page).toContain('downloadVariantProductIdTemplate');
+    expect(page).toContain('平台商品ID允许多个变体共用');
+    expect(api).toContain('importPlatformProductIds');
+    expect(api).toContain('/api/internal/listings/product-details/import-platform-product-ids/');
+  });
 });
