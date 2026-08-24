@@ -1,0 +1,4 @@
+FROM saas-collab-frontend:v2.44.39
+
+RUN rm -rf /usr/share/nginx/html/*
+COPY frontend/dist/ /usr/share/nginx/html/

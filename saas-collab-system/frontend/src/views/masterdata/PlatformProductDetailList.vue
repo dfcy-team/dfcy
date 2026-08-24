@@ -149,7 +149,40 @@
 
     <el-dialog v-model="importDialog" :title="importing ? '正在导入' : '导入结果'" width="min(680px, 94vw)" :close-on-click-modal="!importing" :show-close="!importing">
       <el-steps :active="importStep" finish-status="success" align-center><el-step title="文件已选择"/><el-step title="上传并解析"/><el-step title="导入完成"/></el-steps>
-      <div class="import-status" v-loading="importing"><p><strong>{{ importStatus }}</strong></p><p class="import-meta">文件：{{ importFileName || '-' }} · 已用时 {{ importElapsedSeconds }} 秒</p><pre v-if="importResult" class="result">{{ JSON.stringify(importResult, null, 2) }}</pre></div>
+      <div class="import-status" v-loading="importing">
+        <p><strong>{{ importStatus }}</strong></p>
+        <p class="import-meta">文件：{{ importFileName || '-' }} · 已用时 {{ importElapsedSeconds }} 秒</p>
+        <div
+          v-if="importResult"
+          class="import-result-panel"
+          :class="{ 'import-result-panel--warning': importHasWarnings }"
+        >
+          <div class="import-summary-grid" aria-label="导入汇总">
+            <div class="import-summary-item"><span>处理行数</span><strong>{{ importSummary.total }}</strong></div>
+            <div class="import-summary-item"><span>新增</span><strong>{{ importSummary.created }}</strong></div>
+            <div class="import-summary-item"><span>更新</span><strong>{{ importSummary.updated }}</strong></div>
+            <div class="import-summary-item"><span>无变化</span><strong>{{ importSummary.unchanged }}</strong></div>
+            <div class="import-summary-item"><span>未匹配</span><strong>{{ importSummary.unmatched }}</strong></div>
+            <div class="import-summary-item"><span>跳过</span><strong>{{ importSummary.skipped }}</strong></div>
+          </div>
+          <p v-if="importMode === 'variant_product_id' && importSummary.unmatched" class="import-warning">
+            当前租户平台商品明细中不存在，已跳过 {{ importSummary.unmatched }} 条。
+            <span v-if="importSummary.unmatchedSample.length">示例变体ID：{{ importSummary.unmatchedSample.join('、') }}。</span>
+            <span v-if="importSummary.unmatchedRemaining">另有 {{ importSummary.unmatchedRemaining }} 个未匹配变体ID未展开。</span>
+          </p>
+          <p v-if="importMode === 'variant_product_id' && importSummary.ambiguous" class="import-warning">
+            有 {{ importSummary.ambiguous }} 条变体ID在当前租户内对应多个平台/店铺记录，无法确定更新对象，已跳过。
+          </p>
+          <div v-if="importSummary.errors.length" class="import-errors">
+            <p>有 {{ importSummary.errors.length }} 条数据未通过校验：</p>
+            <ul>
+              <li v-for="(error, index) in importSummary.errors.slice(0, 5)" :key="`${error.row || 'error'}-${index}`">{{ formatImportError(error) }}</li>
+            </ul>
+            <p v-if="importSummary.errors.length > 5" class="import-meta">其余 {{ importSummary.errors.length - 5 }} 条错误已折叠。</p>
+          </div>
+          <p v-if="!importHasWarnings && importSummary.total" class="import-success">全部数据已处理完成。</p>
+        </div>
+      </div>
       <template #footer><el-button :disabled="importing" @click="importDialog = false">关闭</el-button></template>
     </el-dialog>
 
@@ -255,6 +288,7 @@ const messageType = ref('success');
 const importDialog = ref(false);
 const templateDialog = ref(false);
 const importResult = ref(null);
+const importMode = ref('full');
 const importing = ref(false), importStep = ref(0), importStatus = ref('等待选择文件'), importFileName = ref(''), importElapsedSeconds = ref(0);
 let importTimer = null;
 const serverPaginated = ref(false);
@@ -275,6 +309,43 @@ const bulkVisible = ref(false);
 const bulkSaving = ref(false);
 const bulkPreview = ref(null);
 const bulkForm = reactive({ match_type: 'old_spu', spu_code: '', title: '', variant: '', sales_status: '', owner: '', leader: '' });
+
+function importCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : 0;
+}
+
+const importSummary = computed(() => {
+  const value = importResult.value;
+  const data = value?.data && typeof value.data === 'object' && !Array.isArray(value.data) && !('total' in value)
+    ? value.data
+    : value;
+  const result = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  return {
+    total: importCount(result.total),
+    created: importCount(result.created),
+    updated: importCount(result.updated),
+    unchanged: importCount(result.unchanged),
+    unmatched: importCount(result.unmatched),
+    ambiguous: importCount(result.ambiguous),
+    skipped: importCount(result.skipped),
+    unmatchedSample: Array.isArray(result.unmatched_sample) ? result.unmatched_sample.map((item) => String(item)) : [],
+    unmatchedRemaining: importCount(result.unmatched_remaining),
+    errors: Array.isArray(result.errors) ? result.errors : [],
+  };
+});
+
+const importHasWarnings = computed(() => Boolean(
+  importSummary.value.unmatched
+    || importSummary.value.ambiguous
+    || importSummary.value.skipped
+    || importSummary.value.errors.length,
+));
+
+function formatImportError(error) {
+  const row = error?.row ? `第 ${error.row} 行：` : '';
+  return `${row}${error?.message || error?.code || '字段校验未通过'}`;
+}
 
 const categoryTree = computed(() => {
   const map = new Map(categories.value.map((item) => [item.id, { ...item, displayName: `${item.code || ''} ${item.name || ''}`.trim(), children: [] }]));
@@ -564,12 +635,20 @@ async function onImport(event) {
   event.target.value = '';
   if (!file) return;
   importDialog.value = true;
+  importMode.value = 'full';
   importing.value = true; importStep.value = 1; importStatus.value = '正在上传文件，服务器正在解析并校验数据，请勿关闭页面。'; importFileName.value = file.name; importElapsedSeconds.value = 0; importResult.value = null;
   const startedAt = Date.now(); clearInterval(importTimer); importTimer = setInterval(() => { importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); }, 1000);
   try {
     const response = await importPlatformProductDetails(file, { dryRun: false });
     importResult.value = response?.data || response;
-    if (response?.success) { importStep.value = 3; importStatus.value = '导入完成，列表数据已刷新。'; message.value = '导入完成'; messageType.value = 'success'; filters.page = 1; await loadData(); }
+    if (response?.success) {
+      importStep.value = 3;
+      importStatus.value = importHasWarnings.value ? '导入完成，但有部分数据未写入，请查看下方汇总。' : '导入完成，列表数据已刷新。';
+      message.value = importHasWarnings.value ? '导入完成，但有部分数据被跳过，请查看导入结果。' : '导入完成';
+      messageType.value = importHasWarnings.value ? 'warning' : 'success';
+      filters.page = 1;
+      await loadData();
+    }
     else { importStatus.value = response?.message || '导入失败，请根据结果信息修正文件后重试。'; message.value = importStatus.value; messageType.value = 'error'; }
   } finally { importing.value = false; importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); clearInterval(importTimer); importTimer = null; }
 }
@@ -594,12 +673,20 @@ async function onVariantProductIdImport(event) {
   event.target.value = '';
   if (!file) return;
   importDialog.value = true;
+  importMode.value = 'variant_product_id';
   importing.value = true; importStep.value = 1; importStatus.value = '正在按变体ID匹配并更新平台商品ID，请勿关闭页面。'; importFileName.value = file.name; importElapsedSeconds.value = 0; importResult.value = null;
   const startedAt = Date.now(); clearInterval(importTimer); importTimer = setInterval(() => { importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); }, 1000);
   try {
     const response = await importPlatformProductIds(file, { dryRun: false });
     importResult.value = response?.data || response;
-    if (response?.success) { importStep.value = 3; importStatus.value = '变体ID导入完成，列表数据已刷新。'; message.value = `变体ID导入完成：更新 ${response.data?.updated || 0} 条`; messageType.value = response.data?.errors?.length || response.data?.unmatched ? 'warning' : 'success'; filters.page = 1; await loadData(); }
+    if (response?.success) {
+      importStep.value = 3;
+      importStatus.value = importHasWarnings.value ? '变体ID导入完成，但有部分数据未更新，请查看下方汇总。' : '变体ID导入完成，列表数据已刷新。';
+      message.value = importHasWarnings.value ? '变体ID导入完成，但有部分数据被跳过，请查看导入结果。' : `变体ID导入完成：更新 ${importSummary.value.updated} 条`;
+      messageType.value = importHasWarnings.value ? 'warning' : 'success';
+      filters.page = 1;
+      await loadData();
+    }
     else { importStatus.value = response?.message || '导入失败，请根据结果信息修正文件后重试。'; message.value = importStatus.value; messageType.value = 'error'; }
   } finally { importing.value = false; importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); clearInterval(importTimer); importTimer = null; }
 }
@@ -667,10 +754,20 @@ onUnmounted(() => clearInterval(importTimer));
   max-width: 100%;
   margin-left: auto;
 }
-.result { max-height: 420px; overflow: auto; white-space: pre-wrap; }
 .import-status { min-height: 130px; margin-top: 24px; padding: 16px; border-radius: 8px; background: #f8fafc; }
 .import-status p { margin: 0 0 8px; }
 .import-meta { color: #64748b; font-size: 13px; }
+.import-result-panel { margin-top: 16px; padding: 12px; border: 1px solid #dbe3ec; border-radius: 8px; background: #fff; }
+.import-result-panel--warning { border-color: #f3c27a; background: #fffaf0; }
+.import-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.import-summary-item { padding: 9px 10px; border: 1px solid #e5eaf0; border-radius: 6px; background: #fff; }
+.import-summary-item span { display: block; color: #64748b; font-size: 12px; }
+.import-summary-item strong { display: block; margin-top: 4px; color: #172033; font-size: 18px; }
+.import-warning { color: #9a5b00; line-height: 1.6; }
+.import-success { color: #2d8a45; }
+.import-errors { margin-top: 12px; color: #b42318; line-height: 1.6; }
+.import-errors ul { margin: 4px 0 8px; padding-left: 20px; }
+@media (max-width: 560px) { .import-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 960px) {
   .detail-workspace { grid-template-columns: 210px minmax(0, 1fr); }
   .resource-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

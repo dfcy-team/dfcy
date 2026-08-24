@@ -64,4 +64,14 @@ describe('平台商品明细编辑与批量修改契约', () => {
     expect(api).toContain('importPlatformProductIds');
     expect(api).toContain('/api/internal/listings/product-details/import-platform-product-ids/');
   });
+
+  it('以中文汇总显示导入结果并限制未匹配示例', () => {
+    expect(page).toContain('import-summary-grid');
+    expect(page).toContain('importSummary.total');
+    expect(page).toContain('当前租户平台商品明细中不存在，已跳过');
+    expect(page).toContain('importSummary.unmatchedSample.join');
+    expect(page).toContain('importSummary.unmatchedRemaining');
+    expect(page).toContain('importSummary.errors.slice(0, 5)');
+    expect(page).not.toContain('JSON.stringify(importResult');
+  });
 });

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.40",
+  "status": "deployed_server_verified",
+  "registered_at": "2026-08-24",
+  "parent_release": "2.44.39",
+  "current_deployed_base": "2.44.39",
+  "menu_baseline": "2.44.33",
+  "permission_ui_baseline": "2.44.29",
+  "scope": "user-readable results for tenant-scoped platform product ID import",
+  "menu_change_scope": "none",
+  "top_level_menu_count": 16,
+  "target_menu_node_count": 99,
+  "target_route_capability_count": 111,
+  "menu_sha256": "41188b3be0e39809e0a2530ab8d7438781bc83af5f8b91e47dc4f5f7326de1c8",
+  "router_sha256": "0f00ba73f8df8c69c1c386843d37124bdbbde4b7d9ecc4c0e870df2feb2252c9",
+  "navigation_source_sha256": "0192cf6b70ad3351d9adfb07c7064c371a913770a0e127a7285e91c11e2685d9",
+  "target_backend_image": "saas-collab-backend:v2.44.40",
+  "backend_image_base": "saas-collab-backend:v2.44.39",
+  "target_frontend_image": "saas-collab-frontend:v2.44.40",
+  "frontend_image_base": "saas-collab-frontend:v2.44.39",
+  "deployed_backend_image_id": "sha256:ec6b3d2821c984aa4b71c0f8e93871c4372ccd2877f42d0afb5e8b4bd5e2de68",
+  "deployed_backend_container_id": "dd84924bd1cd6f232451ae9cbe93f6530914020238b3f9ba159a08d76ce19642",
+  "deployed_frontend_image_id": "sha256:d1673be3bff222736c2226da1621743b5443c76a963cf9503390406acdfe5273",
+  "deployed_frontend_container_id": "c613779f88223978566ecac72dc8b28e18b3ccdbdcdd0d5cd2100c794a621224",
+  "database_migration_required": false,
+  "feature_contract": {
+    "endpoint": "/api/internal/listings/product-details/import-platform-product-ids/",
+    "deployment_validation_tenant_id": 1,
+    "platform_product_id_unique": false,
+    "unmatched_sample_limit": 100,
+    "unmatched_policy": "skip without creating platform product detail rows",
+    "business_import_during_deploy": false
+  },
+  "tenant1_baseline_after_user_import": {
+    "platform_product_details": 36000,
+    "empty_platform_product_id": 179,
+    "filled_platform_product_id": 35821,
+    "distinct_platform_product_id": 1175,
+    "variant_duplicate_groups": 0
+  },
+  "checks": {
+    "menu_router_navigation_diff": "pass; no source diff relative to v2.44.39",
+    "backend_targeted_tests": "pass; 5 passed in candidate image",
+    "backend_compileall": "pass locally",
+    "frontend_targeted_and_regression_tests": "pass; 18 passed",
+    "frontend_build": "pass",
+    "tenant1_before_after_counts": "pass; 36000 total, 35821 filled, 179 empty, 1175 distinct product IDs, 0 duplicate variant groups",
+    "django_and_migration_checks": "pass before and after deployment; no changes detected",
+    "frontend_runtime_assets": "pass; Chinese import summary and unmatched messages present",
+    "menu_permission_navigation_assets": "pass; baseline labels, dark CSS and role permission assets present",
+    "page_and_api_checks": "pass; pages return 200 and unauthenticated APIs return 401",
+    "runtime_logs": "pass; no critical errors",
+    "deployment_performed": true,
+    "deployment_validation": "pass"
+  },
+  "deployment": {
+    "release_directory": "/home/dfcy01/releases/system-v2.44.40-build-20260824",
+    "script": "deploy/pilot/releases/system-v2.44.40/deploy-v24440.sh",
+    "redis_replacement": false,
+    "real_business_import": false,
+    "verified_at": "2026-08-24T16:36:51+08:00",
+    "database_backup": "/home/dfcy01/releases/system-v2.44.40-build-20260824/pre-deploy-v2.44.40.sql.gz",
+    "database_backup_sha256": "7484d9b40ba18593214f47ba3f26daa0dd33388037a589aebcf369dad594be5e",
+    "database_backup_bytes": 1365890
+  },
+  "rollback": {
+    "backend_image": "saas-collab-backend:v2.44.39",
+    "frontend_image": "saas-collab-frontend:v2.44.39",
+    "database_restore_required": false
+  },
+  "release_notes": "docs/06_release/system_v2.44.40.md"
+}

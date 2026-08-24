@@ -1,0 +1,10 @@
+FROM saas-collab-backend:v2.44.39
+
+# V2.44.40 is a listings-only additive patch on the deployed V2.44.39 image.
+# The base image already contains the endpoint, models and route wiring;
+# overlay only the user-readable import-result helper and its five focused
+# regression tests.  No menu, permission, migration or unrelated backend
+# source is copied into this release.
+COPY backend/apps/listings/platform_product_details.py /app/apps/listings/platform_product_details.py
+COPY backend/tests/test_platform_product_id_import.py /app/tests/test_platform_product_id_import.py
+COPY backend/pytest.ini /app/pytest.ini

@@ -64,6 +64,10 @@ IMPORT_CREATE_BATCH_SIZE = 1000
 IMPORT_UPDATE_BATCH_SIZE = 100
 IMPORT_UPDATE_WORK_CHUNK_SIZE = 500
 IMPORT_EXISTING_QUERY_CHUNK_SIZE = 2000
+# The variant-ID import can legitimately receive a large export with many
+# rows that are not present in the current tenant.  Keep the response useful
+# for a user without echoing every unmatched ID back through the API.
+UNMATCHED_SAMPLE_LIMIT = 100
 
 # The key columns are already constrained by the lookup and must not be
 # rewritten.  All remaining fields are values supplied by an import and are
@@ -580,6 +584,9 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
     updated = 0
     unchanged = 0
     unmatched = 0
+    unmatched_unique_count = 0
+    unmatched_variant_seen = set()
+    unmatched_sample = []
     ambiguous = 0
     changed_items = []
     # Read each variant chunk in one query, then write changed targets with a
@@ -603,6 +610,11 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
                 matches = matches_by_variant.get(group["variant_id"], [])
                 if not matches:
                     unmatched += len(rows)
+                    if group["variant_id"] not in unmatched_variant_seen:
+                        unmatched_variant_seen.add(group["variant_id"])
+                        unmatched_unique_count += 1
+                        if len(unmatched_sample) < UNMATCHED_SAMPLE_LIMIT:
+                            unmatched_sample.append(group["variant_id"])
                     continue
                 if len(matches) > 1:
                     ambiguous += len(rows)
@@ -637,8 +649,15 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
         "updated": updated,
         "unchanged": unchanged,
         "unmatched": unmatched,
+        "unmatched_unique": unmatched_unique_count,
+        "unmatched_sample": unmatched_sample,
+        "unmatched_sample_limit": UNMATCHED_SAMPLE_LIMIT,
+        "unmatched_remaining": max(0, unmatched_unique_count - len(unmatched_sample)),
         "ambiguous": ambiguous,
         "errors": errors,
+        # A row is skipped exactly when it was not updated or counted as
+        # unchanged.  This keeps ambiguous/error rows from being counted a
+        # second time merely because they also appear in ``errors``.
         "skipped": max(0, rows_seen - updated - unchanged),
         "partial_success": bool((updated or unchanged) and (rows_seen - updated - unchanged)),
     }

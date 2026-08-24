@@ -68,6 +68,7 @@ class PlatformProductIdImportTests(TestCase):
         result = import_platform_product_ids(tenant=self.tenant, raw=raw.encode("utf-8-sig"), filename="ids.csv")
         self.assertEqual(result["ambiguous"], 1)
         self.assertEqual(result["unmatched"], 2)
+        self.assertEqual(result["skipped"], 3)
         self.assertEqual(PlatformProductDetail.objects.filter(tenant=self.tenant, platform_product_id="P-NEW").count(), 0)
         self.assertEqual(PlatformProductDetail.objects.get(platform_variant_id="V-OTHER").platform_product_id, "")
 
@@ -79,3 +80,24 @@ class PlatformProductIdImportTests(TestCase):
         )
         self.assertEqual(result["total"], 2)
         self.assertEqual(len(result["errors"]), 2)
+
+    def test_unmatched_response_has_bounded_sample_and_remaining_count(self):
+        rows = "\n".join(
+            f"V-MISSING-{index:03d},P-{index:03d}"
+            for index in range(105)
+        )
+        result = import_platform_product_ids(
+            tenant=self.tenant,
+            raw=f"变体ID,平台商品ID\n{rows}\n".encode("utf-8-sig"),
+            filename="ids.csv",
+        )
+
+        self.assertEqual(result["total"], 105)
+        self.assertEqual(result["unmatched"], 105)
+        self.assertEqual(result["unmatched_unique"], 105)
+        self.assertEqual(len(result["unmatched_sample"]), 100)
+        self.assertEqual(result["unmatched_sample"][0], "V-MISSING-000")
+        self.assertEqual(result["unmatched_sample"][-1], "V-MISSING-099")
+        self.assertEqual(result["unmatched_remaining"], 5)
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["skipped"], 105)
