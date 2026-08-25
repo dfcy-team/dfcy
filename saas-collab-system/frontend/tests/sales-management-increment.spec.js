@@ -33,6 +33,19 @@ describe('sales management incremental integration', () => {
     }
   });
 
+  it('keeps the handoff filter and table dimensions on the six data pages', () => {
+    for (const mode of ['overview', 'orders', 'returns', 'stores', 'skus', 'data-quality']) {
+      expect(salesPageContracts[mode].filters.map((filter) => filter.key)).toEqual([
+        'date_from', 'date_to', 'platform', 'store_id', 'currency'
+      ]);
+    }
+    const workspace = read('src/views/sales-management/SalesWorkspace.vue');
+    expect(workspace).toContain('SaaS MySQL 已更新');
+    expect(workspace).toContain('按日销售趋势');
+    expect(workspace).toContain('从已查询数据生成文件');
+    expect(salesPageContracts['data-quality'].tableTitle).toBe('数据同步状态');
+  });
+
   it('uses additive commerce and sales-management endpoints without touching menu or router source', () => {
     const api = read('src/api/salesManagement.js');
     expect(api).toContain("'/api/internal/commerce/overview/'");

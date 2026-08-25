@@ -23,6 +23,9 @@ export function buildAnalyticsQuery(params = {}) {
     query.warehouse_id = query.warehouse;
     delete query.warehouse;
   }
+  if (['out', 'low', 'locked', 'healthy'].includes(query.risk_level)) {
+    query.risk = query.risk_level;
+  }
   delete query.risk_level;
   return compact(query);
 }

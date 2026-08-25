@@ -5,11 +5,16 @@
     subtitle="按国家、平台、店铺和商品查看销售趋势与结构。"
     boundary-note="销售数据为只读分析，缺失指标显示 N/A，不用于自动决策。"
     :loader="fetchSalesAnalysis"
+    :options-loader="fetchAnalyticsFilters"
     :filters="filters"
     :columns="columns"
+    presentation="operating"
+    metrics-key="summary_metrics"
+    trend-value-key="order_count"
+    trend-count-unit="个数据点"
+    :show-metric-code="false"
     trend-title="销售趋势"
-    trend-note="当前筛选范围内的演示销售指数"
-    trend-unit="指数"
+    trend-note="当前筛选范围内按事实表汇总的订单表现"
     table-title="维度钻取"
     table-note="逐层核对国家、平台、店铺与商品表现"
   />
@@ -17,24 +22,26 @@
 
 <script setup>
 import Phase3AnalyticsPage from '../../components/Phase3AnalyticsPage.vue';
-import { fetchSalesAnalysis } from '../../api/analytics';
+import { fetchAnalyticsFilters, fetchSalesAnalysis } from '../../api/analytics';
 
 const filters = [
-  { key: 'date_range', label: '日期', type: 'daterange' },
-  { key: 'country', label: '国家', options: [{ label: 'DEMO-CN', value: 'DEMO-CN' }, { label: 'DEMO-US', value: 'DEMO-US' }] },
-  { key: 'platform', label: '平台', options: [{ label: 'DemoMall', value: 'DemoMall' }, { label: 'SampleShop', value: 'SampleShop' }] },
-  { key: 'store', label: '店铺', options: [{ label: '演示店铺 A', value: 'demo-store-a' }, { label: '演示店铺 B', value: 'demo-store-b' }] }
+  { key: 'date_from', label: '开始日期', type: 'date', placeholder: '年/月/日' },
+  { key: 'date_to', label: '结束日期', type: 'date', placeholder: '年/月/日' },
+  { key: 'platform', label: '平台', optionSource: 'platforms', placeholder: '全部平台', clears: ['store_id'] },
+  { key: 'store_id', label: '店铺', optionSource: 'stores', placeholder: '全部店铺', dependsOn: 'platform', optionField: 'platform' },
+  { key: 'currency', label: '币种', optionSource: 'currencies', placeholder: '全部币种' }
 ];
 
 const columns = [
-  { prop: 'metric_code', label: '指标编码', width: 170 },
-  { prop: 'metric_name', label: '指标名称', width: 170 },
-  { prop: 'value', label: '指标值' },
-  { prop: 'unit', label: '单位' },
-  { prop: 'platform', label: '平台' },
-  { prop: 'store_id', label: '店铺' },
-  { prop: 'country', label: '国家' },
-  { prop: 'quality_status', label: '质量', type: 'status' },
-  { prop: 'updated_at', label: '更新时间', width: 180 }
+  { prop: 'store_name', secondaryProp: 'store_code', label: '店铺', type: 'primary', width: 190 },
+  { prop: 'platform', label: '平台', type: 'platform' },
+  { prop: 'region', label: '国家/站点' },
+  { prop: 'order_count', label: '订单量', type: 'number' },
+  { prop: 'units_sold', label: '销售件数', type: 'number' },
+  { prop: 'gross_sales', label: '销售额', type: 'money', width: 150 },
+  { prop: 'refund_amount', label: '退款金额', type: 'money', width: 150 },
+  { prop: 'net_sales', label: '净销售额', type: 'money', emphasis: true, width: 150 },
+  { prop: 'quality', label: '质量', type: 'status' },
+  { prop: 'source_updated_at', label: '更新时间', type: 'datetime', width: 180 }
 ];
 </script>

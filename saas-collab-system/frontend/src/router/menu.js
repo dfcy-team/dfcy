@@ -41,12 +41,12 @@ export const menuItems = [
   {
     label: '经营决策',
     children: [
-      { path: '/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
-      { path: '/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] },
-      { path: '/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
-      { path: '/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
-      { path: '/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
-      { path: '/alerts/business', label: '经营预警', permissions: ['alerts.view'] }
+      { path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
+      { path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] },
+      { path: '/decision/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
+      { path: '/decision/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
+      { path: '/decision/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
+      { path: '/decision/alerts/business', label: '经营预警', permissions: ['alerts.view'] }
     ]
   },
   {
@@ -220,6 +220,12 @@ export const routeCapabilities = [
   { path: '/analytics/overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/decision/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },
+  { path: '/decision/inventory/replenishment', permissions: ['replenishment.view'], userTypes: ['internal'] },
+  { path: '/decision/lifecycle/reviews', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
+  { path: '/decision/lifecycle/history', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
+  { path: '/decision/lifecycle/clearance-requests', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
+  { path: '/decision/alerts/business', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/inventory/replenishment', permissions: ['replenishment.view'], userTypes: ['internal'] },
   { path: '/lifecycle/reviews', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },

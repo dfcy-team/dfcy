@@ -1,5 +1,10 @@
 from django.shortcuts import get_object_or_404
-from django.db import transaction
+import json
+import uuid
+
+from django.conf import settings
+from django.db import connection, transaction
+from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
@@ -22,6 +27,7 @@ from apps.permissions.api_permissions import (
     IsIntegrationManager,
     IsIntegrationReadOrManage,
     IsIntegrationRunner,
+    IsIntegrationLiveReadonlyRunner,
     IsIntegrationViewer,
     IsMarketplaceCredentialRotator,
     IsMarketplaceStoreAuthorizer,
@@ -45,6 +51,7 @@ from .credential_service import (
     rotate_config_references,
     rotate_config_secrets,
 )
+from .custody import CustodyError, get_custody_backend
 from .marketplace_oauth_service import (
     complete_marketplace_oauth_callback,
     refresh_marketplace_authorization,
@@ -86,11 +93,30 @@ from .serializers import (
     SyncRunSerializer,
 )
 from .store_mapping_service import create_store_mapping, update_store_mapping
+from .adapters import MockPlatformAdapter, get_adapter_for_config
 from .sync_services import run_sync_job
+from .tasks import run_readonly_sync_job
+from .workspace_service import integration_workspace
 
 
 def health_response(service):
     return success_response({"status": "ok", "service": service})
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationViewer])
+def integration_workspace_view(request):
+    allowed_query = {
+        "mode", "page", "page_size", "platform", "status", "environment", "api_type",
+        "resource_type", "schedule_type", "job_state", "subject", "run_id", "started_from", "started_to",
+    }
+    if set(request.query_params) - allowed_query:
+        raise ValidationError("Unknown integration workspace query parameter.")
+    try:
+        data = integration_workspace(request.user, request.query_params.get("mode", "configs"), request.query_params)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(str(exc)) from exc
+    return success_response(data)
 
 
 @api_view(["GET"])
@@ -208,6 +234,67 @@ def integration_config_collection(request):
     return success_response(PlatformIntegrationConfigSerializer(config).data, status=201)
 
 
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigCollectionUser])
+def create_handoff_integration_config(request):
+    allowed = {"account_alias", "platform", "api_type", "environment", "regions"}
+    if set(request.data) - allowed:
+        raise ValidationError("接入配置包含不支持的字段。")
+    alias = str(request.data.get("account_alias") or "").strip()
+    platform = str(request.data.get("platform") or "").strip().lower()
+    api_type = str(request.data.get("api_type") or "").strip().lower()
+    environment = str(request.data.get("environment") or "").strip().lower()
+    regions = [str(value).strip().upper() for value in (request.data.get("regions") or [])]
+    if not alias or len(alias) > 120:
+        raise ValidationError({"account_alias": "配置名称不能为空且不能超过 120 个字符。"})
+    if platform not in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK, PlatformChoices.JIFENG_WMS}:
+        raise ValidationError({"platform": "平台无效。"})
+    if api_type not in {"marketplace", "advertising", "inventory"}:
+        raise ValidationError({"api_type": "API 类型无效。"})
+    if (platform == PlatformChoices.JIFENG_WMS) != (api_type == "inventory"):
+        raise ValidationError({"api_type": "极风 WMS 只支持库存 API，店铺平台不能使用库存 API。"})
+    if environment not in {"sandbox", "pilot", "production"}:
+        raise ValidationError({"environment": "环境无效。"})
+    if not regions or len(regions) != len(set(regions)) or any(len(region) > 8 for region in regions):
+        raise ValidationError({"regions": "请选择一个或多个不重复的适用站点。"})
+    if not integration_values_allowed(
+        request.user,
+        "integrations.config.create",
+        platform=platform,
+        environment=environment,
+        regions=regions,
+    ):
+        raise DataScopeDenied("Integration configuration is outside the authorized data scope.", error_code=ErrorCode.DATA_SCOPE_FORBIDDEN)
+    if PlatformIntegrationConfig.objects.filter(
+        tenant=request.user.tenant,
+        platform=platform,
+        account_alias=alias,
+        environment=environment,
+    ).exists():
+        raise ValidationError("相同平台、名称和环境的配置已存在。")
+    with transaction.atomic():
+        config = PlatformIntegrationConfig.objects.create(
+            tenant=request.user.tenant,
+            platform=platform,
+            account_alias=alias,
+            environment=environment,
+            status=PlatformIntegrationConfig.Status.PENDING_REVIEW,
+            regions=regions,
+            contract_version="shopapi-local-v1",
+            platform_config={"api_type": api_type},
+            created_by=request.user,
+        )
+        with connection.cursor() as cursor:
+            columns = {column.name for column in connection.introspection.get_table_description(cursor, PlatformIntegrationConfig._meta.db_table)}
+            if "api_type" in columns:
+                cursor.execute(
+                    f"UPDATE {PlatformIntegrationConfig._meta.db_table} SET api_type=%s WHERE id=%s AND tenant_id=%s",
+                    [api_type, config.id, request.user.tenant_id],
+                )
+        _write_audit_log(config, request.user, "create_integration_config", detail={"platform": platform, "api_type": api_type, "environment": environment, "regions": regions, "credential_source": "none"})
+    return success_response(PlatformIntegrationConfigSerializer(config).data, status=201)
+
+
 @api_view(["GET", "PATCH"])
 @permission_classes([IsIntegrationConfigDetailUser])
 def integration_config_detail(request, pk):
@@ -276,6 +363,93 @@ def platform_config_schema(request, platform):
     )
 
 
+def _config_api_type(config):
+    configured = str((config.platform_config or {}).get("api_type") or "").strip().lower()
+    if configured:
+        return configured
+    with connection.cursor() as cursor:
+        columns = {
+            column.name
+            for column in connection.introspection.get_table_description(cursor, config._meta.db_table)
+        }
+        if "api_type" in columns:
+            cursor.execute(
+                f"SELECT api_type FROM {config._meta.db_table} WHERE id=%s AND tenant_id=%s",
+                [config.id, config.tenant_id],
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return str(row[0]).strip().lower()
+    return "inventory" if config.platform == PlatformChoices.JIFENG_WMS else "marketplace"
+
+
+def _credential_update_parts(config, values):
+    api_type = _config_api_type(config)
+    platform_config = dict(config.platform_config or {})
+    platform_config["api_type"] = api_type
+    identity = str(platform_config.get("identity") or "").strip()
+    secret_values = {}
+    callback_url = None
+
+    if config.platform == PlatformChoices.SHOPEE:
+        unsupported = set(values) - {"partner_id", "partner_key"}
+        if unsupported:
+            raise ValidationError("Shopee 凭据字段与当前配置不匹配。")
+        partner_id = str(values.get("partner_id") or platform_config.get("partner_id") or identity).strip()
+        if not partner_id.isdigit() or int(partner_id) <= 0:
+            raise ValidationError({"credentials": {"partner_id": "Partner ID 必须是正整数。"}})
+        platform_config["partner_id"] = partner_id
+        if values.get("partner_key"):
+            secret_values["partner_key"] = values["partner_key"]
+    elif config.platform == PlatformChoices.TIKTOK and api_type == "advertising":
+        unsupported = set(values) - {"ads_app_id", "ads_secret", "redirect_uri"}
+        if unsupported:
+            raise ValidationError("TikTok 广告凭据字段与当前配置不匹配。")
+        app_id = str(values.get("ads_app_id") or platform_config.get("app_id") or identity).strip()
+        redirect_uri = str(values.get("redirect_uri") or config.callback_url or "").strip()
+        if not app_id:
+            raise ValidationError({"credentials": {"ads_app_id": "App ID 不能为空。"}})
+        if not redirect_uri:
+            raise ValidationError({"credentials": {"redirect_uri": "广告授权回调地址不能为空。"}})
+        platform_config["app_id"] = app_id
+        platform_config["redirect_uri"] = redirect_uri
+        callback_url = redirect_uri
+        if values.get("ads_secret"):
+            secret_values["api_secret"] = values["ads_secret"]
+    elif config.platform == PlatformChoices.TIKTOK:
+        unsupported = set(values) - {"app_key", "service_id", "app_secret"}
+        if unsupported:
+            raise ValidationError("TikTok Shop 凭据字段与当前配置不匹配。")
+        app_key = str(values.get("app_key") or platform_config.get("app_key") or identity).strip()
+        service_id = str(values.get("service_id") or platform_config.get("service_id") or "").strip()
+        if not app_key or not service_id:
+            raise ValidationError("App Key 和 Service ID 不能为空。")
+        platform_config.update({"app_key": app_key, "service_id": service_id})
+        if values.get("app_secret"):
+            secret_values["app_secret"] = values["app_secret"]
+    elif config.platform == PlatformChoices.JIFENG_WMS:
+        unsupported = set(values) - {"api_base_url", "domain", "client_id", "client_secret"}
+        if unsupported:
+            raise ValidationError("极风 WMS 凭据字段与当前配置不匹配。")
+        api_host = str(values.get("api_base_url") or platform_config.get("api_host") or "").strip()
+        domain = str(values.get("domain") or platform_config.get("domain") or "").strip()
+        client_id = str(values.get("client_id") or platform_config.get("client_id") or identity).strip()
+        if not api_host or not domain or not client_id:
+            raise ValidationError("API Base URL、Domain 和 Client ID 不能为空。")
+        platform_config.update({"api_host": api_host, "domain": domain, "client_id": client_id})
+        if values.get("client_secret"):
+            secret_values["api_secret"] = values["client_secret"]
+    else:
+        raise ValidationError("当前平台不支持维护开发者凭据。")
+
+    if not secret_values:
+        try:
+            get_custody_backend().retrieve_secret(config.credential_id)
+        except Exception:
+            raise ValidationError("现有凭据无法由当前保管库读取，请填写新的密钥。") from None
+    return secret_values, platform_config, callback_url
+
+
 @api_view(["POST"])
 @permission_classes([IsMarketplaceCredentialRotator])
 def rotate_integration_secret_values(request, pk):
@@ -283,13 +457,16 @@ def rotate_integration_secret_values(request, pk):
     serializer = CredentialRotateWriteSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
+    secret_values, platform_config, callback_url = _credential_update_parts(config, dict(data["credentials"]))
     config, repeated = rotate_config_secrets(
         config,
-        credentials=dict(data["credentials"]),
+        credentials=secret_values,
         version=data["version"],
         reason=data["reason"],
         actor=request.user,
         idempotency_key=request.headers.get("Idempotency-Key"),
+        platform_config=platform_config,
+        callback_url=callback_url,
     )
     response = PlatformIntegrationConfigSerializer(config).data
     response["idempotent_replay"] = repeated
@@ -473,6 +650,8 @@ def _get_store_authorization_for_user(request, pk, permission_code):
 def refresh_store_authorization(request, pk):
     reject_raw_credential_fields(request.data)
     record = _get_store_authorization_for_user(request, pk, "integrations.credential.rotate")
+    if record.platform == PlatformChoices.TIKTOK and request.data.get("confirmed") is not True:
+        raise ValidationError({"confirmed": "TikTok Shop token refresh requires explicit confirmation."})
     record = refresh_marketplace_authorization(record, actor=request.user)
     return success_response(MarketplaceStoreAuthorizationSerializer(record).data)
 
@@ -710,9 +889,19 @@ def product_mapping_detail(request, pk):
 @permission_classes([IsIntegrationConfigDisabler])
 def disable_integration_config(request, pk):
     config = _get_config_for_user(request, pk, "integrations.config.disable")
-    config.status = PlatformIntegrationConfig.Status.DISABLED
-    config.save(update_fields=["status", "updated_at"])
-    _write_audit_log(config, request.user, "disable", detail={"status": config.status})
+    with transaction.atomic():
+        config.status = PlatformIntegrationConfig.Status.DISABLED
+        config.save(update_fields=["status", "updated_at"])
+        disabled_jobs = SyncJob.objects.filter(
+            tenant=request.user.tenant,
+            integration_config=config,
+        ).update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
+        _write_audit_log(
+            config,
+            request.user,
+            "disable",
+            detail={"status": config.status, "disabled_job_count": disabled_jobs},
+        )
     return success_response(PlatformIntegrationConfigSerializer(config).data)
 
 
@@ -730,6 +919,127 @@ def verify_integration_config(request, pk):
         )
         raise ValidationError("Production connection verification is not allowed in phase 2.")
     return success_response({"status": "mock_only", "platform": config.platform})
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigVerifier])
+def check_integration_reference(request, pk):
+    config = _get_config_for_user(request, pk, "integrations.config.verify")
+    if not config.credential_id:
+        raise ValidationError("开发者凭据引用不完整，请先维护凭据。")
+    if config.credential_status in {
+        PlatformIntegrationConfig.CredentialStatus.UNCONFIGURED,
+        PlatformIntegrationConfig.CredentialStatus.REVOKED,
+    }:
+        raise ValidationError("开发者凭据当前不可用，请重新维护凭据。")
+    if config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK, PlatformChoices.JIFENG_WMS}:
+        try:
+            get_custody_backend().retrieve_secret(config.credential_id)
+        except CustodyError:
+            raise ValidationError("当前凭据仍是交接包旧引用或已失效，请通过“维护凭据”重新加密保存。") from None
+    config.last_verified_at = timezone.now()
+    if config.status != PlatformIntegrationConfig.Status.DISABLED:
+        config.status = PlatformIntegrationConfig.Status.VERIFIED
+    config.save(update_fields=["status", "last_verified_at", "updated_at"])
+    _write_audit_log(
+        config,
+        request.user,
+        "verify_credential_reference",
+        detail={"external_api_called": False, "token_refreshed": False},
+    )
+    return success_response({"verified": True, "external_api_called": False, "token_refreshed": False, "checked_at": config.last_verified_at})
+
+
+def _warehouse_binding_summary(config):
+    table = "integrations_warehouseauthorization"
+    master_table = "masterdata_warehousemaster"
+    with connection.cursor() as cursor:
+        if table not in connection.introspection.table_names(cursor):
+            return {"count": 0, "invalid_region_count": 0}
+        columns = {column.name for column in connection.introspection.get_table_description(cursor, table)}
+        if not {"tenant_id", "integration_config_id"}.issubset(columns):
+            return {"count": 0, "invalid_region_count": 0}
+        if "warehouse_id" in columns and master_table in connection.introspection.table_names(cursor):
+            cursor.execute(
+                f"SELECT w.country_code FROM {table} a JOIN {master_table} w ON w.id=a.warehouse_id WHERE a.tenant_id=%s AND a.integration_config_id=%s",
+                [config.tenant_id, config.id],
+            )
+            countries = [str(row[0] or "").upper() for row in cursor.fetchall()]
+            regions = {str(value).upper() for value in (config.regions or [])}
+            return {"count": len(countries), "invalid_region_count": sum(1 for country in countries if country not in regions)}
+        cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE tenant_id=%s AND integration_config_id=%s", [config.tenant_id, config.id])
+        return {"count": int(cursor.fetchone()[0]), "invalid_region_count": 0}
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigVerifier])
+def check_integration_consistency(request, pk):
+    config = _get_config_for_user(request, pk, "integrations.config.verify")
+    regions = {str(value).upper() for value in (config.regions or [])}
+    store_bindings = list(
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant, integration_config=config).values("region", "status")
+    )
+    warehouse = _warehouse_binding_summary(config)
+    invalid_store_regions = sum(1 for binding in store_bindings if str(binding["region"] or "").upper() not in regions)
+    credential_ready = bool(config.credential_id) and config.credential_status not in {
+        PlatformIntegrationConfig.CredentialStatus.UNCONFIGURED,
+        PlatformIntegrationConfig.CredentialStatus.REVOKED,
+    }
+    checks = {
+        "credential_reference": credential_ready,
+        "region_configuration": bool(regions),
+        "binding_regions": invalid_store_regions + warehouse["invalid_region_count"] == 0,
+        "config_enabled": config.status != PlatformIntegrationConfig.Status.DISABLED,
+    }
+    passed = all(checks.values())
+    job_count = SyncJob.objects.filter(tenant=request.user.tenant, integration_config=config).count()
+    _write_audit_log(
+        config,
+        request.user,
+        "test_simulated_integration_connection",
+        result=IntegrationAuditLog.Result.SUCCESS if passed else IntegrationAuditLog.Result.BLOCKED,
+        detail={"external_api_called": False, "token_refreshed": False, "binding_count": len(store_bindings) + warehouse["count"], "job_reference_count": job_count, "checks": checks},
+    )
+    if not passed:
+        raise ValidationError("本地配置、凭据引用或授权映射存在不一致，请按检查结果处理。")
+    return success_response({"connected": True, "simulated": True, "external_api_called": False, "token_refreshed": False, "binding_count": len(store_bindings) + warehouse["count"], "job_reference_count": job_count, "checks": checks})
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationLiveReadonlyRunner])
+def check_integration_readonly_connection(request, pk):
+    config = _get_config_for_user(request, pk, "integrations.run_live_readonly")
+    if getattr(settings, "PLATFORM_NETWORK_MODE", "") != "approved-live-test":
+        raise ValidationError("系统尚未启用生产平台只读网络模式；请由运维确认网络白名单后再检查。")
+    if not getattr(settings, "LIVE_READONLY_SYNC_ENABLED", False):
+        raise ValidationError("系统尚未启用生产只读同步功能。")
+    if config.status not in {PlatformIntegrationConfig.Status.VERIFIED, PlatformIntegrationConfig.Status.ACTIVE}:
+        raise ValidationError("请先维护并检查开发者凭据，再执行平台只读检查。")
+    try:
+        get_custody_backend().retrieve_secret(config.credential_id)
+    except CustodyError:
+        raise ValidationError("开发者凭据无法读取，请通过“维护凭据”重新加密保存。") from None
+    job = filter_sync_jobs(
+        request.user,
+        SyncJob.objects.filter(tenant=request.user.tenant, integration_config=config).select_related("integration_config"),
+        "integrations.run_live_readonly",
+    ).filter(resource_type__in=(SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN, SyncJob.ResourceType.INVENTORY_SNAPSHOT)).first()
+    if job is None:
+        raise ValidationError("当前配置没有可用于只读检查的已授权同步任务。")
+    adapter = get_adapter_for_config(config, job.resource_type)
+    try:
+        adapter.validate_configuration(job)
+        page = adapter.fetch_page(job, None)
+    except CustodyError:
+        _write_audit_log(config, request.user, "test_live_integration_connection", result=IntegrationAuditLog.Result.FAILED, detail={"external_api_called": False, "token_refreshed": False, "reason": "credential_unavailable"})
+        raise ValidationError("平台或主体授权凭据无法读取，请重新维护开发者凭据并检查基础档案授权。") from None
+    except Exception:
+        _write_audit_log(config, request.user, "test_live_integration_connection", result=IntegrationAuditLog.Result.FAILED, detail={"external_api_called": True, "token_refreshed": False})
+        raise
+    config.last_verified_at = timezone.now()
+    config.save(update_fields=["last_verified_at", "updated_at"])
+    _write_audit_log(config, request.user, "test_live_integration_connection", detail={"external_api_called": True, "token_refreshed": False, "resource_type": job.resource_type})
+    return success_response({"connected": True, "external_api_called": True, "token_refreshed": False, "sample_count": len(page.get("records", [])) if isinstance(page, dict) else 0, "checked_at": config.last_verified_at})
 
 
 @api_view(["GET", "POST"])
@@ -764,6 +1074,125 @@ def sync_job_collection(request):
     return success_response(SyncJobSerializer(job, context={"request": request}).data, status=201)
 
 
+def _scoped_sync_job(request, pk, permission_code="integrations.manage"):
+    return get_scoped_object_or_404(
+        filter_sync_jobs(
+            request.user,
+            SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config"),
+            permission_code,
+        ),
+        pk=pk,
+    )
+
+
+def _sync_scope_columns():
+    with connection.cursor() as cursor:
+        return {column.name for column in connection.introspection.get_table_description(cursor, SyncJob._meta.db_table)}
+
+
+def _set_job_execution_mode(job, execution_mode):
+    if "sync_scope" not in _sync_scope_columns():
+        return
+    with connection.cursor() as cursor:
+        cursor.execute(f"SELECT sync_scope FROM {SyncJob._meta.db_table} WHERE id=%s", [job.id])
+        raw = cursor.fetchone()[0]
+        if isinstance(raw, str):
+            try:
+                scope = json.loads(raw or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                scope = {}
+        else:
+            scope = raw if isinstance(raw, dict) else {}
+        scope["execution_mode"] = execution_mode
+        cursor.execute(
+            f"UPDATE {SyncJob._meta.db_table} SET sync_scope=%s WHERE id=%s AND tenant_id=%s",
+            [json.dumps(scope, ensure_ascii=False), job.id, job.tenant_id],
+        )
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsIntegrationReadOrManage])
+def sync_job_detail(request, pk):
+    permission_code = "integrations.view" if request.method == "GET" else "integrations.manage"
+    job = _scoped_sync_job(request, pk, permission_code)
+    if request.method == "GET":
+        return success_response(SyncJobSerializer(job, context={"request": request}).data)
+    if job.status == SyncJob.Status.RUNNING:
+        raise ValidationError("运行中的同步任务不能修改。")
+    allowed = {"schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode"}
+    if set(request.data) - allowed:
+        raise ValidationError("同步策略包含不支持的字段。")
+    execution_mode = request.data.get("execution_mode")
+    if execution_mode not in (None, "simulation", "live_readonly"):
+        raise ValidationError({"execution_mode": "运行模式必须为本地模拟或生产只读。"})
+    serializer = SyncJobSerializer(
+        job,
+        data={key: value for key, value in request.data.items() if key != "execution_mode"},
+        partial=True,
+        context={"request": request},
+    )
+    serializer.is_valid(raise_exception=True)
+    job = serializer.save()
+    if execution_mode:
+        _set_job_execution_mode(job, execution_mode)
+    _write_audit_log(job.integration_config, request.user, "update_sync_job", detail={"sync_job_id": job.id, "updated_fields": sorted(request.data.keys())})
+    return success_response(SyncJobSerializer(job, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationManager])
+def toggle_sync_job(request, pk):
+    job = _scoped_sync_job(request, pk)
+    if job.status == SyncJob.Status.RUNNING:
+        raise ValidationError("运行中的同步任务不能切换启用状态。")
+    enabled = request.data.get("enabled") is True
+    if enabled:
+        if job.integration_config.status == PlatformIntegrationConfig.Status.DISABLED:
+            raise ValidationError("关联接入配置已禁用。")
+        if not job.integration_config.credential_id or job.integration_config.credential_status in {
+            PlatformIntegrationConfig.CredentialStatus.UNCONFIGURED,
+            PlatformIntegrationConfig.CredentialStatus.REVOKED,
+        }:
+            raise ValidationError("开发者凭据尚未就绪。")
+    job.is_enabled = enabled
+    job.status = SyncJob.Status.IDLE if enabled else SyncJob.Status.DISABLED
+    job.next_run_at = None
+    job.save(update_fields=["is_enabled", "status", "next_run_at", "updated_at"])
+    _write_audit_log(job.integration_config, request.user, "enable_sync_job" if enabled else "disable_sync_job", detail={"sync_job_id": job.id})
+    return success_response(SyncJobSerializer(job, context={"request": request}).data)
+
+
+def _sync_job_delete_preview(job):
+    run_count = SyncRun.objects.filter(tenant=job.tenant, sync_job=job).count()
+    cursor_count = job.cursors.count()
+    blockers = []
+    if job.is_enabled or job.status == SyncJob.Status.RUNNING:
+        blockers.append("请先停用同步任务")
+    if job.lock_token or job.lock_acquired_at or job.lock_expires_at or job.lock_heartbeat_at:
+        blockers.append("任务仍保留运行锁")
+    if run_count:
+        blockers.append("任务已有运行记录，需保留审计链路")
+    if cursor_count:
+        blockers.append("任务已有同步游标，不能直接删除")
+    return {"can_delete": not blockers, "run_count": run_count, "cursor_count": cursor_count, "blockers": blockers}
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsIntegrationReadOrManage])
+def sync_job_delete(request, pk):
+    job = _scoped_sync_job(request, pk, "integrations.view" if request.method == "GET" else "integrations.manage")
+    preview = _sync_job_delete_preview(job)
+    if request.method == "GET":
+        return success_response(preview)
+    if not preview["can_delete"]:
+        raise ValidationError(preview["blockers"][0])
+    config = job.integration_config
+    job_id = job.id
+    job.delete()
+    _write_audit_log(config, request.user, "delete_sync_job", detail={"sync_job_id": job_id})
+    return success_response({"deleted": True, "job_id": job_id})
+
+
 @api_view(["GET"])
 @permission_classes([IsIntegrationViewer])
 def sync_run_collection(request):
@@ -789,6 +1218,36 @@ def sync_run_detail(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsIntegrationRunner])
+def retry_sync_run(request, pk):
+    sync_run = get_scoped_object_or_404(
+        filter_sync_runs(
+            request.user,
+            SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config"),
+            "integrations.run",
+        ),
+        pk=pk,
+    )
+    if sync_run.status != SyncRun.Status.FAILED:
+        raise ValidationError("只有失败的本地模拟运行可以重试。")
+    if sync_run.retry_count >= sync_run.sync_job.max_retry_count:
+        raise ValidationError("该运行已达到最大重试次数。")
+    execution_mode = (sync_run.masked_log or {}).get("execution_mode", "simulation")
+    if execution_mode == "live_readonly":
+        raise ValidationError("生产只读任务请返回同步任务页重新确认运行。")
+    run, _created = run_sync_job(
+        sync_run.sync_job,
+        adapter=MockPlatformAdapter(),
+        idempotency_key=f"retry:{sync_run.id}:{uuid.uuid4().hex}",
+    )
+    run.retry_count = sync_run.retry_count + 1
+    run.masked_log = {**(run.masked_log or {}), "execution_mode": "simulation", "retry_of": sync_run.run_id}
+    run.save(update_fields=["retry_count", "masked_log"])
+    _write_audit_log(sync_run.sync_job.integration_config, request.user, "retry_simulated_sync_run", detail={"source_run_id": sync_run.run_id, "retry_run_id": run.run_id, "external_api_called": False})
+    return success_response(SyncRunSerializer(run).data, status=201)
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationRunner])
 def run_mock_sync_job(request, pk):
     sync_job = get_scoped_object_or_404(
         filter_sync_jobs(
@@ -800,6 +1259,24 @@ def run_mock_sync_job(request, pk):
     )
     run, created = run_sync_job(sync_job, idempotency_key=request.data.get("idempotency_key"))
     return success_response({"created": created, "run": SyncRunSerializer(run).data})
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationLiveReadonlyRunner])
+def enqueue_sync_job(request, pk):
+    sync_job = get_scoped_object_or_404(
+        filter_sync_jobs(
+            request.user,
+            SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config"),
+            "integrations.run_live_readonly",
+        ),
+        pk=pk,
+    )
+    idempotency_key = str(request.data.get("idempotency_key") or "").strip() or None
+    if idempotency_key and len(idempotency_key) > 160:
+        raise ValidationError({"idempotency_key": "Idempotency key cannot exceed 160 characters."})
+    task = run_readonly_sync_job.delay(sync_job.id, idempotency_key)
+    return success_response({"accepted": True, "task_id": task.id}, status=202)
 
 
 @api_view(["POST"])

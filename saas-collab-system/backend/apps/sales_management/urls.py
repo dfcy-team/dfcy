@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     CommerceFiltersView,
+    DataLinkageStatusView,
     InventoryCollectionView,
     SalesDataQualityView,
     SalesExportCollectionView,
@@ -17,6 +18,7 @@ from .views import (
 
 urlpatterns = [
     path("filters/", CommerceFiltersView.as_view(), name="commerce-filters"),
+    path("linkage-status/", DataLinkageStatusView.as_view(), name="commerce-linkage-status"),
     path("overview/", SalesOverviewView.as_view(), name="sales-overview"),
     path("sales/trend/", SalesTrendView.as_view(), name="sales-trend"),
     path("sales/stores/", StoreSalesCollectionView.as_view(), name="commerce-store-sales"),

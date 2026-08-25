@@ -206,7 +206,19 @@ class RotateCredentialsSerializer(serializers.Serializer):
 
 
 class CredentialPayloadSerializer(serializers.Serializer):
+    partner_id = serializers.CharField(max_length=32, required=False, write_only=True)
+    partner_key = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
+    ads_app_id = serializers.CharField(max_length=255, required=False, write_only=True)
+    ads_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
+    redirect_uri = serializers.URLField(max_length=500, required=False, write_only=True)
+    app_key = serializers.CharField(max_length=255, required=False, write_only=True)
+    service_id = serializers.CharField(max_length=255, required=False, write_only=True)
+    api_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     app_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
+    api_base_url = serializers.URLField(max_length=500, required=False, write_only=True)
+    domain = serializers.CharField(max_length=255, required=False, write_only=True)
+    client_id = serializers.CharField(max_length=255, required=False, write_only=True)
+    client_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     signing_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     webhook_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     access_token = serializers.CharField(max_length=8192, required=False, write_only=True, trim_whitespace=False)
@@ -461,6 +473,10 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
 class SyncJobSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     integration_config_id = serializers.IntegerField()
+    platform = serializers.CharField(source="integration_config.platform", read_only=True)
+    config_alias = serializers.CharField(source="integration_config.account_alias", read_only=True)
+    environment = serializers.CharField(source="integration_config.environment", read_only=True)
+    regions = serializers.JSONField(source="integration_config.regions", read_only=True)
 
     class Meta:
         model = SyncJob
@@ -468,6 +484,10 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "integration_config_id",
+            "platform",
+            "config_alias",
+            "environment",
+            "regions",
             "resource_type",
             "schedule_type",
             "status",
@@ -499,20 +519,47 @@ class SyncJobSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Integration config does not belong to current tenant.")
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        request = self.context["request"]
+        config_id = attrs.get("integration_config_id") or getattr(self.instance, "integration_config_id", None)
+        resource_type = attrs.get("resource_type") or getattr(self.instance, "resource_type", None)
+        if not config_id or not resource_type:
+            return attrs
+        config = PlatformIntegrationConfig.objects.get(id=config_id, tenant=request.user.tenant)
+        if config.environment not in {
+            PlatformIntegrationConfig.Environment.PILOT,
+            PlatformIntegrationConfig.Environment.PRODUCTION,
+        }:
+            return attrs
+        supported = {
+            PlatformChoices.SHOPEE: {SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN},
+            PlatformChoices.TIKTOK: {SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN},
+            PlatformChoices.JIFENG_WMS: {SyncJob.ResourceType.INVENTORY_SNAPSHOT},
+        }
+        if resource_type not in supported.get(config.platform, set()):
+            raise serializers.ValidationError("Platform and readonly resource type are incompatible.")
+        if config.sync_write_enabled:
+            raise serializers.ValidationError("Readonly production jobs reject write-enabled integration configs.")
+        return attrs
+
     def validate_max_retry_count(self, value):
         if value > 5:
-            raise serializers.ValidationError("max_retry_count cannot exceed 5 in phase 2.")
+            raise serializers.ValidationError("max_retry_count cannot exceed 5.")
         return value
 
     def validate_backoff_base_seconds(self, value):
         if not 1 <= value <= 5:
-            raise serializers.ValidationError("backoff_base_seconds must be between 1 and 5 in phase 2.")
+            raise serializers.ValidationError("backoff_base_seconds must be between 1 and 5.")
         return value
 
 
 class SyncRunSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     sync_job_id = serializers.IntegerField(read_only=True)
+    platform = serializers.CharField(source="sync_job.integration_config.platform", read_only=True)
+    config_alias = serializers.CharField(source="sync_job.integration_config.account_alias", read_only=True)
+    resource_type = serializers.CharField(source="sync_job.resource_type", read_only=True)
 
     class Meta:
         model = SyncRun
@@ -520,6 +567,9 @@ class SyncRunSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "sync_job_id",
+            "platform",
+            "config_alias",
+            "resource_type",
             "run_id",
             "idempotency_key",
             "status",

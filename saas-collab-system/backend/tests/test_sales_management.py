@@ -133,6 +133,28 @@ def test_orders_are_tenant_and_store_scope_filtered_on_both_routes():
 
 
 @pytest.mark.django_db
+def test_linkage_status_is_tenant_scoped_and_exposes_the_operating_chain():
+    tenant, _, store, _ = create_scope("linkage-visible")
+    hidden_tenant, _, hidden_store, _ = create_scope("linkage-hidden")
+    create_order(tenant, store, "linkage-visible")
+    create_order(hidden_tenant, hidden_store, "linkage-hidden")
+    viewer = user_for(tenant, "linkage-viewer")
+    grant(viewer, "sales_management.data_quality.view")
+
+    response = client_for(viewer).get("/api/internal/commerce/linkage-status/")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [step["key"] for step in data["steps"]] == [
+        "masterdata", "authorization", "sync", "facts"
+    ]
+    assert data["tenant_id"] == tenant.id
+    assert data["steps"][0]["label"] == "本地基础档案"
+    assert data["counts"]["orders"] == 1
+    assert data["counts"]["stores"] == 1
+
+
+@pytest.mark.django_db
 def test_order_detail_embeds_refund_header_and_multiple_items():
     tenant, platform, store, _ = create_scope("detail")
     order = create_order(tenant, store, "detail")
@@ -277,6 +299,59 @@ def test_overview_never_combines_currencies_and_refund_comes_from_refund_fact():
 
 
 @pytest.mark.django_db
+def test_sales_overview_matches_the_handoff_display_dimensions():
+    tenant, platform, store, _ = create_scope("handoff-sales")
+    order = create_order(tenant, store, "handoff-sales", "100.0000")
+    cancelled = create_order(tenant, store, "handoff-sales-cancelled", "900.0000")
+    cancelled.normalized_status = "cancelled"
+    cancelled.save(update_fields=["normalized_status"])
+    refund_run = create_run(tenant, "refund_return", "handoff-sales-refund")
+    refund = RefundReturn.objects.create(
+        tenant=tenant,
+        platform=platform,
+        store=store,
+        sales_order=order,
+        source_run=refund_run,
+        external_return_id="RETURN-HANDOFF-SALES",
+        case_type="refund_only",
+        raw_status="PROCESSING",
+        normalized_status="processing",
+        requested_at_utc=NOW,
+        updated_at_utc=NOW,
+        currency="PHP",
+        refund_amount="50.0000",
+        payload_hash="d" * 64,
+    )
+    RefundReturnItem.objects.create(
+        refund_return=refund,
+        external_return_item_id="RETURN-HANDOFF-LINE",
+        seller_sku="SKU-handoff-sales",
+        quantity=1,
+        currency="PHP",
+        refund_amount="50.0000",
+    )
+    viewer = user_for(tenant, "handoff-sales-viewer")
+    grant(viewer, "sales_management.view")
+
+    data = client_for(viewer).get("/api/internal/commerce/overview/").json()["data"]
+    metrics = {metric["code"]: metric for metric in data["summary_metrics"]}
+
+    assert list(metrics) == [
+        "gross_sales", "net_sales", "order_count", "units_sold",
+        "average_order_value", "refund_rate",
+    ]
+    assert metrics["gross_sales"]["money"] == {"PHP": "100"}
+    assert metrics["net_sales"]["money"] == {"PHP": "50"}
+    assert metrics["order_count"]["value"] == 2
+    assert metrics["units_sold"]["value"] == 4
+    assert metrics["average_order_value"]["money"] == {"PHP": "50"}
+    assert metrics["refund_rate"]["value"] == "50.0%"
+    assert data["quality"]["checked_rows"] == 6
+    assert data["results"][0]["source_alias"] == "auth-order-handoff-sales-cancelled"
+    assert data["results"][0]["average_order_value"] == "50"
+
+
+@pytest.mark.django_db
 def test_inventory_endpoint_reads_inventory_snapshot_only():
     tenant, _, _, warehouse = create_scope("inventory")
     run = create_run(tenant, "inventory_snapshot", "inventory", platform="jifeng_wms")
@@ -376,11 +451,23 @@ def test_formal_analytics_routes_prefer_commerce_facts_when_available():
     assert sales.status_code == 200
     assert sales.json()["data"]["dashboard_type"] == "sales"
     assert sales.json()["data"]["results"][0]["store_id"] == store.id
+    assert sales.json()["data"]["results"][0]["store_name"] == store.name
+    assert [metric["code"] for metric in sales.json()["data"]["summary_metrics"]] == [
+        "order_count", "units_sold", "gross_sales", "net_sales"
+    ]
+    assert sales.json()["data"]["quality"]["metric_version"] == "经营分析 v1"
     assert sales.json()["data"]["count"] == 1
     assert order.external_order_id == "ORDER-analytics-commerce"
     assert inventory.status_code == 200
     assert inventory.json()["data"]["dashboard_type"] == "inventory"
     assert inventory.json()["data"]["results"][0]["source_sku"] == "ANALYTICS-SKU"
+    assert inventory.json()["data"]["results"][0]["warehouse_code"] == warehouse.code
+    assert len(inventory.json()["data"]["summary_metrics"]) == 6
+
+    filters = client_for(viewer).get("/api/internal/analytics/filters/")
+    assert filters.status_code == 200
+    assert filters.json()["data"]["stores"][0]["id"] == store.id
+    assert filters.json()["data"]["warehouses"][0]["id"] == warehouse.id
 
 
 @pytest.mark.django_db
@@ -439,7 +526,9 @@ def test_sales_export_reuses_report_export_and_audit_model():
     assert response.status_code == 201
     export = ReportExportRequest.objects.get(pk=response.json()["data"]["id"])
     assert export.report_type == ReportExportRequest.ReportType.SALES_DETAILS
-    assert export.masked_file_reference.startswith("placeholder://")
+    assert export.masked_file_reference.startswith("export://")
+    assert export.storage_key
+    assert export.file_sha256
 
 
 @pytest.mark.django_db

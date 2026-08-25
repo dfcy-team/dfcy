@@ -115,4 +115,32 @@ describe('UI-P6 API and analytics contract', () => {
     expect(finance).not.toContain('<el-button');
     expect(finance).not.toMatch(/submitPayment|transferFunds|withdrawFunds/);
   });
+
+  it('restores the API integration workspace dimensions and tenant-linked dialogs', () => {
+    const page = read('src/views/integrations/IntegrationWorkspace.vue');
+    const api = read('src/api/integrations.js');
+    const jobs = read('src/views/integrations/SyncJobList.vue');
+
+    expect(api).toContain('/api/internal/integrations/workspace/');
+    expect(page).toContain('开发者配置');
+    expect(page).toContain('店铺/仓库');
+    expect(page).toContain('SaaS 数据目标');
+    expect(page).toContain('处理到期同步任务');
+    expect(page).toContain('补齐缺失同步任务');
+    expect(page).toContain('没有可新增的同步任务');
+    expect(page).toContain('本地一致性检查');
+    expect(page).toContain('平台只读检查');
+    expect(page).toContain('填写/修改开发者凭据');
+    expect(page).toContain('Partner ID');
+    expect(page).toContain('广告授权回调地址');
+    expect(page).toContain('API Base URL');
+    expect(page).toContain('加密保存');
+    expect(page).toContain('编辑同步策略');
+    expect(page).toContain('重试失败任务');
+    expect(api).toContain('/reference-check/');
+    expect(api).toContain('/consistency-check/');
+    expect(api).toContain('/readonly-check/');
+    expect(api).toContain('/retry/');
+    expect(jobs).toContain('mode="sync-jobs"');
+  });
 });

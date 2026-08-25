@@ -121,6 +121,7 @@ const PilotVerificationRuns = () => import('../views/pilot/VerificationRunWorksp
 const PilotPerformanceRuns = () => import('../views/pilot/PerformanceRunWorkspace.vue');
 const PilotEntryDecisions = () => import('../views/pilot/EntryDecisionWorkspace.vue');
 const ReleaseContractConsole = () => import('../views/releases/ReleaseContractConsole.vue');
+const DecisionEmbeddedPage = () => import('../views/decision/DecisionEmbeddedPage.vue');
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -133,6 +134,12 @@ const routes = [
       { path: 'analytics/overview', component: BusinessOverview },
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
+      { path: 'decision/inventory/alerts', component: DecisionEmbeddedPage },
+      { path: 'decision/inventory/replenishment', component: DecisionEmbeddedPage },
+      { path: 'decision/lifecycle/reviews', component: DecisionEmbeddedPage },
+      { path: 'decision/lifecycle/history', component: DecisionEmbeddedPage },
+      { path: 'decision/lifecycle/clearance-requests', component: DecisionEmbeddedPage },
+      { path: 'decision/alerts/business', component: DecisionEmbeddedPage },
       { path: 'inventory/alerts', component: InventoryAlertList },
       { path: 'inventory/replenishment', component: ReplenishmentSuggestionList },
       { path: 'lifecycle/reviews', component: LifecycleReviewList },

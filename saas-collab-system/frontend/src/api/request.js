@@ -7,11 +7,9 @@ import {
   updateAccessToken
 } from '../utils/authSession';
 
-// Keep local development/tests convenient while making an unset production
-// build use the real API. A production build may still opt into Mock
-// explicitly with VITE_USE_MOCK=true for controlled demos.
-export const useMock = import.meta.env.VITE_USE_MOCK === 'true'
-  || (!import.meta.env.PROD && import.meta.env.VITE_USE_MOCK !== 'false');
+// Mock data is a local-development aid only. Production builds always use the
+// authenticated API and expose failures instead of substituting demo records.
+export const useMock = !import.meta.env.PROD && import.meta.env.VITE_USE_MOCK === 'true';
 
 const request = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '',
@@ -140,6 +138,25 @@ export async function requestApi(config) {
   }
 }
 
+export async function downloadApiFile(url, filename) {
+  try {
+    const access = getAccessToken();
+    const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, {
+      responseType: 'blob',
+      headers: access ? { Authorization: `Bearer ${access}` } : {}
+    });
+    const objectUrl = URL.createObjectURL(response.data);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+    return { success: true, code: 'OK', message: '文件下载已开始。', data: null };
+  } catch (error) {
+    return normalizeApiError(error);
+  }
+}
+
 export function getMockResponse(mockHandler, moduleName) {
   if (typeof mockHandler === 'function') {
     return normalizeApiResponse(mockHandler());
@@ -162,7 +179,7 @@ export async function requestWithMockFallback(config, mockHandler, moduleName) {
     return response;
   }
 
-  if (response.http_status) {
+  if (response.http_status || import.meta.env.PROD) {
     return response;
   }
 

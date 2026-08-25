@@ -10,7 +10,7 @@ from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .adapters import MockPlatformAdapter, get_adapter_for_config
+from .adapters import get_adapter_for_config
 from .models import SyncCursor, SyncJob, SyncRun, WebhookEvent
 from .security import sanitize_payload, sanitize_text
 
@@ -82,9 +82,10 @@ def _renew_lease(sync_job, run, not_before=None):
 
 def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
     retry_wait = retry_wait or default_retry_wait
-    adapter = adapter or get_adapter_for_config(sync_job.integration_config)
-    if type(adapter) is not MockPlatformAdapter:
-        raise ValidationError("Only mock synchronization can be executed by this endpoint in phase 2.")
+    adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
+    if getattr(adapter, "execution_mode", "unsupported") not in {"mock", "live_readonly"}:
+        raise ValidationError("The selected synchronization adapter is not executable.")
+    adapter.validate_configuration(sync_job)
 
     now = timezone.now()
     with transaction.atomic():
@@ -144,13 +145,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         locked_job.refresh_from_db()
 
     sync_job = locked_job
+    adapter.bind_run(run)
 
     last_retry_error = ""
     while True:
         try:
             _renew_lease(sync_job, run)
             with transaction.atomic():
-                page = adapter.fetch_page(sync_job, cursor.cursor_value)
+                previous_cursor = cursor.cursor_value
+                page = adapter.fetch_page(sync_job, previous_cursor)
                 records = page.get("records", [])
                 for raw_record in records:
                     run.fetched_count += 1
@@ -168,6 +171,17 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
 
                 cursor.cursor_value = adapter.get_next_cursor(page)
                 cursor.save(update_fields=["cursor_value", "updated_at"])
+                if adapter.should_continue(page, previous_cursor):
+                    run.save(
+                        update_fields=[
+                            "fetched_count",
+                            "created_count",
+                            "updated_count",
+                            "skipped_count",
+                            "failed_count",
+                        ]
+                    )
+                    continue
                 run.status = SyncRun.Status.SUCCESS
                 run.finished_at = timezone.now()
                 run.error_code = ""
@@ -175,7 +189,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                 run.masked_log = sanitize_payload(
                     {
                         "fetched": run.fetched_count,
-                        "sample": records[:1],
+                        "last_page_record_keys": sorted(records[0]) if records and isinstance(records[0], dict) else [],
                         "retry_count": run.retry_count,
                         "last_retry_error": last_retry_error,
                     }

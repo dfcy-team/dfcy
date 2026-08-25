@@ -223,7 +223,8 @@ class FileCustodyBackend(CustodyBackend):
             expires_at = payload.pop("expires_at", None)
             idempotency_key = payload.pop("idempotency_key", None)
             operation_id = payload.pop("operation_id", None)
-            credentials = {key: value for key, value in payload.items() if key in self._SECRET_KEYS}
+            credentials = self._values(credential_id or token_id, allow_expired=True)
+            credentials.update({key: value for key, value in payload.items() if key in self._SECRET_KEYS})
             reference = self._store.rotate(
                 credential_id or token_id,
                 credentials,

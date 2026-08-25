@@ -1,3 +1,4 @@
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -7,7 +8,7 @@ from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import paginated_data, success_response
 from apps.commerce.models import InventorySnapshot, SalesOrder
 from apps.permissions.api_permissions import IsInternalUser
-from apps.sales_management.views import commerce_inventory_payload, commerce_overview_payload
+from apps.sales_management.views import commerce_filters_payload, commerce_inventory_payload, commerce_overview_payload
 
 from .models import MetricAggregate, MetricDefinition, ReportExportRequest
 from .permissions import (
@@ -35,6 +36,7 @@ from .export_services import (
     create_export_request,
     log_export_view,
     report_catalog_for_user,
+    resolve_export_file,
     visible_export_requests,
 )
 
@@ -229,9 +231,17 @@ def aggregate_mock(request):
 
 @api_view(["GET"])
 @permission_classes([IsAnalyticsViewer])
+def analytics_filters(request):
+    return success_response(commerce_filters_payload(request, "analytics.view"))
+
+
+@api_view(["GET"])
+@permission_classes([IsAnalyticsViewer])
 def analytics_overview(request):
     if SalesOrder.objects.filter(tenant=request.user.tenant).exists():
-        return success_response(commerce_overview_payload(request, "analytics.view", "overview"))
+        return success_response(
+            commerce_overview_payload(request, "analytics.view", "overview", original_dimensions=True)
+        )
     return success_response(_dashboard_payload(request, "overview"))
 
 
@@ -239,7 +249,9 @@ def analytics_overview(request):
 @permission_classes([IsAnalyticsViewer])
 def analytics_sales(request):
     if SalesOrder.objects.filter(tenant=request.user.tenant).exists():
-        return success_response(commerce_overview_payload(request, "analytics.view", "sales"))
+        return success_response(
+            commerce_overview_payload(request, "analytics.view", "sales", original_dimensions=True)
+        )
     return success_response(_dashboard_payload(request, "sales"))
 
 
@@ -300,3 +312,22 @@ def report_export_download(request, pk):
         pk=pk,
     )
     return success_response(create_download_grant(export_request=export_request, actor=request.user))
+
+
+@api_view(["GET"])
+@permission_classes([IsInternalUser])
+def report_export_file(request, pk):
+    queryset = ReportExportRequest.objects.filter(tenant=request.user.tenant)
+    if not request.user.is_superuser:
+        queryset = queryset.filter(requested_by=request.user)
+    export_request = get_scoped_object_or_404(queryset, pk=pk)
+    target = resolve_export_file(
+        export_request=export_request,
+        actor=request.user,
+        token=str(request.query_params.get("token") or ""),
+    )
+    return FileResponse(
+        target.open("rb"),
+        as_attachment=True,
+        filename=f"sales-details-{export_request.id}.{export_request.file_format}",
+    )

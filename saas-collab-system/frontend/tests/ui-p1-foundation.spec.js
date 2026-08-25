@@ -168,7 +168,7 @@ describe('UI-P1 action permission convergence', () => {
       'src/views/finance/ReconciliationMatchList.vue': 'finance.reconcile',
       'src/views/finance/ReconciliationMatchDetail.vue': 'finance.reconcile',
       'src/views/products/ProductStatusRecommendationDetail.vue': 'products.status.confirm',
-      'src/views/integrations/SyncJobList.vue': 'integrations.run'
+      'src/views/integrations/SyncJobList.vue': 'integrations.run_live_readonly'
     };
     for (const [path, permission] of Object.entries(expectedContracts)) {
       expect(read(path), path).toContain(`permission: '${permission}'`);

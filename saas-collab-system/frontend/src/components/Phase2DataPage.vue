@@ -10,13 +10,16 @@
 
     <el-alert v-if="riskNote" :title="riskNote" type="warning" show-icon :closable="false" />
 
-    <el-form v-if="filters.length" class="phase2-filter" inline>
-      <el-form-item v-for="filter in filters" :key="filter" :label="filter">
-        <el-input placeholder="筛选占位" disabled />
+    <el-form v-if="filterDefinitions.length" class="phase2-filter" inline @submit.prevent>
+      <el-form-item v-for="filter in filterDefinitions" :key="filter.key" :label="filter.label">
+        <el-select v-if="filter.type === 'select'" v-model="query[filter.key]" clearable placeholder="全部">
+          <el-option v-for="option in filter.options || []" :key="option.value" :label="option.label" :value="option.value" />
+        </el-select>
+        <el-input v-else v-model="query[filter.key]" clearable :placeholder="`筛选${filter.label}`" />
       </el-form-item>
       <el-form-item>
-        <el-button disabled>筛选</el-button>
-        <el-button disabled>重置</el-button>
+        <el-button type="primary" @click="loadData">刷新</el-button>
+        <el-button @click="resetFilters">重置</el-button>
       </el-form-item>
     </el-form>
 
@@ -37,14 +40,18 @@
 
     <el-alert v-if="message" :title="message" :type="dataStatus === 'error' ? 'error' : 'warning'" show-icon :closable="false" />
 
-    <el-table v-if="mode === 'list'" v-loading="loading" :data="rows" border :empty-text="emptyText">
+    <section v-if="mode === 'list'" class="phase2-table-shell">
+      <div class="phase2-summary"><span>当前结果</span><strong>{{ filteredRows.length }}</strong><small>数据范围：当前租户及角色授权范围</small></div>
+      <el-table v-loading="loading" :data="filteredRows" border :empty-text="emptyText" @row-click="openRowDetail">
       <el-table-column v-for="column in columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 130" show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])">{{ row[column.prop] || '-' }}</el-tag>
           <span v-else>{{ formatValue(row[column.prop]) }}</span>
         </template>
       </el-table-column>
-    </el-table>
+      <el-table-column label="操作" width="92" fixed="right"><template #default="{ row }"><el-button link type="primary" @click.stop="openRowDetail(row)">查看</el-button></template></el-table-column>
+      </el-table>
+    </section>
 
     <el-card v-else v-loading="loading" shadow="never">
       <template #header>详情</template>
@@ -58,11 +65,20 @@
     </el-card>
 
     <el-empty v-if="!loading && !message && isEmpty" :description="emptyText" />
+
+    <el-drawer v-model="drawerOpen" title="数据接入详情" size="min(520px, 92vw)">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item v-for="column in columns" :key="column.prop" :label="column.label">
+          {{ formatValue(selectedRow[column.prop]) }}
+        </el-descriptions-item>
+      </el-descriptions>
+      <el-alert class="drawer-alert" title="仅展示当前租户的脱敏配置、同步状态与计数，不展示明文凭据。" type="info" :closable="false" />
+    </el-drawer>
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
@@ -88,6 +104,22 @@ const loading = ref(false);
 const actionLoading = ref('');
 const dataStatus = ref('loading');
 const message = ref('');
+const query = reactive({});
+const drawerOpen = ref(false);
+const selectedRow = ref({});
+const filterDefinitions = computed(() => props.filters.map((filter) => {
+  if (typeof filter === 'object') return filter;
+  const column = props.columns.find((item) => item.label === filter);
+  return { key: column?.prop || filter, label: filter, type: 'text' };
+}));
+const filteredRows = computed(() => rows.value.filter((row) => filterDefinitions.value.every((filter) => {
+  const expected = query[filter.key];
+  if (expected === '' || expected === null || expected === undefined) return true;
+  const actual = row[filter.key];
+  return filter.type === 'select'
+    ? String(actual ?? '') === String(expected)
+    : String(actual ?? '').toLowerCase().includes(String(expected).toLowerCase());
+})));
 
 const tagType = computed(() => {
   if (dataStatus.value === 'error') return 'danger';
@@ -140,6 +172,16 @@ function statusType(value) {
   }[value] || 'info';
 }
 
+function resetFilters() {
+  filterDefinitions.value.forEach((filter) => { query[filter.key] = ''; });
+  loadData();
+}
+
+function openRowDetail(row) {
+  selectedRow.value = row;
+  drawerOpen.value = true;
+}
+
 async function loadData() {
   loading.value = true;
   try {
@@ -147,7 +189,7 @@ async function loadData() {
     if (!response.success) throw new Error(response.message || '接口返回失败');
     rows.value = getRows(response.data);
     detail.value = getDetail(response.data);
-    dataStatus.value = response.data?.api_status || response.data?.status || 'mock';
+    dataStatus.value = response.data?.api_status || response.data?.status || 'connected';
     if (response.data?.api_status === 'fallback') message.value = response.message;
   } catch (error) {
     dataStatus.value = 'error';
@@ -192,5 +234,9 @@ onMounted(loadData);
 .phase2-header p { margin: -8px 0 0; color: #64748b; font-size: 13px; }
 .phase2-filter { padding: 12px; border: 1px solid #d9e2ec; border-radius: 8px; background: #fff; }
 .phase2-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.phase2-table-shell { overflow: hidden; border: 1px solid #d9e2ec; border-radius: 8px; background: #fff; }
+.phase2-summary { display: flex; align-items: baseline; gap: 12px; padding: 13px 16px; border-bottom: 1px solid #e5eaf0; }
+.phase2-summary span, .phase2-summary small { color: #64748b; font-size: 12px; }.phase2-summary strong { color: #172033; font-size: 20px; }.phase2-summary small { margin-left: auto; }
+.drawer-alert { margin-top: 16px; }
 pre { max-height: 260px; margin: 0; overflow: auto; font-size: 12px; line-height: 1.5; }
 </style>

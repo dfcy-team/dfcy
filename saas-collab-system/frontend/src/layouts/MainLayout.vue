@@ -97,7 +97,13 @@ const AppMenu = defineComponent({
           }
         );
       }
-      return h(ElMenuItem, { index: item.path, onClick: () => emit('select') }, () => item.label);
+      return h(ElMenuItem, {
+        index: item.external ? `external:${item.path}` : item.path,
+        onClick: () => {
+          emit('select');
+          if (item.external) window.location.assign(item.path);
+        }
+      }, () => item.label);
     };
     return () => h(ElMenu, { router: true, defaultActive: route.path, class: 'menu' }, () => props.items.map(renderItem));
   }

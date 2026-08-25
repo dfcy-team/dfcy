@@ -63,6 +63,7 @@ export const permissionNames = Object.freeze({
   'integrations.manage': '管理集成配置',
   'integrations.rotate': '轮换集成凭据',
   'integrations.run': '运行集成同步',
+  'integrations.run_live_readonly': '运行生产只读同步',
   'suppliers.performance.view': '查看供应商绩效',
   'suppliers.performance.calculate': '计算供应商绩效',
   'products.status.view': '查看商品状态',

@@ -14,6 +14,7 @@ from apps.integrations.models import (
     SyncJob,
     SyncRun,
     WebhookEvent,
+    authorization_service_write,
 )
 from apps.integrations.sync_services import calculate_backoff_seconds, record_retry_failure, record_webhook_event
 from apps.integrations.sync_services import run_sync_job
@@ -60,18 +61,19 @@ def authenticated_client(user):
 
 
 def create_config(tenant, user, environment=PlatformIntegrationConfig.Environment.MOCK, alias="demo-sync"):
-    return PlatformIntegrationConfig.objects.create(
-        tenant=tenant,
-        platform="mock",
-        account_alias=alias,
-        environment=environment,
-        status=PlatformIntegrationConfig.Status.ACTIVE
-        if environment != PlatformIntegrationConfig.Environment.PRODUCTION
-        else PlatformIntegrationConfig.Status.PENDING_REVIEW,
-        credential_key_version="test-v1",
-        credential_fingerprint="placeholder-fingerprint",
-        created_by=user,
-    )
+    with authorization_service_write():
+        return PlatformIntegrationConfig.objects.create(
+            tenant=tenant,
+            platform="mock",
+            account_alias=alias,
+            environment=environment,
+            status=PlatformIntegrationConfig.Status.ACTIVE
+            if environment != PlatformIntegrationConfig.Environment.PRODUCTION
+            else PlatformIntegrationConfig.Status.PENDING_REVIEW,
+            credential_key_version="test-v1",
+            credential_fingerprint="placeholder-fingerprint",
+            created_by=user,
+        )
 
 
 def create_sync_job(tenant, user, environment=PlatformIntegrationConfig.Environment.MOCK, alias="demo-sync"):
@@ -113,6 +115,132 @@ def test_sync_job_api_uses_tenant_scope_and_standard_response():
     other_response = authenticated_client(other_user).get("/api/internal/integrations/sync-jobs/")
     assert other_response.status_code == 200
     assert other_response.json()["data"] == []
+
+
+@pytest.mark.django_db
+def test_integration_workspace_links_tenant_scoped_config_jobs_and_runs():
+    tenant = Tenant.objects.create(name="Tenant A", code="workspace-a")
+    other_tenant = Tenant.objects.create(name="Tenant B", code="workspace-b")
+    user = create_user(tenant, "workspace-user")
+    other_user = create_user(other_tenant, "workspace-other")
+    user.is_superuser = True
+    user.is_staff = True
+    user.save(update_fields=["is_superuser", "is_staff"])
+    grant_integration_access(user)
+    grant_integration_access(other_user)
+    config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="mock",
+        account_alias="tenant-a-config",
+        environment=PlatformIntegrationConfig.Environment.MOCK,
+        status=PlatformIntegrationConfig.Status.ACTIVE,
+        created_by=user,
+    )
+    other_config = PlatformIntegrationConfig.objects.create(
+        tenant=other_tenant,
+        platform="mock",
+        account_alias="tenant-b-config",
+        environment=PlatformIntegrationConfig.Environment.MOCK,
+        status=PlatformIntegrationConfig.Status.ACTIVE,
+        created_by=other_user,
+    )
+    job = SyncJob.objects.create(tenant=tenant, integration_config=config, resource_type=SyncJob.ResourceType.MOCK_RECORD)
+    SyncJob.objects.create(tenant=other_tenant, integration_config=other_config, resource_type=SyncJob.ResourceType.MOCK_RECORD)
+    SyncRun.objects.create(
+        tenant=tenant,
+        sync_job=job,
+        run_id="workspace-run",
+        idempotency_key="workspace-run-key",
+        status=SyncRun.Status.SUCCESS,
+        started_at=timezone.now(),
+        finished_at=timezone.now(),
+        fetched_count=2,
+    )
+
+    client = authenticated_client(user)
+    jobs = client.get("/api/internal/integrations/workspace/", {"mode": "sync-jobs"})
+    runs = client.get("/api/internal/integrations/workspace/", {"mode": "sync-runs"})
+
+    assert jobs.status_code == 200
+    assert jobs.json()["data"]["summary"]["job_count"] == 1
+    assert jobs.json()["data"]["pagination"]["total"] == 1
+    assert jobs.json()["data"]["results"][0]["config_name"] == "tenant-a-config"
+    assert runs.json()["data"]["summary"]["run_count"] == 1
+    assert runs.json()["data"]["results"][0]["run_id"] == "workspace-run"
+
+
+@pytest.mark.django_db
+def test_integration_workspace_operation_endpoints_are_real_and_tenant_scoped():
+    tenant = Tenant.objects.create(name="Tenant A", code="workspace-actions-a")
+    other_tenant = Tenant.objects.create(name="Tenant B", code="workspace-actions-b")
+    user = create_user(tenant, "workspace-actions-user")
+    other_user = create_user(other_tenant, "workspace-actions-other")
+    user.is_superuser = True
+    user.is_staff = True
+    user.save(update_fields=["is_superuser", "is_staff"])
+    grant_integration_access(user)
+    grant_integration_access(other_user)
+    config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="mock",
+        account_alias="workspace-actions-config",
+        environment=PlatformIntegrationConfig.Environment.MOCK,
+        status=PlatformIntegrationConfig.Status.ACTIVE,
+        created_by=user,
+    )
+    config.regions = ["TH"]
+    config.credential_id = "custody://workspace-actions"
+    config.credential_status = PlatformIntegrationConfig.CredentialStatus.CONFIGURED
+    with authorization_service_write():
+        config.save(update_fields=["regions", "credential_id", "credential_status", "updated_at"])
+    job = SyncJob.objects.create(
+        tenant=tenant,
+        integration_config=config,
+        resource_type=SyncJob.ResourceType.MOCK_RECORD,
+        schedule_type=SyncJob.ScheduleType.MANUAL,
+        status=SyncJob.Status.FAILED,
+    )
+    failed_run = SyncRun.objects.create(
+        tenant=tenant,
+        sync_job=job,
+        run_id="workspace-actions-failed",
+        idempotency_key="workspace-actions-failed-key",
+        status=SyncRun.Status.FAILED,
+        retry_count=0,
+        masked_log={"execution_mode": "simulation"},
+    )
+    client = authenticated_client(user)
+
+    created_config = client.post(
+        "/api/internal/integrations/workspace-configs/",
+        {"account_alias": "new-handoff-config", "platform": "shopee", "api_type": "marketplace", "environment": "sandbox", "regions": ["TH"]},
+        format="json",
+    )
+    reference = client.post(f"/api/internal/integrations/configs/{config.id}/reference-check/", {}, format="json")
+    consistency = client.post(f"/api/internal/integrations/configs/{config.id}/consistency-check/", {}, format="json")
+    updated = client.patch(
+        f"/api/internal/integrations/sync-jobs/{job.id}/",
+        {"schedule_type": "interval", "max_retry_count": 4, "backoff_base_seconds": 2, "execution_mode": "simulation"},
+        format="json",
+    )
+    retried = client.post(f"/api/internal/integrations/sync-runs/{failed_run.id}/retry/", {}, format="json")
+
+    assert created_config.status_code == 201
+    assert created_config.json()["data"]["status"] == PlatformIntegrationConfig.Status.PENDING_REVIEW
+    assert reference.status_code == 200
+    assert reference.json()["data"]["external_api_called"] is False
+    assert consistency.status_code == 200
+    assert consistency.json()["data"]["checks"]["credential_reference"] is True
+    assert updated.status_code == 200
+    assert updated.json()["data"]["max_retry_count"] == 4
+    assert retried.status_code == 201
+    assert retried.json()["data"]["retry_count"] == 1
+    assert retried.json()["data"]["masked_log"]["retry_of"] == failed_run.run_id
+    assert authenticated_client(other_user).patch(
+        f"/api/internal/integrations/sync-jobs/{job.id}/",
+        {"max_retry_count": 2},
+        format="json",
+    ).status_code == 404
 
 
 @pytest.mark.django_db

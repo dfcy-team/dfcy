@@ -1,0 +1,6063 @@
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+DROP TABLE IF EXISTS `accounts_customuser`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `accounts_customuser` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `password` varchar(128) NOT NULL,
+  `last_login` datetime(6) DEFAULT NULL,
+  `is_superuser` tinyint(1) NOT NULL,
+  `username` varchar(150) NOT NULL,
+  `email` varchar(254) NOT NULL,
+  `phone` varchar(32) NOT NULL,
+  `user_type` varchar(20) NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `is_staff` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `full_name` varchar(100) NOT NULL,
+  `uat_credential_activated_at` datetime(6) DEFAULT NULL,
+  `uat_credential_expires_at` datetime(6) DEFAULT NULL,
+  `uat_credential_batch_digest` varchar(64) NOT NULL,
+  `uat_credential_status` varchar(16) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`),
+  KEY `accounts_customuser_tenant_id_8d797110_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `accounts_customuser_tenant_id_8d797110_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=66 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `accounts_customuser_groups`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `accounts_customuser_groups` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `customuser_id` bigint NOT NULL,
+  `group_id` int NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `accounts_customuser_groups_customuser_id_group_id_c074bdcb_uniq` (`customuser_id`,`group_id`),
+  KEY `accounts_customuser_groups_group_id_86ba5f9e_fk_auth_group_id` (`group_id`),
+  CONSTRAINT `accounts_customuser__customuser_id_bc55088e_fk_accounts_` FOREIGN KEY (`customuser_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `accounts_customuser_groups_group_id_86ba5f9e_fk_auth_group_id` FOREIGN KEY (`group_id`) REFERENCES `auth_group` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `accounts_customuser_user_permissions`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `accounts_customuser_user_permissions` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `customuser_id` bigint NOT NULL,
+  `permission_id` int NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `accounts_customuser_user_customuser_id_permission_9632a709_uniq` (`customuser_id`,`permission_id`),
+  KEY `accounts_customuser__permission_id_aea3d0e5_fk_auth_perm` (`permission_id`),
+  CONSTRAINT `accounts_customuser__customuser_id_0deaefae_fk_accounts_` FOREIGN KEY (`customuser_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `accounts_customuser__permission_id_aea3d0e5_fk_auth_perm` FOREIGN KEY (`permission_id`) REFERENCES `auth_permission` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `accounts_externaluserprofile`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `accounts_externaluserprofile` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `supplier_id` bigint DEFAULT NULL,
+  `company_name` varchar(100) NOT NULL,
+  `contact_name` varchar(100) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `user_id` (`user_id`),
+  KEY `accounts_externaluse_tenant_id_bcf73167_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `accounts_externaluse_tenant_id_bcf73167_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `accounts_externaluse_user_id_3c5a94e1_fk_accounts_` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `accounts_internaluserprofile`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `accounts_internaluserprofile` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `employee_no` varchar(50) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `department_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `user_id` (`user_id`),
+  KEY `accounts_internaluse_department_id_28699c07_fk_tenants_d` (`department_id`),
+  KEY `accounts_internaluse_tenant_id_659330a8_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `accounts_internaluse_department_id_28699c07_fk_tenants_d` FOREIGN KEY (`department_id`) REFERENCES `tenants_department` (`id`),
+  CONSTRAINT `accounts_internaluse_tenant_id_659330a8_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `accounts_internaluse_user_id_446f9787_fk_accounts_` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `accounts_internaluserprofile_departments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `accounts_internaluserprofile_departments` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `internaluserprofile_id` bigint NOT NULL,
+  `department_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `accounts_internaluserpro_internaluserprofile_id_d_0a3b1f44_uniq` (`internaluserprofile_id`,`department_id`),
+  KEY `accounts_internaluse_department_id_29d2bf68_fk_tenants_d` (`department_id`),
+  CONSTRAINT `accounts_internaluse_department_id_29d2bf68_fk_tenants_d` FOREIGN KEY (`department_id`) REFERENCES `tenants_department` (`id`),
+  CONSTRAINT `accounts_internaluse_internaluserprofile__57ce781d_fk_accounts_` FOREIGN KEY (`internaluserprofile_id`) REFERENCES `accounts_internaluserprofile` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=25 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `accounts_miniappidentity`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `accounts_miniappidentity` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `provider` varchar(20) NOT NULL,
+  `subject_digest` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `last_login_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_miniapp_provider_subject` (`provider`,`subject_digest`),
+  KEY `accounts_miniappiden_user_id_459d7b35_fk_accounts_` (`user_id`),
+  CONSTRAINT `accounts_miniappiden_user_id_459d7b35_fk_accounts_` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `alerts_businessalert`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alerts_businessalert` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `business_type` varchar(80) NOT NULL,
+  `business_id` varchar(120) NOT NULL,
+  `severity` varchar(20) NOT NULL,
+  `title` varchar(200) NOT NULL,
+  `detail` json NOT NULL,
+  `metric_value` decimal(20,4) NOT NULL,
+  `threshold_value` decimal(20,4) NOT NULL,
+  `dedup_key` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `triggered_at` datetime(6) NOT NULL,
+  `silenced_until` datetime(6) DEFAULT NULL,
+  `closed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `assigned_to_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `rule_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_business_alert_dedup` (`tenant_id`,`dedup_key`),
+  KEY `idx_business_alert_state` (`tenant_id`,`status`,`severity`),
+  KEY `idx_business_alert_target` (`tenant_id`,`business_type`,`business_id`),
+  KEY `alerts_businessalert_assigned_to_id_eaec2a5e_fk_accounts_` (`assigned_to_id`),
+  KEY `alerts_businessalert_rule_id_8ada0a4e_fk_alerts_bu` (`rule_id`),
+  CONSTRAINT `alerts_businessalert_assigned_to_id_eaec2a5e_fk_accounts_` FOREIGN KEY (`assigned_to_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `alerts_businessalert_rule_id_8ada0a4e_fk_alerts_bu` FOREIGN KEY (`rule_id`) REFERENCES `alerts_businessalertrule` (`id`),
+  CONSTRAINT `alerts_businessalert_tenant_id_22f309c4_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `alerts_businessalertactionlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alerts_businessalertactionlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(30) NOT NULL,
+  `note` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint DEFAULT NULL,
+  `alert_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `alerts_businessalert_actor_id_129971fc_fk_accounts_` (`actor_id`),
+  KEY `alerts_businessalert_alert_id_2787343c_fk_alerts_bu` (`alert_id`),
+  KEY `idx_business_alert_action` (`tenant_id`,`alert_id`,`action`),
+  CONSTRAINT `alerts_businessalert_actor_id_129971fc_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `alerts_businessalert_alert_id_2787343c_fk_alerts_bu` FOREIGN KEY (`alert_id`) REFERENCES `alerts_businessalert` (`id`),
+  CONSTRAINT `alerts_businessalert_tenant_id_971d1ff2_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `alerts_businessalertrule`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alerts_businessalertrule` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `rule_code` varchar(80) NOT NULL,
+  `alert_type` varchar(40) NOT NULL,
+  `severity` varchar(20) NOT NULL,
+  `condition_config` json NOT NULL,
+  `silence_minutes` int unsigned NOT NULL,
+  `is_enabled` tinyint(1) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `effective_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_business_alert_rule_version` (`tenant_id`,`rule_code`,`version`),
+  KEY `idx_business_alert_rule` (`tenant_id`,`alert_type`,`is_enabled`),
+  CONSTRAINT `alerts_businessalertrule_tenant_id_cf023686_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `alerts_businessalertrule_chk_1` CHECK ((`silence_minutes` >= 0)),
+  CONSTRAINT `alerts_businessalertrule_chk_2` CHECK ((`version` >= 0)),
+  CONSTRAINT `business_alert_rule_version_gte_1` CHECK ((`version` >= 1))
+) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `alerts_inventoryalert`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alerts_inventoryalert` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `warehouse_code` varchar(80) NOT NULL,
+  `alert_type` varchar(30) NOT NULL,
+  `severity` varchar(20) NOT NULL,
+  `available_stock` decimal(16,4) NOT NULL,
+  `in_transit_stock` decimal(16,4) NOT NULL,
+  `average_daily_sales` decimal(16,4) DEFAULT NULL,
+  `coverage_days` decimal(12,4) DEFAULT NULL,
+  `threshold_value` decimal(12,4) NOT NULL,
+  `dedup_key` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `reason` longtext NOT NULL,
+  `source_summary` json NOT NULL,
+  `triggered_at` datetime(6) NOT NULL,
+  `silenced_until` datetime(6) DEFAULT NULL,
+  `closed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `assigned_to_id` bigint DEFAULT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `rule_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_inventory_alert_dedup` (`tenant_id`,`dedup_key`),
+  KEY `idx_inventory_alert_state` (`tenant_id`,`status`,`severity`),
+  KEY `idx_inventory_alert_sku` (`tenant_id`,`sku_id`,`alert_type`),
+  KEY `alerts_inventoryaler_assigned_to_id_257bf3e8_fk_accounts_` (`assigned_to_id`),
+  KEY `alerts_inventoryalert_sku_id_64b7c58a_fk_products_productsku_id` (`sku_id`),
+  KEY `alerts_inventoryalert_spu_id_75ed8806_fk_products_productspu_id` (`spu_id`),
+  KEY `alerts_inventoryaler_rule_id_138d14d1_fk_alerts_in` (`rule_id`),
+  CONSTRAINT `alerts_inventoryaler_assigned_to_id_257bf3e8_fk_accounts_` FOREIGN KEY (`assigned_to_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `alerts_inventoryaler_rule_id_138d14d1_fk_alerts_in` FOREIGN KEY (`rule_id`) REFERENCES `alerts_inventoryalertrule` (`id`),
+  CONSTRAINT `alerts_inventoryalert_sku_id_64b7c58a_fk_products_productsku_id` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `alerts_inventoryalert_spu_id_75ed8806_fk_products_productspu_id` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `alerts_inventoryalert_tenant_id_9e051893_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `inventory_alert_has_product` CHECK (((`spu_id` is not null) or (`sku_id` is not null)))
+) ENGINE=InnoDB AUTO_INCREMENT=15439 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `alerts_inventoryalertevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alerts_inventoryalertevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `event_type` varchar(30) NOT NULL,
+  `detail` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint DEFAULT NULL,
+  `alert_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `alerts_inventoryaler_actor_id_136453f9_fk_accounts_` (`actor_id`),
+  KEY `alerts_inventoryaler_alert_id_f09b5cfb_fk_alerts_in` (`alert_id`),
+  KEY `idx_inventory_alert_event` (`tenant_id`,`alert_id`,`event_type`),
+  CONSTRAINT `alerts_inventoryaler_actor_id_136453f9_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `alerts_inventoryaler_alert_id_f09b5cfb_fk_alerts_in` FOREIGN KEY (`alert_id`) REFERENCES `alerts_inventoryalert` (`id`),
+  CONSTRAINT `alerts_inventoryaler_tenant_id_262ded8e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `alerts_inventoryalertrule`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alerts_inventoryalertrule` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `rule_code` varchar(80) NOT NULL,
+  `alert_type` varchar(30) NOT NULL,
+  `threshold_config` json NOT NULL,
+  `severity` varchar(20) NOT NULL,
+  `silence_minutes` int unsigned NOT NULL,
+  `is_enabled` tinyint(1) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `effective_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_inventory_rule_version` (`tenant_id`,`rule_code`,`version`),
+  KEY `idx_inventory_rule_type` (`tenant_id`,`alert_type`,`is_enabled`),
+  CONSTRAINT `alerts_inventoryaler_tenant_id_f879ce93_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `alerts_inventoryalertrule_chk_1` CHECK ((`silence_minutes` >= 0)),
+  CONSTRAINT `alerts_inventoryalertrule_chk_2` CHECK ((`version` >= 0)),
+  CONSTRAINT `inventory_rule_version_gte_1` CHECK ((`version` >= 1))
+) ENGINE=InnoDB AUTO_INCREMENT=33 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `audit_approvallog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `audit_approvallog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `business_type` varchar(80) NOT NULL,
+  `business_id` varchar(100) NOT NULL,
+  `action` varchar(80) NOT NULL,
+  `status` varchar(40) NOT NULL,
+  `comment` longtext NOT NULL,
+  `before_data` json NOT NULL,
+  `after_data` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `user_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `audit_approvallog_tenant_id_39f1cdd6_fk_tenants_tenant_id` (`tenant_id`),
+  KEY `audit_approvallog_user_id_3a89ce2a_fk_accounts_customuser_id` (`user_id`),
+  CONSTRAINT `audit_approvallog_tenant_id_39f1cdd6_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `audit_approvallog_user_id_3a89ce2a_fk_accounts_customuser_id` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `audit_dataimportlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `audit_dataimportlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `import_type` varchar(80) NOT NULL,
+  `file_name` varchar(255) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `total_count` int unsigned NOT NULL,
+  `success_count` int unsigned NOT NULL,
+  `failed_count` int unsigned NOT NULL,
+  `error_summary` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `created_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `audit_dataimportlog_created_by_id_aaf710ae_fk_accounts_` (`created_by_id`),
+  KEY `audit_dataimportlog_tenant_id_d91c3924_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `audit_dataimportlog_created_by_id_aaf710ae_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `audit_dataimportlog_tenant_id_d91c3924_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `audit_dataimportlog_chk_1` CHECK ((`total_count` >= 0)),
+  CONSTRAINT `audit_dataimportlog_chk_2` CHECK ((`success_count` >= 0)),
+  CONSTRAINT `audit_dataimportlog_chk_3` CHECK ((`failed_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `audit_notificationmessage`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `audit_notificationmessage` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `title` varchar(200) NOT NULL,
+  `message` longtext NOT NULL,
+  `message_type` varchar(60) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `read_at` datetime(6) DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `audit_notificationme_tenant_id_112c211c_fk_tenants_t` (`tenant_id`),
+  KEY `audit_notificationme_user_id_2a5c7afd_fk_accounts_` (`user_id`),
+  CONSTRAINT `audit_notificationme_tenant_id_112c211c_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `audit_notificationme_user_id_2a5c7afd_fk_accounts_` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `audit_operationlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `audit_operationlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `module` varchar(80) NOT NULL,
+  `action` varchar(80) NOT NULL,
+  `object_type` varchar(100) NOT NULL,
+  `object_id` varchar(100) NOT NULL,
+  `before_data` json NOT NULL,
+  `after_data` json NOT NULL,
+  `ip_address` char(39) DEFAULT NULL,
+  `user_agent` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `user_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `audit_operationlog_user_id_f4641ac3_fk_accounts_customuser_id` (`user_id`),
+  KEY `idx_operation_log_action` (`tenant_id`,`module`,`action`),
+  KEY `idx_operation_log_object` (`object_type`,`object_id`),
+  CONSTRAINT `audit_operationlog_tenant_id_08976177_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `audit_operationlog_user_id_f4641ac3_fk_accounts_customuser_id` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=85 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `audit_systemexceptionlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `audit_systemexceptionlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `module` varchar(80) NOT NULL,
+  `exception_type` varchar(120) NOT NULL,
+  `message` longtext NOT NULL,
+  `traceback` longtext NOT NULL,
+  `context` json NOT NULL,
+  `severity` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tenant_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `audit_systemexceptionlog_tenant_id_3b757de4_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `audit_systemexceptionlog_tenant_id_3b757de4_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `auth_group`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `auth_group` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(150) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `auth_group_permissions`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `auth_group_permissions` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `group_id` int NOT NULL,
+  `permission_id` int NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `auth_group_permissions_group_id_permission_id_0cd325b0_uniq` (`group_id`,`permission_id`),
+  KEY `auth_group_permissio_permission_id_84c5c92e_fk_auth_perm` (`permission_id`),
+  CONSTRAINT `auth_group_permissio_permission_id_84c5c92e_fk_auth_perm` FOREIGN KEY (`permission_id`) REFERENCES `auth_permission` (`id`),
+  CONSTRAINT `auth_group_permissions_group_id_b120cbf9_fk_auth_group_id` FOREIGN KEY (`group_id`) REFERENCES `auth_group` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `auth_permission`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `auth_permission` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `content_type_id` int NOT NULL,
+  `codename` varchar(100) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `auth_permission_content_type_id_codename_01ab375a_uniq` (`content_type_id`,`codename`),
+  CONSTRAINT `auth_permission_content_type_id_2f476e4b_fk_django_co` FOREIGN KEY (`content_type_id`) REFERENCES `django_content_type` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=801 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `configcenter_configchangelog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `configcenter_configchangelog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `config_key` varchar(120) NOT NULL,
+  `scope_key` varchar(80) NOT NULL,
+  `from_version` int unsigned DEFAULT NULL,
+  `to_version` int unsigned NOT NULL,
+  `action` varchar(30) NOT NULL,
+  `masked_detail` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `configcenter_configc_actor_id_cb8fbc1e_fk_accounts_` (`actor_id`),
+  KEY `configcenter_configc_tenant_id_21f6d56e_fk_tenants_t` (`tenant_id`),
+  KEY `idx_config_change_log` (`scope_key`,`config_key`,`created_at`),
+  CONSTRAINT `configcenter_configc_actor_id_cb8fbc1e_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `configcenter_configc_tenant_id_21f6d56e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `configcenter_configchangelog_chk_1` CHECK ((`from_version` >= 0)),
+  CONSTRAINT `configcenter_configchangelog_chk_2` CHECK ((`to_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `configcenter_systemconfigdefinition`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `configcenter_systemconfigdefinition` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `config_key` varchar(120) NOT NULL,
+  `scope_type` varchar(20) NOT NULL,
+  `value_type` varchar(20) NOT NULL,
+  `default_value` json DEFAULT NULL,
+  `is_sensitive` tinyint(1) NOT NULL,
+  `requires_approval` tinyint(1) NOT NULL,
+  `description` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `config_key` (`config_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `configcenter_tenantconfigversion`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `configcenter_tenantconfigversion` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `config_key` varchar(120) NOT NULL,
+  `scope_key` varchar(80) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `value` json NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `effective_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `approved_by_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `definition_id` bigint NOT NULL,
+  `tenant_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_config_scope_version` (`scope_key`,`config_key`,`version`),
+  KEY `configcenter_tenantc_approved_by_id_18343d01_fk_accounts_` (`approved_by_id`),
+  KEY `configcenter_tenantc_created_by_id_c748fbb8_fk_accounts_` (`created_by_id`),
+  KEY `configcenter_tenantc_definition_id_a59354fa_fk_configcen` (`definition_id`),
+  KEY `idx_config_scope_status` (`scope_key`,`config_key`,`status`),
+  KEY `idx_tenant_config_effective` (`tenant_id`,`status`,`effective_at`),
+  CONSTRAINT `configcenter_tenantc_approved_by_id_18343d01_fk_accounts_` FOREIGN KEY (`approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `configcenter_tenantc_created_by_id_c748fbb8_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `configcenter_tenantc_definition_id_a59354fa_fk_configcen` FOREIGN KEY (`definition_id`) REFERENCES `configcenter_systemconfigdefinition` (`id`),
+  CONSTRAINT `configcenter_tenantc_tenant_id_4b640a28_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `config_version_gte_1` CHECK ((`version` >= 1)),
+  CONSTRAINT `configcenter_tenantconfigversion_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `consolidation_consolidationboxallocation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `consolidation_consolidationboxallocation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `supplier_id_snapshot` bigint unsigned DEFAULT NULL,
+  `order_id_snapshot` bigint unsigned DEFAULT NULL,
+  `order_no_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `batch_id_snapshot` bigint unsigned DEFAULT NULL,
+  `batch_no_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `box_no_snapshot` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity_snapshot` bigint unsigned NOT NULL,
+  `weight_snapshot` decimal(12,3) DEFAULT NULL,
+  `volume_snapshot` decimal(12,6) DEFAULT NULL,
+  `snapshot` json NOT NULL,
+  `state` varchar(24) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `version` int unsigned NOT NULL,
+  `handover_method` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `handover_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `handover_evidence_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `submitted_at` datetime(6) DEFAULT NULL,
+  `received_at` datetime(6) DEFAULT NULL,
+  `exception_code` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `exception_note` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `released_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `box_id` bigint NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `packing_box_consumption_id` bigint NOT NULL,
+  `received_by_id` bigint DEFAULT NULL,
+  `submitted_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `consolidation_id` bigint NOT NULL,
+  `order_ids_snapshot` json NOT NULL DEFAULT (_utf8mb4'[]'),
+  `order_nos_snapshot` json NOT NULL DEFAULT (_utf8mb4'[]'),
+  `evidence_ids` json NOT NULL DEFAULT (_utf8mb4'[]'),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_consolidation_box` (`consolidation_id`,`box_id`),
+  KEY `idx_consolidation_box_state` (`tenant_id`,`box_id`,`state`),
+  KEY `consolidation_consol_box_id_1d0b10e1_fk_packing_p` (`box_id`),
+  KEY `consolidation_consol_created_by_id_9058ab6c_fk_accounts_` (`created_by_id`),
+  KEY `consolidation_consol_packing_box_consumpt_e0b71d49_fk_packing_p` (`packing_box_consumption_id`),
+  KEY `consolidation_consol_received_by_id_ebd4c9bf_fk_accounts_` (`received_by_id`),
+  KEY `consolidation_consol_submitted_by_id_d52e0a13_fk_accounts_` (`submitted_by_id`),
+  CONSTRAINT `consolidation_consol_box_id_1d0b10e1_fk_packing_p` FOREIGN KEY (`box_id`) REFERENCES `packing_packingbox` (`id`),
+  CONSTRAINT `consolidation_consol_consolidation_id_7469354e_fk_consolida` FOREIGN KEY (`consolidation_id`) REFERENCES `consolidation_loosecargoconsolidation` (`id`),
+  CONSTRAINT `consolidation_consol_created_by_id_9058ab6c_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_consol_packing_box_consumpt_e0b71d49_fk_packing_p` FOREIGN KEY (`packing_box_consumption_id`) REFERENCES `packing_packingboxconsumption` (`id`),
+  CONSTRAINT `consolidation_consol_received_by_id_ebd4c9bf_fk_accounts_` FOREIGN KEY (`received_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_consol_submitted_by_id_d52e0a13_fk_accounts_` FOREIGN KEY (`submitted_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_consol_tenant_id_c5fcda8e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `consolidation_allocation_qty_gt_zero` CHECK ((`quantity_snapshot` > 0)),
+  CONSTRAINT `consolidation_allocation_version_gt_zero` CHECK ((`version` > 0)),
+  CONSTRAINT `consolidation_consolidationboxallocation_chk_1` CHECK ((`supplier_id_snapshot` >= 0)),
+  CONSTRAINT `consolidation_consolidationboxallocation_chk_2` CHECK ((`order_id_snapshot` >= 0)),
+  CONSTRAINT `consolidation_consolidationboxallocation_chk_3` CHECK ((`batch_id_snapshot` >= 0)),
+  CONSTRAINT `consolidation_consolidationboxallocation_chk_4` CHECK ((`quantity_snapshot` >= 0)),
+  CONSTRAINT `consolidation_consolidationboxallocation_chk_5` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `consolidation_consolidationevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `consolidation_consolidationevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `channel` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before` json NOT NULL,
+  `after` json NOT NULL,
+  `reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `evidence_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `expected_version` int unsigned DEFAULT NULL,
+  `source_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_version` int unsigned DEFAULT NULL,
+  `occurred_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `allocation_id` bigint DEFAULT NULL,
+  `box_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `site_id` bigint DEFAULT NULL,
+  `consolidation_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_consolidation_event_key` (`tenant_id`,`idempotency_key`),
+  KEY `idx_consolidation_event_action` (`tenant_id`,`consolidation_id`,`action`,`created_at`),
+  KEY `idx_consolidation_event_source` (`tenant_id`,`source_type`,`source_id`,`source_version`),
+  KEY `consolidation_consol_actor_id_12800177_fk_accounts_` (`actor_id`),
+  KEY `consolidation_consol_allocation_id_cf3417ec_fk_consolida` (`allocation_id`),
+  KEY `consolidation_consol_box_id_cc88725e_fk_packing_p` (`box_id`),
+  KEY `consolidation_consol_site_id_80b1c93b_fk_consolida` (`site_id`),
+  KEY `consolidation_consol_consolidation_id_88707771_fk_consolida` (`consolidation_id`),
+  CONSTRAINT `consolidation_consol_actor_id_12800177_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_consol_allocation_id_cf3417ec_fk_consolida` FOREIGN KEY (`allocation_id`) REFERENCES `consolidation_consolidationboxallocation` (`id`),
+  CONSTRAINT `consolidation_consol_box_id_cc88725e_fk_packing_p` FOREIGN KEY (`box_id`) REFERENCES `packing_packingbox` (`id`),
+  CONSTRAINT `consolidation_consol_consolidation_id_88707771_fk_consolida` FOREIGN KEY (`consolidation_id`) REFERENCES `consolidation_loosecargoconsolidation` (`id`),
+  CONSTRAINT `consolidation_consol_site_id_80b1c93b_fk_consolida` FOREIGN KEY (`site_id`) REFERENCES `consolidation_consolidationsite` (`id`),
+  CONSTRAINT `consolidation_consol_tenant_id_ff5845eb_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `consolidation_consolidationevent_chk_1` CHECK ((`expected_version` >= 0)),
+  CONSTRAINT `consolidation_consolidationevent_chk_2` CHECK ((`source_version` >= 0)),
+  CONSTRAINT `consolidation_event_hash_hex` CHECK (regexp_like(`request_hash`,_utf8mb4'^[0-9a-fA-F]{64}$',_utf8mb4'c'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `consolidation_consolidationsite`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `consolidation_consolidationsite` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `site_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `region_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `country_code` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `province_state` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `city` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `district` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `address_line` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `postal_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `timezone` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `contact_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `contact_phone` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `delivery_instructions` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `effective_from` datetime(6) DEFAULT NULL,
+  `effective_to` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `updated_by_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_consolidation_site_code` (`tenant_id`,`site_code`),
+  KEY `idx_consolidation_site_scope` (`tenant_id`,`region_code`,`is_active`),
+  KEY `consolidation_consol_created_by_id_c879a355_fk_accounts_` (`created_by_id`),
+  KEY `consolidation_consol_updated_by_id_5be476ef_fk_accounts_` (`updated_by_id`),
+  CONSTRAINT `consolidation_consol_created_by_id_c879a355_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_consol_tenant_id_90bf3044_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `consolidation_consol_updated_by_id_5be476ef_fk_accounts_` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_consolidationsite_chk_1` CHECK ((`version` >= 0)),
+  CONSTRAINT `consolidation_site_version_gt_zero` CHECK ((`version` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `consolidation_consolidationsuppliercapability`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `consolidation_consolidationsuppliercapability` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `can_submit_handover` tinyint(1) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `supplier_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `updated_by_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_consolidation_supplier_capability` (`tenant_id`,`supplier_id`),
+  KEY `consolidation_consol_created_by_id_e03c9b42_fk_accounts_` (`created_by_id`),
+  KEY `consolidation_consol_supplier_id_e0f3c90a_fk_masterdat` (`supplier_id`),
+  KEY `consolidation_consol_updated_by_id_955e46fe_fk_accounts_` (`updated_by_id`),
+  CONSTRAINT `consolidation_consol_created_by_id_e03c9b42_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_consol_supplier_id_e0f3c90a_fk_masterdat` FOREIGN KEY (`supplier_id`) REFERENCES `masterdata_suppliermaster` (`id`),
+  CONSTRAINT `consolidation_consol_tenant_id_5bc36073_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `consolidation_consol_updated_by_id_955e46fe_fk_accounts_` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_capability_version_gt_zero` CHECK ((`version` > 0)),
+  CONSTRAINT `consolidation_consolidationsuppliercapability_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `consolidation_loosecargoconsolidation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `consolidation_loosecargoconsolidation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `consolidation_no` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `region_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_code_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_name_snapshot` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_region_code_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_country_code_snapshot` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_province_state_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_city_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_district_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_address_line_snapshot` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_postal_code_snapshot` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_timezone_snapshot` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_contact_name_snapshot` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_contact_phone_snapshot` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_delivery_instructions_snapshot` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_snapshot` json NOT NULL,
+  `collection_cutoff_at` datetime(6) DEFAULT NULL,
+  `expected_dispatch_at` datetime(6) DEFAULT NULL,
+  `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `version` int unsigned NOT NULL,
+  `note` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_forwarder_ref` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_groupage_ref` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `release_site_snapshot` json NOT NULL,
+  `release_allocation_snapshot` json NOT NULL,
+  `released_at` datetime(6) DEFAULT NULL,
+  `ready_at` datetime(6) DEFAULT NULL,
+  `cancelled_at` datetime(6) DEFAULT NULL,
+  `cancelled_reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `cancelled_by_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `ready_by_id` bigint DEFAULT NULL,
+  `released_by_id` bigint DEFAULT NULL,
+  `site_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_consolidation_no_tenant` (`tenant_id`,`consolidation_no`),
+  KEY `idx_consolidation_scope` (`tenant_id`,`region_code`,`status`),
+  KEY `consolidation_loosec_cancelled_by_id_b75c4346_fk_accounts_` (`cancelled_by_id`),
+  KEY `consolidation_loosec_created_by_id_5d0f0df7_fk_accounts_` (`created_by_id`),
+  KEY `consolidation_loosec_ready_by_id_682535d7_fk_accounts_` (`ready_by_id`),
+  KEY `consolidation_loosec_released_by_id_d313f564_fk_accounts_` (`released_by_id`),
+  KEY `consolidation_loosec_site_id_b0667025_fk_consolida` (`site_id`),
+  CONSTRAINT `consolidation_loosec_cancelled_by_id_b75c4346_fk_accounts_` FOREIGN KEY (`cancelled_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_loosec_created_by_id_5d0f0df7_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_loosec_ready_by_id_682535d7_fk_accounts_` FOREIGN KEY (`ready_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_loosec_released_by_id_d313f564_fk_accounts_` FOREIGN KEY (`released_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `consolidation_loosec_site_id_b0667025_fk_consolida` FOREIGN KEY (`site_id`) REFERENCES `consolidation_consolidationsite` (`id`),
+  CONSTRAINT `consolidation_loosec_tenant_id_cc4eec73_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `consolidation_loosecargoconsolidation_chk_1` CHECK ((`version` >= 0)),
+  CONSTRAINT `consolidation_version_gt_zero` CHECK ((`version` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentcostestimate`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentcostestimate` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `site` varchar(40) NOT NULL,
+  `material_cost` decimal(12,2) NOT NULL,
+  `processing_fee` decimal(12,2) NOT NULL,
+  `packaging_cost` decimal(12,2) NOT NULL,
+  `first_leg_shipping` decimal(12,2) NOT NULL,
+  `platform_commission_rate` decimal(7,4) NOT NULL,
+  `tariff_rate` decimal(7,4) NOT NULL,
+  `other_cost` decimal(12,2) NOT NULL,
+  `total_cost` decimal(12,2) NOT NULL,
+  `target_selling_price` decimal(12,2) NOT NULL,
+  `estimated_margin` decimal(12,2) NOT NULL,
+  `estimated_margin_rate` decimal(7,4) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `approved_by_id` bigint DEFAULT NULL,
+  `project_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_dev_cost_version` (`project_id`,`site`,`version`),
+  KEY `development_developm_approved_by_id_6612b4e5_fk_accounts_` (`approved_by_id`),
+  CONSTRAINT `development_developm_approved_by_id_6612b4e5_fk_accounts_` FOREIGN KEY (`approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_project_id_185437ac_fk_developme` FOREIGN KEY (`project_id`) REFERENCES `development_developmentproject` (`id`),
+  CONSTRAINT `development_developmentcostestimate_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentperformancereview`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentperformancereview` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `review_period` varchar(40) NOT NULL,
+  `review_date` date NOT NULL,
+  `actual_sales_qty` int unsigned NOT NULL,
+  `estimated_sales_qty` int unsigned NOT NULL,
+  `hit_rate` decimal(9,4) DEFAULT NULL,
+  `actual_margin_rate` decimal(7,4) DEFAULT NULL,
+  `estimated_margin_rate` decimal(7,4) DEFAULT NULL,
+  `margin_deviation` decimal(7,4) DEFAULT NULL,
+  `conclusion` varchar(20) NOT NULL,
+  `failure_reason` longtext NOT NULL,
+  `lessons_learned` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `product_id` bigint NOT NULL,
+  `requirement_id` bigint DEFAULT NULL,
+  `reviewed_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `project_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_dev_review_period` (`project_id`,`review_period`),
+  KEY `development_developm_product_id_74ea26a9_fk_products_` (`product_id`),
+  KEY `development_developm_requirement_id_356e6638_fk_products_` (`requirement_id`),
+  KEY `development_developm_reviewed_by_id_eae39461_fk_accounts_` (`reviewed_by_id`),
+  KEY `development_developm_tenant_id_ef2c6a81_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `development_developm_product_id_74ea26a9_fk_products_` FOREIGN KEY (`product_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `development_developm_project_id_2c5d58fd_fk_developme` FOREIGN KEY (`project_id`) REFERENCES `development_developmentproject` (`id`),
+  CONSTRAINT `development_developm_requirement_id_356e6638_fk_products_` FOREIGN KEY (`requirement_id`) REFERENCES `products_productresearch` (`id`),
+  CONSTRAINT `development_developm_reviewed_by_id_eae39461_fk_accounts_` FOREIGN KEY (`reviewed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_tenant_id_ef2c6a81_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `development_developmentperformancereview_chk_1` CHECK ((`actual_sales_qty` >= 0)),
+  CONSTRAINT `development_developmentperformancereview_chk_2` CHECK ((`estimated_sales_qty` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentproductarchive`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentproductarchive` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `archive_no` varchar(80) NOT NULL,
+  `product_name` varchar(200) NOT NULL,
+  `category` varchar(120) NOT NULL,
+  `platform` varchar(50) NOT NULL,
+  `site` varchar(40) NOT NULL,
+  `inventory_mode` varchar(20) NOT NULL,
+  `virtual_inventory_sku` varchar(100) NOT NULL,
+  `virtual_inventory_qty` int unsigned NOT NULL,
+  `test_result` varchar(20) NOT NULL,
+  `test_notes` longtext NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `trial_confirmed_at` datetime(6) DEFAULT NULL,
+  `formalized_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `category_node_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `formal_product_id` bigint DEFAULT NULL,
+  `formalized_by_id` bigint DEFAULT NULL,
+  `project_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `trial_confirmed_by_id` bigint DEFAULT NULL,
+  `updated_by_id` bigint DEFAULT NULL,
+  `platform_master_id` bigint DEFAULT NULL,
+  `store_master_id` bigint DEFAULT NULL,
+  `trial_product_id` bigint DEFAULT NULL,
+  `trial_sku_id` bigint DEFAULT NULL,
+  `development_spu_code` varchar(80) NOT NULL,
+  `season_code` varchar(1) NOT NULL,
+  `formal_sku_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `project_id` (`project_id`),
+  UNIQUE KEY `uniq_dev_product_archive_no` (`tenant_id`,`archive_no`),
+  UNIQUE KEY `formal_product_id` (`formal_product_id`),
+  KEY `idx_dev_product_archive_status` (`tenant_id`,`status`),
+  KEY `idx_dev_product_archive_market` (`tenant_id`,`platform`,`site`),
+  KEY `development_developm_category_node_id_e9269840_fk_products_` (`category_node_id`),
+  KEY `development_developm_created_by_id_7a8bfbae_fk_accounts_` (`created_by_id`),
+  KEY `development_developm_formalized_by_id_1f4fd534_fk_accounts_` (`formalized_by_id`),
+  KEY `development_developm_trial_confirmed_by_i_18126b93_fk_accounts_` (`trial_confirmed_by_id`),
+  KEY `development_developm_updated_by_id_581fad07_fk_accounts_` (`updated_by_id`),
+  KEY `development_developm_platform_master_id_ebee5167_fk_masterdat` (`platform_master_id`),
+  KEY `development_developm_store_master_id_60ea9ae1_fk_masterdat` (`store_master_id`),
+  KEY `development_developm_trial_product_id_bfa6cbd1_fk_products_` (`trial_product_id`),
+  KEY `development_developm_trial_sku_id_15f008c8_fk_products_` (`trial_sku_id`),
+  KEY `idx_dev_archive_platform_ref` (`tenant_id`,`platform_master_id`),
+  KEY `idx_dev_archive_store_ref` (`tenant_id`,`store_master_id`),
+  KEY `development_developm_formal_sku_id_31802ff6_fk_products_` (`formal_sku_id`),
+  CONSTRAINT `development_developm_category_node_id_e9269840_fk_products_` FOREIGN KEY (`category_node_id`) REFERENCES `products_productcategory` (`id`),
+  CONSTRAINT `development_developm_created_by_id_7a8bfbae_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_formal_product_id_eaddae0d_fk_products_` FOREIGN KEY (`formal_product_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `development_developm_formal_sku_id_31802ff6_fk_products_` FOREIGN KEY (`formal_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `development_developm_formalized_by_id_1f4fd534_fk_accounts_` FOREIGN KEY (`formalized_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_platform_master_id_ebee5167_fk_masterdat` FOREIGN KEY (`platform_master_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `development_developm_project_id_9b30f1bf_fk_developme` FOREIGN KEY (`project_id`) REFERENCES `development_developmentproject` (`id`),
+  CONSTRAINT `development_developm_store_master_id_60ea9ae1_fk_masterdat` FOREIGN KEY (`store_master_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `development_developm_tenant_id_0ea81442_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `development_developm_trial_confirmed_by_i_18126b93_fk_accounts_` FOREIGN KEY (`trial_confirmed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_trial_product_id_bfa6cbd1_fk_products_` FOREIGN KEY (`trial_product_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `development_developm_trial_sku_id_15f008c8_fk_products_` FOREIGN KEY (`trial_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `development_developm_updated_by_id_581fad07_fk_accounts_` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developmentproductarchive_chk_1` CHECK ((`virtual_inventory_qty` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentproductarchiveevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentproductarchiveevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(40) NOT NULL,
+  `from_status` varchar(20) NOT NULL,
+  `to_status` varchar(20) NOT NULL,
+  `metadata` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `archive_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_dev_product_archive_event` (`tenant_id`,`archive_id`,`created_at`),
+  KEY `development_developm_actor_id_73ec7126_fk_accounts_` (`actor_id`),
+  KEY `development_developm_archive_id_7fab3525_fk_developme` (`archive_id`),
+  CONSTRAINT `development_developm_actor_id_73ec7126_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_archive_id_7fab3525_fk_developme` FOREIGN KEY (`archive_id`) REFERENCES `development_developmentproductarchive` (`id`),
+  CONSTRAINT `development_developm_tenant_id_81b6658c_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentproject`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentproject` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `project_no` varchar(80) NOT NULL,
+  `development_source` varchar(30) NOT NULL,
+  `product_name` varchar(200) NOT NULL,
+  `category` varchar(120) NOT NULL,
+  `target_sites` json NOT NULL,
+  `stage` varchar(20) NOT NULL,
+  `target_purchase_price` decimal(12,2) DEFAULT NULL,
+  `estimated_margin_rate` decimal(7,4) DEFAULT NULL,
+  `planned_launch_date` date DEFAULT NULL,
+  `actual_launch_date` date DEFAULT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `assigned_to_id` bigint NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `finalized_product_id` bigint DEFAULT NULL,
+  `requirement_id` bigint DEFAULT NULL,
+  `supplier_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `category_node_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_dev_project_no_tenant` (`tenant_id`,`project_no`),
+  KEY `idx_dev_project_stage` (`tenant_id`,`stage`,`status`),
+  KEY `idx_dev_project_owner` (`tenant_id`,`assigned_to_id`),
+  KEY `development_developm_assigned_to_id_d6040e98_fk_accounts_` (`assigned_to_id`),
+  KEY `development_developm_created_by_id_27d9e60e_fk_accounts_` (`created_by_id`),
+  KEY `development_developm_finalized_product_id_dcc489db_fk_products_` (`finalized_product_id`),
+  KEY `development_developm_requirement_id_11c601e2_fk_products_` (`requirement_id`),
+  KEY `development_developm_supplier_id_db539646_fk_masterdat` (`supplier_id`),
+  KEY `development_developm_category_node_id_07835eab_fk_products_` (`category_node_id`),
+  CONSTRAINT `development_developm_assigned_to_id_d6040e98_fk_accounts_` FOREIGN KEY (`assigned_to_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_category_node_id_07835eab_fk_products_` FOREIGN KEY (`category_node_id`) REFERENCES `products_productcategory` (`id`),
+  CONSTRAINT `development_developm_created_by_id_27d9e60e_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_finalized_product_id_dcc489db_fk_products_` FOREIGN KEY (`finalized_product_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `development_developm_requirement_id_11c601e2_fk_products_` FOREIGN KEY (`requirement_id`) REFERENCES `products_productresearch` (`id`),
+  CONSTRAINT `development_developm_supplier_id_db539646_fk_masterdat` FOREIGN KEY (`supplier_id`) REFERENCES `masterdata_suppliermaster` (`id`),
+  CONSTRAINT `development_developm_tenant_id_d452fcac_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentprojectstage`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentprojectstage` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `stage` varchar(20) NOT NULL,
+  `entered_at` datetime(6) NOT NULL,
+  `completed_at` datetime(6) DEFAULT NULL,
+  `deliverables` json NOT NULL,
+  `approval_notes` longtext NOT NULL,
+  `approved_by_id` bigint DEFAULT NULL,
+  `project_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_dev_stage_project` (`project_id`,`stage`),
+  KEY `development_developm_approved_by_id_e779f73b_fk_accounts_` (`approved_by_id`),
+  CONSTRAINT `development_developm_approved_by_id_e779f73b_fk_accounts_` FOREIGN KEY (`approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_project_id_a88fb8e7_fk_developme` FOREIGN KEY (`project_id`) REFERENCES `development_developmentproject` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentrequirementchangelog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentrequirementchangelog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `changed_at` datetime(6) NOT NULL,
+  `change_type` varchar(30) NOT NULL,
+  `field_name` varchar(80) NOT NULL,
+  `old_value` longtext NOT NULL,
+  `new_value` longtext NOT NULL,
+  `changed_by_id` bigint NOT NULL,
+  `requirement_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_dev_req_change` (`requirement_id`,`changed_at`),
+  KEY `development_developm_changed_by_id_6cefe7d8_fk_accounts_` (`changed_by_id`),
+  CONSTRAINT `development_developm_changed_by_id_6cefe7d8_fk_accounts_` FOREIGN KEY (`changed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_requirement_id_cd999aff_fk_products_` FOREIGN KEY (`requirement_id`) REFERENCES `products_productresearch` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentrequirementcompetitorlink`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentrequirementcompetitorlink` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_report_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `task_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_title` varchar(300) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `relation_type` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_primary` tinyint(1) NOT NULL,
+  `reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `report_completed_at` datetime(6) NOT NULL,
+  `data_updated_at` datetime(6) NOT NULL,
+  `decision_snapshot` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `requirement_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_dev_req_competitor_report` (`tenant_id`,`requirement_id`,`external_report_id`),
+  KEY `development_developm_created_by_id_530edea1_fk_accounts_` (`created_by_id`),
+  KEY `development_developm_requirement_id_654ca927_fk_products_` (`requirement_id`),
+  KEY `idx_dev_comp_req` (`tenant_id`,`requirement_id`),
+  KEY `idx_dev_comp_report` (`tenant_id`,`external_report_id`),
+  KEY `idx_dev_comp_market` (`tenant_id`,`platform`,`site`),
+  CONSTRAINT `development_developm_created_by_id_530edea1_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `development_developm_requirement_id_654ca927_fk_products_` FOREIGN KEY (`requirement_id`) REFERENCES `products_productresearch` (`id`),
+  CONSTRAINT `development_developm_tenant_id_daf7b496_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_developmentsample`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_developmentsample` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `sample_no` varchar(80) NOT NULL,
+  `sent_date` date DEFAULT NULL,
+  `received_date` date DEFAULT NULL,
+  `evaluation_result` varchar(20) NOT NULL,
+  `evaluation_notes` longtext NOT NULL,
+  `photos` json NOT NULL,
+  `unit_price_quoted` decimal(12,2) DEFAULT NULL,
+  `moq` int unsigned DEFAULT NULL,
+  `lead_time_days` int unsigned DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `project_id` bigint NOT NULL,
+  `supplier_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_dev_sample_no` (`project_id`,`sample_no`),
+  KEY `development_developm_supplier_id_c610b5de_fk_masterdat` (`supplier_id`),
+  CONSTRAINT `development_developm_project_id_514c2431_fk_developme` FOREIGN KEY (`project_id`) REFERENCES `development_developmentproject` (`id`),
+  CONSTRAINT `development_developm_supplier_id_c610b5de_fk_masterdat` FOREIGN KEY (`supplier_id`) REFERENCES `masterdata_suppliermaster` (`id`),
+  CONSTRAINT `development_developmentsample_chk_1` CHECK ((`moq` >= 0)),
+  CONSTRAINT `development_developmentsample_chk_2` CHECK ((`lead_time_days` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `development_productsalessnapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `development_productsalessnapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `site` varchar(40) NOT NULL,
+  `platform` varchar(30) NOT NULL,
+  `snapshot_date` date NOT NULL,
+  `daily_sales_qty` int unsigned NOT NULL,
+  `daily_sales_amount` decimal(14,2) NOT NULL,
+  `daily_sales_amount_usd` decimal(14,2) NOT NULL,
+  `cumulative_sales_qty` int unsigned NOT NULL,
+  `cumulative_sales_amount_usd` decimal(14,2) NOT NULL,
+  `current_price` decimal(12,2) DEFAULT NULL,
+  `category_rank` int unsigned DEFAULT NULL,
+  `review_count` int unsigned NOT NULL,
+  `rating` decimal(3,2) DEFAULT NULL,
+  `ad_spend` decimal(14,2) NOT NULL,
+  `data_source` varchar(30) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `product_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sales_snapshot_day` (`tenant_id`,`product_id`,`site`,`snapshot_date`),
+  KEY `idx_sales_snapshot_date` (`tenant_id`,`snapshot_date`),
+  KEY `development_products_product_id_05f860a7_fk_products_` (`product_id`),
+  CONSTRAINT `development_products_product_id_05f860a7_fk_products_` FOREIGN KEY (`product_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `development_products_tenant_id_1cd20831_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `development_productsalessnapshot_chk_1` CHECK ((`daily_sales_qty` >= 0)),
+  CONSTRAINT `development_productsalessnapshot_chk_2` CHECK ((`cumulative_sales_qty` >= 0)),
+  CONSTRAINT `development_productsalessnapshot_chk_3` CHECK ((`category_rank` >= 0)),
+  CONSTRAINT `development_productsalessnapshot_chk_4` CHECK ((`review_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `django_admin_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `django_admin_log` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `action_time` datetime(6) NOT NULL,
+  `object_id` longtext,
+  `object_repr` varchar(200) NOT NULL,
+  `action_flag` smallint unsigned NOT NULL,
+  `change_message` longtext NOT NULL,
+  `content_type_id` int DEFAULT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `django_admin_log_content_type_id_c4bce8eb_fk_django_co` (`content_type_id`),
+  KEY `django_admin_log_user_id_c564eba6_fk_accounts_customuser_id` (`user_id`),
+  CONSTRAINT `django_admin_log_content_type_id_c4bce8eb_fk_django_co` FOREIGN KEY (`content_type_id`) REFERENCES `django_content_type` (`id`),
+  CONSTRAINT `django_admin_log_user_id_c564eba6_fk_accounts_customuser_id` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `django_admin_log_chk_1` CHECK ((`action_flag` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `django_content_type`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `django_content_type` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `app_label` varchar(100) NOT NULL,
+  `model` varchar(100) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `django_content_type_app_label_model_76bd3d3b_uniq` (`app_label`,`model`)
+) ENGINE=InnoDB AUTO_INCREMENT=201 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `django_migrations`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `django_migrations` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `app` varchar(255) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `applied` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=177 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `django_session`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `django_session` (
+  `session_key` varchar(40) NOT NULL,
+  `session_data` longtext NOT NULL,
+  `expire_date` datetime(6) NOT NULL,
+  PRIMARY KEY (`session_key`),
+  KEY `django_session_expire_date_a5c62663` (`expire_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `files_attachmentfile`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `files_attachmentfile` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `file_name` varchar(255) NOT NULL,
+  `file_path` varchar(500) NOT NULL,
+  `file_type` varchar(100) NOT NULL,
+  `file_size` bigint unsigned NOT NULL,
+  `business_type` varchar(80) NOT NULL,
+  `business_id` varchar(100) NOT NULL,
+  `is_private` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `uploaded_by_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `files_attachmentfile_uploaded_by_id_2503e704_fk_accounts_` (`uploaded_by_id`),
+  KEY `idx_attachment_business` (`tenant_id`,`business_type`,`business_id`),
+  CONSTRAINT `files_attachmentfile_tenant_id_545ee58c_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `files_attachmentfile_uploaded_by_id_2503e704_fk_accounts_` FOREIGN KEY (`uploaded_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `files_attachmentfile_chk_1` CHECK ((`file_size` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `files_attachmentuploadsession`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `files_attachmentuploadsession` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `upload_token_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `storage_key` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `state` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `expires_at` datetime(6) NOT NULL,
+  `created_by_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_by_id` bigint unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `attachment_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_attachment_upload_session_key` (`tenant_id`,`idempotency_key`),
+  UNIQUE KEY `uniq_attachment_upload_session_storage_key` (`storage_key`),
+  KEY `files_attachmentuplo_attachment_id_feda48f0_fk_files_con` (`attachment_id`),
+  CONSTRAINT `files_attachmentuplo_attachment_id_feda48f0_fk_files_con` FOREIGN KEY (`attachment_id`) REFERENCES `files_controlledattachment` (`id`),
+  CONSTRAINT `files_attachmentuplo_tenant_id_3f73e15e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `files_attachmentuploadsession_chk_1` CHECK ((`created_by_id` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `files_controlledattachment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `files_controlledattachment` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `attachment_no` varchar(96) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `owner_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `owner_id` bigint unsigned NOT NULL,
+  `business_type` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `business_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `business_version` int unsigned NOT NULL,
+  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `extension` varchar(12) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `media_type` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `byte_size` bigint unsigned NOT NULL,
+  `sha256` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `storage_key` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `state` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `scan_status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `scan_engine` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `scan_engine_version` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `scanned_at` datetime(6) DEFAULT NULL,
+  `rejection_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_by_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_by_id` bigint unsigned NOT NULL,
+  `channel` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `accepted_at` datetime(6) DEFAULT NULL,
+  `retention_policy_version` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `upload_idempotency_key` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `superseded_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_controlled_attachment_no` (`tenant_id`,`attachment_no`),
+  UNIQUE KEY `uniq_controlled_attachment_upload_key` (`tenant_id`,`upload_idempotency_key`),
+  UNIQUE KEY `storage_key` (`storage_key`),
+  UNIQUE KEY `uniq_controlled_attachment_content_binding` (`tenant_id`,`sha256`,`business_type`,`business_id`,`business_version`),
+  KEY `idx_ctrl_attach_binding` (`tenant_id`,`business_type`,`business_id`,`business_version`,`state`),
+  KEY `idx_ctrl_attach_owner` (`tenant_id`,`owner_type`,`owner_id`,`state`),
+  KEY `files_controlledatta_superseded_by_id_387fc523_fk_files_con` (`superseded_by_id`),
+  CONSTRAINT `files_controlledatta_superseded_by_id_387fc523_fk_files_con` FOREIGN KEY (`superseded_by_id`) REFERENCES `files_controlledattachment` (`id`),
+  CONSTRAINT `files_controlledatta_tenant_id_aa9e7cbd_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `controlled_attachment_identity_positive` CHECK (((`owner_id` > 0) and (`business_version` > 0))),
+  CONSTRAINT `controlled_attachment_size_nonnegative` CHECK ((`byte_size` >= 0)),
+  CONSTRAINT `files_controlledattachment_chk_1` CHECK ((`owner_id` >= 0)),
+  CONSTRAINT `files_controlledattachment_chk_2` CHECK ((`business_version` >= 0)),
+  CONSTRAINT `files_controlledattachment_chk_3` CHECK ((`byte_size` >= 0)),
+  CONSTRAINT `files_controlledattachment_chk_4` CHECK ((`created_by_id` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `files_controlledattachmentevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `files_controlledattachmentevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor_id` bigint unsigned NOT NULL,
+  `channel` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before` json NOT NULL,
+  `after` json NOT NULL,
+  `reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `occurred_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `attachment_id` bigint DEFAULT NULL,
+  `related_attachment_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_controlled_attachment_event_key` (`tenant_id`,`idempotency_key`),
+  KEY `idx_ctrl_attach_event` (`tenant_id`,`attachment_id`,`action`,`created_at`),
+  KEY `files_controlledatta_attachment_id_e2cb832e_fk_files_con` (`attachment_id`),
+  KEY `files_controlledatta_related_attachment_i_a4d257cb_fk_files_con` (`related_attachment_id`),
+  CONSTRAINT `files_controlledatta_attachment_id_e2cb832e_fk_files_con` FOREIGN KEY (`attachment_id`) REFERENCES `files_controlledattachment` (`id`),
+  CONSTRAINT `files_controlledatta_related_attachment_i_a4d257cb_fk_files_con` FOREIGN KEY (`related_attachment_id`) REFERENCES `files_controlledattachment` (`id`),
+  CONSTRAINT `files_controlledatta_tenant_id_a77a4636_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `controlled_attachment_event_hash_hex` CHECK (regexp_like(`request_hash`,_utf8mb4'^[0-9a-fA-F]{64}$',_utf8mb4'c')),
+  CONSTRAINT `files_controlledattachmentevent_chk_1` CHECK ((`actor_id` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `finance_bankreceiptimport`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `finance_bankreceiptimport` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `import_batch_no` varchar(80) NOT NULL,
+  `masked_account` varchar(80) NOT NULL,
+  `currency` varchar(10) NOT NULL,
+  `receipt_amount` decimal(12,2) NOT NULL,
+  `receipt_date` date NOT NULL,
+  `reference_no` varchar(120) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_receipt_reference_per_tenant` (`tenant_id`,`reference_no`),
+  CONSTRAINT `finance_bankreceipti_tenant_id_547d540e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `finance_financeauditlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `finance_financeauditlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(80) NOT NULL,
+  `object_type` varchar(80) NOT NULL,
+  `object_id` varchar(80) NOT NULL,
+  `masked_detail` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `finance_financeaudit_actor_id_3dd6b276_fk_accounts_` (`actor_id`),
+  KEY `finance_financeauditlog_tenant_id_54746c56_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `finance_financeaudit_actor_id_3dd6b276_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `finance_financeauditlog_tenant_id_54746c56_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `finance_platformstatement`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `finance_platformstatement` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(40) NOT NULL,
+  `statement_no` varchar(80) NOT NULL,
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `currency` varchar(10) NOT NULL,
+  `gross_amount` decimal(12,2) NOT NULL,
+  `fee_amount` decimal(12,2) NOT NULL,
+  `net_amount` decimal(12,2) NOT NULL,
+  `source_type` varchar(30) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_statement_no_per_tenant` (`tenant_id`,`statement_no`),
+  CONSTRAINT `finance_platformstat_tenant_id_98ff0b93_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `finance_reconciliationexception`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `finance_reconciliationexception` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `exception_type` varchar(40) NOT NULL,
+  `difference_amount` decimal(12,2) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `resolution_note` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `resolved_at` datetime(6) DEFAULT NULL,
+  `assigned_to_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `reconciliation_match_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `finance_reconciliati_assigned_to_id_39a75c6b_fk_accounts_` (`assigned_to_id`),
+  KEY `finance_reconciliati_tenant_id_be270adf_fk_tenants_t` (`tenant_id`),
+  KEY `finance_reconciliati_reconciliation_match_9273ef5f_fk_finance_r` (`reconciliation_match_id`),
+  CONSTRAINT `finance_reconciliati_assigned_to_id_39a75c6b_fk_accounts_` FOREIGN KEY (`assigned_to_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `finance_reconciliati_reconciliation_match_9273ef5f_fk_finance_r` FOREIGN KEY (`reconciliation_match_id`) REFERENCES `finance_reconciliationmatch` (`id`),
+  CONSTRAINT `finance_reconciliati_tenant_id_be270adf_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `finance_reconciliationmatch`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `finance_reconciliationmatch` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `match_type` varchar(30) NOT NULL,
+  `matched_amount` decimal(12,2) NOT NULL,
+  `difference_amount` decimal(12,2) NOT NULL,
+  `confidence` decimal(5,4) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `bank_receipt_id` bigint NOT NULL,
+  `reviewed_by_id` bigint DEFAULT NULL,
+  `statement_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `withdrawal_id` bigint NOT NULL,
+  `idempotency_key` varchar(64) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `finance_reconciliati_withdrawal_id_f9c89014_fk_finance_w` (`withdrawal_id`),
+  KEY `finance_reconciliati_bank_receipt_id_23ff89db_fk_finance_b` (`bank_receipt_id`),
+  KEY `finance_reconciliati_reviewed_by_id_851554eb_fk_accounts_` (`reviewed_by_id`),
+  KEY `finance_reconciliati_statement_id_d1109273_fk_finance_p` (`statement_id`),
+  KEY `finance_reconciliati_tenant_id_574c57eb_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `finance_reconciliati_bank_receipt_id_23ff89db_fk_finance_b` FOREIGN KEY (`bank_receipt_id`) REFERENCES `finance_bankreceiptimport` (`id`),
+  CONSTRAINT `finance_reconciliati_reviewed_by_id_851554eb_fk_accounts_` FOREIGN KEY (`reviewed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `finance_reconciliati_statement_id_d1109273_fk_finance_p` FOREIGN KEY (`statement_id`) REFERENCES `finance_platformstatement` (`id`),
+  CONSTRAINT `finance_reconciliati_tenant_id_574c57eb_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `finance_reconciliati_withdrawal_id_f9c89014_fk_finance_w` FOREIGN KEY (`withdrawal_id`) REFERENCES `finance_withdrawalrecord` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `finance_withdrawalrecord`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `finance_withdrawalrecord` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(40) NOT NULL,
+  `withdrawal_no` varchar(80) NOT NULL,
+  `currency` varchar(10) NOT NULL,
+  `requested_amount` decimal(12,2) NOT NULL,
+  `expected_amount` decimal(12,2) NOT NULL,
+  `requested_at` datetime(6) NOT NULL,
+  `completed_at` datetime(6) DEFAULT NULL,
+  `status` varchar(30) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_withdrawal_no_per_tenant` (`tenant_id`,`withdrawal_no`),
+  CONSTRAINT `finance_withdrawalrecord_tenant_id_ee937d07_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `governance_apicontract`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `governance_apicontract` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `module` varchar(80) NOT NULL,
+  `name` varchar(160) NOT NULL,
+  `method` varchar(10) NOT NULL,
+  `path` varchar(240) NOT NULL,
+  `owner` varchar(120) NOT NULL,
+  `version` varchar(40) NOT NULL,
+  `permission_code` varchar(120) NOT NULL,
+  `data_scope_keys` json NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `compatibility` varchar(20) NOT NULL,
+  `deprecation_at` datetime(6) DEFAULT NULL,
+  `request_fields` json NOT NULL,
+  `response_fields` json NOT NULL,
+  `error_codes` json NOT NULL,
+  `change_history` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_governance_contract_version` (`method`,`path`,`version`),
+  KEY `governance_apicontract_tenant_id_e1a58eec_fk_tenants_tenant_id` (`tenant_id`),
+  KEY `governance_apicontract_module_4b04c96d` (`module`),
+  CONSTRAINT `governance_apicontract_tenant_id_e1a58eec_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `governance_assistantdefinition`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `governance_assistantdefinition` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `name` varchar(160) NOT NULL,
+  `description` longtext NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `data_class` varchar(40) NOT NULL,
+  `allowed_tools` json NOT NULL,
+  `output_types` json NOT NULL,
+  `limitations` json NOT NULL,
+  `human_confirmation_required` tinyint(1) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`),
+  KEY `governance_assistant_tenant_id_b9063a96_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `governance_assistant_tenant_id_b9063a96_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `governance_assistantdefinition_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `inbound_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `inbound_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `site_code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_inbound_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_line_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `inbound_type` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_sku` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `planned_quantity` bigint unsigned NOT NULL,
+  `received_quantity` bigint unsigned NOT NULL,
+  `status` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `expected_at_utc` datetime(6) DEFAULT NULL,
+  `received_at_utc` datetime(6) DEFAULT NULL,
+  `updated_at_utc` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `internal_sku_id` bigint DEFAULT NULL,
+  `source_run_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `warehouse_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_inbound_record_line` (`tenant_id`,`site_code`,`warehouse_id`,`external_inbound_id`,`external_line_id`),
+  KEY `idx_inbound_site_time` (`tenant_id`,`site_code`,`updated_at_utc`),
+  KEY `idx_inbound_sku_time` (`tenant_id`,`source_sku`,`updated_at_utc`),
+  KEY `idx_inbound_source_run` (`source_run_id`),
+  KEY `inbound_record_internal_sku_id_2f863a1e_fk_products_` (`internal_sku_id`),
+  KEY `inbound_record_warehouse_id_d602d87c_fk_masterdat` (`warehouse_id`),
+  CONSTRAINT `inbound_record_internal_sku_id_2f863a1e_fk_products_` FOREIGN KEY (`internal_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `inbound_record_source_run_id_1630f667_fk_integrations_syncrun_id` FOREIGN KEY (`source_run_id`) REFERENCES `integrations_syncrun` (`id`),
+  CONSTRAINT `inbound_record_tenant_id_b76774fc_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `inbound_record_warehouse_id_d602d87c_fk_masterdat` FOREIGN KEY (`warehouse_id`) REFERENCES `masterdata_warehousemaster` (`id`),
+  CONSTRAINT `inbound_qty_nonnegative` CHECK (((`planned_quantity` >= 0) and (`received_quantity` >= 0))),
+  CONSTRAINT `inbound_record_chk_1` CHECK ((`planned_quantity` >= 0)),
+  CONSTRAINT `inbound_record_chk_2` CHECK ((`received_quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_affiliateimportstate`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_affiliateimportstate` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `cursor` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lease_token` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lease_expires_at` datetime(6) DEFAULT NULL,
+  `last_data_time` datetime(6) DEFAULT NULL,
+  `last_source_updated_at` datetime(6) DEFAULT NULL,
+  `last_row_count` int unsigned NOT NULL,
+  `last_rejected_count` int unsigned NOT NULL,
+  `last_error_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_affiliate_import_state` (`tenant_id`,`source`),
+  KEY `idx_aff_import_lease` (`tenant_id`,`status`,`lease_expires_at`),
+  CONSTRAINT `influencers_affiliat_tenant_id_16b3c23f_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_affiliateimportstate_chk_1` CHECK ((`last_row_count` >= 0)),
+  CONSTRAINT `influencers_affiliateimportstate_chk_2` CHECK ((`last_rejected_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_affiliateorderrevision`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_affiliateorderrevision` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_row_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `revision_no` int unsigned NOT NULL,
+  `before_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `after_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before_values` json NOT NULL,
+  `after_values` json NOT NULL,
+  `source_updated_at` datetime(6) DEFAULT NULL,
+  `changed_at` datetime(6) NOT NULL,
+  `order_snapshot_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_affiliate_order_revision` (`tenant_id`,`source`,`source_row_key`,`revision_no`),
+  KEY `idx_aff_order_revision_key` (`tenant_id`,`source_row_key`,`revision_no`),
+  KEY `influencers_affiliat_order_snapshot_id_83be0e4d_fk_influence` (`order_snapshot_id`),
+  CONSTRAINT `influencers_affiliat_order_snapshot_id_83be0e4d_fk_influence` FOREIGN KEY (`order_snapshot_id`) REFERENCES `influencers_affiliateordersnapshot` (`id`),
+  CONSTRAINT `influencers_affiliat_tenant_id_e3ddea04_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_affiliateorderrevision_chk_1` CHECK ((`revision_no` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_affiliateordersnapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_affiliateordersnapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_row_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `row_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `data_time` datetime(6) NOT NULL,
+  `shop_name` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `shop_abbr` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `order_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_name` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sku_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_price` decimal(20,4) DEFAULT NULL,
+  `payment_amount` decimal(20,4) NOT NULL,
+  `currency` varchar(3) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity` int unsigned NOT NULL,
+  `fully_returned` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `order_status` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `creator_username` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `creator_username_normalized` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actual_paid_commission` decimal(20,4) NOT NULL,
+  `estimated_paid_commission` decimal(20,4) NOT NULL,
+  `source_updated_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `store_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_affiliate_order_source_row` (`tenant_id`,`source`,`source_row_key`),
+  KEY `idx_aff_order_date_creator` (`tenant_id`,`data_time`,`creator_username_normalized`,`shop_abbr`,`product_id`),
+  KEY `idx_aff_order_creator_shop` (`tenant_id`,`creator_username_normalized`,`shop_abbr`,`site`,`product_id`,`data_time`),
+  KEY `idx_aff_order_shop_order_sku` (`tenant_id`,`shop_abbr`,`site`,`order_id`,`sku_id`),
+  KEY `influencers_affiliat_store_id_9393705b_fk_masterdat` (`store_id`),
+  KEY `influencers_affiliateorders_creator_username_normalized_01672d8c` (`creator_username_normalized`),
+  CONSTRAINT `influencers_affiliat_store_id_9393705b_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_affiliat_tenant_id_a63c42d1_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_affiliateordersnapshot_chk_1` CHECK ((`quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_bdorderattributionsnapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_bdorderattributionsnapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `order_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sku_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `rule` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `rule_version` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `attributed_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `order_snapshot_id` bigint NOT NULL,
+  `owner_id` bigint NOT NULL,
+  `sample_attribution_id` bigint NOT NULL,
+  `store_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_bd_order_attribution_version` (`tenant_id`,`order_snapshot_id`,`rule_version`),
+  KEY `idx_bd_order_owner_date` (`tenant_id`,`owner_id`,`attributed_at`),
+  KEY `idx_bd_order_rule_version` (`tenant_id`,`rule`,`rule_version`),
+  KEY `influencers_bdordera_influencer_id_944b0248_fk_influence` (`influencer_id`),
+  KEY `influencers_bdordera_order_snapshot_id_faa5e66d_fk_influence` (`order_snapshot_id`),
+  KEY `influencers_bdordera_owner_id_354f18e9_fk_accounts_` (`owner_id`),
+  KEY `influencers_bdordera_sample_attribution_i_37f91025_fk_influence` (`sample_attribution_id`),
+  KEY `influencers_bdordera_store_id_8e02c4f2_fk_masterdat` (`store_id`),
+  CONSTRAINT `influencers_bdordera_influencer_id_944b0248_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_bdordera_order_snapshot_id_faa5e66d_fk_influence` FOREIGN KEY (`order_snapshot_id`) REFERENCES `influencers_affiliateordersnapshot` (`id`),
+  CONSTRAINT `influencers_bdordera_owner_id_354f18e9_fk_accounts_` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_bdordera_sample_attribution_i_37f91025_fk_influence` FOREIGN KEY (`sample_attribution_id`) REFERENCES `influencers_bdsampleattributionsnapshot` (`id`),
+  CONSTRAINT `influencers_bdordera_store_id_8e02c4f2_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_bdordera_tenant_id_554dfe6c_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_bdsampleattributionsnapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_bdsampleattributionsnapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `creator_username` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `shop_abbr` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_name` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sku_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sampled_at` datetime(6) NOT NULL,
+  `shipped_at` datetime(6) DEFAULT NULL,
+  `sample_status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `cost_amount` decimal(20,4) DEFAULT NULL,
+  `currency` varchar(3) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `pricing_status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `legacy_inferred` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `fulfillment_id` bigint NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `owner_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `fulfillment_id` (`fulfillment_id`),
+  KEY `idx_bd_sample_match` (`tenant_id`,`creator_username`,`shop_abbr`,`product_id`,`sampled_at`),
+  KEY `idx_bd_sample_owner_date` (`tenant_id`,`owner_id`,`sampled_at`),
+  KEY `influencers_bdsample_influencer_id_2969203a_fk_influence` (`influencer_id`),
+  KEY `influencers_bdsample_owner_id_77a13a82_fk_accounts_` (`owner_id`),
+  KEY `influencers_bdsample_store_id_7b082208_fk_masterdat` (`store_id`),
+  CONSTRAINT `influencers_bdsample_fulfillment_id_8b7944fe_fk_influence` FOREIGN KEY (`fulfillment_id`) REFERENCES `influencers_samplefulfillment` (`id`),
+  CONSTRAINT `influencers_bdsample_influencer_id_2969203a_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_bdsample_owner_id_77a13a82_fk_accounts_` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_bdsample_store_id_7b082208_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_bdsample_tenant_id_e416717d_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_bdvideoattribution`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_bdvideoattribution` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `published_at` datetime(6) DEFAULT NULL,
+  `eligible_at` datetime(6) DEFAULT NULL,
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `rule_version` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `input_fingerprint` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `owner_id` bigint DEFAULT NULL,
+  `sample_fulfillment_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `video_id` bigint NOT NULL,
+  `matched_product_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_tk_bd_attr_evidence` (`tenant_id`,`video_id`,`rule_version`,`input_fingerprint`),
+  KEY `influencers_bdvideoa_video_id_9abfaaac_fk_influence` (`video_id`),
+  KEY `influencers_bdvideoa_matched_product_id_63c0cab7_fk_influence` (`matched_product_id`),
+  KEY `idx_tk_bd_video_state` (`tenant_id`,`video_id`,`status`),
+  KEY `idx_tk_bd_owner_date` (`tenant_id`,`owner_id`,`eligible_at`),
+  KEY `idx_tk_bd_rule_created` (`tenant_id`,`rule_version`,`created_at`),
+  KEY `influencers_bdvideoa_owner_id_a2b8bc20_fk_accounts_` (`owner_id`),
+  KEY `influencers_bdvideoa_sample_fulfillment_i_579f23a5_fk_influence` (`sample_fulfillment_id`),
+  CONSTRAINT `influencers_bdvideoa_matched_product_id_63c0cab7_fk_influence` FOREIGN KEY (`matched_product_id`) REFERENCES `influencers_tiktokvideoproduct` (`id`),
+  CONSTRAINT `influencers_bdvideoa_owner_id_a2b8bc20_fk_accounts_` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_bdvideoa_sample_fulfillment_i_579f23a5_fk_influence` FOREIGN KEY (`sample_fulfillment_id`) REFERENCES `influencers_samplefulfillment` (`id`),
+  CONSTRAINT `influencers_bdvideoa_tenant_id_c4c452c8_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_bdvideoa_video_id_9abfaaac_fk_influence` FOREIGN KEY (`video_id`) REFERENCES `influencers_tiktokshopvideo` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_bdvideoattributioncurrent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_bdvideoattributioncurrent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `rule_version` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `attribution_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `video_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_tk_bd_current_pointer` (`tenant_id`,`video_id`,`rule_version`),
+  KEY `idx_tk_bd_current_rule` (`tenant_id`,`rule_version`),
+  KEY `influencers_bdvideoa_attribution_id_35b560cb_fk_influence` (`attribution_id`),
+  KEY `influencers_bdvideoa_video_id_56d94c1b_fk_influence` (`video_id`),
+  CONSTRAINT `influencers_bdvideoa_attribution_id_35b560cb_fk_influence` FOREIGN KEY (`attribution_id`) REFERENCES `influencers_bdvideoattribution` (`id`),
+  CONSTRAINT `influencers_bdvideoa_tenant_id_7d91587b_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_bdvideoa_video_id_56d94c1b_fk_influence` FOREIGN KEY (`video_id`) REFERENCES `influencers_tiktokshopvideo` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_exchangerate`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_exchangerate` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `base_currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quote_currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `rate` decimal(20,10) NOT NULL,
+  `effective_from` date NOT NULL,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_fx_pair_start_src` (`tenant_id`,`base_currency`,`quote_currency`,`effective_from`,`source`),
+  KEY `influencers_exchange_created_by_id_90961b4c_fk_accounts_` (`created_by_id`),
+  KEY `idx_fx_pair_effective` (`tenant_id`,`base_currency`,`quote_currency`,`effective_from`,`is_active`),
+  CONSTRAINT `influencers_exchange_created_by_id_90961b4c_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_exchangerate_tenant_id_014fec67_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `chk_fx_rate_positive` CHECK ((`rate` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_externalsourcerecord`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_externalsourcerecord` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source` varchar(40) NOT NULL,
+  `external_id` varchar(160) NOT NULL,
+  `record_type` varchar(60) NOT NULL,
+  `payload_hash` varchar(64) NOT NULL,
+  `target_model` varchar(100) NOT NULL,
+  `target_id` varchar(80) NOT NULL,
+  `imported_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `batch_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_influencer_source_record` (`tenant_id`,`source`,`record_type`,`external_id`),
+  KEY `influencers_external_batch_id_a0a8595d_fk_influence` (`batch_id`),
+  CONSTRAINT `influencers_external_batch_id_a0a8595d_fk_influence` FOREIGN KEY (`batch_id`) REFERENCES `influencers_importbatch` (`id`),
+  CONSTRAINT `influencers_external_tenant_id_ee9a93a2_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_fulfillmentstatusevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_fulfillmentstatusevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `from_status` varchar(20) NOT NULL,
+  `to_status` varchar(20) NOT NULL,
+  `reason` varchar(240) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `fulfillment_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `influencers_fulfillm_actor_id_a3ef7c26_fk_accounts_` (`actor_id`),
+  KEY `influencers_fulfillm_tenant_id_3c2315cb_fk_tenants_t` (`tenant_id`),
+  KEY `influencers_fulfillm_fulfillment_id_86ab0e3e_fk_influence` (`fulfillment_id`),
+  CONSTRAINT `influencers_fulfillm_actor_id_a3ef7c26_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_fulfillm_fulfillment_id_86ab0e3e_fk_influence` FOREIGN KEY (`fulfillment_id`) REFERENCES `influencers_samplefulfillment` (`id`),
+  CONSTRAINT `influencers_fulfillm_tenant_id_3c2315cb_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_importbatch`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_importbatch` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source` varchar(40) NOT NULL,
+  `batch_key` varchar(128) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `row_count` int unsigned NOT NULL,
+  `error_count` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `completed_at` datetime(6) DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_influencer_import_batch` (`tenant_id`,`source`,`batch_key`),
+  KEY `influencers_importba_created_by_id_c8553063_fk_accounts_` (`created_by_id`),
+  CONSTRAINT `influencers_importba_created_by_id_c8553063_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_importbatch_tenant_id_08b14572_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_importbatch_chk_1` CHECK ((`row_count` >= 0)),
+  CONSTRAINT `influencers_importbatch_chk_2` CHECK ((`error_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_influencer`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_influencer` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `platform` varchar(40) NOT NULL,
+  `handle` varchar(120) NOT NULL,
+  `category` varchar(80) NOT NULL,
+  `follower_count` bigint unsigned NOT NULL,
+  `contact_name` varchar(80) NOT NULL,
+  `contact_phone` varchar(32) NOT NULL,
+  `contact_email` varchar(254) NOT NULL,
+  `cooperation_status` varchar(20) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `notes` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_influencer_code_per_tenant` (`tenant_id`,`code`),
+  KEY `influencers_influencer_code_c03f6ee4` (`code`),
+  CONSTRAINT `influencers_influencer_tenant_id_12e5ec6a_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_influencer_chk_1` CHECK ((`follower_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_influencercontact`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_influencercontact` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `channel` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `value` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `label` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_primary` tinyint(1) NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_inf_contact_value` (`tenant_id`,`influencer_id`,`channel`,`value`),
+  KEY `influencers_influenc_created_by_id_d7505f84_fk_accounts_` (`created_by_id`),
+  KEY `influencers_influenc_influencer_id_21b2ceef_fk_influence` (`influencer_id`),
+  KEY `idx_inf_contact_active` (`tenant_id`,`influencer_id`,`is_active`),
+  CONSTRAINT `influencers_influenc_created_by_id_d7505f84_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_influenc_influencer_id_21b2ceef_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_influenc_tenant_id_a1c71d12_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_influencerprofile`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_influencerprofile` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `display_name` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_influencer_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `level` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `tier` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `average_video_views` bigint unsigned NOT NULL,
+  `average_live_views` bigint unsigned NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `market` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platforms` json NOT NULL,
+  `content_types` json NOT NULL,
+  `profile_url` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `duplicate_reason` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `product_cooperation_count` int unsigned NOT NULL,
+  `first_cooperation_at` datetime(6) DEFAULT NULL,
+  `cooperation_count` int unsigned NOT NULL,
+  `completed_cooperation_count` int unsigned NOT NULL,
+  `fulfilled_cooperation_count` int unsigned NOT NULL,
+  `fulfillment_rate` decimal(7,4) DEFAULT NULL,
+  `content_completion_rate` decimal(7,4) DEFAULT NULL,
+  `historical_gmv` decimal(20,4) NOT NULL,
+  `historical_orders` bigint unsigned NOT NULL,
+  `historical_performance` json NOT NULL,
+  `profile_notes` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `influencer_id` (`influencer_id`),
+  KEY `influencers_influenc_tenant_id_2e6caaa5_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `influencers_influenc_influencer_id_58ceb5ed_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_influenc_tenant_id_2e6caaa5_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `chk_inf_content_rate` CHECK (((`content_completion_rate` is null) or ((`content_completion_rate` >= 0) and (`content_completion_rate` <= 1)))),
+  CONSTRAINT `chk_inf_fulfill_rate` CHECK (((`fulfillment_rate` is null) or ((`fulfillment_rate` >= 0) and (`fulfillment_rate` <= 1)))),
+  CONSTRAINT `influencers_influencerprofile_chk_1` CHECK ((`average_video_views` >= 0)),
+  CONSTRAINT `influencers_influencerprofile_chk_2` CHECK ((`average_live_views` >= 0)),
+  CONSTRAINT `influencers_influencerprofile_chk_3` CHECK ((`product_cooperation_count` >= 0)),
+  CONSTRAINT `influencers_influencerprofile_chk_4` CHECK ((`cooperation_count` >= 0)),
+  CONSTRAINT `influencers_influencerprofile_chk_5` CHECK ((`completed_cooperation_count` >= 0)),
+  CONSTRAINT `influencers_influencerprofile_chk_6` CHECK ((`fulfilled_cooperation_count` >= 0)),
+  CONSTRAINT `influencers_influencerprofile_chk_7` CHECK ((`historical_orders` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_influencerrestrictevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_influencerrestrictevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `occurred_at` datetime(6) NOT NULL,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `influencers_influenc_actor_id_4fe256c2_fk_accounts_` (`actor_id`),
+  KEY `influencers_influenc_influencer_id_2517d106_fk_influence` (`influencer_id`),
+  KEY `idx_inf_restrict_time` (`tenant_id`,`influencer_id`,`occurred_at`),
+  CONSTRAINT `influencers_influenc_actor_id_4fe256c2_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_influenc_influencer_id_2517d106_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_influenc_tenant_id_dfb565e7_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_influencerrestriction`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_influencerrestriction` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `is_blacklisted` tinyint(1) NOT NULL,
+  `reason` varchar(240) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_influencer_restriction` (`tenant_id`,`influencer_id`),
+  KEY `influencers_influenc_created_by_id_36dedd28_fk_accounts_` (`created_by_id`),
+  KEY `influencers_influenc_influencer_id_1cfbe910_fk_influence` (`influencer_id`),
+  CONSTRAINT `influencers_influenc_created_by_id_36dedd28_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_influenc_influencer_id_1cfbe910_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_influenc_tenant_id_9beb0ee8_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_outreachtarget`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_outreachtarget` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `first_linked_at` datetime(6) NOT NULL,
+  `outreach_result` varchar(20) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `notes` longtext NOT NULL,
+  `is_deleted` tinyint(1) NOT NULL,
+  `deleted_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `task_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_outreach_target_relation` (`tenant_id`,`task_id`,`influencer_id`),
+  KEY `idx_target_task_active` (`tenant_id`,`task_id`,`is_deleted`),
+  KEY `influencers_outreach_influencer_id_f6dd803a_fk_influence` (`influencer_id`),
+  KEY `influencers_outreach_task_id_422b2f5d_fk_influence` (`task_id`),
+  CONSTRAINT `influencers_outreach_influencer_id_f6dd803a_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_outreach_task_id_422b2f5d_fk_influence` FOREIGN KEY (`task_id`) REFERENCES `influencers_outreachtask` (`id`),
+  CONSTRAINT `influencers_outreach_tenant_id_95d861fd_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_outreachtarget_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_outreachtask`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_outreachtask` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `task_no` varchar(80) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finalized_at` datetime(6) DEFAULT NULL,
+  `source` varchar(40) NOT NULL,
+  `external_id` varchar(160) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `notes` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `dispatcher_id` bigint NOT NULL,
+  `influencer_id` bigint DEFAULT NULL,
+  `owner_id` bigint NOT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `deleted_at` datetime(6) DEFAULT NULL,
+  `dispatch_time` datetime(6) NOT NULL,
+  `external_product_id` varchar(120) NOT NULL,
+  `is_deleted` tinyint(1) NOT NULL,
+  `outreach_at` datetime(6) DEFAULT NULL,
+  `sku_prefix` varchar(120) NOT NULL,
+  `target_count` int unsigned NOT NULL,
+  `task_name` varchar(160) NOT NULL,
+  `product_name_snapshot` varchar(240) NOT NULL,
+  `product_match_status` varchar(20) NOT NULL,
+  `product_match_source` varchar(40) NOT NULL,
+  `product_matched_at` datetime(6) DEFAULT NULL,
+  `priority` varchar(20) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_outreach_task_no` (`tenant_id`,`task_no`),
+  UNIQUE KEY `uniq_outreach_external` (`tenant_id`,`source`,`external_id`),
+  KEY `idx_outreach_owner_status` (`tenant_id`,`owner_id`,`status`),
+  KEY `influencers_outreach_dispatcher_id_429b224d_fk_accounts_` (`dispatcher_id`),
+  KEY `influencers_outreach_owner_id_49a17ee9_fk_accounts_` (`owner_id`),
+  KEY `influencers_outreach_spu_id_aae45623_fk_products_` (`spu_id`),
+  KEY `influencers_outreach_store_id_865de061_fk_masterdat` (`store_id`),
+  KEY `influencers_outreach_influencer_id_801a229b_fk_influence` (`influencer_id`),
+  CONSTRAINT `influencers_outreach_dispatcher_id_429b224d_fk_accounts_` FOREIGN KEY (`dispatcher_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_outreach_influencer_id_801a229b_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_outreach_owner_id_49a17ee9_fk_accounts_` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_outreach_spu_id_aae45623_fk_products_` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `influencers_outreach_store_id_865de061_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_outreachtask_tenant_id_4d4c5487_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_outreachtask_chk_1` CHECK ((`version` >= 0)),
+  CONSTRAINT `influencers_outreachtask_chk_2` CHECK ((`target_count` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_samplefulfillment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_samplefulfillment` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `fulfillment_no` varchar(80) NOT NULL,
+  `request_key` varchar(128) NOT NULL,
+  `request_hash` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `source` varchar(40) NOT NULL,
+  `external_id` varchar(160) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `notes` longtext NOT NULL,
+  `finalized_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `outreach_task_id` bigint DEFAULT NULL,
+  `owner_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `external_product_id` varchar(120) NOT NULL,
+  `product_name_snapshot` varchar(240) NOT NULL,
+  `sample_order_no` varchar(120) NOT NULL,
+  `sample_sent_at` datetime(6) NOT NULL,
+  `shipped_at` datetime(6) DEFAULT NULL,
+  `outreach_target_id` bigint DEFAULT NULL,
+  `sku_quantity` int unsigned NOT NULL,
+  `sales_amount` decimal(18,4) DEFAULT NULL,
+  `calculated_cost` decimal(18,4) DEFAULT NULL,
+  `pricing_status` varchar(20) NOT NULL,
+  `priced_at` datetime(6) DEFAULT NULL,
+  `deleted_at` datetime(6) DEFAULT NULL,
+  `deleted_by_id` bigint DEFAULT NULL,
+  `is_deleted` tinyint(1) NOT NULL,
+  `link_type` varchar(20) NOT NULL,
+  `quick_tags` json NOT NULL DEFAULT (_utf8mb4'[]'),
+  `video_deadline_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sample_fulfillment_no` (`tenant_id`,`fulfillment_no`),
+  UNIQUE KEY `uniq_sample_request_key` (`tenant_id`,`request_key`),
+  UNIQUE KEY `uniq_sample_external` (`tenant_id`,`source`,`external_id`),
+  KEY `idx_sample_owner_status` (`tenant_id`,`owner_id`,`status`),
+  KEY `influencers_samplefu_influencer_id_ac02aa85_fk_influence` (`influencer_id`),
+  KEY `influencers_samplefu_outreach_task_id_d72c651b_fk_influence` (`outreach_task_id`),
+  KEY `influencers_samplefu_owner_id_8264ae48_fk_accounts_` (`owner_id`),
+  KEY `influencers_samplefu_store_id_6595698c_fk_masterdat` (`store_id`),
+  KEY `influencers_samplefu_outreach_target_id_316f9b2f_fk_influence` (`outreach_target_id`),
+  KEY `influencers_samplefu_deleted_by_id_d7af8d93_fk_accounts_` (`deleted_by_id`),
+  KEY `idx_sample_deadline` (`tenant_id`,`is_deleted`,`video_deadline_at`),
+  CONSTRAINT `influencers_samplefu_deleted_by_id_d7af8d93_fk_accounts_` FOREIGN KEY (`deleted_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_samplefu_influencer_id_ac02aa85_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_samplefu_outreach_target_id_316f9b2f_fk_influence` FOREIGN KEY (`outreach_target_id`) REFERENCES `influencers_outreachtarget` (`id`),
+  CONSTRAINT `influencers_samplefu_outreach_task_id_d72c651b_fk_influence` FOREIGN KEY (`outreach_task_id`) REFERENCES `influencers_outreachtask` (`id`),
+  CONSTRAINT `influencers_samplefu_owner_id_8264ae48_fk_accounts_` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `influencers_samplefu_store_id_6595698c_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_samplefu_tenant_id_3876a020_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_samplefulfillment_chk_1` CHECK ((`version` >= 0)),
+  CONSTRAINT `influencers_samplefulfillment_chk_2` CHECK ((`sku_quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_sampleitem`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_sampleitem` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_product_id` varchar(120) NOT NULL,
+  `site_code` varchar(16) NOT NULL,
+  `requested_sku` varchar(120) DEFAULT NULL,
+  `product_name` varchar(240) NOT NULL,
+  `quantity` int unsigned NOT NULL,
+  `unit_price` decimal(18,4) DEFAULT NULL,
+  `unit_cost` decimal(18,4) DEFAULT NULL,
+  `currency` varchar(8) NOT NULL,
+  `price_match_status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `fulfillment_id` bigint NOT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `normalized_sku` varchar(160) NOT NULL,
+  `matched_sku_code` varchar(80) NOT NULL,
+  `matched_legacy_sku_code` varchar(160) NOT NULL,
+  `sales_amount` decimal(18,4) DEFAULT NULL,
+  `cost_amount` decimal(18,4) DEFAULT NULL,
+  `cost_match_status` varchar(20) NOT NULL,
+  `price_source` varchar(40) NOT NULL,
+  `cost_source` varchar(40) NOT NULL,
+  `price_snapshot_at` datetime(6) DEFAULT NULL,
+  `cost_snapshot_at` datetime(6) DEFAULT NULL,
+  `match_notes` varchar(240) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sample_item_requested_sku` (`tenant_id`,`fulfillment_id`,`requested_sku`),
+  KEY `influencers_sampleit_fulfillment_id_216eb64a_fk_influence` (`fulfillment_id`),
+  KEY `influencers_sampleitem_sku_id_bd0662ad_fk_products_productsku_id` (`sku_id`),
+  CONSTRAINT `influencers_sampleit_fulfillment_id_216eb64a_fk_influence` FOREIGN KEY (`fulfillment_id`) REFERENCES `influencers_samplefulfillment` (`id`),
+  CONSTRAINT `influencers_sampleitem_sku_id_bd0662ad_fk_products_productsku_id` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `influencers_sampleitem_tenant_id_e596d4dc_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_sampleitem_chk_1` CHECK ((`quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_skupricesnapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_skupricesnapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_sku` varchar(120) NOT NULL,
+  `variant_id` varchar(120) NOT NULL,
+  `variant_name` varchar(160) NOT NULL,
+  `original_price` decimal(18,4) DEFAULT NULL,
+  `promotion_price` decimal(18,4) DEFAULT NULL,
+  `effective_price` decimal(18,4) DEFAULT NULL,
+  `inbound_cost` decimal(18,4) DEFAULT NULL,
+  `currency` varchar(8) NOT NULL,
+  `stock` int DEFAULT NULL,
+  `source` varchar(40) NOT NULL,
+  `source_updated_at` datetime(6) DEFAULT NULL,
+  `cost_updated_at` datetime(6) DEFAULT NULL,
+  `imported_at` datetime(6) NOT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `listing_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_external_sku` (`tenant_id`,`listing_id`,`external_sku`,`variant_id`),
+  KEY `idx_snapshot_external_sku` (`tenant_id`,`external_sku`),
+  KEY `influencers_skuprice_sku_id_607c8081_fk_products_` (`sku_id`),
+  KEY `influencers_skuprice_listing_id_4a5b7af8_fk_influence` (`listing_id`),
+  CONSTRAINT `influencers_skuprice_listing_id_4a5b7af8_fk_influence` FOREIGN KEY (`listing_id`) REFERENCES `influencers_storeproductlisting` (`id`),
+  CONSTRAINT `influencers_skuprice_sku_id_607c8081_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `influencers_skuprice_tenant_id_13974770_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_storeproductlisting`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_storeproductlisting` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_product_id` varchar(120) NOT NULL,
+  `parent_sku` varchar(120) NOT NULL,
+  `product_name` varchar(240) NOT NULL,
+  `site_code` varchar(16) NOT NULL,
+  `source` varchar(40) NOT NULL,
+  `source_updated_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_store_external_product` (`tenant_id`,`store_id`,`site_code`,`external_product_id`),
+  KEY `idx_listing_product_id` (`tenant_id`,`external_product_id`),
+  KEY `influencers_storepro_spu_id_aee96ecc_fk_products_` (`spu_id`),
+  KEY `influencers_storepro_store_id_b8d28c9a_fk_masterdat` (`store_id`),
+  CONSTRAINT `influencers_storepro_spu_id_aee96ecc_fk_products_` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `influencers_storepro_store_id_b8d28c9a_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_storepro_tenant_id_ee05c8c6_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_tiktokshopvideo`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_tiktokshopvideo` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_video_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `creator_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `creator_open_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `creator_username` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `creator_username_normalized` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `published_at` datetime(6) DEFAULT NULL,
+  `video_type` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `first_seen_at` datetime(6) NOT NULL,
+  `last_seen_at` datetime(6) NOT NULL,
+  `source_api` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `influencer_id` bigint DEFAULT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_tk_video_external_id` (`tenant_id`,`store_id`,`external_video_id`),
+  KEY `idx_tk_video_store_seen` (`tenant_id`,`store_id`,`last_seen_at`),
+  KEY `idx_tk_video_creator` (`tenant_id`,`creator_username_normalized`),
+  KEY `influencers_tiktoksh_influencer_id_901a057e_fk_influence` (`influencer_id`),
+  KEY `influencers_tiktoksh_store_id_ad4632ea_fk_masterdat` (`store_id`),
+  CONSTRAINT `influencers_tiktoksh_influencer_id_901a057e_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_tiktoksh_store_id_ad4632ea_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_tiktoksh_tenant_id_9ac0a365_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_tiktokvideodailymetric`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_tiktokvideodailymetric` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `metric_date` date NOT NULL,
+  `currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `currency_basis` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `views` bigint unsigned NOT NULL,
+  `likes` bigint unsigned NOT NULL,
+  `comments` bigint unsigned NOT NULL,
+  `shares` bigint unsigned NOT NULL,
+  `new_followers` bigint unsigned NOT NULL,
+  `v_to_l_clicks` bigint unsigned NOT NULL,
+  `product_impressions` bigint unsigned NOT NULL,
+  `product_clicks` bigint unsigned NOT NULL,
+  `unique_customers` bigint unsigned NOT NULL,
+  `orders` bigint unsigned NOT NULL,
+  `items_sold` bigint unsigned NOT NULL,
+  `attributed_gmv` decimal(20,4) NOT NULL,
+  `direct_gmv` decimal(20,4) NOT NULL,
+  `indirect_gmv` decimal(20,4) NOT NULL,
+  `gpm` decimal(20,4) NOT NULL,
+  `ctr` decimal(7,4) NOT NULL,
+  `v_to_l_rate` decimal(7,4) NOT NULL,
+  `finish_rate` decimal(7,4) NOT NULL,
+  `click_to_order_rate` decimal(7,4) NOT NULL,
+  `quality_status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `diagnosis` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `row_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `video_id` bigint NOT NULL,
+  `batch_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_tk_vmetric_day` (`tenant_id`,`video_id`,`metric_date`),
+  KEY `idx_tk_vmetric_store` (`tenant_id`,`store_id`,`metric_date`),
+  KEY `idx_tk_vmetric_batch` (`tenant_id`,`batch_id`),
+  KEY `idx_tk_vmetric_quality` (`tenant_id`,`quality_status`,`metric_date`),
+  KEY `influencers_tiktokvi_store_id_30d2c7f1_fk_masterdat` (`store_id`),
+  KEY `influencers_tiktokvi_video_id_f0978d1e_fk_influence` (`video_id`),
+  KEY `influencers_tiktokvi_batch_id_5c10e2f6_fk_influence` (`batch_id`),
+  CONSTRAINT `influencers_tiktokvi_batch_id_5c10e2f6_fk_influence` FOREIGN KEY (`batch_id`) REFERENCES `influencers_tiktokvideosyncbatch` (`id`),
+  CONSTRAINT `influencers_tiktokvi_store_id_30d2c7f1_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_tiktokvi_tenant_id_7278ebe6_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_tiktokvi_video_id_f0978d1e_fk_influence` FOREIGN KEY (`video_id`) REFERENCES `influencers_tiktokshopvideo` (`id`),
+  CONSTRAINT `chk_tk_vmetric_amounts` CHECK (((`attributed_gmv` >= 0) and (`direct_gmv` >= 0) and (`indirect_gmv` >= 0) and (`gpm` >= 0))),
+  CONSTRAINT `chk_tk_vmetric_rates` CHECK (((`ctr` >= 0) and (`ctr` <= 1) and (`v_to_l_rate` >= 0) and (`v_to_l_rate` <= 1) and (`finish_rate` >= 0) and (`finish_rate` <= 1) and (`click_to_order_rate` >= 0) and (`click_to_order_rate` <= 1))),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_1` CHECK ((`views` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_10` CHECK ((`orders` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_11` CHECK ((`items_sold` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_2` CHECK ((`likes` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_3` CHECK ((`comments` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_4` CHECK ((`shares` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_5` CHECK ((`new_followers` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_6` CHECK ((`v_to_l_clicks` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_7` CHECK ((`product_impressions` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_8` CHECK ((`product_clicks` >= 0)),
+  CONSTRAINT `influencers_tiktokvideodailymetric_chk_9` CHECK ((`unique_customers` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_tiktokvideoproduct`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_tiktokvideoproduct` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_product_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `confidence` decimal(5,4) NOT NULL,
+  `parse_status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `first_seen_at` datetime(6) NOT NULL,
+  `last_seen_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `video_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_tk_vprod_external` (`tenant_id`,`video_id`,`external_product_id`),
+  KEY `idx_tk_vprod_parse` (`tenant_id`,`video_id`,`parse_status`),
+  KEY `idx_tk_vprod_ext_id` (`tenant_id`,`external_product_id`),
+  KEY `influencers_tiktokvi_video_id_5b5313f8_fk_influence` (`video_id`),
+  CONSTRAINT `influencers_tiktokvi_tenant_id_569f33da_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_tiktokvi_video_id_5b5313f8_fk_influence` FOREIGN KEY (`video_id`) REFERENCES `influencers_tiktokshopvideo` (`id`),
+  CONSTRAINT `chk_tk_vprod_confidence` CHECK (((`confidence` >= 0) and (`confidence` <= 1)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_tiktokvideosyncbatch`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_tiktokvideosyncbatch` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `window_start` date NOT NULL,
+  `window_end` date NOT NULL,
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `api_version` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `page_count` int unsigned NOT NULL,
+  `video_count` int unsigned NOT NULL,
+  `detail_requested_count` int unsigned NOT NULL,
+  `detail_succeeded_count` int unsigned NOT NULL,
+  `detail_failed_count` int unsigned NOT NULL,
+  `request_cursor` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lease_token` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lease_expires_at` datetime(6) DEFAULT NULL,
+  `heartbeat_at` datetime(6) DEFAULT NULL,
+  `attempt_count` int unsigned NOT NULL,
+  `max_attempts` int unsigned NOT NULL,
+  `next_retry_at` datetime(6) DEFAULT NULL,
+  `latest_available_date` date DEFAULT NULL,
+  `error_summary` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `completed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_tk_batch_idempotency` (`tenant_id`,`store_id`,`idempotency_key`),
+  UNIQUE KEY `uniq_tk_batch_window_job` (`tenant_id`,`store_id`,`window_start`,`window_end`,`api_version`),
+  KEY `idx_tk_batch_store_state` (`tenant_id`,`store_id`,`status`,`window_start`),
+  KEY `idx_tk_batch_store_window` (`tenant_id`,`store_id`,`window_start`,`window_end`),
+  KEY `influencers_tiktokvi_store_id_81320d59_fk_masterdat` (`store_id`),
+  CONSTRAINT `influencers_tiktokvi_store_id_81320d59_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_tiktokvi_tenant_id_1dbf81fd_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `chk_tk_batch_attempts` CHECK (((`attempt_count` <= `max_attempts`) and (`max_attempts` >= 1))),
+  CONSTRAINT `chk_tk_batch_running_lease` CHECK (((`status` <> _utf8mb4'running') or ((`heartbeat_at` is not null) and (`lease_expires_at` > `heartbeat_at`) and (`lease_expires_at` is not null) and (`lease_token` > _utf8mb4'')))),
+  CONSTRAINT `chk_tk_batch_window` CHECK ((`window_start` < `window_end`)),
+  CONSTRAINT `influencers_tiktokvideosyncbatch_chk_1` CHECK ((`page_count` >= 0)),
+  CONSTRAINT `influencers_tiktokvideosyncbatch_chk_2` CHECK ((`video_count` >= 0)),
+  CONSTRAINT `influencers_tiktokvideosyncbatch_chk_3` CHECK ((`detail_requested_count` >= 0)),
+  CONSTRAINT `influencers_tiktokvideosyncbatch_chk_4` CHECK ((`detail_succeeded_count` >= 0)),
+  CONSTRAINT `influencers_tiktokvideosyncbatch_chk_5` CHECK ((`detail_failed_count` >= 0)),
+  CONSTRAINT `influencers_tiktokvideosyncbatch_chk_6` CHECK ((`attempt_count` >= 0)),
+  CONSTRAINT `influencers_tiktokvideosyncbatch_chk_7` CHECK ((`max_attempts` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `influencers_videoresult`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `influencers_videoresult` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `content_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_content_id` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `url` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `published_at` datetime(6) DEFAULT NULL,
+  `metric_date` date NOT NULL,
+  `views` bigint unsigned NOT NULL,
+  `live_views` bigint unsigned NOT NULL,
+  `orders` bigint unsigned NOT NULL,
+  `gmv` decimal(20,4) NOT NULL,
+  `currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_updated_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `influencer_id` bigint NOT NULL,
+  `outreach_task_id` bigint DEFAULT NULL,
+  `sample_fulfillment_id` bigint DEFAULT NULL,
+  `store_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_vres_platform_ext` (`tenant_id`,`platform`,`external_content_id`),
+  KEY `influencers_videores_influencer_id_08052294_fk_influence` (`influencer_id`),
+  KEY `influencers_videores_outreach_task_id_8c1d5e3f_fk_influence` (`outreach_task_id`),
+  KEY `influencers_videores_sample_fulfillment_i_a6eaa516_fk_influence` (`sample_fulfillment_id`),
+  KEY `influencers_videores_store_id_5cb213cb_fk_masterdat` (`store_id`),
+  KEY `idx_vres_creator_date` (`tenant_id`,`influencer_id`,`metric_date`),
+  KEY `idx_vres_task_date` (`tenant_id`,`outreach_task_id`,`metric_date`),
+  CONSTRAINT `influencers_videores_influencer_id_08052294_fk_influence` FOREIGN KEY (`influencer_id`) REFERENCES `influencers_influencer` (`id`),
+  CONSTRAINT `influencers_videores_outreach_task_id_8c1d5e3f_fk_influence` FOREIGN KEY (`outreach_task_id`) REFERENCES `influencers_outreachtask` (`id`),
+  CONSTRAINT `influencers_videores_sample_fulfillment_i_a6eaa516_fk_influence` FOREIGN KEY (`sample_fulfillment_id`) REFERENCES `influencers_samplefulfillment` (`id`),
+  CONSTRAINT `influencers_videores_store_id_5cb213cb_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `influencers_videoresult_tenant_id_b48dbfa4_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `influencers_videoresult_chk_1` CHECK ((`views` >= 0)),
+  CONSTRAINT `influencers_videoresult_chk_2` CHECK ((`live_views` >= 0)),
+  CONSTRAINT `influencers_videoresult_chk_3` CHECK ((`orders` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_apidataqualitycheck`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_apidataqualitycheck` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `check_type` varchar(80) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `message` longtext NOT NULL,
+  `details` json NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `sync_log_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `integrations_apidata_tenant_id_ff806072_fk_tenants_t` (`tenant_id`),
+  KEY `integrations_apidata_sync_log_id_0d76befd_fk_integrati` (`sync_log_id`),
+  CONSTRAINT `integrations_apidata_sync_log_id_0d76befd_fk_integrati` FOREIGN KEY (`sync_log_id`) REFERENCES `integrations_apisynclog` (`id`),
+  CONSTRAINT `integrations_apidata_tenant_id_ff806072_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_apiintegrationconfig`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_apiintegrationconfig` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `shop_code` varchar(80) NOT NULL,
+  `api_base_url` varchar(200) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `auth_scheme` varchar(40) NOT NULL,
+  `credential_expires_at` datetime(6) DEFAULT NULL,
+  `credential_key_version` varchar(40) NOT NULL,
+  `credential_ref` varchar(160) NOT NULL,
+  `credential_status` varchar(30) NOT NULL,
+  `environment` varchar(20) NOT NULL,
+  `last_rotated_at` datetime(6) DEFAULT NULL,
+  `least_privilege_scope` json NOT NULL DEFAULT (_utf8mb4'[]'),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_api_config_shop_per_tenant` (`tenant_id`,`platform`,`shop_code`),
+  CONSTRAINT `integrations_apiinte_tenant_id_b6c7553f_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_apisynclog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_apisynclog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `status` varchar(30) NOT NULL,
+  `request_url` varchar(200) NOT NULL,
+  `request_payload` json NOT NULL,
+  `response_summary` json NOT NULL,
+  `error_message` longtext NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `task_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `integrations_apisync_task_id_8677b156_fk_integrati` (`task_id`),
+  KEY `integrations_apisynclog_tenant_id_23172809_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `integrations_apisync_task_id_8677b156_fk_integrati` FOREIGN KEY (`task_id`) REFERENCES `integrations_apisynctask` (`id`),
+  CONSTRAINT `integrations_apisynclog_tenant_id_23172809_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_apisynctask`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_apisynctask` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `sync_type` varchar(40) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `last_sync_at` datetime(6) DEFAULT NULL,
+  `next_sync_at` datetime(6) DEFAULT NULL,
+  `retry_count` int unsigned NOT NULL,
+  `max_retry_count` int unsigned NOT NULL,
+  `config` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_api_task_tenant_type` (`tenant_id`,`platform`,`sync_type`),
+  KEY `idx_api_task_schedule` (`status`,`next_sync_at`),
+  CONSTRAINT `integrations_apisynctask_tenant_id_d120174f_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `integrations_apisynctask_chk_1` CHECK ((`retry_count` >= 0)),
+  CONSTRAINT `integrations_apisynctask_chk_2` CHECK ((`max_retry_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_credentialmutationrequest`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_credentialmutationrequest` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(20) NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `payload_digest` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `response_metadata` json NOT NULL,
+  `error_code` varchar(80) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `integration_config_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_tenant_credential_mutation_key` (`tenant_id`,`idempotency_key_hash`),
+  KEY `integrations_credent_integration_config_i_3276f12f_fk_integrati` (`integration_config_id`),
+  CONSTRAINT `integrations_credent_integration_config_i_3276f12f_fk_integrati` FOREIGN KEY (`integration_config_id`) REFERENCES `integrations_platformintegrationconfig` (`id`),
+  CONSTRAINT `integrations_credent_tenant_id_1e5259b1_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_integrationauditlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_integrationauditlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(80) NOT NULL,
+  `result` varchar(20) NOT NULL,
+  `masked_detail` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `integration_config_id` bigint DEFAULT NULL,
+  `store_authorization_id` bigint DEFAULT NULL,
+  `warehouse_authorization_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `integrations_integra_actor_id_69c4717b_fk_accounts_` (`actor_id`),
+  KEY `integrations_integra_tenant_id_50bc22e7_fk_tenants_t` (`tenant_id`),
+  KEY `integrations_integra_integration_config_i_6c771a25_fk_integrati` (`integration_config_id`),
+  KEY `integrations_integra_store_authorization__8b4c0f09_fk_integrati` (`store_authorization_id`),
+  KEY `idx_integration_audit_warehouse_auth` (`warehouse_authorization_id`),
+  CONSTRAINT `fk_integration_audit_config_preserve` FOREIGN KEY (`integration_config_id`) REFERENCES `integrations_platformintegrationconfig` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_integration_audit_warehouse_auth` FOREIGN KEY (`warehouse_authorization_id`) REFERENCES `integrations_warehouseauthorization` (`id`),
+  CONSTRAINT `integrations_integra_actor_id_69c4717b_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_integra_store_authorization__8b4c0f09_fk_integrati` FOREIGN KEY (`store_authorization_id`) REFERENCES `integrations_marketplacestoreauthorization` (`id`),
+  CONSTRAINT `integrations_integra_tenant_id_50bc22e7_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=111 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_marketplaceproductmapping`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_marketplaceproductmapping` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `platform_product_id` varchar(160) NOT NULL,
+  `platform_variant_id` varchar(160) NOT NULL,
+  `platform_sku` varchar(160) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `mapping_source` varchar(30) NOT NULL,
+  `confidence` smallint unsigned DEFAULT NULL,
+  `manually_confirmed` tinyint(1) NOT NULL,
+  `result_code` varchar(80) NOT NULL,
+  `first_seen_at` datetime(6) NOT NULL,
+  `last_verified_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `product_id` bigint DEFAULT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `store_mapping_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `updated_by_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_product_mapping_variant` (`store_mapping_id`,`platform_variant_id`),
+  KEY `integrations_marketp_created_by_id_404d2132_fk_accounts_` (`created_by_id`),
+  KEY `integrations_marketp_product_id_635221b2_fk_products_` (`product_id`),
+  KEY `integrations_marketp_sku_id_7418879b_fk_products_` (`sku_id`),
+  KEY `integrations_marketp_updated_by_id_c3c13dd8_fk_accounts_` (`updated_by_id`),
+  KEY `idx_prod_map_tenant_status` (`tenant_id`,`platform`,`status`),
+  CONSTRAINT `integrations_marketp_created_by_id_404d2132_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_marketp_product_id_635221b2_fk_products_` FOREIGN KEY (`product_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `integrations_marketp_sku_id_7418879b_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `integrations_marketp_store_mapping_id_f1cdaf05_fk_integrati` FOREIGN KEY (`store_mapping_id`) REFERENCES `integrations_marketplacestoremapping` (`id`),
+  CONSTRAINT `integrations_marketp_tenant_id_732540be_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `integrations_marketp_updated_by_id_c3c13dd8_fk_accounts_` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_marketplaceproductmapping_chk_1` CHECK ((`confidence` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_marketplacestoreauthorization`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_marketplacestoreauthorization` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `region` varchar(8) NOT NULL,
+  `platform_store_id` varchar(120) NOT NULL,
+  `platform_identity_key` varchar(64) NOT NULL,
+  `merchant_subject_id` varchar(160) NOT NULL,
+  `shop_cipher` varchar(255) NOT NULL,
+  `credential_id` varchar(160) NOT NULL,
+  `token_id` varchar(160) NOT NULL,
+  `credential_mask` json NOT NULL,
+  `credential_reference_version` int unsigned NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `scopes` json NOT NULL,
+  `authorized_at` datetime(6) DEFAULT NULL,
+  `expires_at` datetime(6) DEFAULT NULL,
+  `refreshed_at` datetime(6) DEFAULT NULL,
+  `revoked_at` datetime(6) DEFAULT NULL,
+  `last_error_code` varchar(80) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `integration_config_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `updated_by_id` bigint NOT NULL,
+  `active_platform_identity_key` varchar(64) DEFAULT NULL,
+  `active_store_binding_key` varchar(64) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `active_platform_identity_key` (`active_platform_identity_key`),
+  UNIQUE KEY `active_store_binding_key` (`active_store_binding_key`),
+  KEY `idx_market_auth_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_market_auth_tenant_store` (`tenant_id`,`store_id`),
+  KEY `integrations_marketp_created_by_id_91771f04_fk_accounts_` (`created_by_id`),
+  KEY `integrations_marketp_integration_config_i_19d353b3_fk_integrati` (`integration_config_id`),
+  KEY `integrations_marketp_store_id_83ac645f_fk_masterdat` (`store_id`),
+  KEY `integrations_marketp_updated_by_id_6fbe78ef_fk_accounts_` (`updated_by_id`),
+  CONSTRAINT `integrations_marketp_created_by_id_91771f04_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_marketp_integration_config_i_19d353b3_fk_integrati` FOREIGN KEY (`integration_config_id`) REFERENCES `integrations_platformintegrationconfig` (`id`),
+  CONSTRAINT `integrations_marketp_store_id_83ac645f_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `integrations_marketp_tenant_id_eed15c86_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `integrations_marketp_updated_by_id_6fbe78ef_fk_accounts_` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_marketplacestoreauthorization_chk_1` CHECK ((`credential_reference_version` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=28 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_marketplacestoremapping`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_marketplacestoremapping` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `platform_store_id` varchar(160) NOT NULL,
+  `platform_identity_key` varchar(64) NOT NULL,
+  `platform_subject_id` varchar(160) NOT NULL,
+  `region` varchar(8) NOT NULL,
+  `timezone` varchar(64) NOT NULL,
+  `currency` varchar(3) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `mapping_source` varchar(30) NOT NULL,
+  `mapped_at` datetime(6) NOT NULL,
+  `last_verified_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `authorization_id` bigint NOT NULL,
+  `mapped_by_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_store_mapping_tenant_platform_store` (`tenant_id`,`platform`,`platform_store_id`),
+  KEY `integrations_marketp_authorization_id_6300b5ca_fk_integrati` (`authorization_id`),
+  KEY `integrations_marketp_mapped_by_id_14afada5_fk_accounts_` (`mapped_by_id`),
+  KEY `integrations_marketp_store_id_a956af68_fk_masterdat` (`store_id`),
+  KEY `idx_store_map_tenant_status` (`tenant_id`,`platform`,`status`),
+  CONSTRAINT `integrations_marketp_authorization_id_6300b5ca_fk_integrati` FOREIGN KEY (`authorization_id`) REFERENCES `integrations_marketplacestoreauthorization` (`id`),
+  CONSTRAINT `integrations_marketp_mapped_by_id_14afada5_fk_accounts_` FOREIGN KEY (`mapped_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_marketp_store_id_a956af68_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `integrations_marketp_tenant_id_afd37d1d_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=25 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_oauthstatesession`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_oauthstatesession` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `region` varchar(8) NOT NULL,
+  `state_hash` varchar(64) NOT NULL,
+  `redirect_uri` varchar(500) NOT NULL,
+  `requested_scopes` json NOT NULL,
+  `session_binding` varchar(128) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `expires_at` datetime(6) NOT NULL,
+  `consumed_at` datetime(6) DEFAULT NULL,
+  `result_code` varchar(80) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `initiated_by_id` bigint NOT NULL,
+  `integration_config_id` bigint NOT NULL,
+  `store_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_oauth_state_hash` (`state_hash`),
+  KEY `integrations_oauthst_initiated_by_id_44773ed0_fk_accounts_` (`initiated_by_id`),
+  KEY `integrations_oauthst_integration_config_i_07609f54_fk_integrati` (`integration_config_id`),
+  KEY `integrations_oauthst_store_id_df7e5a7e_fk_masterdat` (`store_id`),
+  KEY `idx_oauth_state_tenant_status` (`tenant_id`,`platform`,`status`),
+  CONSTRAINT `integrations_oauthst_initiated_by_id_44773ed0_fk_accounts_` FOREIGN KEY (`initiated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_oauthst_integration_config_i_07609f54_fk_integrati` FOREIGN KEY (`integration_config_id`) REFERENCES `integrations_platformintegrationconfig` (`id`),
+  CONSTRAINT `integrations_oauthst_store_id_df7e5a7e_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `integrations_oauthst_tenant_id_39cdd243_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_platformintegrationconfig`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_platformintegrationconfig` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `api_type` varchar(32) NOT NULL DEFAULT 'marketplace',
+  `account_alias` varchar(120) NOT NULL,
+  `environment` varchar(20) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `credential_key_version` varchar(40) NOT NULL,
+  `credential_fingerprint` varchar(64) NOT NULL,
+  `last_verified_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `credential_id` varchar(160) NOT NULL,
+  `credential_mask` json NOT NULL DEFAULT (_utf8mb4'{}'),
+  `credential_reference_version` int unsigned NOT NULL,
+  `token_id` varchar(160) NOT NULL,
+  `callback_url` varchar(500) NOT NULL,
+  `config_version` int unsigned NOT NULL,
+  `connect_timeout_seconds` smallint unsigned NOT NULL,
+  `contract_version` varchar(80) NOT NULL,
+  `credential_expires_at` datetime(6) DEFAULT NULL,
+  `credential_status` varchar(30) NOT NULL,
+  `last_rotated_at` datetime(6) DEFAULT NULL,
+  `network_enabled` tinyint(1) NOT NULL,
+  `platform_config` json NOT NULL DEFAULT (_utf8mb4'{}'),
+  `proxy_profile` varchar(120) NOT NULL,
+  `read_timeout_seconds` smallint unsigned NOT NULL,
+  `regions` json NOT NULL DEFAULT (_utf8mb4'[]'),
+  `scopes` json NOT NULL DEFAULT (_utf8mb4'[]'),
+  `sync_read_enabled` tinyint(1) NOT NULL,
+  `sync_write_enabled` tinyint(1) NOT NULL,
+  `credential_operation_id_hash` varchar(64) NOT NULL,
+  `credential_revoked_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_platform_integration_per_tenant_api` (`tenant_id`,`platform`,`api_type`,`account_alias`,`environment`),
+  KEY `integrations_platfor_created_by_id_75a338bc_fk_accounts_` (`created_by_id`),
+  KEY `idx_platform_config_tenant_type` (`tenant_id`,`api_type`,`status`),
+  CONSTRAINT `integrations_platfor_created_by_id_75a338bc_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `integrations_platfor_tenant_id_1e150c7f_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `chk_platform_config_api_type` CHECK ((`api_type` in (_utf8mb4'marketplace',_utf8mb4'advertising',_utf8mb4'inventory'))),
+  CONSTRAINT `integrations_platformintegrationconfig_chk_1` CHECK ((`credential_reference_version` >= 0)),
+  CONSTRAINT `integrations_platformintegrationconfig_chk_2` CHECK ((`config_version` >= 0)),
+  CONSTRAINT `integrations_platformintegrationconfig_chk_3` CHECK ((`connect_timeout_seconds` >= 0)),
+  CONSTRAINT `integrations_platformintegrationconfig_chk_4` CHECK ((`read_timeout_seconds` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=26 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_synccheckpoint`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_synccheckpoint` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint NOT NULL,
+  `sync_job_id` bigint NOT NULL,
+  `cursor_json` json DEFAULT NULL,
+  `watermark_utc` datetime(6) DEFAULT NULL,
+  `last_success_run_id` bigint DEFAULT NULL,
+  `version` bigint NOT NULL DEFAULT '1',
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sync_checkpoint_job` (`tenant_id`,`sync_job_id`),
+  KEY `idx_sync_checkpoint_watermark` (`tenant_id`,`watermark_utc`),
+  KEY `idx_sync_checkpoint_last_run` (`last_success_run_id`),
+  KEY `fk_sync_checkpoint_job` (`sync_job_id`),
+  CONSTRAINT `fk_sync_checkpoint_job` FOREIGN KEY (`sync_job_id`) REFERENCES `integrations_syncjob` (`id`),
+  CONSTRAINT `fk_sync_checkpoint_last_run` FOREIGN KEY (`last_success_run_id`) REFERENCES `integrations_syncrun` (`id`),
+  CONSTRAINT `fk_sync_checkpoint_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_synccursor`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_synccursor` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `cursor_key` varchar(80) NOT NULL,
+  `cursor_value` varchar(255) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `sync_job_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sync_cursor_key` (`tenant_id`,`sync_job_id`,`cursor_key`),
+  KEY `integrations_synccur_sync_job_id_ea1fb691_fk_integrati` (`sync_job_id`),
+  CONSTRAINT `integrations_synccur_sync_job_id_ea1fb691_fk_integrati` FOREIGN KEY (`sync_job_id`) REFERENCES `integrations_syncjob` (`id`),
+  CONSTRAINT `integrations_synccursor_tenant_id_19e61f9d_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_syncjob`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_syncjob` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `resource_type` varchar(40) NOT NULL,
+  `schedule_type` varchar(20) NOT NULL,
+  `sync_scope` json DEFAULT NULL,
+  `status` varchar(20) NOT NULL,
+  `is_enabled` tinyint(1) NOT NULL,
+  `max_retry_count` int unsigned NOT NULL,
+  `backoff_base_seconds` int unsigned NOT NULL,
+  `last_run_at` datetime(6) DEFAULT NULL,
+  `next_run_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `integration_config_id` bigint NOT NULL,
+  `store_authorization_id` bigint DEFAULT NULL,
+  `warehouse_authorization_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `lock_acquired_at` datetime(6) DEFAULT NULL,
+  `lock_expires_at` datetime(6) DEFAULT NULL,
+  `lock_heartbeat_at` datetime(6) DEFAULT NULL,
+  `lock_token` varchar(80) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sync_job_store_resource` (`tenant_id`,`store_authorization_id`,`resource_type`),
+  UNIQUE KEY `uniq_sync_job_warehouse_resource` (`tenant_id`,`warehouse_authorization_id`,`resource_type`),
+  KEY `idx_sync_job_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_sync_job_tenant_resource` (`tenant_id`,`resource_type`),
+  KEY `integrations_syncjob_integration_config_i_191949ac_fk_integrati` (`integration_config_id`),
+  KEY `idx_sync_job_store_auth` (`store_authorization_id`),
+  KEY `idx_sync_job_warehouse_auth` (`warehouse_authorization_id`),
+  CONSTRAINT `fk_sync_job_store_auth` FOREIGN KEY (`store_authorization_id`) REFERENCES `integrations_marketplacestoreauthorization` (`id`),
+  CONSTRAINT `fk_sync_job_warehouse_auth` FOREIGN KEY (`warehouse_authorization_id`) REFERENCES `integrations_warehouseauthorization` (`id`),
+  CONSTRAINT `integrations_syncjob_integration_config_i_191949ac_fk_integrati` FOREIGN KEY (`integration_config_id`) REFERENCES `integrations_platformintegrationconfig` (`id`),
+  CONSTRAINT `integrations_syncjob_tenant_id_526d278e_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `chk_sync_job_single_subject` CHECK (((`store_authorization_id` is null) or (`warehouse_authorization_id` is null))),
+  CONSTRAINT `integrations_syncjob_chk_1` CHECK ((`max_retry_count` >= 0)),
+  CONSTRAINT `integrations_syncjob_chk_2` CHECK ((`backoff_base_seconds` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=114 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_syncrun`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_syncrun` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `run_id` varchar(80) NOT NULL,
+  `idempotency_key` varchar(160) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `fetched_count` int unsigned NOT NULL,
+  `created_count` int unsigned NOT NULL,
+  `updated_count` int unsigned NOT NULL,
+  `skipped_count` int unsigned NOT NULL,
+  `failed_count` int unsigned NOT NULL,
+  `retry_count` int unsigned NOT NULL,
+  `error_code` varchar(80) NOT NULL,
+  `masked_error_message` longtext NOT NULL,
+  `masked_log` json NOT NULL,
+  `sync_job_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sync_run_job_idempotency` (`tenant_id`,`sync_job_id`,`idempotency_key`),
+  KEY `idx_sync_run_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_sync_run_run_id` (`run_id`),
+  KEY `integrations_syncrun_sync_job_id_0ac15c24_fk_integrati` (`sync_job_id`),
+  CONSTRAINT `integrations_syncrun_sync_job_id_0ac15c24_fk_integrati` FOREIGN KEY (`sync_job_id`) REFERENCES `integrations_syncjob` (`id`),
+  CONSTRAINT `integrations_syncrun_tenant_id_640dbfc9_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `integrations_syncrun_chk_1` CHECK ((`fetched_count` >= 0)),
+  CONSTRAINT `integrations_syncrun_chk_2` CHECK ((`created_count` >= 0)),
+  CONSTRAINT `integrations_syncrun_chk_3` CHECK ((`updated_count` >= 0)),
+  CONSTRAINT `integrations_syncrun_chk_4` CHECK ((`skipped_count` >= 0)),
+  CONSTRAINT `integrations_syncrun_chk_5` CHECK ((`failed_count` >= 0)),
+  CONSTRAINT `integrations_syncrun_chk_6` CHECK ((`retry_count` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=33 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_warehouseauthorization`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_warehouseauthorization` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `provider` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `credential_id` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `token_id` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `credential_mask` json NOT NULL,
+  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `authorized_at` datetime(6) DEFAULT NULL,
+  `last_verified_at` datetime(6) DEFAULT NULL,
+  `revoked_at` datetime(6) DEFAULT NULL,
+  `last_error_code` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `active_warehouse_binding_key` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `updated_by_id` bigint NOT NULL,
+  `integration_config_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `warehouse_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_active_warehouse_binding` (`active_warehouse_binding_key`),
+  KEY `idx_warehouse_auth_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_warehouse_auth_tenant_warehouse` (`tenant_id`,`warehouse_id`),
+  KEY `idx_warehouse_auth_config` (`integration_config_id`),
+  KEY `fk_warehouse_auth_warehouse` (`warehouse_id`),
+  KEY `fk_warehouse_auth_created_by` (`created_by_id`),
+  KEY `fk_warehouse_auth_updated_by` (`updated_by_id`),
+  CONSTRAINT `fk_warehouse_auth_config` FOREIGN KEY (`integration_config_id`) REFERENCES `integrations_platformintegrationconfig` (`id`),
+  CONSTRAINT `fk_warehouse_auth_created_by` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `fk_warehouse_auth_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `fk_warehouse_auth_updated_by` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `fk_warehouse_auth_warehouse` FOREIGN KEY (`warehouse_id`) REFERENCES `masterdata_warehousemaster` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `integrations_webhookevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `integrations_webhookevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(30) NOT NULL,
+  `event_id` varchar(120) NOT NULL,
+  `event_type` varchar(80) NOT NULL,
+  `signature_status` varchar(30) NOT NULL,
+  `processing_status` varchar(30) NOT NULL,
+  `payload_hash` varchar(64) NOT NULL,
+  `received_at` datetime(6) NOT NULL,
+  `processed_at` datetime(6) DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_webhook_event_per_tenant` (`tenant_id`,`platform`,`event_id`),
+  CONSTRAINT `integrations_webhook_tenant_id_e25e848f_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `inventory_snapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `inventory_snapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `site_code` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_sku` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform_product_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform_variant_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `seller_sku` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `on_hand_qty` bigint unsigned NOT NULL,
+  `available_qty` bigint unsigned NOT NULL,
+  `reserved_qty` bigint unsigned NOT NULL,
+  `in_transit_qty` bigint unsigned NOT NULL,
+  `pending_putaway_qty` bigint unsigned NOT NULL,
+  `defective_qty` bigint unsigned NOT NULL,
+  `snapshot_at_utc` datetime(6) NOT NULL,
+  `payload_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ingested_at` datetime(6) NOT NULL,
+  `internal_sku_id` bigint DEFAULT NULL,
+  `source_run_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `warehouse_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_inventory_snapshot` (`tenant_id`,`site_code`,`warehouse_id`,`source_sku`,`snapshot_at_utc`),
+  KEY `idx_inventory_site_time` (`tenant_id`,`site_code`,`snapshot_at_utc`),
+  KEY `idx_inventory_sku_time` (`tenant_id`,`source_sku`,`snapshot_at_utc`),
+  KEY `idx_inventory_source_run` (`source_run_id`),
+  KEY `inventory_snapshot_internal_sku_id_6f93f988_fk_products_` (`internal_sku_id`),
+  KEY `inventory_snapshot_warehouse_id_51b0783f_fk_masterdat` (`warehouse_id`),
+  CONSTRAINT `inventory_snapshot_internal_sku_id_6f93f988_fk_products_` FOREIGN KEY (`internal_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `inventory_snapshot_source_run_id_64fa78a5_fk_integrati` FOREIGN KEY (`source_run_id`) REFERENCES `integrations_syncrun` (`id`),
+  CONSTRAINT `inventory_snapshot_tenant_id_1d06de28_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `inventory_snapshot_warehouse_id_51b0783f_fk_masterdat` FOREIGN KEY (`warehouse_id`) REFERENCES `masterdata_warehousemaster` (`id`),
+  CONSTRAINT `inventory_qty_nonnegative` CHECK (((`on_hand_qty` >= 0) and (`available_qty` >= 0) and (`reserved_qty` >= 0) and (`in_transit_qty` >= 0) and (`pending_putaway_qty` >= 0) and (`defective_qty` >= 0))),
+  CONSTRAINT `inventory_snapshot_chk_1` CHECK ((`on_hand_qty` >= 0)),
+  CONSTRAINT `inventory_snapshot_chk_2` CHECK ((`available_qty` >= 0)),
+  CONSTRAINT `inventory_snapshot_chk_3` CHECK ((`reserved_qty` >= 0)),
+  CONSTRAINT `inventory_snapshot_chk_4` CHECK ((`in_transit_qty` >= 0)),
+  CONSTRAINT `inventory_snapshot_chk_5` CHECK ((`pending_putaway_qty` >= 0)),
+  CONSTRAINT `inventory_snapshot_chk_6` CHECK ((`defective_qty` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=9788 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingattributemapping`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingattributemapping` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `country_code` varchar(8) NOT NULL,
+  `source_attribute_code` varchar(120) NOT NULL,
+  `source_attribute_name` varchar(200) NOT NULL,
+  `target_attribute_code` varchar(160) NOT NULL,
+  `target_attribute_name` varchar(200) NOT NULL,
+  `value_mapping` json NOT NULL,
+  `is_required` tinyint(1) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `platform_id` bigint NOT NULL,
+  `template_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_attribute_mapping` (`tenant_id`,`platform_id`,`template_id`,`country_code`,`source_attribute_code`),
+  KEY `listings_listingattr_created_by_id_bd5c95b7_fk_accounts_` (`created_by_id`),
+  KEY `listings_listingattr_platform_id_b220a1c5_fk_masterdat` (`platform_id`),
+  KEY `listings_listingattr_template_id_a3148974_fk_listings_` (`template_id`),
+  KEY `idx_listing_attr_map` (`tenant_id`,`platform_id`,`country_code`,`status`),
+  CONSTRAINT `listings_listingattr_created_by_id_bd5c95b7_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingattr_platform_id_b220a1c5_fk_masterdat` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `listings_listingattr_template_id_a3148974_fk_listings_` FOREIGN KEY (`template_id`) REFERENCES `listings_listingtemplate` (`id`),
+  CONSTRAINT `listings_listingattr_tenant_id_5056fbaa_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingchangelog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingchangelog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(40) NOT NULL,
+  `before_snapshot` json NOT NULL,
+  `after_snapshot` json NOT NULL,
+  `reason` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `changed_by_id` bigint NOT NULL,
+  `profile_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `listings_listingchan_changed_by_id_123e4654_fk_accounts_` (`changed_by_id`),
+  KEY `idx_listing_change` (`profile_id`,`created_at`),
+  CONSTRAINT `listings_listingchan_changed_by_id_123e4654_fk_accounts_` FOREIGN KEY (`changed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingchan_profile_id_d05b9894_fk_listings_` FOREIGN KEY (`profile_id`) REFERENCES `listings_listingprofile` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingprofile`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingprofile` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `profile_no` varchar(80) NOT NULL,
+  `title` varchar(300) NOT NULL,
+  `description` longtext NOT NULL,
+  `category_code` varchar(120) NOT NULL,
+  `attributes` json NOT NULL,
+  `media` json NOT NULL,
+  `price` decimal(12,2) DEFAULT NULL,
+  `currency` varchar(8) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `validation_errors` json NOT NULL,
+  `external_listing_id` varchar(160) NOT NULL,
+  `approved_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `approved_by_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `product_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `template_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_profile_no` (`tenant_id`,`profile_no`),
+  KEY `idx_listing_store_status` (`tenant_id`,`store_id`,`status`),
+  KEY `idx_listing_product` (`tenant_id`,`product_id`),
+  KEY `listings_listingprof_approved_by_id_b2d08740_fk_accounts_` (`approved_by_id`),
+  KEY `listings_listingprof_created_by_id_176f0219_fk_accounts_` (`created_by_id`),
+  KEY `listings_listingprof_product_id_ce65f341_fk_products_` (`product_id`),
+  KEY `listings_listingprof_store_id_aa2cafb7_fk_masterdat` (`store_id`),
+  KEY `listings_listingprof_template_id_07ebf4c2_fk_listings_` (`template_id`),
+  CONSTRAINT `listings_listingprof_approved_by_id_b2d08740_fk_accounts_` FOREIGN KEY (`approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingprof_created_by_id_176f0219_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingprof_product_id_ce65f341_fk_products_` FOREIGN KEY (`product_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `listings_listingprof_store_id_aa2cafb7_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `listings_listingprof_template_id_07ebf4c2_fk_listings_` FOREIGN KEY (`template_id`) REFERENCES `listings_listingtemplate` (`id`),
+  CONSTRAINT `listings_listingprofile_tenant_id_775ab89f_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingpublicationjob`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingpublicationjob` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(20) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `idempotency_key` varchar(128) NOT NULL,
+  `payload_snapshot` json NOT NULL,
+  `response_snapshot` json NOT NULL,
+  `error_code` varchar(80) NOT NULL,
+  `error_message` longtext NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `profile_id` bigint NOT NULL,
+  `requested_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `confirmed_production` tinyint(1) NOT NULL,
+  `execution_channel` varchar(20) NOT NULL,
+  `execution_mode` varchar(20) NOT NULL,
+  `rpa_task_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_job_key` (`tenant_id`,`idempotency_key`),
+  KEY `listings_listingpubl_profile_id_797253a5_fk_listings_` (`profile_id`),
+  KEY `listings_listingpubl_requested_by_id_4deb575c_fk_accounts_` (`requested_by_id`),
+  KEY `idx_listing_job_status` (`tenant_id`,`status`,`created_at`),
+  KEY `listings_listingpubl_rpa_task_id_ee9cc93c_fk_rpa_rpata` (`rpa_task_id`),
+  CONSTRAINT `listings_listingpubl_profile_id_797253a5_fk_listings_` FOREIGN KEY (`profile_id`) REFERENCES `listings_listingprofile` (`id`),
+  CONSTRAINT `listings_listingpubl_requested_by_id_4deb575c_fk_accounts_` FOREIGN KEY (`requested_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingpubl_rpa_task_id_ee9cc93c_fk_rpa_rpata` FOREIGN KEY (`rpa_task_id`) REFERENCES `rpa_rpatask` (`id`),
+  CONSTRAINT `listings_listingpubl_tenant_id_6afb0bc1_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingtask`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingtask` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `task_no` varchar(100) NOT NULL,
+  `execution_channel` varchar(20) NOT NULL,
+  `execution_mode` varchar(20) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `idempotency_key` varchar(128) NOT NULL,
+  `payload_snapshot` json NOT NULL,
+  `result_snapshot` json NOT NULL,
+  `current_step` varchar(120) NOT NULL,
+  `error_code` varchar(80) NOT NULL,
+  `error_message` longtext NOT NULL,
+  `confirmed_production` tinyint(1) NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `profile_id` bigint DEFAULT NULL,
+  `publication_job_id` bigint DEFAULT NULL,
+  `requested_by_id` bigint NOT NULL,
+  `rpa_task_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_task_no` (`tenant_id`,`task_no`),
+  UNIQUE KEY `uniq_listing_task_key` (`tenant_id`,`idempotency_key`),
+  UNIQUE KEY `publication_job_id` (`publication_job_id`),
+  KEY `idx_listing_task_status` (`tenant_id`,`status`,`created_at`),
+  KEY `idx_listing_task_channel` (`tenant_id`,`execution_channel`,`execution_mode`),
+  KEY `listings_listingtask_profile_id_66122ae9_fk_listings_` (`profile_id`),
+  KEY `listings_listingtask_requested_by_id_c16931f6_fk_accounts_` (`requested_by_id`),
+  KEY `listings_listingtask_rpa_task_id_3bd6d92d_fk_rpa_rpatask_id` (`rpa_task_id`),
+  CONSTRAINT `listings_listingtask_profile_id_66122ae9_fk_listings_` FOREIGN KEY (`profile_id`) REFERENCES `listings_listingprofile` (`id`),
+  CONSTRAINT `listings_listingtask_publication_job_id_6657d622_fk_listings_` FOREIGN KEY (`publication_job_id`) REFERENCES `listings_listingpublicationjob` (`id`),
+  CONSTRAINT `listings_listingtask_requested_by_id_c16931f6_fk_accounts_` FOREIGN KEY (`requested_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingtask_rpa_task_id_3bd6d92d_fk_rpa_rpatask_id` FOREIGN KEY (`rpa_task_id`) REFERENCES `rpa_rpatask` (`id`),
+  CONSTRAINT `listings_listingtask_tenant_id_e0d45e92_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingtaskerrorlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingtaskerrorlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `error_code` varchar(80) NOT NULL,
+  `message` longtext NOT NULL,
+  `detail` json NOT NULL,
+  `is_resolved` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `resolved_at` datetime(6) DEFAULT NULL,
+  `resolved_by_id` bigint DEFAULT NULL,
+  `task_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `step_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_listing_task_error` (`tenant_id`,`is_resolved`,`created_at`),
+  KEY `listings_listingtask_resolved_by_id_60405fcb_fk_accounts_` (`resolved_by_id`),
+  KEY `listings_listingtask_task_id_e5b8deb8_fk_listings_` (`task_id`),
+  KEY `listings_listingtask_step_id_9fad172e_fk_listings_` (`step_id`),
+  CONSTRAINT `listings_listingtask_resolved_by_id_60405fcb_fk_accounts_` FOREIGN KEY (`resolved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingtask_step_id_9fad172e_fk_listings_` FOREIGN KEY (`step_id`) REFERENCES `listings_listingtasksteplog` (`id`),
+  CONSTRAINT `listings_listingtask_task_id_e5b8deb8_fk_listings_` FOREIGN KEY (`task_id`) REFERENCES `listings_listingtask` (`id`),
+  CONSTRAINT `listings_listingtask_tenant_id_3be4a8a5_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingtasksteplog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingtasksteplog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `step_no` int unsigned NOT NULL,
+  `step_name` varchar(120) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `message` longtext NOT NULL,
+  `detail` json NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `task_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_task_step_no` (`task_id`,`step_no`),
+  KEY `listings_listingtask_tenant_id_a5d93702_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `listings_listingtask_task_id_1cc50814_fk_listings_` FOREIGN KEY (`task_id`) REFERENCES `listings_listingtask` (`id`),
+  CONSTRAINT `listings_listingtask_tenant_id_a5d93702_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `listings_listingtasksteplog_chk_1` CHECK ((`step_no` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingtemplate`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingtemplate` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `template_no` varchar(80) NOT NULL,
+  `name` varchar(160) NOT NULL,
+  `country_code` varchar(8) NOT NULL,
+  `category_code` varchar(120) NOT NULL,
+  `field_schema` json NOT NULL,
+  `default_values` json NOT NULL,
+  `version` int unsigned NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `platform_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_template_ver` (`tenant_id`,`template_no`,`version`),
+  KEY `idx_listing_template_site` (`tenant_id`,`platform_id`,`country_code`),
+  KEY `listings_listingtemp_created_by_id_6073bc96_fk_accounts_` (`created_by_id`),
+  KEY `listings_listingtemp_platform_id_2b08c565_fk_masterdat` (`platform_id`),
+  CONSTRAINT `listings_listingtemp_created_by_id_6073bc96_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_listingtemp_platform_id_2b08c565_fk_masterdat` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `listings_listingtemplate_tenant_id_e3f2397d_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `listings_listingtemplate_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_listingvariant`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_listingvariant` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `seller_sku` varchar(100) NOT NULL,
+  `price` decimal(12,2) NOT NULL,
+  `stock_quantity` int unsigned NOT NULL,
+  `attributes` json NOT NULL,
+  `external_variant_id` varchar(160) NOT NULL,
+  `is_enabled` tinyint(1) NOT NULL,
+  `profile_id` bigint NOT NULL,
+  `sku_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_seller_sku` (`profile_id`,`seller_sku`),
+  KEY `listings_listingvari_sku_id_f26a52f0_fk_products_` (`sku_id`),
+  CONSTRAINT `listings_listingvari_profile_id_a9990628_fk_listings_` FOREIGN KEY (`profile_id`) REFERENCES `listings_listingprofile` (`id`),
+  CONSTRAINT `listings_listingvari_sku_id_f26a52f0_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `listings_listingvariant_chk_1` CHECK ((`stock_quantity` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_platformcategorymapping`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_platformcategorymapping` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `country_code` varchar(8) NOT NULL,
+  `source_category_code` varchar(120) NOT NULL,
+  `source_category_name` varchar(200) NOT NULL,
+  `target_category_code` varchar(160) NOT NULL,
+  `target_category_name` varchar(200) NOT NULL,
+  `mapping_version` int unsigned NOT NULL,
+  `metadata` json NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `platform_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_listing_category_mapping_ver` (`tenant_id`,`platform_id`,`country_code`,`source_category_code`,`mapping_version`),
+  KEY `idx_listing_category_map` (`tenant_id`,`platform_id`,`country_code`,`status`),
+  KEY `listings_platformcat_created_by_id_5cb25301_fk_accounts_` (`created_by_id`),
+  KEY `listings_platformcat_platform_id_c014cccb_fk_masterdat` (`platform_id`),
+  CONSTRAINT `listings_platformcat_created_by_id_5cb25301_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `listings_platformcat_platform_id_c014cccb_fk_masterdat` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `listings_platformcat_tenant_id_807844f8_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `listings_platformcategorymapping_chk_1` CHECK ((`mapping_version` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `listings_platformproductdetail`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `listings_platformproductdetail` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform_product_id` varchar(160) NOT NULL,
+  `platform_variant_id` varchar(160) NOT NULL,
+  `platform_sku` varchar(160) NOT NULL,
+  `source_old_sku_code` varchar(160) NOT NULL,
+  `title` varchar(300) NOT NULL,
+  `variant` varchar(300) NOT NULL,
+  `category_l1` varchar(200) NOT NULL,
+  `category_l2` varchar(200) NOT NULL,
+  `category_l3` varchar(200) NOT NULL,
+  `sku_prefix` varchar(120) NOT NULL,
+  `shop_abbr` varchar(120) NOT NULL,
+  `sales_status` varchar(80) NOT NULL,
+  `owner` varchar(120) NOT NULL,
+  `leader` varchar(120) NOT NULL,
+  `platform_created_at` datetime(6) DEFAULT NULL,
+  `platform_updated_at` datetime(6) DEFAULT NULL,
+  `source` varchar(40) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `internal_sku_id` bigint DEFAULT NULL,
+  `platform_id` bigint NOT NULL,
+  `site_id` bigint DEFAULT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_platform_product_variant` (`tenant_id`,`platform_id`,`store_id`,`platform_variant_id`),
+  KEY `listings_platformpro_internal_sku_id_2e7f7d39_fk_products_` (`internal_sku_id`),
+  KEY `listings_platformpro_platform_id_9823dff6_fk_masterdat` (`platform_id`),
+  KEY `listings_platformpro_site_id_3a482164_fk_masterdat` (`site_id`),
+  KEY `listings_platformpro_store_id_8019f2da_fk_masterdat` (`store_id`),
+  KEY `idx_platform_product_store` (`tenant_id`,`platform_id`,`store_id`),
+  KEY `idx_platform_product_sku` (`tenant_id`,`internal_sku_id`),
+  KEY `idx_platform_product_status` (`tenant_id`,`sales_status`),
+  CONSTRAINT `listings_platformpro_internal_sku_id_2e7f7d39_fk_products_` FOREIGN KEY (`internal_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `listings_platformpro_platform_id_9823dff6_fk_masterdat` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `listings_platformpro_site_id_3a482164_fk_masterdat` FOREIGN KEY (`site_id`) REFERENCES `masterdata_countrysitemaster` (`id`),
+  CONSTRAINT `listings_platformpro_store_id_8019f2da_fk_masterdat` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `listings_platformpro_tenant_id_32c1755c_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=36001 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `masterdata_countrysitemaster`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `masterdata_countrysitemaster` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `country_code` varchar(8) NOT NULL,
+  `platform` varchar(60) DEFAULT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `currency` varchar(8) NOT NULL,
+  `timezone` varchar(60) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_country_site_master_code` (`tenant_id`,`code`),
+  KEY `masterdata_countrysitemaster_code_3de317b4` (`code`),
+  CONSTRAINT `masterdata_countrysi_tenant_id_5e37980b_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=56 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `masterdata_platformmaster`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `masterdata_platformmaster` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(60) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `platform_type` varchar(30) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_platform_master_code` (`tenant_id`,`code`),
+  KEY `masterdata_platformmaster_code_23099451` (`code`),
+  CONSTRAINT `masterdata_platformm_tenant_id_bf9c524b_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `masterdata_storemaster`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `masterdata_storemaster` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `country_code` varchar(8) NOT NULL,
+  `currency` varchar(8) NOT NULL,
+  `timezone` varchar(60) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `platform_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `platform_store_name` varchar(160) NOT NULL,
+  `category_id` bigint DEFAULT NULL,
+  `operator_id` bigint DEFAULT NULL,
+  `bd_id` bigint DEFAULT NULL,
+  `leader_id` bigint DEFAULT NULL,
+  `is_connected` tinyint(1) NOT NULL,
+  `tactical_client` varchar(160) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_store_master_code` (`tenant_id`,`code`),
+  KEY `masterdata_storemast_platform_id_ce297a87_fk_masterdat` (`platform_id`),
+  KEY `masterdata_storemaster_code_dccb75df` (`code`),
+  KEY `masterdata_storemast_category_id_864b5923_fk_products_` (`category_id`),
+  KEY `masterdata_storemast_operator_id_a7172ef0_fk_accounts_` (`operator_id`),
+  KEY `masterdata_storemaster_bd_id_b3554a98_fk_accounts_customuser_id` (`bd_id`),
+  KEY `masterdata_storemast_leader_id_f1072759_fk_accounts_` (`leader_id`),
+  CONSTRAINT `masterdata_storemast_category_id_864b5923_fk_products_` FOREIGN KEY (`category_id`) REFERENCES `products_productcategory` (`id`),
+  CONSTRAINT `masterdata_storemast_leader_id_f1072759_fk_accounts_` FOREIGN KEY (`leader_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `masterdata_storemast_operator_id_a7172ef0_fk_accounts_` FOREIGN KEY (`operator_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `masterdata_storemast_platform_id_ce297a87_fk_masterdat` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `masterdata_storemaster_bd_id_b3554a98_fk_accounts_customuser_id` FOREIGN KEY (`bd_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `masterdata_storemaster_tenant_id_b8609b7d_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=65 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `masterdata_suppliermaster`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `masterdata_suppliermaster` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `name` varchar(160) NOT NULL,
+  `contact_alias` varchar(80) NOT NULL,
+  `contact_email` varchar(254) NOT NULL,
+  `contact_phone` varchar(32) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supplier_master_code` (`tenant_id`,`code`),
+  KEY `masterdata_suppliermaster_code_5d897d97` (`code`),
+  CONSTRAINT `masterdata_supplierm_tenant_id_5aef5225_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `masterdata_warehousemaster`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `masterdata_warehousemaster` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `country_code` varchar(8) NOT NULL,
+  `warehouse_type` varchar(30) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_warehouse_master_code` (`tenant_id`,`code`),
+  KEY `masterdata_warehousemaster_code_a5f083cb` (`code`),
+  CONSTRAINT `masterdata_warehouse_tenant_id_97db8fdd_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingapiidempotencyrecord`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingapiidempotencyrecord` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `scope_key` varchar(255) NOT NULL,
+  `idempotency_key` varchar(128) NOT NULL,
+  `channel` varchar(20) NOT NULL,
+  `action` varchar(40) NOT NULL,
+  `resource_key` varchar(255) NOT NULL,
+  `request_hash` varchar(64) NOT NULL,
+  `http_status` smallint unsigned NOT NULL,
+  `response_kind` varchar(10) NOT NULL,
+  `response_body` json DEFAULT NULL,
+  `label_snapshot` json DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_api_scope_key` (`tenant_id`,`scope_key`,`idempotency_key`),
+  UNIQUE KEY `uniq_pack_api_tenant_key` (`tenant_id`,`idempotency_key`),
+  KEY `packing_packingapiid_actor_id_945e6b7a_fk_accounts_` (`actor_id`),
+  KEY `idx_pack_api_tenant_key` (`tenant_id`,`idempotency_key`),
+  CONSTRAINT `packing_packingapiid_actor_id_945e6b7a_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingapiid_tenant_id_d8c54bb7_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_api_http_success` CHECK (((`http_status` >= 200) and (`http_status` < 300))),
+  CONSTRAINT `packing_packingapiidempotencyrecord_chk_1` CHECK ((`http_status` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingbatch`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingbatch` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `batch_no` varchar(80) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `note` longtext NOT NULL,
+  `version` int unsigned NOT NULL,
+  `creation_idempotency_key` varchar(128) NOT NULL,
+  `creation_request_hash` varchar(64) NOT NULL,
+  `source_system` varchar(80) DEFAULT NULL,
+  `source_table` varchar(80) DEFAULT NULL,
+  `source_record_id` varchar(128) DEFAULT NULL,
+  `source_updated_at` datetime(6) DEFAULT NULL,
+  `source_payload_hash` varchar(64) NOT NULL,
+  `completed_at` datetime(6) DEFAULT NULL,
+  `cancelled_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `supplier_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `standard_version_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_batch_no_tenant` (`tenant_id`,`batch_no`),
+  UNIQUE KEY `uniq_pack_batch_create_key` (`tenant_id`,`creation_idempotency_key`),
+  UNIQUE KEY `uniq_pack_batch_source` (`tenant_id`,`source_system`,`source_table`,`source_record_id`),
+  KEY `packing_packingbatch_standard_version_id_d427d89c_fk_packing_p` (`standard_version_id`),
+  KEY `idx_pack_batch_scope` (`tenant_id`,`supplier_id`,`status`),
+  KEY `packing_packingbatch_created_by_id_491501a3_fk_accounts_` (`created_by_id`),
+  KEY `packing_packingbatch_supplier_id_3eb102b9_fk_masterdat` (`supplier_id`),
+  CONSTRAINT `packing_packingbatch_created_by_id_491501a3_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingbatch_standard_version_id_d427d89c_fk_packing_p` FOREIGN KEY (`standard_version_id`) REFERENCES `packing_packingstandardversion` (`id`),
+  CONSTRAINT `packing_packingbatch_supplier_id_3eb102b9_fk_masterdat` FOREIGN KEY (`supplier_id`) REFERENCES `masterdata_suppliermaster` (`id`),
+  CONSTRAINT `packing_packingbatch_tenant_id_8aa84adc_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_batch_version_gt_zero` CHECK ((`version` > 0)),
+  CONSTRAINT `packing_packingbatch_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingbatchlineallocation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingbatchlineallocation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `quantity` bigint unsigned NOT NULL,
+  `state` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `allocation_version` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `frozen_at` datetime(6) DEFAULT NULL,
+  `released_at` datetime(6) DEFAULT NULL,
+  `batch_id` bigint NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `order_line_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_batch_line_allocation` (`batch_id`,`order_line_id`),
+  KEY `idx_pack_alloc_line_state` (`tenant_id`,`order_line_id`,`state`),
+  KEY `packing_packingbatch_created_by_id_4d453136_fk_accounts_` (`created_by_id`),
+  KEY `packing_packingbatch_order_line_id_16f62ae1_fk_purchasin` (`order_line_id`),
+  CONSTRAINT `packing_packingbatch_batch_id_de68fe22_fk_packing_p` FOREIGN KEY (`batch_id`) REFERENCES `packing_packingbatch` (`id`),
+  CONSTRAINT `packing_packingbatch_created_by_id_4d453136_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingbatch_order_line_id_16f62ae1_fk_purchasin` FOREIGN KEY (`order_line_id`) REFERENCES `purchasing_supplypurchaseorderline` (`id`),
+  CONSTRAINT `packing_packingbatch_tenant_id_65194982_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_allocation_qty_gt_zero` CHECK ((`quantity` > 0)),
+  CONSTRAINT `pack_allocation_version_gt_zero` CHECK ((`allocation_version` > 0)),
+  CONSTRAINT `packing_packingbatchlineallocation_chk_1` CHECK ((`quantity` >= 0)),
+  CONSTRAINT `packing_packingbatchlineallocation_chk_2` CHECK ((`allocation_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingbatchorder`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingbatchorder` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `active_guard` tinyint(1) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `batch_id` bigint NOT NULL,
+  `order_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_batch_order` (`batch_id`,`order_id`),
+  KEY `packing_packingbatch_tenant_id_91c9c911_fk_tenants_t` (`tenant_id`),
+  KEY `packing_packingbatchorder_order_id_631a9582` (`order_id`),
+  CONSTRAINT `packing_packingbatch_batch_id_a786abd4_fk_packing_p` FOREIGN KEY (`batch_id`) REFERENCES `packing_packingbatch` (`id`),
+  CONSTRAINT `packing_packingbatch_order_id_631a9582_fk_purchasin` FOREIGN KEY (`order_id`) REFERENCES `purchasing_supplypurchaseorder` (`id`),
+  CONSTRAINT `packing_packingbatch_tenant_id_91c9c911_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_active_guard_true_null` CHECK (((`active_guard` = 0x01) or (`active_guard` is null)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingbox`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingbox` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `sequence` int unsigned NOT NULL,
+  `box_no` varchar(100) NOT NULL,
+  `weight` decimal(12,3) DEFAULT NULL,
+  `volume` decimal(12,6) DEFAULT NULL,
+  `note` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `batch_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_box_sequence` (`batch_id`,`sequence`),
+  UNIQUE KEY `uniq_pack_box_no_tenant` (`tenant_id`,`box_no`),
+  CONSTRAINT `packing_packingbox_batch_id_9a9afc8e_fk_packing_packingbatch_id` FOREIGN KEY (`batch_id`) REFERENCES `packing_packingbatch` (`id`),
+  CONSTRAINT `packing_packingbox_tenant_id_fa1090fe_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_box_sequence_gt_zero` CHECK ((`sequence` > 0)),
+  CONSTRAINT `pack_box_volume_positive` CHECK (((`volume` is null) or (`volume` > 0))),
+  CONSTRAINT `pack_box_weight_positive` CHECK (((`weight` is null) or (`weight` > 0))),
+  CONSTRAINT `packing_packingbox_chk_1` CHECK ((`sequence` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingboxconsumption`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingboxconsumption` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `consumer_type` varchar(24) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `consumer_id` bigint unsigned NOT NULL,
+  `consumer_version` int unsigned NOT NULL,
+  `state` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `active_guard` tinyint(1) DEFAULT NULL,
+  `idempotency_key` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reserved_at` datetime(6) NOT NULL,
+  `committed_at` datetime(6) DEFAULT NULL,
+  `released_at` datetime(6) DEFAULT NULL,
+  `actor_id` bigint NOT NULL,
+  `box_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `transferred_from_id` bigint DEFAULT NULL,
+  `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_box_consumption_key` (`tenant_id`,`idempotency_key`),
+  UNIQUE KEY `uniq_pack_box_active_consumption` (`box_id`,`active_guard`),
+  KEY `idx_pack_consumption_consumer` (`tenant_id`,`consumer_type`,`consumer_id`,`state`),
+  KEY `packing_packingboxco_actor_id_de935096_fk_accounts_` (`actor_id`),
+  KEY `packing_packingboxco_transferred_from_id_4aed3316_fk_packing_p` (`transferred_from_id`),
+  CONSTRAINT `packing_packingboxco_actor_id_de935096_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingboxco_box_id_368b405b_fk_packing_p` FOREIGN KEY (`box_id`) REFERENCES `packing_packingbox` (`id`),
+  CONSTRAINT `packing_packingboxco_tenant_id_f93d9131_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `packing_packingboxco_transferred_from_id_4aed3316_fk_packing_p` FOREIGN KEY (`transferred_from_id`) REFERENCES `packing_packingboxconsumption` (`id`),
+  CONSTRAINT `pack_box_consumption_guard_true_null` CHECK (((`active_guard` = 0x01) or (`active_guard` is null))),
+  CONSTRAINT `pack_box_consumption_identity_positive` CHECK (((`consumer_id` > 0) and (`consumer_version` > 0))),
+  CONSTRAINT `packing_packingboxconsumption_chk_1` CHECK ((`consumer_id` >= 0)),
+  CONSTRAINT `packing_packingboxconsumption_chk_2` CHECK ((`consumer_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingboxconsumptionaction`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingboxconsumptionaction` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before_state` json NOT NULL,
+  `after_state` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `consumption_id` bigint NOT NULL,
+  `result_consumption_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_consumption_action_key` (`tenant_id`,`idempotency_key`),
+  KEY `packing_packingboxco_actor_id_200ee976_fk_accounts_` (`actor_id`),
+  KEY `packing_packingboxco_consumption_id_f938df7f_fk_packing_p` (`consumption_id`),
+  KEY `packing_packingboxco_result_consumption_i_9b148433_fk_packing_p` (`result_consumption_id`),
+  KEY `idx_pack_consumption_action` (`tenant_id`,`consumption_id`,`action`),
+  CONSTRAINT `packing_packingboxco_actor_id_200ee976_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingboxco_consumption_id_f938df7f_fk_packing_p` FOREIGN KEY (`consumption_id`) REFERENCES `packing_packingboxconsumption` (`id`),
+  CONSTRAINT `packing_packingboxco_result_consumption_i_9b148433_fk_packing_p` FOREIGN KEY (`result_consumption_id`) REFERENCES `packing_packingboxconsumption` (`id`),
+  CONSTRAINT `packing_packingboxco_tenant_id_f22cb85f_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingboxitem`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingboxitem` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `quantity` int unsigned NOT NULL,
+  `order_no_snapshot` varchar(80) NOT NULL,
+  `sku_code_snapshot` varchar(80) NOT NULL,
+  `product_name_snapshot` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `box_id` bigint NOT NULL,
+  `order_line_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_box_order_line` (`box_id`,`order_line_id`),
+  KEY `idx_pack_item_order_line` (`tenant_id`,`order_line_id`),
+  KEY `packing_packingboxit_order_line_id_485c2aae_fk_purchasin` (`order_line_id`),
+  CONSTRAINT `packing_packingboxit_order_line_id_485c2aae_fk_purchasin` FOREIGN KEY (`order_line_id`) REFERENCES `purchasing_supplypurchaseorderline` (`id`),
+  CONSTRAINT `packing_packingboxitem_box_id_08771cc7_fk_packing_packingbox_id` FOREIGN KEY (`box_id`) REFERENCES `packing_packingbox` (`id`),
+  CONSTRAINT `packing_packingboxitem_tenant_id_a44cbfb9_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_box_item_qty_gt_zero` CHECK ((`quantity` > 0)),
+  CONSTRAINT `packing_packingboxitem_chk_1` CHECK ((`quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingchangerequest`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingchangerequest` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `expected_version` int unsigned NOT NULL,
+  `reason` longtext NOT NULL,
+  `proposed_boxes` json NOT NULL,
+  `request_hash` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `review_note` longtext NOT NULL,
+  `applied_version` int unsigned DEFAULT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `batch_id` bigint NOT NULL,
+  `reviewed_by_id` bigint DEFAULT NULL,
+  `submitted_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `packing_packingchang_batch_id_d85cc1e9_fk_packing_p` (`batch_id`),
+  KEY `packing_packingchang_reviewed_by_id_0ad9ca2b_fk_accounts_` (`reviewed_by_id`),
+  KEY `packing_packingchang_submitted_by_id_6af890cb_fk_accounts_` (`submitted_by_id`),
+  KEY `packing_packingchang_tenant_id_53b63fab_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `packing_packingchang_batch_id_d85cc1e9_fk_packing_p` FOREIGN KEY (`batch_id`) REFERENCES `packing_packingbatch` (`id`),
+  CONSTRAINT `packing_packingchang_reviewed_by_id_0ad9ca2b_fk_accounts_` FOREIGN KEY (`reviewed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingchang_submitted_by_id_6af890cb_fk_accounts_` FOREIGN KEY (`submitted_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingchang_tenant_id_53b63fab_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_change_expected_gt_zero` CHECK ((`expected_version` > 0)),
+  CONSTRAINT `packing_packingchangerequest_chk_1` CHECK ((`expected_version` >= 0)),
+  CONSTRAINT `packing_packingchangerequest_chk_2` CHECK ((`applied_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(40) NOT NULL,
+  `idempotency_key` varchar(128) NOT NULL,
+  `request_hash` varchar(64) NOT NULL,
+  `actor_type` varchar(20) NOT NULL,
+  `before_status` varchar(30) NOT NULL,
+  `after_status` varchar(30) NOT NULL,
+  `batch_version` int unsigned NOT NULL,
+  `payload` json NOT NULL,
+  `response_snapshot` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `batch_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_event_idempotency` (`batch_id`,`idempotency_key`),
+  KEY `idx_pack_event_action` (`tenant_id`,`action`,`created_at`),
+  KEY `packing_packingevent_actor_id_0f3e9855_fk_accounts_customuser_id` (`actor_id`),
+  CONSTRAINT `packing_packingevent_actor_id_0f3e9855_fk_accounts_customuser_id` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `packing_packingevent_batch_id_55607758_fk_packing_p` FOREIGN KEY (`batch_id`) REFERENCES `packing_packingbatch` (`id`),
+  CONSTRAINT `packing_packingevent_tenant_id_c7e56901_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pack_event_version_gt_zero` CHECK ((`batch_version` > 0)),
+  CONSTRAINT `packing_packingevent_chk_1` CHECK ((`batch_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingstandardversion`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingstandardversion` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(60) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `title` varchar(160) NOT NULL,
+  `rules` json NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pack_standard_version` (`code`,`version`),
+  KEY `packing_packingstandardversion_code_50698479` (`code`),
+  CONSTRAINT `pack_standard_version_gt_zero` CHECK ((`version` > 0)),
+  CONSTRAINT `packing_packingstandardversion_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `packing_packingsuppliercapability`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `packing_packingsuppliercapability` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `can_self_pack` tinyint(1) NOT NULL,
+  `can_mix_order_packing` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `supplier_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `updated_by_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `supplier_id` (`supplier_id`),
+  KEY `packing_packingsuppl_tenant_id_486cc0aa_fk_tenants_t` (`tenant_id`),
+  KEY `packing_packingsuppl_updated_by_id_897ee706_fk_accounts_` (`updated_by_id`),
+  CONSTRAINT `packing_packingsuppl_supplier_id_b938a749_fk_masterdat` FOREIGN KEY (`supplier_id`) REFERENCES `masterdata_suppliermaster` (`id`),
+  CONSTRAINT `packing_packingsuppl_tenant_id_486cc0aa_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `packing_packingsuppl_updated_by_id_897ee706_fk_accounts_` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `permissions_datascope`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `permissions_datascope` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `scope_type` varchar(20) NOT NULL,
+  `config` json NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `role_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_data_scope_per_role` (`tenant_id`,`role_id`,`scope_type`),
+  KEY `permissions_datascope_role_id_d66aa6a0_fk_permissions_role_id` (`role_id`),
+  CONSTRAINT `permissions_datascope_role_id_d66aa6a0_fk_permissions_role_id` FOREIGN KEY (`role_id`) REFERENCES `permissions_role` (`id`),
+  CONSTRAINT `permissions_datascope_tenant_id_c9fa49a1_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=38 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `permissions_permission`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `permissions_permission` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(120) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `module` varchar(80) NOT NULL,
+  `action` varchar(80) NOT NULL,
+  `description` longtext NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+) ENGINE=InnoDB AUTO_INCREMENT=213 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `permissions_role`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `permissions_role` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `code` varchar(80) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_role_code_per_tenant` (`tenant_id`,`code`),
+  KEY `permissions_role_code_821ce232` (`code`),
+  CONSTRAINT `permissions_role_tenant_id_f5b0ab62_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=36 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `permissions_role_permissions`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `permissions_role_permissions` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `role_id` bigint NOT NULL,
+  `permission_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `permissions_role_permissions_role_id_permission_id_ea4429c8_uniq` (`role_id`,`permission_id`),
+  KEY `permissions_role_per_permission_id_cd4f2c07_fk_permissio` (`permission_id`),
+  CONSTRAINT `permissions_role_per_permission_id_cd4f2c07_fk_permissio` FOREIGN KEY (`permission_id`) REFERENCES `permissions_permission` (`id`),
+  CONSTRAINT `permissions_role_per_role_id_9313389c_fk_permissio` FOREIGN KEY (`role_id`) REFERENCES `permissions_role` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=593 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `permissions_userrole`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `permissions_userrole` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `role_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `user_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_user_role_per_tenant` (`tenant_id`,`user_id`,`role_id`),
+  KEY `permissions_userrole_role_id_7928b088_fk_permissions_role_id` (`role_id`),
+  KEY `permissions_userrole_user_id_193dc7ca_fk_accounts_customuser_id` (`user_id`),
+  CONSTRAINT `permissions_userrole_role_id_7928b088_fk_permissions_role_id` FOREIGN KEY (`role_id`) REFERENCES `permissions_role` (`id`),
+  CONSTRAINT `permissions_userrole_tenant_id_25686f42_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `permissions_userrole_user_id_193dc7ca_fk_accounts_customuser_id` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=46 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_capacityobservation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_capacityobservation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `service_name` varchar(40) NOT NULL,
+  `metric_code` varchar(40) NOT NULL,
+  `value` double DEFAULT NULL,
+  `unit` varchar(20) NOT NULL,
+  `warning_threshold` double DEFAULT NULL,
+  `critical_threshold` double DEFAULT NULL,
+  `status` varchar(20) NOT NULL,
+  `source` varchar(80) NOT NULL,
+  `observed_at` datetime(6) NOT NULL,
+  `environment_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_pilot_capacity` (`environment_id`,`metric_code`,`observed_at`),
+  CONSTRAINT `pilot_capacityobserv_environment_id_8ca2d3f5_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_entrydecision`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_entrydecision` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `review_reason` varchar(1000) NOT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `decision` varchar(10) NOT NULL,
+  `scope_summary` varchar(1000) NOT NULL,
+  `security_review_ids` json NOT NULL,
+  `verification_run_ids` json NOT NULL,
+  `performance_run_ids` json NOT NULL,
+  `recovery_plan_ids` json NOT NULL,
+  `release_plan_ids` json NOT NULL,
+  `expires_at` datetime(6) NOT NULL,
+  `expired_at` datetime(6) DEFAULT NULL,
+  `evidence_snapshot` json DEFAULT NULL,
+  `evidence_hash` varchar(64) NOT NULL,
+  `blockers` json NOT NULL,
+  `warnings` json NOT NULL,
+  `contract_version` varchar(40) NOT NULL,
+  `creator_id` bigint NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `owner_id` bigint NOT NULL,
+  `reviewer_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_p8_entry_code` (`tenant_id`,`code`),
+  UNIQUE KEY `uniq_p8_entry_idem` (`tenant_id`,`idempotency_key_hash`),
+  KEY `pilot_entrydecision_creator_id_e1ddde13_fk_accounts_` (`creator_id`),
+  KEY `pilot_entrydecision_environment_id_f99f1afc_fk_pilot_pil` (`environment_id`),
+  KEY `pilot_entrydecision_owner_id_530cc280_fk_accounts_customuser_id` (`owner_id`),
+  KEY `pilot_entrydecision_reviewer_id_7ced4454_fk_accounts_` (`reviewer_id`),
+  CONSTRAINT `pilot_entrydecision_creator_id_e1ddde13_fk_accounts_` FOREIGN KEY (`creator_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_entrydecision_environment_id_f99f1afc_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_entrydecision_owner_id_530cc280_fk_accounts_customuser_id` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_entrydecision_reviewer_id_7ced4454_fk_accounts_` FOREIGN KEY (`reviewer_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_entrydecision_tenant_id_6f11b4c5_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_entrydecision_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_performancerun`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_performancerun` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `review_reason` varchar(1000) NOT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `scenario` varchar(200) NOT NULL,
+  `workload_profile` varchar(20) NOT NULL,
+  `max_rps` int unsigned NOT NULL,
+  `concurrency` int unsigned NOT NULL,
+  `duration_seconds` int unsigned NOT NULL,
+  `thresholds` json NOT NULL,
+  `evidence_refs` json NOT NULL,
+  `p50_ms` decimal(12,3) DEFAULT NULL,
+  `p95_ms` decimal(12,3) DEFAULT NULL,
+  `error_rate` decimal(8,6) DEFAULT NULL,
+  `cpu_percent` decimal(7,3) DEFAULT NULL,
+  `memory_percent` decimal(7,3) DEFAULT NULL,
+  `result_summary` varchar(1000) NOT NULL,
+  `creator_id` bigint NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `owner_id` bigint NOT NULL,
+  `recorder_id` bigint DEFAULT NULL,
+  `reviewer_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_p8_performance_code` (`tenant_id`,`code`),
+  UNIQUE KEY `uniq_p8_performance_idem` (`tenant_id`,`idempotency_key_hash`),
+  KEY `pilot_performancerun_creator_id_4dbb9f16_fk_accounts_` (`creator_id`),
+  KEY `pilot_performancerun_environment_id_d2024180_fk_pilot_pil` (`environment_id`),
+  KEY `pilot_performancerun_owner_id_4c8fd9cb_fk_accounts_customuser_id` (`owner_id`),
+  KEY `pilot_performancerun_recorder_id_146c3682_fk_accounts_` (`recorder_id`),
+  KEY `pilot_performancerun_reviewer_id_bf433ff4_fk_accounts_` (`reviewer_id`),
+  CONSTRAINT `pilot_performancerun_creator_id_4dbb9f16_fk_accounts_` FOREIGN KEY (`creator_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_performancerun_environment_id_d2024180_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_performancerun_owner_id_4c8fd9cb_fk_accounts_customuser_id` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_performancerun_recorder_id_146c3682_fk_accounts_` FOREIGN KEY (`recorder_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_performancerun_reviewer_id_bf433ff4_fk_accounts_` FOREIGN KEY (`reviewer_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_performancerun_tenant_id_8b638801_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_performancerun_chk_1` CHECK ((`version` >= 0)),
+  CONSTRAINT `pilot_performancerun_chk_2` CHECK ((`max_rps` >= 0)),
+  CONSTRAINT `pilot_performancerun_chk_3` CHECK ((`concurrency` >= 0)),
+  CONSTRAINT `pilot_performancerun_chk_4` CHECK ((`duration_seconds` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_pilotauditevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_pilotauditevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `object_type` varchar(40) NOT NULL,
+  `object_id` varchar(100) NOT NULL,
+  `action` varchar(50) NOT NULL,
+  `permission_code` varchar(120) NOT NULL,
+  `from_status` varchar(30) NOT NULL,
+  `to_status` varchar(30) NOT NULL,
+  `reason` varchar(500) NOT NULL,
+  `approval_ref` varchar(160) NOT NULL,
+  `rollback_approval_ref` varchar(160) NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `request_id` varchar(120) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `evidence_refs` json NOT NULL,
+  `occurred_at` datetime(6) NOT NULL,
+  `actor_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `recovery_plan_id` bigint DEFAULT NULL,
+  `release_plan_id` bigint DEFAULT NULL,
+  `outcome` varchar(10) NOT NULL,
+  `error_code` varchar(80) NOT NULL,
+  `actor_type` varchar(20) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pilot_audit_idempotency` (`tenant_id`,`idempotency_key_hash`),
+  KEY `pilot_pilotauditeven_recovery_plan_id_5cb00c4d_fk_pilot_rec` (`recovery_plan_id`),
+  KEY `pilot_pilotauditeven_release_plan_id_6dac4c10_fk_pilot_rel` (`release_plan_id`),
+  KEY `pilot_pilotauditeven_actor_id_4294e435_fk_accounts_` (`actor_id`),
+  CONSTRAINT `pilot_pilotauditeven_actor_id_4294e435_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_pilotauditeven_recovery_plan_id_5cb00c4d_fk_pilot_rec` FOREIGN KEY (`recovery_plan_id`) REFERENCES `pilot_recoveryplan` (`id`),
+  CONSTRAINT `pilot_pilotauditeven_release_plan_id_6dac4c10_fk_pilot_rel` FOREIGN KEY (`release_plan_id`) REFERENCES `pilot_releaseplan` (`id`),
+  CONSTRAINT `pilot_pilotauditevent_tenant_id_1f15d2ed_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_pilotauditevent_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_pilotenvironment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_pilotenvironment` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(64) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_pilotevidencereference`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_pilotevidencereference` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `reference` varchar(200) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pilot_evidence_ref` (`tenant_id`,`environment_id`,`reference`),
+  KEY `pilot_pilotevidencer_environment_id_b3e379a9_fk_pilot_pil` (`environment_id`),
+  CONSTRAINT `pilot_pilotevidencer_environment_id_b3e379a9_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_pilotevidencer_tenant_id_5b1c5d12_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_pilottargetalias`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_pilottargetalias` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `alias` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pilot_target_alias` (`tenant_id`,`environment_id`,`alias`),
+  KEY `pilot_pilottargetali_environment_id_3e68cb9f_fk_pilot_pil` (`environment_id`),
+  KEY `pilot_pilottargetalias_alias_a5110bef` (`alias`),
+  CONSTRAINT `pilot_pilottargetali_environment_id_3e68cb9f_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_pilottargetalias_tenant_id_f4e7774f_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_readinessgate`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_readinessgate` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(40) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `evidence_ref` varchar(160) NOT NULL,
+  `message` varchar(300) NOT NULL,
+  `evaluated_at` datetime(6) DEFAULT NULL,
+  `expires_at` datetime(6) DEFAULT NULL,
+  `environment_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pilot_readiness_gate` (`environment_id`,`code`),
+  CONSTRAINT `pilot_readinessgate_environment_id_89a023e5_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_recoverydrill`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_recoverydrill` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `status` varchar(30) NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `actual_rpo_minutes` int unsigned DEFAULT NULL,
+  `actual_rto_minutes` int unsigned DEFAULT NULL,
+  `result_summary` varchar(1000) NOT NULL,
+  `evidence_refs` json NOT NULL,
+  `version` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `recovery_plan_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `pilot_recoverydrill_tenant_id_faf8f09a_fk_tenants_tenant_id` (`tenant_id`),
+  KEY `pilot_recoverydrill_recovery_plan_id_c1fec605_fk_pilot_rec` (`recovery_plan_id`),
+  CONSTRAINT `pilot_recoverydrill_recovery_plan_id_c1fec605_fk_pilot_rec` FOREIGN KEY (`recovery_plan_id`) REFERENCES `pilot_recoveryplan` (`id`),
+  CONSTRAINT `pilot_recoverydrill_tenant_id_faf8f09a_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_recoverydrill_chk_1` CHECK ((`actual_rpo_minutes` >= 0)),
+  CONSTRAINT `pilot_recoverydrill_chk_2` CHECK ((`actual_rto_minutes` >= 0)),
+  CONSTRAINT `pilot_recoverydrill_chk_3` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_recoveryplan`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_recoveryplan` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  `rpo_minutes` int unsigned NOT NULL,
+  `rto_minutes` int unsigned NOT NULL,
+  `backup_summary` varchar(500) NOT NULL,
+  `backup_checksum_masked` varchar(128) NOT NULL,
+  `approval_ref` varchar(160) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `scheduled_at` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `reason` varchar(500) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `approved_by_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_recovery_plan_idempotency` (`tenant_id`,`idempotency_key_hash`),
+  KEY `pilot_recoveryplan_approved_by_id_51d29dce_fk_accounts_` (`approved_by_id`),
+  KEY `pilot_recoveryplan_created_by_id_1df6c6bf_fk_accounts_` (`created_by_id`),
+  KEY `pilot_recoveryplan_environment_id_beefd8be_fk_pilot_pil` (`environment_id`),
+  CONSTRAINT `pilot_recoveryplan_approved_by_id_51d29dce_fk_accounts_` FOREIGN KEY (`approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_recoveryplan_created_by_id_1df6c6bf_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_recoveryplan_environment_id_beefd8be_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_recoveryplan_tenant_id_04731c49_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_recoveryplan_chk_1` CHECK ((`rpo_minutes` >= 0)),
+  CONSTRAINT `pilot_recoveryplan_chk_2` CHECK ((`rto_minutes` >= 0)),
+  CONSTRAINT `pilot_recoveryplan_chk_3` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_releaseplan`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_releaseplan` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `release_channel` varchar(30) NOT NULL,
+  `commit_sha` varchar(64) NOT NULL,
+  `tag` varchar(120) NOT NULL,
+  `demo_tenant_refs` json NOT NULL,
+  `observation_minutes` int unsigned NOT NULL,
+  `stop_conditions` json NOT NULL,
+  `rollback_point` varchar(200) NOT NULL,
+  `database_compatibility` varchar(20) NOT NULL,
+  `approval_ref` varchar(160) NOT NULL,
+  `rollback_approval_ref` varchar(160) DEFAULT NULL,
+  `rollback_approved_at` datetime(6) DEFAULT NULL,
+  `rollback_approval_expires_at` datetime(6) DEFAULT NULL,
+  `status` varchar(30) NOT NULL,
+  `manual_context` varchar(20) NOT NULL,
+  `scheduled_at` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `reason` varchar(500) NOT NULL,
+  `result_summary` varchar(1000) NOT NULL,
+  `evidence_refs` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `approved_by_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `rollback_approved_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_release_plan_idempotency` (`tenant_id`,`idempotency_key_hash`),
+  UNIQUE KEY `pilot_releaseplan_rollback_approval_ref_0cab8170_uniq` (`rollback_approval_ref`),
+  KEY `pilot_releaseplan_approved_by_id_daf90932_fk_accounts_` (`approved_by_id`),
+  KEY `pilot_releaseplan_created_by_id_36c0fcb7_fk_accounts_` (`created_by_id`),
+  KEY `pilot_releaseplan_environment_id_1eba8a04_fk_pilot_pil` (`environment_id`),
+  KEY `pilot_releaseplan_rollback_approved_by_addc1df3_fk_accounts_` (`rollback_approved_by_id`),
+  CONSTRAINT `pilot_releaseplan_approved_by_id_daf90932_fk_accounts_` FOREIGN KEY (`approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_releaseplan_created_by_id_36c0fcb7_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_releaseplan_environment_id_1eba8a04_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_releaseplan_rollback_approved_by_addc1df3_fk_accounts_` FOREIGN KEY (`rollback_approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_releaseplan_tenant_id_6d048c94_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_releaseplan_chk_1` CHECK ((`observation_minutes` >= 0)),
+  CONSTRAINT `pilot_releaseplan_chk_2` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_securityreview`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_securityreview` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `review_reason` varchar(1000) NOT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `review_type` varchar(30) NOT NULL,
+  `scope_summary` varchar(1000) NOT NULL,
+  `risk_level` varchar(10) NOT NULL,
+  `finance_scope` json DEFAULT NULL,
+  `evidence_refs` json NOT NULL,
+  `expires_at` datetime(6) NOT NULL,
+  `expired_at` datetime(6) DEFAULT NULL,
+  `creator_id` bigint NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `owner_id` bigint NOT NULL,
+  `reviewer_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_p8_security_code` (`tenant_id`,`code`),
+  UNIQUE KEY `uniq_p8_security_idem` (`tenant_id`,`idempotency_key_hash`),
+  KEY `pilot_securityreview_creator_id_faf3bbda_fk_accounts_` (`creator_id`),
+  KEY `pilot_securityreview_environment_id_d44332ee_fk_pilot_pil` (`environment_id`),
+  KEY `pilot_securityreview_owner_id_a926e5c2_fk_accounts_customuser_id` (`owner_id`),
+  KEY `pilot_securityreview_reviewer_id_775544de_fk_accounts_` (`reviewer_id`),
+  CONSTRAINT `pilot_securityreview_creator_id_faf3bbda_fk_accounts_` FOREIGN KEY (`creator_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_securityreview_environment_id_d44332ee_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_securityreview_owner_id_a926e5c2_fk_accounts_customuser_id` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_securityreview_reviewer_id_775544de_fk_accounts_` FOREIGN KEY (`reviewer_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_securityreview_tenant_id_18052a8c_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_securityreview_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_topologyservice`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_topologyservice` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `service_name` varchar(40) NOT NULL,
+  `host_role` varchar(30) NOT NULL,
+  `network_zone` varchar(30) NOT NULL,
+  `exposure` varchar(20) NOT NULL,
+  `host_ref_masked` varchar(120) NOT NULL,
+  `port_hint` varchar(40) NOT NULL,
+  `verified_at` datetime(6) DEFAULT NULL,
+  `environment_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_pilot_topology_service` (`environment_id`,`service_name`),
+  CONSTRAINT `pilot_topologyservic_environment_id_681db585_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `pilot_verificationrun`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `pilot_verificationrun` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `review_reason` varchar(1000) NOT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `category` varchar(30) NOT NULL,
+  `target_alias` varchar(64) NOT NULL,
+  `data_class` varchar(20) NOT NULL,
+  `planned_start_at` datetime(6) NOT NULL,
+  `planned_end_at` datetime(6) NOT NULL,
+  `success_criteria` json NOT NULL,
+  `evidence_refs` json NOT NULL,
+  `result_summary` varchar(1000) NOT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `error_code` varchar(80) NOT NULL,
+  `error_message` varchar(1000) NOT NULL,
+  `creator_id` bigint NOT NULL,
+  `environment_id` bigint NOT NULL,
+  `owner_id` bigint NOT NULL,
+  `recorder_id` bigint DEFAULT NULL,
+  `reviewer_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_p8_verification_code` (`tenant_id`,`code`),
+  UNIQUE KEY `uniq_p8_verification_idem` (`tenant_id`,`idempotency_key_hash`),
+  KEY `pilot_verificationru_creator_id_c0e31e27_fk_accounts_` (`creator_id`),
+  KEY `pilot_verificationru_environment_id_0145d4db_fk_pilot_pil` (`environment_id`),
+  KEY `pilot_verificationru_owner_id_36fb0791_fk_accounts_` (`owner_id`),
+  KEY `pilot_verificationru_recorder_id_d39f6580_fk_accounts_` (`recorder_id`),
+  KEY `pilot_verificationru_reviewer_id_fd29b4ab_fk_accounts_` (`reviewer_id`),
+  KEY `pilot_verificationrun_target_alias_f1cf6fe2` (`target_alias`),
+  CONSTRAINT `pilot_verificationru_creator_id_c0e31e27_fk_accounts_` FOREIGN KEY (`creator_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_verificationru_environment_id_0145d4db_fk_pilot_pil` FOREIGN KEY (`environment_id`) REFERENCES `pilot_pilotenvironment` (`id`),
+  CONSTRAINT `pilot_verificationru_owner_id_36fb0791_fk_accounts_` FOREIGN KEY (`owner_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_verificationru_recorder_id_d39f6580_fk_accounts_` FOREIGN KEY (`recorder_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_verificationru_reviewer_id_fd29b4ab_fk_accounts_` FOREIGN KEY (`reviewer_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `pilot_verificationrun_tenant_id_52b06ce7_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `pilot_verificationrun_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productattribute`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productattribute` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(1) NOT NULL,
+  `name` varchar(80) NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_product_attribute_per_tenant` (`tenant_id`,`code`),
+  CONSTRAINT `products_productattr_tenant_id_99d66c8b_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productbundlecomponent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productbundlecomponent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `quantity` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `bundle_sku_id` bigint NOT NULL,
+  `component_sku_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_component_per_bundle_sku` (`bundle_sku_id`,`component_sku_id`),
+  KEY `products_productbund_component_sku_id_1f598c0a_fk_products_` (`component_sku_id`),
+  KEY `products_productbund_tenant_id_0b2db97e_fk_tenants_t` (`tenant_id`),
+  CONSTRAINT `products_productbund_bundle_sku_id_37e3faea_fk_products_` FOREIGN KEY (`bundle_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `products_productbund_component_sku_id_1f598c0a_fk_products_` FOREIGN KEY (`component_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `products_productbund_tenant_id_0b2db97e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `bundle_component_not_self` CHECK ((`bundle_sku_id` <> `component_sku_id`)),
+  CONSTRAINT `bundle_component_quantity_positive` CHECK ((`quantity` >= 1)),
+  CONSTRAINT `products_productbundlecomponent_chk_1` CHECK ((`quantity` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productcategory`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productcategory` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `level` smallint unsigned NOT NULL,
+  `code` varchar(2) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `english_name` varchar(160) NOT NULL,
+  `platform_category_id` varchar(80) NOT NULL,
+  `spec_dimensions` json NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `parent_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_product_category_sibling_code` (`tenant_id`,`parent_id`,`code`),
+  KEY `products_productcate_parent_id_37f1f851_fk_products_` (`parent_id`),
+  CONSTRAINT `products_productcate_parent_id_37f1f851_fk_products_` FOREIGN KEY (`parent_id`) REFERENCES `products_productcategory` (`id`),
+  CONSTRAINT `products_productcategory_tenant_id_0f8c1c73_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `products_productcategory_chk_1` CHECK ((`level` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=85 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productcodesequence`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productcodesequence` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `l1_code` varchar(1) NOT NULL,
+  `l2_code` varchar(2) NOT NULL,
+  `l3_code` varchar(2) NOT NULL,
+  `season_code` varchar(1) NOT NULL,
+  `current_value` smallint unsigned NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_product_code_sequence_per_tenant` (`tenant_id`,`l1_code`,`l2_code`,`l3_code`,`season_code`),
+  CONSTRAINT `products_productcode_tenant_id_8bf84388_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `product_code_sequence_range` CHECK (((`current_value` >= 0) and (`current_value` <= 999))),
+  CONSTRAINT `products_productcodesequence_chk_1` CHECK ((`current_value` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=51 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productcolor`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productcolor` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(40) NOT NULL,
+  `name` varchar(80) NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_product_color_per_tenant` (`tenant_id`,`code`),
+  CONSTRAINT `products_productcolor_tenant_id_6c1fc61a_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=248 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productlegacyitem`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productlegacyitem` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `legacy_spu_code` varchar(120) NOT NULL,
+  `legacy_sku_code` varchar(160) NOT NULL,
+  `product_name` varchar(200) NOT NULL,
+  `attribute_code` varchar(1) NOT NULL,
+  `color_code` varchar(40) NOT NULL,
+  `specification` varchar(120) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `error_message` varchar(500) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `category_node_id` bigint DEFAULT NULL,
+  `generated_sku_id` bigint DEFAULT NULL,
+  `generated_spu_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `purchase_price` decimal(14,4) DEFAULT NULL,
+  `unit` varchar(30) DEFAULT NULL,
+  `image_url` varchar(500) DEFAULT NULL,
+  `package_weight` decimal(10,3) DEFAULT NULL,
+  `package_volume` decimal(12,6) DEFAULT NULL,
+  `package_length_cm` decimal(10,3) DEFAULT NULL,
+  `package_width_cm` decimal(10,3) DEFAULT NULL,
+  `package_height_cm` decimal(10,3) DEFAULT NULL,
+  `origin_country` varchar(80) DEFAULT NULL,
+  `hs_code` varchar(20) DEFAULT NULL,
+  `product_description` longtext,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_legacy_sku_per_tenant` (`tenant_id`,`legacy_sku_code`),
+  KEY `products_productlega_category_node_id_bd872cfd_fk_products_` (`category_node_id`),
+  KEY `products_productlega_generated_sku_id_277d4917_fk_products_` (`generated_sku_id`),
+  KEY `products_productlega_generated_spu_id_909a3d6b_fk_products_` (`generated_spu_id`),
+  CONSTRAINT `products_productlega_category_node_id_bd872cfd_fk_products_` FOREIGN KEY (`category_node_id`) REFERENCES `products_productcategory` (`id`),
+  CONSTRAINT `products_productlega_generated_sku_id_277d4917_fk_products_` FOREIGN KEY (`generated_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `products_productlega_generated_spu_id_909a3d6b_fk_products_` FOREIGN KEY (`generated_spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `products_productlega_tenant_id_8f6f5500_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `product_legacy_package_height_nonnegative` CHECK (((`package_height_cm` is null) or (`package_height_cm` >= 0))),
+  CONSTRAINT `product_legacy_package_length_nonnegative` CHECK (((`package_length_cm` is null) or (`package_length_cm` >= 0))),
+  CONSTRAINT `product_legacy_package_volume_nonnegative` CHECK (((`package_volume` is null) or (`package_volume` >= 0))),
+  CONSTRAINT `product_legacy_package_weight_nonnegative` CHECK (((`package_weight` is null) or (`package_weight` >= 0))),
+  CONSTRAINT `product_legacy_package_width_nonnegative` CHECK (((`package_width_cm` is null) or (`package_width_cm` >= 0)))
+) ENGINE=InnoDB AUTO_INCREMENT=6610 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productlifecycledecision`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productlifecycledecision` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `decision` varchar(20) NOT NULL,
+  `from_stage` varchar(40) NOT NULL,
+  `to_stage` varchar(40) NOT NULL,
+  `reason` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `review_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `review_id` (`review_id`),
+  KEY `idx_lifecycle_decision_stage` (`tenant_id`,`to_stage`,`created_at`),
+  KEY `products_productlife_actor_id_53b6b9bd_fk_accounts_` (`actor_id`),
+  CONSTRAINT `products_productlife_actor_id_53b6b9bd_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `products_productlife_review_id_577e29e9_fk_products_` FOREIGN KEY (`review_id`) REFERENCES `products_productlifecyclereview` (`id`),
+  CONSTRAINT `products_productlife_tenant_id_14815918_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productlifecyclereview`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productlifecyclereview` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `current_stage` varchar(40) NOT NULL,
+  `recommended_stage` varchar(40) NOT NULL,
+  `review_period_start` date NOT NULL,
+  `review_period_end` date NOT NULL,
+  `reason_code` varchar(80) NOT NULL,
+  `reason_detail` longtext NOT NULL,
+  `confidence` decimal(5,4) NOT NULL,
+  `source_metrics` json NOT NULL,
+  `source_type` varchar(30) NOT NULL,
+  `rule_version` varchar(40) NOT NULL,
+  `dedup_key` varchar(64) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `reviewed_by_id` bigint DEFAULT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_lifecycle_review_dedup` (`tenant_id`,`dedup_key`),
+  KEY `idx_lifecycle_review_status` (`tenant_id`,`status`,`review_period_end`),
+  KEY `idx_lifecycle_review_sku` (`tenant_id`,`sku_id`,`recommended_stage`),
+  KEY `products_productlife_reviewed_by_id_12798306_fk_accounts_` (`reviewed_by_id`),
+  KEY `products_productlife_sku_id_181821d3_fk_products_` (`sku_id`),
+  KEY `products_productlife_spu_id_3b76d1f3_fk_products_` (`spu_id`),
+  CONSTRAINT `products_productlife_reviewed_by_id_12798306_fk_accounts_` FOREIGN KEY (`reviewed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `products_productlife_sku_id_181821d3_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `products_productlife_spu_id_3b76d1f3_fk_products_` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `products_productlife_tenant_id_559617ba_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `lifecycle_review_has_product` CHECK (((`spu_id` is not null) or (`sku_id` is not null))),
+  CONSTRAINT `lifecycle_review_valid_period` CHECK ((`review_period_start` <= `review_period_end`))
+) ENGINE=InnoDB AUTO_INCREMENT=1136 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productresearch`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productresearch` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `research_no` varchar(80) NOT NULL,
+  `product_name` varchar(200) NOT NULL,
+  `platform` varchar(50) NOT NULL,
+  `competitor_url` varchar(200) NOT NULL,
+  `estimated_sales` int unsigned NOT NULL,
+  `estimated_gross_margin` decimal(7,4) DEFAULT NULL,
+  `risk_points` json NOT NULL,
+  `approval_status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_research_no_per_tenant` (`tenant_id`,`research_no`),
+  KEY `products_productrese_created_by_id_93a5a5e0_fk_accounts_` (`created_by_id`),
+  CONSTRAINT `products_productrese_created_by_id_93a5a5e0_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `products_productresearch_tenant_id_3d04117f_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `products_productresearch_chk_1` CHECK ((`estimated_sales` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productsku`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productsku` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `sku_code` varchar(80) NOT NULL,
+  `size` varchar(80) NOT NULL,
+  `material` varchar(120) NOT NULL,
+  `selling_points` json NOT NULL,
+  `package_weight` decimal(10,3) DEFAULT NULL,
+  `package_volume` decimal(12,6) DEFAULT NULL,
+  `is_code_frozen` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `spu_id` bigint NOT NULL,
+  `color_code` varchar(40) NOT NULL,
+  `spec_values` json NOT NULL DEFAULT (_utf8mb4'{}'),
+  `specification` varchar(120) NOT NULL,
+  `legacy_sku_code` varchar(160) NOT NULL,
+  `is_active` tinyint(1) NOT NULL,
+  `purchase_price` decimal(14,4) DEFAULT NULL,
+  `unit` varchar(30) DEFAULT NULL,
+  `image_url` varchar(500) DEFAULT NULL,
+  `package_length_cm` decimal(10,3) DEFAULT NULL,
+  `package_width_cm` decimal(10,3) DEFAULT NULL,
+  `package_height_cm` decimal(10,3) DEFAULT NULL,
+  `origin_country` varchar(80) DEFAULT NULL,
+  `hs_code` varchar(20) DEFAULT NULL,
+  `product_description` longtext,
+  `product_name` varchar(200) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sku_code_per_tenant` (`tenant_id`,`sku_code`),
+  KEY `products_productsku_spu_id_15c44ec1_fk_products_productspu_id` (`spu_id`),
+  KEY `products_productsku_legacy_sku_code_32acf681` (`legacy_sku_code`),
+  KEY `products_productsku_is_active_f661463b` (`is_active`),
+  CONSTRAINT `products_productsku_spu_id_15c44ec1_fk_products_productspu_id` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `products_productsku_tenant_id_960233c9_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `product_sku_package_height_nonnegative` CHECK (((`package_height_cm` is null) or (`package_height_cm` >= 0))),
+  CONSTRAINT `product_sku_package_length_nonnegative` CHECK (((`package_length_cm` is null) or (`package_length_cm` >= 0))),
+  CONSTRAINT `product_sku_package_volume_nonnegative` CHECK (((`package_volume` is null) or (`package_volume` >= 0))),
+  CONSTRAINT `product_sku_package_weight_nonnegative` CHECK (((`package_weight` is null) or (`package_weight` >= 0))),
+  CONSTRAINT `product_sku_package_width_nonnegative` CHECK (((`package_width_cm` is null) or (`package_width_cm` >= 0)))
+) ENGINE=InnoDB AUTO_INCREMENT=8277 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productspu`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productspu` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `spu_code` varchar(80) NOT NULL,
+  `product_name` varchar(200) NOT NULL,
+  `category` varchar(120) NOT NULL,
+  `lifecycle_status` varchar(30) NOT NULL,
+  `sales_status` varchar(30) NOT NULL,
+  `is_code_frozen` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `l1_code` varchar(1) NOT NULL,
+  `l2_code` varchar(2) NOT NULL,
+  `l3_code` varchar(2) NOT NULL,
+  `product_type` varchar(20) NOT NULL,
+  `season_code` varchar(1) NOT NULL,
+  `category_node_id` bigint DEFAULT NULL,
+  `legacy_spu_code` varchar(120) NOT NULL,
+  `brand` varchar(120) NOT NULL,
+  `development_project_id` bigint DEFAULT NULL,
+  `development_source` varchar(30) DEFAULT NULL,
+  `erp_product_id` varchar(160) DEFAULT NULL,
+  `first_sale_date` date DEFAULT NULL,
+  `platform_listing_url` varchar(500) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_spu_code_per_tenant` (`tenant_id`,`spu_code`),
+  KEY `products_productspu_category_node_id_c9cc95df_fk_products_` (`category_node_id`),
+  KEY `products_productspu_legacy_spu_code_af5aa771` (`legacy_spu_code`),
+  KEY `products_productspu_brand_01c78082` (`brand`),
+  KEY `products_productspu_development_project__b3fbd6a5_fk_developme` (`development_project_id`),
+  CONSTRAINT `products_productspu_category_node_id_c9cc95df_fk_products_` FOREIGN KEY (`category_node_id`) REFERENCES `products_productcategory` (`id`),
+  CONSTRAINT `products_productspu_development_project__b3fbd6a5_fk_developme` FOREIGN KEY (`development_project_id`) REFERENCES `development_developmentproject` (`id`),
+  CONSTRAINT `products_productspu_tenant_id_9f156c87_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=420 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productstatusrecommendation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productstatusrecommendation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `recommended_status` varchar(40) NOT NULL,
+  `reason_code` varchar(80) NOT NULL,
+  `reason_detail` longtext NOT NULL,
+  `confidence` decimal(5,4) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `confirmed_at` datetime(6) DEFAULT NULL,
+  `confirmed_by_id` bigint DEFAULT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `source_snapshot_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_product_reco_status` (`tenant_id`,`status`),
+  KEY `idx_product_reco_target` (`tenant_id`,`recommended_status`),
+  KEY `products_productstat_confirmed_by_id_5415865f_fk_accounts_` (`confirmed_by_id`),
+  KEY `products_productstat_sku_id_56394b23_fk_products_` (`sku_id`),
+  KEY `products_productstat_spu_id_b91e9d42_fk_products_` (`spu_id`),
+  KEY `products_productstat_source_snapshot_id_be68b31e_fk_products_` (`source_snapshot_id`),
+  CONSTRAINT `products_productstat_confirmed_by_id_5415865f_fk_accounts_` FOREIGN KEY (`confirmed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `products_productstat_sku_id_56394b23_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `products_productstat_source_snapshot_id_be68b31e_fk_products_` FOREIGN KEY (`source_snapshot_id`) REFERENCES `products_productstatussnapshot` (`id`),
+  CONSTRAINT `products_productstat_spu_id_b91e9d42_fk_products_` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `products_productstat_tenant_id_a74718b6_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productstatussnapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productstatussnapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source` varchar(30) NOT NULL,
+  `source_reference` varchar(120) NOT NULL,
+  `metrics_payload` json NOT NULL,
+  `calculated_status` varchar(40) NOT NULL,
+  `calculated_at` datetime(6) NOT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_product_snapshot_source` (`tenant_id`,`source`),
+  KEY `idx_product_snapshot_status` (`tenant_id`,`calculated_status`),
+  KEY `products_productstat_sku_id_01e4e9fd_fk_products_` (`sku_id`),
+  KEY `products_productstat_spu_id_39843e9d_fk_products_` (`spu_id`),
+  CONSTRAINT `products_productstat_sku_id_01e4e9fd_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `products_productstat_spu_id_39843e9d_fk_products_` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `products_productstat_tenant_id_88dbae4a_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `products_productstatustransition`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `products_productstatustransition` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `from_status` varchar(40) NOT NULL,
+  `to_status` varchar(40) NOT NULL,
+  `trigger_type` varchar(30) NOT NULL,
+  `reason` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `approved_by_id` bigint NOT NULL,
+  `recommendation_id` bigint DEFAULT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_product_status_transition_recommendation` (`recommendation_id`),
+  KEY `idx_product_transition_status` (`tenant_id`,`from_status`,`to_status`),
+  KEY `products_productstat_approved_by_id_99300651_fk_accounts_` (`approved_by_id`),
+  KEY `products_productstat_sku_id_7486b9ce_fk_products_` (`sku_id`),
+  KEY `products_productstat_spu_id_b9653e32_fk_products_` (`spu_id`),
+  CONSTRAINT `products_productstat_approved_by_id_99300651_fk_accounts_` FOREIGN KEY (`approved_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `products_productstat_recommendation_id_8a43b669_fk_products_` FOREIGN KEY (`recommendation_id`) REFERENCES `products_productstatusrecommendation` (`id`),
+  CONSTRAINT `products_productstat_sku_id_7486b9ce_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `products_productstat_spu_id_b9653e32_fk_products_` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `products_productstat_tenant_id_792170c7_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchasing_purchaseorder`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `purchasing_purchaseorder` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `po_no` varchar(80) NOT NULL,
+  `sku_code` varchar(80) NOT NULL,
+  `supplier_id` bigint NOT NULL,
+  `quantity` int unsigned NOT NULL,
+  `unit_price` decimal(12,2) NOT NULL,
+  `delivery_date` date DEFAULT NULL,
+  `payment_terms` varchar(200) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `approval_status` varchar(30) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_po_no_per_tenant` (`tenant_id`,`po_no`),
+  KEY `purchasing_purchaseo_created_by_id_20836023_fk_accounts_` (`created_by_id`),
+  CONSTRAINT `purchasing_purchaseo_created_by_id_20836023_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `purchasing_purchaseorder_tenant_id_f300f552_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `purchasing_purchaseorder_chk_1` CHECK ((`quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchasing_supplyfulfillmentevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `purchasing_supplyfulfillmentevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `stage` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `delta_quantity` bigint NOT NULL,
+  `source_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_version` int unsigned NOT NULL,
+  `action` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `channel` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before_snapshot` json NOT NULL,
+  `after_snapshot` json NOT NULL,
+  `occurred_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `order_id` bigint NOT NULL,
+  `order_line_id` bigint NOT NULL,
+  `reverse_of_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_fulfillment_event_idempotency` (`tenant_id`,`idempotency_key`),
+  UNIQUE KEY `uniq_fulfillment_event_source_version` (`tenant_id`,`source_type`,`source_id`,`source_version`,`order_line_id`,`stage`,`action`),
+  KEY `idx_fulfillment_event_line` (`tenant_id`,`order_line_id`,`stage`,`created_at`),
+  KEY `purchasing_supplyful_actor_id_92bac16a_fk_accounts_` (`actor_id`),
+  KEY `purchasing_supplyful_order_id_39abc583_fk_purchasin` (`order_id`),
+  KEY `purchasing_supplyful_order_line_id_055497c5_fk_purchasin` (`order_line_id`),
+  KEY `purchasing_supplyful_reverse_of_id_4a4307f0_fk_purchasin` (`reverse_of_id`),
+  CONSTRAINT `purchasing_supplyful_actor_id_92bac16a_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `purchasing_supplyful_order_id_39abc583_fk_purchasin` FOREIGN KEY (`order_id`) REFERENCES `purchasing_supplypurchaseorder` (`id`),
+  CONSTRAINT `purchasing_supplyful_order_line_id_055497c5_fk_purchasin` FOREIGN KEY (`order_line_id`) REFERENCES `purchasing_supplypurchaseorderline` (`id`),
+  CONSTRAINT `purchasing_supplyful_reverse_of_id_4a4307f0_fk_purchasin` FOREIGN KEY (`reverse_of_id`) REFERENCES `purchasing_supplyfulfillmentevent` (`id`),
+  CONSTRAINT `purchasing_supplyful_tenant_id_74f57f63_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `fulfillment_event_delta_nonzero` CHECK ((`delta_quantity` <> 0)),
+  CONSTRAINT `fulfillment_event_source_nonempty` CHECK ((`source_id` > _utf8mb4'')),
+  CONSTRAINT `purchasing_supplyfulfillmentevent_chk_1` CHECK ((`source_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchasing_supplyorderlinefulfillment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `purchasing_supplyorderlinefulfillment` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `ordered_quantity` bigint unsigned NOT NULL,
+  `production_completed_quantity` bigint unsigned NOT NULL,
+  `packing_reserved_quantity` bigint unsigned NOT NULL,
+  `packed_quantity` bigint unsigned NOT NULL,
+  `shipped_quantity` bigint unsigned NOT NULL,
+  `warehouse_received_quantity` bigint unsigned NOT NULL,
+  `warehouse_cleared_quantity` bigint unsigned NOT NULL,
+  `version` int unsigned NOT NULL,
+  `migration_classification` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `needs_manual_allocation` tinyint(1) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `order_id` bigint NOT NULL,
+  `order_line_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `order_line_id` (`order_line_id`),
+  UNIQUE KEY `uniq_fulfillment_tenant_line` (`tenant_id`,`order_line_id`),
+  KEY `idx_fulfillment_scope` (`tenant_id`,`order_id`,`order_line_id`),
+  KEY `purchasing_supplyord_order_id_e252d872_fk_purchasin` (`order_id`),
+  CONSTRAINT `purchasing_supplyord_order_id_e252d872_fk_purchasin` FOREIGN KEY (`order_id`) REFERENCES `purchasing_supplypurchaseorder` (`id`),
+  CONSTRAINT `purchasing_supplyord_order_line_id_da92cab9_fk_purchasin` FOREIGN KEY (`order_line_id`) REFERENCES `purchasing_supplypurchaseorderline` (`id`),
+  CONSTRAINT `purchasing_supplyord_tenant_id_0aef264e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `fulfillment_downstream_order` CHECK (((`shipped_quantity` >= 0) and (`warehouse_received_quantity` >= 0) and (`warehouse_cleared_quantity` >= 0) and (`shipped_quantity` <= `packed_quantity`) and (`warehouse_received_quantity` <= `shipped_quantity`) and (`warehouse_cleared_quantity` <= `warehouse_received_quantity`))),
+  CONSTRAINT `fulfillment_ordered_gt_zero` CHECK ((`ordered_quantity` > 0)),
+  CONSTRAINT `fulfillment_production_lte_ordered` CHECK (((`production_completed_quantity` >= 0) and (`production_completed_quantity` <= `ordered_quantity`))),
+  CONSTRAINT `fulfillment_reserved_packed_lte_production` CHECK (((`packing_reserved_quantity` >= 0) and (`packed_quantity` >= 0) and (`packing_reserved_quantity` <= `production_completed_quantity`) and (`packed_quantity` <= `production_completed_quantity`) and (`packing_reserved_quantity` <= (`production_completed_quantity` - `packed_quantity`)))),
+  CONSTRAINT `fulfillment_version_gt_zero` CHECK ((`version` > 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_1` CHECK ((`ordered_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_2` CHECK ((`production_completed_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_3` CHECK ((`packing_reserved_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_4` CHECK ((`packed_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_5` CHECK ((`shipped_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_6` CHECK ((`warehouse_received_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_7` CHECK ((`warehouse_cleared_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplyorderlinefulfillment_chk_8` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchasing_supplyproductionprogress`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `purchasing_supplyproductionprogress` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `completed_quantity` bigint unsigned NOT NULL,
+  `progress_percent` decimal(5,2) NOT NULL,
+  `note` longtext NOT NULL,
+  `request_id` varchar(128) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `order_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supply_progress_request` (`order_id`,`request_id`),
+  KEY `idx_supply_progress_order` (`tenant_id`,`order_id`,`created_at`),
+  KEY `purchasing_supplypro_actor_id_061711d9_fk_accounts_` (`actor_id`),
+  CONSTRAINT `purchasing_supplypro_actor_id_061711d9_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `purchasing_supplypro_order_id_b8e6355d_fk_purchasin` FOREIGN KEY (`order_id`) REFERENCES `purchasing_supplypurchaseorder` (`id`),
+  CONSTRAINT `purchasing_supplypro_tenant_id_88edc654_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `purchasing_supplyproductionprogress_chk_1` CHECK ((`completed_quantity` >= 0)),
+  CONSTRAINT `supply_progress_percent_range` CHECK (((`progress_percent` >= 0) and (`progress_percent` <= 100)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchasing_supplypurchaseorder`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `purchasing_supplypurchaseorder` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `order_no` varchar(80) NOT NULL,
+  `order_date` date NOT NULL,
+  `expected_delivery_date` date DEFAULT NULL,
+  `currency` varchar(8) NOT NULL,
+  `notes` longtext NOT NULL,
+  `status` varchar(40) NOT NULL,
+  `completed_quantity` bigint unsigned NOT NULL,
+  `version` int unsigned NOT NULL,
+  `source_system` varchar(80) DEFAULT NULL,
+  `source_table` varchar(80) DEFAULT NULL,
+  `source_record_id` varchar(128) DEFAULT NULL,
+  `source_updated_at` datetime(6) DEFAULT NULL,
+  `source_payload_hash` varchar(64) NOT NULL,
+  `accepted_at` datetime(6) DEFAULT NULL,
+  `production_started_at` datetime(6) DEFAULT NULL,
+  `production_completed_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `supplier_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `creation_idempotency_key` varchar(128) DEFAULT NULL,
+  `creation_request_hash` varchar(64) NOT NULL,
+  `shipping_route` varchar(24) NOT NULL,
+  `shipping_route_decided_at` datetime(6) DEFAULT NULL,
+  `shipping_route_decided_by_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supply_po_no_tenant` (`tenant_id`,`order_no`),
+  UNIQUE KEY `uniq_supply_po_source` (`tenant_id`,`source_system`,`source_table`,`source_record_id`),
+  UNIQUE KEY `uniq_supply_po_create_key` (`tenant_id`,`creation_idempotency_key`),
+  KEY `idx_supply_po_scope` (`tenant_id`,`supplier_id`,`status`),
+  KEY `idx_supply_po_status` (`tenant_id`,`status`,`expected_delivery_date`),
+  KEY `purchasing_supplypur_created_by_id_c5f6868d_fk_accounts_` (`created_by_id`),
+  KEY `purchasing_supplypur_supplier_id_d336b3a4_fk_masterdat` (`supplier_id`),
+  KEY `purchasing_supplypur_shipping_route_decid_3295986b_fk_accounts_` (`shipping_route_decided_by_id`),
+  CONSTRAINT `purchasing_supplypur_created_by_id_c5f6868d_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `purchasing_supplypur_shipping_route_decid_3295986b_fk_accounts_` FOREIGN KEY (`shipping_route_decided_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `purchasing_supplypur_supplier_id_d336b3a4_fk_masterdat` FOREIGN KEY (`supplier_id`) REFERENCES `masterdata_suppliermaster` (`id`),
+  CONSTRAINT `purchasing_supplypur_tenant_id_1c078898_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `purchasing_supplypurchaseorder_chk_1` CHECK ((`completed_quantity` >= 0)),
+  CONSTRAINT `purchasing_supplypurchaseorder_chk_2` CHECK ((`version` >= 0)),
+  CONSTRAINT `supply_po_route_decision_consistent` CHECK ((((`shipping_route` = _utf8mb4'undecided') and (`shipping_route_decided_at` is null) and (`shipping_route_decided_by_id` is null)) or ((`shipping_route` in (_utf8mb4'loose_cargo',_utf8mb4'container_cargo')) and (`shipping_route_decided_at` is not null) and (`shipping_route_decided_by_id` is not null))))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchasing_supplypurchaseorderevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `purchasing_supplypurchaseorderevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(40) NOT NULL,
+  `idempotency_key` varchar(128) NOT NULL,
+  `actor_type` varchar(20) NOT NULL,
+  `before_status` varchar(40) NOT NULL,
+  `after_status` varchar(40) NOT NULL,
+  `payload` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `order_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `request_hash` varchar(64) NOT NULL,
+  `response_snapshot` json NOT NULL DEFAULT (_utf8mb4'{}'),
+  `after_shipping_route` varchar(24) NOT NULL,
+  `before_shipping_route` varchar(24) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supply_po_idempotency` (`order_id`,`idempotency_key`),
+  KEY `idx_supply_po_event` (`tenant_id`,`action`,`created_at`),
+  KEY `purchasing_supplypur_actor_id_f7bb8bd9_fk_accounts_` (`actor_id`),
+  CONSTRAINT `purchasing_supplypur_actor_id_f7bb8bd9_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `purchasing_supplypur_order_id_399d09a0_fk_purchasin` FOREIGN KEY (`order_id`) REFERENCES `purchasing_supplypurchaseorder` (`id`),
+  CONSTRAINT `purchasing_supplypur_tenant_id_09ec9a17_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchasing_supplypurchaseorderline`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `purchasing_supplypurchaseorderline` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `line_no` int unsigned NOT NULL,
+  `sku_code_snapshot` varchar(80) NOT NULL,
+  `product_name_snapshot` varchar(200) NOT NULL,
+  `quantity` int unsigned NOT NULL,
+  `unit_price` decimal(14,4) NOT NULL,
+  `expected_delivery_date` date DEFAULT NULL,
+  `source_record_id` varchar(128) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `order_id` bigint NOT NULL,
+  `sku_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supply_po_line_no` (`order_id`,`line_no`),
+  UNIQUE KEY `uniq_supply_po_line_source` (`order_id`,`source_record_id`),
+  KEY `idx_supply_po_line_sku` (`tenant_id`,`sku_id`),
+  KEY `purchasing_supplypur_sku_id_c62ad207_fk_products_` (`sku_id`),
+  CONSTRAINT `purchasing_supplypur_order_id_9975cb3d_fk_purchasin` FOREIGN KEY (`order_id`) REFERENCES `purchasing_supplypurchaseorder` (`id`),
+  CONSTRAINT `purchasing_supplypur_sku_id_c62ad207_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `purchasing_supplypur_tenant_id_07054988_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `purchasing_supplypurchaseorderline_chk_1` CHECK ((`line_no` >= 0)),
+  CONSTRAINT `purchasing_supplypurchaseorderline_chk_2` CHECK ((`quantity` >= 0)),
+  CONSTRAINT `supply_po_line_price_gte_zero` CHECK ((`unit_price` >= 0)),
+  CONSTRAINT `supply_po_line_qty_gt_zero` CHECK ((`quantity` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `refund_return`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `refund_return` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_return_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_refund_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `case_type` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `raw_status` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `normalized_status` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `arbitration_status` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `requested_at_utc` datetime(6) NOT NULL,
+  `updated_at_utc` datetime(6) NOT NULL,
+  `completed_at_utc` datetime(6) DEFAULT NULL,
+  `currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `refund_amount` decimal(20,4) NOT NULL,
+  `refund_subtotal` decimal(20,4) NOT NULL,
+  `refund_shipping_fee` decimal(20,4) NOT NULL,
+  `refund_tax` decimal(20,4) NOT NULL,
+  `requires_physical_return` tinyint(1) DEFAULT NULL,
+  `is_partial_quantity_return` tinyint(1) DEFAULT NULL,
+  `is_refund_amount_adjusted` tinyint(1) DEFAULT NULL,
+  `payload_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `inbound_record_id` bigint DEFAULT NULL,
+  `platform_id` bigint NOT NULL,
+  `source_run_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `sales_order_id` bigint DEFAULT NULL,
+  `shipment_record_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_refund_return_external` (`tenant_id`,`platform_id`,`store_id`,`external_return_id`),
+  KEY `refund_return_shipment_record_id_8b941c06_fk_shipment_record_id` (`shipment_record_id`),
+  KEY `idx_refund_store_time` (`tenant_id`,`store_id`,`requested_at_utc`),
+  KEY `idx_refund_status_time` (`tenant_id`,`normalized_status`,`updated_at_utc`),
+  KEY `idx_refund_source_run` (`source_run_id`),
+  KEY `refund_return_inbound_record_id_6660c8e4_fk_inbound_record_id` (`inbound_record_id`),
+  KEY `refund_return_platform_id_1c437d0c_fk_masterdat` (`platform_id`),
+  KEY `refund_return_store_id_4650891f_fk_masterdata_storemaster_id` (`store_id`),
+  KEY `refund_return_sales_order_id_0ae1e6c5_fk_sales_order_id` (`sales_order_id`),
+  CONSTRAINT `refund_return_inbound_record_id_6660c8e4_fk_inbound_record_id` FOREIGN KEY (`inbound_record_id`) REFERENCES `inbound_record` (`id`),
+  CONSTRAINT `refund_return_platform_id_1c437d0c_fk_masterdat` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `refund_return_sales_order_id_0ae1e6c5_fk_sales_order_id` FOREIGN KEY (`sales_order_id`) REFERENCES `sales_order` (`id`),
+  CONSTRAINT `refund_return_shipment_record_id_8b941c06_fk_shipment_record_id` FOREIGN KEY (`shipment_record_id`) REFERENCES `shipment_record` (`id`),
+  CONSTRAINT `refund_return_source_run_id_31246818_fk_integrations_syncrun_id` FOREIGN KEY (`source_run_id`) REFERENCES `integrations_syncrun` (`id`),
+  CONSTRAINT `refund_return_store_id_4650891f_fk_masterdata_storemaster_id` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `refund_return_tenant_id_3cef521c_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `refund_return_amounts_nonneg` CHECK (((`refund_amount` >= 0) and (`refund_subtotal` >= 0) and (`refund_shipping_fee` >= 0) and (`refund_tax` >= 0)))
+) ENGINE=InnoDB AUTO_INCREMENT=29 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `refund_return_item`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `refund_return_item` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_return_item_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_order_item_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform_product_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform_variant_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `seller_sku` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `item_name_snapshot` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity` int unsigned NOT NULL,
+  `currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `refund_amount` decimal(20,4) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `internal_sku_id` bigint DEFAULT NULL,
+  `refund_return_id` bigint NOT NULL,
+  `sales_order_item_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_refund_return_item_ext` (`refund_return_id`,`external_return_item_id`),
+  KEY `idx_refund_item_seller_sku` (`refund_return_id`,`seller_sku`),
+  KEY `refund_return_item_internal_sku_id_e4e97e99_fk_products_` (`internal_sku_id`),
+  KEY `refund_return_item_sales_order_item_id_07323f55_fk_sales_ord` (`sales_order_item_id`),
+  CONSTRAINT `refund_return_item_internal_sku_id_e4e97e99_fk_products_` FOREIGN KEY (`internal_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `refund_return_item_refund_return_id_4e8a43e7_fk_refund_return_id` FOREIGN KEY (`refund_return_id`) REFERENCES `refund_return` (`id`),
+  CONSTRAINT `refund_return_item_sales_order_item_id_07323f55_fk_sales_ord` FOREIGN KEY (`sales_order_item_id`) REFERENCES `sales_order_item` (`id`),
+  CONSTRAINT `refund_item_values_valid` CHECK (((`quantity` > 0) and (`refund_amount` >= 0))),
+  CONSTRAINT `refund_return_item_chk_1` CHECK ((`quantity` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=29 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `releases_releaseapproval`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `releases_releaseapproval` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `approval_type` varchar(20) NOT NULL,
+  `decision` varchar(20) NOT NULL,
+  `reason` varchar(500) NOT NULL,
+  `decided_at` datetime(6) NOT NULL,
+  `decided_by_id` bigint NOT NULL,
+  `contract_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_release_approval_type` (`contract_id`,`approval_type`),
+  KEY `releases_releaseappr_decided_by_id_4f929ca3_fk_accounts_` (`decided_by_id`),
+  CONSTRAINT `releases_releaseappr_contract_id_90d703cf_fk_releases_` FOREIGN KEY (`contract_id`) REFERENCES `releases_releasecontract` (`id`),
+  CONSTRAINT `releases_releaseappr_decided_by_id_4f929ca3_fk_accounts_` FOREIGN KEY (`decided_by_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `releases_releaseartifact`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `releases_releaseartifact` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `build_no` varchar(80) NOT NULL,
+  `commit_sha` varchar(64) NOT NULL,
+  `artifact_hash` varchar(64) NOT NULL,
+  `config_version` varchar(80) NOT NULL,
+  `manifest` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `recorded_by_id` bigint NOT NULL,
+  `contract_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `contract_id` (`contract_id`),
+  KEY `releases_releasearti_recorded_by_id_6bcc0f64_fk_accounts_` (`recorded_by_id`),
+  CONSTRAINT `releases_releasearti_contract_id_97c7c921_fk_releases_` FOREIGN KEY (`contract_id`) REFERENCES `releases_releasecontract` (`id`),
+  CONSTRAINT `releases_releasearti_recorded_by_id_6bcc0f64_fk_accounts_` FOREIGN KEY (`recorded_by_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `releases_releaseauditevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `releases_releaseauditevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(50) NOT NULL,
+  `from_status` varchar(30) NOT NULL,
+  `to_status` varchar(30) NOT NULL,
+  `outcome` varchar(20) NOT NULL,
+  `reason` varchar(500) NOT NULL,
+  `evidence_refs` json NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `request_id` varchar(80) NOT NULL,
+  `contract_version` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `contract_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_release_audit_key` (`tenant_id`,`idempotency_key_hash`),
+  KEY `idx_release_audit_contract` (`tenant_id`,`contract_id`,`created_at`),
+  KEY `releases_releaseaudi_actor_id_5704624c_fk_accounts_` (`actor_id`),
+  KEY `releases_releaseaudi_contract_id_bfb8310a_fk_releases_` (`contract_id`),
+  CONSTRAINT `releases_releaseaudi_actor_id_5704624c_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `releases_releaseaudi_contract_id_bfb8310a_fk_releases_` FOREIGN KEY (`contract_id`) REFERENCES `releases_releasecontract` (`id`),
+  CONSTRAINT `releases_releaseaudi_tenant_id_df92ec91_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `releases_releaseauditevent_chk_1` CHECK ((`contract_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `releases_releasecontract`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `releases_releasecontract` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `contract_no` varchar(40) NOT NULL,
+  `application_code` varchar(80) NOT NULL,
+  `environment` varchar(20) NOT NULL,
+  `commit_sha` varchar(64) NOT NULL,
+  `api_contract_version` varchar(40) NOT NULL,
+  `scope` json NOT NULL,
+  `risk_level` varchar(20) NOT NULL,
+  `rollback_version` varchar(120) NOT NULL,
+  `rollback_point` varchar(200) NOT NULL,
+  `stop_conditions` json NOT NULL,
+  `observation_minutes` int unsigned NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `scheduled_at` datetime(6) DEFAULT NULL,
+  `completed_at` datetime(6) DEFAULT NULL,
+  `version` int unsigned NOT NULL,
+  `idempotency_key_hash` varchar(64) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_release_contract_no` (`tenant_id`,`contract_no`),
+  UNIQUE KEY `uniq_release_contract_create_key` (`tenant_id`,`idempotency_key_hash`),
+  KEY `idx_release_contract_state` (`tenant_id`,`status`,`updated_at`),
+  KEY `releases_releasecont_created_by_id_d3715fa8_fk_accounts_` (`created_by_id`),
+  KEY `releases_releasecontract_application_code_c658507d` (`application_code`),
+  CONSTRAINT `releases_releasecont_created_by_id_d3715fa8_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `releases_releasecontract_tenant_id_805e0467_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `releases_releasecontract_chk_1` CHECK ((`observation_minutes` >= 0)),
+  CONSTRAINT `releases_releasecontract_chk_2` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `releases_releasegateresult`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `releases_releasegateresult` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(80) NOT NULL,
+  `category` varchar(40) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `evidence_ref` varchar(240) NOT NULL,
+  `evaluated_at` datetime(6) NOT NULL,
+  `expires_at` datetime(6) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `contract_id` bigint NOT NULL,
+  `recorded_by_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_release_gate_code` (`contract_id`,`code`),
+  KEY `releases_releasegate_recorded_by_id_38e92034_fk_accounts_` (`recorded_by_id`),
+  KEY `releases_releasegateresult_code_da962557` (`code`),
+  CONSTRAINT `releases_releasegate_contract_id_e60dc855_fk_releases_` FOREIGN KEY (`contract_id`) REFERENCES `releases_releasecontract` (`id`),
+  CONSTRAINT `releases_releasegate_recorded_by_id_38e92034_fk_accounts_` FOREIGN KEY (`recorded_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `releases_releasegateresult_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `replenishment_replenishmentrecommendation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `replenishment_replenishmentrecommendation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `available_stock` decimal(16,4) NOT NULL,
+  `in_transit_stock` decimal(16,4) NOT NULL,
+  `average_daily_sales` decimal(16,4) DEFAULT NULL,
+  `safety_stock_days` int unsigned NOT NULL,
+  `supplier_lead_days` int unsigned NOT NULL,
+  `replenishment_cycle_days` int unsigned NOT NULL,
+  `suggested_quantity` int unsigned NOT NULL,
+  `suggested_date` date NOT NULL,
+  `confidence` decimal(5,4) NOT NULL,
+  `reason_code` varchar(80) NOT NULL,
+  `reason_detail` longtext NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `reviewed_at` datetime(6) DEFAULT NULL,
+  `review_reason` longtext NOT NULL,
+  `source_summary` json NOT NULL,
+  `formula_version` varchar(40) NOT NULL,
+  `dedup_key` varchar(64) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `reviewed_by_id` bigint DEFAULT NULL,
+  `sku_id` bigint DEFAULT NULL,
+  `spu_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_replenishment_dedup` (`tenant_id`,`dedup_key`),
+  KEY `replenishment_replen_reviewed_by_id_c1b693a3_fk_accounts_` (`reviewed_by_id`),
+  KEY `replenishment_replen_sku_id_a05d1a8f_fk_products_` (`sku_id`),
+  KEY `replenishment_replen_spu_id_ea67fb9d_fk_products_` (`spu_id`),
+  KEY `idx_replenishment_status` (`tenant_id`,`status`,`created_at`),
+  KEY `idx_replenishment_sku` (`tenant_id`,`sku_id`,`suggested_date`),
+  CONSTRAINT `replenishment_replen_reviewed_by_id_c1b693a3_fk_accounts_` FOREIGN KEY (`reviewed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `replenishment_replen_sku_id_a05d1a8f_fk_products_` FOREIGN KEY (`sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `replenishment_replen_spu_id_ea67fb9d_fk_products_` FOREIGN KEY (`spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `replenishment_replen_tenant_id_3298253e_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `replenishment_has_product` CHECK (((`spu_id` is not null) or (`sku_id` is not null))),
+  CONSTRAINT `replenishment_replenishmentrecommendation_chk_1` CHECK ((`safety_stock_days` >= 0)),
+  CONSTRAINT `replenishment_replenishmentrecommendation_chk_2` CHECK ((`supplier_lead_days` >= 0)),
+  CONSTRAINT `replenishment_replenishmentrecommendation_chk_3` CHECK ((`replenishment_cycle_days` >= 0)),
+  CONSTRAINT `replenishment_replenishmentrecommendation_chk_4` CHECK ((`suggested_quantity` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=184 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `reports_metricaggregate`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `reports_metricaggregate` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `definition_version` int unsigned NOT NULL,
+  `granularity` varchar(20) NOT NULL,
+  `period_start` datetime(6) NOT NULL,
+  `period_end` datetime(6) NOT NULL,
+  `dimensions` json NOT NULL,
+  `dimensions_hash` varchar(64) NOT NULL,
+  `numeric_value` decimal(20,4) DEFAULT NULL,
+  `valid_point_count` int unsigned NOT NULL,
+  `excluded_point_count` int unsigned NOT NULL,
+  `quality_status` varchar(30) NOT NULL,
+  `is_formal` tinyint(1) NOT NULL,
+  `source_lineage` json NOT NULL,
+  `refreshed_at` datetime(6) NOT NULL,
+  `calculated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `metric_definition_id` bigint NOT NULL,
+  `quality_detail` json NOT NULL DEFAULT (_utf8mb4'{}'),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_metric_aggregate_slice` (`tenant_id`,`metric_definition_id`,`definition_version`,`granularity`,`period_start`,`period_end`,`dimensions_hash`),
+  KEY `idx_metric_aggregate_period` (`tenant_id`,`metric_definition_id`,`period_end`),
+  KEY `idx_metric_aggregate_quality` (`tenant_id`,`quality_status`),
+  KEY `reports_metricaggreg_metric_definition_id_d288bbb7_fk_reports_m` (`metric_definition_id`),
+  CONSTRAINT `reports_metricaggreg_metric_definition_id_d288bbb7_fk_reports_m` FOREIGN KEY (`metric_definition_id`) REFERENCES `reports_metricdefinition` (`id`),
+  CONSTRAINT `reports_metricaggregate_tenant_id_7f124319_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `formal_metric_aggregate_has_valid_data` CHECK (((`is_formal` = 0x00) or ((`quality_status` = _utf8mb4'passed') and (`valid_point_count` > 0)))),
+  CONSTRAINT `metric_aggregate_valid_period` CHECK ((`period_start` < `period_end`)),
+  CONSTRAINT `reports_metricaggregate_chk_1` CHECK ((`definition_version` >= 0)),
+  CONSTRAINT `reports_metricaggregate_chk_2` CHECK ((`valid_point_count` >= 0)),
+  CONSTRAINT `reports_metricaggregate_chk_3` CHECK ((`excluded_point_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `reports_metricaggregatelineage`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `reports_metricaggregatelineage` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source_table` varchar(120) NOT NULL,
+  `source_batch` varchar(120) NOT NULL,
+  `calculation_task` varchar(120) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `aggregate_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_metric_aggregate_lineage` (`aggregate_id`,`source_table`,`source_batch`,`calculation_task`),
+  KEY `idx_metric_lineage_aggregate` (`tenant_id`,`aggregate_id`),
+  KEY `idx_metric_lineage_batch` (`tenant_id`,`source_batch`),
+  CONSTRAINT `reports_metricaggreg_aggregate_id_fc4521b4_fk_reports_m` FOREIGN KEY (`aggregate_id`) REFERENCES `reports_metricaggregate` (`id`),
+  CONSTRAINT `reports_metricaggreg_tenant_id_bba50eb4_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `reports_metricdatapoint`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `reports_metricdatapoint` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source_table` varchar(120) NOT NULL,
+  `source_batch` varchar(120) NOT NULL,
+  `source_record_id` varchar(120) NOT NULL,
+  `calculation_task` varchar(120) NOT NULL,
+  `occurred_at` datetime(6) NOT NULL,
+  `dimensions` json NOT NULL,
+  `numeric_value` decimal(20,4) DEFAULT NULL,
+  `quality_status` varchar(20) NOT NULL,
+  `quality_detail` json NOT NULL,
+  `expires_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `metric_definition_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_metric_source_record` (`tenant_id`,`source_table`,`source_record_id`,`metric_definition_id`),
+  KEY `idx_metric_point_period` (`tenant_id`,`metric_definition_id`,`occurred_at`),
+  KEY `idx_metric_point_quality` (`tenant_id`,`quality_status`),
+  KEY `reports_metricdatapo_metric_definition_id_1d8f7bd0_fk_reports_m` (`metric_definition_id`),
+  CONSTRAINT `reports_metricdatapo_metric_definition_id_1d8f7bd0_fk_reports_m` FOREIGN KEY (`metric_definition_id`) REFERENCES `reports_metricdefinition` (`id`),
+  CONSTRAINT `reports_metricdatapoint_tenant_id_43270354_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `reports_metricdefinition`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `reports_metricdefinition` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `metric_code` varchar(80) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `description` longtext NOT NULL,
+  `formula` longtext NOT NULL,
+  `aggregation_method` varchar(20) NOT NULL,
+  `source_tables` json NOT NULL,
+  `supported_granularities` json NOT NULL,
+  `allowed_dimensions` json NOT NULL,
+  `permission_code` varchar(120) NOT NULL,
+  `allow_drill_down` tinyint(1) NOT NULL,
+  `contains_sensitive_data` tinyint(1) NOT NULL,
+  `missing_data_policy` varchar(40) NOT NULL,
+  `allows_automated_decision` tinyint(1) NOT NULL,
+  `version` int unsigned NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `minimum_quality_rate` decimal(5,4) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_metric_definition_version` (`tenant_id`,`metric_code`,`version`),
+  CONSTRAINT `reports_metricdefinition_tenant_id_8ebb0d02_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `metric_definition_no_auto_decision` CHECK ((`allows_automated_decision` = 0x00)),
+  CONSTRAINT `metric_definition_quality_rate_range` CHECK (((`minimum_quality_rate` >= 0) and (`minimum_quality_rate` <= 1))),
+  CONSTRAINT `metric_definition_version_positive` CHECK ((`version` >= 1)),
+  CONSTRAINT `reports_metricdefinition_chk_1` CHECK ((`version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `reports_reportexportauditlog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `reports_reportexportauditlog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(20) NOT NULL,
+  `result` varchar(40) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `export_request_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_report_export_audit` (`tenant_id`,`export_request_id`,`action`),
+  KEY `reports_reportexport_actor_id_9c1f2803_fk_accounts_` (`actor_id`),
+  KEY `reports_reportexport_export_request_id_43a8d899_fk_reports_r` (`export_request_id`),
+  CONSTRAINT `reports_reportexport_actor_id_9c1f2803_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `reports_reportexport_export_request_id_43a8d899_fk_reports_r` FOREIGN KEY (`export_request_id`) REFERENCES `reports_reportexportrequest` (`id`),
+  CONSTRAINT `reports_reportexport_tenant_id_448d8d28_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `reports_reportexportrequest`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `reports_reportexportrequest` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `report_type` varchar(40) NOT NULL,
+  `data_scope` json NOT NULL,
+  `filters` json NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `row_count` int unsigned NOT NULL,
+  `masked_file_reference` varchar(240) NOT NULL,
+  `rejection_reason` varchar(200) NOT NULL,
+  `requested_at` datetime(6) NOT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `requested_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `file_format` varchar(10) NOT NULL,
+  `storage_key` varchar(255) NOT NULL,
+  `file_sha256` varchar(64) NOT NULL,
+  `expires_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_report_export_owner` (`tenant_id`,`requested_by_id`,`status`),
+  KEY `idx_report_export_type` (`tenant_id`,`report_type`,`requested_at`),
+  KEY `reports_reportexport_requested_by_id_59eb2feb_fk_accounts_` (`requested_by_id`),
+  CONSTRAINT `reports_reportexport_requested_by_id_59eb2feb_fk_accounts_` FOREIGN KEY (`requested_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `reports_reportexport_tenant_id_ee6c2200_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `reports_reportexportrequest_chk_1` CHECK ((`row_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_bigselleraccount`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_bigselleraccount` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `account_identifier` varchar(100) NOT NULL,
+  `credential_ref` varchar(120) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_bigseller_account_per_tenant` (`tenant_id`,`account_identifier`),
+  CONSTRAINT `rpa_bigselleraccount_tenant_id_ead18db0_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpaaccountlock`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpaaccountlock` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(40) NOT NULL,
+  `account_alias` varchar(120) NOT NULL,
+  `lock_status` varchar(20) NOT NULL,
+  `acquired_at` datetime(6) NOT NULL,
+  `expires_at` datetime(6) NOT NULL,
+  `released_at` datetime(6) DEFAULT NULL,
+  `task_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `held_lock_key` varchar(161) GENERATED ALWAYS AS ((case when (`lock_status` = _utf8mb4'held') then concat_ws(_utf8mb4'',`platform`,concat_ws(_utf8mb4'',_utf8mb4'',`account_alias`)) else NULL end)) STORED,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_held_rpa_platform_account` (`tenant_id`,`held_lock_key`),
+  KEY `rpa_rpaaccountlock_task_id_73ddb2b4_fk_rpa_rpatask_id` (`task_id`),
+  CONSTRAINT `rpa_rpaaccountlock_task_id_73ddb2b4_fk_rpa_rpatask_id` FOREIGN KEY (`task_id`) REFERENCES `rpa_rpatask` (`id`),
+  CONSTRAINT `rpa_rpaaccountlock_tenant_id_9d7067af_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpaagent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpaagent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `token_hash` varchar(128) NOT NULL,
+  `device_fingerprint` varchar(128) NOT NULL,
+  `ip_whitelist` json NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `last_heartbeat_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `user_id` bigint DEFAULT NULL,
+  `execution_mode` varchar(30) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `user_id` (`user_id`),
+  KEY `rpa_rpaagent_tenant_id_dc3cb239_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `rpa_rpaagent_tenant_id_dc3cb239_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `rpa_rpaagent_user_id_081ad530_fk_accounts_customuser_id` FOREIGN KEY (`user_id`) REFERENCES `accounts_customuser` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpaevidence`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpaevidence` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `evidence_type` varchar(30) NOT NULL,
+  `placeholder_url` varchar(255) NOT NULL,
+  `payload_hash` varchar(64) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `task_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  `attempt_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `rpa_rpaevidence_task_id_3dc92df3_fk_rpa_rpatask_id` (`task_id`),
+  KEY `rpa_rpaevidence_tenant_id_31cc44b2_fk_tenants_tenant_id` (`tenant_id`),
+  KEY `rpa_rpaevidence_attempt_id_0d542bbe_fk_rpa_rpataskattempt_id` (`attempt_id`),
+  CONSTRAINT `rpa_rpaevidence_attempt_id_0d542bbe_fk_rpa_rpataskattempt_id` FOREIGN KEY (`attempt_id`) REFERENCES `rpa_rpataskattempt` (`id`),
+  CONSTRAINT `rpa_rpaevidence_task_id_3dc92df3_fk_rpa_rpatask_id` FOREIGN KEY (`task_id`) REFERENCES `rpa_rpatask` (`id`),
+  CONSTRAINT `rpa_rpaevidence_tenant_id_31cc44b2_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `rpa_evidence_placeholder_only` CHECK (((`placeholder_url` like cast(_utf8mb4'demo%' as char charset binary)) or (`placeholder_url` like cast(_utf8mb4'example%' as char charset binary)) or (`placeholder_url` like cast(_utf8mb4'local-placeholder%' as char charset binary))))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpapagesignature`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpapagesignature` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `platform` varchar(40) NOT NULL,
+  `page_type` varchar(80) NOT NULL,
+  `signature_hash` varchar(128) NOT NULL,
+  `detected_status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `rpa_rpapagesignature_tenant_id_0d5290aa_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `rpa_rpapagesignature_tenant_id_0d5290aa_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpatask`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpatask` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `task_type` varchar(80) NOT NULL,
+  `business_type` varchar(80) NOT NULL,
+  `business_id` varchar(80) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `priority` int NOT NULL,
+  `payload` json NOT NULL,
+  `result` json NOT NULL,
+  `error_message` longtext NOT NULL,
+  `screenshot_url` varchar(200) NOT NULL,
+  `retry_count` int unsigned NOT NULL,
+  `max_retry_count` int unsigned NOT NULL,
+  `claimed_at` datetime(6) DEFAULT NULL,
+  `started_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `claimed_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `manual_assigned_at` datetime(6) DEFAULT NULL,
+  `manual_assignee_id` bigint DEFAULT NULL,
+  `manual_reason` longtext NOT NULL,
+  `execution_mode` varchar(20) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_rpa_task_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_rpa_task_business_ref` (`business_type`,`business_id`),
+  KEY `rpa_rpatask_claimed_by_id_8506ed45_fk_rpa_rpaagent_id` (`claimed_by_id`),
+  KEY `rpa_rpatask_manual_assignee_id_9a9e5e00_fk_accounts_` (`manual_assignee_id`),
+  CONSTRAINT `rpa_rpatask_claimed_by_id_8506ed45_fk_rpa_rpaagent_id` FOREIGN KEY (`claimed_by_id`) REFERENCES `rpa_rpaagent` (`id`),
+  CONSTRAINT `rpa_rpatask_manual_assignee_id_9a9e5e00_fk_accounts_` FOREIGN KEY (`manual_assignee_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `rpa_rpatask_tenant_id_81737522_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `rpa_rpatask_chk_1` CHECK ((`retry_count` >= 0)),
+  CONSTRAINT `rpa_rpatask_chk_2` CHECK ((`max_retry_count` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpataskattempt`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpataskattempt` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `attempt_no` int unsigned NOT NULL,
+  `started_at` datetime(6) NOT NULL,
+  `heartbeat_at` datetime(6) DEFAULT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `status` varchar(30) NOT NULL,
+  `failed_step` varchar(120) NOT NULL,
+  `last_success_step` varchar(120) NOT NULL,
+  `masked_error` longtext NOT NULL,
+  `manual_required` tinyint(1) NOT NULL,
+  `agent_id` bigint NOT NULL,
+  `task_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_rpa_task_attempt_no` (`task_id`,`attempt_no`),
+  KEY `rpa_rpataskattempt_agent_id_4bb3f683_fk_rpa_rpaagent_id` (`agent_id`),
+  KEY `rpa_rpataskattempt_tenant_id_140d634b_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `rpa_rpataskattempt_agent_id_4bb3f683_fk_rpa_rpaagent_id` FOREIGN KEY (`agent_id`) REFERENCES `rpa_rpaagent` (`id`),
+  CONSTRAINT `rpa_rpataskattempt_task_id_b0c9a5e7_fk_rpa_rpatask_id` FOREIGN KEY (`task_id`) REFERENCES `rpa_rpatask` (`id`),
+  CONSTRAINT `rpa_rpataskattempt_tenant_id_140d634b_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `rpa_rpataskattempt_chk_1` CHECK ((`attempt_no` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpatasksteplog`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpatasksteplog` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `step_name` varchar(100) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `message` longtext NOT NULL,
+  `screenshot_url` varchar(200) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `task_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `rpa_rpatasksteplog_task_id_1067db1a_fk_rpa_rpatask_id` (`task_id`),
+  KEY `rpa_rpatasksteplog_tenant_id_e65e2d52_fk_tenants_tenant_id` (`tenant_id`),
+  CONSTRAINT `rpa_rpatasksteplog_task_id_1067db1a_fk_rpa_rpatask_id` FOREIGN KEY (`task_id`) REFERENCES `rpa_rpatask` (`id`),
+  CONSTRAINT `rpa_rpatasksteplog_tenant_id_e65e2d52_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `rpa_rpatool`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rpa_rpatool` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `code` varchar(80) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `config` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_rpa_tool_code_per_tenant` (`tenant_id`,`code`),
+  KEY `rpa_rpatool_code_774eb59a` (`code`),
+  CONSTRAINT `rpa_rpatool_tenant_id_d5e51a99_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `sales_order`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sales_order` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_order_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `region` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `raw_status` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `normalized_status` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status_mapping_version` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at_utc` datetime(6) NOT NULL,
+  `updated_at_utc` datetime(6) NOT NULL,
+  `paid_at_utc` datetime(6) DEFAULT NULL,
+  `cancelled_at_utc` datetime(6) DEFAULT NULL,
+  `completed_at_utc` datetime(6) DEFAULT NULL,
+  `business_date` date NOT NULL,
+  `ingested_at` datetime(6) NOT NULL,
+  `currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `subtotal_amount` decimal(20,4) NOT NULL,
+  `seller_discount_amount` decimal(20,4) NOT NULL,
+  `platform_discount_amount` decimal(20,4) NOT NULL,
+  `shipping_amount` decimal(20,4) NOT NULL,
+  `tax_amount` decimal(20,4) NOT NULL,
+  `order_total_amount` decimal(20,4) NOT NULL,
+  `payload_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `authorization_id` bigint NOT NULL,
+  `platform_id` bigint NOT NULL,
+  `source_run_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sales_order_external` (`tenant_id`,`platform_id`,`store_id`,`external_order_id`),
+  KEY `idx_sales_order_store_time` (`tenant_id`,`store_id`,`created_at_utc`),
+  KEY `idx_sales_order_status_time` (`tenant_id`,`normalized_status`,`updated_at_utc`),
+  KEY `idx_sales_order_source_run` (`source_run_id`),
+  KEY `sales_order_authorization_id_c895efd5_fk_integrati` (`authorization_id`),
+  KEY `sales_order_platform_id_5be9f426_fk_masterdata_platformmaster_id` (`platform_id`),
+  KEY `sales_order_store_id_ddf9eb2a_fk_masterdata_storemaster_id` (`store_id`),
+  CONSTRAINT `sales_order_authorization_id_c895efd5_fk_integrati` FOREIGN KEY (`authorization_id`) REFERENCES `integrations_platformintegrationconfig` (`id`),
+  CONSTRAINT `sales_order_platform_id_5be9f426_fk_masterdata_platformmaster_id` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `sales_order_source_run_id_4cce0fd7_fk_integrations_syncrun_id` FOREIGN KEY (`source_run_id`) REFERENCES `integrations_syncrun` (`id`),
+  CONSTRAINT `sales_order_store_id_ddf9eb2a_fk_masterdata_storemaster_id` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `sales_order_tenant_id_c85d9d3a_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `sales_order_amounts_nonneg` CHECK (((`subtotal_amount` >= 0) and (`seller_discount_amount` >= 0) and (`platform_discount_amount` >= 0) and (`shipping_amount` >= 0) and (`tax_amount` >= 0) and (`order_total_amount` >= 0)))
+) ENGINE=InnoDB AUTO_INCREMENT=9302 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `sales_order_item`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sales_order_item` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_line_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform_product_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `platform_variant_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `seller_sku` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `item_name_snapshot` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `variation_snapshot` varchar(240) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity` int unsigned NOT NULL,
+  `original_unit_price` decimal(20,4) NOT NULL,
+  `sale_unit_price` decimal(20,4) NOT NULL,
+  `discount_amount` decimal(20,4) NOT NULL,
+  `tax_amount` decimal(20,4) NOT NULL,
+  `line_total_amount` decimal(20,4) NOT NULL,
+  `currency` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `raw_line_status` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `internal_sku_id` bigint DEFAULT NULL,
+  `internal_spu_id` bigint DEFAULT NULL,
+  `sales_order_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_sales_order_item_ext` (`sales_order_id`,`external_line_id`),
+  KEY `idx_sales_item_seller_sku` (`sales_order_id`,`seller_sku`),
+  KEY `sales_order_item_internal_sku_id_b38d0c4b_fk_products_` (`internal_sku_id`),
+  KEY `sales_order_item_internal_spu_id_02d98eaa_fk_products_` (`internal_spu_id`),
+  CONSTRAINT `sales_order_item_internal_sku_id_b38d0c4b_fk_products_` FOREIGN KEY (`internal_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `sales_order_item_internal_spu_id_02d98eaa_fk_products_` FOREIGN KEY (`internal_spu_id`) REFERENCES `products_productspu` (`id`),
+  CONSTRAINT `sales_order_item_sales_order_id_441345c5_fk_sales_order_id` FOREIGN KEY (`sales_order_id`) REFERENCES `sales_order` (`id`),
+  CONSTRAINT `sales_order_item_chk_1` CHECK ((`quantity` >= 0)),
+  CONSTRAINT `sales_order_item_values` CHECK (((`quantity` > 0) and (`original_unit_price` >= 0) and (`sale_unit_price` >= 0) and (`discount_amount` >= 0) and (`tax_amount` >= 0) and (`line_total_amount` >= 0)))
+) ENGINE=InnoDB AUTO_INCREMENT=11587 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `shipment_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `shipment_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `external_shipment_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `external_line_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `shipment_type` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_sku` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `carrier_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `tracking_reference_masked` varchar(120) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity` bigint unsigned NOT NULL,
+  `status` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `shipped_at_utc` datetime(6) DEFAULT NULL,
+  `delivered_at_utc` datetime(6) DEFAULT NULL,
+  `updated_at_utc` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `internal_sku_id` bigint DEFAULT NULL,
+  `platform_id` bigint NOT NULL,
+  `sales_order_id` bigint DEFAULT NULL,
+  `sales_order_item_id` bigint DEFAULT NULL,
+  `source_run_id` bigint NOT NULL,
+  `store_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_shipment_record_line` (`tenant_id`,`platform_id`,`store_id`,`external_shipment_id`,`external_line_id`),
+  KEY `idx_shipment_store_time` (`tenant_id`,`store_id`,`updated_at_utc`),
+  KEY `idx_shipment_sku_time` (`tenant_id`,`source_sku`,`updated_at_utc`),
+  KEY `idx_shipment_source_run` (`source_run_id`),
+  KEY `shipment_record_internal_sku_id_547ccb55_fk_products_` (`internal_sku_id`),
+  KEY `shipment_record_platform_id_c7d40a86_fk_masterdat` (`platform_id`),
+  KEY `shipment_record_sales_order_id_35ba63ac_fk_sales_order_id` (`sales_order_id`),
+  KEY `shipment_record_sales_order_item_id_92f00591_fk_sales_ord` (`sales_order_item_id`),
+  KEY `shipment_record_store_id_cfe41c75_fk_masterdata_storemaster_id` (`store_id`),
+  CONSTRAINT `shipment_record_internal_sku_id_547ccb55_fk_products_` FOREIGN KEY (`internal_sku_id`) REFERENCES `products_productsku` (`id`),
+  CONSTRAINT `shipment_record_platform_id_c7d40a86_fk_masterdat` FOREIGN KEY (`platform_id`) REFERENCES `masterdata_platformmaster` (`id`),
+  CONSTRAINT `shipment_record_sales_order_id_35ba63ac_fk_sales_order_id` FOREIGN KEY (`sales_order_id`) REFERENCES `sales_order` (`id`),
+  CONSTRAINT `shipment_record_sales_order_item_id_92f00591_fk_sales_ord` FOREIGN KEY (`sales_order_item_id`) REFERENCES `sales_order_item` (`id`),
+  CONSTRAINT `shipment_record_source_run_id_456b084d_fk_integrati` FOREIGN KEY (`source_run_id`) REFERENCES `integrations_syncrun` (`id`),
+  CONSTRAINT `shipment_record_store_id_cfe41c75_fk_masterdata_storemaster_id` FOREIGN KEY (`store_id`) REFERENCES `masterdata_storemaster` (`id`),
+  CONSTRAINT `shipment_record_tenant_id_60e9b404_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `shipment_quantity_positive` CHECK ((`quantity` > 0)),
+  CONSTRAINT `shipment_record_chk_1` CHECK ((`quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `shipping_loosecargoshipment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `shipping_loosecargoshipment` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `shipment_no` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `route_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `region_code` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `origin_site_id_snapshot` bigint unsigned DEFAULT NULL,
+  `origin_site_snapshot` json NOT NULL,
+  `destination_country_code` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `destination_port_code` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `destination_warehouse_code` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `note` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `forwarder_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `groupage_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `container_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `customs_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `transport_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `planned_dispatch_at` datetime(6) DEFAULT NULL,
+  `actual_dispatch_at` datetime(6) DEFAULT NULL,
+  `port_arrived_at` datetime(6) DEFAULT NULL,
+  `warehouse_arrived_at` datetime(6) DEFAULT NULL,
+  `cleared_at` datetime(6) DEFAULT NULL,
+  `status` varchar(28) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `version` int unsigned NOT NULL,
+  `cancelled_at` datetime(6) DEFAULT NULL,
+  `cancelled_reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `cancelled_by_id` bigint DEFAULT NULL,
+  `cleared_by_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `customs_declared_by_id` bigint DEFAULT NULL,
+  `dispatched_by_id` bigint DEFAULT NULL,
+  `port_arrived_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  `updated_by_id` bigint NOT NULL,
+  `warehouse_arrived_by_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_shipping_shipment_no` (`tenant_id`,`shipment_no`),
+  KEY `idx_shipping_scope` (`tenant_id`,`region_code`,`status`),
+  KEY `shipping_loosecargos_cancelled_by_id_36d314f2_fk_accounts_` (`cancelled_by_id`),
+  KEY `shipping_loosecargos_cleared_by_id_12b63983_fk_accounts_` (`cleared_by_id`),
+  KEY `shipping_loosecargos_created_by_id_cd3a991e_fk_accounts_` (`created_by_id`),
+  KEY `shipping_loosecargos_customs_declared_by__31a1c112_fk_accounts_` (`customs_declared_by_id`),
+  KEY `shipping_loosecargos_dispatched_by_id_a3faea6c_fk_accounts_` (`dispatched_by_id`),
+  KEY `shipping_loosecargos_port_arrived_by_id_530f30a0_fk_accounts_` (`port_arrived_by_id`),
+  KEY `shipping_loosecargos_updated_by_id_4865aafa_fk_accounts_` (`updated_by_id`),
+  KEY `shipping_loosecargos_warehouse_arrived_by_88e5a501_fk_accounts_` (`warehouse_arrived_by_id`),
+  CONSTRAINT `shipping_loosecargos_cancelled_by_id_36d314f2_fk_accounts_` FOREIGN KEY (`cancelled_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargos_cleared_by_id_12b63983_fk_accounts_` FOREIGN KEY (`cleared_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargos_created_by_id_cd3a991e_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargos_customs_declared_by__31a1c112_fk_accounts_` FOREIGN KEY (`customs_declared_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargos_dispatched_by_id_a3faea6c_fk_accounts_` FOREIGN KEY (`dispatched_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargos_port_arrived_by_id_530f30a0_fk_accounts_` FOREIGN KEY (`port_arrived_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargos_tenant_id_ac1ac123_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `shipping_loosecargos_updated_by_id_4865aafa_fk_accounts_` FOREIGN KEY (`updated_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargos_warehouse_arrived_by_88e5a501_fk_accounts_` FOREIGN KEY (`warehouse_arrived_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_loosecargoshipment_chk_1` CHECK ((`origin_site_id_snapshot` >= 0)),
+  CONSTRAINT `shipping_loosecargoshipment_chk_2` CHECK ((`version` >= 0)),
+  CONSTRAINT `shipping_shipment_route_loose` CHECK ((`route_type` = _utf8mb4'loose_cargo_groupage')),
+  CONSTRAINT `shipping_shipment_version_gt_zero` CHECK ((`version` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `shipping_shipmentboxallocation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `shipping_shipmentboxallocation` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source_consolidation_version` int unsigned NOT NULL,
+  `source_release_version` int unsigned NOT NULL,
+  `supplier_id_snapshot` bigint unsigned DEFAULT NULL,
+  `order_ids_snapshot` json NOT NULL,
+  `order_nos_snapshot` json NOT NULL,
+  `batch_id_snapshot` bigint unsigned DEFAULT NULL,
+  `batch_no_snapshot` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `box_no_snapshot` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quantity_snapshot` bigint unsigned NOT NULL,
+  `weight_snapshot` decimal(12,3) DEFAULT NULL,
+  `volume_snapshot` decimal(12,6) DEFAULT NULL,
+  `snapshot` json NOT NULL,
+  `state` varchar(24) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `version` int unsigned NOT NULL,
+  `transferred_at` datetime(6) NOT NULL,
+  `dispatched_at` datetime(6) DEFAULT NULL,
+  `arrived_port_at` datetime(6) DEFAULT NULL,
+  `arrived_warehouse_at` datetime(6) DEFAULT NULL,
+  `cleared_at` datetime(6) DEFAULT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `box_id` bigint NOT NULL,
+  `consolidation_id` bigint NOT NULL,
+  `consolidation_allocation_id` bigint NOT NULL,
+  `created_by_id` bigint NOT NULL,
+  `dispatched_by_id` bigint DEFAULT NULL,
+  `packing_box_consumption_id` bigint NOT NULL,
+  `shipment_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_shipping_active_box` (`tenant_id`,`box_id`),
+  UNIQUE KEY `uniq_shipping_source_allocation` (`tenant_id`,`consolidation_allocation_id`),
+  KEY `idx_shipping_allocation_state` (`tenant_id`,`shipment_id`,`state`),
+  KEY `idx_shipping_source_scope` (`tenant_id`,`consolidation_id`,`state`),
+  KEY `shipping_shipmentbox_box_id_329c4177_fk_packing_p` (`box_id`),
+  KEY `shipping_shipmentbox_consolidation_id_a3679979_fk_consolida` (`consolidation_id`),
+  KEY `shipping_shipmentbox_consolidation_alloca_cbbafe03_fk_consolida` (`consolidation_allocation_id`),
+  KEY `shipping_shipmentbox_created_by_id_a4ec4f37_fk_accounts_` (`created_by_id`),
+  KEY `shipping_shipmentbox_dispatched_by_id_67903d40_fk_accounts_` (`dispatched_by_id`),
+  KEY `shipping_shipmentbox_packing_box_consumpt_6b74fdde_fk_packing_p` (`packing_box_consumption_id`),
+  KEY `shipping_shipmentbox_shipment_id_c81b05ea_fk_shipping_` (`shipment_id`),
+  CONSTRAINT `shipping_shipmentbox_box_id_329c4177_fk_packing_p` FOREIGN KEY (`box_id`) REFERENCES `packing_packingbox` (`id`),
+  CONSTRAINT `shipping_shipmentbox_consolidation_alloca_cbbafe03_fk_consolida` FOREIGN KEY (`consolidation_allocation_id`) REFERENCES `consolidation_consolidationboxallocation` (`id`),
+  CONSTRAINT `shipping_shipmentbox_consolidation_id_a3679979_fk_consolida` FOREIGN KEY (`consolidation_id`) REFERENCES `consolidation_loosecargoconsolidation` (`id`),
+  CONSTRAINT `shipping_shipmentbox_created_by_id_a4ec4f37_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_shipmentbox_dispatched_by_id_67903d40_fk_accounts_` FOREIGN KEY (`dispatched_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `shipping_shipmentbox_packing_box_consumpt_6b74fdde_fk_packing_p` FOREIGN KEY (`packing_box_consumption_id`) REFERENCES `packing_packingboxconsumption` (`id`),
+  CONSTRAINT `shipping_shipmentbox_shipment_id_c81b05ea_fk_shipping_` FOREIGN KEY (`shipment_id`) REFERENCES `shipping_loosecargoshipment` (`id`),
+  CONSTRAINT `shipping_shipmentbox_tenant_id_27f36ed5_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `shipping_allocation_qty_gt_zero` CHECK ((`quantity_snapshot` > 0)),
+  CONSTRAINT `shipping_allocation_version_gt_zero` CHECK ((`version` > 0)),
+  CONSTRAINT `shipping_shipmentboxallocation_chk_1` CHECK ((`source_consolidation_version` >= 0)),
+  CONSTRAINT `shipping_shipmentboxallocation_chk_2` CHECK ((`source_release_version` >= 0)),
+  CONSTRAINT `shipping_shipmentboxallocation_chk_3` CHECK ((`supplier_id_snapshot` >= 0)),
+  CONSTRAINT `shipping_shipmentboxallocation_chk_4` CHECK ((`batch_id_snapshot` >= 0)),
+  CONSTRAINT `shipping_shipmentboxallocation_chk_5` CHECK ((`quantity_snapshot` >= 0)),
+  CONSTRAINT `shipping_shipmentboxallocation_chk_6` CHECK ((`version` >= 0)),
+  CONSTRAINT `shipping_source_release_version_gt_zero` CHECK ((`source_release_version` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `shipping_shipmentevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `shipping_shipmentevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `action` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor_id` bigint unsigned NOT NULL,
+  `channel` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `expected_version` int unsigned DEFAULT NULL,
+  `source_version` int unsigned DEFAULT NULL,
+  `before` json NOT NULL,
+  `after` json NOT NULL,
+  `external_reference` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `idempotency_key` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `request_hash` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `occurred_at` datetime(6) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `allocation_id` bigint DEFAULT NULL,
+  `box_id` bigint DEFAULT NULL,
+  `shipment_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_shipping_event_key` (`tenant_id`,`idempotency_key`),
+  KEY `idx_shipping_event` (`tenant_id`,`shipment_id`,`action`,`created_at`),
+  KEY `shipping_shipmenteve_allocation_id_26800886_fk_shipping_` (`allocation_id`),
+  KEY `shipping_shipmentevent_box_id_9a65cfc6_fk_packing_packingbox_id` (`box_id`),
+  KEY `shipping_shipmenteve_shipment_id_6673998c_fk_shipping_` (`shipment_id`),
+  CONSTRAINT `shipping_shipmenteve_allocation_id_26800886_fk_shipping_` FOREIGN KEY (`allocation_id`) REFERENCES `shipping_shipmentboxallocation` (`id`),
+  CONSTRAINT `shipping_shipmenteve_shipment_id_6673998c_fk_shipping_` FOREIGN KEY (`shipment_id`) REFERENCES `shipping_loosecargoshipment` (`id`),
+  CONSTRAINT `shipping_shipmentevent_box_id_9a65cfc6_fk_packing_packingbox_id` FOREIGN KEY (`box_id`) REFERENCES `packing_packingbox` (`id`),
+  CONSTRAINT `shipping_shipmentevent_tenant_id_4182c769_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `shipping_event_actor_positive` CHECK ((`actor_id` > 0)),
+  CONSTRAINT `shipping_event_hash_hex` CHECK (regexp_like(`request_hash`,_utf8mb4'^[0-9a-fA-F]{64}$',_utf8mb4'c')),
+  CONSTRAINT `shipping_shipmentevent_chk_1` CHECK ((`actor_id` >= 0)),
+  CONSTRAINT `shipping_shipmentevent_chk_2` CHECK ((`expected_version` >= 0)),
+  CONSTRAINT `shipping_shipmentevent_chk_3` CHECK ((`source_version` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `suppliers_supplierperformancesnapshot`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `suppliers_supplierperformancesnapshot` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `supplier_id` bigint NOT NULL,
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `total_tasks` int unsigned NOT NULL,
+  `on_time_tasks` int unsigned NOT NULL,
+  `overdue_tasks` int unsigned NOT NULL,
+  `exception_tasks` int unsigned NOT NULL,
+  `total_shipments` int unsigned NOT NULL,
+  `accurate_shipments` int unsigned NOT NULL,
+  `feedback_on_time_count` int unsigned NOT NULL,
+  `on_time_rate` decimal(5,2) NOT NULL,
+  `overdue_rate` decimal(5,2) NOT NULL,
+  `exception_rate` decimal(5,2) NOT NULL,
+  `shipment_accuracy_rate` decimal(5,2) NOT NULL,
+  `feedback_timeliness_rate` decimal(5,2) NOT NULL,
+  `total_score` decimal(5,2) NOT NULL,
+  `calculated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supplier_performance_period` (`tenant_id`,`supplier_id`,`period_start`,`period_end`),
+  CONSTRAINT `suppliers_supplierpe_tenant_id_b983d1f2_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `supplier_performance_valid_period` CHECK ((`period_start` <= `period_end`)),
+  CONSTRAINT `suppliers_supplierperformancesnapshot_chk_1` CHECK ((`total_tasks` >= 0)),
+  CONSTRAINT `suppliers_supplierperformancesnapshot_chk_2` CHECK ((`on_time_tasks` >= 0)),
+  CONSTRAINT `suppliers_supplierperformancesnapshot_chk_3` CHECK ((`overdue_tasks` >= 0)),
+  CONSTRAINT `suppliers_supplierperformancesnapshot_chk_4` CHECK ((`exception_tasks` >= 0)),
+  CONSTRAINT `suppliers_supplierperformancesnapshot_chk_5` CHECK ((`total_shipments` >= 0)),
+  CONSTRAINT `suppliers_supplierperformancesnapshot_chk_6` CHECK ((`accurate_shipments` >= 0)),
+  CONSTRAINT `suppliers_supplierperformancesnapshot_chk_7` CHECK ((`feedback_on_time_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `suppliers_suppliershipment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `suppliers_suppliershipment` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `supplier_id` bigint NOT NULL,
+  `shipment_no` varchar(80) NOT NULL,
+  `sku_code` varchar(80) NOT NULL,
+  `ship_quantity` int unsigned NOT NULL,
+  `carton_count` int unsigned NOT NULL,
+  `weight` decimal(10,3) DEFAULT NULL,
+  `volume` decimal(10,3) DEFAULT NULL,
+  `shipping_mark` varchar(120) NOT NULL,
+  `tracking_no` varchar(120) NOT NULL,
+  `attachment_placeholder` varchar(255) NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supplier_shipment_no_per_tenant` (`tenant_id`,`shipment_no`),
+  CONSTRAINT `suppliers_suppliersh_tenant_id_e7ef9093_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `suppliers_suppliershipment_chk_1` CHECK ((`ship_quantity` >= 0)),
+  CONSTRAINT `suppliers_suppliershipment_chk_2` CHECK ((`carton_count` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `suppliers_suppliertask`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `suppliers_suppliertask` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `supplier_id` bigint NOT NULL,
+  `task_no` varchar(80) NOT NULL,
+  `sku_code` varchar(80) NOT NULL,
+  `production_quantity` int unsigned NOT NULL,
+  `completed_quantity` int unsigned NOT NULL,
+  `expected_ship_date` date DEFAULT NULL,
+  `status` varchar(30) NOT NULL,
+  `is_overdue` tinyint(1) NOT NULL,
+  `feedback_note` longtext NOT NULL,
+  `exception_note` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_supplier_task_no_per_tenant` (`tenant_id`,`task_no`),
+  CONSTRAINT `suppliers_suppliertask_tenant_id_5099b40f_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`),
+  CONSTRAINT `suppliers_suppliertask_chk_1` CHECK ((`production_quantity` >= 0)),
+  CONSTRAINT `suppliers_suppliertask_chk_2` CHECK ((`completed_quantity` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `tenants_department`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `tenants_department` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `parent_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_department_per_parent` (`tenant_id`,`name`,`parent_id`),
+  KEY `tenants_department_parent_id_5f30c8f0_fk_tenants_department_id` (`parent_id`),
+  CONSTRAINT `tenants_department_parent_id_5f30c8f0_fk_tenants_department_id` FOREIGN KEY (`parent_id`) REFERENCES `tenants_department` (`id`),
+  CONSTRAINT `tenants_department_tenant_id_b681b6e5_fk_tenants_tenant_id` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `tenants_tenant`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `tenants_tenant` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `code` varchar(50) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `workflows_approvalrequest`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `workflows_approvalrequest` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `approval_type` varchar(40) NOT NULL,
+  `title` varchar(200) NOT NULL,
+  `business_type` varchar(80) NOT NULL,
+  `business_id` varchar(100) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `reason` longtext NOT NULL,
+  `decision_note` longtext NOT NULL,
+  `idempotency_key` varchar(120) NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `decided_at` datetime(6) DEFAULT NULL,
+  `requested_by_id` bigint NOT NULL,
+  `reviewed_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_workflow_approval_idempotency` (`tenant_id`,`idempotency_key`),
+  KEY `workflows_approvalre_requested_by_id_b4234b7a_fk_accounts_` (`requested_by_id`),
+  KEY `workflows_approvalre_reviewed_by_id_ac0a5bc0_fk_accounts_` (`reviewed_by_id`),
+  KEY `idx_workflow_approval` (`tenant_id`,`approval_type`,`status`),
+  CONSTRAINT `workflows_approvalre_requested_by_id_b4234b7a_fk_accounts_` FOREIGN KEY (`requested_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `workflows_approvalre_reviewed_by_id_ac0a5bc0_fk_accounts_` FOREIGN KEY (`reviewed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `workflows_approvalre_tenant_id_cf925c65_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `workflows_businessexception`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `workflows_businessexception` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `module` varchar(40) NOT NULL,
+  `title` varchar(200) NOT NULL,
+  `severity` varchar(20) NOT NULL,
+  `status` varchar(20) NOT NULL,
+  `business_type` varchar(80) NOT NULL,
+  `business_id` varchar(100) NOT NULL,
+  `description` longtext NOT NULL,
+  `resolution` longtext NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `resolved_at` datetime(6) DEFAULT NULL,
+  `closed_at` datetime(6) DEFAULT NULL,
+  `assigned_to_id` bigint DEFAULT NULL,
+  `created_by_id` bigint NOT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `workflows_businessex_assigned_to_id_844ae3b7_fk_accounts_` (`assigned_to_id`),
+  KEY `workflows_businessex_created_by_id_de1a0b3e_fk_accounts_` (`created_by_id`),
+  KEY `idx_workflow_exception` (`tenant_id`,`module`,`status`),
+  CONSTRAINT `workflows_businessex_assigned_to_id_844ae3b7_fk_accounts_` FOREIGN KEY (`assigned_to_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `workflows_businessex_created_by_id_de1a0b3e_fk_accounts_` FOREIGN KEY (`created_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `workflows_businessex_tenant_id_63d32b9d_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `workflows_collaborationevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `workflows_collaborationevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `channel` varchar(20) NOT NULL,
+  `event_id` varchar(120) NOT NULL,
+  `event_type` varchar(80) NOT NULL,
+  `payload_hash` varchar(64) NOT NULL,
+  `masked_summary` json NOT NULL,
+  `status` varchar(30) NOT NULL,
+  `decision_note` longtext NOT NULL,
+  `received_at` datetime(6) NOT NULL,
+  `processed_at` datetime(6) DEFAULT NULL,
+  `confirmed_by_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_workflow_collab_event` (`tenant_id`,`channel`,`event_id`),
+  KEY `workflows_collaborat_confirmed_by_id_f5dc1ab0_fk_accounts_` (`confirmed_by_id`),
+  KEY `idx_workflow_collab` (`tenant_id`,`channel`,`status`),
+  CONSTRAINT `workflows_collaborat_confirmed_by_id_f5dc1ab0_fk_accounts_` FOREIGN KEY (`confirmed_by_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `workflows_collaborat_tenant_id_8c78b172_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `workflows_workflowauditevent`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `workflows_workflowauditevent` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `resource_type` varchar(40) NOT NULL,
+  `resource_id` varchar(100) NOT NULL,
+  `action` varchar(40) NOT NULL,
+  `from_status` varchar(30) NOT NULL,
+  `to_status` varchar(30) NOT NULL,
+  `masked_detail` json NOT NULL,
+  `created_at` datetime(6) NOT NULL,
+  `actor_id` bigint DEFAULT NULL,
+  `tenant_id` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `workflows_workflowau_actor_id_d40df314_fk_accounts_` (`actor_id`),
+  KEY `idx_workflow_audit` (`tenant_id`,`resource_type`,`resource_id`),
+  CONSTRAINT `workflows_workflowau_actor_id_d40df314_fk_accounts_` FOREIGN KEY (`actor_id`) REFERENCES `accounts_customuser` (`id`),
+  CONSTRAINT `workflows_workflowau_tenant_id_e4edab55_fk_tenants_t` FOREIGN KEY (`tenant_id`) REFERENCES `tenants_tenant` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;

@@ -37,3 +37,10 @@ export const fetchInventoryAnalysis = (params = {}) =>
     mockInventoryAnalysis,
     'analytics.inventory'
   );
+
+export const fetchAnalyticsFilters = (params = {}) =>
+  analyticsRequest(
+    { method: 'get', url: '/api/internal/analytics/filters/', params },
+    () => ({ success: true, code: 'OK', message: '', data: { platforms: [], stores: [], sites: [], warehouses: [], currencies: [] } }),
+    'analytics.filters'
+  );

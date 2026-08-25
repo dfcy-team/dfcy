@@ -1,8 +1,15 @@
+import csv
+import hashlib
+import io
 import json
+import os
+import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
+from django.conf import settings
+from django.core import signing
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -114,7 +121,11 @@ def _scope_snapshot(user, permission_code):
 
 def report_catalog_for_user(user):
     return [
-        {"report_type": report_type, **metadata, "mode": "placeholder_export"}
+        {
+            "report_type": report_type,
+            **metadata,
+            "mode": "file_export" if report_type == ReportExportRequest.ReportType.SALES_DETAILS else "placeholder_export",
+        }
         for report_type, metadata in REPORT_CATALOG.items()
         if report_type_allowed(user, "reports.view", report_type)
         and check_user_permission(user, metadata["required_permission"])
@@ -223,9 +234,92 @@ def _reject_download(export_request, actor, result, exception):
     raise exception
 
 
+SALES_EXPORT_COLUMNS = (
+    "platform",
+    "store_code",
+    "external_order_id",
+    "created_at_utc",
+    "updated_at_utc",
+    "normalized_status",
+    "currency",
+    "order_total_amount",
+    "external_line_id",
+    "seller_sku",
+    "item_name",
+    "quantity",
+    "sale_unit_price",
+    "line_total_amount",
+)
+
+
+def _safe_csv_value(value):
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(("=", "+", "-", "@")) else text
+
+
+def _sales_export_rows(queryset):
+    orders = queryset.select_related("platform", "store").prefetch_related("items").order_by("created_at_utc", "id")
+    for order in orders:
+        items = list(order.items.all()) or [None]
+        for item in items:
+            yield {
+                "platform": order.platform.platform_type,
+                "store_code": order.store.code,
+                "external_order_id": order.external_order_id,
+                "created_at_utc": order.created_at_utc.isoformat(),
+                "updated_at_utc": order.updated_at_utc.isoformat(),
+                "normalized_status": order.normalized_status,
+                "currency": order.currency,
+                "order_total_amount": str(order.order_total_amount),
+                "external_line_id": item.external_line_id if item else "",
+                "seller_sku": item.seller_sku if item else "",
+                "item_name": item.item_name_snapshot if item else "",
+                "quantity": item.quantity if item else "",
+                "sale_unit_price": str(item.sale_unit_price) if item else "",
+                "line_total_amount": str(item.line_total_amount) if item else "",
+            }
+
+
+def _render_sales_export(queryset, file_format):
+    rows = list(_sales_export_rows(queryset))
+    if file_format == "txt":
+        content = json.dumps(rows, ensure_ascii=False, indent=2, separators=(",", ": "))
+        return f"\ufeff{content}\r\n".encode("utf-8")
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=SALES_EXPORT_COLUMNS, lineterminator="\r\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _safe_csv_value(value) for key, value in row.items()})
+    return ("\ufeff" + stream.getvalue()).encode("utf-8")
+
+
+def _write_sales_export(export_request, queryset):
+    root = settings.REPORT_EXPORT_ROOT.resolve()
+    tenant_directory = (root / str(export_request.tenant_id)).resolve()
+    if root not in tenant_directory.parents:
+        raise ValidationError("Export storage path is invalid.")
+    tenant_directory.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid.uuid4().hex}.{export_request.file_format}"
+    target = tenant_directory / filename
+    temporary = tenant_directory / f".{filename}.tmp"
+    content = _render_sales_export(queryset, export_request.file_format)
+    try:
+        temporary.write_bytes(content)
+        os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    export_request.storage_key = f"{export_request.tenant_id}/{filename}"
+    export_request.file_sha256 = hashlib.sha256(content).hexdigest()
+    export_request.masked_file_reference = f"export://{export_request.id}"
+    export_request.expires_at = timezone.now() + timedelta(seconds=settings.REPORT_EXPORT_TTL_SECONDS)
+    export_request._export_service_write = True
+    export_request.save(update_fields=["storage_key", "file_sha256", "masked_file_reference", "expires_at"])
+
+
 @transaction.atomic
-def create_export_request(*, user, report_type, filters, permission_code="reports.export"):
-    """Create a scoped placeholder export using the caller's export permission.
+def create_export_request(*, user, report_type, filters, permission_code="reports.export", file_format="csv"):
+    """Create a scoped audited export using the caller's export permission.
 
     Existing report callers keep the ``reports.export`` default.  Feature-owned
     exports may provide their own permission (for example
@@ -247,6 +341,8 @@ def create_export_request(*, user, report_type, filters, permission_code="report
         )
     if not check_user_permission(user, metadata["required_permission"]):
         raise PermissionDenied("The selected report type requires additional permission.")
+    if file_format not in {"csv", "txt"}:
+        raise ValidationError("Export format must be csv or txt.")
     sanitized_filters = sanitize_sensitive_data(filters or {})
     if sanitized_filters != (filters or {}):
         raise ValidationError("Sensitive credentials are not allowed in report filters.")
@@ -262,12 +358,15 @@ def create_export_request(*, user, report_type, filters, permission_code="report
         filters=sanitized_filters,
         status=ReportExportRequest.Status.REJECTED if rejected else ReportExportRequest.Status.COMPLETED,
         row_count=MAX_EXPORT_ROWS if rejected else limited_count,
+        file_format=file_format,
         rejection_reason="row_limit_exceeded" if rejected else "",
         finished_at=timezone.now(),
     )
     export_request._export_service_write = True
     export_request.save()
-    if not rejected:
+    if not rejected and report_type == ReportExportRequest.ReportType.SALES_DETAILS:
+        _write_sales_export(export_request, queryset)
+    elif not rejected:
         export_request.masked_file_reference = f"placeholder://report-export/{export_request.id}"
         export_request._export_service_write = True
         export_request.save(update_fields=["masked_file_reference"])
@@ -275,7 +374,7 @@ def create_export_request(*, user, report_type, filters, permission_code="report
         export_request,
         user,
         ReportExportAuditLog.Action.REQUEST,
-        "rejected_row_limit" if rejected else "placeholder_completed",
+        "rejected_row_limit" if rejected else "file_completed" if export_request.storage_key else "placeholder_completed",
     )
     return export_request
 
@@ -325,7 +424,7 @@ def create_download_grant(*, export_request, actor):
             export_request,
             actor,
             "rejected_status",
-            ValidationError("Only completed placeholder exports can be downloaded."),
+            ValidationError("Only completed exports can be downloaded."),
         )
     metadata = REPORT_CATALOG[export_request.report_type]
     if not check_user_permission(actor, metadata["required_permission"]):
@@ -339,10 +438,48 @@ def create_download_grant(*, export_request, actor):
         _apply_filters(_source_queryset(actor, export_request.report_type), export_request.report_type, export_request.filters)
     except (DataScopeDenied, PermissionDenied) as exc:
         _reject_download(export_request, actor, "denied_source_scope", exc)
-    audit = _write_audit(export_request, actor, ReportExportAuditLog.Action.DOWNLOAD, "placeholder_grant")
+    if not export_request.storage_key:
+        audit = _write_audit(export_request, actor, ReportExportAuditLog.Action.DOWNLOAD, "placeholder_grant")
+        return {
+            "download_reference": export_request.masked_file_reference,
+            "audit_id": audit.id,
+            "expires_in_seconds": None,
+            "placeholder_only": True,
+        }
+    if export_request.expires_at and export_request.expires_at <= timezone.now():
+        _reject_download(export_request, actor, "expired", ValidationError("Export file has expired."))
+    audit = _write_audit(export_request, actor, ReportExportAuditLog.Action.DOWNLOAD, "file_grant")
+    token = signing.dumps(
+        {"export_id": export_request.id, "tenant_id": actor.tenant_id, "user_id": actor.id, "audit_id": audit.id},
+        salt="report-export-download",
+        compress=True,
+    )
     return {
-        "download_reference": f"{export_request.masked_file_reference}?audit={audit.id}",
+        "download_reference": f"/api/report/exports/{export_request.id}/file/?token={token}",
         "audit_id": audit.id,
         "expires_in_seconds": 300,
-        "placeholder_only": True,
+        "placeholder_only": False,
     }
+
+
+def resolve_export_file(*, export_request, actor, token):
+    try:
+        payload = signing.loads(token, salt="report-export-download", max_age=300)
+    except signing.BadSignature as exc:
+        raise PermissionDenied("Download grant is invalid or expired.") from exc
+    expected = {
+        "export_id": export_request.id,
+        "tenant_id": actor.tenant_id,
+        "user_id": actor.id,
+    }
+    if any(payload.get(key) != value for key, value in expected.items()):
+        raise PermissionDenied("Download grant does not match the current user and tenant.")
+    if export_request.expires_at and export_request.expires_at <= timezone.now():
+        raise ValidationError("Export file has expired.")
+    root = settings.REPORT_EXPORT_ROOT.resolve()
+    target = (root / export_request.storage_key).resolve()
+    if root not in target.parents or not target.is_file():
+        raise ValidationError("Export file is unavailable.")
+    if hashlib.sha256(target.read_bytes()).hexdigest() != export_request.file_sha256:
+        raise ValidationError("Export file integrity check failed.")
+    return target

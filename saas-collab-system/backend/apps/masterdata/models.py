@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 from apps.tenants.models import Tenant
@@ -19,6 +20,8 @@ class PlatformMaster(models.Model):
         BIGSELLER = "bigseller", "BigSeller"
         SHOPEE = "shopee", "Shopee"
         TIKTOK = "tiktok", "TikTok"
+        LAZADA = "lazada", "LAZADA"
+        TEMU = "temu", "TEMU"
         OTHER = "other", "Other"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_masters")
@@ -39,6 +42,25 @@ class StoreMaster(models.Model):
     platform = models.ForeignKey(PlatformMaster, on_delete=models.PROTECT, related_name="stores")
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=120)
+    platform_store_name = models.CharField(max_length=160, blank=True, default="")
+    category = models.ForeignKey(
+        "products.ProductCategory", on_delete=models.PROTECT,
+        related_name="store_masters", null=True, blank=True,
+    )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        related_name="operated_store_masters", null=True, blank=True,
+    )
+    bd = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        related_name="bd_store_masters", null=True, blank=True,
+    )
+    leader = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        related_name="led_store_masters", null=True, blank=True,
+    )
+    is_connected = models.BooleanField(default=False)
+    tactical_client = models.CharField(max_length=160, blank=True, default="")
     country_code = models.CharField(max_length=8)
     currency = models.CharField(max_length=8)
     timezone = models.CharField(max_length=60, default="UTC")
@@ -49,6 +71,26 @@ class StoreMaster(models.Model):
     class Meta:
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_store_master_code")]
+
+
+class CountrySiteMaster(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="country_site_masters")
+    code = models.SlugField(max_length=80)
+    name = models.CharField(max_length=120)
+    country_code = models.CharField(max_length=8)
+    platform = models.CharField(max_length=60, blank=True, null=True, default=None)
+    currency = models.CharField(max_length=8, blank=True, default="")
+    timezone = models.CharField(max_length=60, blank=True, default="UTC")
+    status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "code"]
+        constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_country_site_master_code")]
+
+    def __str__(self):
+        return f"{self.code} ({self.name})"
 
 
 class WarehouseMaster(models.Model):

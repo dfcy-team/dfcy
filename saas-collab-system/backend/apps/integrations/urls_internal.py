@@ -4,8 +4,10 @@ from . import views
 
 
 urlpatterns = [
+    path("workspace/", views.integration_workspace_view, name="integration-workspace"),
     path("platform-schemas/<str:platform>/", views.platform_config_schema, name="platform-config-schema"),
     path("configs/", views.integration_config_collection, name="integration-config-collection"),
+    path("workspace-configs/", views.create_handoff_integration_config, name="integration-workspace-config-create"),
     path("configs/<int:pk>/", views.integration_config_detail, name="integration-config-detail"),
     path("configs/<int:pk>/rotate/", views.rotate_integration_credentials, name="integration-config-rotate"),
     path(
@@ -21,6 +23,9 @@ urlpatterns = [
     path("configs/<int:pk>/audit/", views.integration_config_audit, name="integration-config-audit"),
     path("configs/<int:pk>/disable/", views.disable_integration_config, name="integration-config-disable"),
     path("configs/<int:pk>/verify/", views.verify_integration_config, name="integration-config-verify"),
+    path("configs/<int:pk>/reference-check/", views.check_integration_reference, name="integration-config-reference-check"),
+    path("configs/<int:pk>/consistency-check/", views.check_integration_consistency, name="integration-config-consistency-check"),
+    path("configs/<int:pk>/readonly-check/", views.check_integration_readonly_connection, name="integration-config-readonly-check"),
     path(
         "store-authorizations/",
         views.store_authorization_collection,
@@ -61,8 +66,13 @@ urlpatterns = [
     path("product-mappings/", views.product_mapping_collection, name="product-mapping-collection"),
     path("product-mappings/<int:pk>/", views.product_mapping_detail, name="product-mapping-detail"),
     path("sync-jobs/", views.sync_job_collection, name="sync-job-collection"),
+    path("sync-jobs/<int:pk>/", views.sync_job_detail, name="sync-job-detail"),
+    path("sync-jobs/<int:pk>/toggle/", views.toggle_sync_job, name="sync-job-toggle"),
+    path("sync-jobs/<int:pk>/delete/", views.sync_job_delete, name="sync-job-delete"),
+    path("sync-jobs/<int:pk>/run/", views.enqueue_sync_job, name="sync-job-run"),
     path("sync-jobs/<int:pk>/run-mock/", views.run_mock_sync_job, name="sync-job-run-mock"),
     path("sync-jobs/<int:pk>/disable/", views.disable_sync_job, name="sync-job-disable"),
     path("sync-runs/", views.sync_run_collection, name="sync-run-collection"),
     path("sync-runs/<int:pk>/", views.sync_run_detail, name="sync-run-detail"),
+    path("sync-runs/<int:pk>/retry/", views.retry_sync_run, name="sync-run-retry"),
 ]
