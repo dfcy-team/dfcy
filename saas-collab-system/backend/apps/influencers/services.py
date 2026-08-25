@@ -331,7 +331,7 @@ def _lock_task_relations(
 
 def _product_snapshot(user, task, store):
     product_id = (task.external_product_id or "").strip()
-    product_name = ""
+    product_name = (task.product_name_snapshot or "").strip()
     if task.spu_id:
         product_name = (
             ProductSPU.objects.filter(pk=task.spu_id, tenant=user.tenant)
@@ -1302,9 +1302,6 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             external_product_id=data.get("external_product_id"),
         )
         product_id, product_name = _product_snapshot(user, task, store)
-        supplied_product_name = str(data.get("product_name_snapshot") or "").strip()
-        if supplied_product_name and product_name and supplied_product_name != product_name:
-            raise ValidationError({"product_name_snapshot": "Product name must match the outreach task."})
     else:
         target = None
         if data.get("link_type") in (None, "", "DRJL"):

@@ -135,6 +135,33 @@ def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_
     assert "influencer" in missing_influencer.errors
 
 
+def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name():
+    _, user, store, influencer = _records("task-product-snapshot")
+    task = _task(
+        user,
+        store,
+        task_name="Task-facing product name",
+        external_product_id="1730000000000000002",
+        product_name_snapshot="Task product snapshot",
+    )
+
+    fulfillment, created = create_sample_fulfillment(
+        user=user,
+        request_key="task-product-snapshot-key",
+        validated_data={
+            "fulfillment_no": "TASK-PRODUCT-SNAPSHOT",
+            "outreach_task": task,
+            "influencer": influencer,
+            "product_name_snapshot": "Stale client product name",
+        },
+        item_payloads=[],
+    )
+
+    assert created is True
+    assert fulfillment.external_product_id == task.external_product_id
+    assert fulfillment.product_name_snapshot == "Task product snapshot"
+
+
 def test_standalone_sample_uses_type_number_and_does_not_require_outreach_task():
     _, user, store, influencer = _records("standalone-sample")
     serializer = SampleFulfillmentSerializer(

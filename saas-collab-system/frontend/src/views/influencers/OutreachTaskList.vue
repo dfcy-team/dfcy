@@ -266,6 +266,7 @@
             <div class="detail-facts">
               <div><span>任务编号</span><b>{{ displayValue(detailTask.task_no) }}</b></div>
               <div><span>任务 ID</span><b>{{ displayValue(detailTask.id) }}</b></div>
+              <div><span>任务名称</span><b>{{ displayValue(detailTask.task_name) }}</b></div>
               <div><span>店铺</span><b>{{ displayValue(detailTask.store_name || detailTask.store) }}</b></div>
               <div><span>商品</span><b>{{ displayValue(detailTask.product_name_snapshot) }}</b></div>
               <div><span>商品 ID</span><b>{{ displayValue(detailTask.external_product_id) }}</b></div>
@@ -274,10 +275,10 @@
               <div><span>目标进度</span><b>{{ detailProgressLabel }}</b></div>
               <div><span>负责人</span><b>{{ displayValue(detailTask.owner_name || detailTask.owner) }}</b></div>
               <div><span>任务下发人</span><b>{{ displayValue(detailTask.dispatcher_name || detailTask.dispatcher_id) }}</b></div>
-              <div><span>开始时间</span><b>{{ displayValue(detailTask.started_at) }}</b></div>
-              <div><span>下发时间</span><b>{{ displayValue(detailTask.dispatch_time) }}</b></div>
-              <div><span>建联时间</span><b>{{ displayValue(detailTask.outreach_at) }}</b></div>
-              <div><span>完成时间</span><b>{{ displayValue(detailTask.finalized_at) }}</b></div>
+              <div><span>开始时间</span><b>{{ formatTaskDateTime(detailTask.started_at) }}</b></div>
+              <div><span>下发时间</span><b>{{ formatTaskDateTime(detailTask.dispatch_time) }}</b></div>
+              <div><span>建联时间</span><b>{{ formatTaskDateTime(detailTask.outreach_at) }}</b></div>
+              <div><span>完成时间</span><b>{{ formatTaskDateTime(detailTask.finalized_at) }}</b></div>
             </div>
             <div class="detail-validation">
               <b>送样完成校验</b>
@@ -349,6 +350,7 @@ import {
   updateOutreachTask
 } from '../../api/influencers';
 import { applyProductCandidate } from './outreachProductMatch';
+import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
