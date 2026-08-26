@@ -130,6 +130,21 @@ export function formatApiError(response) {
   return `${response?.code || 'API_ERROR'}: ${labels[status] || response?.message || '请求失败'}`;
 }
 
+// File downloads are deliberately constrained to the application's API
+// namespace.  In particular, do not let an absolute/protocol-relative URL
+// bypass axios' base URL and receive the current user's bearer token.
+export function isTrustedApiFilePath(value) {
+  if (typeof value !== 'string') return false;
+  const candidate = value.trim();
+  if (!candidate.startsWith('/api/')) return false;
+  try {
+    const parsed = new URL(candidate, 'https://local-api.invalid');
+    return parsed.origin === 'https://local-api.invalid' && parsed.pathname.startsWith('/api/');
+  } catch (_error) {
+    return false;
+  }
+}
+
 export async function requestApi(config) {
   try {
     return withApiStatus(await request(config), 'connected');
@@ -139,6 +154,14 @@ export async function requestApi(config) {
 }
 
 export async function downloadApiFile(url, filename) {
+  if (!isTrustedApiFilePath(url)) {
+    return {
+      success: false,
+      code: 'INVALID_DOWNLOAD_PATH',
+      message: '下载地址必须是受信的 /api/ 相对路径。',
+      data: null
+    };
+  }
   try {
     const access = getAccessToken();
     const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, {

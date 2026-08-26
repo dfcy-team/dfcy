@@ -51,6 +51,7 @@ def test_legacy_wms_credential_can_be_replaced_and_checked_without_external_call
         config.save(update_fields=["credential_id", "token_id", "credential_status", "updated_at"])
 
     settings = override_settings(
+        DEBUG=True,
         LIVE_CUSTODY_BACKEND="file",
         CREDENTIAL_CUSTODY_PATH=str(tmp_path / "custody"),
         PLATFORM_NETWORK_MODE="",

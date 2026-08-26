@@ -42,9 +42,16 @@ LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "
 LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
 LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
 
-LIVE_CUSTODY_BACKEND = os.getenv("LIVE_CUSTODY_BACKEND", "file" if DEBUG else "refuse")
-LIVE_CUSTODY_SERVICE_URL = os.getenv("LIVE_CUSTODY_SERVICE_URL", "")
-LIVE_CUSTODY_SERVICE_HOST = os.getenv("LIVE_CUSTODY_SERVICE_HOST", "")
+# File custody is a local synthetic/test aid only.  A production process must
+# explicitly use an independent HTTP custody service; the safe default is to
+# refuse all secret operations.
+LIVE_CUSTODY_BACKEND = os.getenv("LIVE_CUSTODY_BACKEND", "refuse").strip().lower()
+LIVE_CUSTODY_SERVICE_URL = os.getenv("LIVE_CUSTODY_SERVICE_URL", "").strip()
+LIVE_CUSTODY_SERVICE_HOST = os.getenv("LIVE_CUSTODY_SERVICE_HOST", "").strip()
+LIVE_CUSTODY_SERVICE_TOKEN = os.getenv(
+    "LIVE_CUSTODY_SERVICE_TOKEN",
+    os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN", ""),
+).strip()
 CREDENTIAL_CUSTODY_PATH = os.getenv(
     "CREDENTIAL_CUSTODY_PATH",
     "/var/lib/saas-collab/credentials" if DEBUG else "",

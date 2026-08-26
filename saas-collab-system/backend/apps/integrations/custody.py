@@ -1,8 +1,9 @@
 """Credential custody boundary for live marketplace authorization.
 
 Only an approved custody backend can handle live secrets. The default backend
-refuses every secret operation. The file backend requires an explicit path
-outside the repository and never falls back to the application database.
+refuses every secret operation. The file backend is limited to local
+synthetic/test use and never falls back to the application database. Live mode
+requires an independently operated HTTP custody service with authentication.
 """
 
 from abc import ABC, abstractmethod
@@ -73,12 +74,30 @@ def _reference_result(payload):
 class HttpCustodyBackend(CustodyBackend):
     """Thin adapter to an approved custody service with atomic rotation support."""
 
-    def __init__(self, base_url, client):
-        self.base_url = str(base_url).rstrip("/")
+    def __init__(self, base_url, client, service_auth_token=None):
+        self.base_url = str(base_url or "").strip().rstrip("/")
         self._client = client
+        self._service_auth_token = str(
+            service_auth_token
+            if service_auth_token is not None
+            else (
+                getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
+                or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
+                or ""
+            )
+        ).strip()
+        if not self.base_url:
+            raise CustodyError("LIVE_CUSTODY_SERVICE_URL is required for approved custody.")
+        if not self._service_auth_token:
+            raise CustodyError("Credential custody service authentication is not configured.")
 
     def _request_json(self, method, path, *, body=None):
-        response = self._client.request(method, f"{self.base_url}{path}", json_body=body)
+        response = self._client.request(
+            method,
+            f"{self.base_url}{path}",
+            json_body=body,
+            headers={"Authorization": f"Bearer {self._service_auth_token}"},
+        )
         try:
             payload = response.json()
         except (TypeError, ValueError):
@@ -277,8 +296,10 @@ def get_custody_backend():
     global _cached_backend
     if _cached_backend is not None:
         return _cached_backend
-    backend = getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse")
+    backend = str(getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") or "").strip().lower()
     if backend == "file":
+        if not getattr(settings, "DEBUG", False):
+            raise CustodyError("File custody is available only in local synthetic/test mode.")
         path = getattr(settings, "CREDENTIAL_CUSTODY_PATH", "")
         if not path:
             raise CustodyError("CREDENTIAL_CUSTODY_PATH is required for file custody.")
@@ -293,8 +314,15 @@ def get_custody_backend():
     base_url = getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "")
     if not base_url:
         raise CustodyError("LIVE_CUSTODY_SERVICE_URL is required for approved custody.")
+    service_auth_token = str(
+        getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
+        or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
+        or ""
+    ).strip()
+    if not service_auth_token:
+        raise CustodyError("Credential custody service authentication is not configured.")
     from .net_guard import PlatformHttpClient
-    _cached_backend = HttpCustodyBackend(base_url, PlatformHttpClient())
+    _cached_backend = HttpCustodyBackend(base_url, PlatformHttpClient(), service_auth_token)
     return _cached_backend
 
 

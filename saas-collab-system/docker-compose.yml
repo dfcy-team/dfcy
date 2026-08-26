@@ -19,11 +19,12 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-      LIVE_CUSTODY_BACKEND: ${LIVE_CUSTODY_BACKEND:-file}
-      CREDENTIAL_CUSTODY_PATH: ${CREDENTIAL_CUSTODY_PATH:-/var/lib/saas-collab/credentials}
+      LIVE_CUSTODY_BACKEND: ${LIVE_CUSTODY_BACKEND:-refuse}
+      LIVE_CUSTODY_SERVICE_URL: ${LIVE_CUSTODY_SERVICE_URL:-}
+      LIVE_CUSTODY_SERVICE_HOST: ${LIVE_CUSTODY_SERVICE_HOST:-}
+      LIVE_CUSTODY_SERVICE_TOKEN: ${LIVE_CUSTODY_SERVICE_TOKEN:-}
     volumes:
       - ./backend:/app
-      - credential-custody-data:/var/lib/saas-collab/credentials
     ports:
       - "8000:8000"
     depends_on:
@@ -77,11 +78,12 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-      LIVE_CUSTODY_BACKEND: ${LIVE_CUSTODY_BACKEND:-file}
-      CREDENTIAL_CUSTODY_PATH: ${CREDENTIAL_CUSTODY_PATH:-/var/lib/saas-collab/credentials}
+      LIVE_CUSTODY_BACKEND: ${LIVE_CUSTODY_BACKEND:-refuse}
+      LIVE_CUSTODY_SERVICE_URL: ${LIVE_CUSTODY_SERVICE_URL:-}
+      LIVE_CUSTODY_SERVICE_HOST: ${LIVE_CUSTODY_SERVICE_HOST:-}
+      LIVE_CUSTODY_SERVICE_TOKEN: ${LIVE_CUSTODY_SERVICE_TOKEN:-}
     volumes:
       - ./backend:/app
-      - credential-custody-data:/var/lib/saas-collab/credentials
     depends_on:
       mysql:
         condition: service_healthy
@@ -119,7 +121,6 @@ services:
 volumes:
   mysql-data:
   redis-data:
-  credential-custody-data:
 
 # Development note:
 # MySQL is bound to 127.0.0.1 for local development only. Do not expose MySQL

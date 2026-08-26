@@ -232,7 +232,10 @@ class _NoCredentialAccess:
     PLATFORM_NETWORK_MODE="approved-live-test",
     LIVE_PLATFORM_SECURITY_APPROVED=True,
     LIVE_PLATFORM_ALLOWED_HOSTS=["open-api.example.test"],
-    LIVE_CUSTODY_BACKEND="file",
+    LIVE_CUSTODY_BACKEND="http",
+    LIVE_CUSTODY_SERVICE_URL="https://custody.example.test",
+    LIVE_CUSTODY_SERVICE_HOST="custody.example.test",
+    LIVE_CUSTODY_SERVICE_TOKEN="test-custody-token",
     LIVE_READONLY_SYNC_ENABLED=True,
 )
 def test_tiktok_expiry_fails_without_implicit_refresh_or_token_resolution(tmp_path):
