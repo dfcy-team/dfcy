@@ -58,6 +58,7 @@ from apps.influencers.services import (
 from apps.influencers.attribution import (
     affiliate_order_source_row_key,
     build_bd_performance,
+    normalize_account,
     parse_decimal,
     refresh_order_attributions,
     rule_version_for,
@@ -65,6 +66,11 @@ from apps.influencers.attribution import (
 
 
 pytestmark = pytest.mark.django_db
+
+
+def test_normalize_account_handles_tiktok_username_variants():
+    assert normalize_account("  @Creator.Name  ") == "creator.name"
+    assert normalize_account("＠Ｃｒｅａｔｏｒ") == "creator"
 
 
 def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
@@ -1425,6 +1431,7 @@ def _new_affiliate_order(
     fully_returned="否",
     order_status="completed",
     order_id=None,
+    sku_id="SKU-1",
 ):
     order_id = order_id or f"ORDER-{data_time.timestamp()}"
     order = AffiliateOrderSnapshot(
@@ -1435,7 +1442,7 @@ def _new_affiliate_order(
             shop_abbr="store-affiliate",
             site="PH",
             order_id=order_id,
-            sku_id="SKU-1",
+            sku_id=sku_id,
         ),
         row_hash="a" * 64,
         data_time=data_time,
@@ -1443,7 +1450,7 @@ def _new_affiliate_order(
         site="PH",
         order_id=order_id,
         product_id=product_id,
-        sku_id="SKU-1",
+        sku_id=sku_id,
         payment_amount=Decimal("1000"),
         currency="PHP",
         quantity=2,
@@ -1592,7 +1599,7 @@ def test_affiliate_decimal_limits_and_currency_allowlist_are_exact():
         order.full_clean()
 
 
-def test_bd_attribution_requires_product_in_strict_mode_and_uses_latest_sample_in_fallback():
+def test_bd_attribution_requires_product_in_strict_mode_and_uses_earliest_sample_in_fallback():
     tenant = Tenant.objects.create(name="Attribution tenant", code="attribution-rules")
     user, _ = user_with_permissions(tenant, "attribution-owner")
     make_bd_owner(tenant, user)
@@ -1645,7 +1652,7 @@ def test_bd_attribution_requires_product_in_strict_mode_and_uses_latest_sample_i
     fallback = refresh_order_attributions(tenant=tenant, attribution="fallback")
     assert fallback["created"] == 1
     attribution = BdOrderAttributionSnapshot.objects.get(order_snapshot=other_product, rule="fallback")
-    assert attribution.sample_attribution_id == new_sample.pk
+    assert attribution.sample_attribution_id == old_sample.pk
 
     refunded = _new_affiliate_order(
         tenant,
@@ -1663,6 +1670,65 @@ def test_bd_attribution_requires_product_in_strict_mode_and_uses_latest_sample_i
     )
     refresh_order_attributions(tenant=tenant, attribution="strict")
     assert not BdOrderAttributionSnapshot.objects.filter(order_snapshot__in=[refunded, cancelled]).exists()
+
+
+def test_bd_attribution_does_not_cross_sku_or_use_legacy_display_name_snapshot():
+    tenant = Tenant.objects.create(name="Attribution guard tenant", code="attribution-guards")
+    user, _ = user_with_permissions(tenant, "attribution-guard-owner")
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "store-affiliate")
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="creator-code",
+        name="Display Name",
+        platform="tiktok",
+        handle="creator-account",
+    )
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_no": "ATTRIBUTION-GUARD-TASK",
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+            "external_product_id": "P-1",
+        },
+    )
+    target, _ = add_outreach_target(user=user, task=task, influencer=influencer)
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="attribution-guard-sample",
+        validated_data={
+            "fulfillment_no": "ATTRIBUTION-GUARD-SAMPLE",
+            "outreach_task": task,
+            "outreach_target": target,
+        },
+        item_payloads=[],
+    )
+    sample = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
+    sample.sampled_at = timezone.now() - timedelta(days=2)
+    sample.product_id = "P-1"
+    sample.sku_id = "SKU-A"
+    sample.save()
+
+    different_sku = _new_affiliate_order(
+        tenant,
+        data_time=timezone.now() - timedelta(days=1),
+        sku_id="SKU-B",
+    )
+    assert refresh_order_attributions(tenant=tenant, attribution="strict")["created"] == 0
+    assert not BdOrderAttributionSnapshot.objects.filter(order_snapshot=different_sku).exists()
+
+    sample.creator_username = influencer.name
+    sample.sku_id = "SKU-1"
+    sample.save()
+    matching_sku = _new_affiliate_order(
+        tenant,
+        data_time=timezone.now() - timedelta(hours=12),
+        order_id="ORDER-LEGACY-DISPLAY-NAME",
+    )
+    assert refresh_order_attributions(tenant=tenant, attribution="strict")["created"] == 0
+    assert not BdOrderAttributionSnapshot.objects.filter(order_snapshot=matching_sku).exists()
 
 
 def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku():
@@ -2017,8 +2083,7 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
     assert performance["totals"]["item_quantity"] == 2
     assert performance["totals"]["valid_orders"] == 1
 
-    first_order.fully_returned = "是"
-    first_order.save(update_fields=["fully_returned"])
+    # A later refunded export must invalidate the earlier completed fact.
     second_order.fully_returned = "是"
     second_order.save(update_fields=["fully_returned"])
     invalidated = refresh_order_attributions(tenant=tenant, attribution="strict")

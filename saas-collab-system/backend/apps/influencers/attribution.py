@@ -24,6 +24,7 @@ from .models import (
     OutreachTask,
     SampleFulfillment,
     SUPPORTED_CURRENCY_CHOICES,
+    normalize_tiktok_username,
 )
 
 
@@ -48,15 +49,12 @@ SHIPPED_SAMPLE_STATUSES = frozenset(
 
 
 def normalize_account(value):
-    return " ".join(str(value or "").strip().split()).casefold()
+    return normalize_tiktok_username(value)
 
 
 def influencer_account(influencer):
-    """Use the existing account-like handle, then stable code, then name for legacy rows."""
-    for value in (getattr(influencer, "handle", ""), getattr(influencer, "code", ""), getattr(influencer, "name", "")):
-        if str(value or "").strip():
-            return str(value).strip()
-    return ""
+    """Use only the TikTok handle; display names are not account identifiers."""
+    return str(getattr(influencer, "handle", "") or "").strip()
 
 
 def rule_version_for(attribution):
@@ -287,7 +285,7 @@ def create_sample_attribution_snapshot(
     ).first()
     currency = str((first_item or {}).get("currency") or store.currency or "CNY").strip().upper()
     sampled_site = str(site or (first_item or {}).get("site_code") or store.country_code or "").strip()
-    account = influencer_account(influencer)
+    account = normalize_account(influencer_account(influencer))
     snapshot = BdSampleAttributionSnapshot(
         tenant=tenant,
         fulfillment=fulfillment,
@@ -315,20 +313,37 @@ def create_sample_attribution_snapshot(
 
 
 def _candidate_sort_key(snapshot):
-    sampled_at = snapshot.sampled_at
-    if timezone.is_naive(sampled_at):
-        sampled_at = timezone.make_aware(sampled_at, timezone.get_current_timezone())
+    sampled_at = _aware_datetime(snapshot.sampled_at)
     fulfillment_id = getattr(snapshot, "fulfillment_id", None) or snapshot.pk
-    return (-sampled_at.timestamp(), -fulfillment_id)
+    return sampled_at, fulfillment_id, snapshot.pk
+
+
+def _aware_datetime(value):
+    if timezone.is_naive(value):
+        value = timezone.make_aware(value, timezone.get_current_timezone())
+    return value.astimezone(dt_timezone.utc)
+
+
+def _business_key_part(value):
+    return str(value or "").strip().casefold()
+
+
+def _sample_duplicate_key(sample):
+    return (
+        normalize_account(sample.creator_username),
+        _business_key_part(sample.shop_abbr),
+        _business_key_part(sample.product_id),
+        _business_key_part(sample.sku_id),
+    )
 
 
 def _sample_group_key(sample, *, product_required):
     key = (
         normalize_account(sample.creator_username),
-        normalize_account(sample.shop_abbr),
+        _business_key_part(sample.shop_abbr),
     )
     if product_required:
-        key += (normalize_account(sample.product_id),)
+        key += (_business_key_part(sample.product_id),)
     return key
 
 
@@ -337,35 +352,74 @@ def _group_sample_candidates(samples, *, product_required):
     for sample in samples:
         grouped[_sample_group_key(sample, product_required=product_required)].append(sample)
     for key, candidates in grouped.items():
-        # Ascending time enables O(log n) lookup; the last equal-time row is
-        # the highest fulfillment id, matching sampled_at DESC, fulfillment_id DESC.
-        candidates.sort(key=lambda sample: (sample.sampled_at, getattr(sample, "fulfillment_id", None) or sample.pk))
-        grouped[key] = ([sample.sampled_at for sample in candidates], candidates)
+        # Ascending time enables O(log n) lookup. Duplicate samples are
+        # resolved after the order-time cutoff so the earliest eligible fact wins.
+        candidates.sort(key=_candidate_sort_key)
+        grouped[key] = ([_aware_datetime(sample.sampled_at) for sample in candidates], candidates)
     return grouped
+
+
+def _order_account(order):
+    account = normalize_account(order.creator_username)
+    return account or normalize_account(order.creator_username_normalized)
+
+
+def _candidate_for_order_sku(candidates, order):
+    earliest_by_sample_key = {}
+    for sample in candidates:
+        duplicate_key = _sample_duplicate_key(sample)
+        current = earliest_by_sample_key.get(duplicate_key)
+        if current is None or _candidate_sort_key(sample) < _candidate_sort_key(current):
+            earliest_by_sample_key[duplicate_key] = sample
+    candidates = list(earliest_by_sample_key.values())
+    if not candidates:
+        return None
+
+    order_sku = _business_key_part(order.sku_id)
+    exact_sku = [
+        sample
+        for sample in candidates
+        if order_sku and _business_key_part(sample.sku_id) == order_sku
+    ]
+    if exact_sku:
+        return min(exact_sku, key=_candidate_sort_key)
+
+    # Empty sample SKU is the legacy product-level fact and remains eligible.
+    legacy_product_samples = [sample for sample in candidates if not _business_key_part(sample.sku_id)]
+    if legacy_product_samples:
+        return min(legacy_product_samples, key=_candidate_sort_key)
+    if order_sku:
+        return None
+    return min(candidates, key=_candidate_sort_key)
+
+
+def _snapshot_has_current_handle(sample):
+    current_handle = normalize_account(influencer_account(sample.influencer))
+    return bool(current_handle) and normalize_account(sample.creator_username) == current_handle
 
 
 def _eligible_candidate(candidates, order, *, product_required):
     key = (
-        normalize_account(order.creator_username_normalized or order.creator_username),
-        normalize_account(order.shop_abbr),
+        _order_account(order),
+        _business_key_part(order.shop_abbr),
     )
     if product_required:
-        key += (normalize_account(order.product_id),)
+        key += (_business_key_part(order.product_id),)
     if isinstance(candidates, dict):
         candidate_times, grouped_candidates = candidates.get(key, ((), ()))
-        position = bisect_right(candidate_times, order.data_time)
-        return grouped_candidates[position - 1] if position else None
+        position = bisect_right(candidate_times, _aware_datetime(order.data_time))
+        return _candidate_for_order_sku(grouped_candidates[:position], order)
     else:
         candidates = [
             sample for sample in candidates
             if _sample_group_key(sample, product_required=product_required) == key
         ]
-        candidates = sorted(candidates, key=_candidate_sort_key)
-    for sample in candidates:
-        if sample.sampled_at > order.data_time:
-            continue
-        return sample
-    return None
+        candidates = [
+            sample
+            for sample in candidates
+            if _aware_datetime(sample.sampled_at) <= _aware_datetime(order.data_time)
+        ]
+        return _candidate_for_order_sku(sorted(candidates, key=_candidate_sort_key), order)
 
 
 def _valid_order(order):
@@ -383,11 +437,29 @@ def _order_attribution_key(order):
     # one deterministic line while the source row remains separately stored
     # and auditable. Shop/site keep reused order numbers isolated.
     return (
-        str(order.shop_abbr or "").strip().casefold(),
-        str(order.site or "").strip().casefold(),
-        str(order.order_id or "").strip().casefold(),
-        str(order.sku_id or "").strip().casefold(),
+        _business_key_part(order.shop_abbr),
+        _business_key_part(order.site),
+        _business_key_part(order.order_id),
+        _business_key_part(order.sku_id),
     )
+
+
+def _order_fact_sort_key(order):
+    """Choose the latest exported fact before applying status/refund rules."""
+    source_time = order.source_updated_at or order.data_time
+    return _aware_datetime(source_time), _aware_datetime(order.data_time), order.pk
+
+
+def _latest_order_snapshots(*, tenant):
+    """Select one current export per tenant-scoped order SKU business key."""
+    latest = {}
+    queryset = AffiliateOrderSnapshot.objects.filter(tenant=tenant).order_by("id")
+    for order in queryset.iterator(chunk_size=1000):
+        key = _order_attribution_key(order)
+        current = latest.get(key)
+        if current is None or _order_fact_sort_key(order) > _order_fact_sort_key(current):
+            latest[key] = order
+    return latest
 
 
 @transaction.atomic
@@ -395,7 +467,7 @@ def refresh_order_attributions(*, tenant, attribution="strict", rule_version=Non
     if attribution not in {"strict", "fallback"}:
         raise ValidationError({"attribution": "Attribution must be strict or fallback."})
     effective_rule_version = rule_version or rule_version_for(attribution)
-    samples = list(
+    sample_queryset = (
         BdSampleAttributionSnapshot.objects.filter(
             tenant=tenant,
             fulfillment__tenant=tenant,
@@ -403,16 +475,23 @@ def refresh_order_attributions(*, tenant, attribution="strict", rule_version=Non
         ).filter(
             Q(fulfillment__outreach_task__isnull=True)
             | Q(fulfillment__outreach_task__is_deleted=False)
-        ).order_by("sampled_at", "fulfillment_id", "id")
+        )
+        .select_related("influencer")
+        .order_by("sampled_at", "fulfillment_id", "id")
     )
+    samples = [
+        sample
+        for sample in sample_queryset
+        if _snapshot_has_current_handle(sample)
+    ]
     sample_groups = _group_sample_candidates(
         samples,
         product_required=attribution == "strict",
     )
-    orders_by_key = {}
-    for order in AffiliateOrderSnapshot.objects.filter(tenant=tenant).order_by("data_time", "id").iterator(chunk_size=1000):
-        if _valid_order(order):
-            orders_by_key.setdefault(_order_attribution_key(order), order)
+    latest_orders_by_key = _latest_order_snapshots(tenant=tenant)
+    orders_by_key = {
+        key: order for key, order in latest_orders_by_key.items() if _valid_order(order)
+    }
     existing = {}
     duplicate_existing_ids = []
     for item in BdOrderAttributionSnapshot.objects.filter(
@@ -425,7 +504,10 @@ def refresh_order_attributions(*, tenant, attribution="strict", rule_version=Non
             existing[key] = item
     created = updated = noop = rejected = deleted = 0
     desired_keys = set()
-    for key, order in sorted(orders_by_key.items(), key=lambda item: (item[1].data_time, item[1].id)):
+    for key, order in sorted(
+        orders_by_key.items(),
+        key=lambda item: (_aware_datetime(item[1].data_time), item[1].id),
+    ):
         sample = _eligible_candidate(
             sample_groups,
             order,
@@ -693,10 +775,10 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         # Keep this guard aligned with the business identity so legacy
         # duplicate attribution rows cannot inflate GMV/quantity.
         line_key = (
-            str(row["order_snapshot__shop_abbr"] or "").strip().casefold(),
-            str(row["order_snapshot__site"] or "").strip().casefold(),
-            str(row["order_snapshot__order_id"] or "").strip().casefold(),
-            str(row["order_snapshot__sku_id"] or "").strip().casefold(),
+            _business_key_part(row["order_snapshot__shop_abbr"]),
+            _business_key_part(row["order_snapshot__site"]),
+            _business_key_part(row["order_snapshot__order_id"]),
+            _business_key_part(row["order_snapshot__sku_id"]),
         )
         if line_key in seen_lines:
             continue
