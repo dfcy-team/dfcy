@@ -4,7 +4,13 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.influencers.models import Influencer, OutreachTarget, OutreachTask, SampleFulfillment
+from apps.influencers.models import (
+    Influencer,
+    InfluencerRestriction,
+    OutreachTarget,
+    OutreachTask,
+    SampleFulfillment,
+)
 from apps.influencers.serializers import SampleFulfillmentSerializer, OutreachTaskSerializer
 from apps.influencers.services import create_outreach_task, create_sample_fulfillment
 from apps.masterdata.models import PlatformMaster, StoreMaster
@@ -238,6 +244,14 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     assert denied.status_code == 403
 
     _grant_all_scope(role, "influencers.fulfillment.manage")
+    influencer.handle = "@duplicate.creator"
+    influencer.save(update_fields=["handle"])
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=influencer,
+        is_blacklisted=True,
+        created_by=user,
+    )
     task = _task(
         user,
         store,
@@ -256,6 +270,8 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     assert {item["id"] for item in payload["tasks"]} == {task.id}
     assert other_task.id not in {item["id"] for item in payload["tasks"]}
     assert {item["id"] for item in payload["influencers"]} == {influencer.id}
+    assert payload["influencers"][0]["handle"] == "@duplicate.creator"
+    assert payload["influencers"][0]["is_blacklisted"] is True
     assert set(payload["tasks"][0]) == {
         "id",
         "task_no",
@@ -269,6 +285,37 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     }
     assert "notes" not in payload["tasks"][0]
     assert "external_id" not in payload["tasks"][0]
+
+
+def test_outreach_options_include_account_and_blacklist_state():
+    tenant, user, _, influencer = _records("outreach-options")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.outreach.view")
+    influencer.handle = "@outreach.creator"
+    influencer.save(update_fields=["handle"])
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=influencer,
+        is_blacklisted=True,
+        created_by=user,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/outreach-task-options/")
+
+    assert response.status_code == 200
+    candidates = response.json()["data"]["influencers"]
+    assert candidates == [
+        {
+            "id": influencer.id,
+            "code": influencer.code,
+            "name": influencer.name,
+            "handle": "@outreach.creator",
+            "platform": influencer.platform,
+            "is_blacklisted": True,
+        }
+    ]
 
 
 def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
@@ -296,3 +343,63 @@ def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
     assert created.handle == "new.creator"
     assert created.platform == "TikTok"
     assert Influencer.objects.filter(tenant=tenant, handle="new.creator").count() == 1
+
+
+def test_outreach_manager_can_resolve_existing_influencer():
+    _, user, _, influencer = _records("outreach-resolve")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.outreach.manage")
+    influencer.handle = "outreach.creator"
+    influencer.save(update_fields=["handle"])
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/resolve/", {"q": "outreach.creator"})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["candidates"][0]["id"] == influencer.id
+
+    create_response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "outreach-created.creator"},
+        format="json",
+    )
+
+    assert create_response.status_code == 403
+    assert not Influencer.objects.filter(
+        tenant=user.tenant,
+        handle="outreach-created.creator",
+    ).exists()
+
+
+def test_account_resolve_prefers_blacklisted_duplicate_profile():
+    tenant, user, _, clean = _records("resolve-blacklisted-duplicate")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    clean.handle = "duplicate.creator"
+    clean.save(update_fields=["handle"])
+    blocked = Influencer.objects.create(
+        tenant=tenant,
+        code="creator-blocked-duplicate",
+        name="Blocked duplicate",
+        handle="duplicate.creator",
+        platform="tiktok",
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=blocked,
+        is_blacklisted=True,
+        created_by=user,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "@duplicate.creator"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == blocked.id
+    assert response.json()["data"]["is_blacklisted"] is True

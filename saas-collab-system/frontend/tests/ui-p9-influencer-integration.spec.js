@@ -262,7 +262,7 @@ describe('influencer integration workspace contracts', () => {
     for (const field of ['form.link_type', 'form.influencer', 'form.store', 'form.external_product_id', 'inheritedTask?.sku_prefix', 'requested_sku', 'quantity', 'sample_order_no', 'notes']) expect(page).toContain(field);
     for (const label of ['搜索达人/送样编号/建联编号/产品/订单', '全部店铺', '全部状态', '新增送样', '送样 / 建联编号', '任务 ID', '达人', '店铺', '产品 / SKU / 数量', '商品 ID', '样品订单', '成本', '状态', '备注', '建联日期', '操作']) expect(page).toContain(label);
     for (const field of ['送样履约', '新增送样记录', '送样日期', '达人账号', '达人 ID', '产品 ID', '待发样', 'SKU 与数量', '保存送样']) expect(page).toContain(field);
-    const dialog = page.slice(page.indexOf('<el-dialog v-model="visible"'));
+    const dialog = page.slice(page.indexOf('<el-dialog'));
     const dialogOrder = ['送样类型', '送样日期', '达人账号', '达人 ID', '店铺', '样品订单', '产品 ID', '状态', 'SKU 与数量', '备注'];
     let previous = -1;
     for (const field of dialogOrder) {
@@ -304,6 +304,64 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('notes: form.notes');
     expect(page).not.toContain('sample_sent_date');
     expect(page).toContain('if (!r.success) return ElMessage.error');
+  });
+
+  it('deduplicates influencer candidates by normalized account across every candidate entry', () => {
+    for (const path of [
+      'src/views/influencers/SampleFulfillmentList.vue',
+      'src/views/influencers/OutreachTaskList.vue'
+    ]) {
+      const page = read(path);
+      expect(page, path).toMatch(/function normalizeInfluencerAccount\(value\) \{[\s\S]*?\.trim\(\)\.replace\(\/\^@\+\//);
+      expect(page, path).toContain(".trim().toLowerCase()");
+      expect(page, path).toContain('function dedupeInfluencerCandidates(candidates = [])');
+      expect(page, path).toContain('isBlacklistedInfluencer');
+      expect(page, path).toContain('influencerInformationScore');
+      expect(page, path).toContain('responseInfluencerCandidates(response)');
+      expect(page, path).toContain('Array.isArray(response?.data?.candidates)');
+      expect(page, path).toContain('Array.isArray(response?.data?.results)');
+    }
+
+    const sample = read('src/views/influencers/SampleFulfillmentList.vue');
+    expect(sample).toMatch(/influencerOptions\.value = optionResponse\.success[\s\S]*?dedupeInfluencerCandidates\(optionResponse\.data\?\.influencers/);
+    expect(sample).toContain('dedupeInfluencerCandidates([resolved, ...influencerOptions.value])');
+    expect(sample).toMatch(/influencerOptions\.value = dedupeInfluencerCandidates\(\[\s+resolved,\s+selected,/);
+    expect(sample).toContain('influencerAccountKey(item) === resolvedAccount');
+
+    const outreach = read('src/views/influencers/OutreachTaskList.vue');
+    expect(outreach).toMatch(/influencerOptions\.value = dedupeInfluencerCandidates\(\s+\(data\.influencers \|\| \[\]\)/);
+    expect(outreach).toMatch(/influencerOptions\.value = responseInfluencerCandidates\(response\)/);
+  });
+
+  it('keeps task and fulfillment editors open on mask clicks while retaining normal close controls', () => {
+    const task = read('src/views/influencers/OutreachTaskList.vue');
+    const sample = read('src/views/influencers/SampleFulfillmentList.vue');
+    expect(task).toMatch(/v-model="createVisible"[\s\S]*?:close-on-click-modal="false"/);
+    expect(sample).toMatch(/v-model="visible"[\s\S]*?:close-on-click-modal="false"/);
+    expect(task).not.toContain(':close-on-press-escape="false"');
+    expect(sample).not.toContain(':close-on-press-escape="false"');
+    expect(task).not.toContain(':show-close="false"');
+    expect(sample).not.toContain(':show-close="false"');
+  });
+
+  it('blocks creator mutations until duplicate and blacklist resolution completes', () => {
+    const task = read('src/views/influencers/OutreachTaskList.vue');
+    const sample = read('src/views/influencers/SampleFulfillmentList.vue');
+    expect(sample).toContain(':disabled="influencerLoading || selectedInfluencer?.is_blacklisted"');
+    expect(sample).toContain("if (influencerLoading.value) return ElMessage.warning('达人账号仍在校验，请稍候')");
+    expect(sample).toContain('let influencerResolveSequence = 0');
+    expect(task).toContain('targetInfluencerLoading || selectedTargetInfluencer?.is_blacklisted');
+    expect(task).toContain("if (targetInfluencerLoading.value) return ElMessage.warning('达人账号仍在校验，请稍候')");
+    expect(task).toContain('let targetInfluencerResolveSequence = 0');
+    expect(task).not.toContain('<el-input-number v-else v-model="targetForm.influencer"');
+    expect(task).toContain("if (!targetForm.influencer || !selectedTargetInfluencer.value) return ElMessage.warning('请从搜索结果中选择达人')");
+    expect(task).toContain('@closed="clearTargetDraft"');
+    expect(task).toMatch(/function clearTargetDraft\(\) \{[\s\S]*?targetInfluencerResolveSequence \+= 1/);
+    expect(sample).toMatch(/function discardDraft\(\) \{[\s\S]*?influencerResolveSequence \+= 1/);
+    expect(task).toMatch(/function clearTaskDraft\(\) \{[\s\S]*?taskSubmitSequence \+= 1/);
+    expect(task).toMatch(/const sequence = \+\+taskSubmitSequence;[\s\S]*?if \(sequence !== taskSubmitSequence\) return/);
+    expect(sample).toMatch(/function discardDraft\(\) \{[\s\S]*?sampleSubmitSequence \+= 1/);
+    expect(sample).toMatch(/const sequence = \+\+sampleSubmitSequence;[\s\S]*?if \(sequence !== sampleSubmitSequence\) return/);
   });
 
   it('disables target mutations for read-only, terminal tasks, and terminal target results', () => {

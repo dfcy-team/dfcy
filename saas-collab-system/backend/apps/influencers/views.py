@@ -322,15 +322,55 @@ class InfluencerBlacklistHistoryView(APIView):
         return success_response(InfluencerRestrictEventSerializer(rows, many=True).data)
 
 
+INFLUENCER_RESOLVE_PERMISSION_CODES = (
+    "influencers.fulfillment.manage",
+    "influencers.outreach.manage",
+)
+INFLUENCER_RESOLVE_WRITE_PERMISSION_CODES = (
+    "influencers.fulfillment.manage",
+)
+
+
+def require_influencer_resolve_scope(user, permission_codes=INFLUENCER_RESOLVE_PERMISSION_CODES):
+    for permission_code in permission_codes:
+        if not check_user_permission(user, permission_code):
+            continue
+        try:
+            require_all_scope(user, permission_code)
+            return
+        except PermissionDenied:
+            continue
+    raise PermissionDenied("Creator resolution requires fulfillment or outreach management scope.")
+
+
+class InfluencerResolvePermission(DeclaredApplicationPermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not (
+            user
+            and user.is_authenticated
+            and user.user_type == CustomUser.UserType.INTERNAL
+        ):
+            return False
+        try:
+            permission_codes = (
+                INFLUENCER_RESOLVE_WRITE_PERMISSION_CODES
+                if request.method == "POST"
+                else INFLUENCER_RESOLVE_PERMISSION_CODES
+            )
+            require_influencer_resolve_scope(user, permission_codes)
+            return True
+        except PermissionDenied:
+            return False
+
+
 class InfluencerResolveView(APIView):
     """Resolve creator accounts without exposing cross-tenant profile data."""
 
-    permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "influencers.fulfillment.manage"
-    write_permission_code = "influencers.fulfillment.manage"
+    permission_classes = [InfluencerResolvePermission]
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_influencer_resolve_scope(request.user)
         query = str(
             request.query_params.get("q")
             or request.query_params.get("search")
@@ -372,17 +412,26 @@ class InfluencerResolveView(APIView):
     @transaction.atomic
     def post(self, request):
         """Resolve an exact account or create the minimal tenant profile needed for sampling."""
-        require_all_scope(request.user, self.read_permission_code)
+        require_influencer_resolve_scope(
+            request.user,
+            INFLUENCER_RESOLVE_WRITE_PERMISSION_CODES,
+        )
         account = str(request.data.get("handle") or request.data.get("account") or "").strip()
         account = account.lstrip("@").strip()
         if not account or len(account) > 120:
             raise ValidationError({"handle": "TikTok account must be 1-120 characters."})
 
+        blacklist_subquery = InfluencerRestriction.objects.filter(
+            tenant=request.user.tenant,
+            influencer_id=OuterRef("pk"),
+            is_blacklisted=True,
+        )
         influencer = (
             Influencer.objects.select_for_update()
             .filter(tenant=request.user.tenant)
             .filter(Q(handle__iexact=account) | Q(code__iexact=account))
-            .order_by("id")
+            .annotate(is_blacklisted=Exists(blacklist_subquery))
+            .order_by("-is_blacklisted", "id")
             .first()
         )
         created = False
@@ -411,7 +460,7 @@ class InfluencerResolveView(APIView):
                     after_data={"code": influencer.code, "handle": influencer.handle},
                 )
 
-        is_blacklisted = influencer.restrictions.filter(is_blacklisted=True).exists()
+        is_blacklisted = bool(getattr(influencer, "is_blacklisted", False)) or influencer.restrictions.filter(is_blacklisted=True).exists()
         payload = {
             "id": influencer.id,
             "code": influencer.code,
@@ -521,10 +570,15 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
+        blacklist_subquery = InfluencerRestriction.objects.filter(
+            tenant=request.user.tenant,
+            influencer_id=OuterRef("pk"),
+            is_blacklisted=True,
+        )
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
-        ).order_by("name", "code")[:500]
+        ).annotate(is_blacklisted=Exists(blacklist_subquery)).order_by("name", "code")[:500]
         stores = stores[:200]
         return success_response({
             "stores": [
@@ -546,7 +600,9 @@ class OutreachTaskOptionsView(APIView):
                     "id": influencer.id,
                     "code": influencer.code,
                     "name": influencer.name,
+                    "handle": influencer.handle,
                     "platform": influencer.platform,
+                    "is_blacklisted": influencer.is_blacklisted,
                 }
                 for influencer in influencers
             ],
@@ -560,10 +616,15 @@ class SampleFulfillmentOptionsView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         search = request.query_params.get("search", "").strip()
+        blacklist_subquery = InfluencerRestriction.objects.filter(
+            tenant=request.user.tenant,
+            influencer_id=OuterRef("pk"),
+            is_blacklisted=True,
+        )
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
-        )
+        ).annotate(is_blacklisted=Exists(blacklist_subquery))
         if search:
             influencers = influencers.filter(
                 Q(code__icontains=search)
@@ -598,6 +659,7 @@ class SampleFulfillmentOptionsView(APIView):
                     "name": influencer.name,
                     "handle": influencer.handle,
                     "platform": influencer.platform,
+                    "is_blacklisted": influencer.is_blacklisted,
                 }
                 for influencer in influencers
             ],
