@@ -14,7 +14,7 @@
         <template v-else-if="mode === 'sync-jobs'">
           <el-button @click="dueDialog = true">处理到期任务</el-button>
           <el-button @click="reconcileDialog = true">补齐缺失任务</el-button>
-          <el-button class="handoff-action" @click="createJobDialog = true">新增同步任务</el-button>
+          <el-button class="handoff-action" @click="openCreateJob()">新增同步任务</el-button>
         </template>
         <el-button v-else :loading="loading" @click="load">刷新运行状态</el-button>
       </div>
@@ -127,10 +127,10 @@
           <el-table-column label="店铺/仓库" min-width="190"><template #default="{ row }"><strong>{{ row.subject_name }}</strong><small class="cell-sub">{{ row.subject_code || '未绑定' }}</small></template></el-table-column>
           <el-table-column label="平台/站点" min-width="130"><template #default="{ row }"><strong>{{ label('platform', row.platform) }}</strong><small class="cell-sub">{{ row.region || '—' }} · {{ label('api_type', row.api_type) }}</small></template></el-table-column>
           <el-table-column label="同步资源" min-width="120"><template #default="{ row }">{{ label('resource_type', row.resource_type) }}</template></el-table-column>
-          <el-table-column label="运行策略" min-width="180"><template #default="{ row }"><strong>{{ label('schedule_type', row.schedule_type) }}运行</strong><small class="cell-sub">{{ label('execution_mode', row.execution_mode) }} · {{ row.next_run_at ? `下次 ${date(row.next_run_at)}` : label('schedule_state', row.schedule_state) }}</small></template></el-table-column>
+          <el-table-column label="运行策略" min-width="180"><template #default="{ row }"><strong>{{ scheduleDescription(row) }}</strong><small class="cell-sub">{{ label('execution_mode', row.execution_mode) }} · {{ row.next_run_at ? `下次 ${date(row.next_run_at)}` : label('schedule_state', row.schedule_state) }}</small></template></el-table-column>
           <el-table-column label="任务状态" min-width="150"><template #default="{ row }"><status-tag :value="row.health_state" /><small class="cell-sub">{{ row.blocked_reason || label('schedule_state', row.schedule_state) }}</small></template></el-table-column>
           <el-table-column label="最近运行" min-width="180"><template #default="{ row }"><strong>{{ row.latest_run_status ? label('status', row.latest_run_status) : '尚未运行' }}</strong><small class="cell-sub">{{ row.latest_started_at ? date(row.latest_started_at) : '等待首次执行' }}</small></template></el-table-column>
-          <el-table-column label="操作" fixed="right" min-width="180"><template #default="{ row }"><el-button link type="primary" :disabled="!rowRunAccess(row).allowed" :title="rowRunAccess(row).reason" @click="runJob(row)">{{ row.execution_mode === 'live_readonly' ? '确认并运行' : '立即运行' }}</el-button><el-button link type="primary" @click="openJobDetail(row)">详情</el-button><el-dropdown trigger="click" @command="command => handleJobCommand(command, row)"><el-button link type="primary">更多</el-button><template #dropdown><el-dropdown-menu><el-dropdown-item command="edit">编辑同步策略</el-dropdown-item><el-dropdown-item command="runs">查看运行记录</el-dropdown-item><el-dropdown-item command="business">查看业务数据</el-dropdown-item><el-dropdown-item command="toggle">{{ row.is_enabled ? '停用任务' : '启用任务' }}</el-dropdown-item><el-dropdown-item v-if="!row.is_enabled" command="delete" divided>删除任务</el-dropdown-item></el-dropdown-menu></template></el-dropdown></template></el-table-column>
+          <el-table-column label="操作" fixed="right" min-width="180"><template #default="{ row }"><el-button link type="primary" :disabled="!rowRunAccess(row).allowed" :title="rowRunAccess(row).reason" @click="runJob(row)">{{ row.execution_mode === 'live_readonly' ? '确认并运行' : '立即运行' }}</el-button><el-button link type="primary" @click="openJobDetail(row)">详情</el-button><el-dropdown trigger="click" @command="command => handleJobCommand(command, row)"><el-button link type="primary">更多</el-button><template #dropdown><el-dropdown-menu><el-dropdown-item command="detail">查看任务详情</el-dropdown-item><el-dropdown-item command="edit">编辑同步策略</el-dropdown-item><el-dropdown-item command="clone">复制配置新建</el-dropdown-item><el-dropdown-item command="runs">查看运行记录</el-dropdown-item><el-dropdown-item command="business">查看业务数据</el-dropdown-item><el-dropdown-item command="toggle" :disabled="!row.is_enabled && Boolean(row.blocked_reason)">{{ row.is_enabled ? '停用任务' : (row.blocked_reason ? '暂不可启用' : '启用任务') }}</el-dropdown-item><el-dropdown-item v-if="!row.is_enabled && row.schedule_state !== 'running'" command="delete" divided>删除任务</el-dropdown-item></el-dropdown-menu></template></el-dropdown></template></el-table-column>
         </template>
 
         <template v-else>
@@ -186,9 +186,15 @@
       <template #footer><el-button @click="reconcileDialog = false">关闭</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="createJobDialog" title="新增同步任务" width="min(920px, 92vw)">
+    <el-dialog v-model="createJobDialog" width="min(920px, 92vw)">
+      <template #header>
+        <div class="dialog-heading">
+          <strong>{{ creatingJobTemplate ? '复制策略并新建任务' : '新增同步任务' }}</strong>
+          <small>可一次选择多个授权主体和资源；系统会逐项校验并排除重复任务</small>
+        </div>
+      </template>
       <div class="empty-job"><strong>没有可新增的同步任务</strong><p>已授权主体的必需资源任务均已存在，或尚未完成商城/库存授权和开发者凭据配置。</p><div><el-button class="handoff-action" @click="go('/master-data/stores')">检查店铺授权</el-button><el-button @click="go('/master-data/warehouses')">检查仓库授权</el-button></div></div>
-      <template #footer><el-button @click="createJobDialog = false">关闭</el-button></template>
+      <template #footer><el-button @click="closeCreateJob">关闭</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="credentialDialog" title="填写/修改开发者凭据" width="min(760px, 92vw)" :close-on-click-modal="false">
@@ -248,14 +254,47 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="jobEditDialog" title="编辑同步策略" width="min(720px, 92vw)" :close-on-click-modal="false">
-      <el-form :model="jobForm" label-position="top" class="dialog-grid">
-        <el-form-item label="调度类型"><el-select v-model="jobForm.schedule_type"><el-option label="手动运行" value="manual" /><el-option label="固定间隔" value="interval" /><el-option label="定时运行" value="cron" /></el-select></el-form-item>
-        <el-form-item label="最大重试次数"><el-input-number v-model="jobForm.max_retry_count" :min="0" :max="5" /></el-form-item>
-        <el-form-item label="重试退避秒数"><el-input-number v-model="jobForm.backoff_base_seconds" :min="1" :max="5" /></el-form-item>
-        <el-form-item label="运行模式"><el-select v-model="jobForm.execution_mode"><el-option label="本地模拟" value="simulation" /><el-option label="生产只读" value="live_readonly" /></el-select></el-form-item>
+    <el-dialog v-model="jobEditDialog" width="min(760px, 94vw)" :close-on-click-modal="false">
+      <template #header>
+        <div v-if="activeJob" class="dialog-heading"><strong>编辑同步策略</strong><small>{{ activeJob.subject_name }} · {{ label('resource_type', activeJob.resource_type) }}</small></div>
+      </template>
+      <el-form :model="jobForm" label-position="top" class="job-policy-form">
+        <fieldset class="job-policy-section">
+          <legend>调度与运行</legend>
+          <div class="dialog-grid">
+            <el-form-item label="调度方式 *"><el-select v-model="jobForm.schedule_type"><el-option label="手动运行" value="manual" /><el-option label="每小时" value="hourly" /><el-option label="固定间隔" value="interval" /><el-option label="每天定时" value="daily" /><el-option label="每周定时" value="weekly" /></el-select></el-form-item>
+            <el-form-item label="最大重试次数 *"><el-input-number v-model="jobForm.max_retry_count" :min="0" :max="10" controls-position="right" /></el-form-item>
+            <el-form-item v-if="jobForm.schedule_type === 'interval'" label="间隔分钟数 *"><el-input-number v-model="jobForm.interval_minutes" :min="15" :max="10080" controls-position="right" /></el-form-item>
+            <el-form-item v-if="['daily', 'weekly'].includes(jobForm.schedule_type)" label="执行时间 *"><el-time-picker v-model="jobForm.local_time" value-format="HH:mm" format="HH:mm" /></el-form-item>
+            <el-form-item v-if="jobForm.schedule_type === 'weekly'" label="每周执行日 *" class="wide"><el-checkbox-group v-model="jobForm.weekdays"><el-checkbox-button v-for="day in weekdayOptions" :key="day.value" :value="day.value">{{ day.label }}</el-checkbox-button></el-checkbox-group></el-form-item>
+            <el-form-item label="执行时区 *"><el-input v-model="jobForm.timezone" /></el-form-item>
+            <el-form-item label="错过执行"><el-select v-model="jobForm.catch_up"><el-option label="恢复后补跑一次" value="run_once" /><el-option label="跳过错过的计划" value="skip" /></el-select></el-form-item>
+            <el-form-item label="暂停至"><el-date-picker v-model="jobForm.pause_until" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" placeholder="不暂停" /></el-form-item>
+            <el-form-item label="运行模式 *"><el-select v-model="jobForm.execution_mode"><el-option label="本地模拟（不调用平台）" value="simulation" /><el-option label="生产只读" value="live_readonly" /></el-select></el-form-item>
+          </div>
+        </fieldset>
+        <fieldset class="job-policy-section">
+          <legend>要同步哪些数据</legend>
+          <p class="policy-intro">推荐保持默认值：首次补齐近期数据，之后从上次进度继续，不会每次重复查询全部历史。</p>
+          <div class="dialog-grid">
+            <el-form-item label="同步范围 *"><el-select v-model="jobForm.query_mode"><el-option label="按上次进度继续同步（推荐）" value="incremental" /><el-option label="指定时间范围" value="range" /></el-select></el-form-item>
+            <el-form-item v-if="jobForm.query_mode === 'incremental'" label="首次同步最近多少天 *"><el-input-number v-model="jobForm.lookback_days" :min="1" :max="3650" controls-position="right" /><small>只在任务第一次运行时使用，推荐 30 天。</small></el-form-item>
+            <el-form-item v-if="jobForm.query_mode === 'range'" label="开始时间 *"><el-date-picker v-model="jobForm.range_start_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+            <el-form-item v-if="jobForm.query_mode === 'range'" label="结束时间 *"><el-date-picker v-model="jobForm.range_end_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+          </div>
+          <details class="job-policy-advanced">
+            <summary>高级设置（一般无需修改）</summary>
+            <div class="dialog-grid">
+              <el-form-item label="重叠查询分钟数"><el-input-number v-model="jobForm.overlap_minutes" :min="0" :max="1440" controls-position="right" /></el-form-item>
+              <el-form-item label="每页查询条数"><el-input-number v-model="jobForm.query_page_size" :min="1" :max="100" controls-position="right" /></el-form-item>
+              <el-form-item label="单次最大页数"><el-input-number v-model="jobForm.max_pages" :min="1" :max="1000" controls-position="right" /></el-form-item>
+              <el-form-item label="单次最大记录数"><el-input-number v-model="jobForm.max_records" :min="1" :max="100000" controls-position="right" /></el-form-item>
+              <el-form-item label="查询状态" class="wide"><el-input v-model="jobForm.query_statuses" placeholder="多个状态用英文逗号分隔；留空表示全部" /></el-form-item>
+            </div>
+          </details>
+        </fieldset>
       </el-form>
-      <el-alert title="切换为生产只读后，每次运行仍需单独确认；不会写回平台。" type="warning" :closable="false" show-icon />
+      <p class="safe-note policy-safe-note">保存策略不会调用外部平台。系统只自动处理本地模拟任务；生产只读任务每次仍要人工确认，TikTok Token 不自动刷新。</p>
       <template #footer><el-button @click="jobEditDialog = false">取消</el-button><el-button type="primary" :loading="operating" @click="saveJob">保存策略</el-button></template>
     </el-dialog>
 
@@ -327,6 +366,7 @@ const selectedJobs = ref([]);
 const activeConfig = ref(null);
 const activeJob = ref(null);
 const activeRun = ref(null);
+const creatingJobTemplate = ref(null);
 const draft = reactive({ platform: '', status: '', environment: '', api_type: '', resource_type: '', schedule_type: '', subject: '', run_id: '', started_from: '', started_to: '' });
 const query = reactive({ ...draft, job_state: '' });
 const configForm = reactive({ account_alias: '', platform: 'shopee', api_type: 'marketplace', environment: 'production', regions: [] });
@@ -335,7 +375,13 @@ const credentialForm = reactive({
   app_key: '', service_id: '', app_secret: '', api_base_url: '', domain: '', client_id: '', client_secret: '',
   reason: '按运用交接计划维护开发者凭据'
 });
-const jobForm = reactive({ schedule_type: 'manual', max_retry_count: 3, backoff_base_seconds: 1, execution_mode: 'simulation' });
+const jobForm = reactive({
+  schedule_type: 'manual', max_retry_count: 3, execution_mode: 'simulation',
+  interval_minutes: 60, local_time: '02:00', weekdays: [1, 2, 3, 4, 5, 6, 7], timezone: 'Asia/Shanghai', catch_up: 'run_once', pause_until: null,
+  query_mode: 'incremental', lookback_days: 30, overlap_minutes: 5, query_page_size: 50, max_pages: 100, max_records: 50000,
+  range_start_at: null, range_end_at: null, query_statuses: ''
+});
+const weekdayOptions = [{ label: '一', value: 1 }, { label: '二', value: 2 }, { label: '三', value: 3 }, { label: '四', value: 4 }, { label: '五', value: 5 }, { label: '六', value: 6 }, { label: '日', value: 7 }];
 const liveRunAccess = computed(() => getActionAccess(auth, { permission: props.runPermission }));
 const mockRunAccess = computed(() => getActionAccess(auth, { permission: props.mockRunPermission }));
 
@@ -410,13 +456,14 @@ const SummaryGrid = defineComponent({ props: { items: Array }, setup(p) { return
 const labels = {
   platform: { shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' }, api_type: { marketplace: '商城 API', advertising: '广告 API', inventory: '库存 API' },
   environment: { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' }, resource_type: { sales_order: '销售订单', refund_return: '退款退货', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单' },
-  schedule_type: { manual: '手动', interval: '间隔', cron: '定时' }, execution_mode: { simulation: '本地模拟', live_readonly: '生产只读' }, schedule_state: { disabled: '已停用', running: '运行中', manual: '手动触发', unscheduled: '尚未排期', due: '等待执行', scheduled: '已排期', retry_waiting: '退避等待', retry_exhausted: '重试暂停' },
+  schedule_type: { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每天定时', weekly: '每周定时', cron: '定时' }, execution_mode: { simulation: '本地模拟', live_readonly: '生产只读' }, schedule_state: { disabled: '已停用', running: '运行中', manual: '手动触发', unscheduled: '尚未排期', due: '等待执行', scheduled: '已排期', retry_waiting: '退避等待', retry_exhausted: '重试暂停' },
   status: { success: '成功', failed: '失败', running: '运行中', active: '已启用', configured: '已配置', verified: '已验证', referenced: '已引用', unconfigured: '未配置', disabled: '已停用', idle: '空闲', pending_review: '待审核', healthy: '运行正常', authorization: '授权异常', configuration: '配置待处理', due: '等待执行', simulation: '本地模拟', live_readonly: '生产只读' }
 };
 function label(group, value) { return labels[group]?.[value] || value || '—'; }
 function number(value) { return Number(value || 0).toLocaleString('zh-CN'); }
 function date(value) { if (!value) return '—'; return String(value).replace('T', ' ').slice(0, 19); }
 function scheduleDescription(row) {
+  if (row.schedule_type === 'hourly') return '每小时';
   if (row.schedule_type === 'interval') return `每 ${number(row.interval_minutes || 60)} 分钟`;
   if (row.schedule_type === 'daily') return `每天 ${row.local_time || '02:00'} · ${row.timezone || 'Asia/Shanghai'}`;
   if (row.schedule_type === 'weekly') return `每周指定日 ${row.local_time || '02:00'} · ${row.timezone || 'Asia/Shanghai'}`;
@@ -502,11 +549,23 @@ function openJobDetail(row) { activeJob.value = row; jobDetailDialog.value = tru
 function openJobEditor(row) {
   if (!row) return;
   activeJob.value = row;
-  Object.assign(jobForm, { schedule_type: row.schedule_type || 'manual', max_retry_count: row.max_retry_count ?? 3, backoff_base_seconds: row.backoff_base_seconds ?? 1, execution_mode: row.execution_mode || 'simulation' });
+  Object.assign(jobForm, {
+    schedule_type: row.schedule_type || 'manual', max_retry_count: row.max_retry_count ?? 3, execution_mode: row.execution_mode || 'simulation',
+    interval_minutes: row.interval_minutes ?? 60, local_time: row.local_time || '02:00', weekdays: [...(row.weekdays || [1, 2, 3, 4, 5, 6, 7])],
+    timezone: row.timezone || 'Asia/Shanghai', catch_up: row.catch_up || 'run_once', pause_until: row.pause_until || null,
+    query_mode: row.query_mode || 'incremental', lookback_days: row.lookback_days ?? 30, overlap_minutes: row.overlap_minutes ?? 5,
+    query_page_size: row.query_page_size ?? 50, max_pages: row.max_pages ?? 100, max_records: row.max_records ?? 50000,
+    range_start_at: row.range_start_at || null, range_end_at: row.range_end_at || null,
+    query_statuses: Array.isArray(row.query_statuses) ? row.query_statuses.join(', ') : (row.query_statuses || '')
+  });
   jobDetailDialog.value = false;
   jobEditDialog.value = true;
 }
 async function saveJob() {
+  if (!jobForm.timezone.trim()) { ElMessage.warning('请填写执行时区。'); return; }
+  if (['daily', 'weekly'].includes(jobForm.schedule_type) && !jobForm.local_time) { ElMessage.warning('请填写执行时间。'); return; }
+  if (jobForm.schedule_type === 'weekly' && !jobForm.weekdays.length) { ElMessage.warning('请至少选择一个每周执行日。'); return; }
+  if (jobForm.query_mode === 'range' && (!jobForm.range_start_at || !jobForm.range_end_at)) { ElMessage.warning('请填写完整的同步开始和结束时间。'); return; }
   operating.value = true;
   const response = await updateSyncJob(activeJob.value.id, { ...jobForm });
   operating.value = false;
@@ -524,7 +583,9 @@ function businessPath(resourceType) { return businessDestination(resourceType).p
 function viewJobRuns(row) { if (!row) return; jobDetailDialog.value = false; router.push({ path: '/integrations/sync-runs', query: { subject: row.subject_name } }); }
 function viewJobBusiness(row) { if (!row) return; jobDetailDialog.value = false; router.push(businessPath(row.resource_type)); }
 async function handleJobCommand(command, row) {
+  if (command === 'detail') { openJobDetail(row); return; }
   if (command === 'edit') { openJobEditor(row); return; }
+  if (command === 'clone') { openCreateJob(row); return; }
   if (command === 'runs') { router.push({ path: '/integrations/sync-runs', query: { subject: row.subject_name } }); return; }
   if (command === 'business') { router.push(businessPath(row.resource_type)); return; }
   if (command === 'toggle') {
@@ -572,7 +633,9 @@ async function retryRun(row) {
   ElMessage.success('已创建新的本地模拟重试运行。');
   await load();
 }
-function go(path) { createJobDialog.value = false; router.push(path); }
+function openCreateJob(template = null) { creatingJobTemplate.value = template; createJobDialog.value = true; }
+function closeCreateJob() { createJobDialog.value = false; creatingJobTemplate.value = null; }
+function go(path) { closeCreateJob(); router.push(path); }
 onMounted(load);
 </script>
 
@@ -597,6 +660,8 @@ onMounted(load);
 .table-card > header { padding: 15px 16px; }.table-card > header strong { color: #536279; font-size: 12px; }.batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: 1px solid #e3e9f0; background: #f4f9ff; }.table-footer { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; color: #607087; font-size: 12px; }.table-card :deep(.el-table th.el-table__cell) { color: #40516a; background: #f4f7fa; }.table-card :deep(.el-table .cell) { line-height: 1.35; }
 .status-pill { display: inline-flex; padding: 3px 7px; border-radius: 5px; font-size: 11px; font-weight: 700; }.status-pill.is-success { color: #07835c; background: #e7f7f0; }.status-pill.is-danger { color: #c43333; background: #fff0ef; }.status-pill.is-warning { color: #9a6700; background: #fff6da; }.status-pill.is-info { color: #526172; background: #eef2f5; }
 .dialog-note { margin: -12px 0 18px; color: #7a8798; font-size: 12px; }.dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }.dialog-grid .wide { grid-column: 1 / -1; }.dialog-grid :deep(.el-select) { width: 100%; }.dialog-grid small { display: block; margin-top: 5px; color: #7a8798; }.safe-note { color: #607087; font-size: 12px; line-height: 1.7; }.empty-job { display: grid; place-items: center; min-height: 180px; text-align: center; }.empty-job strong { font-size: 18px; }.empty-job p { color: #64748b; }
+.dialog-heading { display: grid; gap: 4px; }.dialog-heading strong { color: #1f2937; font-size: 18px; }.dialog-heading small { color: #7a8798; font-size: 12px; font-weight: 400; }
+.job-policy-form { display: grid; gap: 16px; }.job-policy-section { min-width: 0; margin: 0; padding: 17px 16px 4px; border: 1px solid #d9e2ec; border-radius: 7px; }.job-policy-section legend { padding: 0 7px; color: #26364d; font-size: 14px; font-weight: 700; }.job-policy-section :deep(.el-select), .job-policy-section :deep(.el-date-editor), .job-policy-section :deep(.el-input-number) { width: 100%; }.policy-intro { margin: 0 0 14px; color: #607087; font-size: 12px; line-height: 1.6; }.job-policy-advanced { grid-column: 1 / -1; margin: 0 0 12px; border: 1px solid #d9e2ec; border-radius: 6px; background: #f8fafc; }.job-policy-advanced summary { padding: 11px 13px; color: #40516a; cursor: pointer; font-size: 13px; font-weight: 650; }.job-policy-advanced[open] summary { border-bottom: 1px solid #d9e2ec; }.job-policy-advanced .dialog-grid { padding: 14px 13px 0; }.policy-safe-note { margin: 14px 2px 0; padding-left: 19px; position: relative; }.policy-safe-note::before { content: 'ⓘ'; position: absolute; left: 0; color: #409eff; }
 .job-detail-heading { display: grid; gap: 4px; }.job-detail-heading strong { color: #1f2937; font-size: 18px; }.job-detail-heading small { color: #7a8798; font-size: 12px; font-weight: 400; }.job-detail-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -2px 0 14px; color: #64748b; font-size: 12px; }.job-detail-grid { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid #d9e2ec; border-left: 1px solid #d9e2ec; }.job-detail-grid div { min-width: 0; padding: 11px 13px; border-right: 1px solid #d9e2ec; border-bottom: 1px solid #d9e2ec; }.job-detail-grid dt { margin-bottom: 5px; color: #66758c; font-size: 12px; }.job-detail-grid dd { margin: 0; overflow-wrap: anywhere; color: #26364d; font-size: 13px; line-height: 1.45; }.job-detail-grid + :deep(.el-alert) { margin-top: 14px; }
 :deep(.summary-grid) { display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 16px; border: 1px solid #d9e2ec; border-radius: 6px; overflow: hidden; }:deep(.summary-grid div) { padding: 13px; border-right: 1px solid #d9e2ec; border-bottom: 1px solid #d9e2ec; }:deep(.summary-grid div:nth-child(2n)) { border-right: 0; }:deep(.summary-grid div:nth-last-child(-n+2)) { border-bottom: 0; }:deep(.summary-grid dt) { color: #66758c; font-size: 12px; }:deep(.summary-grid dd) { margin: 5px 0 0; font-weight: 700; }
 @media (max-width: 1100px) { .filter-card { grid-template-columns: repeat(3, 1fr); }.health-card dl { grid-template-columns: repeat(3, 1fr); }.health-card footer { flex-direction: column; }.workspace-header { flex-direction: column; }.header-actions { justify-content: flex-start; } }

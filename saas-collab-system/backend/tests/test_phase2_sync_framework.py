@@ -229,7 +229,22 @@ def test_integration_workspace_operation_endpoints_are_real_and_tenant_scoped():
     consistency = client.post(f"/api/internal/integrations/configs/{config.id}/consistency-check/", {}, format="json")
     updated = client.patch(
         f"/api/internal/integrations/sync-jobs/{job.id}/",
-        {"schedule_type": "interval", "max_retry_count": 4, "backoff_base_seconds": 2, "execution_mode": "simulation"},
+        {
+            "schedule_type": "daily",
+            "max_retry_count": 8,
+            "backoff_base_seconds": 2,
+            "execution_mode": "simulation",
+            "local_time": "03:30",
+            "timezone": "Asia/Bangkok",
+            "catch_up": "skip",
+            "query_mode": "incremental",
+            "lookback_days": 45,
+            "overlap_minutes": 10,
+            "query_page_size": 80,
+            "max_pages": 120,
+            "max_records": 60000,
+            "query_statuses": "READY, SHIPPED",
+        },
         format="json",
     )
     retried = client.post(f"/api/internal/integrations/sync-runs/{failed_run.id}/retry/", {}, format="json")
@@ -241,7 +256,8 @@ def test_integration_workspace_operation_endpoints_are_real_and_tenant_scoped():
     assert consistency.status_code == 200
     assert consistency.json()["data"]["checks"]["credential_reference"] is True
     assert updated.status_code == 200
-    assert updated.json()["data"]["max_retry_count"] == 4
+    assert updated.json()["data"]["schedule_type"] == "daily"
+    assert updated.json()["data"]["max_retry_count"] == 8
     assert retried.status_code == 201
     assert retried.json()["data"]["retry_count"] == 1
     assert retried.json()["data"]["masked_log"]["retry_of"] == failed_run.run_id

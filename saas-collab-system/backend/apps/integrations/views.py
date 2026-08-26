@@ -1090,7 +1090,7 @@ def _sync_scope_columns():
         return {column.name for column in connection.introspection.get_table_description(cursor, SyncJob._meta.db_table)}
 
 
-def _set_job_execution_mode(job, execution_mode):
+def _set_job_scope(job, values):
     if "sync_scope" not in _sync_scope_columns():
         return
     with connection.cursor() as cursor:
@@ -1103,11 +1103,101 @@ def _set_job_execution_mode(job, execution_mode):
                 scope = {}
         else:
             scope = raw if isinstance(raw, dict) else {}
-        scope["execution_mode"] = execution_mode
+        schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
+        query = scope.get("query") if isinstance(scope.get("query"), dict) else {}
+        if "execution_mode" in values:
+            scope["execution_mode"] = values["execution_mode"]
+        for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until"):
+            if key in values:
+                schedule[key] = values[key]
+        query_fields = {
+            "query_mode": "mode",
+            "lookback_days": "lookback_days",
+            "overlap_minutes": "overlap_minutes",
+            "query_page_size": "page_size",
+            "max_pages": "max_pages",
+            "max_records": "max_records",
+            "range_start_at": "start_at",
+            "range_end_at": "end_at",
+            "query_statuses": "statuses",
+        }
+        for source, target in query_fields.items():
+            if source in values:
+                query[target] = values[source]
+        scope["schedule"] = schedule
+        scope["query"] = query
         cursor.execute(
             f"UPDATE {SyncJob._meta.db_table} SET sync_scope=%s WHERE id=%s AND tenant_id=%s",
             [json.dumps(scope, ensure_ascii=False), job.id, job.tenant_id],
         )
+
+
+def _validated_job_policy(data):
+    allowed = {
+        "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
+        "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
+        "query_mode", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
+        "max_records", "range_start_at", "range_end_at", "query_statuses",
+    }
+    if set(data) - allowed:
+        raise ValidationError("同步策略包含不支持的字段。")
+    values = dict(data)
+    choices = {
+        "schedule_type": {"manual", "hourly", "interval", "daily", "weekly", "cron"},
+        "execution_mode": {"simulation", "live_readonly"},
+        "catch_up": {"run_once", "skip"},
+        "query_mode": {"incremental", "range"},
+    }
+    for key, valid in choices.items():
+        if key in values and values[key] not in valid:
+            raise ValidationError({key: "策略选项无效。"})
+    limits = {
+        "max_retry_count": (0, 10),
+        "backoff_base_seconds": (1, 5),
+        "interval_minutes": (15, 10080),
+        "lookback_days": (1, 3650),
+        "overlap_minutes": (0, 1440),
+        "query_page_size": (1, 100),
+        "max_pages": (1, 1000),
+        "max_records": (1, 100000),
+    }
+    for key, (minimum, maximum) in limits.items():
+        if key not in values:
+            continue
+        try:
+            values[key] = int(values[key])
+        except (TypeError, ValueError):
+            raise ValidationError({key: "必须为整数。"})
+        if not minimum <= values[key] <= maximum:
+            raise ValidationError({key: f"必须在 {minimum} 到 {maximum} 之间。"})
+    if "weekdays" in values:
+        if not isinstance(values["weekdays"], list):
+            raise ValidationError({"weekdays": "每周执行日必须为数组。"})
+        try:
+            values["weekdays"] = sorted({int(day) for day in values["weekdays"]})
+        except (TypeError, ValueError):
+            raise ValidationError({"weekdays": "每周执行日无效。"})
+        if any(day < 1 or day > 7 for day in values["weekdays"]):
+            raise ValidationError({"weekdays": "每周执行日必须在周一到周日之间。"})
+    if "query_statuses" in values:
+        statuses = values["query_statuses"]
+        if isinstance(statuses, str):
+            statuses = [item.strip() for item in statuses.split(",") if item.strip()]
+        if not isinstance(statuses, list):
+            raise ValidationError({"query_statuses": "查询状态必须为列表或逗号分隔文本。"})
+        values["query_statuses"] = statuses
+    for key in ("local_time", "timezone", "pause_until", "range_start_at", "range_end_at"):
+        if key in values and values[key] is not None and not isinstance(values[key], str):
+            raise ValidationError({key: "必须为文本。"})
+    if values.get("schedule_type") in {"daily", "weekly"} and not values.get("local_time"):
+        raise ValidationError({"local_time": "定时任务必须填写执行时间。"})
+    if values.get("schedule_type") == "weekly" and not values.get("weekdays"):
+        raise ValidationError({"weekdays": "每周任务必须选择执行日。"})
+    if "timezone" in values and not values["timezone"].strip():
+        raise ValidationError({"timezone": "执行时区不能为空。"})
+    if values.get("query_mode") == "range" and (not values.get("range_start_at") or not values.get("range_end_at")):
+        raise ValidationError({"query_mode": "指定时间范围时必须填写开始和结束时间。"})
+    return values
 
 
 @api_view(["GET", "PATCH"])
@@ -1119,22 +1209,18 @@ def sync_job_detail(request, pk):
         return success_response(SyncJobSerializer(job, context={"request": request}).data)
     if job.status == SyncJob.Status.RUNNING:
         raise ValidationError("运行中的同步任务不能修改。")
-    allowed = {"schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode"}
-    if set(request.data) - allowed:
-        raise ValidationError("同步策略包含不支持的字段。")
-    execution_mode = request.data.get("execution_mode")
-    if execution_mode not in (None, "simulation", "live_readonly"):
-        raise ValidationError({"execution_mode": "运行模式必须为本地模拟或生产只读。"})
-    serializer = SyncJobSerializer(
-        job,
-        data={key: value for key, value in request.data.items() if key != "execution_mode"},
-        partial=True,
-        context={"request": request},
-    )
-    serializer.is_valid(raise_exception=True)
-    job = serializer.save()
-    if execution_mode:
-        _set_job_execution_mode(job, execution_mode)
+    values = _validated_job_policy(request.data)
+    core_fields = {"schedule_type", "max_retry_count", "backoff_base_seconds"}
+    changed_core = [key for key in core_fields if key in values]
+    with transaction.atomic():
+        for key in changed_core:
+            setattr(job, key, values[key])
+        if "schedule_type" in changed_core:
+            job.next_run_at = None
+            changed_core.append("next_run_at")
+        if changed_core:
+            job.save(update_fields=[*changed_core, "updated_at"])
+        _set_job_scope(job, values)
     _write_audit_log(job.integration_config, request.user, "update_sync_job", detail={"sync_job_id": job.id, "updated_fields": sorted(request.data.keys())})
     return success_response(SyncJobSerializer(job, context={"request": request}).data)
 
