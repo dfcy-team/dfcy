@@ -233,10 +233,9 @@ class _NoCredentialAccess:
     LIVE_PLATFORM_SECURITY_APPROVED=True,
     LIVE_PLATFORM_ALLOWED_HOSTS=["open-api.example.test"],
     LIVE_CUSTODY_BACKEND="file",
-    CREDENTIAL_CUSTODY_PATH="/tmp/approved-custody.json",
     LIVE_READONLY_SYNC_ENABLED=True,
 )
-def test_tiktok_expiry_fails_without_implicit_refresh_or_token_resolution():
+def test_tiktok_expiry_fails_without_implicit_refresh_or_token_resolution(tmp_path):
     config = SimpleNamespace(
         platform="tiktok",
         environment="production",
@@ -251,6 +250,8 @@ def test_tiktok_expiry_fails_without_implicit_refresh_or_token_resolution():
         Status=SimpleNamespace(ACTIVE="active"),
         expires_at=NOW - timedelta(seconds=1),
     )
-    client = TikTokReadonlyClient(config, authorization, custody=_NoCredentialAccess(), now=lambda: NOW)
-    with pytest.raises(ValidationError, match="TOKEN_EXPIRED_REAUTH_REQUIRED"):
-        client._request("/order/202309/orders/search", method="POST", body={})
+    custody_path = tmp_path / "approved-custody.json"
+    with override_settings(CREDENTIAL_CUSTODY_PATH=str(custody_path)):
+        client = TikTokReadonlyClient(config, authorization, custody=_NoCredentialAccess(), now=lambda: NOW)
+        with pytest.raises(ValidationError, match="TOKEN_EXPIRED_REAUTH_REQUIRED"):
+            client._request("/order/202309/orders/search", method="POST", body={})

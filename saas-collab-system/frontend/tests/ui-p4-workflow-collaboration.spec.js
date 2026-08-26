@@ -1,10 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { canAccessPath, filterMenuItems, flattenMenuItems } from '../src/router/menu';
 import { getActionAccess } from '../src/utils/actionAccess';
 import { mockApprovals, mockCollaborationEvents, mockExceptions } from '../src/mock/workflow';
-import { approveApproval, confirmCollaborationEvent } from '../src/api/workflow';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const viewer = {
@@ -84,8 +83,16 @@ describe('UI-P4 API and mock safety', () => {
   });
 
   it('does not send workflow writes while VITE_USE_MOCK is enabled', async () => {
-    expect((await approveApproval(1)).code).toBe('MOCK_WRITE_DISABLED');
-    expect((await confirmCollaborationEvent(1)).code).toBe('MOCK_WRITE_DISABLED');
+    vi.stubEnv('VITE_USE_MOCK', 'true');
+    vi.resetModules();
+    try {
+      const { approveApproval, confirmCollaborationEvent } = await import('../src/api/workflow');
+      expect((await approveApproval(1)).code).toBe('MOCK_WRITE_DISABLED');
+      expect((await confirmCollaborationEvent(1)).code).toBe('MOCK_WRITE_DISABLED');
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 
   it('keeps high-risk and external feedback boundaries visible in pages', () => {

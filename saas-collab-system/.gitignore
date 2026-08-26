@@ -70,7 +70,6 @@ docker-compose.override.yml
 # IDE / Editor
 .vscode/
 .idea/
-.impeccable/
 *.swp
 *.swo
 

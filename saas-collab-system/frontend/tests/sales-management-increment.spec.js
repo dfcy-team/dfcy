@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { salesPageContracts } from '../src/views/sales-management/pageContracts';
 import { salesManagementMocks } from '../src/mock/salesManagement';
-import { fetchSalesPage } from '../src/api/salesManagement';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -57,16 +56,24 @@ describe('sales management incremental integration', () => {
   });
 
   it('keeps mock fallback payloads aligned with every page mode', async () => {
-    const overview = await fetchSalesPage('overview');
-    const returns = await fetchSalesPage('returns');
-    const skus = await fetchSalesPage('skus');
-    const exportsPage = await fetchSalesPage('exports');
-    const quality = await fetchSalesPage('data-quality');
-    expect(overview.data.results.length).toBeGreaterThan(0);
-    expect(returns.data.results.length).toBeGreaterThan(0);
-    expect(returns.data.results[0].external_return_id).toBeTruthy();
-    expect(skus.data.results[0].internal_sku).toBeTruthy();
-    expect(exportsPage.data.results.length).toBeGreaterThan(0);
-    expect(quality.data.issues.length).toBeGreaterThan(0);
+    vi.stubEnv('VITE_USE_MOCK', 'true');
+    vi.resetModules();
+    try {
+      const { fetchSalesPage } = await import('../src/api/salesManagement');
+      const overview = await fetchSalesPage('overview');
+      const returns = await fetchSalesPage('returns');
+      const skus = await fetchSalesPage('skus');
+      const exportsPage = await fetchSalesPage('exports');
+      const quality = await fetchSalesPage('data-quality');
+      expect(overview.data.results.length).toBeGreaterThan(0);
+      expect(returns.data.results.length).toBeGreaterThan(0);
+      expect(returns.data.results[0].external_return_id).toBeTruthy();
+      expect(skus.data.results[0].internal_sku).toBeTruthy();
+      expect(exportsPage.data.results.length).toBeGreaterThan(0);
+      expect(quality.data.issues.length).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });
