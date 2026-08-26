@@ -1,4 +1,5 @@
 from decimal import Decimal
+import unicodedata
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -18,6 +19,12 @@ SUPPORTED_CURRENCY_CHOICES = (
     ("THB", "THB"),
     ("USD", "USD"),
 )
+
+
+def normalize_tiktok_username(value):
+    """Return the one canonical key used for TikTok username matching."""
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return normalized.strip().lstrip("@").strip().casefold()
 
 
 class ProtectedInfluencerQuerySet(models.QuerySet):
@@ -654,8 +661,7 @@ class AffiliateOrderSnapshot(TenantValidatedModel):
 
     def clean(self):
         super().clean()
-        if not self.creator_username_normalized:
-            self.creator_username_normalized = self.creator_username.strip().casefold()
+        self.creator_username_normalized = normalize_tiktok_username(self.creator_username)
         if self.store_id and self.store.tenant_id != self.tenant_id:
             raise ValidationError({"store": "Store must belong to the same tenant."})
 
@@ -1270,8 +1276,7 @@ class TikTokShopVideo(TenantValidatedModel):
 
     def clean(self):
         super().clean()
-        normalized = self.creator_username.strip().lstrip("@").casefold()
-        self.creator_username_normalized = normalized
+        self.creator_username_normalized = normalize_tiktok_username(self.creator_username)
         if self.first_seen_at and self.last_seen_at and self.first_seen_at > self.last_seen_at:
             raise ValidationError({"last_seen_at": "Last seen time cannot precede first seen time."})
 
