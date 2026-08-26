@@ -107,7 +107,13 @@
       <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="load" />
     </el-card>
 
-    <el-dialog v-model="visible" class="sample-dialog" width="720px" @closed="discardDraft">
+    <el-dialog
+      v-model="visible"
+      class="sample-dialog"
+      width="720px"
+      :close-on-click-modal="false"
+      @closed="discardDraft"
+    >
       <template #header>
         <div class="dialog-heading">
           <span>送样履约</span>
@@ -193,7 +199,7 @@
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
-        <el-button type="primary" :disabled="selectedInfluencer?.is_blacklisted" :loading="saving" @click="submit">{{ editingSample ? '保存修改' : '保存送样' }}</el-button>
+        <el-button type="primary" :disabled="influencerLoading || selectedInfluencer?.is_blacklisted" :loading="saving" @click="submit">{{ editingSample ? '保存修改' : '保存送样' }}</el-button>
       </template>
     </el-dialog>
 
@@ -288,6 +294,67 @@ const rowStores = computed(() => [...new Map(rows.value.filter((row) => row.stor
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
+let influencerResolveSequence = 0;
+let sampleSubmitSequence = 0;
+
+function normalizeInfluencerAccount(value) {
+  return String(value ?? '').trim().replace(/^@+/, '').trim().toLowerCase();
+}
+
+function influencerAccountKey(influencer) {
+  for (const value of [influencer?.handle, influencer?.code]) {
+    const normalized = normalizeInfluencerAccount(value);
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function isBlacklistedInfluencer(influencer) {
+  const value = influencer?.is_blacklisted ?? influencer?.blacklisted;
+  return value === true || value === 1 || value === 'true';
+}
+
+function influencerInformationScore(influencer) {
+  return Object.entries(influencer || {}).reduce((score, [field, value]) => {
+    if (field === 'id' || field === 'is_blacklisted' || field === 'blacklisted') return score;
+    return score + (hasValue(value) ? 1 : 0);
+  }, 0);
+}
+
+function shouldPreferInfluencer(candidate, current) {
+  const candidateBlacklisted = isBlacklistedInfluencer(candidate);
+  const currentBlacklisted = isBlacklistedInfluencer(current);
+  if (candidateBlacklisted !== currentBlacklisted) return candidateBlacklisted;
+  return influencerInformationScore(candidate) > influencerInformationScore(current);
+}
+
+function dedupeInfluencerCandidates(candidates = []) {
+  const unique = [];
+  const indexesByAccount = new Map();
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const account = influencerAccountKey(candidate);
+    if (!account) {
+      unique.push(candidate);
+      continue;
+    }
+    const currentIndex = indexesByAccount.get(account);
+    if (currentIndex === undefined) {
+      indexesByAccount.set(account, unique.length);
+      unique.push(candidate);
+    } else if (shouldPreferInfluencer(candidate, unique[currentIndex])) {
+      unique[currentIndex] = candidate;
+    }
+  }
+  return unique;
+}
+
+function responseInfluencerCandidates(response) {
+  return dedupeInfluencerCandidates([
+    ...(Array.isArray(response?.data?.candidates) ? response.data.candidates : []),
+    ...(Array.isArray(response?.data?.results) ? response.data.results : [])
+  ]);
+}
+
 const todayLabel = (() => {
   const today = new Date();
   const pad = (value) => String(value).padStart(2, '0');
@@ -319,7 +386,14 @@ function resetFilters() {
 }
 
 const newKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-function discardDraft() { draftKey.value = ''; clearEditor(); }
+function discardDraft() {
+  influencerResolveSequence += 1;
+  sampleSubmitSequence += 1;
+  influencerLoading.value = false;
+  saving.value = false;
+  draftKey.value = '';
+  clearEditor();
+}
 
 function clearEditor() {
   editingSample.value = null;
@@ -358,6 +432,10 @@ async function findTask(taskId) {
 }
 
 async function openCreate(selection = {}) {
+  influencerResolveSequence += 1;
+  sampleSubmitSequence += 1;
+  influencerLoading.value = false;
+  saving.value = false;
   editingSample.value = null;
   Object.assign(form, {
     outreach_task: null,
@@ -379,7 +457,9 @@ async function openCreate(selection = {}) {
   ]);
   tasks.value = optionResponse.success ? (optionResponse.data?.tasks || []) : [];
   storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
-  influencerOptions.value = optionResponse.success ? (optionResponse.data?.influencers || []) : [];
+  influencerOptions.value = optionResponse.success
+    ? dedupeInfluencerCandidates(optionResponse.data?.influencers || [])
+    : [];
   if (!optionResponse.success) ElMessage.error(formatInfluencerError(optionResponse, '达人账号加载失败'));
   const routeSelection = querySelection();
   const requested = { ...routeSelection, ...(selection?.taskId ? selection : {}) };
@@ -412,35 +492,65 @@ function influencerLabel(influencer) {
 }
 
 async function searchInfluencers(search) {
+  const sequence = ++influencerResolveSequence;
   influencerLoading.value = true;
   const response = await fetchInfluencerResolve(String(search || '').trim());
+  if (sequence !== influencerResolveSequence) return;
   influencerLoading.value = false;
   if (!response.success) return ElMessage.error(formatInfluencerError(response, '达人账号搜索失败'));
-  influencerOptions.value = response.data?.candidates || response.data?.results || [];
+  influencerOptions.value = responseInfluencerCandidates(response);
 }
 
 async function resolveSelectedInfluencer(id) {
+  const sequence = ++influencerResolveSequence;
   const selected = influencerOptions.value.find((item) => String(item.id) === String(id));
   if (!selected) {
     const account = String(id || '').trim().replace(/^@+/, '');
-    if (!account) return;
+    if (!account) {
+      influencerLoading.value = false;
+      return;
+    }
     influencerLoading.value = true;
     const created = await resolveOrCreateInfluencer(account);
+    if (sequence !== influencerResolveSequence) return;
     influencerLoading.value = false;
     if (!created.success) {
       form.influencer = null;
       return ElMessage.error(formatInfluencerError(created, '达人账号解析失败'));
     }
     const resolved = created.data;
-    influencerOptions.value = [resolved, ...influencerOptions.value.filter((item) => String(item.id) !== String(resolved.id))];
-    form.influencer = resolved.id;
+    influencerOptions.value = dedupeInfluencerCandidates([resolved, ...influencerOptions.value]);
+    const resolvedAccount = influencerAccountKey(resolved);
+    const selected = influencerOptions.value.find((item) => (
+      String(item.id) === String(resolved.id)
+      || (resolvedAccount && influencerAccountKey(item) === resolvedAccount)
+    ));
+    form.influencer = selected?.id ?? resolved.id;
     if (resolved.created) ElMessage.success('已自动建立达人档案');
     return;
   }
+  influencerLoading.value = true;
   const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
-  if (!response.success) return;
-  const resolved = (response.data?.candidates || response.data?.results || []).find((item) => String(item.id) === String(id));
-  if (resolved) influencerOptions.value = influencerOptions.value.map((item) => String(item.id) === String(id) ? resolved : item);
+  if (sequence !== influencerResolveSequence) return;
+  influencerLoading.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '达人账号校验失败'));
+  const selectedAccount = influencerAccountKey(selected);
+  const resolved = responseInfluencerCandidates(response).find((item) => (
+    String(item.id) === String(id)
+    || (selectedAccount && influencerAccountKey(item) === selectedAccount)
+  ));
+  if (resolved) {
+    influencerOptions.value = dedupeInfluencerCandidates([
+      resolved,
+      selected,
+      ...influencerOptions.value.filter((item) => String(item.id) !== String(id))
+    ]);
+    const preferred = influencerOptions.value.find((item) => (
+      String(item.id) === String(resolved.id)
+      || (selectedAccount && influencerAccountKey(item) === selectedAccount)
+    ));
+    form.influencer = preferred?.id ?? resolved.id;
+  }
 }
 
 function outreachDate(row) {
@@ -478,6 +588,10 @@ async function openDetail(row) {
 
 async function openEdit(row) {
   if (!canManage.value || row.is_deleted) return;
+  influencerResolveSequence += 1;
+  sampleSubmitSequence += 1;
+  influencerLoading.value = false;
+  saving.value = false;
   editingSample.value = { ...row };
   Object.assign(form, {
     outreach_task: row.outreach_task,
@@ -490,14 +604,14 @@ async function openEdit(row) {
     link_type: row.link_type || 'DRJL',
     quick_tags: [...(row.quick_tags || [])]
   });
-  influencerOptions.value = [{
+  influencerOptions.value = dedupeInfluencerCandidates([{
     id: row.influencer,
     name: row.influencer_name,
     code: row.influencer_code,
     handle: row.influencer_handle,
     platform: row.influencer_platform,
     is_blacklisted: row.is_blacklisted
-  }];
+  }]);
   inheritedTask.value = row;
   items.value = row.items?.length ? row.items.map((item) => ({ ...item })) : [newItem()];
   visible.value = true;
@@ -526,9 +640,11 @@ async function restoreSample(row) {
 }
 
 async function submit() {
+  if (influencerLoading.value) return ElMessage.warning('达人账号仍在校验，请稍候');
   if (!form.influencer || !form.store || !form.external_product_id.trim()) return ElMessage.warning('请填写达人、店铺和产品 ID');
   if (selectedInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能保存送样');
   if (editingSample.value) return submitEdit();
+  const sequence = ++sampleSubmitSequence;
   saving.value = true;
   const payload = {
     ...(form.outreach_task ? { outreach_task: form.outreach_task } : {}),
@@ -547,6 +663,7 @@ async function submit() {
     }))
   };
   const r = await createSampleFulfillment(payload, draftKey.value);
+  if (sequence !== sampleSubmitSequence) return;
   saving.value = false;
   if (!r.success) return ElMessage.error(formatInfluencerError(r, '送样创建失败'));
   draftKey.value = '';
@@ -556,8 +673,10 @@ async function submit() {
 }
 
 async function submitEdit() {
+  const sequence = ++sampleSubmitSequence;
+  const editedSample = { ...editingSample.value };
   saving.value = true;
-  const response = await updateSampleFulfillment(editingSample.value.id, {
+  const response = await updateSampleFulfillment(editedSample.id, {
     sample_order_no: form.sample_order_no,
     notes: form.notes,
     link_type: form.link_type,
@@ -566,10 +685,11 @@ async function submitEdit() {
       site_code: item.site_code,
       requested_sku: item.requested_sku?.trim() || null,
       quantity: item.quantity,
-      external_product_id: editingSample.value.external_product_id || ''
+      external_product_id: editedSample.external_product_id || ''
     })),
     items_mode: 'replace'
-  }, editingSample.value.version);
+  }, editedSample.version);
+  if (sequence !== sampleSubmitSequence) return;
   saving.value = false;
   if (!response.success) return ElMessage.error(formatInfluencerError(response, '送样修改失败'));
   visible.value = false;
