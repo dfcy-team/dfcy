@@ -65,6 +65,8 @@ def _masked_fingerprint(value):
 def _format_datetime(value):
     if not value:
         return None
+    if isinstance(value, str):
+        return value
     return timezone.localtime(value).isoformat(timespec="seconds") if timezone.is_aware(value) else value.isoformat(timespec="seconds")
 
 
@@ -148,8 +150,29 @@ def _schedule_state(job, latest_run):
     return "scheduled"
 
 
-def _job_row(job, raw, raw_config, subject, latest_run):
+def _checkpoint_map(job_ids):
+    columns = _table_columns("integrations_synccheckpoint")
+    if not job_ids or not {"id", "sync_job_id", "version", "watermark_utc"} <= columns:
+        return {}
+    placeholders = ",".join(["%s"] * len(job_ids))
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT id,sync_job_id,version,watermark_utc FROM integrations_synccheckpoint "
+            f"WHERE sync_job_id IN ({placeholders}) ORDER BY id DESC",
+            job_ids,
+        )
+        checkpoints = {}
+        for _, job_id, version, watermark in cursor.fetchall():
+            checkpoints.setdefault(job_id, {"version": version, "watermark": watermark})
+        return checkpoints
+
+
+def _job_row(job, raw, raw_config, subject, latest_run, checkpoint=None):
     scope = _json_value(raw.get("sync_scope"))
+    query_scope = _json_value(scope.get("query"))
+    schedule_scope = _json_value(scope.get("schedule"))
+    latest_log = _json_value(latest_run.masked_log) if latest_run else {}
+    destination = RESOURCE_DESTINATIONS.get(job.resource_type, (job.resource_type, job.resource_type))
     execution_mode = str(scope.get("execution_mode") or "simulation")
     schedule_state = _schedule_state(job, latest_run)
     config_ready = (
@@ -182,6 +205,7 @@ def _job_row(job, raw, raw_config, subject, latest_run):
         "id": job.id,
         "platform": job.integration_config.platform,
         "api_type": _api_type(job.integration_config, raw_config),
+        "account_alias": job.integration_config.account_alias,
         "config_name": job.integration_config.account_alias,
         "config_status": job.integration_config.status,
         "credential_status": job.integration_config.credential_status,
@@ -192,6 +216,20 @@ def _job_row(job, raw, raw_config, subject, latest_run):
         "is_enabled": job.is_enabled,
         "max_retry_count": job.max_retry_count,
         "backoff_base_seconds": job.backoff_base_seconds,
+        "query_mode": str(query_scope.get("mode") or scope.get("query_mode") or "incremental"),
+        "lookback_days": int(query_scope.get("lookback_days") or scope.get("lookback_days") or 30),
+        "overlap_minutes": int(query_scope.get("overlap_minutes") if query_scope.get("overlap_minutes") is not None else scope.get("overlap_minutes") or 5),
+        "query_page_size": int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
+        "max_pages": int(query_scope.get("max_pages") or scope.get("max_pages") or 100),
+        "max_records": int(query_scope.get("max_records") or scope.get("max_records") or 50000),
+        "range_start_at": query_scope.get("start_at") or scope.get("range_start_at"),
+        "range_end_at": query_scope.get("end_at") or scope.get("range_end_at"),
+        "interval_minutes": int(schedule_scope.get("interval_minutes") or scope.get("interval_minutes") or 60),
+        "local_time": str(schedule_scope.get("local_time") or scope.get("local_time") or "02:00"),
+        "timezone": str(schedule_scope.get("timezone") or scope.get("timezone") or "Asia/Shanghai"),
+        "token_policy": "manual_no_refresh" if job.integration_config.platform == "tiktok" else "auto_refresh",
+        "data_destination": destination[0],
+        "data_table": destination[1],
         "last_run_at": _format_datetime(job.last_run_at),
         "next_run_at": _format_datetime(job.next_run_at),
         "schedule_state": schedule_state,
@@ -200,7 +238,22 @@ def _job_row(job, raw, raw_config, subject, latest_run):
         "latest_run_status": latest_run.status if latest_run else "",
         "latest_run_id": latest_run.run_id if latest_run else "",
         "latest_started_at": _format_datetime(latest_run.started_at) if latest_run else None,
+        "latest_finished_at": _format_datetime(latest_run.finished_at) if latest_run else None,
         "latest_fetched_count": latest_run.fetched_count if latest_run else 0,
+        "latest_created_count": latest_run.created_count if latest_run else 0,
+        "latest_updated_count": latest_run.updated_count if latest_run else 0,
+        "latest_skipped_count": latest_run.skipped_count if latest_run else 0,
+        "latest_failed_count": latest_run.failed_count if latest_run else 0,
+        "latest_retry_count": latest_run.retry_count if latest_run else 0,
+        "latest_error_code": latest_run.error_code if latest_run else "",
+        "latest_error_message": str(
+            (latest_run.masked_error_message if latest_run else "")
+            or latest_log.get("masked_error_message")
+            or ""
+        )[:240],
+        "checkpoint_version": (checkpoint or {}).get("version"),
+        "checkpoint_watermark": _format_datetime((checkpoint or {}).get("watermark")),
+        "updated_at": _format_datetime(job.updated_at),
         **subject,
     }
     return row
@@ -224,6 +277,7 @@ def _workspace_rows(user):
         )
     )
     job_ids = [job.id for job in jobs]
+    checkpoints = _checkpoint_map(job_ids)
     job_raw = _raw_map(
         "integrations_syncjob",
         ["id", "store_authorization_id", "warehouse_authorization_id", "sync_scope"],
@@ -251,6 +305,7 @@ def _workspace_rows(user):
             config_raw.get(job.integration_config_id, {}),
             subject,
             latest_by_job.get(job.id),
+            checkpoints.get(job.id),
         )
     return configs, config_raw, jobs, job_rows, runs, warehouse_auth
 

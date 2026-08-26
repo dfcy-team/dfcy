@@ -220,18 +220,32 @@
       <template #footer><el-button @click="credentialDialog = false">取消</el-button><el-button class="handoff-action" :loading="operating" @click="saveCredential">加密保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="jobDetailDialog" title="同步任务详情" width="min(760px, 92vw)">
-      <el-descriptions v-if="activeJob" :column="2" border>
-        <el-descriptions-item label="店铺/仓库">{{ activeJob.subject_name }}（{{ activeJob.subject_code || '未绑定' }}）</el-descriptions-item>
-        <el-descriptions-item label="平台/站点">{{ label('platform', activeJob.platform) }} · {{ activeJob.region || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="同步资源">{{ label('resource_type', activeJob.resource_type) }}</el-descriptions-item>
-        <el-descriptions-item label="运行模式">{{ label('execution_mode', activeJob.execution_mode) }}</el-descriptions-item>
-        <el-descriptions-item label="调度类型">{{ label('schedule_type', activeJob.schedule_type) }}</el-descriptions-item>
-        <el-descriptions-item label="最大重试">{{ activeJob.max_retry_count }}</el-descriptions-item>
-        <el-descriptions-item label="最近运行">{{ activeJob.latest_run_id || '尚未运行' }}</el-descriptions-item>
-        <el-descriptions-item label="当前状态">{{ activeJob.blocked_reason || label('schedule_state', activeJob.schedule_state) }}</el-descriptions-item>
-      </el-descriptions>
-      <template #footer><el-button @click="jobDetailDialog = false">关闭</el-button><el-button type="primary" @click="openJobEditor(activeJob)">编辑同步策略</el-button></template>
+    <el-dialog v-model="jobDetailDialog" width="min(700px, 94vw)" class="job-detail-dialog">
+      <template #header>
+        <div v-if="activeJob" class="job-detail-heading">
+          <strong>同步任务详情</strong>
+          <small>{{ activeJob.subject_name }} · {{ label('resource_type', activeJob.resource_type) }} · 任务 #{{ activeJob.id }}</small>
+        </div>
+      </template>
+      <template v-if="activeJob">
+        <div class="job-detail-status">
+          <status-tag :value="activeJob.health_state" />
+          <span>{{ label('schedule_state', activeJob.schedule_state) }}</span>
+        </div>
+        <dl class="job-detail-grid">
+          <div v-for="item in jobDetailItems" :key="item.label">
+            <dt>{{ item.label }}</dt>
+            <dd>{{ item.value }}</dd>
+          </div>
+        </dl>
+        <el-alert v-if="activeJob.blocked_reason" :title="activeJob.blocked_reason" type="warning" :closable="false" show-icon />
+      </template>
+      <template #footer>
+        <el-button @click="jobDetailDialog = false">关闭</el-button>
+        <el-button @click="viewJobRuns(activeJob)">查看运行记录</el-button>
+        <el-button @click="viewJobBusiness(activeJob)">查看业务数据</el-button>
+        <el-button class="handoff-action" :disabled="activeJob?.schedule_state === 'running'" @click="openJobEditor(activeJob)">编辑策略</el-button>
+      </template>
     </el-dialog>
 
     <el-dialog v-model="jobEditDialog" title="编辑同步策略" width="min(720px, 92vw)" :close-on-click-modal="false">
@@ -364,6 +378,32 @@ const dueItems = computed(() => { const p = data.value.previews?.due || {}; retu
 const reconcileItems = computed(() => { const p = data.value.previews?.reconcile || {}; return [{ label: '符合条件的主体', value: p.eligible_subject_count || 0 }, { label: '应有任务', value: p.total_required || 0 }, { label: '已存在', value: p.existing_count || 0 }, { label: '待补齐', value: p.missing_count || 0 }]; });
 const pageStart = computed(() => pagination.value.total ? ((pagination.value.page - 1) * pagination.value.page_size) + 1 : 0);
 const pageEnd = computed(() => Math.min(pagination.value.total || 0, (pagination.value.page || 1) * (pagination.value.page_size || 50)));
+const jobDetailItems = computed(() => {
+  const row = activeJob.value;
+  if (!row) return [];
+  const destination = businessDestination(row.resource_type);
+  const latestRun = row.latest_run_status
+    ? `${label('status', row.latest_run_status)} · 抓取 ${number(row.latest_fetched_count)} / 新增 ${number(row.latest_created_count)} / 更新 ${number(row.latest_updated_count)} / 失败 ${number(row.latest_failed_count)}`
+    : '尚未运行';
+  return [
+    { label: '任务状态', value: `${label('status', row.health_state)}${row.blocked_reason ? ` · ${row.blocked_reason}` : ''}` },
+    { label: '业务主体', value: `${row.subject_code || '—'} · ${row.subject_name || '未绑定'}` },
+    { label: '平台与站点', value: `${label('platform', row.platform)} · ${row.region || '—'} · ${label('api_type', row.api_type)}` },
+    { label: '同步资源', value: `${label('resource_type', row.resource_type)} → ${row.data_destination || destination.label}` },
+    { label: '接入配置', value: `${row.account_alias || row.config_name || '—'} · ${label('status', row.credential_status)}` },
+    { label: '主体授权', value: label('status', row.authorization_status) },
+    { label: '运行策略', value: `${scheduleDescription(row)} · ${label('execution_mode', row.execution_mode)}` },
+    { label: '查询范围', value: row.query_mode === 'range' ? `${date(row.range_start_at)} 至 ${date(row.range_end_at)}` : `首次回溯 ${number(row.lookback_days || 30)} 天 · 重叠 ${number(row.overlap_minutes ?? 5)} 分钟` },
+    { label: '单次安全上限', value: `${number(row.query_page_size || 50)} 条/页 · ${number(row.max_pages || 100)} 页 · ${number(row.max_records || 50000)} 条` },
+    { label: '最大重试次数', value: number(row.max_retry_count) },
+    { label: 'Token 策略', value: row.token_policy === 'auto_refresh' ? '到期自动刷新' : '不自动刷新' },
+    { label: '上次/下次运行', value: `${date(row.last_run_at)} / ${date(row.next_run_at)}` },
+    { label: '最近运行', value: latestRun },
+    { label: '同步检查点', value: row.checkpoint_version ? `版本 ${number(row.checkpoint_version)} · 水位 ${date(row.checkpoint_watermark)}` : '尚未生成' },
+    { label: '最近错误', value: row.latest_error_message || row.latest_error_code || '—' },
+    { label: '数据写入表', value: row.data_table || destination.tables }
+  ];
+});
 const StatusTag = defineComponent({ props: { value: String }, setup(p) { const type = computed(() => ({ success: 'success', healthy: 'success', active: 'success', authorized: 'success', referenced: 'success', verified: 'success', configured: 'success', failed: 'danger', error: 'danger', authorization: 'danger', configuration: 'warning', due: 'warning', pending_review: 'warning', unconfigured: 'info', disabled: 'info', simulation: 'info', live_readonly: 'warning' }[p.value] || 'info')); return () => h('span', { class: ['status-pill', `is-${type.value}`] }, label('status', p.value)); } });
 const SummaryGrid = defineComponent({ props: { items: Array }, setup(p) { return () => h('dl', { class: 'summary-grid' }, (p.items || []).map(item => h('div', [h('dt', item.label), h('dd', number(item.value))]))); } });
 
@@ -376,6 +416,12 @@ const labels = {
 function label(group, value) { return labels[group]?.[value] || value || '—'; }
 function number(value) { return Number(value || 0).toLocaleString('zh-CN'); }
 function date(value) { if (!value) return '—'; return String(value).replace('T', ' ').slice(0, 19); }
+function scheduleDescription(row) {
+  if (row.schedule_type === 'interval') return `每 ${number(row.interval_minutes || 60)} 分钟`;
+  if (row.schedule_type === 'daily') return `每天 ${row.local_time || '02:00'} · ${row.timezone || 'Asia/Shanghai'}`;
+  if (row.schedule_type === 'weekly') return `每周指定日 ${row.local_time || '02:00'} · ${row.timezone || 'Asia/Shanghai'}`;
+  return `${label('schedule_type', row.schedule_type)}运行`;
+}
 function filterOptions(key) { const map = { platform: 'platforms', status: 'statuses', environment: 'environments', api_type: 'api_types', resource_type: 'resource_types', schedule_type: 'schedule_types' }; return data.value.options?.[map[key]] || []; }
 async function load() { loading.value = true; error.value = ''; try { const response = await fetchIntegrationWorkspace(props.mode, { ...query, page: page.value, page_size: 50 }); if (!response.success) throw new Error(response.message || '读取失败'); data.value = response.data; page.value = response.data.pagination?.page || 1; } catch (e) { error.value = e?.message || '读取 API 数据接入记录失败'; } finally { loading.value = false; } }
 function applyFilters() { Object.assign(query, draft); page.value = 1; load(); }
@@ -469,7 +515,14 @@ async function saveJob() {
   ElMessage.success('同步策略已更新。');
   await load();
 }
-function businessPath(resourceType) { return resourceType === 'refund_return' ? '/sales-management/returns' : resourceType === 'inventory_snapshot' ? '/analytics/inventory' : '/sales-management/orders'; }
+function businessDestination(resourceType) {
+  if (resourceType === 'refund_return') return { label: '退款退货', path: '/sales-management/returns', tables: 'refund_return / refund_return_item' };
+  if (resourceType === 'inventory_snapshot') return { label: '库存分析', path: '/analytics/inventory', tables: 'inventory_snapshot' };
+  return { label: '销售订单', path: '/sales-management/orders', tables: 'sales_order / sales_order_item' };
+}
+function businessPath(resourceType) { return businessDestination(resourceType).path; }
+function viewJobRuns(row) { if (!row) return; jobDetailDialog.value = false; router.push({ path: '/integrations/sync-runs', query: { subject: row.subject_name } }); }
+function viewJobBusiness(row) { if (!row) return; jobDetailDialog.value = false; router.push(businessPath(row.resource_type)); }
 async function handleJobCommand(command, row) {
   if (command === 'edit') { openJobEditor(row); return; }
   if (command === 'runs') { router.push({ path: '/integrations/sync-runs', query: { subject: row.subject_name } }); return; }
@@ -544,7 +597,8 @@ onMounted(load);
 .table-card > header { padding: 15px 16px; }.table-card > header strong { color: #536279; font-size: 12px; }.batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: 1px solid #e3e9f0; background: #f4f9ff; }.table-footer { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; color: #607087; font-size: 12px; }.table-card :deep(.el-table th.el-table__cell) { color: #40516a; background: #f4f7fa; }.table-card :deep(.el-table .cell) { line-height: 1.35; }
 .status-pill { display: inline-flex; padding: 3px 7px; border-radius: 5px; font-size: 11px; font-weight: 700; }.status-pill.is-success { color: #07835c; background: #e7f7f0; }.status-pill.is-danger { color: #c43333; background: #fff0ef; }.status-pill.is-warning { color: #9a6700; background: #fff6da; }.status-pill.is-info { color: #526172; background: #eef2f5; }
 .dialog-note { margin: -12px 0 18px; color: #7a8798; font-size: 12px; }.dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }.dialog-grid .wide { grid-column: 1 / -1; }.dialog-grid :deep(.el-select) { width: 100%; }.dialog-grid small { display: block; margin-top: 5px; color: #7a8798; }.safe-note { color: #607087; font-size: 12px; line-height: 1.7; }.empty-job { display: grid; place-items: center; min-height: 180px; text-align: center; }.empty-job strong { font-size: 18px; }.empty-job p { color: #64748b; }
+.job-detail-heading { display: grid; gap: 4px; }.job-detail-heading strong { color: #1f2937; font-size: 18px; }.job-detail-heading small { color: #7a8798; font-size: 12px; font-weight: 400; }.job-detail-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -2px 0 14px; color: #64748b; font-size: 12px; }.job-detail-grid { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid #d9e2ec; border-left: 1px solid #d9e2ec; }.job-detail-grid div { min-width: 0; padding: 11px 13px; border-right: 1px solid #d9e2ec; border-bottom: 1px solid #d9e2ec; }.job-detail-grid dt { margin-bottom: 5px; color: #66758c; font-size: 12px; }.job-detail-grid dd { margin: 0; overflow-wrap: anywhere; color: #26364d; font-size: 13px; line-height: 1.45; }.job-detail-grid + :deep(.el-alert) { margin-top: 14px; }
 :deep(.summary-grid) { display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 16px; border: 1px solid #d9e2ec; border-radius: 6px; overflow: hidden; }:deep(.summary-grid div) { padding: 13px; border-right: 1px solid #d9e2ec; border-bottom: 1px solid #d9e2ec; }:deep(.summary-grid div:nth-child(2n)) { border-right: 0; }:deep(.summary-grid div:nth-last-child(-n+2)) { border-bottom: 0; }:deep(.summary-grid dt) { color: #66758c; font-size: 12px; }:deep(.summary-grid dd) { margin: 5px 0 0; font-weight: 700; }
 @media (max-width: 1100px) { .filter-card { grid-template-columns: repeat(3, 1fr); }.health-card dl { grid-template-columns: repeat(3, 1fr); }.health-card footer { flex-direction: column; }.workspace-header { flex-direction: column; }.header-actions { justify-content: flex-start; } }
-@media (max-width: 760px) { .flow-steps { grid-template-columns: 1fr 1fr; gap: 16px; }.flow-steps li::after { display: none; }.flow-metrics { grid-template-columns: 1fr 1fr; }.filter-card { grid-template-columns: 1fr; }.health-card dl { grid-template-columns: 1fr 1fr; }.dialog-grid { grid-template-columns: 1fr; }.table-footer { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 760px) { .flow-steps { grid-template-columns: 1fr 1fr; gap: 16px; }.flow-steps li::after { display: none; }.flow-metrics { grid-template-columns: 1fr 1fr; }.filter-card { grid-template-columns: 1fr; }.health-card dl { grid-template-columns: 1fr 1fr; }.dialog-grid, .job-detail-grid { grid-template-columns: 1fr; }.table-footer { align-items: flex-start; flex-direction: column; } }
 </style>

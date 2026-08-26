@@ -164,7 +164,16 @@ def test_integration_workspace_links_tenant_scoped_config_jobs_and_runs():
     assert jobs.status_code == 200
     assert jobs.json()["data"]["summary"]["job_count"] == 1
     assert jobs.json()["data"]["pagination"]["total"] == 1
-    assert jobs.json()["data"]["results"][0]["config_name"] == "tenant-a-config"
+    job_row = jobs.json()["data"]["results"][0]
+    assert job_row["config_name"] == "tenant-a-config"
+    assert job_row["account_alias"] == "tenant-a-config"
+    assert job_row["query_mode"] == "incremental"
+    assert job_row["lookback_days"] == 30
+    assert job_row["query_page_size"] == 50
+    assert job_row["max_records"] == 50000
+    assert job_row["latest_fetched_count"] == 2
+    assert job_row["latest_created_count"] == 0
+    assert job_row["checkpoint_version"] is None
     assert runs.json()["data"]["summary"]["run_count"] == 1
     assert runs.json()["data"]["results"][0]["run_id"] == "workspace-run"
 
