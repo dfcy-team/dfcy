@@ -1,10 +1,4 @@
 services:
-  decision-frontend:
-    build:
-      context: ./decision-frontend
-    ports:
-      - "127.0.0.1:3001:3001"
-
   backend:
     build:
       context: ./backend

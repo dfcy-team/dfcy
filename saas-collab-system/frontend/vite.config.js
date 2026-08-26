@@ -26,10 +26,6 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/decision-app': {
-        target: process.env.VITE_DECISION_APP_TARGET || 'http://127.0.0.1:3001',
-        changeOrigin: true
-      },
       '/api': {
         target: process.env.VITE_DEV_API_PROXY_TARGET || 'http://127.0.0.1:8001',
         changeOrigin: true
