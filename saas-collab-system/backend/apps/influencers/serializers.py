@@ -485,10 +485,15 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
 
 
 class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
-    """Allow-list for fact edits; status and lifecycle metadata remain service-owned."""
+    """Allow-list for fact edits; status transitions remain service-owned."""
 
     items = SampleItemSerializer(many=True, required=False)
     append_items = SampleItemSerializer(many=True, required=False, write_only=True)
+    status = serializers.ChoiceField(
+        choices=SampleFulfillment.Status.choices,
+        required=False,
+        write_only=True,
+    )
     items_mode = serializers.ChoiceField(
         choices=("replace", "append"), required=False, write_only=True
     )
@@ -500,6 +505,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
             "notes",
             "link_type",
             "quick_tags",
+            "status",
             "items",
             "append_items",
             "items_mode",

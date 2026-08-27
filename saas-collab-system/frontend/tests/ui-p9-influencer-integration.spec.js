@@ -231,8 +231,9 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('filterable');
     expect(page).toContain('influencerOptions');
     for (const field of ['influencer_name', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
-    expect(page).toContain("path: '/influencers/sample-fulfillments'");
-    expect(page).toContain('outreach_task: String(task.id)');
+    expect(page).toContain('createSampleFulfillment({');
+    expect(page).toContain('outreach_task: task.id');
+    expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
     expect(page).toContain('matchOutreachProduct');
@@ -284,8 +285,20 @@ describe('influencer integration workspace contracts', () => {
     for (const field of ['sales_amount', 'pricing_status', 'price_match_status', 'PRICING_STATUS_LABELS']) expect(page).not.toContain(field);
     expect(page).toContain('displayAmount');
     expect(page).toContain("value === null || value === undefined || value === ''");
-    expect(page).not.toContain('FULFILLMENT_STATUS_TRANSITIONS');
+    expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
     expect(page).not.toContain('updateSampleFulfillmentStatus');
+    expect(page).toContain('v-model="form.status"');
+    expect(page).toContain('status: form.status');
+    expect(page).toContain('mergeDetailFacts(row, detail)');
+    expect(page).toMatch(/function mergeDetailFacts\(base = \{\}, detail = \{\}\)[\s\S]*?if \(value === undefined\) continue;[\s\S]*?merged\[key\] = value/);
+    expect(page).toContain('detailSample.value = { ...row }');
+    expect(page).toContain("detailError.value = formatInfluencerError(response, '送样详情加载失败，当前展示列表已有数据')");
+    expect(page).toContain('detailSample.store_name || detailSample.store');
+    expect(page).toContain('detailSample.items?.length');
+    expect(page).toMatch(/function displayAmount\(value\)[\s\S]*?return String\(value\)/);
+    expect(page).not.toMatch(/function displayAmount\(value, row\)/);
+    expect(page).not.toContain('销售价');
+    expect(page).not.toContain('销售额');
     expect(page).toContain('outreach_task');
     expect(page).toContain('influencer: form.influencer');
     expect(page).not.toContain('outreach_target: form.outreach_target');
@@ -344,6 +357,19 @@ describe('influencer integration workspace contracts', () => {
     expect(sample).not.toContain(':show-close="false"');
   });
 
+  it('creates task samples in place without navigating away from outreach tasks', () => {
+    const task = read('src/views/influencers/OutreachTaskList.vue');
+    expect(task).toContain('v-model="sampleCreateVisible"');
+    expect(task).toContain('createSampleFulfillment({');
+    expect(task).toContain('outreach_task: task.id');
+    expect(task).toContain("link_type: 'DRJL'");
+    expect(task).toContain("product_name_snapshot: task.task_name || task.external_product_id || ''");
+    expect(task).toContain('await loadDetailData(detailTask.value, false)');
+    expect(task).not.toContain("path: '/influencers/sample-fulfillments'");
+    expect(task).not.toContain('router.push');
+    expect(task).not.toContain('useRouter');
+  });
+
   it('blocks creator mutations until duplicate and blacklist resolution completes', () => {
     const task = read('src/views/influencers/OutreachTaskList.vue');
     const sample = read('src/views/influencers/SampleFulfillmentList.vue');
@@ -379,6 +405,7 @@ describe('influencer integration workspace contracts', () => {
     expect(FULFILLMENT_STATUS_TRANSITIONS.processing).toEqual(['shipped', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.shipped).toEqual(['delivered', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.delivered).toEqual(['completed', 'cancelled']);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.overdue).toEqual(['published', 'completed', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.completed).toEqual([]);
     expect(FULFILLMENT_STATUS_TRANSITIONS.cancelled).toEqual([]);
 

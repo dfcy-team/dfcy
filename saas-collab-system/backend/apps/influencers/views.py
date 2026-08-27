@@ -1055,19 +1055,41 @@ class SampleFulfillmentDetailView(APIView):
         serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         validated = dict(serializer.validated_data)
+        requested_status = validated.pop("status", None)
         item_payloads = validated.pop("items", None)
         append_item_payloads = validated.pop("append_items", None)
         items_mode = validated.pop("items_mode", "replace")
         try:
-            fulfillment = update_sample_fulfillment(
-                user=request.user,
-                fulfillment=fulfillment,
-                expected_version=_expected_version(request),
-                validated_data=validated,
-                item_payloads=item_payloads,
-                append_item_payloads=append_item_payloads,
-                items_mode=items_mode,
-            )
+            with transaction.atomic():
+                expected_version = _expected_version(request)
+                has_fact_changes = (
+                    bool(validated)
+                    or item_payloads is not None
+                    or append_item_payloads is not None
+                )
+                if has_fact_changes:
+                    fulfillment = update_sample_fulfillment(
+                        user=request.user,
+                        fulfillment=fulfillment,
+                        expected_version=expected_version,
+                        validated_data=validated,
+                        item_payloads=item_payloads,
+                        append_item_payloads=append_item_payloads,
+                        items_mode=items_mode,
+                    )
+                    expected_version = fulfillment.version
+                if requested_status and requested_status != fulfillment.status:
+                    fulfillment = transition_sample_fulfillment(
+                        user=request.user,
+                        fulfillment=fulfillment,
+                        status=requested_status,
+                        expected_version=expected_version,
+                        reason="edited with fulfillment facts",
+                    )
+                elif not has_fact_changes:
+                    raise ValidationError(
+                        {"detail": "At least one editable fulfillment field is required."}
+                    )
         except ValidationError as exc:
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc

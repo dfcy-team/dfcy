@@ -232,6 +232,72 @@
       </el-table>
     </el-dialog>
 
+    <el-dialog
+      v-model="sampleCreateVisible"
+      title="新增送样记录"
+      width="700px"
+      :close-on-click-modal="false"
+      @closed="clearSampleDraft"
+    >
+      <el-form label-width="100px">
+        <div class="sample-form-grid">
+          <el-form-item label="建联任务">
+            <el-input :model-value="sampleTaskLabel" readonly />
+          </el-form-item>
+          <el-form-item label="达人账号" required>
+            <el-select
+              v-model="sampleForm.influencer"
+              filterable
+              remote
+              reserve-keyword
+              clearable
+              :remote-method="searchSampleInfluencers"
+              :loading="sampleInfluencerLoading"
+              placeholder="搜索达人名称或账号"
+              @change="resolveSelectedSampleInfluencer"
+            >
+              <el-option
+                v-for="influencer in sampleInfluencerOptions"
+                :key="influencer.id"
+                :label="influencerOptionLabel(influencer)"
+                :value="influencer.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="selectedSampleInfluencer?.is_blacklisted" class="sample-form-span" label="黑名单">
+            <el-alert type="error" :closable="false" title="该达人在黑名单中，不能创建送样。" />
+          </el-form-item>
+          <el-form-item label="店铺">
+            <el-input :model-value="displayValue(sampleTask?.store_name || sampleTask?.store)" readonly />
+          </el-form-item>
+          <el-form-item label="产品 ID">
+            <el-input :model-value="displayValue(sampleTask?.external_product_id)" readonly />
+          </el-form-item>
+          <el-form-item label="样品订单">
+            <el-input v-model="sampleForm.sample_order_no" placeholder="可稍后补充样品订单号" />
+          </el-form-item>
+          <el-form-item label="SKU">
+            <el-input v-model="sampleForm.requested_sku" placeholder="可暂时为空" />
+          </el-form-item>
+          <el-form-item label="数量">
+            <el-input-number v-model="sampleForm.quantity" :min="1" :step="1" step-strictly />
+          </el-form-item>
+          <el-form-item label="备注" class="sample-form-span">
+            <el-input v-model="sampleForm.notes" type="textarea" :rows="3" placeholder="填写送样备注" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="sampleCreateVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="sampleSaving"
+          :disabled="sampleInfluencerLoading || selectedSampleInfluencer?.is_blacklisted"
+          @click="submitTaskSample"
+        >保存送样</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="detailVisible" direction="rtl" size="560px" :with-header="false" class="task-detail-drawer">
       <div class="drawer-body">
         <div class="drawer-head">
@@ -321,11 +387,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import {
   addOutreachTarget,
   createOutreachTask,
+  createSampleFulfillment,
   deleteOutreachTarget,
   deleteOutreachTask,
   fetchInfluencerResolve,
@@ -353,7 +419,6 @@ import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
-const router = useRouter();
 const rows = ref([]);
 const total = ref(0);
 const page = ref(1);
@@ -375,6 +440,11 @@ const detailTargets = ref([]);
 const detailSamples = ref([]);
 const detailSampleTargetId = ref(null);
 const detailError = ref('');
+const sampleCreateVisible = ref(false);
+const sampleSaving = ref(false);
+const sampleInfluencerLoading = ref(false);
+const sampleTask = ref(null);
+const sampleInfluencerOptions = ref([]);
 const editingTask = ref(null);
 const storeOptions = ref([]);
 const bdOptions = ref([]);
@@ -396,8 +466,16 @@ const form = reactive({
   owner: null
 });
 const targetForm = reactive({ influencer: null, notes: '' });
+const sampleForm = reactive({ influencer: null, sample_order_no: '', requested_sku: '', quantity: 1, notes: '' });
 const selectedTargetInfluencer = computed(() => influencerOptions.value.find((item) => String(item.id) === String(targetForm.influencer)) || null);
+const selectedSampleInfluencer = computed(() => sampleInfluencerOptions.value.find((item) => String(item.id) === String(sampleForm.influencer)) || null);
+const sampleTaskLabel = computed(() => {
+  const task = sampleTask.value;
+  if (!task) return '—';
+  return `${displayValue(task.task_no)} · ${displayValue(task.task_name)}`;
+});
 let targetInfluencerResolveSequence = 0;
+let sampleInfluencerResolveSequence = 0;
 let taskSubmitSequence = 0;
 const matchedStoreIds = ref([]);
 const matchedCandidates = ref([]);
@@ -873,25 +951,113 @@ function displayAmount(value, row) {
   return currency ? `${value} ${currency}` : String(value);
 }
 
-function openSampleFulfillment(row) {
+async function openSampleFulfillment(row) {
   if (!activeTask.value || !row?.id || !canCreateFulfillment.value || isTerminal(activeTask.value)) return;
-  router.push({
-    path: '/influencers/sample-fulfillments',
-    query: {
-      outreach_task: String(activeTask.value.id)
-    }
+  await openTaskSampleDialog(activeTask.value, {
+    id: row.influencer,
+    name: row.influencer_name,
+    code: row.influencer_code,
+    handle: row.influencer_handle || row.influencer_code,
+    platform: row.influencer_platform,
+    is_blacklisted: row.is_blacklisted
   });
 }
 
-function createSampleFromDetail() {
+async function createSampleFromDetail() {
   const task = detailTask.value;
   if (!task || !canCreateFulfillment.value || isTerminal(task)) return;
-  router.push({
-    path: '/influencers/sample-fulfillments',
-    query: {
-      outreach_task: String(task.id)
-    }
+  await openTaskSampleDialog(task);
+}
+
+async function openTaskSampleDialog(task, preferredInfluencer = null) {
+  sampleInfluencerResolveSequence += 1;
+  sampleInfluencerLoading.value = false;
+  sampleSaving.value = false;
+  sampleTask.value = { ...task };
+  Object.assign(sampleForm, { influencer: preferredInfluencer?.id ?? null, sample_order_no: '', requested_sku: '', quantity: 1, notes: '' });
+  await loadTaskOptions(true);
+  sampleInfluencerOptions.value = dedupeInfluencerCandidates([
+    ...(preferredInfluencer?.id ? [preferredInfluencer] : []),
+    ...influencerOptions.value
+  ]);
+  sampleCreateVisible.value = true;
+}
+
+function clearSampleDraft() {
+  sampleInfluencerResolveSequence += 1;
+  sampleInfluencerLoading.value = false;
+  sampleSaving.value = false;
+  sampleTask.value = null;
+  sampleInfluencerOptions.value = [];
+  Object.assign(sampleForm, { influencer: null, sample_order_no: '', requested_sku: '', quantity: 1, notes: '' });
+}
+
+async function searchSampleInfluencers(search) {
+  const sequence = ++sampleInfluencerResolveSequence;
+  sampleInfluencerLoading.value = true;
+  const response = await fetchInfluencerResolve(String(search || '').trim());
+  if (sequence !== sampleInfluencerResolveSequence) return;
+  sampleInfluencerLoading.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '达人账号搜索失败'));
+  sampleInfluencerOptions.value = responseInfluencerCandidates(response);
+}
+
+async function resolveSelectedSampleInfluencer(id) {
+  const sequence = ++sampleInfluencerResolveSequence;
+  const selected = sampleInfluencerOptions.value.find((item) => String(item.id) === String(id));
+  if (!selected) {
+    sampleInfluencerLoading.value = false;
+    return;
+  }
+  sampleInfluencerLoading.value = true;
+  const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
+  if (sequence !== sampleInfluencerResolveSequence) return;
+  sampleInfluencerLoading.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '达人账号校验失败'));
+  const selectedAccount = influencerAccountKey(selected);
+  const resolved = responseInfluencerCandidates(response).find((item) => (
+    String(item.id) === String(id) || (selectedAccount && influencerAccountKey(item) === selectedAccount)
+  ));
+  if (!resolved) return;
+  sampleInfluencerOptions.value = dedupeInfluencerCandidates([resolved, selected, ...sampleInfluencerOptions.value]);
+  sampleForm.influencer = resolved.id;
+}
+
+function sampleSiteCode(task) {
+  const store = storeOptions.value.find((item) => String(item.id) === String(task?.store));
+  return String(store?.country_code || store?.site_code || 'PH').toUpperCase();
+}
+
+async function submitTaskSample() {
+  const task = sampleTask.value;
+  if (!task?.id || !sampleForm.influencer) return ElMessage.warning('请选择达人');
+  if (sampleInfluencerLoading.value) return ElMessage.warning('达人账号仍在校验，请稍候');
+  if (selectedSampleInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能创建送样');
+  sampleSaving.value = true;
+  const response = await createSampleFulfillment({
+    outreach_task: task.id,
+    influencer: sampleForm.influencer,
+    store: task.store,
+    product_name_snapshot: task.task_name || task.external_product_id || '',
+    external_product_id: task.external_product_id || '',
+    sample_order_no: sampleForm.sample_order_no,
+    notes: sampleForm.notes,
+    link_type: 'DRJL',
+    quick_tags: ['BD建联'],
+    items: [{
+      site_code: sampleSiteCode(task),
+      external_product_id: task.external_product_id || '',
+      requested_sku: sampleForm.requested_sku.trim() || null,
+      quantity: sampleForm.quantity
+    }]
   });
+  sampleSaving.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '送样创建失败'));
+  sampleCreateVisible.value = false;
+  ElMessage.success('送样已创建');
+  await load();
+  if (detailTask.value?.id === task.id) await loadDetailData(detailTask.value, false);
+  if (activeTask.value?.id === task.id) await loadTargets();
 }
 
 async function addTarget() {
@@ -1031,6 +1197,8 @@ onMounted(async () => {
 .sample-card > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sample-create-row { display: flex; gap: 8px; margin-bottom: 12px; }
 .sample-create-row .el-select { flex: 1; }
+.sample-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.sample-form-span { grid-column: 1 / -1; }
 .empty-state { padding: 16px 0; color: #84909c; font-size: 13px; text-align: center; }
 @media (max-width: 800px) {
   .creator-page .page-hero, .target-bar { align-items: stretch; flex-direction: column; }
@@ -1040,5 +1208,7 @@ onMounted(async () => {
   .target-bar .el-input, .target-bar .el-select { max-width: none; }
   .detail-facts { grid-template-columns: 1fr; }
   .sample-create-row { flex-direction: column; }
+  .sample-form-grid { grid-template-columns: 1fr; }
+  .sample-form-span { grid-column: auto; }
 }
 </style>

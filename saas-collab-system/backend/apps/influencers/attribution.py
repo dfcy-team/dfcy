@@ -35,6 +35,7 @@ RATE_SOURCE_DESCRIPTION = (
     "active base_currency->CNY rate effective on the business date."
 )
 PERFORMANCE_CURRENCIES = frozenset(currency for currency, _ in SUPPORTED_CURRENCY_CHOICES)
+MISSING_CREATOR_HANDLE_SENTINEL_PREFIX = "__dfcy_missing_creator_handle__:"
 COMPLETED_ORDER_STATUSES = frozenset({"completed", "已完成"})
 REFUND_MARKERS = frozenset({"是", "yes", "true", "1", "y"})
 SHIPPED_SAMPLE_STATUSES = frozenset(
@@ -55,6 +56,21 @@ def normalize_account(value):
 def influencer_account(influencer):
     """Use only the TikTok handle; display names are not account identifiers."""
     return str(getattr(influencer, "handle", "") or "").strip()
+
+
+def missing_creator_handle_sentinel(*, tenant, influencer):
+    """Return a stable, reserved value for samples without a real handle."""
+    return (
+        f"{MISSING_CREATOR_HANDLE_SENTINEL_PREFIX}"
+        f"{getattr(tenant, 'pk', tenant)}:{getattr(influencer, 'pk', influencer)}"
+    )
+
+
+def _real_creator_account(value):
+    normalized = normalize_account(value)
+    if not normalized or normalized.startswith(MISSING_CREATOR_HANDLE_SENTINEL_PREFIX):
+        return ""
+    return normalized
 
 
 def rule_version_for(attribution):
@@ -285,7 +301,9 @@ def create_sample_attribution_snapshot(
     ).first()
     currency = str((first_item or {}).get("currency") or store.currency or "CNY").strip().upper()
     sampled_site = str(site or (first_item or {}).get("site_code") or store.country_code or "").strip()
-    account = normalize_account(influencer_account(influencer))
+    account = _real_creator_account(influencer_account(influencer))
+    if not account:
+        account = missing_creator_handle_sentinel(tenant=tenant, influencer=influencer)
     snapshot = BdSampleAttributionSnapshot(
         tenant=tenant,
         fulfillment=fulfillment,
@@ -330,7 +348,7 @@ def _business_key_part(value):
 
 def _sample_duplicate_key(sample):
     return (
-        normalize_account(sample.creator_username),
+        _real_creator_account(sample.creator_username),
         _business_key_part(sample.shop_abbr),
         _business_key_part(sample.product_id),
         _business_key_part(sample.sku_id),
@@ -339,7 +357,7 @@ def _sample_duplicate_key(sample):
 
 def _sample_group_key(sample, *, product_required):
     key = (
-        normalize_account(sample.creator_username),
+        _real_creator_account(sample.creator_username),
         _business_key_part(sample.shop_abbr),
     )
     if product_required:
@@ -350,6 +368,8 @@ def _sample_group_key(sample, *, product_required):
 def _group_sample_candidates(samples, *, product_required):
     grouped = defaultdict(list)
     for sample in samples:
+        if not _real_creator_account(sample.creator_username):
+            continue
         grouped[_sample_group_key(sample, product_required=product_required)].append(sample)
     for key, candidates in grouped.items():
         # Ascending time enables O(log n) lookup. Duplicate samples are
@@ -360,8 +380,8 @@ def _group_sample_candidates(samples, *, product_required):
 
 
 def _order_account(order):
-    account = normalize_account(order.creator_username)
-    return account or normalize_account(order.creator_username_normalized)
+    account = _real_creator_account(order.creator_username)
+    return account or _real_creator_account(order.creator_username_normalized)
 
 
 def _candidate_for_order_sku(candidates, order):
@@ -394,8 +414,9 @@ def _candidate_for_order_sku(candidates, order):
 
 
 def _snapshot_has_current_handle(sample):
-    current_handle = normalize_account(influencer_account(sample.influencer))
-    return bool(current_handle) and normalize_account(sample.creator_username) == current_handle
+    current_handle = _real_creator_account(influencer_account(sample.influencer))
+    snapshot_handle = _real_creator_account(sample.creator_username)
+    return bool(current_handle) and snapshot_handle == current_handle
 
 
 def _eligible_candidate(candidates, order, *, product_required):
