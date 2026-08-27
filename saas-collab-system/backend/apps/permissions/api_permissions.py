@@ -138,6 +138,10 @@ class IsIntegrationRunner(IntegrationActionPermission):
     permission_code = "integrations.run"
 
 
+class IsIntegrationLiveReadonlyRunner(IntegrationActionPermission):
+    permission_code = "integrations.run_live_readonly"
+
+
 class IsIntegrationReadOrManage(IntegrationActionPermission):
     def has_permission(self, request, view):
         permission_code = "integrations.view" if request.method in SAFE_METHODS else "integrations.manage"

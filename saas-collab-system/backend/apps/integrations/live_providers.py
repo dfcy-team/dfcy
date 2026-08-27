@@ -1,4 +1,4 @@
-"""Fail-closed Shopee and TikTok Shop live OAuth providers."""
+"""Fail-closed Lazada, Shopee and TikTok Shop live OAuth providers."""
 
 import hashlib
 import hmac
@@ -51,6 +51,15 @@ def _tiktok_sign(path, params, secret, body=""):
     parameter_text = "".join(f"{key}{filtered[key]}" for key in sorted(filtered))
     message = f"{secret}{path}{parameter_text}{body}{secret}"
     return _hmac_sha256(secret, message)
+
+
+def _lazada_sign(path, params, secret):
+    parameter_text = "".join(f"{key}{params[key]}" for key in sorted(params) if key != "sign")
+    return hmac.new(
+        secret.encode("utf-8"),
+        f"{path}{parameter_text}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest().upper()
 
 
 class LiveOAuthProviderBase:
@@ -278,6 +287,159 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
         return [self._fetch_shop_with_token(authorization.platform_store_id, authorization.token_id)]
 
 
+class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
+    platform = "lazada"
+
+    def _host(self):
+        return _required(self.config.get("api_host"), "lazada.api_host").rstrip("/")
+
+    def _signed_query(self, path, extra=None):
+        params = {
+            "app_key": self._app_id(),
+            "sign_method": "sha256",
+            "timestamp": int(time.time() * 1000),
+        }
+        params.update(extra or {})
+        params["sign"] = _lazada_sign(path, params, self._app_secret())
+        return params
+
+    @staticmethod
+    def _response_error(payload):
+        code = payload.get("code")
+        return code not in {None, 0, "0"} or bool(payload.get("error"))
+
+    def build_authorization_url(self, context):
+        self.validate_start_configuration(context.get("redirect_uri"))
+        auth_url = _required(self.config.get("auth_url"), "lazada.auth_url")
+        query = {
+            "response_type": "code",
+            "force_auth": "true",
+            "redirect_uri": self.config["redirect_uri"],
+            "client_id": self._app_id(),
+            "state": context["state"],
+        }
+        return {"url": f"{auth_url}?{urllib.parse.urlencode(query)}", "provider_request_id": None}
+
+    def validate_callback(self, params, context):
+        self._preflight("callback")
+        self._reject_unknown(params, {"code", "state", "error", "error_description"})
+        code = str(params.get("code") or "").strip()
+        if params.get("error") or not code:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Lazada authorization was rejected.")
+        return {
+            "code": code,
+            "region": str(context.get("region") or "").upper(),
+            "scopes": list(context.get("scopes") or []),
+        }
+
+    def _token_request(self, path, extra):
+        payload = self._request_json(
+            "POST",
+            f"{self._host()}{path}",
+            query=self._signed_query(path, extra),
+        )
+        if self._response_error(payload):
+            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Lazada rejected the token request.")
+        return payload
+
+    @staticmethod
+    def _store_record(payload, expected_region):
+        countries = payload.get("country_user_info") or []
+        if not isinstance(countries, list):
+            countries = []
+        expected_region = str(expected_region or "").upper()
+        matched = next(
+            (item for item in countries if str(item.get("country") or "").upper() == expected_region),
+            None,
+        )
+        if not matched:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Lazada authorization did not include the selected country store.")
+        store_id = str(matched.get("seller_id") or matched.get("user_id") or "").strip()
+        if not store_id:
+            raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Lazada seller identity is incomplete.")
+        return {
+            "platform_store_id": store_id,
+            "shop_cipher": "",
+            "region": expected_region,
+            "merchant_subject_id": str(matched.get("user_id") or store_id),
+        }
+
+    def exchange_authorization_code(self, payload):
+        self._preflight("token exchange")
+        path = _required(self.config.get("token_path"), "lazada.token_path")
+        data = self._token_request(path, {"code": payload["code"]})
+        access_token = data.get("access_token")
+        refresh_token = data.get("refresh_token")
+        if not access_token or not refresh_token:
+            raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Lazada token response is incomplete.")
+        store = self._store_record(data, payload.get("region"))
+        expires_at = _expiry(data.get("expires_in"))
+        stored = self.custody.store_secrets(
+            credential_type="lazada",
+            reference_version=1,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at.isoformat(),
+            metadata={"platform": "lazada", "region": store["region"], "store_id": store["platform_store_id"]},
+        )
+        return {
+            **stored,
+            "reference_kind": "custody",
+            "credential_reference_version": 1,
+            "expires_at": expires_at,
+            "platform_subject": store["merchant_subject_id"],
+            "authorized_scopes": list(payload.get("scopes") or []),
+            "platform_store_records": [store],
+            "provider_request_id_mask": ProviderRequestId.mask(data.get("request_id")),
+            "new_reference_revoker": self.custody.revoke,
+            "previous_reference_revoker": self.custody.revoke,
+        }
+
+    def refresh_authorization(self, authorization):
+        self._preflight("refresh")
+        path = _required(self.config.get("refresh_path"), "lazada.refresh_path")
+        data = self._token_request(
+            path,
+            {"refresh_token": self.custody.retrieve_refresh_token(authorization.token_id)},
+        )
+        if not data.get("access_token") or not data.get("refresh_token"):
+            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Lazada token refresh failed.")
+        version = authorization.credential_reference_version + 1
+        expires_at = _expiry(data.get("expires_in"))
+        stored = self.custody.store_secrets(
+            credential_type="lazada",
+            reference_version=version,
+            access_token=data["access_token"],
+            refresh_token=data["refresh_token"],
+            expires_at=expires_at.isoformat(),
+            metadata={"platform": "lazada", "region": authorization.region, "store_id": authorization.platform_store_id},
+        )
+        return {
+            **stored,
+            "reference_kind": "custody",
+            "reference_version": version,
+            "expires_at": expires_at,
+            "previous_reference_revoker": self.custody.revoke,
+            "new_reference_revoker": self.custody.revoke,
+        }
+
+    def revoke_authorization(self, authorization):
+        self._preflight("revoke")
+        result = self.custody.revoke(authorization.credential_id, authorization.token_id)
+        if result.get("status") not in {"revoked", "not_required"}:
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Custody revoke failed.")
+        return {"status": "revoked", "platform_revocation": "seller_managed"}
+
+    def fetch_authorized_stores(self, authorization):
+        self._preflight("authorized-store verification")
+        return [{
+            "platform_store_id": authorization.platform_store_id,
+            "shop_cipher": "",
+            "region": authorization.region,
+            "merchant_subject_id": authorization.merchant_subject_id,
+        }]
+
+
 class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
     platform = "tiktok"
 
@@ -471,7 +633,7 @@ def _integration_config_overrides(platform, integration_config):
     if str(getattr(integration_config, "platform", "")).lower() != platform:
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Integration configuration platform mismatch.")
     values = dict(getattr(integration_config, "platform_config", {}) or {})
-    expected_contract = "v2" if platform == "shopee" else "202407"
+    expected_contract = {"lazada": "open-platform-v1", "shopee": "v2", "tiktok": "202407"}.get(platform, "")
     status = str(getattr(integration_config, "status", ""))
     credential_status = str(getattr(integration_config, "credential_status", ""))
     ready = (
@@ -492,15 +654,28 @@ def _integration_config_overrides(platform, integration_config):
     if platform == "shopee":
         common["app_id"] = str(values.get("partner_id") or "")
     else:
-        common.update({
-            "app_id": str(values.get("app_key") or ""),
-            "service_id": str(values.get("service_id") or ""),
-        })
+        common["app_id"] = str(values.get("app_key") or "")
+        if platform == "tiktok":
+            common["service_id"] = str(values.get("service_id") or "")
     return common
 
 
 def build_live_provider(platform, integration_config=None, secret_resolver=None, **overrides):
     platform = str(platform or "").lower()
+    if platform == "lazada":
+        config = {
+            "contract_approved": getattr(settings, "LIVE_LAZADA_CONTRACT_APPROVED", False),
+            "app_id": getattr(settings, "LIVE_LAZADA_APP_KEY", ""),
+            "app_secret_reference": getattr(settings, "LIVE_LAZADA_APP_SECRET_REFERENCE", ""),
+            "redirect_uri": getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
+            "auth_url": getattr(settings, "LIVE_LAZADA_AUTH_URL", "https://auth.lazada.com/oauth/authorize"),
+            "api_host": getattr(settings, "LIVE_LAZADA_API_HOST", "https://api.lazada.com"),
+            "token_path": getattr(settings, "LIVE_LAZADA_TOKEN_PATH", "/rest/auth/token/create"),
+            "refresh_path": getattr(settings, "LIVE_LAZADA_REFRESH_PATH", "/rest/auth/token/refresh"),
+        }
+        config.update(overrides)
+        config.update(_integration_config_overrides(platform, integration_config))
+        return LazadaLiveOAuthProvider(config, secret_resolver=secret_resolver)
     if platform == "shopee":
         config = {
             "contract_approved": getattr(settings, "LIVE_SHOPEE_CONTRACT_APPROVED", False),

@@ -10,8 +10,10 @@ from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .adapters import MockPlatformAdapter, get_adapter_for_config
-from .models import SyncCursor, SyncJob, SyncRun, WebhookEvent
+from .adapters import get_adapter_for_config
+from .models import SyncCheckpoint, SyncCursor, SyncJob, SyncRun, WebhookEvent
+from .raw_services import archive_raw_page, archive_webhook_payload
+from .scheduler import calculate_next_run_at
 from .security import sanitize_payload, sanitize_text
 
 
@@ -82,9 +84,10 @@ def _renew_lease(sync_job, run, not_before=None):
 
 def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
     retry_wait = retry_wait or default_retry_wait
-    adapter = adapter or get_adapter_for_config(sync_job.integration_config)
-    if type(adapter) is not MockPlatformAdapter:
-        raise ValidationError("Only mock synchronization can be executed by this endpoint in phase 2.")
+    adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
+    if getattr(adapter, "execution_mode", "unsupported") not in {"mock", "live_readonly"}:
+        raise ValidationError("The selected synchronization adapter is not executable.")
+    adapter.validate_configuration(sync_job)
 
     now = timezone.now()
     with transaction.atomic():
@@ -99,11 +102,13 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         if _has_expired_lease(locked_job, now):
             _recover_expired_lease(locked_job, now)
 
+        checkpoint = SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
+        checkpoint_cursor = (checkpoint.cursor_json or {}).get("default", "") if checkpoint else ""
         cursor, _created = SyncCursor.objects.get_or_create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
             cursor_key="default",
-            defaults={"cursor_value": ""},
+            defaults={"cursor_value": str(checkpoint_cursor or "")},
         )
         idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
         existing = SyncRun.objects.filter(
@@ -123,7 +128,6 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         ).update(
             status=SyncJob.Status.RUNNING,
             last_run_at=now,
-            next_run_at=None,
             lock_token=run_id,
             lock_acquired_at=now,
             lock_expires_at=lease_expires_at,
@@ -144,13 +148,16 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         locked_job.refresh_from_db()
 
     sync_job = locked_job
+    adapter.bind_run(run)
 
     last_retry_error = ""
     while True:
         try:
             _renew_lease(sync_job, run)
+            previous_cursor = cursor.cursor_value
+            page = adapter.fetch_page(sync_job, previous_cursor)
+            archive_raw_page(sync_job, run, adapter, previous_cursor, page)
             with transaction.atomic():
-                page = adapter.fetch_page(sync_job, cursor.cursor_value)
                 records = page.get("records", [])
                 for raw_record in records:
                     run.fetched_count += 1
@@ -168,20 +175,54 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
 
                 cursor.cursor_value = adapter.get_next_cursor(page)
                 cursor.save(update_fields=["cursor_value", "updated_at"])
+                if adapter.should_continue(page, previous_cursor):
+                    run.save(
+                        update_fields=[
+                            "fetched_count",
+                            "created_count",
+                            "updated_count",
+                            "skipped_count",
+                            "failed_count",
+                        ]
+                    )
+                    continue
                 run.status = SyncRun.Status.SUCCESS
                 run.finished_at = timezone.now()
                 run.error_code = ""
                 run.masked_error_message = ""
+                checkpoint, _checkpoint_created = SyncCheckpoint.objects.select_for_update().get_or_create(
+                    tenant=sync_job.tenant,
+                    sync_job=sync_job,
+                    defaults={"version": 0},
+                )
+                checkpoint.cursor_json = {"default": cursor.cursor_value}
+                checkpoint.watermark_utc = run.finished_at
+                checkpoint.last_success_run = run
+                checkpoint.version += 1
+                checkpoint.save(
+                    update_fields=[
+                        "cursor_json",
+                        "watermark_utc",
+                        "last_success_run",
+                        "version",
+                        "updated_at",
+                    ]
+                )
+                raw_evidence = list(
+                    run.raw_envelopes.order_by("sequence").values("raw_ref", "payload_hash")
+                )
                 run.masked_log = sanitize_payload(
                     {
                         "fetched": run.fetched_count,
-                        "sample": records[:1],
+                        "last_page_record_keys": sorted(records[0]) if records and isinstance(records[0], dict) else [],
                         "retry_count": run.retry_count,
                         "last_retry_error": last_retry_error,
+                        "checkpoint": {"version": checkpoint.version, "advanced": True},
+                        "raw_evidence": raw_evidence,
                     }
                 )
                 sync_job.status = SyncJob.Status.IDLE
-                sync_job.next_run_at = None
+                sync_job.next_run_at = calculate_next_run_at(sync_job, run.finished_at)
                 sync_job.lock_token = ""
                 sync_job.lock_expires_at = None
                 sync_job.lock_heartbeat_at = timezone.now()
@@ -248,7 +289,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                     }
                 )
                 sync_job.status = SyncJob.Status.FAILED
-                sync_job.next_run_at = None
+                sync_job.next_run_at = calculate_next_run_at(sync_job, run.finished_at)
                 sync_job.lock_token = ""
                 sync_job.lock_expires_at = None
                 sync_job.lock_heartbeat_at = timezone.now()
@@ -286,17 +327,20 @@ def record_retry_failure(sync_job, error_message, retry_count):
 def record_webhook_event(tenant, platform, event_id, event_type, payload, signature_status):
     payload_text = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"))
     payload_hash = hashlib.sha256(payload_text.encode()).hexdigest()
-    event, created = WebhookEvent.objects.get_or_create(
-        tenant=tenant,
-        platform=platform,
-        event_id=event_id,
-        defaults={
-            "event_type": event_type,
-            "signature_status": signature_status,
-            "payload_hash": payload_hash,
-        },
-    )
-    if not created:
-        event.processing_status = WebhookEvent.ProcessingStatus.DUPLICATE
-        event.save(update_fields=["processing_status"])
+    with transaction.atomic():
+        event, created = WebhookEvent.objects.get_or_create(
+            tenant=tenant,
+            platform=platform,
+            event_id=event_id,
+            defaults={
+                "event_type": event_type,
+                "signature_status": signature_status,
+                "payload_hash": payload_hash,
+            },
+        )
+        if created:
+            archive_webhook_payload(event, payload or {})
+        else:
+            event.processing_status = WebhookEvent.ProcessingStatus.DUPLICATE
+            event.save(update_fields=["processing_status"])
     return event, created

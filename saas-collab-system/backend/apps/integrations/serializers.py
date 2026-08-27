@@ -17,6 +17,7 @@ from .platform_schema_service import get_platform_schema, validate_platform_conf
 
 
 PILOT_LOOPBACK_CALLBACKS = {
+    PlatformChoices.LAZADA: "/api/internal/integrations/store-authorizations/oauth/callback/lazada/",
     PlatformChoices.SHOPEE: "/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
     PlatformChoices.TIKTOK: "/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
 }
@@ -124,7 +125,8 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"platform": "Platform cannot be changed after creation."})
         if self.instance and "environment" in attrs and attrs["environment"] != self.instance.environment:
             raise serializers.ValidationError({"environment": "Environment changes require a new configuration."})
-        if platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+        marketplace_platforms = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+        if platform in marketplace_platforms:
             schema = get_platform_schema(platform, environment=environment)
             allowed_regions = {item["value"] for item in schema["regions"]}
             contract_version = attrs.get("contract_version", getattr(self.instance, "contract_version", ""))
@@ -144,7 +146,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             platform_config = attrs.get("platform_config", getattr(self.instance, "platform_config", {}))
             attrs["platform_config"] = validate_platform_config(platform, platform_config)
         callback_url = attrs.get("callback_url", getattr(self.instance, "callback_url", ""))
-        if platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK} and not callback_url:
+        if platform in marketplace_platforms and not callback_url:
             raise serializers.ValidationError({"callback_url": "Platform callback URL is required."})
         if callback_url and not _is_approved_callback_transport(callback_url, environment, platform):
             raise serializers.ValidationError(
@@ -157,6 +159,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             )
         redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
         expected_callback = {
+            PlatformChoices.LAZADA: getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
             PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
             PlatformChoices.TIKTOK: getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
         }.get(platform, "")
@@ -165,7 +168,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         if callback_url and redirect_allowlist and callback_url not in redirect_allowlist:
             raise serializers.ValidationError({"callback_url": "Callback URL is not in the approved allowlist."})
         if (
-            platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+            platform in marketplace_platforms
             and environment in {
                 PlatformIntegrationConfig.Environment.PILOT,
                 PlatformIntegrationConfig.Environment.PRODUCTION,
@@ -206,7 +209,19 @@ class RotateCredentialsSerializer(serializers.Serializer):
 
 
 class CredentialPayloadSerializer(serializers.Serializer):
+    partner_id = serializers.CharField(max_length=32, required=False, write_only=True)
+    partner_key = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
+    ads_app_id = serializers.CharField(max_length=255, required=False, write_only=True)
+    ads_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
+    redirect_uri = serializers.URLField(max_length=500, required=False, write_only=True)
+    app_key = serializers.CharField(max_length=255, required=False, write_only=True)
+    service_id = serializers.CharField(max_length=255, required=False, write_only=True)
+    api_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     app_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
+    api_base_url = serializers.URLField(max_length=500, required=False, write_only=True)
+    domain = serializers.CharField(max_length=255, required=False, write_only=True)
+    client_id = serializers.CharField(max_length=255, required=False, write_only=True)
+    client_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     signing_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     webhook_secret = serializers.CharField(max_length=4096, required=False, write_only=True, trim_whitespace=False)
     access_token = serializers.CharField(max_length=8192, required=False, write_only=True, trim_whitespace=False)
@@ -279,7 +294,9 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
 class MarketplaceOAuthStartSerializer(serializers.Serializer):
     """OAuth start request; raw credential fields are rejected by the view."""
 
-    platform = serializers.ChoiceField(choices=[PlatformChoices.SHOPEE, PlatformChoices.TIKTOK])
+    platform = serializers.ChoiceField(
+        choices=[PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK]
+    )
     integration_config_id = serializers.IntegerField(min_value=1)
     store_id = serializers.IntegerField(min_value=1)
     region = serializers.CharField(max_length=8)
@@ -461,6 +478,10 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
 class SyncJobSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     integration_config_id = serializers.IntegerField()
+    platform = serializers.CharField(source="integration_config.platform", read_only=True)
+    config_alias = serializers.CharField(source="integration_config.account_alias", read_only=True)
+    environment = serializers.CharField(source="integration_config.environment", read_only=True)
+    regions = serializers.JSONField(source="integration_config.regions", read_only=True)
 
     class Meta:
         model = SyncJob
@@ -468,6 +489,10 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "integration_config_id",
+            "platform",
+            "config_alias",
+            "environment",
+            "regions",
             "resource_type",
             "schedule_type",
             "status",
@@ -499,20 +524,47 @@ class SyncJobSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Integration config does not belong to current tenant.")
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        request = self.context["request"]
+        config_id = attrs.get("integration_config_id") or getattr(self.instance, "integration_config_id", None)
+        resource_type = attrs.get("resource_type") or getattr(self.instance, "resource_type", None)
+        if not config_id or not resource_type:
+            return attrs
+        config = PlatformIntegrationConfig.objects.get(id=config_id, tenant=request.user.tenant)
+        if config.environment not in {
+            PlatformIntegrationConfig.Environment.PILOT,
+            PlatformIntegrationConfig.Environment.PRODUCTION,
+        }:
+            return attrs
+        supported = {
+            PlatformChoices.SHOPEE: {SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN},
+            PlatformChoices.TIKTOK: {SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN},
+            PlatformChoices.JIFENG_WMS: {SyncJob.ResourceType.INVENTORY_SNAPSHOT},
+        }
+        if resource_type not in supported.get(config.platform, set()):
+            raise serializers.ValidationError("Platform and readonly resource type are incompatible.")
+        if config.sync_write_enabled:
+            raise serializers.ValidationError("Readonly production jobs reject write-enabled integration configs.")
+        return attrs
+
     def validate_max_retry_count(self, value):
         if value > 5:
-            raise serializers.ValidationError("max_retry_count cannot exceed 5 in phase 2.")
+            raise serializers.ValidationError("max_retry_count cannot exceed 5.")
         return value
 
     def validate_backoff_base_seconds(self, value):
         if not 1 <= value <= 5:
-            raise serializers.ValidationError("backoff_base_seconds must be between 1 and 5 in phase 2.")
+            raise serializers.ValidationError("backoff_base_seconds must be between 1 and 5.")
         return value
 
 
 class SyncRunSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     sync_job_id = serializers.IntegerField(read_only=True)
+    platform = serializers.CharField(source="sync_job.integration_config.platform", read_only=True)
+    config_alias = serializers.CharField(source="sync_job.integration_config.account_alias", read_only=True)
+    resource_type = serializers.CharField(source="sync_job.resource_type", read_only=True)
 
     class Meta:
         model = SyncRun
@@ -520,6 +572,9 @@ class SyncRunSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "sync_job_id",
+            "platform",
+            "config_alias",
+            "resource_type",
             "run_id",
             "idempotency_key",
             "status",

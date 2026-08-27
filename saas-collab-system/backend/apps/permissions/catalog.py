@@ -466,6 +466,13 @@ PERMISSION_DEFINITIONS = (
         "action": "run",
         "description": "Run phase 2 mock integration synchronization jobs.",
     },
+    {
+        "code": "integrations.run_live_readonly",
+        "name": "Run live readonly synchronization",
+        "module": "integrations",
+        "action": "run_live_readonly",
+        "description": "Queue an approved production readonly synchronization job.",
+    },
     *(
         {
             "code": f"integrations.{suffix}",
@@ -844,6 +851,7 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "integrations.manage": "管理集成配置",
     "integrations.rotate": "轮换集成凭据",
     "integrations.run": "运行集成同步",
+    "integrations.run_live_readonly": "运行生产只读同步",
     "integrations.store.view": "查看平台店铺授权",
     "integrations.store.authorize": "授权平台店铺",
     "integrations.store.revoke": "撤销平台店铺授权",

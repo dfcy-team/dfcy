@@ -1,7 +1,7 @@
 """Marketplace capability gating for real-platform connection (task A-REAL-PLATFORM-CONNECTION).
 
 This module is the single source of truth for whether the backend is allowed to
-talk to *real* Shopee / TikTok Shop platforms.
+talk to *real* Lazada / Shopee / TikTok Shop platforms.
 
 Design rules (from the task book):
 - Default capability is ``pending/mock``. The system must never perform real
@@ -36,11 +36,27 @@ def live_platform_security_approved():
 
 
 def approved_custody_configured():
-    """Return whether the explicitly selected custody backend has its required locator."""
-    backend = getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse")
+    """Return whether the selected custody backend is safe for its environment.
+
+    The filesystem adapter is intentionally restricted to the local
+    development/test process.  It must never satisfy the gates for a real
+    platform connection.  Live mode requires an independently operated HTTP
+    custody service and a non-empty service authentication token.
+    """
+    backend = str(getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") or "").strip().lower()
     if backend == "http":
-        return bool(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", ""))
+        service_url = str(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "") or "").strip()
+        service_token = str(
+            getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
+            or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
+            or ""
+        ).strip()
+        return bool(service_url) and bool(service_token)
     if backend == "file":
+        # File custody can support explicit local synthetic/test operations,
+        # but it is never an approved live credential boundary.
+        if not bool(getattr(settings, "DEBUG", False)):
+            return False
         path = str(getattr(settings, "CREDENTIAL_CUSTODY_PATH", "") or "").strip()
         return bool(path) and Path(path).is_absolute()
     return False
@@ -89,7 +105,10 @@ def require_live_mode(context="real platform connection"):
             f"Refusing {context}.",
         )
     if not approved_custody_configured():
-        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Approved credential custody is not configured.")
+        raise OAuthFlowError(
+            OAUTH_PROVIDER_UNAVAILABLE,
+            "Live mode requires an authenticated independent HTTP credential custody service.",
+        )
     if not getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []):
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Live outbound host allowlist is empty.")
     if getattr(settings, "DEBUG", False):

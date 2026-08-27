@@ -253,7 +253,17 @@ def _record_failed_mutation(operation, config, actor, action, error_code, *, rec
         pass
 
 
-def rotate_config_secrets(config, *, credentials, version, reason, actor, idempotency_key):
+def rotate_config_secrets(
+    config,
+    *,
+    credentials,
+    version,
+    reason,
+    actor,
+    idempotency_key,
+    platform_config=None,
+    callback_url=None,
+):
     if actor.tenant_id != config.tenant_id:
         raise ValidationError("Credential rotation actor must belong to the config tenant.")
     payload = {"version": version, "reason": reason, "credentials": credentials}
@@ -276,7 +286,13 @@ def rotate_config_secrets(config, *, credentials, version, reason, actor, idempo
             )
             if locked.config_version != version:
                 raise StateConflict("The configuration version changed; reload before replacing credentials.")
-            had_previous_reference = bool(locked.credential_id or locked.token_id)
+            previous_reference = str(locked.credential_id or locked.token_id or "")
+            had_previous_reference = bool(previous_reference)
+            if had_previous_reference:
+                try:
+                    custody.retrieve_secret(previous_reference)
+                except CustodyError:
+                    had_previous_reference = False
             next_reference_version = locked.credential_reference_version + 1
             custody_payload = {
                 "credential_type": locked.platform,
@@ -291,7 +307,7 @@ def rotate_config_secrets(config, *, credentials, version, reason, actor, idempo
                 **credentials,
             }
             try:
-                if locked.credential_id or locked.token_id:
+                if had_previous_reference:
                     stored = custody.rotate_secrets(
                         previous_credential_id=locked.credential_id,
                         previous_token_id=locked.token_id,
@@ -319,6 +335,11 @@ def rotate_config_secrets(config, *, credentials, version, reason, actor, idempo
                 locked.status = PlatformIntegrationConfig.Status.CONFIGURED
             locked.credential_expires_at = _safe_expiry(stored.get("expires_at"))
             locked.last_rotated_at = timezone.now()
+            if platform_config is not None:
+                locked.platform_config = platform_config
+            if callback_url is not None:
+                locked.callback_url = callback_url
+            locked.sync_read_enabled = True
             locked.config_version += 1
             with authorization_service_write():
                 locked.save(
@@ -330,6 +351,9 @@ def rotate_config_secrets(config, *, credentials, version, reason, actor, idempo
                         "status",
                         "credential_expires_at",
                         "last_rotated_at",
+                        "platform_config",
+                        "callback_url",
+                        "sync_read_enabled",
                         "config_version",
                         "updated_at",
                     ]
