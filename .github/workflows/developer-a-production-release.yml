@@ -292,6 +292,9 @@ jobs:
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
           [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          & icacls.exe $key /inheritance:r /grant:r "${identity}:F" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to secure the temporary SSH key ACL.' }
           try {
             & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" check
             if ($LASTEXITCODE -ne 0) { throw 'VM control-plane check failed.' }
@@ -327,6 +330,9 @@ jobs:
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
           [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          & icacls.exe $key /inheritance:r /grant:r "${identity}:F" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to secure the temporary SSH key ACL.' }
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:GITHUB_ACTOR --registry-token-stdin"
           try {
             $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
@@ -358,6 +364,9 @@ jobs:
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
           [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+          & icacls.exe $key /inheritance:r /grant:r "${identity}:F" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to secure the temporary SSH key ACL.' }
           $remote = "rollback --emergency --reason-b64=$reasonB64 --actor=$env:GITHUB_ACTOR --registry-user=$env:GITHUB_ACTOR --registry-token-stdin"
           try {
             $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
