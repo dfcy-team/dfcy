@@ -72,6 +72,45 @@ export const disableIntegrationConfig = (id) =>
     'integrations.configs.disable'
   );
 
+export const fetchSubjectApiAccess = (subjectType, subjectId) =>
+  requestWithMockFallback(
+    {
+      method: 'get',
+      url: '/api/internal/integrations/subject-api-access/',
+      params: { subject_type: subjectType, subject_id: subjectId }
+    },
+    () => ({ success: true, code: 'OK', message: 'mock', data: null }),
+    'integrations.subject_api_access'
+  );
+
+export const startStoreAuthorization = (payload) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/start/', data: payload },
+    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟模式不发起平台授权', data: null }),
+    'integrations.store_authorizations.oauth_start'
+  );
+
+export const completeSyntheticStoreAuthorization = (platform, params) =>
+  requestWithMockFallback(
+    { method: 'get', url: `/api/internal/integrations/store-authorizations/oauth/callback/${platform}/`, params },
+    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟授权回调不可用', data: null }),
+    'integrations.store_authorizations.oauth_callback'
+  );
+
+export const revokeStoreAuthorization = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/store-authorizations/${id}/revoke/`, data: {} },
+    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟模式不修改平台授权', data: null }),
+    'integrations.store_authorizations.revoke'
+  );
+
+export const deleteIntegrationConfig = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/delete/`, data: {} },
+    () => ({ success: true, code: 'OK', message: 'deleted', data: { id, deleted: true } }),
+    'integrations.configs.delete'
+  );
+
 export const verifyIntegrationConfig = (id) =>
   requestWithMockFallback(
     { method: 'post', url: `/api/internal/integrations/configs/${id}/verify/`, data: {} },
@@ -115,8 +154,10 @@ const emptyWorkspace = (mode) => () => ({
     mode,
     source_status: 'mock',
     summary: {},
-    scheduler: { configured: false },
+    scheduler: { configured: false, heartbeat_state: 'disabled', execution_policy: 'simulation_only' },
+    scheduler_history: [],
     options: {},
+    reference_options: { platforms: [], countries: [], environments: [] },
     regions: [],
     previews: {},
     pagination: { page: 1, page_size: 50, total: 0, page_count: 1 },

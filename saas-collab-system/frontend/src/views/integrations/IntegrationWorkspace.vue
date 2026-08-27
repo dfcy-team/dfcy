@@ -9,7 +9,7 @@
         <el-tag type="success" effect="plain">SaaS MySQL 查询正常</el-tag>
         <template v-if="mode === 'configs'">
           <el-button @click="auditVisible = !auditVisible">{{ auditVisible ? '收起变更审计' : '查看变更审计' }}</el-button>
-          <el-button class="handoff-action" @click="configDialog = true">新建接入配置</el-button>
+          <el-button class="handoff-action" @click="openCreateConfig">新建接入配置</el-button>
         </template>
         <template v-else-if="mode === 'sync-jobs'">
           <el-button @click="dueDialog = true">处理到期任务</el-button>
@@ -42,18 +42,40 @@
 
     <section v-if="mode !== 'configs'" class="health-card">
       <header>
-        <div><h2>同步运行健康</h2><p>聚合到期队列、失败退避、并发锁和系统调度心跳。</p></div>
-        <el-tag type="success">运行健康</el-tag>
+        <div><h2>同步运行健康</h2><p>聚合到期队列、失败退避、并发锁和系统调度心跳，不读取或展示凭据明文。</p></div>
+        <el-tag :type="healthAttention ? 'danger' : 'success'">{{ healthStatusText }}</el-tag>
       </header>
       <dl>
         <div><dt>到期模拟任务</dt><dd>{{ summary.due_job_count || 0 }}</dd></div>
-        <div><dt>生产待确认</dt><dd>0</dd></div>
+        <div><dt>生产待确认</dt><dd>{{ summary.live_confirmation_job_count || 0 }}</dd></div>
         <div><dt>退避等待</dt><dd>{{ summary.retry_waiting_job_count || 0 }}</dd></div>
         <div><dt>重试已暂停</dt><dd>{{ summary.retry_exhausted_job_count || 0 }}</dd></div>
         <div><dt>超时运行锁</dt><dd>{{ summary.stale_running_job_count || 0 }}</dd></div>
         <div><dt>近 24 小时失败</dt><dd>{{ summary.failed_run_count || 0 }}</dd></div>
       </dl>
-      <footer><strong>系统调度：未启用 · 仍可在同步任务页手动处理</strong><span>查看调度记录　查看任务队列　查看失败运行　查看经营预警</span></footer>
+      <footer>
+        <strong>系统调度：{{ schedulerText }}</strong>
+        <nav aria-label="同步异常快捷入口">
+          <button type="button" :aria-expanded="schedulerHistoryOpen" aria-controls="scheduler-audit-history" @click="toggleSchedulerHistory">{{ schedulerHistoryOpen ? '收起调度记录' : '查看调度记录' }}</button>
+          <router-link to="/integrations/sync-jobs">查看任务队列</router-link>
+          <router-link :to="{ path: '/integrations/sync-runs', query: { status: 'failed' } }">查看失败运行</router-link>
+          <router-link to="/alerts/business">查看经营预警</router-link>
+        </nav>
+      </footer>
+      <section v-if="schedulerHistoryOpen" id="scheduler-audit-history" class="scheduler-history" aria-label="最近调度记录">
+        <header><div><strong>最近调度记录</strong><p>仅展示最近 20 次已认证调用的脱敏运行摘要。</p></div><span>{{ number(schedulerHistory.length) }} 条</span></header>
+        <el-table v-if="schedulerHistory.length" :data="schedulerHistory" size="small">
+          <el-table-column label="调用时间" min-width="165"><template #default="{ row }">{{ date(row.invoked_at) }}</template></el-table-column>
+          <el-table-column label="结果" min-width="90"><template #default="{ row }"><status-tag :value="row.result" /></template></el-table-column>
+          <el-table-column label="到期" prop="due_count" min-width="70" />
+          <el-table-column label="已处理" prop="processed_count" min-width="75" />
+          <el-table-column label="跳过" prop="skipped_count" min-width="70" />
+          <el-table-column label="失败" prop="failed_count" min-width="70" />
+          <el-table-column label="生产待确认" prop="live_confirmation_count" min-width="100" />
+          <el-table-column label="耗时" min-width="100"><template #default="{ row }">{{ duration(row.duration_ms) }}</template></el-table-column>
+        </el-table>
+        <p v-else class="scheduler-history-empty">暂无调度调用记录。配置调度密钥并由系统计划任务成功调用后，这里会显示执行摘要。</p>
+      </section>
     </section>
 
     <el-alert :title="contract.risk" type="warning" :closable="false" show-icon />
@@ -119,6 +141,7 @@
               <el-button link type="primary" @click="checkConsistency(row)">本地一致性检查</el-button>
               <el-button link type="primary" @click="checkReadonly(row)">平台只读检查</el-button>
               <el-button v-if="row.status !== 'disabled'" link type="danger" @click="disableConfig(row)">禁用</el-button>
+              <el-button v-else link type="danger" :loading="deletingConfigId === row.id" @click="deleteConfig(row)">删除</el-button>
             </template>
           </el-table-column>
         </template>
@@ -151,7 +174,7 @@
           <el-table-column label="失败" prop="failed_count" min-width="70" />
           <el-table-column label="重试" min-width="80"><template #default="{ row }">{{ row.retry_count ? `第 ${row.retry_count} 次` : '首次' }}</template></el-table-column>
           <el-table-column label="脱敏错误" min-width="170"><template #default="{ row }">{{ row.masked_error_message || '—' }}</template></el-table-column>
-          <el-table-column label="操作" fixed="right" min-width="170"><template #default="{ row }"><el-button link type="primary" @click="openRunDetail(row)">查看详情</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'simulation'" link type="primary" :disabled="row.retry_count >= row.max_retry_count" @click="retryRun(row)">{{ row.retry_count >= row.max_retry_count ? '已达重试上限' : '重试失败任务' }}</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'live_readonly'" link type="primary" @click="go('/integrations/sync-jobs')">返回任务确认重跑</el-button></template></el-table-column>
+          <el-table-column label="操作" fixed="right" min-width="170"><template #default="{ row }"><el-button link type="primary" @click="openRunDetail(row)">查看详情</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'simulation'" link type="primary" :disabled="row.retry_count >= row.max_retry_count" @click="retryRun(row)">{{ row.retry_count >= row.max_retry_count ? '已达重试上限' : '重试失败任务' }}</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'live_readonly'" link type="primary" @click="returnToJob(row)">返回任务确认重跑</el-button></template></el-table-column>
         </template>
       </el-table>
       <footer class="table-footer"><span>第 {{ pageStart }}–{{ pageEnd }} 条，共 {{ number(pagination.total) }} 条</span><el-pagination v-model:current-page="page" background layout="prev, pager, next" :page-size="pagination.page_size || 50" :total="pagination.total || 0" @current-change="load" /></footer>
@@ -161,10 +184,22 @@
       <p class="dialog-note">仅创建开发者配置引用，不在这里绑定店铺或仓库 Token</p>
       <el-form :model="configForm" label-position="top" class="dialog-grid">
         <el-form-item label="配置名称 *"><el-input v-model="configForm.account_alias" placeholder="例如 Shopee 商城生产配置" /></el-form-item>
-        <el-form-item label="平台 *"><el-select v-model="configForm.platform"><el-option label="Shopee" value="shopee" /><el-option label="TikTok Shop" value="tiktok" /><el-option label="极风 WMS" value="jifeng_wms" /></el-select></el-form-item>
-        <el-form-item label="API 类型 *"><el-select v-model="configForm.api_type"><el-option label="商城 API" value="marketplace" /><el-option label="广告 API" value="advertising" /><el-option label="库存 API" value="inventory" /></el-select></el-form-item>
-        <el-form-item label="环境 *"><el-select v-model="configForm.environment"><el-option label="生产" value="production" /><el-option label="试运行" value="pilot" /><el-option label="沙箱" value="sandbox" /></el-select></el-form-item>
-        <el-form-item label="适用站点 *" class="wide"><el-select v-model="configForm.regions" multiple placeholder="请选择适用站点"><el-option v-for="region in data.regions || []" :key="region.country_code" :label="`${region.name} (${region.country_code})`" :value="region.country_code" /></el-select><small>可选择多个站点；选项来自启用的国家信息档案。</small></el-form-item>
+        <el-form-item label="平台 *"><el-select v-model="configForm.platform" placeholder="请选择平台" @change="normalizeConfigApiType"><el-option v-for="platform in referencePlatforms" :key="platform.id || platform.value" :label="platform.label" :value="platform.value" :disabled="!platform.enabled" /></el-select></el-form-item>
+        <el-form-item label="API 类型 *"><el-select v-model="configForm.api_type" placeholder="请选择 API 类型"><el-option v-for="option in configApiTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        <el-form-item label="环境 *"><el-select v-model="configForm.environment" placeholder="请选择环境"><el-option v-for="option in referenceEnvironments" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        <el-form-item label="适用站点 *" class="wide">
+          <el-select v-model="configForm.regions" multiple filterable collapse-tags collapse-tags-tooltip :max-collapse-tags="3" placeholder="请选择适用站点">
+            <el-option v-for="region in configRegionOptions" :key="region.country_code" :label="region.label" :value="region.country_code" class="region-option">
+              <el-checkbox
+                :model-value="configForm.regions.includes(region.country_code)"
+                tabindex="-1"
+                @click.stop
+                @change="setConfigRegion(region.country_code, $event)"
+              >{{ region.label }}</el-checkbox>
+            </el-option>
+          </el-select>
+          <small>已选择 {{ configForm.regions.length }} 个站点；可连续勾选多个国家，选项按平台可用范围联动。</small>
+        </el-form-item>
       </el-form>
       <el-alert title="平台来自平台档案；服务端仍会校验平台能力、回调地址与可用 API 类型。" type="info" :closable="false" show-icon />
       <template #footer><el-button @click="configDialog = false">取消</el-button><el-button class="handoff-action" @click="prepareConfig">创建配置</el-button></template>
@@ -201,7 +236,12 @@
       <p class="dialog-note">{{ activeConfig?.account_alias }} · {{ label('platform', activeConfig?.platform) }}</p>
       <el-alert title="仅填写需要修改的字段；留空将保留数据库现值或服务器环境变量。密钥提交后不会再次显示。" type="info" :closable="false" />
       <el-form :model="credentialForm" label-position="top" class="dialog-grid credential-grid">
-        <template v-if="activeConfig?.platform === 'shopee'">
+        <template v-if="activeConfig?.platform === 'lazada'">
+          <el-form-item label="App Key"><el-input v-model="credentialForm.app_key" maxlength="255" placeholder="留空保留现值" /></el-form-item>
+          <el-form-item label="App Secret"><el-input v-model="credentialForm.app_secret" type="password" autocomplete="new-password" placeholder="输入新的 App Secret" /></el-form-item>
+          <el-form-item label="授权回调地址" class="wide"><el-input v-model="credentialForm.redirect_uri" type="url" maxlength="500" placeholder="https://your-domain.example/api/internal/integrations/store-authorizations/oauth/callback/lazada/" /></el-form-item>
+        </template>
+        <template v-else-if="activeConfig?.platform === 'shopee'">
           <el-form-item label="Partner ID"><el-input v-model="credentialForm.partner_id" inputmode="numeric" maxlength="32" placeholder="留空保留现值" /></el-form-item>
           <el-form-item label="Partner Key"><el-input v-model="credentialForm.partner_key" type="password" autocomplete="new-password" placeholder="输入新的 Partner Key" /></el-form-item>
         </template>
@@ -298,31 +338,37 @@
       <template #footer><el-button @click="jobEditDialog = false">取消</el-button><el-button type="primary" :loading="operating" @click="saveJob">保存策略</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="runDetailDialog" title="同步运行详情" width="min(820px, 92vw)">
-      <el-descriptions v-if="activeRun" :column="2" border>
-        <el-descriptions-item label="执行 ID">{{ activeRun.run_id }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ label('status', activeRun.status) }}</el-descriptions-item>
-        <el-descriptions-item label="运行模式">{{ label('execution_mode', activeRun.execution_mode) }}</el-descriptions-item>
-        <el-descriptions-item label="开始/结束">{{ date(activeRun.started_at) }} / {{ date(activeRun.finished_at) }}</el-descriptions-item>
-        <el-descriptions-item label="抓取/新增">{{ number(activeRun.fetched_count) }} / {{ number(activeRun.created_count) }}</el-descriptions-item>
-        <el-descriptions-item label="更新/跳过/失败">{{ number(activeRun.updated_count) }} / {{ number(activeRun.skipped_count) }} / {{ number(activeRun.failed_count) }}</el-descriptions-item>
-        <el-descriptions-item label="重试链路">第 {{ number(activeRun.retry_count) }} 次<span v-if="activeRun.masked_log?.retry_of"> · 来源 {{ activeRun.masked_log.retry_of }}</span></el-descriptions-item>
-        <el-descriptions-item label="脱敏错误">{{ activeRun.masked_error_message || '—' }}</el-descriptions-item>
-      </el-descriptions>
-      <template #footer><el-button @click="runDetailDialog = false">关闭</el-button><el-button v-if="activeRun?.status === 'failed' && activeRun.execution_mode === 'simulation'" type="primary" :disabled="activeRun.retry_count >= activeRun.max_retry_count" @click="retryRun(activeRun)">创建重试运行</el-button></template>
+    <el-dialog v-model="runDetailDialog" width="min(860px, 94vw)" class="run-detail-dialog">
+      <template #header>
+        <div class="run-detail-heading"><strong>同步运行详情</strong><small>展示脱敏后的调用、处理和写入结果</small></div>
+      </template>
+      <template v-if="activeRun">
+        <dl class="run-detail-grid">
+          <div v-for="item in runDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div>
+        </dl>
+        <ol v-if="runStages.length" class="run-stages" aria-label="同步执行阶段">
+          <li v-for="(stage, index) in runStages" :key="stage.code" :class="`is-${stage.status}`">
+            <span>{{ index + 1 }}</span>
+            <div><strong>{{ stage.label }}</strong><small>{{ runStageSummary(stage) }}</small></div>
+          </li>
+        </ol>
+        <p v-else class="run-stage-empty">该历史运行尚无分阶段记录。</p>
+      </template>
+      <template #footer><el-button @click="runDetailDialog = false">关闭</el-button></template>
     </el-dialog>
   </section>
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   checkIntegrationConsistency,
   checkIntegrationReadonlyConnection,
   checkIntegrationReference,
   createIntegrationConfig,
+  deleteIntegrationConfig,
   deleteSyncJob,
   disableIntegrationConfig,
   fetchIntegrationWorkspace,
@@ -344,10 +390,11 @@ const props = defineProps({
   mockRunPermission: { type: String, default: '' }
 });
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const loading = ref(false);
 const error = ref('');
-const data = ref({ summary: {}, options: {}, previews: {}, regions: [], pagination: {}, results: [] });
+const data = ref({ summary: {}, options: {}, reference_options: {}, previews: {}, regions: [], pagination: {}, results: [] });
 const rows = computed(() => data.value.results || []);
 const summary = computed(() => data.value.summary || {});
 const pagination = computed(() => data.value.pagination || {});
@@ -357,11 +404,13 @@ const configDialog = ref(false);
 const dueDialog = ref(false);
 const reconcileDialog = ref(false);
 const createJobDialog = ref(false);
+const schedulerHistoryOpen = ref(false);
 const credentialDialog = ref(false);
 const jobDetailDialog = ref(false);
 const jobEditDialog = ref(false);
 const runDetailDialog = ref(false);
 const operating = ref(false);
+const deletingConfigId = ref(null);
 const selectedJobs = ref([]);
 const activeConfig = ref(null);
 const activeJob = ref(null);
@@ -369,7 +418,18 @@ const activeRun = ref(null);
 const creatingJobTemplate = ref(null);
 const draft = reactive({ platform: '', status: '', environment: '', api_type: '', resource_type: '', schedule_type: '', subject: '', run_id: '', started_from: '', started_to: '' });
 const query = reactive({ ...draft, job_state: '' });
-const configForm = reactive({ account_alias: '', platform: 'shopee', api_type: 'marketplace', environment: 'production', regions: [] });
+const configForm = reactive({ account_alias: '', platform: '', api_type: '', environment: '', regions: [] });
+const referencePlatforms = computed(() => data.value.reference_options?.platforms || []);
+const referenceEnvironments = computed(() => data.value.reference_options?.environments || []);
+const selectedReferencePlatform = computed(() => referencePlatforms.value.find(option => option.value === configForm.platform));
+const configApiTypeOptions = computed(() => selectedReferencePlatform.value?.api_types || []);
+const configRegionOptions = computed(() => {
+  const regions = data.value.reference_options?.countries || data.value.regions || [];
+  const allowed = selectedReferencePlatform.value?.allowed_regions;
+  if (!Array.isArray(allowed)) return regions;
+  const supported = new Set(allowed.map(value => String(value).toUpperCase()));
+  return regions.filter(region => supported.has(String(region.country_code || '').toUpperCase()));
+});
 const credentialForm = reactive({
   partner_id: '', partner_key: '', ads_app_id: '', ads_secret: '', redirect_uri: '',
   app_key: '', service_id: '', app_secret: '', api_base_url: '', domain: '', client_id: '', client_secret: '',
@@ -420,6 +480,23 @@ const jobTabs = computed(() => [
   { value: 'disabled', label: '已停用' }, { value: 'running', label: '运行中' }, { value: 'due', label: '等待执行', count: summary.value.due_job_count || 0 },
   { value: 'failed', label: '运行失败' }, { value: 'authorization', label: '授权异常' }
 ]);
+const scheduler = computed(() => data.value.scheduler || {});
+const schedulerHistory = computed(() => data.value.scheduler_history || []);
+const healthIssueCount = computed(() => Number(summary.value.retry_exhausted_job_count || 0) + Number(summary.value.stale_running_job_count || 0) + Number(summary.value.failed_run_count || 0));
+const schedulerIssue = computed(() => Boolean(scheduler.value.configured && ['stale', 'failed'].includes(scheduler.value.heartbeat_state)));
+const healthAttention = computed(() => Boolean(healthIssueCount.value || schedulerIssue.value));
+const healthStatusText = computed(() => healthIssueCount.value ? `${number(healthIssueCount.value)} 项需处理` : (schedulerIssue.value ? '调度需检查' : '运行健康'));
+const schedulerText = computed(() => {
+  const value = scheduler.value;
+  const state = value.heartbeat_state || (value.configured ? 'awaiting_first_tick' : 'disabled');
+  if (state === 'disabled') return '未启用 · 仍可在同步任务页手动处理';
+  if (state === 'awaiting_first_tick') return '已配置 · 等待系统计划任务首次调用';
+  if (state === 'failed') return `最近调用失败 · ${date(value.last_invoked_at)}`;
+  if (state === 'stale') return `超过 ${number(value.stale_after_minutes || 120)} 分钟未调用 · 上次 ${date(value.last_invoked_at)}`;
+  return Number(value.last_due_count || 0) === 0
+    ? `运行正常 · ${date(value.last_invoked_at)} · 最近一次无到期任务`
+    : `运行正常 · ${date(value.last_invoked_at)} · 最近处理 ${number(value.last_processed_count)} / ${number(value.last_due_count)} 个任务`;
+});
 const dueItems = computed(() => { const p = data.value.previews?.due || {}; return [{ label: '到期任务', value: p.due_count || 0 }, { label: '可自动处理', value: p.automatic_count || 0 }, { label: '需人工确认', value: p.confirmation_count || 0 }, { label: '单批上限', value: p.batch_limit || 20 }]; });
 const reconcileItems = computed(() => { const p = data.value.previews?.reconcile || {}; return [{ label: '符合条件的主体', value: p.eligible_subject_count || 0 }, { label: '应有任务', value: p.total_required || 0 }, { label: '已存在', value: p.existing_count || 0 }, { label: '待补齐', value: p.missing_count || 0 }]; });
 const pageStart = computed(() => pagination.value.total ? ((pagination.value.page - 1) * pagination.value.page_size) + 1 : 0);
@@ -450,11 +527,52 @@ const jobDetailItems = computed(() => {
     { label: '数据写入表', value: row.data_table || destination.tables }
   ];
 });
+const runLog = computed(() => {
+  const value = activeRun.value?.masked_log;
+  if (value && typeof value === 'object') return value;
+  if (typeof value !== 'string') return {};
+  try { return JSON.parse(value); } catch { return {}; }
+});
+const runDetailItems = computed(() => {
+  const row = activeRun.value;
+  if (!row) return [];
+  const log = runLog.value;
+  const retryCount = Number(row.retry_count || 0);
+  const retryOf = row.retry_of || log.retry_of;
+  const checkpoint = log.checkpoint && typeof log.checkpoint === 'object' ? log.checkpoint : {};
+  const checkpointVersion = row.checkpoint_version ?? checkpoint.version;
+  const checkpointAdvanced = row.checkpoint_advanced ?? checkpoint.advanced;
+  const archiveCount = row.archive_file_count ?? (Array.isArray(log.archive_files) ? log.archive_files.length : 0);
+  return [
+    { label: '执行 ID', value: row.run_id || row.id || '—' },
+    { label: '业务主体', value: row.subject_name || '历史未绑定' },
+    { label: '平台/API', value: `${label('platform', row.platform)} · ${label('api_type', row.api_type)}` },
+    { label: '资源类型', value: label('resource_type', row.resource_type) },
+    { label: '执行状态', value: label('status', row.status) },
+    { label: '开始时间', value: date(row.started_at) },
+    { label: '结束时间', value: date(row.finished_at) },
+    { label: '执行耗时', value: row.duration_seconds === null || row.duration_seconds === undefined ? '—' : `${number(row.duration_seconds)} 秒` },
+    { label: '运行模式', value: label('execution_mode', row.execution_mode) },
+    { label: '外部平台调用', value: booleanValue(row.external_api_called ?? log.external_api_called) ? '是' : '否' },
+    { label: 'Token 刷新/替换', value: booleanValue(row.token_refreshed ?? log.token_refreshed) ? '是（需检查）' : '否' },
+    { label: '重试链路', value: retryCount ? `第 ${number(retryCount)} 次重试${retryOf ? ` · 来源 ${retryOf}` : ''}` : '首次运行' },
+    { label: '同步检查点', value: checkpointVersion ? `版本 ${number(checkpointVersion)} · ${booleanValue(checkpointAdvanced) ? '已推进' : '未推进'}` : '未生成' },
+    { label: '原始响应归档', value: archiveCount ? `${number(archiveCount)} 个服务端 TXT 文件` : '无' },
+    { label: '数据结果', value: `抓取 ${number(row.fetched_count)} / 新增 ${number(row.created_count)} / 更新 ${number(row.updated_count)} / 跳过 ${number(row.skipped_count)} / 失败 ${number(row.failed_count)}` },
+    { label: '错误代码', value: row.error_code || '—' },
+    { label: '脱敏错误', value: row.masked_error_message || log.masked_error_message || '—' }
+  ];
+});
+const runStages = computed(() => {
+  const stages = runLog.value.stages;
+  if (!Array.isArray(stages)) return [];
+  return stages.filter(stage => stage && typeof stage === 'object' && stage.code && stage.label && stage.status);
+});
 const StatusTag = defineComponent({ props: { value: String }, setup(p) { const type = computed(() => ({ success: 'success', healthy: 'success', active: 'success', authorized: 'success', referenced: 'success', verified: 'success', configured: 'success', failed: 'danger', error: 'danger', authorization: 'danger', configuration: 'warning', due: 'warning', pending_review: 'warning', unconfigured: 'info', disabled: 'info', simulation: 'info', live_readonly: 'warning' }[p.value] || 'info')); return () => h('span', { class: ['status-pill', `is-${type.value}`] }, label('status', p.value)); } });
 const SummaryGrid = defineComponent({ props: { items: Array }, setup(p) { return () => h('dl', { class: 'summary-grid' }, (p.items || []).map(item => h('div', [h('dt', item.label), h('dd', number(item.value))]))); } });
 
 const labels = {
-  platform: { shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' }, api_type: { marketplace: '商城 API', advertising: '广告 API', inventory: '库存 API' },
+  platform: { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' }, api_type: { marketplace: '商城 API', advertising: '广告 API', inventory: '库存 API' },
   environment: { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' }, resource_type: { sales_order: '销售订单', refund_return: '退款退货', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单' },
   schedule_type: { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每天定时', weekly: '每周定时', cron: '定时' }, execution_mode: { simulation: '本地模拟', live_readonly: '生产只读' }, schedule_state: { disabled: '已停用', running: '运行中', manual: '手动触发', unscheduled: '尚未排期', due: '等待执行', scheduled: '已排期', retry_waiting: '退避等待', retry_exhausted: '重试暂停' },
   status: { success: '成功', failed: '失败', running: '运行中', active: '已启用', configured: '已配置', verified: '已验证', referenced: '已引用', unconfigured: '未配置', disabled: '已停用', idle: '空闲', pending_review: '待审核', healthy: '运行正常', authorization: '授权异常', configuration: '配置待处理', due: '等待执行', simulation: '本地模拟', live_readonly: '生产只读' }
@@ -462,6 +580,16 @@ const labels = {
 function label(group, value) { return labels[group]?.[value] || value || '—'; }
 function number(value) { return Number(value || 0).toLocaleString('zh-CN'); }
 function date(value) { if (!value) return '—'; return String(value).replace('T', ' ').slice(0, 19); }
+function duration(value) { const milliseconds = Number(value || 0); return milliseconds < 1000 ? `${number(milliseconds)} 毫秒` : `${(milliseconds / 1000).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} 秒`; }
+function booleanValue(value) { return value === true || ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase()); }
+function runStageSummary(stage) {
+  if (stage.status === 'success') {
+    if (stage.code === 'checkpoint' && !booleanValue(stage.advanced)) return '已记录，游标未推进';
+    return stage.finished_at ? `完成于 ${date(stage.finished_at)}` : '已完成';
+  }
+  if (stage.status === 'skipped') return ({ simulation_mode: '本地模拟未调用外部平台', no_external_payload: '无外部响应待处理', previous_stage_failed: '前序阶段失败', run_failed: '运行失败，检查点未推进' })[stage.reason] || '已跳过';
+  return ({ running: '运行中', pending: '等待执行', failed: '失败', cancelled: '已取消' })[stage.status] || label('status', stage.status);
+}
 function scheduleDescription(row) {
   if (row.schedule_type === 'hourly') return '每小时';
   if (row.schedule_type === 'interval') return `每 ${number(row.interval_minutes || 60)} 分钟`;
@@ -474,15 +602,39 @@ async function load() { loading.value = true; error.value = ''; try { const resp
 function applyFilters() { Object.assign(query, draft); page.value = 1; load(); }
 function resetFilters() { Object.keys(draft).forEach(key => { draft[key] = ''; query[key] = ''; }); query.job_state = ''; page.value = 1; load(); }
 function setJobState(value) { query.job_state = value; page.value = 1; load(); }
+function hydrateRouteFilters() { Object.keys(draft).forEach(key => { const value = route.query[key]; draft[key] = typeof value === 'string' ? value : ''; query[key] = draft[key]; }); }
+function toggleSchedulerHistory() { schedulerHistoryOpen.value = !schedulerHistoryOpen.value; }
 function operationFailed(response, fallback = '操作失败。') { ElMessage.error(response?.message || fallback); return false; }
 const credentialFields = ['partner_id', 'partner_key', 'ads_app_id', 'ads_secret', 'redirect_uri', 'app_key', 'service_id', 'app_secret', 'api_base_url', 'domain', 'client_id', 'client_secret'];
 const secretCredentialFields = ['partner_key', 'ads_secret', 'app_secret', 'client_secret'];
 function clearCredentialForm() { credentialFields.forEach(key => { credentialForm[key] = ''; }); credentialForm.reason = '按运用交接计划维护开发者凭据'; }
+function normalizeConfigApiType() {
+  configForm.api_type = configApiTypeOptions.value[0]?.value || '';
+  configForm.regions = [];
+}
+function setConfigRegion(countryCode, selected) {
+  const regions = new Set(configForm.regions);
+  selected ? regions.add(countryCode) : regions.delete(countryCode);
+  configForm.regions = [...regions];
+}
+function openCreateConfig() {
+  const platform = referencePlatforms.value.find(option => option.enabled);
+  Object.assign(configForm, {
+    account_alias: '',
+    platform: platform?.value || '',
+    api_type: platform?.api_types?.[0]?.value || '',
+    environment: referenceEnvironments.value.find(option => option.value === 'production')?.value || referenceEnvironments.value[0]?.value || '',
+    regions: [],
+  });
+  configDialog.value = true;
+}
 function openCredential(row) { activeConfig.value = row; clearCredentialForm(); credentialDialog.value = true; }
 function credentialPayload() {
   const platform = activeConfig.value?.platform;
   const apiType = activeConfig.value?.api_type;
-  const keys = platform === 'shopee'
+  const keys = platform === 'lazada'
+    ? ['app_key', 'app_secret', 'redirect_uri']
+    : platform === 'shopee'
     ? ['partner_id', 'partner_key']
     : platform === 'jifeng_wms'
       ? ['api_base_url', 'domain', 'client_id', 'client_secret']
@@ -521,6 +673,24 @@ async function disableConfig(row) {
   ElMessage.success('接入配置已禁用。');
   await load();
 }
+async function deleteConfig(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除“${row.account_alias}”？删除后将从配置列表移除，历史审计和运行记录继续保留。`,
+      '删除接入配置',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+    );
+  } catch (reason) {
+    if (reason === 'cancel' || reason === 'close') return;
+    throw reason;
+  }
+  deletingConfigId.value = row.id;
+  const response = await deleteIntegrationConfig(row.id);
+  deletingConfigId.value = null;
+  if (!response.success) { operationFailed(response, '接入配置删除失败。'); return; }
+  ElMessage.success('接入配置已删除，历史记录继续保留。');
+  await load();
+}
 function rowRunAccess(row) { return row.execution_mode === 'live_readonly' ? liveRunAccess.value : mockRunAccess.value; }
 async function runJob(row) {
   const access = rowRunAccess(row);
@@ -536,7 +706,7 @@ async function runJob(row) {
   await load();
 }
 async function prepareConfig() {
-  if (!configForm.account_alias.trim() || !configForm.regions.length) { ElMessage.warning('请填写配置名称并选择适用站点。'); return; }
+  if (!configForm.account_alias.trim() || !configForm.platform || !configForm.api_type || !configForm.environment || !configForm.regions.length) { ElMessage.warning('请填写配置名称，并选择平台、API 类型、环境和适用站点。'); return; }
   operating.value = true;
   const response = await createIntegrationConfig({ account_alias: configForm.account_alias.trim(), platform: configForm.platform, api_type: configForm.api_type, environment: configForm.environment, regions: configForm.regions });
   operating.value = false;
@@ -582,6 +752,7 @@ function businessDestination(resourceType) {
 function businessPath(resourceType) { return businessDestination(resourceType).path; }
 function viewJobRuns(row) { if (!row) return; jobDetailDialog.value = false; router.push({ path: '/integrations/sync-runs', query: { subject: row.subject_name } }); }
 function viewJobBusiness(row) { if (!row) return; jobDetailDialog.value = false; router.push(businessPath(row.resource_type)); }
+function returnToJob(row) { router.push({ path: '/integrations/sync-jobs', query: { subject: row.subject_name || '' } }); }
 async function handleJobCommand(command, row) {
   if (command === 'detail') { openJobDetail(row); return; }
   if (command === 'edit') { openJobEditor(row); return; }
@@ -636,7 +807,8 @@ async function retryRun(row) {
 function openCreateJob(template = null) { creatingJobTemplate.value = template; createJobDialog.value = true; }
 function closeCreateJob() { createJobDialog.value = false; creatingJobTemplate.value = null; }
 function go(path) { closeCreateJob(); router.push(path); }
-onMounted(load);
+watch(() => route.query, () => { hydrateRouteFilters(); page.value = 1; load(); });
+onMounted(() => { hydrateRouteFilters(); load(); });
 </script>
 
 <style scoped>
@@ -654,16 +826,21 @@ onMounted(load);
 .flow-steps small, .cell-sub { display: block; margin-top: 4px; color: #6b7a90; font-size: 11px; font-weight: 400; }
 .flow-metrics { display: grid; grid-template-columns: repeat(4, 1fr); margin: 0; border-top: 1px solid #e3e9f0; background: #f8fafc; }
 .flow-metrics div { padding: 12px 20px; border-right: 1px solid #e3e9f0; }.flow-metrics div:last-child { border: 0; }.flow-metrics dt { color: #66758c; font-size: 12px; }.flow-metrics dd { margin: 4px 0 0; font-size: 20px; font-weight: 750; }
-.health-card header { padding: 14px 16px 10px; }.health-card h2, .table-card h2 { margin: 0; font-size: 16px; }.health-card dl { display: grid; grid-template-columns: repeat(6, 1fr); margin: 0; border-top: 1px solid #e4eaf1; border-bottom: 1px solid #e4eaf1; }.health-card dl div { padding: 12px 16px; border-right: 1px solid #e4eaf1; }.health-card dt { color: #64748b; font-size: 12px; }.health-card dd { margin: 5px 0 0; font-size: 18px; font-weight: 700; }.health-card footer { display: flex; justify-content: space-between; gap: 16px; padding: 10px 16px; color: #087a58; font-size: 12px; }
+.health-card header { padding: 14px 16px 10px; }.health-card h2, .table-card h2 { margin: 0; font-size: 16px; }.health-card dl { display: grid; grid-template-columns: repeat(6, 1fr); margin: 0; border-top: 1px solid #e4eaf1; border-bottom: 1px solid #e4eaf1; }.health-card dl div { padding: 12px 16px; border-right: 1px solid #e4eaf1; }.health-card dt { color: #64748b; font-size: 12px; }.health-card dd { margin: 5px 0 0; font-size: 18px; font-weight: 700; }.health-card footer { display: flex; justify-content: space-between; gap: 16px; padding: 10px 16px; color: #087a58; font-size: 12px; }.health-card footer nav { display: flex; justify-content: flex-end; gap: 16px; flex-wrap: wrap; }.health-card footer nav a, .health-card footer nav button { border: 0; padding: 0; color: #0877d1; background: transparent; cursor: pointer; font: inherit; text-decoration: none; }.health-card footer nav a:hover, .health-card footer nav button:hover { color: #075ea7; text-decoration: underline; }.health-card footer nav a:focus-visible, .health-card footer nav button:focus-visible { outline: 2px solid #409eff; outline-offset: 3px; border-radius: 2px; }
+.scheduler-history { border-top: 1px solid #e4eaf1; }.scheduler-history > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 13px 16px; }.scheduler-history > header p { margin: 4px 0 0; }.scheduler-history > header span { color: #607087; font-size: 12px; }.scheduler-history-empty { margin: 0; padding: 18px 16px; border-top: 1px solid #edf1f5; color: #64748b; font-size: 12px; }
 .job-tabs { display: flex; gap: 6px; padding: 6px; border: 1px solid #d8e2ee; border-radius: 8px; background: #fff; }.job-tabs button { border: 0; border-radius: 6px; padding: 8px 10px; color: #526279; background: transparent; cursor: pointer; }.job-tabs button.active { color: #1677ff; background: #eaf3ff; font-weight: 700; }.job-tabs span { margin-left: 5px; padding: 1px 6px; border-radius: 10px; background: #dcecff; }
 .filter-card { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)) auto; align-items: end; gap: 10px; padding: 12px 14px 14px; }.filter-card :deep(.el-form-item) { margin: 0; }.filter-card :deep(.el-form-item__label) { padding: 0 0 5px; line-height: 18px; }.filter-card :deep(.el-select), .filter-card :deep(.el-date-editor) { width: 100%; }.filter-actions { display: flex; gap: 8px; }
 .table-card > header { padding: 15px 16px; }.table-card > header strong { color: #536279; font-size: 12px; }.batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: 1px solid #e3e9f0; background: #f4f9ff; }.table-footer { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; color: #607087; font-size: 12px; }.table-card :deep(.el-table th.el-table__cell) { color: #40516a; background: #f4f7fa; }.table-card :deep(.el-table .cell) { line-height: 1.35; }
 .status-pill { display: inline-flex; padding: 3px 7px; border-radius: 5px; font-size: 11px; font-weight: 700; }.status-pill.is-success { color: #07835c; background: #e7f7f0; }.status-pill.is-danger { color: #c43333; background: #fff0ef; }.status-pill.is-warning { color: #9a6700; background: #fff6da; }.status-pill.is-info { color: #526172; background: #eef2f5; }
 .dialog-note { margin: -12px 0 18px; color: #7a8798; font-size: 12px; }.dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }.dialog-grid .wide { grid-column: 1 / -1; }.dialog-grid :deep(.el-select) { width: 100%; }.dialog-grid small { display: block; margin-top: 5px; color: #7a8798; }.safe-note { color: #607087; font-size: 12px; line-height: 1.7; }.empty-job { display: grid; place-items: center; min-height: 180px; text-align: center; }.empty-job strong { font-size: 18px; }.empty-job p { color: #64748b; }
+.region-option :deep(.el-checkbox) { width: 100%; height: 100%; margin-right: 0; }.region-option :deep(.el-checkbox__label) { color: inherit; }
 .dialog-heading { display: grid; gap: 4px; }.dialog-heading strong { color: #1f2937; font-size: 18px; }.dialog-heading small { color: #7a8798; font-size: 12px; font-weight: 400; }
 .job-policy-form { display: grid; gap: 16px; }.job-policy-section { min-width: 0; margin: 0; padding: 17px 16px 4px; border: 1px solid #d9e2ec; border-radius: 7px; }.job-policy-section legend { padding: 0 7px; color: #26364d; font-size: 14px; font-weight: 700; }.job-policy-section :deep(.el-select), .job-policy-section :deep(.el-date-editor), .job-policy-section :deep(.el-input-number) { width: 100%; }.policy-intro { margin: 0 0 14px; color: #607087; font-size: 12px; line-height: 1.6; }.job-policy-advanced { grid-column: 1 / -1; margin: 0 0 12px; border: 1px solid #d9e2ec; border-radius: 6px; background: #f8fafc; }.job-policy-advanced summary { padding: 11px 13px; color: #40516a; cursor: pointer; font-size: 13px; font-weight: 650; }.job-policy-advanced[open] summary { border-bottom: 1px solid #d9e2ec; }.job-policy-advanced .dialog-grid { padding: 14px 13px 0; }.policy-safe-note { margin: 14px 2px 0; padding-left: 19px; position: relative; }.policy-safe-note::before { content: 'ⓘ'; position: absolute; left: 0; color: #409eff; }
 .job-detail-heading { display: grid; gap: 4px; }.job-detail-heading strong { color: #1f2937; font-size: 18px; }.job-detail-heading small { color: #7a8798; font-size: 12px; font-weight: 400; }.job-detail-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -2px 0 14px; color: #64748b; font-size: 12px; }.job-detail-grid { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid #d9e2ec; border-left: 1px solid #d9e2ec; }.job-detail-grid div { min-width: 0; padding: 11px 13px; border-right: 1px solid #d9e2ec; border-bottom: 1px solid #d9e2ec; }.job-detail-grid dt { margin-bottom: 5px; color: #66758c; font-size: 12px; }.job-detail-grid dd { margin: 0; overflow-wrap: anywhere; color: #26364d; font-size: 13px; line-height: 1.45; }.job-detail-grid + :deep(.el-alert) { margin-top: 14px; }
+.run-detail-heading { display: grid; gap: 4px; }.run-detail-heading strong { color: #1f2937; font-size: 18px; }.run-detail-heading small { color: #7a8798; font-size: 12px; font-weight: 400; }
+.run-detail-grid { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid #d9e2ec; border-left: 1px solid #d9e2ec; }.run-detail-grid div { min-width: 0; padding: 12px 14px; border-right: 1px solid #d9e2ec; border-bottom: 1px solid #d9e2ec; }.run-detail-grid dt { margin-bottom: 5px; color: #66758c; font-size: 12px; }.run-detail-grid dd { margin: 0; overflow-wrap: anywhere; color: #26364d; font-size: 13px; line-height: 1.45; }
+.run-stages { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); margin: 16px 0 0; padding: 0; overflow-x: auto; list-style: none; }.run-stages li { position: relative; display: grid; justify-items: center; min-width: 120px; padding: 0 8px; text-align: center; }.run-stages li:not(:last-child)::after { content: ''; position: absolute; z-index: 0; top: 15px; left: calc(50% + 16px); width: calc(100% - 32px); height: 1px; background: #ccd7e2; }.run-stages li > span { z-index: 1; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #aab8c7; border-radius: 50%; color: #607087; background: #fff; font-size: 12px; font-weight: 700; }.run-stages li.is-success > span { border-color: #75caaa; color: #087a58; background: #effbf6; }.run-stages li.is-failed > span { border-color: #ef9b98; color: #c43333; background: #fff1f0; }.run-stages li.is-running > span { border-color: #76aef5; color: #1677d2; background: #eff6ff; }.run-stages li div { margin-top: 8px; }.run-stages strong { display: block; color: #34445a; font-size: 12px; }.run-stages small { display: block; margin-top: 4px; color: #738197; font-size: 10px; line-height: 1.45; }.run-stage-empty { margin: 16px 0 0; padding: 14px; border: 1px dashed #d9e2ec; color: #738197; font-size: 12px; text-align: center; }
 :deep(.summary-grid) { display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 16px; border: 1px solid #d9e2ec; border-radius: 6px; overflow: hidden; }:deep(.summary-grid div) { padding: 13px; border-right: 1px solid #d9e2ec; border-bottom: 1px solid #d9e2ec; }:deep(.summary-grid div:nth-child(2n)) { border-right: 0; }:deep(.summary-grid div:nth-last-child(-n+2)) { border-bottom: 0; }:deep(.summary-grid dt) { color: #66758c; font-size: 12px; }:deep(.summary-grid dd) { margin: 5px 0 0; font-weight: 700; }
 @media (max-width: 1100px) { .filter-card { grid-template-columns: repeat(3, 1fr); }.health-card dl { grid-template-columns: repeat(3, 1fr); }.health-card footer { flex-direction: column; }.workspace-header { flex-direction: column; }.header-actions { justify-content: flex-start; } }
-@media (max-width: 760px) { .flow-steps { grid-template-columns: 1fr 1fr; gap: 16px; }.flow-steps li::after { display: none; }.flow-metrics { grid-template-columns: 1fr 1fr; }.filter-card { grid-template-columns: 1fr; }.health-card dl { grid-template-columns: 1fr 1fr; }.dialog-grid, .job-detail-grid { grid-template-columns: 1fr; }.table-footer { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 760px) { .flow-steps { grid-template-columns: 1fr 1fr; gap: 16px; }.flow-steps li::after { display: none; }.flow-metrics { grid-template-columns: 1fr 1fr; }.filter-card { grid-template-columns: 1fr; }.health-card dl { grid-template-columns: 1fr 1fr; }.dialog-grid, .job-detail-grid, .run-detail-grid { grid-template-columns: 1fr; }.table-footer { align-items: flex-start; flex-direction: column; } }
 </style>

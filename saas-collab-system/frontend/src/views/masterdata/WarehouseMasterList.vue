@@ -19,15 +19,20 @@
     :operation-width="240"
   >
     <template #row-actions="{ row }">
-      <el-button link type="primary" @click.stop="goToAccess(row)">API 接入</el-button>
+      <el-button v-if="apiAccess.visible" link type="primary" @click.stop="openApiAccess(row)">API 接入</el-button>
     </template>
+    <SubjectApiAccessDialog
+      v-model="apiAccessOpen"
+      subject-type="warehouse"
+      :row="selectedWarehouse"
+    />
   </AdminResourcePage>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
+import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
 import {
   createMasterData,
   fetchCountrySites,
@@ -35,9 +40,14 @@ import {
   updateMasterData,
   updateMasterDataStatus,
 } from '../../api/masterData';
+import { useAuthStore } from '../../stores/auth';
+import { getActionAccess } from '../../utils/actionAccess';
 
-const router = useRouter();
+const auth = useAuthStore();
 const countryRows = ref([]);
+const apiAccessOpen = ref(false);
+const selectedWarehouse = ref(null);
+const apiAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view' }));
 
 const warehouseTypes = [
   { label: '自营仓', value: 'owned' },
@@ -75,8 +85,9 @@ async function loadCountryOptions() {
   countryRows.value = [...unique.values()];
 }
 
-function goToAccess(row) {
-  router.push({ path: '/integrations/configs', query: { warehouse: row.code } });
+function openApiAccess(row) {
+  selectedWarehouse.value = row;
+  apiAccessOpen.value = true;
 }
 
 onMounted(loadCountryOptions);

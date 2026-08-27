@@ -5,6 +5,7 @@ from . import views
 
 urlpatterns = [
     path("workspace/", views.integration_workspace_view, name="integration-workspace"),
+    path("subject-api-access/", views.subject_api_access_detail, name="subject-api-access-detail"),
     path("platform-schemas/<str:platform>/", views.platform_config_schema, name="platform-config-schema"),
     path("configs/", views.integration_config_collection, name="integration-config-collection"),
     path("workspace-configs/", views.create_handoff_integration_config, name="integration-workspace-config-create"),
@@ -22,6 +23,7 @@ urlpatterns = [
     ),
     path("configs/<int:pk>/audit/", views.integration_config_audit, name="integration-config-audit"),
     path("configs/<int:pk>/disable/", views.disable_integration_config, name="integration-config-disable"),
+    path("configs/<int:pk>/delete/", views.delete_integration_config, name="integration-config-delete"),
     path("configs/<int:pk>/verify/", views.verify_integration_config, name="integration-config-verify"),
     path("configs/<int:pk>/reference-check/", views.check_integration_reference, name="integration-config-reference-check"),
     path("configs/<int:pk>/consistency-check/", views.check_integration_consistency, name="integration-config-consistency-check"),
@@ -35,6 +37,11 @@ urlpatterns = [
         "store-authorizations/oauth/start/",
         views.start_marketplace_store_oauth,
         name="store-authorization-oauth-start",
+    ),
+    path(
+        "store-authorizations/oauth/callback/lazada/",
+        views.marketplace_oauth_callback_lazada,
+        name="store-authorization-oauth-callback-lazada",
     ),
     path(
         "store-authorizations/oauth/callback/shopee/",

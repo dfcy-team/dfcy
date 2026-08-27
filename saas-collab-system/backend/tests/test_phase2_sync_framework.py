@@ -18,6 +18,7 @@ from apps.integrations.models import (
 )
 from apps.integrations.sync_services import calculate_backoff_seconds, record_retry_failure, record_webhook_event
 from apps.integrations.sync_services import run_sync_job
+from apps.masterdata.models import CountrySiteMaster, PlatformMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -128,6 +129,34 @@ def test_integration_workspace_links_tenant_scoped_config_jobs_and_runs():
     user.save(update_fields=["is_superuser", "is_staff"])
     grant_integration_access(user)
     grant_integration_access(other_user)
+    PlatformMaster.objects.create(
+        tenant=tenant,
+        code="shopee",
+        name="Shopee",
+        platform_type=PlatformMaster.PlatformType.SHOPEE,
+    )
+    PlatformMaster.objects.create(
+        tenant=other_tenant,
+        code="lazada",
+        name="Other tenant Lazada",
+        platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    CountrySiteMaster.objects.create(
+        tenant=tenant,
+        code="country-cn",
+        name="中国",
+        country_code="CN",
+        currency="CNY",
+        timezone="Asia/Shanghai",
+    )
+    CountrySiteMaster.objects.create(
+        tenant=other_tenant,
+        code="country-ph",
+        name="Other tenant Philippines",
+        country_code="PH",
+        currency="PHP",
+        timezone="Asia/Manila",
+    )
     config = PlatformIntegrationConfig.objects.create(
         tenant=tenant,
         platform="mock",
@@ -155,6 +184,18 @@ def test_integration_workspace_links_tenant_scoped_config_jobs_and_runs():
         started_at=timezone.now(),
         finished_at=timezone.now(),
         fetched_count=2,
+        masked_log={
+            "execution_mode": "live_readonly",
+            "external_api_called": True,
+            "token_refreshed": False,
+            "retry_of": "workspace-source-run",
+            "checkpoint": {"version": 3, "advanced": True},
+            "archive_files": ["response-1.txt", "response-2.txt"],
+            "stages": [
+                {"code": "validate", "label": "任务与授权校验", "status": "success"},
+                {"code": "fetch", "label": "外部平台只读调用", "status": "success"},
+            ],
+        },
     )
 
     client = authenticated_client(user)
@@ -174,8 +215,46 @@ def test_integration_workspace_links_tenant_scoped_config_jobs_and_runs():
     assert job_row["latest_fetched_count"] == 2
     assert job_row["latest_created_count"] == 0
     assert job_row["checkpoint_version"] is None
+    assert jobs.json()["data"]["scheduler"]["heartbeat_state"] == "disabled"
+    assert jobs.json()["data"]["scheduler_history"] == []
+    assert jobs.json()["data"]["reference_options"]["platforms"] == [
+        {
+            "id": PlatformMaster.objects.get(tenant=tenant, code="shopee").id,
+            "value": "shopee",
+            "code": "shopee",
+            "name": "Shopee",
+            "label": "Shopee（shopee）",
+            "enabled": True,
+            "api_types": [
+                {"value": "marketplace", "label": "商城 API"},
+                {"value": "advertising", "label": "广告 API"},
+            ],
+            "allowed_regions": None,
+        }
+    ]
+    assert jobs.json()["data"]["reference_options"]["countries"] == [
+        {
+            "value": "CN",
+            "country_code": "CN",
+            "code": "country-cn",
+            "name": "中国",
+            "label": "CN（中国）",
+            "currency": "CNY",
+            "timezone": "Asia/Shanghai",
+        }
+    ]
+    assert jobs.json()["data"]["regions"] == jobs.json()["data"]["reference_options"]["countries"]
     assert runs.json()["data"]["summary"]["run_count"] == 1
-    assert runs.json()["data"]["results"][0]["run_id"] == "workspace-run"
+    run_row = runs.json()["data"]["results"][0]
+    assert run_row["run_id"] == "workspace-run"
+    assert run_row["execution_mode"] == "live_readonly"
+    assert run_row["external_api_called"] is True
+    assert run_row["token_refreshed"] is False
+    assert run_row["retry_of"] == "workspace-source-run"
+    assert run_row["checkpoint_version"] == 3
+    assert run_row["checkpoint_advanced"] is True
+    assert run_row["archive_file_count"] == 2
+    assert run_row["masked_log"]["stages"][0]["code"] == "validate"
 
 
 @pytest.mark.django_db

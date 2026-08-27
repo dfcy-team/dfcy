@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db import connection
 
 from apps.accounts.models import CustomUser
 from apps.products.models import ProductCategory
@@ -110,7 +111,7 @@ class StoreMasterSerializer(TenantOwnedSerializer):
 
     def get_api_connected(self, obj):
         authorization = self._latest_authorization(obj)
-        return bool(authorization and authorization.status == authorization.Status.ACTIVE)
+        return bool(authorization and authorization.status in {"authorized", "active"})
 
     def get_authorization_status(self, obj):
         authorization = self._latest_authorization(obj)
@@ -176,6 +177,16 @@ class StoreMasterSerializer(TenantOwnedSerializer):
         return value
 
 
+class CountrySiteMasterSerializer(TenantOwnedSerializer):
+    class Meta:
+        model = CountrySiteMaster
+        fields = (
+            "id", "tenant_id", "code", "name", "country_code", "currency", "timezone", "platform", "status",
+            "created_at", "updated_at",
+        )
+        read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
+
+
 class WarehouseMasterSerializer(TenantOwnedSerializer):
     api_connected = serializers.SerializerMethodField()
     site_code = serializers.SerializerMethodField()
@@ -202,7 +213,19 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
         return obj._latest_inventory_snapshot
 
     def get_api_connected(self, obj):
-        return self._latest_snapshot(obj) is not None
+        table = "integrations_warehouseauthorization"
+        with connection.cursor() as cursor:
+            if table not in connection.introspection.table_names(cursor):
+                return False
+            columns = {column.name for column in connection.introspection.get_table_description(cursor, table)}
+            if not {"tenant_id", "warehouse_id", "status"}.issubset(columns):
+                return False
+            cursor.execute(
+                f"SELECT 1 FROM {table} WHERE tenant_id=%s AND warehouse_id=%s "
+                "AND status IN ('authorized','active') LIMIT 1",
+                [obj.tenant_id, obj.id],
+            )
+            return cursor.fetchone() is not None
 
     def get_site_code(self, obj):
         snapshot = self._latest_snapshot(obj)
@@ -241,6 +264,7 @@ class SupplierMasterSerializer(TenantOwnedSerializer):
 SERIALIZER_BY_RESOURCE = {
     "platforms": PlatformMasterSerializer,
     "stores": StoreMasterSerializer,
+    "sites": CountrySiteMasterSerializer,
     "warehouses": WarehouseMasterSerializer,
     "suppliers": SupplierMasterSerializer,
 }
@@ -248,6 +272,7 @@ SERIALIZER_BY_RESOURCE = {
 MODEL_BY_RESOURCE = {
     "platforms": PlatformMaster,
     "stores": StoreMaster,
+    "sites": CountrySiteMaster,
     "warehouses": WarehouseMaster,
     "suppliers": SupplierMaster,
 }

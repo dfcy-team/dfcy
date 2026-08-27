@@ -17,6 +17,7 @@ from .platform_schema_service import get_platform_schema, validate_platform_conf
 
 
 PILOT_LOOPBACK_CALLBACKS = {
+    PlatformChoices.LAZADA: "/api/internal/integrations/store-authorizations/oauth/callback/lazada/",
     PlatformChoices.SHOPEE: "/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
     PlatformChoices.TIKTOK: "/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
 }
@@ -124,7 +125,8 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"platform": "Platform cannot be changed after creation."})
         if self.instance and "environment" in attrs and attrs["environment"] != self.instance.environment:
             raise serializers.ValidationError({"environment": "Environment changes require a new configuration."})
-        if platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+        marketplace_platforms = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+        if platform in marketplace_platforms:
             schema = get_platform_schema(platform, environment=environment)
             allowed_regions = {item["value"] for item in schema["regions"]}
             contract_version = attrs.get("contract_version", getattr(self.instance, "contract_version", ""))
@@ -144,7 +146,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             platform_config = attrs.get("platform_config", getattr(self.instance, "platform_config", {}))
             attrs["platform_config"] = validate_platform_config(platform, platform_config)
         callback_url = attrs.get("callback_url", getattr(self.instance, "callback_url", ""))
-        if platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK} and not callback_url:
+        if platform in marketplace_platforms and not callback_url:
             raise serializers.ValidationError({"callback_url": "Platform callback URL is required."})
         if callback_url and not _is_approved_callback_transport(callback_url, environment, platform):
             raise serializers.ValidationError(
@@ -157,6 +159,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             )
         redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
         expected_callback = {
+            PlatformChoices.LAZADA: getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
             PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
             PlatformChoices.TIKTOK: getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
         }.get(platform, "")
@@ -165,7 +168,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         if callback_url and redirect_allowlist and callback_url not in redirect_allowlist:
             raise serializers.ValidationError({"callback_url": "Callback URL is not in the approved allowlist."})
         if (
-            platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+            platform in marketplace_platforms
             and environment in {
                 PlatformIntegrationConfig.Environment.PILOT,
                 PlatformIntegrationConfig.Environment.PRODUCTION,
@@ -291,7 +294,9 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
 class MarketplaceOAuthStartSerializer(serializers.Serializer):
     """OAuth start request; raw credential fields are rejected by the view."""
 
-    platform = serializers.ChoiceField(choices=[PlatformChoices.SHOPEE, PlatformChoices.TIKTOK])
+    platform = serializers.ChoiceField(
+        choices=[PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK]
+    )
     integration_config_id = serializers.IntegerField(min_value=1)
     store_id = serializers.IntegerField(min_value=1)
     region = serializers.CharField(max_length=8)

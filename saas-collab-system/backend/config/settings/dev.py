@@ -18,3 +18,8 @@ CORS_ALLOWED_ORIGINS = CORS_ALLOWED_ORIGINS or [
 
 # The reversible provider is intentionally limited to local development and tests.
 INTEGRATION_ENCRYPTION_PROVIDER = os.getenv("INTEGRATION_ENCRYPTION_PROVIDER", "test-only")
+
+# Local development keeps raw credential values out of the business database.
+# Production settings still fail closed unless an approved HTTP custody service
+# is configured explicitly.
+LIVE_CUSTODY_BACKEND = os.getenv("LIVE_CUSTODY_BACKEND", "file").strip().lower()

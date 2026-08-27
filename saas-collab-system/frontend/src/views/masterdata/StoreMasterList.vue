@@ -31,7 +31,7 @@
       </el-button>
     </template>
     <template #row-actions="{ row }">
-      <el-button link type="primary" @click.stop="goToAccess(row)">API 接入</el-button>
+      <el-button v-if="apiAccess.visible" link type="primary" @click.stop="openApiAccess(row)">API 接入</el-button>
     </template>
 
     <el-dialog v-model="importOpen" title="导入店铺档案" width="min(620px, 94vw)" destroy-on-close>
@@ -59,14 +59,21 @@
         <el-button type="primary" :loading="importing" :disabled="!importFile" @click="submitImport">开始导入</el-button>
       </template>
     </el-dialog>
+
+    <SubjectApiAccessDialog
+      v-model="apiAccessOpen"
+      subject-type="store"
+      :row="selectedStore"
+      @changed="resourcePage?.loadData()"
+    />
   </AdminResourcePage>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { useRouter } from 'vue-router';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
+import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
 import {
   createMasterData,
   fetchCountrySites,
@@ -79,7 +86,6 @@ import {
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
 
-const router = useRouter();
 const auth = useAuthStore();
 const resourcePage = ref(null);
 const platformRows = ref([]);
@@ -87,8 +93,11 @@ const countryRows = ref([]);
 const importOpen = ref(false);
 const importFile = ref(null);
 const importing = ref(false);
+const apiAccessOpen = ref(false);
+const selectedStore = ref(null);
 
 const importAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.manage' }));
+const apiAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view' }));
 const platformOptions = computed(() => platformRows.value.map((row) => ({
   label: `${row.name}（${row.code}）`, value: row.id,
 })));
@@ -96,16 +105,11 @@ const countryOptions = computed(() => countryRows.value.map((row) => ({
   label: `${row.name}（${row.country_code}）`, value: row.country_code,
 })));
 
-function platformLabel(value) {
-  const labels = { lazada: 'Lazada', shopee: 'Shopee', temu: 'Temu', tiktok: 'TikTok', 'tiktok shop': 'TikTok Shop', bigseller: 'BigSeller' };
-  return labels[String(value || '').toLowerCase()] || value || '-';
-}
-
 const columns = [
   { prop: 'code', label: '店铺档案编码', width: 170 },
   { prop: 'name', label: '店铺名称', width: 190 },
   { prop: 'platform_store_name', label: '平台店铺名', width: 180 },
-  { prop: 'platform_name', label: '所属平台', width: 150, format: platformLabel },
+  { prop: 'platform_name', label: '所属平台', width: 150 },
   { prop: 'api_connected', label: 'API 接入', type: 'api', width: 120 },
   { prop: 'category_name', label: '类目', width: 130 },
   { prop: 'operator_name', label: '负责运营', width: 120 },
@@ -159,8 +163,9 @@ async function loadReferenceOptions() {
   }
 }
 
-function goToAccess(row) {
-  router.push({ path: '/integrations/configs', query: { store: row.code } });
+function openApiAccess(row) {
+  selectedStore.value = row;
+  apiAccessOpen.value = true;
 }
 
 function openImport() {

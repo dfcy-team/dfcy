@@ -1,7 +1,7 @@
 """Marketplace capability gating for real-platform connection (task A-REAL-PLATFORM-CONNECTION).
 
 This module is the single source of truth for whether the backend is allowed to
-talk to *real* Shopee / TikTok Shop platforms.
+talk to *real* Lazada / Shopee / TikTok Shop platforms.
 
 Design rules (from the task book):
 - Default capability is ``pending/mock``. The system must never perform real

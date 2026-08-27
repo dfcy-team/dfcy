@@ -4,10 +4,11 @@ from django.db import connection
 from django.db.models import Count
 from django.utils import timezone
 
-from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
+from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
 from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_sync_jobs, filter_sync_runs
 
 from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
+from .platform_schema_service import get_platform_schema, integration_platform_key, platform_api_type_options
 
 
 RESOURCE_DESTINATIONS = {
@@ -48,6 +49,12 @@ def _json_value(value):
         return json.loads(value)
     except (TypeError, ValueError):
         return {}
+
+
+def _boolean_value(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _api_type(config, raw_config):
@@ -264,14 +271,15 @@ def _job_row(job, raw, raw_config, subject, latest_run, checkpoint=None):
 
 
 def _workspace_rows(user):
-    configs = list(
+    all_configs = list(
         filter_integration_configs(
             user,
-            PlatformIntegrationConfig.objects.filter(tenant=user.tenant).annotate(reference_count=Count("sync_jobs")),
+            PlatformIntegrationConfig.all_objects.filter(tenant=user.tenant).annotate(reference_count=Count("sync_jobs")),
             "integrations.config.view",
         )
     )
-    config_ids = [config.id for config in configs]
+    configs = [config for config in all_configs if config.deleted_at is None]
+    config_ids = [config.id for config in all_configs]
     config_raw = _raw_map("integrations_platformintegrationconfig", ["id", "api_type"], config_ids)
     jobs = list(
         filter_sync_jobs(
@@ -341,6 +349,8 @@ def _run_rows(runs, job_rows):
     for run in runs:
         job = job_rows.get(run.sync_job_id, {})
         log = _json_value(run.masked_log)
+        checkpoint = _json_value(log.get("checkpoint"))
+        archive_files = log.get("archive_files") if isinstance(log.get("archive_files"), list) else []
         destination = RESOURCE_DESTINATIONS.get(run.sync_job.resource_type, ("业务事实", run.sync_job.resource_type))
         duration = None
         if run.started_at and run.finished_at:
@@ -359,6 +369,8 @@ def _run_rows(runs, job_rows):
                 "data_destination": destination[0],
                 "data_table": destination[1],
                 "execution_mode": log.get("execution_mode", "simulation"),
+                "external_api_called": _boolean_value(log.get("external_api_called")),
+                "token_refreshed": _boolean_value(log.get("token_refreshed")),
                 "status": run.status,
                 "started_at": _format_datetime(run.started_at),
                 "finished_at": _format_datetime(run.finished_at),
@@ -369,7 +381,12 @@ def _run_rows(runs, job_rows):
                 "skipped_count": run.skipped_count,
                 "failed_count": run.failed_count,
                 "retry_count": run.retry_count,
+                "retry_of": str(log.get("retry_of") or "")[:80],
+                "next_retry_at": _format_datetime(log.get("next_retry_at")),
                 "max_retry_count": run.sync_job.max_retry_count,
+                "checkpoint_version": checkpoint.get("version"),
+                "checkpoint_advanced": _boolean_value(checkpoint.get("advanced")),
+                "archive_file_count": len(archive_files),
                 "error_code": str(run.error_code or "")[:80],
                 "masked_error_message": str(run.masked_error_message or "")[:240],
                 "masked_log": log,
@@ -432,6 +449,66 @@ def _options(rows):
     }
 
 
+def _reference_options(user):
+    countries = []
+    seen_country_codes = set()
+    for country in CountrySiteMaster.objects.filter(tenant=user.tenant, status="active").order_by(
+        "country_code", "code"
+    ):
+        country_code = str(country.country_code or "").strip().upper()
+        if not country_code or country_code in seen_country_codes:
+            continue
+        seen_country_codes.add(country_code)
+        countries.append(
+            {
+                "value": country_code,
+                "country_code": country_code,
+                "code": country.code,
+                "name": country.name,
+                "label": f"{country_code}（{country.name}）",
+                "currency": country.currency,
+                "timezone": country.timezone,
+            }
+        )
+
+    platforms = []
+    seen_platforms = set()
+    for platform in PlatformMaster.objects.filter(tenant=user.tenant, status="active").order_by("code"):
+        integration_value = integration_platform_key(
+            platform_type=platform.platform_type,
+            code=platform.code,
+            name=platform.name,
+        )
+        value = integration_value or platform.code
+        if value in seen_platforms:
+            continue
+        seen_platforms.add(value)
+        api_types = platform_api_type_options(integration_value)
+        allowed_regions = None
+        if integration_value == "lazada":
+            allowed_regions = [item["value"] for item in get_platform_schema(integration_value)["regions"]]
+        platforms.append(
+            {
+                "id": platform.id,
+                "value": value,
+                "code": platform.code,
+                "name": platform.name,
+                "label": f"{platform.name}（{platform.code}）",
+                "enabled": bool(api_types),
+                "api_types": api_types,
+                "allowed_regions": allowed_regions,
+            }
+        )
+
+    environment_labels = {"sandbox": "沙箱", "pilot": "试运行", "production": "生产"}
+    environments = [
+        {"value": value, "label": environment_labels.get(value, label)}
+        for value, label in PlatformIntegrationConfig.Environment.choices
+        if value != PlatformIntegrationConfig.Environment.MOCK
+    ]
+    return {"platforms": platforms, "countries": countries, "environments": environments}
+
+
 def _warehouse_authorization_count(user, allowed_config_ids):
     columns = _table_columns("integrations_warehouseauthorization")
     if not {"tenant_id", "integration_config_id"} <= columns or not allowed_config_ids:
@@ -483,7 +560,8 @@ def integration_workspace(user, mode, params):
         "successful_run_count": sum(1 for run in runs if run.status == SyncRun.Status.SUCCESS),
         "failed_run_count": sum(1 for run in runs if run.status == SyncRun.Status.FAILED),
         "running_run_count": sum(1 for run in runs if run.status == SyncRun.Status.RUNNING),
-        "due_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "due"),
+        "due_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "due" and row["execution_mode"] == "simulation"),
+        "live_confirmation_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "due" and row["execution_mode"] == "live_readonly"),
         "retry_waiting_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "retry_waiting"),
         "retry_exhausted_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "retry_exhausted"),
         "stale_running_job_count": sum(1 for job in jobs if job.status == SyncJob.Status.RUNNING and (not job.lock_expires_at or job.lock_expires_at <= timezone.now())),
@@ -493,27 +571,21 @@ def integration_workspace(user, mode, params):
         for row in job_rows.values()
         if row["subject_type"] != "unbound" and row["credential_status"] in {"referenced", "verified"}
     }
+    reference_options = _reference_options(user)
     return {
         "mode": mode,
         "source_status": "ready",
         "summary": summary,
-        "scheduler": {"configured": False, "execution_policy": "simulation_only"},
+        "scheduler": {"configured": False, "heartbeat_state": "disabled", "execution_policy": "simulation_only"},
+        "scheduler_history": [],
         "options": _options(all_rows),
-        "regions": list(
-            CountrySiteMaster.objects.filter(
-                tenant=user.tenant,
-                status="active",
-                country_code__in={region for config in configs for region in config.regions},
-            )
-            .values("country_code", "name")
-            .distinct()
-            .order_by("country_code")
-        ),
+        "reference_options": reference_options,
+        "regions": reference_options["countries"],
         "previews": {
             "due": {
                 "due_count": summary["due_job_count"],
-                "automatic_count": 0,
-                "confirmation_count": 0,
+                "automatic_count": summary["due_job_count"],
+                "confirmation_count": summary["live_confirmation_job_count"],
                 "batch_limit": 20,
             },
             "reconcile": {

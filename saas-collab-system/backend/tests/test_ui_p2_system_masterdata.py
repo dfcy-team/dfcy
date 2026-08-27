@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.audit.models import OperationLog
 from apps.integrations.models import PlatformIntegrationConfig, authorization_service_write
-from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
+from apps.masterdata.models import CountrySiteMaster, PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.suppliers.models import SupplierTask
 from apps.tenants.models import Department, Tenant
@@ -348,6 +348,34 @@ def test_master_data_is_tenant_filtered_and_codes_are_unique_per_tenant():
         format="json",
     )
     assert duplicate.status_code == 400
+
+
+def test_country_site_master_data_is_registered_and_scoped():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-country-sites")
+    manager = create_user(tenant, "country-site-manager")
+    scoped_viewer = create_user(tenant, "country-site-viewer")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    allowed = CountrySiteMaster.objects.create(
+        tenant=tenant, code="country-th", name="泰国", country_code="TH", currency="THB", timezone="Asia/Bangkok"
+    )
+    CountrySiteMaster.objects.create(
+        tenant=tenant, code="country-ph", name="菲律宾", country_code="PH", currency="PHP", timezone="Asia/Manila"
+    )
+    grant(
+        scoped_viewer,
+        "masterdata.view",
+        scope_type=DataScope.ScopeType.CUSTOM,
+        scope_config={"site_ids": [allowed.pk]},
+    )
+
+    listed = client_for(manager).get("/api/internal/master-data/sites/")
+    scoped = client_for(scoped_viewer).get("/api/internal/master-data/sites/")
+
+    assert listed.status_code == 200
+    assert {item["country_code"] for item in listed.data["data"]["results"]} == {"TH", "PH"}
+    assert listed.data["data"]["results"][0]["currency"] in {"THB", "PHP"}
+    assert scoped.status_code == 200
+    assert [item["id"] for item in scoped.data["data"]["results"]] == [allowed.pk]
 
 
 def test_master_data_custom_scope_filters_list_detail_and_status_actions():

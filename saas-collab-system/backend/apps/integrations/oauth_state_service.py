@@ -16,7 +16,7 @@ from .oauth_errors import (
 )
 
 
-ALLOWED_OAUTH_PLATFORMS = {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+ALLOWED_OAUTH_PLATFORMS = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
 OAUTH_STATE_TTL = timedelta(minutes=10)
 MAX_OAUTH_STATE_TTL = timedelta(minutes=30)
 
@@ -42,7 +42,7 @@ def create_oauth_state(
     ttl=None,
 ):
     if platform not in ALLOWED_OAUTH_PLATFORMS:
-        raise ValidationError({"platform": "OAuth start only supports Shopee or TikTok Shop."})
+        raise ValidationError({"platform": "OAuth start only supports Lazada, Shopee or TikTok Shop."})
     if actor.tenant_id != tenant.id:
         raise ValidationError("OAuth start actor must belong to the initiating tenant.")
     if integration_config is None or integration_config.tenant_id != tenant.id or integration_config.platform != platform:

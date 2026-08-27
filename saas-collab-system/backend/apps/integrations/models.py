@@ -53,6 +53,7 @@ def product_mapping_service_write():
 
 class PlatformChoices(models.TextChoices):
     BIGSELLER = "bigseller", "BigSeller"
+    LAZADA = "lazada", "Lazada"
     SHOPEE = "shopee", "Shopee"
     TIKTOK = "tiktok", "TikTok"
     JIFENG_WMS = "jifeng_wms", "Jifeng WMS"
@@ -100,6 +101,11 @@ class PlatformIntegrationConfigQuerySet(models.QuerySet):
         if not _authorization_service_write.get() and self.reference_fields.intersection(fields):
             raise ValidationError("Credential references can only be changed by the rotation service.")
         return super().bulk_update(objs, fields, **kwargs)
+
+
+class PlatformIntegrationConfigManager(models.Manager.from_queryset(PlatformIntegrationConfigQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
 
 
 class PlatformIntegrationConfig(models.Model):
@@ -159,6 +165,7 @@ class PlatformIntegrationConfig(models.Model):
     credential_operation_id_hash = models.CharField(max_length=64, blank=True)
     last_rotated_at = models.DateTimeField(null=True, blank=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -167,7 +174,8 @@ class PlatformIntegrationConfig(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    objects = PlatformIntegrationConfigQuerySet.as_manager()
+    objects = PlatformIntegrationConfigManager()
+    all_objects = PlatformIntegrationConfigQuerySet.as_manager()
 
     class Meta:
         ordering = ["tenant_id", "platform", "account_alias"]
@@ -448,8 +456,8 @@ class MarketplaceStoreAuthorization(models.Model):
 
     def clean(self):
         errors = {}
-        if self.platform not in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
-            errors["platform"] = "Store authorization only supports Shopee or TikTok Shop."
+        if self.platform not in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+            errors["platform"] = "Store authorization only supports Lazada, Shopee or TikTok Shop."
         if self.store_id:
             if self.tenant_id != self.store.tenant_id:
                 errors["store"] = "Store tenant must match authorization tenant."
@@ -568,8 +576,8 @@ class OAuthStateSession(models.Model):
 
     def clean(self):
         errors = {}
-        if self.platform not in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
-            errors["platform"] = "OAuth state only supports Shopee or TikTok Shop."
+        if self.platform not in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+            errors["platform"] = "OAuth state only supports Lazada, Shopee or TikTok Shop."
         if not self.state_hash or len(self.state_hash) != 64:
             errors["state_hash"] = "OAuth state must be stored as a SHA-256 hash."
         if self.store_id and self.store.tenant_id != self.tenant_id:

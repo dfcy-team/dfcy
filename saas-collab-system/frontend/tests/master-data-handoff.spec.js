@@ -23,6 +23,7 @@ describe('基础档案交接包界面契约', () => {
     expect(store).toContain("fetchCountrySites({ status: 'active', page: 1, page_size: 100 })");
     expect(store).toContain('onChange: applyCountryDefaults');
     expect(store).not.toContain("default: 1, options: [{ label: '示例平台'");
+    expect(store).not.toContain('function platformLabel');
     for (const field of ['平台店铺名', 'API 接入', '类目', '负责运营', 'BD', '组长', '是否建联', '战斧客户端']) {
       expect(store).toContain(field);
     }
@@ -33,10 +34,35 @@ describe('基础档案交接包界面契约', () => {
     const warehouse = read('src/views/masterdata/WarehouseMasterList.vue');
     expect(store).toContain('importStores(importFile.value)');
     expect(store).toContain('下载 CSV 导入模板');
-    expect(store).toContain("query: { store: row.code }");
-    expect(warehouse).toContain("query: { warehouse: row.code }");
+    expect(store).toContain('SubjectApiAccessDialog');
+    expect(store).toContain('selectedStore.value = row');
+    expect(warehouse).toContain('SubjectApiAccessDialog');
+    expect(warehouse).toContain('selectedWarehouse.value = row');
     expect(warehouse).toContain(':edit-handler');
     expect(warehouse).not.toContain("{ prop: 'last_sync_at'");
+  });
+
+  it('接入配置下拉项由服务端基础档案和能力数据驱动', () => {
+    const workspace = read('src/views/integrations/IntegrationWorkspace.vue');
+    expect(workspace).toContain('data.value.reference_options?.platforms');
+    expect(workspace).toContain('selectedReferencePlatform.value?.api_types');
+    expect(workspace).toContain('data.value.reference_options?.countries');
+    expect(workspace).toContain('data.value.reference_options?.environments');
+    expect(workspace).toContain(':model-value="configForm.regions.includes(region.country_code)"');
+    expect(workspace).toContain('@change="setConfigRegion(region.country_code, $event)"');
+    expect(workspace).toContain('已选择 {{ configForm.regions.length }} 个站点');
+    expect(workspace).not.toContain('<el-option label="Shopee" value="shopee" />');
+    expect(workspace).not.toContain("new Set(['SG', 'MY', 'TH', 'VN', 'ID', 'PH'])");
+  });
+
+  it('按原设计维度联动展示主体、配置、授权与最近同步', () => {
+    const access = read('src/components/SubjectApiAccessDialog.vue');
+    for (const field of ['档案编码', '国家/站点', '令牌策略', '商城 API', '广告 API', '库存 API', '接入配置', '授权时间', '最近同步']) {
+      expect(access).toContain(field);
+    }
+    expect(access).toContain('fetchSubjectApiAccess(props.subjectType, props.row.id)');
+    expect(access).toContain('checkIntegrationReadonlyConnection(binding.integration_config_id)');
+    expect(access).toContain("path: '/integrations/sync-jobs'");
   });
 
   it('通用档案页支持编辑、筛选标签和每页条数', () => {

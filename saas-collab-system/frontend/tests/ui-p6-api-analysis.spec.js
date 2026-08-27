@@ -140,6 +140,10 @@ describe('UI-P6 API and analytics contract', () => {
     expect(api).toContain('/reference-check/');
     expect(api).toContain('/consistency-check/');
     expect(api).toContain('/readonly-check/');
+    expect(api).toContain('/configs/${id}/delete/');
+    expect(page).toContain('v-else link type="danger"');
+    expect(page).toContain('@click="deleteConfig(row)"');
+    expect(page).toContain('历史审计和运行记录继续保留');
     expect(api).toContain('/retry/');
     expect(jobs).toContain('mode="sync-jobs"');
   });

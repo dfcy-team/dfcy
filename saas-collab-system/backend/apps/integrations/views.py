@@ -97,10 +97,25 @@ from .adapters import MockPlatformAdapter, get_adapter_for_config
 from .sync_services import run_sync_job
 from .tasks import run_readonly_sync_job
 from .workspace_service import integration_workspace
+from .subject_access_service import subject_api_access
 
 
 def health_response(service):
     return success_response({"status": "ok", "service": service})
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationViewer])
+def subject_api_access_detail(request):
+    subject_type = str(request.query_params.get("subject_type") or "")
+    subject_id = positive_int(request.query_params.get("subject_id"), default=None, maximum=2147483647)
+    if subject_id is None:
+        raise ValidationError("业务主体 ID 不能为空")
+    try:
+        data = subject_api_access(request.user, subject_type, subject_id)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    return success_response(data)
 
 
 @api_view(["GET"])
@@ -247,16 +262,27 @@ def create_handoff_integration_config(request):
     regions = [str(value).strip().upper() for value in (request.data.get("regions") or [])]
     if not alias or len(alias) > 120:
         raise ValidationError({"account_alias": "配置名称不能为空且不能超过 120 个字符。"})
-    if platform not in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK, PlatformChoices.JIFENG_WMS}:
+    if platform not in {
+        PlatformChoices.LAZADA,
+        PlatformChoices.SHOPEE,
+        PlatformChoices.TIKTOK,
+        PlatformChoices.JIFENG_WMS,
+    }:
         raise ValidationError({"platform": "平台无效。"})
     if api_type not in {"marketplace", "advertising", "inventory"}:
         raise ValidationError({"api_type": "API 类型无效。"})
     if (platform == PlatformChoices.JIFENG_WMS) != (api_type == "inventory"):
         raise ValidationError({"api_type": "极风 WMS 只支持库存 API，店铺平台不能使用库存 API。"})
+    if platform == PlatformChoices.LAZADA and api_type != "marketplace":
+        raise ValidationError({"api_type": "Lazada 当前只支持商城 API 授权。"})
     if environment not in {"sandbox", "pilot", "production"}:
         raise ValidationError({"environment": "环境无效。"})
     if not regions or len(regions) != len(set(regions)) or any(len(region) > 8 for region in regions):
         raise ValidationError({"regions": "请选择一个或多个不重复的适用站点。"})
+    if platform == PlatformChoices.LAZADA:
+        allowed_regions = {item["value"] for item in get_platform_schema("lazada")["regions"]}
+        if not set(regions) <= allowed_regions:
+            raise ValidationError({"regions": "Lazada 仅支持 SG、MY、TH、VN、ID、PH 站点。"})
     if not integration_values_allowed(
         request.user,
         "integrations.config.create",
@@ -280,7 +306,7 @@ def create_handoff_integration_config(request):
             environment=environment,
             status=PlatformIntegrationConfig.Status.PENDING_REVIEW,
             regions=regions,
-            contract_version="shopapi-local-v1",
+            contract_version="open-platform-v1" if platform == PlatformChoices.LAZADA else "shopapi-local-v1",
             platform_config={"api_type": api_type},
             created_by=request.user,
         )
@@ -391,7 +417,21 @@ def _credential_update_parts(config, values):
     secret_values = {}
     callback_url = None
 
-    if config.platform == PlatformChoices.SHOPEE:
+    if config.platform == PlatformChoices.LAZADA:
+        unsupported = set(values) - {"app_key", "app_secret", "redirect_uri"}
+        if unsupported:
+            raise ValidationError("Lazada 凭据字段与当前配置不匹配。")
+        app_key = str(values.get("app_key") or platform_config.get("app_key") or identity).strip()
+        redirect_uri = str(values.get("redirect_uri") or config.callback_url or "").strip()
+        if not app_key:
+            raise ValidationError({"credentials": {"app_key": "App Key 不能为空。"}})
+        if not redirect_uri:
+            raise ValidationError({"credentials": {"redirect_uri": "授权回调地址不能为空。"}})
+        platform_config["app_key"] = app_key
+        callback_url = redirect_uri
+        if values.get("app_secret"):
+            secret_values["app_secret"] = values["app_secret"]
+    elif config.platform == PlatformChoices.SHOPEE:
         unsupported = set(values) - {"partner_id", "partner_key"}
         if unsupported:
             raise ValidationError("Shopee 凭据字段与当前配置不匹配。")
@@ -529,7 +569,7 @@ def store_authorization_collection(request):
     queryset = MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store")
     if request.query_params.get("platform"):
         platform = request.query_params["platform"]
-        if platform not in {"shopee", "tiktok"}:
+        if platform not in {"lazada", "shopee", "tiktok"}:
             raise ValidationError("Unsupported marketplace platform filter.")
         queryset = queryset.filter(platform=platform)
     if request.query_params.get("status"):
@@ -634,6 +674,13 @@ def marketplace_oauth_callback_shopee(request):
 @permission_classes([])
 def marketplace_oauth_callback_tiktok(request):
     return _marketplace_oauth_callback(request, PlatformChoices.TIKTOK)
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def marketplace_oauth_callback_lazada(request):
+    return _marketplace_oauth_callback(request, PlatformChoices.LAZADA)
 
 
 def _get_store_authorization_for_user(request, pk, permission_code):
@@ -903,6 +950,34 @@ def disable_integration_config(request, pk):
             detail={"status": config.status, "disabled_job_count": disabled_jobs},
         )
     return success_response(PlatformIntegrationConfigSerializer(config).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigDisabler])
+def delete_integration_config(request, pk):
+    config = _get_config_for_user(request, pk, "integrations.config.disable")
+    if config.status != PlatformIntegrationConfig.Status.DISABLED:
+        raise StateConflict("仅已禁用的接入配置可以删除。")
+    with transaction.atomic():
+        config = PlatformIntegrationConfig.objects.select_for_update().get(
+            pk=config.pk,
+            tenant=request.user.tenant,
+        )
+        if config.status != PlatformIntegrationConfig.Status.DISABLED:
+            raise StateConflict("仅已禁用的接入配置可以删除。")
+        SyncJob.objects.filter(
+            tenant=request.user.tenant,
+            integration_config=config,
+        ).update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
+        _write_audit_log(
+            config,
+            request.user,
+            "delete",
+            detail={"status": config.status, "soft_deleted": True},
+        )
+        config.deleted_at = timezone.now()
+        config.save(update_fields=["deleted_at", "updated_at"])
+    return success_response({"id": config.id, "deleted": True})
 
 
 @api_view(["POST"])
