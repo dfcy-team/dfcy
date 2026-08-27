@@ -1,6 +1,6 @@
 """Marketplace OAuth provider abstraction.
 
-Providers isolate Shopee / TikTok Shop differences (URL parameters, callback
+Providers isolate Lazada / Shopee / TikTok Shop differences (URL parameters, callback
 signatures, error shapes) from views. Only synthetic providers are registered:
 they simulate platform behaviour and only emit ``synthetic-*`` custody
 references. Real HTTP providers require a dedicated approval and are out of
@@ -22,6 +22,7 @@ from .oauth_errors import (
 
 
 SYNTHETIC_OAUTH_BASE_URLS = {
+    "lazada": "https://synthetic-lazada-oauth.invalid/oauth/authorize",
     "shopee": "https://synthetic-shopee-oauth.invalid/v2/authorize",
     "tiktok": "https://synthetic-tiktok-oauth.invalid/auth/authorize",
 }
@@ -89,6 +90,20 @@ class SyntheticMarketplaceOAuthProvider(MarketplaceOAuthProvider):
         }
         query = "&".join(f"{key}={params[key]}" for key in sorted(params))
         return {"url": f"{SYNTHETIC_OAUTH_BASE_URLS[self.platform]}?{query}", "params": params}
+
+    def build_simulation_callback(self, context):
+        params = {
+            self.code_param: f"synthetic-{self.platform}-code",
+            "state": context["state"],
+            "shop_id": _normalize_platform_id(context["store_code"]),
+        }
+        if self.platform == "tiktok":
+            params["shop_cipher"] = f"synthetic-{params['shop_id']}-cipher"
+        params[self.signature_param] = synthetic_callback_signature(
+            self.platform,
+            **self._signature_fields(params),
+        )
+        return params
 
     def _required_callback_fields(self):
         return (self.code_param, "state", "shop_id")
@@ -183,6 +198,14 @@ class SyntheticShopeeOAuthProvider(SyntheticMarketplaceOAuthProvider):
         return {"partner_id": "synthetic-shopee-partner"}
 
 
+class SyntheticLazadaOAuthProvider(SyntheticMarketplaceOAuthProvider):
+    platform = "lazada"
+    code_param = "code"
+
+    def _authorization_params(self, context):
+        return {"client_id": "synthetic-lazada-app-key", "response_type": "code"}
+
+
 class SyntheticTikTokOAuthProvider(SyntheticMarketplaceOAuthProvider):
     platform = "tiktok"
     code_param = "auth_code"
@@ -206,6 +229,7 @@ class SyntheticTikTokOAuthProvider(SyntheticMarketplaceOAuthProvider):
 
 
 _OAUTH_PROVIDERS = {
+    SyntheticLazadaOAuthProvider.platform: SyntheticLazadaOAuthProvider(),
     SyntheticShopeeOAuthProvider.platform: SyntheticShopeeOAuthProvider(),
     SyntheticTikTokOAuthProvider.platform: SyntheticTikTokOAuthProvider(),
 }

@@ -2,11 +2,22 @@
 
 from django.core.exceptions import ValidationError
 
+from .platform_capabilities import CAPABILITY_REGISTRY, capability_payload, get_platform_capability
+
 
 REGIONS = [
     {"value": "PH", "label": "Philippines (PH)"},
     {"value": "TH", "label": "Thailand (TH)"},
     {"value": "MY", "label": "Malaysia (MY)"},
+]
+
+LAZADA_REGIONS = [
+    {"value": "SG", "label": "Singapore (SG)"},
+    {"value": "MY", "label": "Malaysia (MY)"},
+    {"value": "TH", "label": "Thailand (TH)"},
+    {"value": "VN", "label": "Vietnam (VN)"},
+    {"value": "ID", "label": "Indonesia (ID)"},
+    {"value": "PH", "label": "Philippines (PH)"},
 ]
 
 COMMON_SECRET_FIELDS = [
@@ -40,6 +51,30 @@ COMMON_SECRET_FIELDS = [
 ]
 
 SCHEMAS = {
+    "lazada": {
+        "label": "Lazada",
+        "contract_versions": ["open-platform-v1"],
+        "regions": LAZADA_REGIONS,
+        "fields": [
+            {
+                "key": "app_key",
+                "label": "App Key",
+                "type": "text",
+                "required": True,
+                "secret": False,
+                "help_text": "Public identifier from the approved Lazada Open Platform application.",
+            },
+            {
+                "key": "account_reference",
+                "label": "Account / Organization reference",
+                "type": "text",
+                "required": False,
+                "secret": False,
+            },
+        ],
+        "scope_options": [],
+        "secret_fields": COMMON_SECRET_FIELDS,
+    },
     "shopee": {
         "label": "Shopee",
         "contract_versions": ["v2"],
@@ -99,6 +134,40 @@ SCHEMAS = {
 }
 
 
+API_TYPE_OPTIONS = {
+    "marketplace": {"value": "marketplace", "label": "商城 API"},
+    "advertising": {"value": "advertising", "label": "广告 API"},
+    "inventory": {"value": "inventory", "label": "库存 API"},
+}
+
+def integration_platform_key(*, platform_type="", code="", name=""):
+    """Map a platform master row to the integration contract without using its display name in the UI."""
+    platform_type = str(platform_type or "").strip().lower()
+    if platform_type in CAPABILITY_REGISTRY:
+        return platform_type
+    aliases = {
+        "lazada": "lazada",
+        "shopee": "shopee",
+        "tiktok": "tiktok",
+        "tiktokshop": "tiktok",
+        "jifengwms": "jifeng_wms",
+        "极风wms": "jifeng_wms",
+    }
+    for candidate in (code, name):
+        normalized = "".join(character for character in str(candidate or "").strip().lower() if character.isalnum())
+        if normalized in aliases:
+            return aliases[normalized]
+    return ""
+
+
+def platform_api_type_options(platform):
+    try:
+        capability = get_platform_capability(platform)
+    except ValidationError:
+        return []
+    return [API_TYPE_OPTIONS[value].copy() for value in capability.api_types]
+
+
 def get_platform_schema(platform, *, environment=None, region=None):
     platform = str(platform or "").lower()
     if platform not in SCHEMAS:
@@ -106,7 +175,8 @@ def get_platform_schema(platform, *, environment=None, region=None):
     environment = str(environment or "sandbox").lower()
     if environment not in {"mock", "sandbox", "pilot", "production"}:
         raise ValidationError("Unsupported platform environment.")
-    if region and str(region).upper() not in {item["value"] for item in REGIONS}:
+    regions = SCHEMAS[platform].get("regions", REGIONS)
+    if region and str(region).upper() not in {item["value"] for item in regions}:
         raise ValidationError("Unsupported platform region.")
     return {
         "schema_version": 1,
@@ -118,8 +188,9 @@ def get_platform_schema(platform, *, environment=None, region=None):
             {"value": "pilot", "label": "Pilot"},
             {"value": "production", "label": "Production (approval required)"},
         ],
-        "regions": REGIONS,
+        "regions": regions,
         "production_write_enabled": False,
+        "capabilities": capability_payload(platform),
         **SCHEMAS[platform],
         "public_fields": SCHEMAS[platform]["fields"],
     }

@@ -65,7 +65,12 @@ def start_marketplace_oauth(*, actor, platform, integration_config, store, regio
         redirect_uri=redirect_uri,
         scopes=scopes,
     )
-    url_payload = provider.build_authorization_url({"state": state_plaintext, "redirect_uri": session.redirect_uri})
+    provider_context = {
+        "state": state_plaintext,
+        "redirect_uri": session.redirect_uri,
+        "store_code": store.code,
+    }
+    url_payload = provider.build_authorization_url(provider_context)
     result = {
         "platform": platform,
         "authorization_url": url_payload["url"],
@@ -75,6 +80,7 @@ def start_marketplace_oauth(*, actor, platform, integration_config, store, regio
 
     if not live_network_mode_enabled():
         result["state"] = state_plaintext
+        result["simulation_callback"] = provider.build_simulation_callback(provider_context)
     return result
 
 

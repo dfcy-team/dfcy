@@ -35,7 +35,7 @@ INTEGRATION_SCOPE_KEYS = {
     "resource_types",
     "store_ids",
 }
-MARKETPLACE_PLATFORMS = {"shopee", "tiktok"}
+MARKETPLACE_PLATFORMS = {"lazada", "shopee", "tiktok"}
 
 
 def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None):

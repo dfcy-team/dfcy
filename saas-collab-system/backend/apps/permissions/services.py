@@ -15,6 +15,7 @@ INTEGRATION_PERMISSION_CODES = (
     "integrations.view",
     "integrations.rotate",
     "integrations.run",
+    "integrations.run_live_readonly",
     "integrations.store.view",
     "integrations.store.authorize",
     "integrations.store.revoke",

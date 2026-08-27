@@ -40,12 +40,32 @@ LIVE_PLATFORM_MAX_RETRIES = int(os.getenv("LIVE_PLATFORM_MAX_RETRIES", "2"))
 LIVE_PLATFORM_BACKOFF_BASE = float(os.getenv("LIVE_PLATFORM_BACKOFF_BASE", "0.5"))
 LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "8"))
 LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
+LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
 
-LIVE_CUSTODY_BACKEND = os.getenv("LIVE_CUSTODY_BACKEND", "refuse")
-LIVE_CUSTODY_SERVICE_URL = os.getenv("LIVE_CUSTODY_SERVICE_URL", "")
-LIVE_CUSTODY_SERVICE_HOST = os.getenv("LIVE_CUSTODY_SERVICE_HOST", "")
-CREDENTIAL_CUSTODY_PATH = os.getenv("CREDENTIAL_CUSTODY_PATH", "")
+# File custody is a local synthetic/test aid only.  A production process must
+# explicitly use an independent HTTP custody service; the safe default is to
+# refuse all secret operations.
+LIVE_CUSTODY_BACKEND = os.getenv("LIVE_CUSTODY_BACKEND", "refuse").strip().lower()
+LIVE_CUSTODY_SERVICE_URL = os.getenv("LIVE_CUSTODY_SERVICE_URL", "").strip()
+LIVE_CUSTODY_SERVICE_HOST = os.getenv("LIVE_CUSTODY_SERVICE_HOST", "").strip()
+LIVE_CUSTODY_SERVICE_TOKEN = os.getenv(
+    "LIVE_CUSTODY_SERVICE_TOKEN",
+    os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN", ""),
+).strip()
+CREDENTIAL_CUSTODY_PATH = os.getenv(
+    "CREDENTIAL_CUSTODY_PATH",
+    "/var/lib/saas-collab/credentials" if DEBUG else "",
+)
 LIVE_OAUTH_REDIRECT_ALLOWLIST = env_list("LIVE_OAUTH_REDIRECT_ALLOWLIST")
+
+LIVE_LAZADA_APP_KEY = os.getenv("LIVE_LAZADA_APP_KEY", "")
+LIVE_LAZADA_APP_SECRET_REFERENCE = os.getenv("LIVE_LAZADA_APP_SECRET_REFERENCE", "")
+LIVE_LAZADA_REDIRECT_URI = os.getenv("LIVE_LAZADA_REDIRECT_URI", "")
+LIVE_LAZADA_CONTRACT_APPROVED = env_bool("LIVE_LAZADA_CONTRACT_APPROVED", False)
+LIVE_LAZADA_AUTH_URL = os.getenv("LIVE_LAZADA_AUTH_URL", "https://auth.lazada.com/oauth/authorize")
+LIVE_LAZADA_API_HOST = os.getenv("LIVE_LAZADA_API_HOST", "https://api.lazada.com")
+LIVE_LAZADA_TOKEN_PATH = os.getenv("LIVE_LAZADA_TOKEN_PATH", "/rest/auth/token/create")
+LIVE_LAZADA_REFRESH_PATH = os.getenv("LIVE_LAZADA_REFRESH_PATH", "/rest/auth/token/refresh")
 
 LIVE_SHOPEE_PARTNER_ID = os.getenv("LIVE_SHOPEE_PARTNER_ID", "")
 LIVE_SHOPEE_APP_SECRET_REFERENCE = os.getenv("LIVE_SHOPEE_APP_SECRET_REFERENCE", "")
@@ -60,6 +80,10 @@ LIVE_SHOPEE_SIGN_SCHEME = os.getenv("LIVE_SHOPEE_SIGN_SCHEME", "v2")
 LIVE_SHOPEE_DEFAULT_REGION = os.getenv("LIVE_SHOPEE_DEFAULT_REGION", "")
 LIVE_SHOPEE_DEFAULT_HOST = os.getenv("LIVE_SHOPEE_DEFAULT_HOST", "https://partner.shopeemobile.com")
 LIVE_SHOPEE_API_HOSTS = {}
+LIVE_SHOPEE_ORDER_LIST_PATH = os.getenv("LIVE_SHOPEE_ORDER_LIST_PATH", "/api/v2/order/get_order_list")
+LIVE_SHOPEE_ORDER_DETAIL_PATH = os.getenv("LIVE_SHOPEE_ORDER_DETAIL_PATH", "/api/v2/order/get_order_detail")
+LIVE_SHOPEE_RETURN_LIST_PATH = os.getenv("LIVE_SHOPEE_RETURN_LIST_PATH", "/api/v2/returns/get_return_list")
+LIVE_SHOPEE_RETURN_DETAIL_PATH = os.getenv("LIVE_SHOPEE_RETURN_DETAIL_PATH", "/api/v2/returns/get_return_detail")
 
 LIVE_TIKTOK_APP_KEY = os.getenv("LIVE_TIKTOK_APP_KEY", "")
 LIVE_TIKTOK_APP_SECRET_REFERENCE = os.getenv("LIVE_TIKTOK_APP_SECRET_REFERENCE", "")
@@ -78,6 +102,11 @@ LIVE_TIKTOK_REVOKE_PATH = os.getenv("LIVE_TIKTOK_REVOKE_PATH", "REPLACE_ME_CONFI
 LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH = os.getenv("LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH", "/authorization/202309/shops")
 LIVE_TIKTOK_METADATA_PATH = os.getenv("LIVE_TIKTOK_METADATA_PATH", "/seller/202309/permissions")
 LIVE_TIKTOK_DEFAULT_SCOPE = os.getenv("LIVE_TIKTOK_DEFAULT_SCOPE", "")
+LIVE_TIKTOK_ORDER_LIST_PATH = os.getenv("LIVE_TIKTOK_ORDER_LIST_PATH", "/order/202309/orders/search")
+LIVE_TIKTOK_ORDER_DETAIL_PATH = os.getenv("LIVE_TIKTOK_ORDER_DETAIL_PATH", "/order/202309/orders")
+LIVE_TIKTOK_RETURN_LIST_PATH = os.getenv("LIVE_TIKTOK_RETURN_LIST_PATH", "/return_refund/202602/returns/search")
+
+LIVE_JIFENG_WMS_INVENTORY_PATH = os.getenv("LIVE_JIFENG_WMS_INVENTORY_PATH", "/api/inventory/queryInventory")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -177,6 +206,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+REPORT_EXPORT_ROOT = Path(os.getenv("REPORT_EXPORT_ROOT", MEDIA_ROOT / "report_exports"))
+REPORT_EXPORT_TTL_SECONDS = max(300, min(int(os.getenv("REPORT_EXPORT_TTL_SECONDS", "86400")), 604800))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.CustomUser"
 
@@ -205,6 +236,13 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-due-readonly-sync-jobs": {
+        "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
+        "schedule": 60.0,
+        "args": (20,),
+    },
+}
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.

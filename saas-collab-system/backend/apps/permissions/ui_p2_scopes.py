@@ -8,6 +8,7 @@ from .services import get_permission_data_scopes
 MASTER_DATA_SCOPE_KEYS = {
     "platforms": "platform_ids",
     "stores": "store_ids",
+    "sites": "site_ids",
     "warehouses": "warehouse_ids",
     "suppliers": "supplier_ids",
 }
