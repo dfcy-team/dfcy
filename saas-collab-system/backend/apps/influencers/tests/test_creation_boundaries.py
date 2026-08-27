@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.influencers.models import (
+    BdSampleAttributionSnapshot,
     Influencer,
     InfluencerRestriction,
     OutreachTarget,
@@ -133,12 +134,69 @@ def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_
     assert fulfillment.influencer_id == influencer.pk
     assert fulfillment.outreach_target_id is None
     assert OutreachTarget.objects.filter(task=task).count() == target_count
+    snapshot = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
+    assert snapshot.creator_username.startswith("__dfcy_missing_creator_handle__:")
 
     missing_influencer = SampleFulfillmentSerializer(
         data={"fulfillment_no": "MISSING-INFLUENCER", "outreach_task": task.pk}
     )
     assert missing_influencer.is_valid() is False
     assert "influencer" in missing_influencer.errors
+
+
+def test_sample_edit_can_transition_status_atomically():
+    tenant, user, store, influencer = _records("sample-edit-status")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-edit-status-key",
+        validated_data={"influencer": influencer, "store": store},
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {"notes": "edited", "status": SampleFulfillment.Status.PROCESSING},
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert response.status_code == 200, response.data
+    fulfillment.refresh_from_db()
+    assert fulfillment.notes == "edited"
+    assert fulfillment.status == SampleFulfillment.Status.PROCESSING
+    assert fulfillment.sample_sent_at is not None
+
+
+def test_invalid_status_transition_rolls_back_fact_edits():
+    tenant, user, store, influencer = _records("sample-edit-status-rollback")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-edit-status-rollback-key",
+        validated_data={"influencer": influencer, "store": store},
+        item_payloads=[],
+    )
+    original_version = fulfillment.version
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {"notes": "must roll back", "status": SampleFulfillment.Status.COMPLETED},
+        format="json",
+        HTTP_IF_MATCH=f'"{original_version}"',
+    )
+
+    assert response.status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.notes == ""
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert fulfillment.version == original_version
 
 
 def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name():

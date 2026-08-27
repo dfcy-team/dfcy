@@ -71,7 +71,7 @@
         </el-table-column>
         <el-table-column label="采购成本" min-width="125">
           <template #default="{ row }">
-            <b>{{ displayAmount(row.calculated_cost, row) }}</b>
+            <b>{{ displayAmount(row.calculated_cost) }}</b>
             <small>{{ costMatchLabel(row) }}</small>
           </template>
         </el-table-column>
@@ -165,7 +165,10 @@
             <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="请输入产品 ID" />
           </el-form-item>
           <el-form-item label="状态">
-            <el-input :model-value="editingSample ? statusLabel(FULFILLMENT_STATUS_LABELS, editingSample.status) : '待发样'" readonly />
+            <el-select v-if="editingSample" v-model="form.status" placeholder="请选择状态">
+              <el-option v-for="status in editableStatusOptions" :key="status" :label="statusLabel(FULFILLMENT_STATUS_LABELS, status)" :value="status" />
+            </el-select>
+            <el-input v-else model-value="待发样" readonly />
           </el-form-item>
           <el-form-item label="快捷备注标签">
             <el-select v-model="form.quick_tags" multiple filterable allow-create default-first-option placeholder="输入后回车添加标签">
@@ -206,6 +209,8 @@
     <el-drawer v-model="detailVisible" direction="rtl" size="560px" :with-header="false">
       <div class="detail-drawer" v-if="detailSample">
         <div class="drawer-heading"><div><span>送样履约详情</span><h2>{{ displayValue(detailSample.fulfillment_no) }}</h2><small>{{ displayValue(detailSample.outreach_task_name || detailSample.outreach_task_no) }}</small></div><el-button text @click="detailVisible = false">×</el-button></div>
+        <el-alert v-if="detailError" class="detail-load-alert" type="warning" :closable="false" :title="detailError" />
+        <el-skeleton v-if="detailLoading" :rows="4" animated />
         <div class="drawer-actions">
           <el-button :disabled="!canManage || detailSample.is_deleted" @click="openEdit(detailSample)">编辑</el-button>
           <el-button v-if="!detailSample.is_deleted" type="danger" plain :disabled="!canManage" @click="removeSample(detailSample)">删除</el-button>
@@ -215,6 +220,8 @@
         <section class="detail-section"><h3>送样事实</h3><div class="detail-facts">
           <div><span>达人</span><b>{{ displayValue(detailSample.influencer_name || detailSample.influencer) }}</b></div>
           <div><span>送样负责人</span><b>{{ displayValue(detailSample.owner_name || detailSample.owner) }}</b></div>
+          <div><span>店铺</span><b>{{ displayValue(detailSample.store_name || detailSample.store) }}</b></div>
+          <div><span>产品 ID</span><b>{{ displayValue(detailSample.external_product_id) }}</b></div>
           <div><span>样品订单</span><b>{{ displayValue(detailSample.sample_order_no) }}</b></div>
           <div><span>建联类型</span><b>{{ statusLabel(FULFILLMENT_LINK_TYPE_LABELS, detailSample.link_type) }}</b></div>
           <div><span>送样时间</span><b>{{ displayValue(detailSample.sample_sent_at) }}</b></div>
@@ -222,8 +229,9 @@
           <div><span>视频截止</span><b>{{ displayValue(detailSample.video_deadline_at) }}</b></div>
           <div><span>视频匹配</span><b>{{ detailSample.video_match_count || 0 }} 条</b></div>
         </div><div class="tag-row"><el-tag v-for="tag in detailSample.quick_tags || []" :key="tag" size="small">{{ tag }}</el-tag></div><p class="detail-note">{{ displayValue(detailSample.notes) }}</p></section>
-        <section class="detail-section"><h3>价格与成本</h3><div class="detail-facts">
-          <div><span>采购成本</span><b>{{ displayAmount(detailSample.calculated_cost, detailSample) }}</b></div>
+        <section class="detail-section"><h3>SKU 明细</h3><div v-if="detailSample.items?.length" class="sku-detail-list"><p v-for="item in detailSample.items" :key="item.id || `${item.site_code}-${item.requested_sku}`">{{ displayValue(item.requested_sku) }} × {{ displayValue(item.quantity) }}</p></div><div v-else class="empty-state">暂无 SKU 明细</div></section>
+        <section class="detail-section"><h3>采购成本</h3><div class="detail-facts">
+          <div><span>采购成本</span><b>{{ displayAmount(detailSample.calculated_cost) }}</b></div>
           <div><span>成本匹配</span><b>{{ costMatchLabel(detailSample) }}</b></div>
         </div></section>
         <section class="detail-section"><h3>视频匹配结果</h3><div v-if="detailSample.video_matches?.length" class="video-list"><p v-for="video in detailSample.video_matches" :key="video.id">{{ displayValue(video.title || video.external_content_id) }} · {{ displayValue(video.published_at) }}</p></div><div v-else class="empty-state">暂无已发布匹配视频</div></section>
@@ -250,6 +258,7 @@ import {
   formatInfluencerError,
   FULFILLMENT_LINK_TYPE_LABELS,
   FULFILLMENT_STATUS_LABELS,
+  FULFILLMENT_STATUS_TRANSITIONS,
   restoreSampleFulfillment,
   resolveOrCreateInfluencer,
   statusLabel,
@@ -273,11 +282,13 @@ const influencerLoading = ref(false);
 const visible = ref(false);
 const detailVisible = ref(false);
 const detailSample = ref(null);
+const detailLoading = ref(false);
+const detailError = ref('');
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
 const filters = reactive({ search: '', status: '', store: null, includeDeleted: false });
-const form = reactive({ outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
+const form = reactive({ outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [], status: 'pending' });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '直播达人', '已完成', '已拉黑']);
 const quickTagOptions = computed(() => [...new Set([...QUICK_TAG_PRESETS, ...form.quick_tags])]);
 const selectableLinkTypes = computed(() => inheritedTask.value
@@ -294,6 +305,10 @@ const rowStores = computed(() => [...new Map(rows.value.filter((row) => row.stor
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
+const editableStatusOptions = computed(() => {
+  const current = editingSample.value?.status || 'pending';
+  return [...new Set([current, ...(FULFILLMENT_STATUS_TRANSITIONS[current] || [])])];
+});
 let influencerResolveSequence = 0;
 let sampleSubmitSequence = 0;
 
@@ -446,7 +461,8 @@ async function openCreate(selection = {}) {
     sample_order_no: '',
     notes: '',
     link_type: 'YYJL',
-    quick_tags: []
+    quick_tags: [],
+    status: 'pending'
   });
   inheritedTask.value = null;
   items.value = [newItem()];
@@ -557,10 +573,9 @@ function outreachDate(row) {
   return row.outreach_at || row.first_linked_at || '—';
 }
 
-function displayAmount(value, row) {
+function displayAmount(value) {
   if (value === null || value === undefined || value === '') return '—';
-  const currency = row.items?.find((item) => item.currency)?.currency;
-  return currency ? `${value} ${currency}` : String(value);
+  return String(value);
 }
 
 function costMatchLabel(row) {
@@ -577,13 +592,28 @@ function matchTagType(status) {
 }
 
 async function openDetail(row) {
-  const response = await fetchSampleFulfillment(row.id, { include_deleted: row.is_deleted ? 'true' : undefined });
-  const detail = response.success ? detailData(response.data) : {};
-  // Mixed frontend/backend patch levels may return a partial detail payload.
-  // Preserve the already loaded list facts instead of replacing them with blanks.
-  detailSample.value = { ...row, ...detail };
+  detailSample.value = { ...row };
   detailVisible.value = true;
-  if (!response.success) ElMessage.error(formatInfluencerError(response, '送样详情加载失败'));
+  detailLoading.value = true;
+  detailError.value = '';
+  const response = await fetchSampleFulfillment(row.id, { include_deleted: row.is_deleted ? 'true' : undefined });
+  detailLoading.value = false;
+  const detail = response.success ? detailData(response.data) : {};
+  if (response.success) {
+    detailSample.value = mergeDetailFacts(row, detail);
+    return;
+  }
+  detailError.value = formatInfluencerError(response, '送样详情加载失败，当前展示列表已有数据');
+  ElMessage.error(detailError.value);
+}
+
+function mergeDetailFacts(base = {}, detail = {}) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(detail || {})) {
+    if (value === undefined) continue;
+    merged[key] = value;
+  }
+  return merged;
 }
 
 async function openEdit(row) {
@@ -602,7 +632,8 @@ async function openEdit(row) {
     sample_order_no: row.sample_order_no || '',
     notes: row.notes || '',
     link_type: row.link_type || 'DRJL',
-    quick_tags: [...(row.quick_tags || [])]
+    quick_tags: [...(row.quick_tags || [])],
+    status: row.status || 'pending'
   });
   influencerOptions.value = dedupeInfluencerCandidates([{
     id: row.influencer,
@@ -681,6 +712,7 @@ async function submitEdit() {
     notes: form.notes,
     link_type: form.link_type,
     quick_tags: form.quick_tags,
+    status: form.status,
     items: items.value.map((item) => ({
       site_code: item.site_code,
       requested_sku: item.requested_sku?.trim() || null,
@@ -745,6 +777,7 @@ onMounted(async () => {
 .drawer-heading { padding-bottom: 16px; border-bottom: 1px solid #eef0f3; }
 .drawer-heading span { color: #167d68; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 .drawer-heading h2 { margin: 5px 0; color: #1f2937; font-size: 22px; }
+.detail-load-alert { margin: 14px 0; }
 .drawer-actions { align-items: center; flex-wrap: wrap; padding: 14px 0; }
 .detail-section { padding: 16px 0; border-top: 1px solid #eef0f3; }
 .detail-section h3 { margin: 0 0 14px; color: #1f2937; font-size: 16px; }
@@ -754,6 +787,7 @@ onMounted(async () => {
 .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .detail-note { margin: 14px 0 0; color: #4b5563; white-space: pre-wrap; }
 .video-list p { margin: 8px 0; color: #4b5563; font-size: 13px; }
+.sku-detail-list p { margin: 6px 0; color: #374151; }
 @media (max-width: 760px) {
   .sample-page .page-hero { align-items: stretch; flex-direction: column; gap: 16px; }
   .metrics { grid-template-columns: 1fr 1fr; }
