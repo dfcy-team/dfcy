@@ -284,7 +284,7 @@ jobs:
       VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
     steps:
       - name: Check fixed VM entrypoint without opening a shell
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$') { throw 'Production VM connection variables are invalid.' }
@@ -318,7 +318,7 @@ jobs:
       MANIFEST_SHA: ${{ needs.build.outputs.manifest_sha }}
     steps:
       - name: Invoke the fixed forced-command entrypoint
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$') { throw 'Production VM connection variables are invalid.' }
@@ -349,7 +349,7 @@ jobs:
       ROLLBACK_REASON: ${{ needs.validate.outputs.rollback_reason }}
     steps:
       - name: Invoke the fixed rollback entrypoint
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'Production VM connection variables are invalid.' }
