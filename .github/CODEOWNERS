@@ -1,0 +1,5 @@
+# Production release control is owner-managed. This does not add approval to
+# normal releases; it only prevents application developers from rewriting the
+# workflow or the VM control plane that holds the release boundary.
+/.github/workflows/developer-a-production-release.yml @2422808586-coder
+/saas-collab-system/deploy/production-control/ @2422808586-coder

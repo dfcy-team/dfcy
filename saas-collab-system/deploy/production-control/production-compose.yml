@@ -1,0 +1,117 @@
+# Canonical single-application production stack.
+#
+# A host that already uses a reviewed Compose overlay chain may set
+# PRODUCTION_COMPOSE_FILES in its root-owned environment file instead of using
+# this file. The release scripts always pass immutable image references through
+# the process environment; this file never builds images on the target host.
+
+services:
+  redis:
+    image: ${PRODUCTION_REDIS_IMAGE:?PRODUCTION_REDIS_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - production-redis-data:/data
+    networks:
+      - production-internal
+
+  migrate:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: python manage.py migrate --noinput
+    restart: "no"
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  backend:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: >-
+      gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-60}
+      --access-logfile - --error-logfile -
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PRODUCTION_APP_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request; r=urllib.request.Request(
+          'http://127.0.0.1:8000/api/internal/health/',
+          headers={'Host':'localhost'}); raise SystemExit(
+          0 if urllib.request.urlopen(r, timeout=5).status == 200 else 1)"
+      interval: 15s
+      timeout: 8s
+      retries: 12
+      start_period: 30s
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  celery:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: celery -A config worker --loglevel=info
+    restart: unless-stopped
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: celery -A config beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: ${PRODUCTION_FRONTEND_IMAGE:?PRODUCTION_FRONTEND_IMAGE must be an immutable digest}
+    restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_FILTER: SANDBOX_HTTPS_PORT
+      SANDBOX_HTTPS_PORT: ${PRODUCTION_HTTPS_PORT:-8443}
+    ports:
+      - "${PRODUCTION_HTTP_PORT:-8080}:80"
+      - "${PRODUCTION_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ${PRODUCTION_TLS_CERT_PATH:?PRODUCTION_TLS_CERT_PATH is required}:/etc/nginx/tls/tls.crt:ro
+      - ${PRODUCTION_TLS_KEY_PATH:?PRODUCTION_TLS_KEY_PATH is required}:/etc/nginx/tls/tls.key:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - production-internal
+
+networks:
+  production-internal:
+    name: saas-production-network
+
+volumes:
+  production-redis-data:
+    name: saas-production-redis-data
