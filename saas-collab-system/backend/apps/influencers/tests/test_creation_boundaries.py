@@ -151,7 +151,13 @@ def test_sample_edit_can_transition_status_atomically():
     fulfillment, _ = create_sample_fulfillment(
         user=user,
         request_key="sample-edit-status-key",
-        validated_data={"influencer": influencer, "store": store},
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "product_name_snapshot": "Status transition sample",
+            "external_product_id": "STATUS-PRODUCT",
+        },
         item_payloads=[],
     )
     client = APIClient()
@@ -178,7 +184,13 @@ def test_invalid_status_transition_rolls_back_fact_edits():
     fulfillment, _ = create_sample_fulfillment(
         user=user,
         request_key="sample-edit-status-rollback-key",
-        validated_data={"influencer": influencer, "store": store},
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "product_name_snapshot": "Rollback sample",
+            "external_product_id": "ROLLBACK-PRODUCT",
+        },
         item_payloads=[],
     )
     original_version = fulfillment.version
@@ -304,18 +316,18 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     _grant_all_scope(role, "influencers.fulfillment.manage")
     influencer.handle = "@duplicate.creator"
     influencer.save(update_fields=["handle"])
-    InfluencerRestriction.objects.create(
-        tenant=tenant,
-        influencer=influencer,
-        is_blacklisted=True,
-        created_by=user,
-    )
     task = _task(
         user,
         store,
         influencer,
         notes="must-not-leak",
         external_id="external-secret",
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=influencer,
+        is_blacklisted=True,
+        created_by=user,
     )
 
     other_tenant, other_user, other_store, other_influencer = _records("other-options")

@@ -234,6 +234,8 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
         "code": "creator-active",
         "name": "Active Creator",
         "platform": "tiktok",
+        "handle": "active.creator",
+        "is_blacklisted": False,
     }]
 
     invalid_priority = client.post("/api/internal/influencers/outreach-tasks/", {
