@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 import hashlib
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -13,6 +14,10 @@ _authorization_service_write = ContextVar("authorization_service_write", default
 _oauth_state_service_write = ContextVar("oauth_state_service_write", default=False)
 _store_mapping_service_write = ContextVar("store_mapping_service_write", default=False)
 _product_mapping_service_write = ContextVar("product_mapping_service_write", default=False)
+
+
+def raw_envelope_ref():
+    return f"raw://sync/{uuid.uuid4().hex}"
 
 
 @contextmanager
@@ -843,6 +848,66 @@ class MarketplaceProductMapping(models.Model):
         raise ValidationError("Product mappings cannot be deleted; deactivate them instead.")
 
 
+class WarehouseAuthorization(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        REVOKED = "revoked", "Revoked"
+        ERROR = "error", "Error"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="warehouse_authorizations")
+    integration_config = models.ForeignKey(
+        PlatformIntegrationConfig,
+        on_delete=models.PROTECT,
+        related_name="warehouse_authorizations",
+    )
+    warehouse = models.ForeignKey(
+        "masterdata.WarehouseMaster",
+        on_delete=models.PROTECT,
+        related_name="api_authorizations",
+    )
+    provider = models.CharField(max_length=32)
+    credential_id = models.CharField(max_length=255)
+    token_id = models.CharField(max_length=255)
+    credential_mask = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
+    authorized_at = models.DateTimeField(null=True, blank=True)
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    last_error_code = models.CharField(max_length=128, blank=True)
+    active_warehouse_binding_key = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_warehouse_authorizations",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_warehouse_authorizations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "integrations_warehouseauthorization"
+        ordering = ["tenant_id", "warehouse_id", "id"]
+        indexes = [
+            models.Index(fields=["tenant", "status"], name="idx_wh_auth_tenant_status"),
+            models.Index(fields=["tenant", "warehouse"], name="idx_wh_auth_tenant_wh"),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.integration_config_id and self.integration_config.tenant_id != self.tenant_id:
+            errors["integration_config"] = "Integration config tenant must match warehouse authorization tenant."
+        if self.warehouse_id and self.warehouse.tenant_id != self.tenant_id:
+            errors["warehouse"] = "Warehouse tenant must match authorization tenant."
+        if errors:
+            raise ValidationError(errors)
+
+
 class SyncJob(models.Model):
     class ResourceType(models.TextChoices):
         SALES_ORDER = "sales_order", "Sales order"
@@ -856,7 +921,10 @@ class SyncJob(models.Model):
 
     class ScheduleType(models.TextChoices):
         MANUAL = "manual", "Manual"
+        HOURLY = "hourly", "Hourly"
         INTERVAL = "interval", "Interval"
+        DAILY = "daily", "Daily"
+        WEEKLY = "weekly", "Weekly"
         CRON = "cron", "Cron"
 
     class Status(models.TextChoices):
@@ -871,8 +939,23 @@ class SyncJob(models.Model):
         on_delete=models.PROTECT,
         related_name="sync_jobs",
     )
+    store_authorization = models.ForeignKey(
+        MarketplaceStoreAuthorization,
+        on_delete=models.PROTECT,
+        related_name="sync_jobs",
+        null=True,
+        blank=True,
+    )
+    warehouse_authorization = models.ForeignKey(
+        WarehouseAuthorization,
+        on_delete=models.PROTECT,
+        related_name="sync_jobs",
+        null=True,
+        blank=True,
+    )
     resource_type = models.CharField(max_length=40, choices=ResourceType.choices)
     schedule_type = models.CharField(max_length=20, choices=ScheduleType.choices, default=ScheduleType.MANUAL)
+    sync_scope = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.IDLE)
     is_enabled = models.BooleanField(default=True)
     max_retry_count = models.PositiveIntegerField(default=3)
@@ -888,6 +971,23 @@ class SyncJob(models.Model):
 
     class Meta:
         ordering = ["tenant_id", "resource_type", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(store_authorization__isnull=True)
+                    | models.Q(warehouse_authorization__isnull=True)
+                ),
+                name="chk_sync_job_single_subject",
+            ),
+            models.UniqueConstraint(
+                fields=["tenant", "store_authorization", "resource_type"],
+                name="uniq_sync_job_store_resource",
+            ),
+            models.UniqueConstraint(
+                fields=["tenant", "warehouse_authorization", "resource_type"],
+                name="uniq_sync_job_warehouse_resource",
+            ),
+        ]
         indexes = [
             models.Index(fields=["tenant", "status"], name="idx_sync_job_tenant_status"),
             models.Index(fields=["tenant", "resource_type"], name="idx_sync_job_tenant_resource"),
@@ -895,6 +995,23 @@ class SyncJob(models.Model):
 
     def __str__(self):
         return f"{self.integration_config_id}:{self.resource_type}:{self.status}"
+
+    def clean(self):
+        errors = {}
+        if self.integration_config_id and self.integration_config.tenant_id != self.tenant_id:
+            errors["integration_config"] = "Sync job and integration config tenant must match."
+        if self.store_authorization_id and self.warehouse_authorization_id:
+            errors["store_authorization"] = "Sync job can bind either a store or warehouse authorization, not both."
+        if self.store_authorization_id:
+            authorization = self.store_authorization
+            if authorization.tenant_id != self.tenant_id or authorization.integration_config_id != self.integration_config_id:
+                errors["store_authorization"] = "Store authorization must match the sync job tenant and config."
+        if self.warehouse_authorization_id:
+            authorization = self.warehouse_authorization
+            if authorization.tenant_id != self.tenant_id or authorization.integration_config_id != self.integration_config_id:
+                errors["warehouse_authorization"] = "Warehouse authorization must match the sync job tenant and config."
+        if errors:
+            raise ValidationError(errors)
 
 
 class SyncRun(models.Model):
@@ -936,6 +1053,113 @@ class SyncRun(models.Model):
 
     def __str__(self):
         return f"{self.run_id}:{self.status}"
+
+
+class SyncCheckpoint(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_checkpoints")
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="checkpoints")
+    cursor_json = models.JSONField(default=dict, blank=True)
+    watermark_utc = models.DateTimeField(null=True, blank=True)
+    last_success_run = models.ForeignKey(
+        SyncRun,
+        on_delete=models.SET_NULL,
+        related_name="advanced_checkpoints",
+        null=True,
+        blank=True,
+    )
+    version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "sync_job"], name="uniq_sync_checkpoint_job"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "watermark_utc"], name="idx_sync_checkpoint_watermark"),
+            models.Index(fields=["last_success_run"], name="idx_sync_checkpoint_last_run"),
+        ]
+
+    def clean(self):
+        if self.sync_job_id and self.sync_job.tenant_id != self.tenant_id:
+            raise ValidationError({"sync_job": "Checkpoint and sync job tenant must match."})
+        if self.last_success_run_id and (
+            self.last_success_run.tenant_id != self.tenant_id
+            or self.last_success_run.sync_job_id != self.sync_job_id
+        ):
+            raise ValidationError({"last_success_run": "Checkpoint run must belong to the same tenant and sync job."})
+
+
+class ImmutableRawEnvelopeQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("RAW response envelopes are immutable.")
+
+    def delete(self):
+        raise ValidationError("RAW response envelopes cannot be deleted.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("RAW response envelopes are immutable.")
+
+
+class SyncRawEnvelope(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="sync_raw_envelopes")
+    sync_run = models.ForeignKey(
+        SyncRun,
+        on_delete=models.PROTECT,
+        related_name="raw_envelopes",
+        null=True,
+        blank=True,
+    )
+    webhook_event = models.OneToOneField(
+        "integrations.WebhookEvent",
+        on_delete=models.PROTECT,
+        related_name="raw_envelope",
+        null=True,
+        blank=True,
+    )
+    store = models.ForeignKey(
+        "masterdata.StoreMaster",
+        on_delete=models.PROTECT,
+        related_name="sync_raw_envelopes",
+        null=True,
+        blank=True,
+    )
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    endpoint = models.CharField(max_length=255)
+    cursor = models.CharField(max_length=255, blank=True)
+    sequence = models.PositiveIntegerField()
+    schema_version = models.CharField(max_length=80, default="raw-envelope.v1")
+    payload = models.JSONField()
+    payload_hash = models.CharField(max_length=64)
+    raw_ref = models.CharField(max_length=80, unique=True, default=raw_envelope_ref)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableRawEnvelopeQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["sync_run_id", "sequence"]
+        constraints = [
+            models.UniqueConstraint(fields=["sync_run", "sequence"], name="uniq_sync_raw_run_sequence"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(sync_run__isnull=False, webhook_event__isnull=True)
+                    | models.Q(sync_run__isnull=True, webhook_event__isnull=False)
+                ),
+                name="chk_sync_raw_single_source",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "platform", "created_at"], name="idx_sync_raw_tenant_time"),
+            models.Index(fields=["payload_hash"], name="idx_sync_raw_payload_hash"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("RAW response envelopes are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("RAW response envelopes cannot be deleted.")
 
 
 class SyncCursor(models.Model):

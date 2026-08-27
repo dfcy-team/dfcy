@@ -120,6 +120,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             },
         )
         envelope = _as_dict(response.get("response"))
+        raw_responses = [{"endpoint": self.ORDER_LIST_PATH, "payload": response}]
         summaries = _as_list(envelope.get("order_list"))
         order_ids = [str(item.get("order_sn")) for item in summaries if isinstance(item, dict) and item.get("order_sn")]
         details = []
@@ -131,8 +132,13 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                     "response_optional_fields": "item_list,payment_method,total_amount,shipping_carrier,package_list",
                 },
             )
+            raw_responses.append({"endpoint": self.ORDER_DETAIL_PATH, "payload": detail})
             details.extend(_as_list(_as_dict(detail.get("response")).get("order_list")))
-        return {"records": details or summaries, "next_cursor": str(envelope.get("next_cursor") or "")}
+        return {
+            "records": details or summaries,
+            "next_cursor": str(envelope.get("next_cursor") or ""),
+            "raw_responses": raw_responses,
+        }
 
     def fetch_returns(self, cursor, scope):
         page_no = int(cursor or 1)
@@ -146,6 +152,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             },
         )
         envelope = _as_dict(response.get("response"))
+        raw_responses = [{"endpoint": self.RETURN_LIST_PATH, "payload": response}]
         summaries = _as_list(envelope.get("return")) or _as_list(envelope.get("return_list"))
         details = []
         for item in summaries:
@@ -155,10 +162,15 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             if not return_id:
                 continue
             detail = self._request(self.RETURN_DETAIL_PATH, {"return_sn": return_id})
+            raw_responses.append({"endpoint": self.RETURN_DETAIL_PATH, "payload": detail})
             detail_record = _as_dict(detail.get("response"))
             details.append({**item, **detail_record})
         has_more = bool(envelope.get("more") or envelope.get("has_more"))
-        return {"records": details or summaries, "next_cursor": str(page_no + 1) if has_more else ""}
+        return {
+            "records": details or summaries,
+            "next_cursor": str(page_no + 1) if has_more else "",
+            "raw_responses": raw_responses,
+        }
 
 
 class TikTokReadonlyClient(ReadonlyClientBase):
@@ -211,6 +223,7 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             method="POST",
         )
         data = _as_dict(payload.get("data"))
+        raw_responses = [{"endpoint": self.ORDER_LIST_PATH, "payload": payload}]
         summaries = _as_list(data.get("orders"))
         order_ids = [str(item.get("id")) for item in summaries if isinstance(item, dict) and item.get("id")]
         details = []
@@ -219,8 +232,13 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                 self.ORDER_DETAIL_PATH,
                 query={"shop_cipher": self.authorization.shop_cipher, "ids": ",".join(order_ids[start : start + 50])},
             )
+            raw_responses.append({"endpoint": self.ORDER_DETAIL_PATH, "payload": detail})
             details.extend(_as_list(_as_dict(detail.get("data")).get("orders")))
-        return {"records": details or summaries, "next_cursor": str(data.get("next_page_token") or "")}
+        return {
+            "records": details or summaries,
+            "next_cursor": str(data.get("next_page_token") or ""),
+            "raw_responses": raw_responses,
+        }
 
     def fetch_returns(self, cursor, scope):
         query = {
@@ -236,7 +254,11 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         )
         data = _as_dict(payload.get("data"))
         records = _as_list(data.get("return_orders")) or _as_list(data.get("returns"))
-        return {"records": records, "next_cursor": str(data.get("next_page_token") or "")}
+        return {
+            "records": records,
+            "next_cursor": str(data.get("next_page_token") or ""),
+            "raw_responses": [{"endpoint": self.RETURN_LIST_PATH, "payload": payload}],
+        }
 
 
 class JifengWmsReadonlyClient(ReadonlyClientBase):
@@ -301,6 +323,7 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
         return {
             "records": [{**item, "_snapshot_at_utc": snapshot_at} for item in records if isinstance(item, dict)],
             "next_cursor": str(page_no + 1) if page_no < total_page else "",
+            "raw_responses": [{"endpoint": self.INVENTORY_PATH, "payload": payload}],
         }
 
 

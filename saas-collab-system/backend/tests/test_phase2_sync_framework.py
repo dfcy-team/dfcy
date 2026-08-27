@@ -2,6 +2,7 @@ import json
 from datetime import timedelta
 
 import pytest
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
@@ -10,12 +11,17 @@ from apps.accounts.models import CustomUser
 from apps.integrations.adapters import DisabledProductionAdapter, MockPlatformAdapter
 from apps.integrations.models import (
     PlatformIntegrationConfig,
+    SyncCheckpoint,
     SyncCursor,
     SyncJob,
+    SyncRawEnvelope,
     SyncRun,
     WebhookEvent,
     authorization_service_write,
 )
+from apps.integrations.platform_capabilities import capability_payload, supports_resource
+from apps.integrations.raw_services import payload_digest, replay_raw_envelope
+from apps.integrations.scheduler import dispatch_due_jobs
 from apps.integrations.sync_services import calculate_backoff_seconds, record_retry_failure, record_webhook_event
 from apps.integrations.sync_services import run_sync_job
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster
@@ -215,7 +221,7 @@ def test_integration_workspace_links_tenant_scoped_config_jobs_and_runs():
     assert job_row["latest_fetched_count"] == 2
     assert job_row["latest_created_count"] == 0
     assert job_row["checkpoint_version"] is None
-    assert jobs.json()["data"]["scheduler"]["heartbeat_state"] == "disabled"
+    assert jobs.json()["data"]["scheduler"]["heartbeat_state"] == "scheduled"
     assert jobs.json()["data"]["scheduler_history"] == []
     assert jobs.json()["data"]["reference_options"]["platforms"] == [
         {
@@ -434,6 +440,99 @@ def test_mock_sync_success_updates_cursor_and_masks_logs():
     assert SyncCursor.objects.get(sync_job=job, cursor_key="default").cursor_value == "done"
     assert "not-a-real-secret" not in json.dumps(data)
     assert "placeholder-token" not in json.dumps(data)
+
+    run = SyncRun.objects.get(sync_job=job)
+    checkpoint = SyncCheckpoint.objects.get(sync_job=job)
+    envelope = SyncRawEnvelope.objects.get(sync_run=run)
+    assert checkpoint.cursor_json == {"default": "done"}
+    assert checkpoint.last_success_run == run
+    assert checkpoint.version == 1
+    assert envelope.payload["records"][0]["api_secret"] == "not-a-real-secret"
+    assert envelope.payload_hash == payload_digest(envelope.payload)
+    assert run.masked_log["raw_evidence"] == [
+        {"raw_ref": envelope.raw_ref, "payload_hash": envelope.payload_hash}
+    ]
+    assert replay_raw_envelope(envelope, MockPlatformAdapter()) == {
+        "created": 0,
+        "updated": 0,
+        "skipped": 2,
+        "failed": 0,
+    }
+    envelope.payload = {"changed": True}
+    with pytest.raises(DjangoValidationError):
+        envelope.save()
+
+
+@pytest.mark.django_db
+def test_scheduler_dispatches_each_due_slot_once_and_restores_failed_enqueue():
+    tenant = Tenant.objects.create(name="Tenant", code="scheduler-control-plane")
+    user = create_user(tenant, "scheduler-user")
+    job = create_sync_job(tenant, user)
+    now = timezone.now()
+    due_at = now - timedelta(minutes=1)
+    job.schedule_type = SyncJob.ScheduleType.INTERVAL
+    job.sync_scope = {"schedule": {"interval_minutes": 5}}
+    job.next_run_at = due_at
+    job.save(update_fields=["schedule_type", "sync_scope", "next_run_at", "updated_at"])
+    dispatched = []
+
+    first = dispatch_due_jobs(lambda job_id, key: dispatched.append((job_id, key)), now=now)
+    second = dispatch_due_jobs(lambda job_id, key: dispatched.append((job_id, key)), now=now)
+
+    job.refresh_from_db()
+    assert first == {"initialized": 0, "dispatched": 1, "failed": 0}
+    assert second == {"initialized": 0, "dispatched": 0, "failed": 0}
+    assert dispatched == [(job.id, f"scheduled:{job.id}:{int(due_at.timestamp())}")]
+    assert job.next_run_at == now + timedelta(minutes=5)
+
+    failed_due_at = now - timedelta(minutes=2)
+    SyncJob.objects.filter(pk=job.pk).update(next_run_at=failed_due_at)
+
+    def fail_enqueue(_job_id, _key):
+        raise RuntimeError("broker unavailable")
+
+    failed = dispatch_due_jobs(fail_enqueue, now=now)
+    job.refresh_from_db()
+    assert failed == {"initialized": 0, "dispatched": 0, "failed": 1}
+    assert job.next_run_at == failed_due_at
+
+
+@pytest.mark.django_db
+def test_raw_response_survives_business_persistence_failure():
+    tenant = Tenant.objects.create(name="Tenant", code="raw-before-normalization")
+    user = create_user(tenant, "raw-user")
+    job = create_sync_job(tenant, user)
+    job.max_retry_count = 0
+    job.save(update_fields=["max_retry_count", "updated_at"])
+    adapter = MockPlatformAdapter()
+
+    def fail_persistence(_sync_job, _record):
+        raise RuntimeError("business persistence failed")
+
+    adapter.persist_record = fail_persistence
+    run, created = run_sync_job(job, adapter=adapter, idempotency_key="raw-failure")
+
+    assert created is True
+    assert run.status == SyncRun.Status.FAILED
+    envelope = SyncRawEnvelope.objects.get(sync_run=run)
+    assert envelope.payload["records"][0]["external_id"].endswith("-001")
+    assert envelope.payload_hash == payload_digest(envelope.payload)
+
+
+def test_capability_registry_separates_authorization_from_executable_resources():
+    assert {value for value, _label in SyncJob.ScheduleType.choices} == {
+        "manual", "hourly", "interval", "daily", "weekly", "cron"
+    }
+    assert capability_payload("lazada") == {
+        "authorization": "oauth_store",
+        "api_types": ["marketplace"],
+        "resources": {},
+    }
+    assert supports_resource("lazada", SyncJob.ResourceType.SALES_ORDER, "live_readonly") is False
+    assert supports_resource("shopee", SyncJob.ResourceType.SALES_ORDER, "live_readonly") is True
+    assert supports_resource("tiktok", SyncJob.ResourceType.REFUND_RETURN, "live_readonly") is True
+    assert supports_resource("jifeng_wms", SyncJob.ResourceType.INVENTORY_SNAPSHOT, "live_readonly") is True
+    assert supports_resource("bigseller", SyncJob.ResourceType.SALES_ORDER, "live_readonly") is False
 
 
 @pytest.mark.django_db
@@ -801,3 +900,11 @@ def test_webhook_event_deduplicates_by_tenant_platform_event_id():
     assert first.id == second.id
     assert second.processing_status == WebhookEvent.ProcessingStatus.DUPLICATE
     assert WebhookEvent.objects.count() == 1
+    envelope = SyncRawEnvelope.objects.get(webhook_event=first)
+    assert envelope.payload == {
+        "event_id": "event-001",
+        "event_type": "order.updated",
+        "payload": payload,
+    }
+    assert envelope.payload_hash == payload_digest(envelope.payload)
+    assert SyncRawEnvelope.objects.filter(webhook_event=first).count() == 1

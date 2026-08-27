@@ -7,7 +7,14 @@ from django.utils import timezone
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
 from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_sync_jobs, filter_sync_runs
 
-from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, SyncRun
+from .models import (
+    MarketplaceStoreAuthorization,
+    PlatformIntegrationConfig,
+    SyncCheckpoint,
+    SyncJob,
+    SyncRun,
+    WarehouseAuthorization,
+)
 from .platform_schema_service import get_platform_schema, integration_platform_key, platform_api_type_options
 
 
@@ -77,8 +84,8 @@ def _format_datetime(value):
     return timezone.localtime(value).isoformat(timespec="seconds") if timezone.is_aware(value) else value.isoformat(timespec="seconds")
 
 
-def _subject_maps(job_raw, allowed_config_ids):
-    store_ids = {row.get("store_authorization_id") for row in job_raw.values() if row.get("store_authorization_id")}
+def _subject_maps(jobs, allowed_config_ids):
+    store_ids = {job.store_authorization_id for job in jobs if job.store_authorization_id}
     stores = {
         item.id: item
         for item in MarketplaceStoreAuthorization.objects.filter(
@@ -86,29 +93,21 @@ def _subject_maps(job_raw, allowed_config_ids):
             integration_config_id__in=allowed_config_ids,
         ).select_related("store")
     }
-    warehouse_ids = {
-        row.get("warehouse_authorization_id")
-        for row in job_raw.values()
-        if row.get("warehouse_authorization_id")
-    }
-    warehouse_auth = _raw_map(
-        "integrations_warehouseauthorization",
-        ["id", "warehouse_id", "integration_config_id", "status"],
-        warehouse_ids,
-    )
-    warehouse_master = {
+    warehouse_ids = {job.warehouse_authorization_id for job in jobs if job.warehouse_authorization_id}
+    warehouse_auth = {
         item.id: item
-        for item in WarehouseMaster.objects.filter(
-            id__in=[row.get("warehouse_id") for row in warehouse_auth.values()],
-        )
+        for item in WarehouseAuthorization.objects.filter(
+            id__in=warehouse_ids,
+            integration_config_id__in=allowed_config_ids,
+        ).select_related("warehouse")
     }
+    warehouse_master = {item.warehouse_id: item.warehouse for item in warehouse_auth.values()}
     return stores, warehouse_auth, warehouse_master
 
 
-def _subject(job_id, job_raw, stores, warehouse_auth, warehouse_master):
-    raw = job_raw.get(job_id, {})
-    if raw.get("store_authorization_id") in stores:
-        auth = stores[raw["store_authorization_id"]]
+def _subject(job, stores, warehouse_auth, warehouse_master):
+    if job.store_authorization_id in stores:
+        auth = stores[job.store_authorization_id]
         return {
             "subject_type": "store",
             "subject_code": auth.store.code,
@@ -117,15 +116,15 @@ def _subject(job_id, job_raw, stores, warehouse_auth, warehouse_master):
             "authorization_status": auth.status,
             "external_subject_id": auth.platform_store_id,
         }
-    warehouse_row = warehouse_auth.get(raw.get("warehouse_authorization_id"), {})
-    warehouse = warehouse_master.get(warehouse_row.get("warehouse_id"))
+    warehouse_row = warehouse_auth.get(job.warehouse_authorization_id)
+    warehouse = warehouse_master.get(warehouse_row.warehouse_id) if warehouse_row else None
     if warehouse:
         return {
             "subject_type": "warehouse",
             "subject_code": warehouse.code,
             "subject_name": warehouse.name,
             "region": warehouse.country_code,
-            "authorization_status": warehouse_row.get("status", ""),
+            "authorization_status": warehouse_row.status,
             "external_subject_id": "",
         }
     return {
@@ -158,24 +157,17 @@ def _schedule_state(job, latest_run):
 
 
 def _checkpoint_map(job_ids):
-    columns = _table_columns("integrations_synccheckpoint")
-    if not job_ids or not {"id", "sync_job_id", "version", "watermark_utc"} <= columns:
-        return {}
-    placeholders = ",".join(["%s"] * len(job_ids))
-    with connection.cursor() as cursor:
-        cursor.execute(
-            f"SELECT id,sync_job_id,version,watermark_utc FROM integrations_synccheckpoint "
-            f"WHERE sync_job_id IN ({placeholders}) ORDER BY id DESC",
-            job_ids,
-        )
-        checkpoints = {}
-        for _, job_id, version, watermark in cursor.fetchall():
-            checkpoints.setdefault(job_id, {"version": version, "watermark": watermark})
-        return checkpoints
+    return {
+        checkpoint.sync_job_id: {
+            "version": checkpoint.version,
+            "watermark": checkpoint.watermark_utc,
+        }
+        for checkpoint in SyncCheckpoint.objects.filter(sync_job_id__in=job_ids)
+    }
 
 
-def _job_row(job, raw, raw_config, subject, latest_run, checkpoint=None):
-    scope = _json_value(raw.get("sync_scope"))
+def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
+    scope = _json_value(job.sync_scope)
     query_scope = _json_value(scope.get("query"))
     schedule_scope = _json_value(scope.get("schedule"))
     latest_log = _json_value(latest_run.masked_log) if latest_run else {}
@@ -284,18 +276,19 @@ def _workspace_rows(user):
     jobs = list(
         filter_sync_jobs(
             user,
-            SyncJob.objects.filter(tenant=user.tenant, integration_config_id__in=config_ids).select_related("integration_config"),
+            SyncJob.objects.filter(tenant=user.tenant, integration_config_id__in=config_ids).select_related(
+                "integration_config",
+                "store_authorization",
+                "store_authorization__store",
+                "warehouse_authorization",
+                "warehouse_authorization__warehouse",
+            ),
             "integrations.view",
         )
     )
     job_ids = [job.id for job in jobs]
     checkpoints = _checkpoint_map(job_ids)
-    job_raw = _raw_map(
-        "integrations_syncjob",
-        ["id", "store_authorization_id", "warehouse_authorization_id", "sync_scope"],
-        job_ids,
-    )
-    stores, warehouse_auth, warehouse_master = _subject_maps(job_raw, config_ids)
+    stores, warehouse_auth, warehouse_master = _subject_maps(jobs, config_ids)
     runs = list(
         filter_sync_runs(
             user,
@@ -310,10 +303,9 @@ def _workspace_rows(user):
         latest_by_job.setdefault(run.sync_job_id, run)
     job_rows = {}
     for job in jobs:
-        subject = _subject(job.id, job_raw, stores, warehouse_auth, warehouse_master)
+        subject = _subject(job, stores, warehouse_auth, warehouse_master)
         job_rows[job.id] = _job_row(
             job,
-            job_raw.get(job.id, {}),
             config_raw.get(job.integration_config_id, {}),
             subject,
             latest_by_job.get(job.id),
@@ -510,16 +502,10 @@ def _reference_options(user):
 
 
 def _warehouse_authorization_count(user, allowed_config_ids):
-    columns = _table_columns("integrations_warehouseauthorization")
-    if not {"tenant_id", "integration_config_id"} <= columns or not allowed_config_ids:
-        return 0
-    placeholders = ",".join(["%s"] * len(allowed_config_ids))
-    with connection.cursor() as cursor:
-        cursor.execute(
-            f"SELECT COUNT(*) FROM integrations_warehouseauthorization WHERE tenant_id=%s AND integration_config_id IN ({placeholders})",
-            [user.tenant_id, *allowed_config_ids],
-        )
-        return cursor.fetchone()[0]
+    return WarehouseAuthorization.objects.filter(
+        tenant_id=user.tenant_id,
+        integration_config_id__in=allowed_config_ids,
+    ).count()
 
 
 def integration_workspace(user, mode, params):
@@ -576,7 +562,7 @@ def integration_workspace(user, mode, params):
         "mode": mode,
         "source_status": "ready",
         "summary": summary,
-        "scheduler": {"configured": False, "heartbeat_state": "disabled", "execution_policy": "simulation_only"},
+        "scheduler": {"configured": True, "heartbeat_state": "scheduled", "execution_policy": "readonly_automatic"},
         "scheduler_history": [],
         "options": _options(all_rows),
         "reference_options": reference_options,

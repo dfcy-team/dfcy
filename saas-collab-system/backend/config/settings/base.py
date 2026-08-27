@@ -236,6 +236,13 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-due-readonly-sync-jobs": {
+        "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
+        "schedule": 60.0,
+        "args": (20,),
+    },
+}
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.

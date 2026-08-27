@@ -1,5 +1,4 @@
 from django.shortcuts import get_object_or_404
-import json
 import uuid
 
 from django.conf import settings
@@ -67,6 +66,7 @@ from .models import (
     PlatformIntegrationConfig,
     SyncJob,
     SyncRun,
+    WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema
 from .product_mapping_service import (
@@ -95,6 +95,7 @@ from .serializers import (
 from .store_mapping_service import create_store_mapping, update_store_mapping
 from .adapters import MockPlatformAdapter, get_adapter_for_config
 from .sync_services import run_sync_job
+from .scheduler import calculate_next_run_at
 from .tasks import run_readonly_sync_job
 from .workspace_service import integration_workspace
 from .subject_access_service import subject_api_access
@@ -1026,24 +1027,18 @@ def check_integration_reference(request, pk):
 
 
 def _warehouse_binding_summary(config):
-    table = "integrations_warehouseauthorization"
-    master_table = "masterdata_warehousemaster"
-    with connection.cursor() as cursor:
-        if table not in connection.introspection.table_names(cursor):
-            return {"count": 0, "invalid_region_count": 0}
-        columns = {column.name for column in connection.introspection.get_table_description(cursor, table)}
-        if not {"tenant_id", "integration_config_id"}.issubset(columns):
-            return {"count": 0, "invalid_region_count": 0}
-        if "warehouse_id" in columns and master_table in connection.introspection.table_names(cursor):
-            cursor.execute(
-                f"SELECT w.country_code FROM {table} a JOIN {master_table} w ON w.id=a.warehouse_id WHERE a.tenant_id=%s AND a.integration_config_id=%s",
-                [config.tenant_id, config.id],
-            )
-            countries = [str(row[0] or "").upper() for row in cursor.fetchall()]
-            regions = {str(value).upper() for value in (config.regions or [])}
-            return {"count": len(countries), "invalid_region_count": sum(1 for country in countries if country not in regions)}
-        cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE tenant_id=%s AND integration_config_id=%s", [config.tenant_id, config.id])
-        return {"count": int(cursor.fetchone()[0]), "invalid_region_count": 0}
+    countries = [
+        str(country or "").upper()
+        for country in WarehouseAuthorization.objects.filter(
+            tenant_id=config.tenant_id,
+            integration_config=config,
+        ).values_list("warehouse__country_code", flat=True)
+    ]
+    regions = {str(value).upper() for value in (config.regions or [])}
+    return {
+        "count": len(countries),
+        "invalid_region_count": sum(1 for country in countries if country not in regions),
+    }
 
 
 @api_view(["POST"])
@@ -1160,51 +1155,32 @@ def _scoped_sync_job(request, pk, permission_code="integrations.manage"):
     )
 
 
-def _sync_scope_columns():
-    with connection.cursor() as cursor:
-        return {column.name for column in connection.introspection.get_table_description(cursor, SyncJob._meta.db_table)}
-
-
 def _set_job_scope(job, values):
-    if "sync_scope" not in _sync_scope_columns():
-        return
-    with connection.cursor() as cursor:
-        cursor.execute(f"SELECT sync_scope FROM {SyncJob._meta.db_table} WHERE id=%s", [job.id])
-        raw = cursor.fetchone()[0]
-        if isinstance(raw, str):
-            try:
-                scope = json.loads(raw or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                scope = {}
-        else:
-            scope = raw if isinstance(raw, dict) else {}
-        schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
-        query = scope.get("query") if isinstance(scope.get("query"), dict) else {}
-        if "execution_mode" in values:
-            scope["execution_mode"] = values["execution_mode"]
-        for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until"):
-            if key in values:
-                schedule[key] = values[key]
-        query_fields = {
-            "query_mode": "mode",
-            "lookback_days": "lookback_days",
-            "overlap_minutes": "overlap_minutes",
-            "query_page_size": "page_size",
-            "max_pages": "max_pages",
-            "max_records": "max_records",
-            "range_start_at": "start_at",
-            "range_end_at": "end_at",
-            "query_statuses": "statuses",
-        }
-        for source, target in query_fields.items():
-            if source in values:
-                query[target] = values[source]
-        scope["schedule"] = schedule
-        scope["query"] = query
-        cursor.execute(
-            f"UPDATE {SyncJob._meta.db_table} SET sync_scope=%s WHERE id=%s AND tenant_id=%s",
-            [json.dumps(scope, ensure_ascii=False), job.id, job.tenant_id],
-        )
+    scope = dict(job.sync_scope or {})
+    schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
+    query = scope.get("query") if isinstance(scope.get("query"), dict) else {}
+    if "execution_mode" in values:
+        scope["execution_mode"] = values["execution_mode"]
+    for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until"):
+        if key in values:
+            schedule[key] = values[key]
+    query_fields = {
+        "query_mode": "mode",
+        "lookback_days": "lookback_days",
+        "overlap_minutes": "overlap_minutes",
+        "query_page_size": "page_size",
+        "max_pages": "max_pages",
+        "max_records": "max_records",
+        "range_start_at": "start_at",
+        "range_end_at": "end_at",
+        "query_statuses": "statuses",
+    }
+    for source, target in query_fields.items():
+        if source in values:
+            query[target] = values[source]
+    scope["schedule"] = schedule
+    scope["query"] = query
+    job.sync_scope = scope
 
 
 def _validated_job_policy(data):
@@ -1290,12 +1266,12 @@ def sync_job_detail(request, pk):
     with transaction.atomic():
         for key in changed_core:
             setattr(job, key, values[key])
-        if "schedule_type" in changed_core:
-            job.next_run_at = None
-            changed_core.append("next_run_at")
-        if changed_core:
-            job.save(update_fields=[*changed_core, "updated_at"])
         _set_job_scope(job, values)
+        update_fields = [*changed_core, "sync_scope"]
+        if {"schedule_type", "interval_minutes", "local_time", "weekdays", "timezone", "pause_until"} & set(values):
+            job.next_run_at = calculate_next_run_at(job)
+            update_fields.append("next_run_at")
+        job.save(update_fields=[*dict.fromkeys(update_fields), "updated_at"])
     _write_audit_log(job.integration_config, request.user, "update_sync_job", detail={"sync_job_id": job.id, "updated_fields": sorted(request.data.keys())})
     return success_response(SyncJobSerializer(job, context={"request": request}).data)
 
