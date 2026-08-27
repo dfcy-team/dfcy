@@ -405,7 +405,7 @@ describe('influencer integration workspace contracts', () => {
     expect(FULFILLMENT_STATUS_TRANSITIONS.processing).toEqual(['shipped', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.shipped).toEqual(['delivered', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.delivered).toEqual(['completed', 'cancelled']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.overdue).toEqual(['published', 'completed', 'cancelled']);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.overdue).toEqual(['completed', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.completed).toEqual([]);
     expect(FULFILLMENT_STATUS_TRANSITIONS.cancelled).toEqual([]);
 
