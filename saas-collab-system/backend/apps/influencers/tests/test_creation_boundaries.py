@@ -223,7 +223,7 @@ def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name()
 
     fulfillment, created = create_sample_fulfillment(
         user=user,
-        request_key="task-product-snapshot-key",
+        request_key="task-product-request-001",
         validated_data={
             "fulfillment_no": "TASK-PRODUCT-SNAPSHOT",
             "outreach_task": task,
@@ -466,10 +466,11 @@ def test_account_resolve_prefers_blacklisted_duplicate_profile():
 
     response = client.post(
         "/api/internal/influencers/resolve/",
-        {"handle": "@duplicate.creator"},
+        {"handle": "＠ｄｕｐｌｉｃａｔｅ．ｃｒｅａｔｏｒ"},
         format="json",
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["id"] == blocked.id
     assert response.json()["data"]["is_blacklisted"] is True
+    assert Influencer.objects.filter(tenant=tenant).count() == 2

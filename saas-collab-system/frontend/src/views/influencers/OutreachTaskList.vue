@@ -489,7 +489,7 @@ const hasValue = (value) => value !== undefined && value !== null && value !== '
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 
 function normalizeInfluencerAccount(value) {
-  return String(value ?? '').trim().replace(/^@+/, '').trim().toLowerCase();
+  return String(value ?? '').normalize('NFKC').trim().replace(/^@+/, '').trim().toLowerCase();
 }
 
 function influencerAccountKey(influencer) {
