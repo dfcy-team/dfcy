@@ -1656,6 +1656,51 @@ def test_bd_attribution_requires_product_in_strict_mode_and_uses_earliest_sample
     attribution = BdOrderAttributionSnapshot.objects.get(order_snapshot=other_product, rule="fallback")
     assert attribution.sample_attribution_id == old_sample.pk
 
+
+def test_missing_creator_handle_sentinel_never_receives_order_attribution():
+    tenant = Tenant.objects.create(name="Missing handle tenant", code="missing-handle-attribution")
+    user, _ = user_with_permissions(tenant, "missing-handle-owner")
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "store-affiliate")
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="missing-handle-creator",
+        name="Creator without handle",
+        platform="tiktok",
+        handle="",
+    )
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_no": "MISSING-HANDLE-TASK",
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+            "external_product_id": "P-1",
+        },
+    )
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="missing-handle-request-001",
+        validated_data={
+            "fulfillment_no": "MISSING-HANDLE-SAMPLE",
+            "outreach_task": task,
+            "influencer": influencer,
+        },
+        item_payloads=[],
+    )
+    sample = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
+    sample.sampled_at = timezone.now() - timedelta(days=2)
+    sample.product_id = "P-1"
+    sample.save(update_fields=["sampled_at", "product_id", "updated_at"])
+
+    order = _new_affiliate_order(tenant, data_time=timezone.now() - timedelta(days=1))
+    order.creator_username = sample.creator_username
+    order.save(update_fields=["creator_username", "creator_username_normalized", "updated_at"])
+
+    assert refresh_order_attributions(tenant=tenant, attribution="strict")["created"] == 0
+    assert BdOrderAttributionSnapshot.objects.filter(order_snapshot=order).exists() is False
+
     refunded = _new_affiliate_order(
         tenant,
         data_time=timezone.now() - timedelta(days=1),

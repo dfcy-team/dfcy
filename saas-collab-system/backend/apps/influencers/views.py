@@ -21,6 +21,7 @@ from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope
 
 from .attribution import (
+    MISSING_CREATOR_HANDLE_SENTINEL_PREFIX,
     build_bd_performance,
     default_performance_dates,
     parse_performance_date,
@@ -37,6 +38,7 @@ from .models import (
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
+    normalize_tiktok_username,
 )
 from .serializers import (
     InfluencerSerializer,
@@ -416,9 +418,14 @@ class InfluencerResolveView(APIView):
             request.user,
             INFLUENCER_RESOLVE_WRITE_PERMISSION_CODES,
         )
-        account = str(request.data.get("handle") or request.data.get("account") or "").strip()
-        account = account.lstrip("@").strip()
-        if not account or len(account) > 120:
+        account = normalize_tiktok_username(
+            request.data.get("handle") or request.data.get("account") or ""
+        )
+        if (
+            not account
+            or len(account) > 120
+            or account.startswith(MISSING_CREATOR_HANDLE_SENTINEL_PREFIX)
+        ):
             raise ValidationError({"handle": "TikTok account must be 1-120 characters."})
 
         blacklist_subquery = InfluencerRestriction.objects.filter(
@@ -426,18 +433,36 @@ class InfluencerResolveView(APIView):
             influencer_id=OuterRef("pk"),
             is_blacklisted=True,
         )
-        influencer = (
+        exact_candidates = list(
             Influencer.objects.select_for_update()
             .filter(tenant=request.user.tenant)
             .filter(Q(handle__iexact=account) | Q(code__iexact=account))
             .annotate(is_blacklisted=Exists(blacklist_subquery))
             .order_by("-is_blacklisted", "id")
-            .first()
         )
+        candidates = exact_candidates
+        if not candidates:
+            tenant_candidates = (
+                Influencer.objects.select_for_update()
+                .filter(tenant=request.user.tenant)
+                .annotate(is_blacklisted=Exists(blacklist_subquery))
+                .order_by("id")
+            )
+            candidates = [
+                candidate
+                for candidate in tenant_candidates
+                if account
+                in {
+                    normalize_tiktok_username(candidate.handle),
+                    normalize_tiktok_username(candidate.code),
+                }
+            ]
+            candidates.sort(key=lambda candidate: (not candidate.is_blacklisted, candidate.id))
+        influencer = candidates[0] if candidates else None
         created = False
         if influencer is None:
             digest = hashlib.sha256(
-                f"{request.user.tenant_id}:{account.casefold()}".encode("utf-8")
+                f"{request.user.tenant_id}:{account}".encode("utf-8")
             ).hexdigest()[:20]
             influencer, created = Influencer.objects.get_or_create(
                 tenant=request.user.tenant,

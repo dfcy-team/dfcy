@@ -313,7 +313,7 @@ let influencerResolveSequence = 0;
 let sampleSubmitSequence = 0;
 
 function normalizeInfluencerAccount(value) {
-  return String(value ?? '').trim().replace(/^@+/, '').trim().toLowerCase();
+  return String(value ?? '').normalize('NFKC').trim().replace(/^@+/, '').trim().toLowerCase();
 }
 
 function influencerAccountKey(influencer) {
