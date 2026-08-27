@@ -1,0 +1,253 @@
+{
+  "schema_version": "operations-data-handoff.v1",
+  "synthetic": true,
+  "description": "Linked synthetic data for sales management, business decisions and business analysis.",
+  "source_links": {
+    "stores": ["LZ9PH", "LZ10PH"],
+    "warehouses": ["PH001", "DEMO-PH-WH-01"],
+    "inventory_contract": "inventory_snapshot.v1",
+    "currency": "PHP",
+    "site_code": "PH"
+  },
+  "api_routes": {
+    "sales_overview": "/api/internal/sales-management/overview/",
+    "sales_orders": "/api/internal/sales-management/orders/",
+    "sales_returns": "/api/internal/sales-management/refunds/",
+    "inventory_alerts": "/api/internal/alerts/inventory/",
+    "business_alerts": "/api/internal/alerts/business/",
+    "replenishment": "/api/internal/replenishment/recommendations/",
+    "analytics_overview": "/api/internal/analytics/overview/",
+    "analytics_sales": "/api/internal/analytics/sales/",
+    "analytics_inventory": "/api/internal/analytics/inventory/"
+  },
+  "sales_management": {
+    "summary": {
+      "gross_sales": "2000.00",
+      "refund_amount": "100.00",
+      "net_sales": "1900.00",
+      "order_count": 17,
+      "units_sold": 23,
+      "currency": "PHP"
+    },
+    "store_sales": [
+      {
+        "store_code": "LZ9PH",
+        "store_name": "LAZADA9号店PH",
+        "platform": "lazada",
+        "region": "PH",
+        "gross_sales": "1200.00",
+        "refund_amount": "100.00",
+        "net_sales": "1100.00",
+        "order_count": 10,
+        "units_sold": 14,
+        "currency": "PHP",
+        "quality": "good",
+        "source_updated_at": "2026-08-27T00:10:00Z"
+      },
+      {
+        "store_code": "LZ10PH",
+        "store_name": "LAZADA10号店PH",
+        "platform": "lazada",
+        "region": "PH",
+        "gross_sales": "800.00",
+        "refund_amount": "0.00",
+        "net_sales": "800.00",
+        "order_count": 7,
+        "units_sold": 9,
+        "currency": "PHP",
+        "quality": "good",
+        "source_updated_at": "2026-08-27T00:10:00Z"
+      }
+    ],
+    "orders": [
+      {
+        "external_order_id": "SYNTHETIC-LZ9PH-ORDER-001",
+        "store_code": "LZ9PH",
+        "seller_sku": "SYNTHETIC-PH-001",
+        "normalized_status": "completed",
+        "quantity": 2,
+        "order_total_amount": "200.00",
+        "currency": "PHP",
+        "created_at_utc": "2026-08-27T00:05:00Z"
+      },
+      {
+        "external_order_id": "SYNTHETIC-LZ10PH-ORDER-001",
+        "store_code": "LZ10PH",
+        "seller_sku": "SYNTHETIC-PH-DEMO-001",
+        "normalized_status": "completed",
+        "quantity": 1,
+        "order_total_amount": "120.00",
+        "currency": "PHP",
+        "created_at_utc": "2026-08-27T00:06:00Z"
+      }
+    ],
+    "returns": [
+      {
+        "external_return_id": "SYNTHETIC-LZ9PH-RETURN-001",
+        "external_order_id": "SYNTHETIC-LZ9PH-ORDER-001",
+        "store_code": "LZ9PH",
+        "case_type": "refund",
+        "reason_code": "synthetic_customer_return",
+        "refund_amount": "100.00",
+        "currency": "PHP",
+        "normalized_status": "completed",
+        "requested_at_utc": "2026-08-27T00:08:00Z"
+      }
+    ]
+  },
+  "business_decision": {
+    "inventory_alerts": [
+      {
+        "alert_id": "SYNTHETIC-INV-PH001-001",
+        "sku_code": "SYNTHETIC-PH-001",
+        "warehouse_code": "PH001",
+        "alert_type": "stockout",
+        "risk_level": "high",
+        "available_qty": 70,
+        "average_daily_sales": 14,
+        "cover_days": 5,
+        "reason": "覆盖天数低于合成安全线",
+        "status": "open"
+      },
+      {
+        "alert_id": "SYNTHETIC-INV-PH-DEMO-001",
+        "sku_code": "SYNTHETIC-PH-DEMO-001",
+        "warehouse_code": "DEMO-PH-WH-01",
+        "alert_type": "stockout",
+        "risk_level": "medium",
+        "available_qty": 18,
+        "average_daily_sales": 3,
+        "cover_days": 6,
+        "reason": "演示仓覆盖天数低于合成安全线",
+        "status": "open"
+      }
+    ],
+    "business_alerts": [
+      {
+        "alert_id": "SYNTHETIC-BIZ-001",
+        "alert_type": "stockout",
+        "object_ref": "SYNTHETIC-PH-001",
+        "level": "high",
+        "owner": "synthetic-purchasing-team",
+        "reason": "PH001 可用库存与销售速度形成缺货风险",
+        "status": "open"
+      },
+      {
+        "alert_id": "SYNTHETIC-BIZ-002",
+        "alert_type": "stale_data",
+        "object_ref": "synthetic-wms-ph-20260827",
+        "level": "low",
+        "owner": "synthetic-data-team",
+        "reason": "用于展示库存同步时效检查，不代表真实故障",
+        "status": "acknowledged"
+      }
+    ],
+    "replenishment_recommendations": [
+      {
+        "suggestion_id": "SYNTHETIC-REP-001",
+        "sku_code": "SYNTHETIC-PH-001",
+        "warehouse_code": "PH001",
+        "suggested_quantity": 140,
+        "suggested_date": "2026-08-30",
+        "confidence": 0.92,
+        "reason": "按 10 天合成覆盖目标补足库存",
+        "status": "pending",
+        "source_alert_id": "SYNTHETIC-INV-PH001-001"
+      },
+      {
+        "suggestion_id": "SYNTHETIC-REP-002",
+        "sku_code": "SYNTHETIC-PH-DEMO-001",
+        "warehouse_code": "DEMO-PH-WH-01",
+        "suggested_quantity": 30,
+        "suggested_date": "2026-08-31",
+        "confidence": 0.75,
+        "reason": "演示仓建议人工复核后补货",
+        "status": "pending",
+        "source_alert_id": "SYNTHETIC-INV-PH-DEMO-001"
+      }
+    ],
+    "lifecycle_reviews": [
+      {
+        "review_id": "SYNTHETIC-LIFECYCLE-001",
+        "seller_sku": "SYNTHETIC-PH-001",
+        "suggestion": "observe",
+        "reason": "销售正常但库存覆盖偏低，保持观察并优先补货",
+        "status": "pending_human_review"
+      }
+    ]
+  },
+  "business_analysis": {
+    "overview": {
+      "summary_metrics": {
+        "gross_sales": "2000.00",
+        "refund_amount": "100.00",
+        "net_sales": "1900.00",
+        "order_count": 17,
+        "units_sold": 23,
+        "available_qty": 88,
+        "inventory_risk_count": 2,
+        "currency": "PHP"
+      },
+      "quality": {
+        "status": "good",
+        "score": 100,
+        "source": "synthetic",
+        "refreshed_at": "2026-08-27T00:10:00Z"
+      }
+    },
+    "sales_items": [
+      {
+        "store_code": "LZ9PH",
+        "store_name": "LAZADA9号店PH",
+        "platform": "lazada",
+        "region": "PH",
+        "order_count": 10,
+        "units_sold": 14,
+        "gross_sales": "1200.00",
+        "refund_amount": "100.00",
+        "net_sales": "1100.00",
+        "quality": "good"
+      },
+      {
+        "store_code": "LZ10PH",
+        "store_name": "LAZADA10号店PH",
+        "platform": "lazada",
+        "region": "PH",
+        "order_count": 7,
+        "units_sold": 9,
+        "gross_sales": "800.00",
+        "refund_amount": "0.00",
+        "net_sales": "800.00",
+        "quality": "good"
+      }
+    ],
+    "inventory_items": [
+      {
+        "source_sku": "SYNTHETIC-PH-001",
+        "site_code": "PH",
+        "warehouse_code": "PH001",
+        "on_hand_qty": 88,
+        "available_qty": 70,
+        "reserved_qty": 12,
+        "in_transit_qty": 16,
+        "pending_putaway_qty": 4,
+        "defective_qty": 2,
+        "risk": "low",
+        "snapshot_at_utc": "2026-08-27T00:01:00Z"
+      },
+      {
+        "source_sku": "SYNTHETIC-PH-DEMO-001",
+        "site_code": "PH",
+        "warehouse_code": "DEMO-PH-WH-01",
+        "on_hand_qty": 20,
+        "available_qty": 18,
+        "reserved_qty": 2,
+        "in_transit_qty": 0,
+        "pending_putaway_qty": 0,
+        "defective_qty": 0,
+        "risk": "low",
+        "snapshot_at_utc": "2026-08-27T00:01:00Z"
+      }
+    ]
+  }
+}
