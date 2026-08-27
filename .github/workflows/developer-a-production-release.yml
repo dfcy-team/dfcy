@@ -284,17 +284,18 @@ jobs:
       VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
     steps:
       - name: Check fixed VM entrypoint without opening a shell
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          [[ "$VM_HOST" =~ ^[A-Za-z0-9._:-]+$ && "$VM_PORT" =~ ^[0-9]{1,5}$ && "$VM_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Production VM connection variables are invalid.' >&2; exit 1; }
-          key="$RUNNER_TEMP/production-ci-key"
-          known_hosts="$RUNNER_TEMP/production-known-hosts"
-          umask 077
-          printf '%s\n' "$VM_SSH_PRIVATE_KEY" > "$key"
-          printf '%s\n' "$VM_KNOWN_HOSTS" > "$known_hosts"
-          chmod 600 "$key" "$known_hosts"
-          ssh -i "$key" -p "$VM_PORT" -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o LogLevel=ERROR "$VM_DEPLOY_USER@$VM_HOST" check
+          $ErrorActionPreference = 'Stop'
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$') { throw 'Production VM connection variables are invalid.' }
+          $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+          try {
+            & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" check
+            if ($LASTEXITCODE -ne 0) { throw 'VM control-plane check failed.' }
+          } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
 
   remote-deploy:
     name: Deploy CI digests to production
@@ -317,21 +318,20 @@ jobs:
       MANIFEST_SHA: ${{ needs.build.outputs.manifest_sha }}
     steps:
       - name: Invoke the fixed forced-command entrypoint
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          [[ "$VM_HOST" =~ ^[A-Za-z0-9._:-]+$ && "$VM_PORT" =~ ^[0-9]{1,5}$ && "$VM_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Production VM connection variables are invalid.' >&2; exit 1; }
-          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ && "$MIGRATION_SHA" =~ ^[0-9a-f]{64}$ && "$MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo 'CI release metadata is invalid.' >&2; exit 1; }
-          actor="$GITHUB_ACTOR"
-          [[ "$actor" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]] || { echo 'GitHub actor is invalid.' >&2; exit 1; }
-          key="$RUNNER_TEMP/production-ci-key"
-          known_hosts="$RUNNER_TEMP/production-known-hosts"
-          umask 077
-          printf '%s\n' "$VM_SSH_PRIVATE_KEY" > "$key"
-          printf '%s\n' "$VM_KNOWN_HOSTS" > "$known_hosts"
-          chmod 600 "$key" "$known_hosts"
-          remote="deploy --release-sha=$RELEASE_SHA --backend-image=$BACKEND_IMAGE --frontend-image=$FRONTEND_IMAGE --redis-image=$REDIS_IMAGE --migration-sha256=$MIGRATION_SHA --manifest-sha256=$MANIFEST_SHA --actor=$actor --registry-user=$actor --registry-token-stdin"
-          printf '%s' "$GHCR_TOKEN" | ssh -i "$key" -p "$VM_PORT" -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o LogLevel=ERROR "$VM_DEPLOY_USER@$VM_HOST" "$remote"
+          $ErrorActionPreference = 'Stop'
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$') { throw 'Production VM connection variables are invalid.' }
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:MIGRATION_SHA -notmatch '^[0-9a-f]{64}$' -or $env:MANIFEST_SHA -notmatch '^[0-9a-f]{64}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'CI release metadata is invalid.' }
+          $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+          $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:GITHUB_ACTOR --registry-token-stdin"
+          try {
+            $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
+            if ($LASTEXITCODE -ne 0) { throw 'VM deployment failed.' }
+          } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
 
   remote-rollback:
     name: Emergency rollback to the last managed release
@@ -349,18 +349,17 @@ jobs:
       ROLLBACK_REASON: ${{ needs.validate.outputs.rollback_reason }}
     steps:
       - name: Invoke the fixed rollback entrypoint
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          [[ "$VM_HOST" =~ ^[A-Za-z0-9._:-]+$ && "$VM_PORT" =~ ^[0-9]{1,5}$ && "$VM_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Production VM connection variables are invalid.' >&2; exit 1; }
-          actor="$GITHUB_ACTOR"
-          [[ "$actor" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]] || { echo 'GitHub actor is invalid.' >&2; exit 1; }
-          reason_b64=$(printf '%s' "$ROLLBACK_REASON" | base64 --wrap=0)
-          key="$RUNNER_TEMP/production-ci-key"
-          known_hosts="$RUNNER_TEMP/production-known-hosts"
-          umask 077
-          printf '%s\n' "$VM_SSH_PRIVATE_KEY" > "$key"
-          printf '%s\n' "$VM_KNOWN_HOSTS" > "$known_hosts"
-          chmod 600 "$key" "$known_hosts"
-          remote="rollback --emergency --reason-b64=$reason_b64 --actor=$actor --registry-user=$actor --registry-token-stdin"
-          printf '%s' "$GHCR_TOKEN" | ssh -i "$key" -p "$VM_PORT" -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o LogLevel=ERROR "$VM_DEPLOY_USER@$VM_HOST" "$remote"
+          $ErrorActionPreference = 'Stop'
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'Production VM connection variables are invalid.' }
+          $reasonB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:ROLLBACK_REASON))
+          $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+          $remote = "rollback --emergency --reason-b64=$reasonB64 --actor=$env:GITHUB_ACTOR --registry-user=$env:GITHUB_ACTOR --registry-token-stdin"
+          try {
+            $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
+            if ($LASTEXITCODE -ne 0) { throw 'VM rollback failed.' }
+          } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
