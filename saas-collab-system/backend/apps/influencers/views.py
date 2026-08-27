@@ -440,24 +440,23 @@ class InfluencerResolveView(APIView):
             .annotate(is_blacklisted=Exists(blacklist_subquery))
             .order_by("-is_blacklisted", "id")
         )
-        candidates = exact_candidates
-        if not candidates:
-            tenant_candidates = (
-                Influencer.objects.select_for_update()
-                .filter(tenant=request.user.tenant)
-                .annotate(is_blacklisted=Exists(blacklist_subquery))
-                .order_by("id")
-            )
-            candidates = [
-                candidate
-                for candidate in tenant_candidates
-                if account
-                in {
-                    normalize_tiktok_username(candidate.handle),
-                    normalize_tiktok_username(candidate.code),
-                }
-            ]
-            candidates.sort(key=lambda candidate: (not candidate.is_blacklisted, candidate.id))
+        tenant_candidates = (
+            Influencer.objects.select_for_update()
+            .filter(tenant=request.user.tenant)
+            .annotate(is_blacklisted=Exists(blacklist_subquery))
+            .order_by("id")
+        )
+        candidates_by_id = {candidate.id: candidate for candidate in exact_candidates}
+        for candidate in tenant_candidates:
+            if account in {
+                normalize_tiktok_username(candidate.handle),
+                normalize_tiktok_username(candidate.code),
+            }:
+                candidates_by_id[candidate.id] = candidate
+        candidates = sorted(
+            candidates_by_id.values(),
+            key=lambda candidate: (not candidate.is_blacklisted, candidate.id),
+        )
         influencer = candidates[0] if candidates else None
         created = False
         if influencer is None:

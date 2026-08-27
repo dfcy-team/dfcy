@@ -452,7 +452,7 @@ def test_account_resolve_prefers_blacklisted_duplicate_profile():
         tenant=tenant,
         code="creator-blocked-duplicate",
         name="Blocked duplicate",
-        handle="duplicate.creator",
+        handle="ｄｕｐｌｉｃａｔｅ．ｃｒｅａｔｏｒ",
         platform="tiktok",
     )
     InfluencerRestriction.objects.create(
@@ -466,7 +466,7 @@ def test_account_resolve_prefers_blacklisted_duplicate_profile():
 
     response = client.post(
         "/api/internal/influencers/resolve/",
-        {"handle": "＠ｄｕｐｌｉｃａｔｅ．ｃｒｅａｔｏｒ"},
+        {"handle": "@duplicate.creator"},
         format="json",
     )
 
