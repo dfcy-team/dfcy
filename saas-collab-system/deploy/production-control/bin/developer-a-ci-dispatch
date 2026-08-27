@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Forced-command target for the dedicated CI SSH key. The authorized_keys entry
+# must contain command="/opt/saas-collab/release-control/unified/bin/developer-a-ci-dispatch",restrict.
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+DEPLOY_BIN="$SCRIPT_DIR/production-deploy"
+ROLLBACK_BIN="$SCRIPT_DIR/production-rollback"
+BASELINE_BIN="$SCRIPT_DIR/production-baseline-check"
+
+reject() {
+  printf 'Production release request rejected.\n' >&2
+  exit 1
+}
+
+original=${SSH_ORIGINAL_COMMAND:-}
+[[ -n "$original" && "${#original}" -le 4096 ]] || reject
+# Only fixed key=value tokens are accepted. In particular, no shell operators,
+# command substitutions, path separators for executables, or newlines may be
+# sent through the forced-command boundary.
+[[ "$original" =~ ^[a-zA-Z0-9_-]+([[:space:]]+--[a-zA-Z0-9_-]+=[A-Za-z0-9._:/@=-]+|[[:space:]]+--[a-zA-Z0-9_-]+)*$ ]] || reject
+
+read -r -a argv <<< "$original"
+[[ "${#argv[@]}" -gt 0 ]] || reject
+operation=${argv[0]}
+unset 'argv[0]'
+argv=("${argv[@]}")
+
+run_fixed() {
+  if [[ -f "$SCRIPT_DIR/../config/use-sudo" ]]; then
+    exec sudo -n "$@"
+  fi
+  exec "$@"
+}
+
+case "$operation" in
+  deploy)
+    [[ "${#argv[@]}" -ge 8 ]] || reject
+    for token in "${argv[@]}"; do
+      case "$token" in
+        --release-sha=*|--backend-image=*|--frontend-image=*|--redis-image=*|--migration-sha256=*|--manifest-sha256=*|--actor=*|--registry-user=*) ;;
+        --registry-token-stdin) ;;
+        *) reject ;;
+      esac
+    done
+    run_fixed "$DEPLOY_BIN" "${argv[@]}"
+    ;;
+  rollback)
+    [[ "${#argv[@]}" -ge 4 ]] || reject
+    for token in "${argv[@]}"; do
+      case "$token" in
+        --emergency|--registry-token-stdin) ;;
+        --reason-b64=*|--actor=*|--registry-user=*) ;;
+        *) reject ;;
+      esac
+    done
+    reason_b64=""
+    filtered=()
+    for token in "${argv[@]}"; do
+      case "$token" in
+        --reason-b64=*) reason_b64=${token#*=} ;;
+        *) filtered+=("$token") ;;
+      esac
+    done
+    [[ "$reason_b64" =~ ^[A-Za-z0-9+/]+=*$ ]] || reject
+    reason=$(printf '%s' "$reason_b64" | base64 --decode 2>/dev/null) || reject
+    [[ -n "$reason" && "${#reason}" -le 512 && "$reason" != *$'\n'* && "$reason" != *$'\r'* ]] || reject
+    run_fixed "$ROLLBACK_BIN" "${filtered[@]}" "--reason=$reason"
+    ;;
+  check)
+    [[ "${#argv[@]}" -eq 0 ]] || reject
+    run_fixed "$BASELINE_BIN" --runtime
+    ;;
+  *)
+    reject
+    ;;
+esac

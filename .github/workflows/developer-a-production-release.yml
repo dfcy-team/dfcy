@@ -1,0 +1,366 @@
+name: Developer A Production Release
+
+# This workflow creates and publishes immutable CI images. The production VM
+# never builds source. The deploy/rollback transport is deliberately separate
+# from the server control scripts: the default is dry-run/local checks, and an
+# operator must explicitly select ssh on a runner that can reach the private VM.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Operation to perform'
+        type: choice
+        required: true
+        default: dry_run
+        options:
+          - dry_run
+          - check
+          - deploy
+          - rollback
+      transport:
+        description: 'Transport for check/deploy/rollback; none performs local gates only'
+        type: choice
+        required: true
+        default: none
+        options:
+          - none
+          - ssh
+      release_sha:
+        description: 'Full lowercase SHA on main (blank uses the selected workflow commit)'
+        required: false
+        type: string
+      redis_image:
+        description: 'Owner-approved immutable Redis digest, required for deploy'
+        required: false
+        type: string
+      rollback_reason:
+        description: 'Single-line reason; required for rollback'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: saas-collab-production-release
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+  CONTROL_DIR: saas-collab-system/deploy/production-control
+
+jobs:
+  validate:
+    name: Validate requested release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.inputs.outputs.action }}
+      transport: ${{ steps.inputs.outputs.transport }}
+      release_sha: ${{ steps.inputs.outputs.release_sha }}
+      redis_image: ${{ steps.inputs.outputs.redis_image }}
+      rollback_reason: ${{ steps.inputs.outputs.rollback_reason }}
+    steps:
+      - name: Check out the requested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Validate request and main ancestry
+        id: inputs
+        shell: bash
+        env:
+          REQUESTED_ACTION: ${{ inputs.action }}
+          REQUESTED_TRANSPORT: ${{ inputs.transport }}
+          REQUESTED_SHA: ${{ inputs.release_sha }}
+          REQUESTED_REDIS: ${{ inputs.redis_image }}
+          REQUESTED_REASON: ${{ inputs.rollback_reason }}
+        run: |
+          set -euo pipefail
+          action="${REQUESTED_ACTION:-dry_run}"
+          transport="${REQUESTED_TRANSPORT:-none}"
+          release_sha="${REQUESTED_SHA:-$GITHUB_SHA}"
+          case "$action" in dry_run|check|deploy|rollback) ;; *) echo 'Unsupported operation.' >&2; exit 1 ;; esac
+          case "$transport" in none|ssh) ;; *) echo 'Unsupported transport.' >&2; exit 1 ;; esac
+          printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' || { echo 'release_sha must be a full lowercase SHA.' >&2; exit 1; }
+
+          if [[ "$action" != rollback ]]; then
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
+          fi
+
+          if [[ "$action" = deploy ]]; then
+            [[ "$transport" = ssh ]] || { echo 'deploy requires explicit ssh transport.' >&2; exit 1; }
+            printf '%s' "${REQUESTED_REDIS:-}" | grep -Eq '^([A-Za-z0-9._/:@-]+)@sha256:[0-9a-f]{64}$' || { echo 'deploy requires an approved immutable redis_image.' >&2; exit 1; }
+          fi
+          if [[ "$action" = rollback ]]; then
+            [[ "$transport" = ssh ]] || { echo 'rollback requires explicit ssh transport.' >&2; exit 1; }
+            [[ -n "${REQUESTED_REASON:-}" && "${REQUESTED_REASON}" != *$'\n'* && "${REQUESTED_REASON}" != *$'\r'* && "${#REQUESTED_REASON}" -le 512 ]] || { echo 'rollback_reason must be a non-empty single line of at most 512 characters.' >&2; exit 1; }
+          fi
+          printf 'action=%s\n' "$action" >> "$GITHUB_OUTPUT"
+          printf 'transport=%s\n' "$transport" >> "$GITHUB_OUTPUT"
+          printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_OUTPUT"
+          printf 'redis_image=%s\n' "${REQUESTED_REDIS:-}" >> "$GITHUB_OUTPUT"
+          # GITHUB_OUTPUT safely encodes multiline values, but newlines have
+          # already been rejected for rollback reasons.
+          printf 'rollback_reason=%s\n' "${REQUESTED_REASON:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Static production baseline gate
+        run: bash "$CONTROL_DIR/bin/production-baseline-check" --ci --repo-root "$GITHUB_WORKSPACE"
+
+  quality:
+    name: Application quality gates
+    needs: validate
+    if: needs.validate.outputs.action == 'deploy' || needs.validate.outputs.action == 'dry_run'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.release_sha }}
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: saas-collab-system/backend/requirements.txt
+      - name: Backend checks and tests
+        working-directory: saas-collab-system/backend
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.dev
+          DJANGO_SECRET_KEY: production-release-ci-placeholder-secret
+          DJANGO_DEBUG: 'false'
+          DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+          DB_ENGINE: django.db.backends.sqlite3
+          DB_NAME: /tmp/production-release-ci.sqlite3
+          REDIS_URL: redis://localhost:6379/15
+          CELERY_BROKER_URL: redis://localhost:6379/15
+          CELERY_RESULT_BACKEND: redis://localhost:6379/15
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+          python manage.py migrate --noinput
+          python -m pytest -q
+      - name: Frontend locked build
+        working-directory: saas-collab-system/frontend
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+
+  build:
+    name: Build immutable CI images
+    needs: [validate, quality]
+    if: needs.validate.outputs.action == 'deploy' || needs.validate.outputs.action == 'dry_run'
+    runs-on: ubuntu-latest
+    outputs:
+      backend_digest: ${{ steps.backend.outputs.digest }}
+      frontend_digest: ${{ steps.frontend.outputs.digest }}
+      migration_sha: ${{ steps.migration.outputs.sha256 }}
+      manifest_sha: ${{ steps.manifest.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.release_sha }}
+          fetch-depth: 1
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR for deploy builds only
+        if: needs.validate.outputs.action == 'deploy'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build backend image
+        id: backend
+        uses: docker/build-push-action@v6
+        with:
+          context: saas-collab-system/backend
+          push: ${{ needs.validate.outputs.action == 'deploy' }}
+          tags: ${{ env.IMAGE_PREFIX }}/saas-collab-backend:${{ needs.validate.outputs.release_sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.validate.outputs.release_sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+      - name: Build frontend image
+        id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: saas-collab-system
+          file: saas-collab-system/deploy/sandbox/application/Dockerfile.frontend
+          push: ${{ needs.validate.outputs.action == 'deploy' }}
+          tags: ${{ env.IMAGE_PREFIX }}/saas-collab-frontend:${{ needs.validate.outputs.release_sha }}
+          build-args: |
+            VITE_API_BASE_URL=
+            VITE_USE_MOCK=false
+          labels: |
+            org.opencontainers.image.revision=${{ needs.validate.outputs.release_sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+      - name: Calculate migration baseline
+        id: migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum_value=$(python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          root = Path('saas-collab-system/backend')
+          digest = sha256()
+          for path in sorted(root.glob('apps/*/migrations/*.py')):
+              digest.update(str(path.relative_to(root)).encode())
+              digest.update(path.read_bytes())
+          print(digest.hexdigest())
+          PY
+          )
+          printf 'sha256=%s\n' "$sha256sum_value" >> "$GITHUB_OUTPUT"
+      - name: Create immutable release manifest
+        id: manifest
+        if: needs.validate.outputs.action == 'deploy'
+        shell: bash
+        env:
+          BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
+          MIGRATION_SHA: ${{ steps.migration.outputs.sha256 }}
+          REDIS_IMAGE: ${{ needs.validate.outputs.redis_image }}
+          RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'backend build did not produce a digest.' >&2; exit 1; }
+          [[ "$FRONTEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'frontend build did not produce a digest.' >&2; exit 1; }
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest = {
+              "schema_version": 1,
+              "environment": "production",
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "git_sha": os.environ["RELEASE_SHA"],
+              "backend_image": f"ghcr.io/{os.environ['GITHUB_REPOSITORY']}/saas-collab-backend@{os.environ['BACKEND_DIGEST']}",
+              "frontend_image": f"ghcr.io/{os.environ['GITHUB_REPOSITORY']}/saas-collab-frontend@{os.environ['FRONTEND_DIGEST']}",
+              "redis_image": os.environ["REDIS_IMAGE"],
+              "migration_sha256": os.environ["MIGRATION_SHA"],
+              "compose_sha256": "owner-controlled-on-target",
+          }
+          Path("release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+          manifest_sha=$(sha256sum release-manifest.json | cut -d' ' -f1)
+          printf 'sha256=%s\n' "$manifest_sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: needs.validate.outputs.action == 'deploy'
+        with:
+          name: production-release-manifest-${{ needs.validate.outputs.release_sha }}
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+  transport-gate:
+    name: Require an explicitly reachable deployment transport
+    needs: validate
+    if: needs.validate.outputs.action == 'deploy' && needs.validate.outputs.transport != 'ssh'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo 'Deployment is intentionally blocked: select ssh on a runner that can reach the private VM.' >&2
+          exit 1
+
+  remote-check:
+    name: Check the VM control plane
+    needs: validate
+    if: needs.validate.outputs.action == 'check' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+    steps:
+      - name: Check fixed VM entrypoint without opening a shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VM_HOST" =~ ^[A-Za-z0-9._:-]+$ && "$VM_PORT" =~ ^[0-9]{1,5}$ && "$VM_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Production VM connection variables are invalid.' >&2; exit 1; }
+          key="$RUNNER_TEMP/production-ci-key"
+          known_hosts="$RUNNER_TEMP/production-known-hosts"
+          umask 077
+          printf '%s\n' "$VM_SSH_PRIVATE_KEY" > "$key"
+          printf '%s\n' "$VM_KNOWN_HOSTS" > "$known_hosts"
+          chmod 600 "$key" "$known_hosts"
+          ssh -i "$key" -p "$VM_PORT" -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o LogLevel=ERROR "$VM_DEPLOY_USER@$VM_HOST" check
+
+  remote-deploy:
+    name: Deploy CI digests to production
+    needs: [validate, build]
+    if: needs.validate.outputs.action == 'deploy' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ github.token }}
+      RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
+      BACKEND_IMAGE: ghcr.io/${{ github.repository }}/saas-collab-backend@${{ needs.build.outputs.backend_digest }}
+      FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/saas-collab-frontend@${{ needs.build.outputs.frontend_digest }}
+      REDIS_IMAGE: ${{ needs.validate.outputs.redis_image }}
+      MIGRATION_SHA: ${{ needs.build.outputs.migration_sha }}
+      MANIFEST_SHA: ${{ needs.build.outputs.manifest_sha }}
+    steps:
+      - name: Invoke the fixed forced-command entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VM_HOST" =~ ^[A-Za-z0-9._:-]+$ && "$VM_PORT" =~ ^[0-9]{1,5}$ && "$VM_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Production VM connection variables are invalid.' >&2; exit 1; }
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ && "$MIGRATION_SHA" =~ ^[0-9a-f]{64}$ && "$MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo 'CI release metadata is invalid.' >&2; exit 1; }
+          actor="$GITHUB_ACTOR"
+          [[ "$actor" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]] || { echo 'GitHub actor is invalid.' >&2; exit 1; }
+          key="$RUNNER_TEMP/production-ci-key"
+          known_hosts="$RUNNER_TEMP/production-known-hosts"
+          umask 077
+          printf '%s\n' "$VM_SSH_PRIVATE_KEY" > "$key"
+          printf '%s\n' "$VM_KNOWN_HOSTS" > "$known_hosts"
+          chmod 600 "$key" "$known_hosts"
+          remote="deploy --release-sha=$RELEASE_SHA --backend-image=$BACKEND_IMAGE --frontend-image=$FRONTEND_IMAGE --redis-image=$REDIS_IMAGE --migration-sha256=$MIGRATION_SHA --manifest-sha256=$MANIFEST_SHA --actor=$actor --registry-user=$actor --registry-token-stdin"
+          printf '%s' "$GHCR_TOKEN" | ssh -i "$key" -p "$VM_PORT" -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o LogLevel=ERROR "$VM_DEPLOY_USER@$VM_HOST" "$remote"
+
+  remote-rollback:
+    name: Emergency rollback to the last managed release
+    needs: validate
+    if: needs.validate.outputs.action == 'rollback' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ github.token }}
+      ROLLBACK_REASON: ${{ needs.validate.outputs.rollback_reason }}
+    steps:
+      - name: Invoke the fixed rollback entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VM_HOST" =~ ^[A-Za-z0-9._:-]+$ && "$VM_PORT" =~ ^[0-9]{1,5}$ && "$VM_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Production VM connection variables are invalid.' >&2; exit 1; }
+          actor="$GITHUB_ACTOR"
+          [[ "$actor" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]] || { echo 'GitHub actor is invalid.' >&2; exit 1; }
+          reason_b64=$(printf '%s' "$ROLLBACK_REASON" | base64 --wrap=0)
+          key="$RUNNER_TEMP/production-ci-key"
+          known_hosts="$RUNNER_TEMP/production-known-hosts"
+          umask 077
+          printf '%s\n' "$VM_SSH_PRIVATE_KEY" > "$key"
+          printf '%s\n' "$VM_KNOWN_HOSTS" > "$known_hosts"
+          chmod 600 "$key" "$known_hosts"
+          remote="rollback --emergency --reason-b64=$reason_b64 --actor=$actor --registry-user=$actor --registry-token-stdin"
+          printf '%s' "$GHCR_TOKEN" | ssh -i "$key" -p "$VM_PORT" -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o LogLevel=ERROR "$VM_DEPLOY_USER@$VM_HOST" "$remote"

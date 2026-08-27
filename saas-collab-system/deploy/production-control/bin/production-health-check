@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/../lib/production-common.sh"
+
+quiet=0
+while (($#)); do
+  case "$1" in
+    --quiet)
+      quiet=1
+      shift
+      ;;
+    --help)
+      printf '%s\n' 'Usage: production-health-check [--quiet]'
+      exit 0
+      ;;
+    *)
+      die 'unknown health-check option.'
+      ;;
+  esac
+done
+
+require_control_identity
+require_command jq
+require_command curl
+load_production_env
+init_compose
+
+backend_service=${PRODUCTION_BACKEND_SERVICE:-backend}
+frontend_service=${PRODUCTION_FRONTEND_SERVICE:-frontend}
+required_services_csv=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
+
+is_running() {
+  local service=$1 container status health
+  container=$("${COMPOSE[@]}" ps -q "$service" 2>/dev/null || true)
+  [[ -n "$container" ]] || return 1
+  status=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)
+  [[ "$status" = running ]] || return 1
+  health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || true)
+  [[ "$health" != unhealthy && "$health" != starting ]] || return 1
+}
+
+"${COMPOSE[@]}" config --quiet
+
+old_ifs=$IFS
+IFS=,
+read -r -a required_services <<< "$required_services_csv"
+IFS=$old_ifs
+for service in "${required_services[@]}"; do
+  [[ "$service" =~ ^[a-zA-Z0-9_.-]+$ ]] || die 'required service name is invalid.'
+  is_running "$service" || die 'a required production service is not healthy.'
+done
+
+backend_container=$("${COMPOSE[@]}" ps -q "$backend_service" 2>/dev/null || true)
+[[ -n "$backend_container" ]] || die 'the backend container is not available.'
+docker exec "$backend_container" python manage.py check --deploy >/dev/null 2>&1 || die 'Django deployment checks failed.'
+docker exec "$backend_container" python -c \
+  'import urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/api/internal/health/",headers={"Host":"localhost"}); raise SystemExit(0 if urllib.request.urlopen(r,timeout=8).status == 200 else 1)' \
+  >/dev/null 2>&1 || die 'backend health endpoint failed.'
+
+health_url=${PRODUCTION_HEALTH_URL:-}
+if [[ -n "$health_url" ]]; then
+  [[ "$health_url" =~ ^https?:// ]] || die 'PRODUCTION_HEALTH_URL must use HTTP or HTTPS.'
+  curl --fail --silent --show-error --max-time 10 "$health_url" -o /dev/null || die 'public production health endpoint failed.'
+fi
+
+printf 'PRODUCTION_HEALTH=PASS\n'
