@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "release_version": "2.44.47",
+  "release_version": "2.44.48",
   "status": "candidate_verified_not_deployed",
   "registered_at": "2026-08-28",
-  "parent_release": "2.44.46",
-  "source_base_commit": "fcbf2b68b0ae58079d0893b953c53e347b208e1c",
+  "parent_release": "2.44.47",
+  "source_base_commit": "d4d62aa72edd3323e55758060a6dee656fef5651",
   "scope": "add tenant-scoped foundation settings and configurable L2 product category row background colors",
   "menu_change_scope": "append /master-data/settings as the final child of 基础档案 only",
   "top_level_menu_count": 16,
@@ -14,8 +14,8 @@
   "router_sha256": "fb8bf32a55f1c1e1bd68c623af7af688d03ebc1890a3d8c27ea3c996c4632f86",
   "navigation_source_sha256": "2f9ff217910d1853d58a0f37cb2a78e10ceac9cf179d0ca29e1bc8562e0f6ea9",
   "permission_catalog_sha256": "f762f9253152cc4611524cc757f914dc6a995efdb3a2b6011fb03a9186adcc19",
-  "target_backend_image": "saas-collab-backend:v2.44.47",
-  "target_frontend_image": "saas-collab-frontend:v2.44.47",
+  "target_backend_image": "saas-collab-backend:v2.44.48",
+  "target_frontend_image": "saas-collab-frontend:v2.44.48",
   "database_migration_required": true,
   "database_migrations": [
     "products.0014_productcategory_row_background_color",
@@ -45,15 +45,15 @@
     "makemigrations_check": "pass; no missing model changes",
     "compileall": "pass",
     "menu_baseline": "pass; top-level order unchanged and one foundation child appended",
-    "navigation_css": "pass; MainLayout.vue unchanged from v2.44.46",
+    "navigation_css": "pass; MainLayout.vue unchanged from v2.44.47",
     "permission_boundary": "pass; category CRUD cannot modify the setting and the dedicated endpoint requires settings permissions",
     "tenant_isolation": "pass; covered by endpoint tests",
     "deployment_performed": false
   },
   "rollback": {
-    "application_release": "2.44.46",
+    "application_release": "2.44.47",
     "database_restore_required_after_migration": false,
     "note": "The added nullable-compatible field can remain unused; application rollback restores default row colors."
   },
-  "release_notes": "docs/06_release/system_v2.44.47.md"
+  "release_notes": "docs/06_release/system_v2.44.48.md"
 }
