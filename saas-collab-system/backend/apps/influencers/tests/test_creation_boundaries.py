@@ -413,6 +413,333 @@ def test_sample_edit_can_transition_status_atomically():
     assert fulfillment.sample_sent_at is not None
 
 
+def test_target_creation_reads_influencer_before_identity_group_lock(monkeypatch):
+    _, user, store, influencer = _records("target-lock-order")
+    influencer.handle = "shared.creator"
+    influencer.save(update_fields=["handle"])
+    task = _task(user, store)
+    events = []
+
+    original_tenant_influencer = influencer_services._tenant_influencer
+    original_identity_queryset = influencer_services.influencer_identity_queryset
+    original_locked_task = influencer_services._locked_task
+
+    def observe_tenant_influencer(*args, **kwargs):
+        assert kwargs["for_update"] is False
+        events.append("influencer_read")
+        return original_tenant_influencer(*args, **kwargs)
+
+    def observe_identity_queryset(*args, **kwargs):
+        assert kwargs["for_update"] is True
+        events.append("identity_group")
+        return original_identity_queryset(*args, **kwargs)
+
+    def observe_locked_task(*args, **kwargs):
+        events.append("task")
+        return original_locked_task(*args, **kwargs)
+
+    monkeypatch.setattr(influencer_services, "_tenant_influencer", observe_tenant_influencer)
+    monkeypatch.setattr(
+        influencer_services,
+        "influencer_identity_queryset",
+        observe_identity_queryset,
+    )
+    monkeypatch.setattr(influencer_services, "_locked_task", observe_locked_task)
+    monkeypatch.setattr(
+        influencer_services,
+        "_locked_influencer",
+        lambda *args, **kwargs: pytest.fail("target creation must not lock the selected influencer row"),
+    )
+
+    target, created = influencer_services.add_outreach_target(
+        user=user,
+        task=task,
+        influencer=influencer,
+    )
+
+    assert created is True
+    assert target.influencer_id == influencer.pk
+    assert events == ["influencer_read", "identity_group", "task"]
+
+
+def test_task_sample_creation_locks_identity_before_task_and_target(monkeypatch):
+    _, user, store, influencer = _records("task-sample-lock-order")
+    task = _task(user, store)
+    target, _ = influencer_services.add_outreach_target(
+        user=user,
+        task=task,
+        influencer=influencer,
+    )
+    events = []
+    original_identity_queryset = influencer_services.influencer_identity_queryset
+    original_locked_task = influencer_services._locked_task
+    original_locked_target = influencer_services._locked_target
+
+    def observe_identity_queryset(*args, **kwargs):
+        assert kwargs["for_update"] is True
+        events.append("identity_group")
+        return original_identity_queryset(*args, **kwargs)
+
+    def observe_locked_task(*args, **kwargs):
+        events.append("task")
+        return original_locked_task(*args, **kwargs)
+
+    def observe_locked_target(*args, **kwargs):
+        events.append("target")
+        return original_locked_target(*args, **kwargs)
+
+    monkeypatch.setattr(
+        influencer_services,
+        "influencer_identity_queryset",
+        observe_identity_queryset,
+    )
+    monkeypatch.setattr(influencer_services, "_locked_task", observe_locked_task)
+    monkeypatch.setattr(influencer_services, "_locked_target", observe_locked_target)
+
+    fulfillment, created = create_sample_fulfillment(
+        user=user,
+        request_key="task-sample-lock-order-key",
+        validated_data={
+            "outreach_task": task,
+            "outreach_target": target,
+        },
+        item_payloads=[],
+    )
+
+    assert created is True
+    assert fulfillment.outreach_target_id == target.pk
+    assert events[:3] == ["identity_group", "task", "target"]
+
+
+def test_standalone_sample_creation_locks_identity_before_store_and_owner(monkeypatch):
+    _, user, store, influencer = _records("standalone-sample-lock-order")
+    events = []
+    original_identity_queryset = influencer_services.influencer_identity_queryset
+    original_locked_store = influencer_services._locked_store
+    original_locked_user = influencer_services._locked_user
+
+    def observe_identity_queryset(*args, **kwargs):
+        assert kwargs["for_update"] is True
+        events.append("identity_group")
+        return original_identity_queryset(*args, **kwargs)
+
+    def observe_locked_store(*args, **kwargs):
+        events.append("store")
+        return original_locked_store(*args, **kwargs)
+
+    def observe_locked_user(*args, **kwargs):
+        events.append("owner")
+        return original_locked_user(*args, **kwargs)
+
+    monkeypatch.setattr(
+        influencer_services,
+        "influencer_identity_queryset",
+        observe_identity_queryset,
+    )
+    monkeypatch.setattr(influencer_services, "_locked_store", observe_locked_store)
+    monkeypatch.setattr(influencer_services, "_locked_user", observe_locked_user)
+
+    fulfillment, created = create_sample_fulfillment(
+        user=user,
+        request_key="standalone-sample-lock-order-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "STANDALONE-LOCK-ORDER-PRODUCT",
+        },
+        item_payloads=[],
+    )
+
+    assert created is True
+    assert fulfillment.influencer_id == influencer.pk
+    assert events[:3] == ["identity_group", "store", "owner"]
+
+
+def test_influencer_task_creation_locks_identity_before_store_and_owner(monkeypatch):
+    _, user, store, influencer = _records("influencer-task-lock-order")
+    influencer.handle = "task.creator"
+    influencer.save(update_fields=["handle"])
+    events = []
+    original_identity_queryset = influencer_services.influencer_identity_queryset
+    original_locked_store = influencer_services._locked_store
+    original_locked_user = influencer_services._locked_user
+
+    def observe_identity_queryset(*args, **kwargs):
+        assert kwargs["for_update"] is True
+        events.append("identity_group")
+        return original_identity_queryset(*args, **kwargs)
+
+    def observe_locked_store(*args, **kwargs):
+        events.append("store")
+        return original_locked_store(*args, **kwargs)
+
+    def observe_locked_user(*args, **kwargs):
+        events.append("owner")
+        return original_locked_user(*args, **kwargs)
+
+    monkeypatch.setattr(
+        influencer_services,
+        "influencer_identity_queryset",
+        observe_identity_queryset,
+    )
+    monkeypatch.setattr(influencer_services, "_locked_store", observe_locked_store)
+    monkeypatch.setattr(influencer_services, "_locked_user", observe_locked_user)
+
+    task = _task(user, store, influencer)
+
+    assert task.influencer_id == influencer.pk
+    assert OutreachTarget.objects.filter(task=task, influencer=influencer).exists()
+    assert events[:3] == ["identity_group", "store", "owner"]
+
+
+def test_task_creation_without_influencer_locks_store_before_owner(monkeypatch):
+    _, user, store, _ = _records("task-without-influencer-lock-order")
+    events = []
+    original_locked_store = influencer_services._locked_store
+    original_locked_user = influencer_services._locked_user
+
+    def observe_locked_store(*args, **kwargs):
+        events.append("store")
+        return original_locked_store(*args, **kwargs)
+
+    def observe_locked_user(*args, **kwargs):
+        events.append("owner")
+        return original_locked_user(*args, **kwargs)
+
+    monkeypatch.setattr(influencer_services, "_locked_store", observe_locked_store)
+    monkeypatch.setattr(influencer_services, "_locked_user", observe_locked_user)
+
+    task = _task(user, store)
+
+    assert task.influencer_id is None
+    assert events[:2] == ["store", "owner"]
+
+
+@pytest.mark.parametrize("restore", [False, True])
+def test_sample_mutation_locks_identity_group_before_fulfillment(monkeypatch, restore):
+    _, user, store, influencer = _records(
+        "sample-lock-order-restore" if restore else "sample-lock-order-edit"
+    )
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key=f"sample-lock-order-{restore}",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "SAMPLE-LOCK-ORDER-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    if restore:
+        fulfillment = influencer_services.soft_delete_sample_fulfillment(
+            user=user,
+            fulfillment=fulfillment,
+            expected_version=fulfillment.version,
+        )
+
+    events = []
+    original_tenant_influencer = influencer_services._tenant_influencer
+    original_identity_queryset = influencer_services.influencer_identity_queryset
+    original_locked_sample = influencer_services._locked_sample_fulfillment
+
+    def observe_tenant_influencer(*args, **kwargs):
+        assert kwargs["for_update"] is False
+        events.append("influencer_read")
+        return original_tenant_influencer(*args, **kwargs)
+
+    def observe_identity_queryset(*args, **kwargs):
+        assert kwargs["for_update"] is True
+        events.append("identity_group")
+        return original_identity_queryset(*args, **kwargs)
+
+    def observe_locked_sample(*args, **kwargs):
+        events.append("sample")
+        return original_locked_sample(*args, **kwargs)
+
+    monkeypatch.setattr(influencer_services, "_tenant_influencer", observe_tenant_influencer)
+    monkeypatch.setattr(
+        influencer_services,
+        "influencer_identity_queryset",
+        observe_identity_queryset,
+    )
+    monkeypatch.setattr(
+        influencer_services,
+        "_locked_sample_fulfillment",
+        observe_locked_sample,
+    )
+
+    if restore:
+        result = influencer_services.restore_sample_fulfillment(
+            user=user,
+            fulfillment=fulfillment,
+            expected_version=fulfillment.version,
+        )
+    else:
+        result = influencer_services.update_sample_fulfillment(
+            user=user,
+            fulfillment=fulfillment,
+            expected_version=fulfillment.version,
+            validated_data={"notes": "identity-first edit"},
+        )
+
+    assert result.pk == fulfillment.pk
+    assert events == ["influencer_read", "identity_group", "sample"]
+
+
+@pytest.mark.parametrize("mutation", ["status", "influencer"])
+def test_sample_edit_revalidates_status_and_influencer_after_identity_lock(monkeypatch, mutation):
+    tenant, user, store, influencer = _records(f"sample-revalidate-{mutation}")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key=f"sample-revalidate-{mutation}",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "SAMPLE-REVALIDATE-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    other_influencer = Influencer.objects.create(
+        tenant=tenant,
+        code=f"sample-revalidate-{mutation}-other",
+        name="Other creator",
+        platform="TikTok",
+        handle="other.creator",
+    )
+    original_locked_sample = influencer_services._locked_sample_fulfillment
+
+    def return_stale_sample(*args, **kwargs):
+        locked = original_locked_sample(*args, **kwargs)
+        if mutation == "status":
+            locked.status = SampleFulfillment.Status.SHIPPED
+        else:
+            locked.influencer_id = other_influencer.pk
+        return locked
+
+    monkeypatch.setattr(
+        influencer_services,
+        "_locked_sample_fulfillment",
+        return_stale_sample,
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        influencer_services.update_sample_fulfillment(
+            user=user,
+            fulfillment=fulfillment,
+            expected_version=fulfillment.version,
+            validated_data={"notes": "must not overwrite stale state"},
+        )
+
+    assert exc_info.value.get_codes() == {mutation: "conflict"}
+    fulfillment.refresh_from_db()
+    assert fulfillment.notes == ""
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert fulfillment.influencer_id == influencer.pk
+
+
 def test_invalid_status_transition_rolls_back_fact_edits():
     tenant, user, store, influencer = _records("sample-edit-status-rollback")
     role = Role.objects.get(tenant=tenant, code="bd")

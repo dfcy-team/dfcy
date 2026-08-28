@@ -211,12 +211,34 @@ def _tenant_influencer(user, influencer_id, *, for_update):
 
 
 def _locked_influencer(user, influencer_id):
-    return _tenant_influencer(user, influencer_id, for_update=True)
+    return _lock_influencer_identity(user=user, influencer=influencer_id)[0]
+
+
+def _lock_influencer_identity(*, user, influencer):
+    """Lock the complete tenant-scoped handle identity and return its member."""
+    selected = Influencer.objects.get(pk=_pk(influencer), tenant_id=user.tenant_id)
+    identity_profiles = list(influencer_identity_queryset(selected, for_update=True))
+    locked = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
+    if locked is None:
+        raise ValidationError({"influencer": "Influencer identity group is empty."})
+    if locked.status != Influencer.Status.ACTIVE:
+        raise ValidationError(
+            {"influencer": "Inactive influencers cannot be linked to outreach tasks or receive samples."},
+            code="conflict",
+        )
+    return locked, [profile.pk for profile in identity_profiles]
 
 
 def _locked_store(user, store_id):
+    return _tenant_store(user, store_id, for_update=True)
+
+
+def _tenant_store(user, store_id, *, for_update):
+    queryset = StoreMaster.objects
+    if for_update:
+        queryset = queryset.select_for_update()
     try:
-        return StoreMaster.objects.select_for_update().get(pk=store_id, tenant=user.tenant)
+        return queryset.get(pk=store_id, tenant=user.tenant)
     except StoreMaster.DoesNotExist as exc:
         raise ValidationError(
             {"store": "Store does not exist in the current tenant."}
@@ -224,12 +246,17 @@ def _locked_store(user, store_id):
 
 
 def _locked_user(user, user_id, field="owner"):
+    return _tenant_user(user, user_id, field=field, for_update=True)
+
+
+def _tenant_user(user, user_id, *, field="owner", for_update):
     if user_id is None:
         raise ValidationError({field: f"{field.capitalize()} is required."})
+    queryset = get_user_model().objects
+    if for_update:
+        queryset = queryset.select_for_update()
     try:
-        return get_user_model().objects.select_for_update().get(
-            pk=user_id, tenant=user.tenant
-        )
+        return queryset.get(pk=user_id, tenant=user.tenant)
     except get_user_model().DoesNotExist as exc:
         raise ValidationError(
             {field: f"{field.capitalize()} does not exist in the current tenant."}
@@ -262,10 +289,15 @@ def _locked_spu(user, spu_id):
 
 
 def _locked_task(user, task_id):
+    return _tenant_task(user, task_id, for_update=True)
+
+
+def _tenant_task(user, task_id, *, for_update):
+    queryset = OutreachTask.objects
+    if for_update:
+        queryset = queryset.select_for_update()
     try:
-        return OutreachTask.objects.select_for_update().get(
-            pk=task_id, tenant=user.tenant
-        )
+        return queryset.get(pk=task_id, tenant=user.tenant)
     except OutreachTask.DoesNotExist as exc:
         raise ValidationError(
             {"outreach_task": "Outreach task does not exist in the current tenant."}
@@ -273,10 +305,15 @@ def _locked_task(user, task_id):
 
 
 def _locked_target(user, target_id):
+    return _tenant_target(user, target_id, for_update=True)
+
+
+def _tenant_target(user, target_id, *, for_update):
+    queryset = OutreachTarget.objects
+    if for_update:
+        queryset = queryset.select_for_update()
     try:
-        return OutreachTarget.objects.select_for_update().get(
-            pk=target_id, tenant=user.tenant
-        )
+        return queryset.get(pk=target_id, tenant=user.tenant)
     except OutreachTarget.DoesNotExist as exc:
         raise ValidationError(
             {"outreach_target": "Outreach target does not exist in the current tenant."}
@@ -292,17 +329,16 @@ def _lock_task_relations(
     store_id=None,
     owner_id=None,
     external_product_id=None,
-    lock_influencer=True,
 ):
-    """Lock and validate task-owned relations before creating a fulfillment."""
-    task = _locked_task(user, task_id)
+    """Discover relations without locks, then lock identity before task-owned rows."""
+    task = _tenant_task(user, task_id, for_update=False)
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive samples."})
     _assert_task_accepts_target(task)
 
     influencer = None
     if target_id is not None:
-        target = _locked_target(user, target_id)
+        target = _tenant_target(user, target_id, for_update=False)
         if target.task_id != task.pk:
             raise ValidationError({"outreach_target": "Target must belong to the outreach task."})
         if target.is_deleted:
@@ -310,7 +346,7 @@ def _lock_task_relations(
         influencer = _tenant_influencer(
             user,
             target.influencer_id,
-            for_update=lock_influencer,
+            for_update=False,
         )
     else:
         if influencer_id is None:
@@ -320,13 +356,32 @@ def _lock_task_relations(
         influencer = _tenant_influencer(
             user,
             _pk(influencer_id),
-            for_update=lock_influencer,
+            for_update=False,
         )
         target = None
 
     if influencer_id is not None and _pk(influencer_id) != influencer.pk:
         raise ValidationError({"influencer": "Influencer must match the outreach target."})
     if target is None and task.influencer_id is not None and task.influencer_id != influencer.pk:
+        raise ValidationError({"influencer": "Influencer must match the outreach task."})
+
+    # Identity is the first influencer business lock. Task and target rows are
+    # locked only after the complete handle group has been serialized.
+    influencer = _assert_influencer_not_blacklisted(user=user, influencer=influencer)
+    task = _locked_task(user, task.pk)
+    if task.is_deleted:
+        raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive samples."})
+    _assert_task_accepts_target(task)
+
+    if target is not None:
+        target = _locked_target(user, target.pk)
+        if target.task_id != task.pk:
+            raise ValidationError({"outreach_target": "Target must belong to the outreach task."})
+        if target.is_deleted:
+            raise ValidationError({"outreach_target": "Deleted outreach targets cannot receive samples."})
+        if target.influencer_id != influencer.pk:
+            raise ValidationError({"influencer": "Influencer must match the outreach target."})
+    elif task.influencer_id is not None and task.influencer_id != influencer.pk:
         raise ValidationError({"influencer": "Influencer must match the outreach task."})
 
     store = _locked_store(user, task.store_id)
@@ -651,14 +706,32 @@ def create_outreach_task(*, user, validated_data):
     owner_value = data.get("owner")
     if owner_value is None:
         raise ValidationError({"owner": "Owner is required."})
-    owner = _locked_user(user, _pk(owner_value))
-    store = _locked_store(user, _pk(data["store"]))
+    owner = _tenant_user(user, _pk(owner_value), for_update=False)
+    store = _tenant_store(user, _pk(data["store"]), for_update=False)
     if store.status != "active":
         raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
     _assert_active_bd_owner(user, owner)
     influencer = None
     if "influencer" in data and data["influencer"] is not None:
-        influencer = _locked_influencer(user, _pk(data["influencer"]))
+        influencer = _tenant_influencer(
+            user,
+            _pk(data["influencer"]),
+            for_update=False,
+        )
+        influencer = _assert_influencer_not_blacklisted(
+            user=user,
+            influencer=influencer,
+            message="Blacklisted influencers cannot be linked to outreach tasks.",
+            code="conflict",
+        )
+        store = _locked_store(user, store.pk)
+        owner = _locked_user(user, owner.pk)
+    else:
+        store = _locked_store(user, store.pk)
+        owner = _locked_user(user, owner.pk)
+    if store.status != "active":
+        raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
+    _assert_active_bd_owner(user, owner)
     spu = _locked_spu(user, _pk(data["spu"])) if data.get("spu") is not None else None
     data["owner"] = owner
     data["store"] = store
@@ -840,17 +913,17 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
 def add_outreach_target(
     *, user, task, influencer, notes="", first_linked_at=None, expected_version=None
 ):
-    task = _locked_task(user, _pk(task))
-    if task.is_deleted:
-        raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive targets."})
-    _assert_task_accepts_target(task)
-    influencer = _locked_influencer(user, _pk(influencer))
-    _assert_influencer_not_blacklisted(
+    influencer = _tenant_influencer(user, _pk(influencer), for_update=False)
+    influencer = _assert_influencer_not_blacklisted(
         user=user,
         influencer=influencer,
         message="Blacklisted influencers cannot be linked to outreach tasks.",
         code="conflict",
     )
+    task = _locked_task(user, _pk(task))
+    if task.is_deleted:
+        raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive targets."})
+    _assert_task_accepts_target(task)
     if task.target_count and OutreachTarget.objects.filter(
         tenant=user.tenant, task=task, is_deleted=False
     ).exclude(influencer=influencer).count() >= task.target_count:
@@ -1256,17 +1329,7 @@ def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=N
     # active restrictions while holding every identity lock in primary-key
     # order. Do not lock the selected row first: two duplicate profiles could
     # otherwise acquire the same group in opposite order and deadlock.
-    selected = Influencer.objects.get(pk=influencer.pk, tenant_id=user.tenant_id)
-    identity_profiles = list(influencer_identity_queryset(selected, for_update=True))
-    locked = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
-    if locked is None:
-        raise ValidationError({"influencer": "Influencer identity group is empty."})
-    if locked.status != Influencer.Status.ACTIVE:
-        raise ValidationError(
-            {"influencer": "Inactive influencers cannot be linked to outreach tasks or receive samples."},
-            code="conflict",
-        )
-    identity_ids = [profile.pk for profile in identity_profiles]
+    locked, identity_ids = _lock_influencer_identity(user=user, influencer=influencer)
     blacklisted = InfluencerRestriction.objects.filter(
         tenant_id=user.tenant_id,
         influencer_id__in=identity_ids,
@@ -1278,6 +1341,54 @@ def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=N
             raise ValidationError(detail, code=code)
         raise ValidationError(detail)
     return locked
+
+
+def _read_sample_fulfillment(*, user, fulfillment, is_deleted):
+    return SampleFulfillment.objects.get(
+        pk=_pk(fulfillment),
+        tenant=user.tenant,
+        is_deleted=is_deleted,
+    )
+
+
+def _locked_sample_fulfillment(*, user, fulfillment):
+    return SampleFulfillment.objects.select_for_update().get(
+        pk=_pk(fulfillment),
+        tenant=user.tenant,
+    )
+
+
+def _revalidate_sample_fulfillment(
+    *,
+    fulfillment,
+    observed,
+    locked_influencer,
+    expected_version,
+    expected_deleted,
+):
+    if fulfillment.version != expected_version:
+        raise ValidationError(
+            {"version": "Fulfillment was changed by another request."},
+            code="conflict",
+        )
+    if fulfillment.is_deleted != expected_deleted:
+        raise ValidationError(
+            {"is_deleted": "Fulfillment was changed by another request."},
+            code="conflict",
+        )
+    if fulfillment.status != observed.status:
+        raise ValidationError(
+            {"status": "Fulfillment was changed by another request."},
+            code="conflict",
+        )
+    if (
+        fulfillment.influencer_id != observed.influencer_id
+        or fulfillment.influencer_id != locked_influencer.pk
+    ):
+        raise ValidationError(
+            {"influencer": "Fulfillment influencer was changed by another request."},
+            code="conflict",
+        )
 
 
 def _recompute_related_task(*, user, fulfillment):
@@ -1320,7 +1431,6 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             store_id=data.get("store"),
             owner_id=data.get("owner"),
             external_product_id=data.get("external_product_id"),
-            lock_influencer=False,
         )
         product_id, product_name = _product_snapshot(user, task, store)
     else:
@@ -1343,6 +1453,8 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             _pk(data["influencer"]),
             for_update=False,
         )
+        influencer = _assert_influencer_not_blacklisted(user=user, influencer=influencer)
+        identity_locked = True
         store = _locked_store(user, _pk(data["store"]))
         owner = _locked_user(user, _pk(data.get("owner") or user.pk))
         product_id = str(data.get("external_product_id") or "").strip()
@@ -1351,8 +1463,6 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
                 {"external_product_id": "Standalone samples require an external product ID."}
             )
         product_name = str(data.get("product_name_snapshot") or "").strip()
-
-    _assert_influencer_not_blacklisted(user=user, influencer=influencer)
 
     fulfillment_data = dict(data)
     has_sample_order = bool(str(data.get("sample_order_no") or "").strip())
@@ -1580,15 +1690,28 @@ def update_sample_fulfillment(
     items_mode="replace",
 ):
     """Edit sample facts and atomically rebuild any requested SKU snapshots."""
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=_pk(fulfillment), tenant=user.tenant, is_deleted=False
+    observed = _read_sample_fulfillment(
+        user=user,
+        fulfillment=fulfillment,
+        is_deleted=False,
     )
-    if fulfillment.version != expected_version:
-        raise ValidationError(
-            {"version": "Fulfillment was changed by another request."},
-            code="conflict",
-        )
-    _assert_influencer_not_blacklisted(user=user, influencer=fulfillment.influencer)
+    unlocked_influencer = _tenant_influencer(
+        user,
+        observed.influencer_id,
+        for_update=False,
+    )
+    locked_influencer = _assert_influencer_not_blacklisted(
+        user=user,
+        influencer=unlocked_influencer,
+    )
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=observed)
+    _revalidate_sample_fulfillment(
+        fulfillment=fulfillment,
+        observed=observed,
+        locked_influencer=locked_influencer,
+        expected_version=expected_version,
+        expected_deleted=False,
+    )
 
     data = dict(validated_data or {})
     if item_payloads is not None and append_item_payloads is not None:
@@ -1738,21 +1861,34 @@ def soft_delete_sample_fulfillment(*, user, fulfillment, expected_version):
 
 @transaction.atomic
 def restore_sample_fulfillment(*, user, fulfillment, expected_version):
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=_pk(fulfillment), tenant=user.tenant, is_deleted=True
+    observed = _read_sample_fulfillment(
+        user=user,
+        fulfillment=fulfillment,
+        is_deleted=True,
     )
-    if fulfillment.version != expected_version:
-        raise ValidationError(
-            {"version": "Fulfillment was changed by another request."},
-            code="conflict",
-        )
+    unlocked_influencer = _tenant_influencer(
+        user,
+        observed.influencer_id,
+        for_update=False,
+    )
+    locked_influencer = _assert_influencer_not_blacklisted(
+        user=user,
+        influencer=unlocked_influencer,
+    )
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=observed)
+    _revalidate_sample_fulfillment(
+        fulfillment=fulfillment,
+        observed=observed,
+        locked_influencer=locked_influencer,
+        expected_version=expected_version,
+        expected_deleted=True,
+    )
     task = _locked_task(user, fulfillment.outreach_task_id) if fulfillment.outreach_task_id else None
     if task is not None and task.is_deleted:
         raise ValidationError(
             {"outreach_task": "Restore the deleted outreach task before restoring its sample."},
             code="conflict",
         )
-    _assert_influencer_not_blacklisted(user=user, influencer=fulfillment.influencer)
     now = timezone.now()
     updated = QuerySet.update(
         SampleFulfillment.objects.filter(
@@ -1839,7 +1975,7 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
                     SampleFulfillment.Status.CANCELLED,
                     SampleFulfillment.Status.BLACKLISTED,
                 }
-            )
+            ).order_by("id")
         )
         now = timezone.now()
         for fulfillment in rows:
