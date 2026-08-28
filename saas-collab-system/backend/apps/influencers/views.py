@@ -4,7 +4,7 @@ from io import StringIO
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, Max, OuterRef, Prefetch, Q
+from django.db.models import Exists, Max, OuterRef, Prefetch, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -42,6 +42,7 @@ from .models import (
     active_influencer_restriction_subquery,
     influencer_has_active_restriction,
     is_valid_tiktok_username,
+    lock_influencer_identity_change,
     normalize_tiktok_username,
 )
 from .serializers import (
@@ -155,7 +156,7 @@ def _influencer_candidates(queryset, *, limit, include_handle=False):
         handle = str(influencer.handle or "").strip().lstrip("@").strip()
         key = (
             f"tiktok:{normalize_tiktok_username(handle)}"
-            if str(influencer.platform or "").casefold() == "tiktok" and handle
+            if str(influencer.platform or "").lower() == "tiktok" and handle
             else f"id:{influencer.pk}"
         )
         if key in seen:
@@ -286,10 +287,25 @@ class InfluencerDetailView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        writes_identity = bool({"handle", "platform"}.intersection(request.data))
+        queryset = Influencer.objects if writes_identity else Influencer.objects.select_for_update()
+        instance = get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
         before = {"code": instance.code, "status": instance.status}
         serializer = InfluencerSerializer(instance, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        if writes_identity:
+            instance = lock_influencer_identity_change(
+                instance,
+                platform=serializer.validated_data.get("platform", instance.platform),
+                handle=serializer.validated_data.get("handle", instance.handle),
+            )
+            serializer = InfluencerSerializer(
+                instance,
+                data=request.data,
+                partial=True,
+                context={"request": request},
+            )
+            serializer.is_valid(raise_exception=True)
         instance = serializer.save()
         write_operation_log(
             tenant=request.user.tenant,
@@ -462,7 +478,7 @@ class InfluencerResolveView(APIView):
         created = False
         if influencer is None:
             digest = hashlib.sha256(
-                f"{request.user.tenant_id}:{account.casefold()}".encode("utf-8")
+                f"{request.user.tenant_id}:{account}".encode("utf-8")
             ).hexdigest()[:20]
             base_code = f"tk-{digest}"
             for suffix in range(100):
@@ -483,7 +499,7 @@ class InfluencerResolveView(APIView):
                     continue
                 candidate_values = normalize_tiktok_username(candidate.handle)
                 if candidate_created or (
-                    candidate.platform.casefold() == "tiktok" and candidate_values == account
+                    candidate.platform.lower() == "tiktok" and candidate_values == account
                 ):
                     influencer, created = candidate, candidate_created
                     break
@@ -526,7 +542,7 @@ class OutreachTaskCollectionView(APIView):
             queryset=SampleFulfillment.objects.filter(
                 tenant=request.user.tenant,
                 is_deleted=False,
-            ).prefetch_related(
+            ).select_related("influencer").prefetch_related(
                 Prefetch(
                     "video_results",
                     queryset=VideoResult.objects.filter(
@@ -538,19 +554,19 @@ class OutreachTaskCollectionView(APIView):
             ),
             to_attr="_active_samples",
         )
+        active_targets = Prefetch(
+            "targets",
+            queryset=OutreachTarget.objects.filter(
+                tenant=request.user.tenant,
+                is_deleted=False,
+            ).select_related("influencer"),
+            to_attr="_active_targets",
+        )
         queryset = OutreachTask.objects.filter(
             tenant=request.user.tenant,
         ).select_related("influencer", "store", "owner", "dispatcher", "spu").prefetch_related(
-            active_samples
-        ).annotate(
-            active_linked_count=Count(
-                "targets",
-                filter=Q(
-                    targets__tenant=request.user.tenant,
-                    targets__is_deleted=False,
-                ),
-                distinct=True,
-            )
+            active_samples,
+            active_targets,
         )
         if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
             raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})

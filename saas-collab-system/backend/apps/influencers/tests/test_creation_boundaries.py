@@ -9,7 +9,9 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.influencers import models as influencer_models
 from apps.influencers import services as influencer_services
+from apps.influencers import views as influencer_views
 from apps.influencers.models import (
     Influencer,
     InfluencerProfile,
@@ -19,6 +21,7 @@ from apps.influencers.models import (
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
+    normalize_tiktok_username,
 )
 from apps.influencers.serializers import (
     InfluencerSerializer,
@@ -161,7 +164,7 @@ def test_tiktok_handle_schema_is_the_canonical_non_nullable_identity_column():
 
 def test_tiktok_handle_save_normalizes_the_business_field():
     _, _, _, influencer = _records("canonical-handle")
-    influencer.handle = " ＠ＭＨＡＩＮＥ＿９４ "
+    influencer.handle = " @MHAINE_94 "
     influencer.save(update_fields=["handle"])
 
     influencer.refresh_from_db()
@@ -172,6 +175,19 @@ def test_tiktok_handle_save_normalizes_the_business_field():
     influencer.save(update_fields=["platform", "handle"])
     influencer.refresh_from_db()
     assert influencer.handle == "Visible.Account"
+
+
+def test_tiktok_handle_normalization_is_strict_and_rejects_fullwidth_aliases():
+    _, _, _, influencer = _records("strict-canonical-handle")
+
+    assert normalize_tiktok_username(" @MHAINE_94 ") == "mhaine_94"
+    assert normalize_tiktok_username("＠ＭＨＡＩＮＥ＿９４") == "＠ｍｈａｉｎｅ＿９４"
+
+    influencer.handle = "＠ＭＨＡＩＮＥ＿９４"
+    with pytest.raises(DjangoValidationError, match="TikTok username"):
+        influencer.save(update_fields=["handle"])
+    influencer.refresh_from_db()
+    assert influencer.handle == ""
 
 
 def test_switching_to_tiktok_validates_an_existing_handle():
@@ -208,7 +224,7 @@ def test_influencer_api_exposes_handle_but_not_identity_helpers():
 
 def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling():
     tenant, user, store, blocked = _records("canonical-blacklist")
-    blocked.handle = "＠ＭＨＡＩＮＥ＿９４"
+    blocked.handle = " @MHAINE_94 "
     blocked.save(update_fields=["handle"])
     duplicate = Influencer.objects.create(
         tenant=tenant,
@@ -343,12 +359,197 @@ def test_handle_identity_is_tenant_scoped_and_empty_handle_has_no_shared_identit
     influencer.handle = ""
     influencer.save(update_fields=["handle"])
     other_tenant, _, _, foreign = _records("canonical-scope-other")
-    foreign.handle = "＠ＭＨＡＩＮＥ＿９４"
+    foreign.handle = " @FOREIGN.CREATOR "
     foreign.save(update_fields=["handle"])
 
     assert influencer.handle == ""
-    assert foreign.handle == "mhaine_94"
+    assert foreign.handle == "foreign.creator"
     assert foreign.tenant_id == other_tenant.id
+
+
+def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
+    tenant, user, _, first = _records("identity-edit-lock-order")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.manage")
+    first.handle = "shared.creator"
+    first.save(update_fields=["handle"])
+    selected = Influencer.objects.create(
+        tenant=tenant,
+        code="identity-edit-lock-order-selected",
+        name="Selected duplicate",
+        platform="TikTok",
+        handle="SHARED.CREATOR",
+    )
+    prospective = Influencer.objects.create(
+        tenant=tenant,
+        code="identity-edit-lock-order-prospective",
+        name="Prospective duplicate",
+        platform="TikTok",
+        handle="changed.creator",
+    )
+    observed_orders = []
+    original_lock = influencer_views.lock_influencer_identity_change
+
+    def observe_lock(*args, **kwargs):
+        locked = original_lock(*args, **kwargs)
+        observed_orders.append(
+            list(
+                Influencer.objects.filter(
+                    tenant=tenant,
+                    pk__in=[first.pk, selected.pk, prospective.pk],
+                ).order_by("pk").values_list("pk", flat=True)
+            )
+        )
+        return locked
+
+    monkeypatch.setattr(influencer_views, "lock_influencer_identity_change", observe_lock)
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/{selected.pk}/",
+        {"handle": "changed.creator"},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    assert observed_orders == [[first.pk, selected.pk, prospective.pk]]
+    selected.refresh_from_db()
+    assert selected.handle == "changed.creator"
+
+
+def test_duplicate_handle_targets_share_capacity_progress_and_terminal_completion():
+    tenant, user, store, first = _records("logical-target-identity")
+    first.handle = "shared.creator"
+    first.save(update_fields=["handle"])
+    duplicate = Influencer.objects.create(
+        tenant=tenant,
+        code="logical-target-identity-duplicate",
+        name="Duplicate creator",
+        platform="TikTok",
+        handle=" @SHARED.CREATOR ",
+    )
+    task = _task(user, store, first, target_count=2)
+    first_target = OutreachTarget.objects.get(task=task, influencer=first)
+
+    reused, created = influencer_services.add_outreach_target(
+        user=user,
+        task=task,
+        influencer=duplicate,
+    )
+    assert created is False
+    assert reused.pk == first_target.pk
+
+    historical_duplicate = OutreachTarget.objects.create(
+        tenant=tenant,
+        task=task,
+        influencer=duplicate,
+    )
+    assert task.linked_count == 1
+    progress = influencer_services.outreach_task_progress(user=user, task=task)
+    assert progress["linked_count"] == 1
+    assert progress["remaining_count"] == 1
+
+    influencer_services.update_outreach_target(
+        user=user,
+        task=task,
+        target=first_target,
+        expected_version=first_target.version,
+        outreach_result=OutreachTarget.OutreachResult.SUCCESS,
+    )
+    influencer_services.update_outreach_target(
+        user=user,
+        task=task,
+        target=historical_duplicate,
+        expected_version=historical_duplicate.version,
+        outreach_result=OutreachTarget.OutreachResult.SUCCESS,
+    )
+    task.refresh_from_db()
+    assert task.status == OutreachTask.Status.PENDING
+
+    second_identity = Influencer.objects.create(
+        tenant=tenant,
+        code="logical-target-identity-second",
+        name="Second creator",
+        platform="TikTok",
+        handle="second.creator",
+    )
+    _, created = influencer_services.add_outreach_target(
+        user=user,
+        task=task,
+        influencer=second_identity,
+    )
+    assert created is True
+    assert task.linked_count == 2
+
+    overflow = Influencer.objects.create(
+        tenant=tenant,
+        code="logical-target-identity-overflow",
+        name="Overflow creator",
+        platform="TikTok",
+        handle="overflow.creator",
+    )
+    with pytest.raises(ValidationError, match="target count"):
+        influencer_services.add_outreach_target(
+            user=user,
+            task=task,
+            influencer=overflow,
+        )
+
+
+def test_duplicate_handle_samples_count_once_and_cannot_auto_complete_task():
+    tenant, user, store, first = _records("logical-sample-identity")
+    first.handle = "sample.creator"
+    first.save(update_fields=["handle"])
+    duplicate = Influencer.objects.create(
+        tenant=tenant,
+        code="logical-sample-identity-duplicate",
+        name="Duplicate sample creator",
+        platform="TikTok",
+        handle="SAMPLE.CREATOR",
+    )
+    task = _task(user, store, target_count=2)
+    first_target, _ = influencer_services.add_outreach_target(
+        user=user,
+        task=task,
+        influencer=first,
+    )
+    duplicate_target = OutreachTarget.objects.create(
+        tenant=tenant,
+        task=task,
+        influencer=duplicate,
+    )
+    fulfillments = []
+    for suffix, target in (("first", first_target), ("duplicate", duplicate_target)):
+        fulfillment, _ = create_sample_fulfillment(
+            user=user,
+            request_key=f"logical-sample-identity-{suffix}",
+            validated_data={
+                "outreach_task": task,
+                "outreach_target": target,
+            },
+            item_payloads=[],
+        )
+        for status in (
+            SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.DELIVERED,
+            SampleFulfillment.Status.COMPLETED,
+        ):
+            fulfillment = influencer_services.transition_sample_fulfillment(
+                user=user,
+                fulfillment=fulfillment,
+                status=status,
+                expected_version=fulfillment.version,
+                confirm_terminal=status == SampleFulfillment.Status.COMPLETED,
+            )
+        fulfillments.append(fulfillment)
+
+    task.refresh_from_db()
+    payload = OutreachTaskSerializer(task).data
+    assert task.status == OutreachTask.Status.PENDING
+    assert payload["sample_fulfillment_count"] == 1
+    assert payload["sample_fulfillment_completed_count"] == 1
+    assert payload["completion_validation"]["target_reached"] is False
 
 
 def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_target():
@@ -1130,7 +1331,7 @@ def test_canonical_handle_migration_normalizes_tiktok_records_and_snapshots():
     with connection.cursor() as cursor:
         cursor.execute(
             f"UPDATE {table} SET handle = %s WHERE id = %s",
-            [" ＠ＭＨＡＩＮＥ＿９４ ", influencer.pk],
+            [" @MHAINE_94 ", influencer.pk],
         )
     snapshot = BdSampleAttributionSnapshot.objects.create(
         tenant=tenant,
@@ -1147,7 +1348,7 @@ def test_canonical_handle_migration_normalizes_tiktok_records_and_snapshots():
         owner=user,
         influencer=influencer,
         store=store,
-        creator_username=" @ＭＨＡＩＮＥ＿９４ ",
+        creator_username=" @MHAINE_94 ",
         shop_abbr=store.code,
         site="PH",
         product_id="migration-product",
@@ -1219,13 +1420,13 @@ def test_canonical_handle_migration_does_not_guess_identity_from_code_or_name():
     assert snapshot.creator_username == ""
 
 
-def test_canonical_handle_migration_clears_malformed_handle_and_snapshot():
+def test_canonical_handle_migration_clears_fullwidth_handle_and_snapshot():
     tenant, user, store, influencer = _records("canonical-migration-invalid")
     table = connection.ops.quote_name(Influencer._meta.db_table)
     with connection.cursor() as cursor:
         cursor.execute(
             f"UPDATE {table} SET handle = %s WHERE id = %s",
-            ["invalid handle!", influencer.pk],
+            ["＠ＭＨＡＩＮＥ＿９４", influencer.pk],
         )
     fulfillment = SampleFulfillment.objects.create(
         tenant=tenant,
@@ -1243,7 +1444,7 @@ def test_canonical_handle_migration_clears_malformed_handle_and_snapshot():
         owner=user,
         influencer=influencer,
         store=store,
-        creator_username="legacy.nickname",
+        creator_username="＠ＭＨＡＩＮＥ＿９４",
         shop_abbr=store.code,
         site="PH",
         product_id="migration-invalid-product",
@@ -1346,30 +1547,18 @@ def test_account_resolve_prefers_blacklisted_duplicate_profile():
     assert response.json()["data"]["is_blacklisted"] is True
 
 
-def test_account_resolve_reuses_normalized_legacy_handle_and_does_not_bypass_blacklist():
+def test_account_resolve_rejects_fullwidth_alias_without_nfkc_matching():
     tenant, user, _, _ = _records("resolve-legacy-handle")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
-    clean = Influencer.objects.create(
+    Influencer.objects.create(
         tenant=tenant,
         code="legacy-clean",
         name="Clean auxiliary name",
         handle="legacy.creator",
         platform="tiktok",
     )
-    blocked = Influencer.objects.create(
-        tenant=tenant,
-        code="legacy-blocked",
-        name="Blocked auxiliary name",
-        handle="＠ＬＥＧＡＣＹ．ＣＲＥＡＴＯＲ",
-        platform="TikTok",
-    )
-    InfluencerRestriction.objects.create(
-        tenant=tenant,
-        influencer=blocked,
-        is_blacklisted=True,
-        created_by=user,
-    )
+    count_before = Influencer.objects.filter(tenant=tenant).count()
     client = APIClient()
     client.force_authenticate(user)
 
@@ -1379,11 +1568,8 @@ def test_account_resolve_reuses_normalized_legacy_handle_and_does_not_bypass_bla
         format="json",
     )
 
-    assert response.status_code == 200, response.data
-    assert response.data["data"]["id"] == blocked.id
-    assert response.data["data"]["is_blacklisted"] is True
-    assert Influencer.objects.filter(tenant=tenant).count() == 3
-    assert clean.id != blocked.id
+    assert response.status_code == 400, response.data
+    assert Influencer.objects.filter(tenant=tenant).count() == count_before
 
 
 def test_account_resolve_keeps_tenant_and_platform_scope():
@@ -1447,7 +1633,7 @@ def test_account_resolve_prefers_normalized_handle_over_another_profile_code():
 
     response = client.post(
         "/api/internal/influencers/resolve/",
-        {"handle": "＠ＭＨＡＩＮＥ＿９４"},
+        {"handle": " @MHAINE_94 "},
         format="json",
     )
 
@@ -1502,7 +1688,7 @@ def test_account_resolve_scans_legacy_candidates_beyond_the_old_fallback_bound()
         tenant=tenant,
         code="legacy-overflow-target",
         name="Legacy display only",
-        handle="＠Ｌｅｇａｃｙ．Ｔａｒｇｅｔ",
+        handle="LEGACY.TARGET",
         platform="TikTok",
     )
     count_before = Influencer.objects.filter(tenant=tenant).count()

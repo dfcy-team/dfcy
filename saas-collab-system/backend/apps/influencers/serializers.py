@@ -14,6 +14,7 @@ from .models import (
     SampleItem,
     SkuPriceSnapshot,
     VideoResult,
+    influencer_identity_key,
     influencer_has_active_restriction,
     is_valid_tiktok_username,
     normalize_tiktok_username,
@@ -98,7 +99,7 @@ class InfluencerSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         platform = attrs.get("platform", getattr(self.instance, "platform", ""))
-        if str(platform or "").strip().casefold() == "tiktok":
+        if str(platform or "").strip().lower() == "tiktok":
             raw_handle = attrs["handle"] if "handle" in attrs else getattr(self.instance, "handle", "")
             handle = normalize_tiktok_username(raw_handle)
             if ("handle" in attrs and not handle) or (handle and not is_valid_tiktok_username(handle)):
@@ -172,8 +173,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
         return self._user_name(obj.dispatcher)
 
     def get_linked_count(self, obj):
-        annotated = getattr(obj, "active_linked_count", None)
-        return annotated if annotated is not None else obj.linked_count
+        return obj.linked_count
 
     def _sample_summary(self, obj):
         cached = getattr(obj, "_sample_status_summary", None)
@@ -186,9 +186,15 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
                 obj.sample_fulfillments.filter(
                     tenant_id=obj.tenant_id,
                     is_deleted=False,
-                ).values_list("id", "status")
+                ).order_by("id").values_list(
+                    "id",
+                    "status",
+                    "influencer_id",
+                    "influencer__platform",
+                    "influencer__handle",
+                )
             )
-            sample_ids = [sample_id for sample_id, _ in sample_rows]
+            sample_ids = [sample_id for sample_id, *_ in sample_rows]
             published_video_rows = VideoResult.objects.filter(
                 tenant_id=obj.tenant_id,
                 sample_fulfillment_id__in=sample_ids,
@@ -196,26 +202,43 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             )
             matched_videos = published_video_rows.count()
         else:
-            sample_rows = [(sample.id, sample.status) for sample in prefetched_samples]
-            sample_ids = [sample_id for sample_id, _ in sample_rows]
+            sample_rows = [
+                (
+                    sample.id,
+                    sample.status,
+                    sample.influencer_id,
+                    sample.influencer.platform,
+                    sample.influencer.handle,
+                )
+                for sample in prefetched_samples
+            ]
+            sample_ids = [sample_id for sample_id, *_ in sample_rows]
             matched_videos = sum(
                 len(getattr(sample, "_published_video_results", []))
                 for sample in prefetched_samples
             )
-        for sample_id, status in sample_rows:
-            counts[status] = counts.get(status, 0) + 1
-        completed = sum(
-            counts.get(status, 0)
-            for status in (
-                SampleFulfillment.Status.PUBLISHED,
-                SampleFulfillment.Status.COMPLETED,
-                SampleFulfillment.Status.LIVE_CREATOR,
+        completion_statuses = {
+            SampleFulfillment.Status.PUBLISHED,
+            SampleFulfillment.Status.COMPLETED,
+            SampleFulfillment.Status.LIVE_CREATOR,
+        }
+        identity_statuses = {}
+        for _, status, influencer_id, platform, handle in sample_rows:
+            key = influencer_identity_key(
+                influencer_id=influencer_id,
+                platform=platform,
+                handle=handle,
             )
-        )
+            current = identity_statuses.get(key)
+            if current is None or (current not in completion_statuses and status in completion_statuses):
+                identity_statuses[key] = status
+        for status in identity_statuses.values():
+            counts[status] = counts.get(status, 0) + 1
+        completed = sum(status in completion_statuses for status in identity_statuses.values())
         summary = {
             "counts": counts,
             "status_counts": counts,
-            "total": len(sample_ids),
+            "total": len(identity_statuses),
             "completed": completed,
             "video_match_count": matched_videos,
         }

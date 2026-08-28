@@ -1936,7 +1936,7 @@ def test_sample_attribution_uses_only_the_normalized_tiktok_handle():
         code="canonical-handle-creator",
         name="Shedeserve ✨",
         platform="tiktok",
-        handle="＠Ｃａｎｏｎｉｃａｌ．Ｃｒｅａｔｏｒ",
+        handle=" @CANONICAL.CREATOR ",
     )
 
     fulfillment, _ = create_sample_fulfillment(

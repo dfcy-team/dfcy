@@ -30,6 +30,7 @@ from .models import (
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
+    influencer_identity_key,
     influencer_identity_queryset,
 )
 from .attribution import create_sample_attribution_snapshot
@@ -834,11 +835,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
 
     if "target_count" in data:
         target_count = int(data["target_count"])
-        linked_count = OutreachTarget.objects.filter(
-            tenant=user.tenant,
-            task=task,
-            is_deleted=False,
-        ).count()
+        linked_count = len(_logical_outreach_target_results(user=user, task=task))
         if target_count < linked_count:
             raise ValidationError(
                 {"target_count": "Target count cannot be lower than the linked influencer count."}
@@ -914,27 +911,35 @@ def add_outreach_target(
     *, user, task, influencer, notes="", first_linked_at=None, expected_version=None
 ):
     influencer = _tenant_influencer(user, _pk(influencer), for_update=False)
-    influencer = _assert_influencer_not_blacklisted(
+    influencer, identity_ids = _assert_influencer_not_blacklisted(
         user=user,
         influencer=influencer,
         message="Blacklisted influencers cannot be linked to outreach tasks.",
         code="conflict",
+        return_identity_ids=True,
     )
     task = _locked_task(user, _pk(task))
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive targets."})
     _assert_task_accepts_target(task)
-    if task.target_count and OutreachTarget.objects.filter(
-        tenant=user.tenant, task=task, is_deleted=False
-    ).exclude(influencer=influencer).count() >= task.target_count:
-        raise ValidationError({"target_count": "The outreach task has reached its target count."})
     now = timezone.now()
     target = (
         OutreachTarget.objects.select_for_update()
-        .filter(tenant=user.tenant, task=task, influencer=influencer)
+        .filter(
+            tenant=user.tenant,
+            task=task,
+            influencer_id__in=identity_ids,
+        )
+        .order_by("is_deleted", "id")
         .first()
     )
     created = target is None
+    if (
+        (target is None or target.is_deleted)
+        and task.target_count
+        and len(_logical_outreach_target_results(user=user, task=task)) >= task.target_count
+    ):
+        raise ValidationError({"target_count": "The outreach task has reached its target count."})
     if target is None:
         target = OutreachTarget(
             tenant=user.tenant,
@@ -980,7 +985,7 @@ def add_outreach_target(
         "outreach_target_add" if created else "outreach_target_restore",
         "outreach_target",
         target,
-        after={"task_id": task.pk, "influencer_id": influencer.pk, "is_deleted": target.is_deleted},
+        after={"task_id": task.pk, "influencer_id": target.influencer_id, "is_deleted": target.is_deleted},
     )
     return target, created
 
@@ -1049,14 +1054,10 @@ def _maybe_auto_complete_outreach_task(user, task):
         return task
     if task.target_count <= 0:
         return task
-    rows = list(
-        OutreachTarget.objects.filter(
-            tenant=user.tenant, task=task, is_deleted=False
-        ).values_list("outreach_result", flat=True)
-    )
-    if not rows or OutreachTarget.OutreachResult.PENDING in rows:
+    logical_results = _logical_outreach_target_results(user=user, task=task)
+    if not logical_results or OutreachTarget.OutreachResult.PENDING in logical_results.values():
         return task
-    if len(rows) < task.target_count:
+    if len(logical_results) < task.target_count:
         return task
     now = timezone.now()
     changes = {
@@ -1193,6 +1194,34 @@ def restore_outreach_task(*, user, task, expected_version):
     return task
 
 
+def _logical_outreach_target_results(*, user, task):
+    """Collapse active target rows to one deterministic result per creator identity."""
+    logical_results = {}
+    rows = OutreachTarget.objects.filter(
+        tenant=user.tenant,
+        task=task,
+        is_deleted=False,
+    ).order_by("id").values_list(
+        "influencer_id",
+        "influencer__platform",
+        "influencer__handle",
+        "outreach_result",
+    )
+    for influencer_id, platform, handle, result in rows:
+        key = influencer_identity_key(
+            influencer_id=influencer_id,
+            platform=platform,
+            handle=handle,
+        )
+        current = logical_results.get(key)
+        if current is None or (
+            current == OutreachTarget.OutreachResult.PENDING
+            and result != OutreachTarget.OutreachResult.PENDING
+        ):
+            logical_results[key] = result
+    return logical_results
+
+
 def outreach_task_progress(*, user, task):
     task = OutreachTask.objects.filter(
         pk=_pk(task), tenant=user.tenant, is_deleted=False
@@ -1200,9 +1229,7 @@ def outreach_task_progress(*, user, task):
     if task is None:
         raise ValidationError({"outreach_task": "Outreach task does not exist in the current tenant."})
     result_counts = {result: 0 for result in OutreachTarget.OutreachResult.values}
-    for result in OutreachTarget.objects.filter(
-        tenant=user.tenant, task=task, is_deleted=False
-    ).values_list("outreach_result", flat=True):
+    for result in _logical_outreach_target_results(user=user, task=task).values():
         result_counts[result] = result_counts.get(result, 0) + 1
     linked_count = sum(result_counts.values())
     terminal_count = linked_count - result_counts.get(OutreachTarget.OutreachResult.PENDING, 0)
@@ -1279,11 +1306,24 @@ def recompute_outreach_task_completion(*, user, task):
         OutreachTask.Status.IN_PROGRESS,
     }:
         return task
-    completed_count = SampleFulfillment.objects.filter(
-        tenant=user.tenant,
-        outreach_task=task,
-        is_deleted=False,
-    ).filter(status__in=SAMPLE_COMPLETION_STATUSES).distinct().count()
+    completed_identities = {
+        influencer_identity_key(
+            influencer_id=influencer_id,
+            platform=platform,
+            handle=handle,
+        )
+        for influencer_id, platform, handle in SampleFulfillment.objects.filter(
+            tenant=user.tenant,
+            outreach_task=task,
+            is_deleted=False,
+            status__in=SAMPLE_COMPLETION_STATUSES,
+        ).values_list(
+            "influencer_id",
+            "influencer__platform",
+            "influencer__handle",
+        )
+    }
+    completed_count = len(completed_identities)
     if task.target_count <= 0 or completed_count < task.target_count:
         return task
 
@@ -1324,7 +1364,14 @@ def recompute_outreach_task_completion(*, user, task):
     return task
 
 
-def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=None):
+def _assert_influencer_not_blacklisted(
+    *,
+    user,
+    influencer,
+    message=None,
+    code=None,
+    return_identity_ids=False,
+):
     # Serialize restriction changes with sample/target creation and re-read the
     # active restrictions while holding every identity lock in primary-key
     # order. Do not lock the selected row first: two duplicate profiles could
@@ -1340,7 +1387,7 @@ def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=N
         if code:
             raise ValidationError(detail, code=code)
         raise ValidationError(detail)
-    return locked
+    return (locked, identity_ids) if return_identity_ids else locked
 
 
 def _read_sample_fulfillment(*, user, fulfillment, is_deleted):

@@ -1,6 +1,5 @@
 from decimal import Decimal
 import re
-import unicodedata
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -24,8 +23,7 @@ SUPPORTED_CURRENCY_CHOICES = (
 
 
 def normalize_tiktok_username(value):
-    value = unicodedata.normalize("NFKC", str(value or ""))
-    return value.strip().lstrip("@").strip().casefold()
+    return str(value or "").strip().lstrip("@").strip().lower()
 
 
 TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._]{1,255}$")
@@ -33,6 +31,13 @@ TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._]{1,255}$")
 
 def is_valid_tiktok_username(value):
     return bool(TIKTOK_USERNAME_PATTERN.fullmatch(normalize_tiktok_username(value)))
+
+
+def influencer_identity_key(*, influencer_id, platform, handle):
+    canonical_handle = normalize_tiktok_username(handle)
+    if str(platform or "").strip().lower() == "tiktok" and canonical_handle:
+        return ("tiktok", canonical_handle)
+    return ("profile", influencer_id)
 
 
 class ProtectedInfluencerQuerySet(models.QuerySet):
@@ -92,7 +97,7 @@ class Influencer(models.Model):
                     persisted["handle"] != self.handle or persisted["platform"] != self.platform
                 ):
                     _assert_influencer_identity_change_allowed(self, persisted)
-            if str(self.platform or "").casefold() == "tiktok":
+            if str(self.platform or "").lower() == "tiktok":
                 self.handle = normalize_tiktok_username(self.handle)
                 if self.handle and not is_valid_tiktok_username(self.handle):
                     raise ValidationError({
@@ -207,7 +212,7 @@ def influencer_identity_queryset(
     handle = influencer.handle if handle is None else handle
     canonical_handle = normalize_tiktok_username(handle)
     identity_filter = Q(pk=influencer.pk)
-    if str(platform or "").casefold() == "tiktok" and canonical_handle:
+    if str(platform or "").lower() == "tiktok" and canonical_handle:
         identity_filter |= Q(
             platform__iexact="TikTok",
             handle__iexact=canonical_handle,
@@ -216,6 +221,29 @@ def influencer_identity_queryset(
         tenant_id=influencer.tenant_id,
     ).filter(identity_filter).order_by("pk")
     return queryset.select_for_update() if for_update else queryset
+
+
+def lock_influencer_identity_change(influencer, *, platform, handle):
+    """Lock the current and prospective TikTok identity groups in one order."""
+    identity_ids = set(
+        influencer_identity_queryset(influencer).values_list("pk", flat=True)
+    )
+    canonical_handle = normalize_tiktok_username(handle)
+    if str(platform or "").lower() == "tiktok" and canonical_handle:
+        identity_ids.update(
+            Influencer.objects.filter(
+                tenant_id=influencer.tenant_id,
+                platform__iexact="TikTok",
+                handle__iexact=canonical_handle,
+            ).values_list("pk", flat=True)
+        )
+    identity_ids.add(influencer.pk)
+    locked = list(
+        Influencer.objects.select_for_update()
+        .filter(tenant_id=influencer.tenant_id, pk__in=sorted(identity_ids))
+        .order_by("pk")
+    )
+    return next(item for item in locked if item.pk == influencer.pk)
 
 
 def influencer_has_active_restriction(
@@ -345,7 +373,29 @@ class OutreachTask(StateMachineTenantModel):
     def linked_count(self):
         if not self.pk:
             return 0
-        return self.targets.filter(tenant_id=self.tenant_id, is_deleted=False).count()
+        prefetched_targets = getattr(self, "_active_targets", None)
+        if prefetched_targets is not None:
+            rows = (
+                (target.influencer_id, target.influencer.platform, target.influencer.handle)
+                for target in prefetched_targets
+            )
+        else:
+            rows = self.targets.filter(
+                tenant_id=self.tenant_id,
+                is_deleted=False,
+            ).values_list(
+                "influencer_id",
+                "influencer__platform",
+                "influencer__handle",
+            )
+        return len({
+            influencer_identity_key(
+                influencer_id=influencer_id,
+                platform=platform,
+                handle=handle,
+            )
+            for influencer_id, platform, handle in rows
+        })
 
 
 class OutreachTarget(StateMachineTenantModel):
