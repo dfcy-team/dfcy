@@ -523,8 +523,6 @@ def test_security_operations_exposes_only_credential_metadata():
             account_alias="demo-alias",
             environment="sandbox",
             status="disabled",
-            credential_id="custody:demo-reference",
-            credential_mask={"configured": "********"},
             credential_key_version="demo-v1",
             credential_fingerprint="demo-fingerprint",
             created_by=viewer,
@@ -535,5 +533,5 @@ def test_security_operations_exposes_only_credential_metadata():
     assert response.status_code == 200
     serialized = str(response.data)
     assert "demo-alias" in serialized and "demo-fingerprint" in serialized
-    assert "custody:demo-reference" not in serialized
+    assert "credential_ciphertext" not in serialized
     assert response.data["data"]["credential_contract"] == "alias_fingerprint_reference_only"

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from rest_framework.exceptions import ValidationError
+from django.core.exceptions import ValidationError
 
 
 @dataclass(frozen=True)
