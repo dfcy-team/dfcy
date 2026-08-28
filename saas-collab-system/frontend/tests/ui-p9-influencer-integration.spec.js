@@ -349,6 +349,10 @@ describe('influencer integration workspace contracts', () => {
     expect(creatorOptionLabel(first)).not.toBe(creatorOptionLabel(second));
     expect(read('src/views/influencers/OutreachTaskList.vue')).toContain('creatorHandleFirst');
     expect(read('src/views/influencers/SampleFulfillmentList.vue')).toContain('creatorHandleFirst');
+    const resourcePage = read('src/views/influencers/InfluencerResourceLibrary.vue');
+    expect(resourcePage).toContain("const influencerDisplayName = (row) => row?.handle");
+    expect(resourcePage).toContain('label="TikTok用户名"');
+    expect(resourcePage).toContain('displayValue(detail.handle)');
   });
 
   it('keeps task and task-sample dialogs open when the backdrop is clicked', () => {

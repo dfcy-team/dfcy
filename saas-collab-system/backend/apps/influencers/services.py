@@ -192,11 +192,12 @@ def _pk(value):
     return getattr(value, "pk", value)
 
 
-def _locked_influencer(user, influencer_id):
+def _tenant_influencer(user, influencer_id, *, for_update):
+    queryset = Influencer.objects
+    if for_update:
+        queryset = queryset.select_for_update()
     try:
-        influencer = Influencer.objects.select_for_update().get(
-            pk=influencer_id, tenant=user.tenant
-        )
+        influencer = queryset.get(pk=influencer_id, tenant=user.tenant)
     except Influencer.DoesNotExist as exc:
         raise ValidationError(
             {"influencer": "Influencer does not exist in the current tenant."}
@@ -207,6 +208,10 @@ def _locked_influencer(user, influencer_id):
             code="conflict",
         )
     return influencer
+
+
+def _locked_influencer(user, influencer_id):
+    return _tenant_influencer(user, influencer_id, for_update=True)
 
 
 def _locked_store(user, store_id):
@@ -287,6 +292,7 @@ def _lock_task_relations(
     store_id=None,
     owner_id=None,
     external_product_id=None,
+    lock_influencer=True,
 ):
     """Lock and validate task-owned relations before creating a fulfillment."""
     task = _locked_task(user, task_id)
@@ -301,13 +307,21 @@ def _lock_task_relations(
             raise ValidationError({"outreach_target": "Target must belong to the outreach task."})
         if target.is_deleted:
             raise ValidationError({"outreach_target": "Deleted outreach targets cannot receive samples."})
-        influencer = _locked_influencer(user, target.influencer_id)
+        influencer = _tenant_influencer(
+            user,
+            target.influencer_id,
+            for_update=lock_influencer,
+        )
     else:
         if influencer_id is None:
             raise ValidationError(
                 {"influencer": "Influencer is required when outreach_target is omitted."}
             )
-        influencer = _locked_influencer(user, _pk(influencer_id))
+        influencer = _tenant_influencer(
+            user,
+            _pk(influencer_id),
+            for_update=lock_influencer,
+        )
         target = None
 
     if influencer_id is not None and _pk(influencer_id) != influencer.pk:
@@ -1247,6 +1261,11 @@ def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=N
     locked = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
     if locked is None:
         raise ValidationError({"influencer": "Influencer identity group is empty."})
+    if locked.status != Influencer.Status.ACTIVE:
+        raise ValidationError(
+            {"influencer": "Inactive influencers cannot be linked to outreach tasks or receive samples."},
+            code="conflict",
+        )
     identity_ids = [profile.pk for profile in identity_profiles]
     blacklisted = InfluencerRestriction.objects.filter(
         tenant_id=user.tenant_id,
@@ -1301,6 +1320,7 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             store_id=data.get("store"),
             owner_id=data.get("owner"),
             external_product_id=data.get("external_product_id"),
+            lock_influencer=False,
         )
         product_id, product_name = _product_snapshot(user, task, store)
     else:
@@ -1315,7 +1335,14 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             raise ValidationError({"influencer": "Influencer is required."})
         if data.get("store") is None:
             raise ValidationError({"store": "Store is required for standalone samples."})
-        influencer = _locked_influencer(user, _pk(data["influencer"]))
+        # The complete normalized-handle identity group is locked below in a
+        # stable primary-key order. Locking this selected row first can invert
+        # the blacklist operation's lock order for duplicate profiles.
+        influencer = _tenant_influencer(
+            user,
+            _pk(data["influencer"]),
+            for_update=False,
+        )
         store = _locked_store(user, _pk(data["store"]))
         owner = _locked_user(user, _pk(data.get("owner") or user.pk))
         product_id = str(data.get("external_product_id") or "").strip()

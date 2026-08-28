@@ -18,18 +18,20 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
 
     for influencer in Influencer.objects.filter(platform__iexact="TikTok").iterator():
         normalized = _normalize_tiktok_username(influencer.handle)
-        # Preserve malformed legacy values for explicit cleanup instead of
-        # silently turning a recognizable account into an empty identity.
-        if normalized and TIKTOK_USERNAME_PATTERN.fullmatch(normalized) and normalized != influencer.handle:
-            influencer.handle = normalized
+        canonical = normalized if TIKTOK_USERNAME_PATTERN.fullmatch(normalized) else ""
+        if canonical != influencer.handle:
+            influencer.handle = canonical
             influencer.save(update_fields=["handle"])
 
-    for snapshot in Snapshot.objects.exclude(creator_username="").iterator():
-        normalized = _normalize_tiktok_username(snapshot.creator_username)
-        if not TIKTOK_USERNAME_PATTERN.fullmatch(normalized):
-            normalized = ""
-        if normalized != snapshot.creator_username:
-            snapshot.creator_username = normalized
+    for snapshot in Snapshot.objects.select_related("influencer").iterator():
+        influencer = snapshot.influencer
+        canonical = ""
+        if influencer and str(influencer.platform or "").casefold() == "tiktok":
+            normalized = _normalize_tiktok_username(influencer.handle)
+            if TIKTOK_USERNAME_PATTERN.fullmatch(normalized):
+                canonical = normalized
+        if canonical != snapshot.creator_username:
+            snapshot.creator_username = canonical
             snapshot.save(update_fields=["creator_username"])
 
 
