@@ -96,7 +96,11 @@ class Influencer(models.Model):
                 if persisted is not None and (
                     persisted["handle"] != self.handle or persisted["platform"] != self.platform
                 ):
-                    _assert_influencer_identity_change_allowed(self, persisted)
+                    lock_influencer_identity_change(
+                        self,
+                        platform=self.platform,
+                        handle=self.handle,
+                    )
             if str(self.platform or "").lower() == "tiktok":
                 self.handle = normalize_tiktok_username(self.handle)
                 if self.handle and not is_valid_tiktok_username(self.handle):
@@ -224,9 +228,17 @@ def influencer_identity_queryset(
 
 
 def lock_influencer_identity_change(influencer, *, platform, handle):
-    """Lock the current and prospective TikTok identity groups in one order."""
+    """Lock and validate the current and prospective TikTok identity groups."""
+    persisted = Influencer.objects.filter(
+        tenant_id=influencer.tenant_id,
+        pk=influencer.pk,
+    ).values("platform", "handle").first()
     identity_ids = set(
-        influencer_identity_queryset(influencer).values_list("pk", flat=True)
+        influencer_identity_queryset(
+            influencer,
+            platform=persisted["platform"] if persisted else influencer.platform,
+            handle=persisted["handle"] if persisted else influencer.handle,
+        ).values_list("pk", flat=True)
     )
     canonical_handle = normalize_tiktok_username(handle)
     if str(platform or "").lower() == "tiktok" and canonical_handle:
@@ -243,6 +255,14 @@ def lock_influencer_identity_change(influencer, *, platform, handle):
         .filter(tenant_id=influencer.tenant_id, pk__in=sorted(identity_ids))
         .order_by("pk")
     )
+    if InfluencerRestriction.objects.filter(
+        tenant_id=influencer.tenant_id,
+        influencer_id__in=identity_ids,
+        is_blacklisted=True,
+    ).exists():
+        raise ValidationError({
+            "handle": "Blacklisted influencer identities cannot change handle or platform.",
+        })
     return next(item for item in locked if item.pk == influencer.pk)
 
 

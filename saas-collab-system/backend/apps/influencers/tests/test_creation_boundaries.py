@@ -418,6 +418,46 @@ def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
     assert selected.handle == "changed.creator"
 
 
+def test_identity_edit_cannot_join_blacklisted_handle_group():
+    tenant, user, _, selected = _records("identity-edit-blacklisted-target")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.manage")
+    selected.handle = "clean.creator"
+    selected.save(update_fields=["handle"])
+    blocked = Influencer.objects.create(
+        tenant=tenant,
+        code="identity-edit-blacklisted-target-blocked",
+        name="Blocked target identity",
+        platform="TikTok",
+        handle="blocked.creator",
+    )
+    set_influencer_blacklist(
+        user=user,
+        influencer=blocked,
+        blacklisted=True,
+        reason="blocked target identity",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/{selected.pk}/",
+        {"handle": " @BLOCKED.CREATOR "},
+        format="json",
+    )
+
+    assert response.status_code == 422, response.data
+    assert response.data["code"] == "BUSINESS_RULE_VIOLATION"
+    selected.refresh_from_db()
+    assert selected.handle == "clean.creator"
+
+    selected.handle = "blocked.creator"
+    with pytest.raises(DjangoValidationError, match="Blacklisted influencer identities"):
+        selected.save(update_fields=["handle"])
+    selected.refresh_from_db()
+    assert selected.handle == "clean.creator"
+
+
 def test_duplicate_handle_targets_share_capacity_progress_and_terminal_completion():
     tenant, user, store, first = _records("logical-target-identity")
     first.handle = "shared.creator"
