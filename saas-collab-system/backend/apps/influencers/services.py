@@ -1320,6 +1320,10 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
         store = _locked_store(user, _pk(data["store"]))
         owner = _locked_user(user, _pk(data.get("owner") or user.pk))
         product_id = str(data.get("external_product_id") or "").strip()
+        if not product_id:
+            raise ValidationError(
+                {"external_product_id": "Standalone samples require an external product ID."}
+            )
         product_name = str(data.get("product_name_snapshot") or "").strip()
 
     _assert_influencer_not_blacklisted(user=user, influencer=influencer)
@@ -1442,7 +1446,9 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
 
 
 @transaction.atomic
-def transition_sample_fulfillment(*, user, fulfillment, status, expected_version, reason=""):
+def transition_sample_fulfillment(
+    *, user, fulfillment, status, expected_version, reason="", confirm_terminal=False
+):
     fulfillment = SampleFulfillment.objects.select_for_update().get(
         pk=fulfillment.pk, tenant=user.tenant, is_deleted=False
     )
@@ -1452,6 +1458,15 @@ def transition_sample_fulfillment(*, user, fulfillment, status, expected_version
         )
     if status not in SampleFulfillment.Status.values:
         raise ValidationError({"status": "Unsupported fulfillment status."})
+    if (
+        status in SAMPLE_TERMINAL_STATUSES
+        and status != fulfillment.status
+        and not confirm_terminal
+    ):
+        raise ValidationError(
+            {"confirmation": "Explicit confirmation is required for terminal status changes."},
+            code="confirmation_required",
+        )
     allowed = {
         SampleFulfillment.Status.PENDING: {
             SampleFulfillment.Status.SHIPPED,

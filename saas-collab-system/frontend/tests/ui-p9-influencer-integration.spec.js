@@ -237,11 +237,14 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain("priority: 'normal'");
     expect(page).toContain('filterable');
     expect(page).toContain('influencerOptions');
-    for (const field of ['influencer_name', 'influencer_handle', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
+    for (const field of ['influencer_name', 'influencer_display_name', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
+    expect(page).not.toContain('influencer_handle');
     expect(page).toContain('sampleVisible');
     expect(page).toContain('createSampleFulfillment(payload, sampleRequestKey.value)');
     expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
     expect(page).toContain('outreach_task: task.id');
+    expect(page).toContain('fetchSampleFulfillments({ outreach_task: task.id');
+    expect(page).not.toContain('search: task.task_no');
     expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
@@ -308,6 +311,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain("value === null || value === undefined || value === ''");
     expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
     expect(page).not.toContain('updateSampleFulfillmentStatus');
+    expect(page).toContain('ElMessageBox.confirm');
+    expect(page).toContain('confirm_terminal');
     expect(page).toContain('status: form.status');
     expect(page).toContain('outreach_task');
     expect(page).toContain('influencer: form.influencer');
@@ -371,7 +376,7 @@ describe('influencer integration workspace contracts', () => {
           data: {
             stores: [{ id: 3, name: 'Creator store', country_code: 'PH' }],
             bd_users: [],
-            influencers: [{ id: 17, name: 'Demo Creator', handle: 'demo.creator', platform: 'TikTok' }]
+            influencers: [{ id: 17, name: 'Demo Creator', display_name: 'Demo Creator', platform: 'TikTok' }]
           }
         };
       }

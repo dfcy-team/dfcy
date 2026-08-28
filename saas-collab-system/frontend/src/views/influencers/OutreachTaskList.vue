@@ -455,8 +455,7 @@ const sampleForm = reactive({
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-const sampleInfluencerName = (row) => String(row?.influencer_handle || '').trim().replace(/^@+/, '').trim()
-  || row?.influencer_name || row?.influencer;
+const sampleInfluencerName = (row) => row?.influencer_display_name || row?.influencer_name || row?.influencer;
 
 const filterStoreOptions = computed(() => {
   const optionsById = new Map(storeOptions.value.map((store) => [store.id, store]));
@@ -742,8 +741,8 @@ async function loadDetailData(task, showLoading = true) {
   if (!task?.id) return;
   const taskId = task.id;
   if (showLoading) detailLoading.value = true;
-  const sampleRequest = canViewFulfillment.value && task.task_no
-    ? fetchSampleFulfillments({ search: task.task_no, page: 1, page_size: 100 })
+  const sampleRequest = canViewFulfillment.value && task.id
+    ? fetchSampleFulfillments({ outreach_task: task.id, page: 1, page_size: 100 })
     : Promise.resolve(null);
   const [taskResponse, progressResponse, sampleResponse] = await Promise.all([
     fetchOutreachTask(taskId, { include_deleted: task.is_deleted ? 'true' : undefined }),
@@ -757,7 +756,7 @@ async function loadDetailData(task, showLoading = true) {
   if (progressResponse?.success) detailProgress.value = detailData(progressResponse.data);
   else failures.push('进度加载失败');
   if (sampleResponse?.success) {
-    detailSamples.value = collectionRows(sampleResponse.data).filter((sample) => String(sample.outreach_task) === String(taskId));
+    detailSamples.value = collectionRows(sampleResponse.data);
   } else if (canViewFulfillment.value) {
     failures.push('送样信息加载失败');
   }
@@ -821,19 +820,17 @@ async function refreshActiveTask() {
 }
 
 function influencerOptionLabel(influencer) {
-  const handle = String(influencer.handle || '').trim().replace(/^@+/, '').trim();
-  const primary = handle || influencer.display_name || influencer.name || influencer.code || `达人 ${influencer.id}`;
+  const primary = influencer.display_name || influencer.name || influencer.code || `达人 ${influencer.id}`;
   const account = [influencer.platform].filter(Boolean).join(' · ');
   return account ? `${primary}（${account}）` : primary;
 }
 
 function targetDisplayName(row) {
-  const handle = String(row.influencer_handle || '').trim().replace(/^@+/, '').trim();
-  return handle || row.influencer_name || row.influencer_code || (row.influencer ? `达人 ${row.influencer}` : '—');
+  return row.influencer_display_name || row.influencer_name || row.influencer_code || (row.influencer ? `达人 ${row.influencer}` : '—');
 }
 
 function targetAccount(row) {
-  const account = [row.influencer_platform, row.influencer_handle || row.influencer_code].filter(Boolean).join(' · ');
+  const account = [row.influencer_platform, row.influencer_code].filter(Boolean).join(' · ');
   return account || (row.influencer ? `ID ${row.influencer}` : '—');
 }
 
@@ -850,7 +847,7 @@ function ensureSampleInfluencer(task, target) {
     influencerOptions.value = [{
       id: influencerId,
       name: target?.influencer_name || task?.influencer_name || `达人 ${influencerId}`,
-      handle: target?.influencer_handle || task?.influencer_handle || '',
+      display_name: target?.influencer_display_name || task?.influencer_display_name || target?.influencer_name || task?.influencer_name || '',
       code: target?.influencer_code || task?.influencer_code || '',
       platform: target?.influencer_platform || task?.influencer_platform || ''
     }, ...influencerOptions.value];

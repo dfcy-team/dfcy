@@ -17,6 +17,19 @@ from .models import (
 )
 
 
+def _safe_display_name(value):
+    if not value:
+        return ""
+    profile = getattr(value, "profile", None)
+    return (
+        getattr(profile, "display_name", "")
+        or getattr(value, "name", "")
+        or getattr(value, "full_name", "")
+        or getattr(value, "username", "")
+        or getattr(value, "code", "")
+    )
+
+
 class InfluencerProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = InfluencerProfile
@@ -43,7 +56,8 @@ class InfluencerRestrictEventSerializer(serializers.ModelSerializer):
 
 
 class InfluencerSerializer(serializers.ModelSerializer):
-    handle = serializers.CharField(required=False, allow_blank=True)
+    handle = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    display_name = serializers.SerializerMethodField()
     tenant_id = serializers.IntegerField(read_only=True)
     is_blacklisted = serializers.SerializerMethodField()
     video_metrics = serializers.SerializerMethodField()
@@ -54,7 +68,7 @@ class InfluencerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Influencer
         fields = (
-            "id", "tenant_id", "code", "name", "platform", "handle", "category",
+            "id", "tenant_id", "code", "name", "display_name", "platform", "handle", "category",
             "follower_count", "cooperation_status", "status", "is_blacklisted", "video_metrics",
             "profile", "contacts", "blacklist_history",
             "created_at", "updated_at",
@@ -62,6 +76,10 @@ class InfluencerSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id", "tenant_id", "status", "created_at", "updated_at", "is_blacklisted",
         )
+
+    def get_display_name(self, obj):
+        return _safe_display_name(obj)
+
     def validate_code(self, value):
         request = self.context["request"]
         queryset = Influencer.objects.filter(tenant=request.user.tenant, code=value)
@@ -289,14 +307,17 @@ class OutreachTargetSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     influencer_code = serializers.CharField(source="influencer.code", read_only=True)
     influencer_name = serializers.CharField(source="influencer.name", read_only=True)
-    influencer_handle = serializers.CharField(source="influencer.handle", read_only=True)
+    influencer_display_name = serializers.SerializerMethodField()
     influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
+
+    def get_influencer_display_name(self, obj):
+        return _safe_display_name(obj.influencer)
 
     class Meta:
         model = OutreachTarget
         fields = (
             "id", "tenant_id", "task", "influencer", "influencer_code", "influencer_name",
-            "influencer_handle",
+            "influencer_display_name",
             "influencer_platform", "first_linked_at", "outreach_result",
             "version", "notes", "is_deleted", "deleted_at", "created_at", "updated_at",
         )
@@ -357,7 +378,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     outreach_task_name = serializers.CharField(source="outreach_task.task_name", read_only=True)
     store_name = serializers.CharField(source="store.name", read_only=True)
     influencer_name = serializers.SerializerMethodField()
-    influencer_handle = serializers.CharField(source="influencer.handle", read_only=True)
+    influencer_display_name = serializers.SerializerMethodField()
     influencer_code = serializers.CharField(source="influencer.code", read_only=True)
     influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
     owner_name = serializers.SerializerMethodField()
@@ -367,16 +388,12 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _display_name(value):
-        if not value:
-            return ""
-        return (
-            getattr(value, "handle", "")
-            or getattr(value, "name", "")
-            or getattr(value, "full_name", "")
-            or getattr(value, "username", "")
-        )
+        return _safe_display_name(value)
 
     def get_influencer_name(self, obj):
+        return self._display_name(obj.influencer)
+
+    def get_influencer_display_name(self, obj):
         return self._display_name(obj.influencer)
 
     def get_owner_name(self, obj):
@@ -425,13 +442,19 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"influencer": "This field is required when outreach_target is omitted."}
             )
+        if attrs.get("outreach_task") is None and not str(
+            attrs.get("external_product_id") or ""
+        ).strip():
+            raise serializers.ValidationError(
+                {"external_product_id": "Standalone samples require an external product ID."}
+            )
         return attrs
 
     class Meta:
         model = SampleFulfillment
         fields = (
             "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
-            "outreach_target", "influencer", "influencer_name", "influencer_handle", "influencer_code",
+            "outreach_target", "influencer", "influencer_name", "influencer_display_name", "influencer_code",
             "influencer_platform", "store", "store_name", "owner", "owner_name",
             "product_name_snapshot", "external_product_id", "sample_order_no",
             "link_type", "quick_tags", "sample_sent_at", "shipped_at", "video_deadline_at", "status", "source", "external_id", "version",
@@ -483,6 +506,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
     items_mode = serializers.ChoiceField(
         choices=("replace", "append"), required=False, write_only=True
     )
+    confirm_terminal = serializers.BooleanField(required=False, write_only=True)
 
     class Meta:
         model = SampleFulfillment
@@ -492,6 +516,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
             "link_type",
             "quick_tags",
             "status",
+            "confirm_terminal",
             "items",
             "append_items",
             "items_mode",

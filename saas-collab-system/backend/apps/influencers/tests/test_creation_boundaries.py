@@ -4,7 +4,14 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.influencers.models import Influencer, InfluencerRestriction, OutreachTarget, OutreachTask, SampleFulfillment
+from apps.influencers.models import (
+    Influencer,
+    InfluencerRestrictEvent,
+    InfluencerRestriction,
+    OutreachTarget,
+    OutreachTask,
+    SampleFulfillment,
+)
 from apps.influencers.serializers import SampleFulfillmentSerializer, OutreachTaskSerializer
 from apps.influencers.services import create_outreach_task, create_sample_fulfillment
 from apps.masterdata.models import PlatformMaster, StoreMaster
@@ -163,7 +170,12 @@ def test_sample_edit_can_transition_status_atomically():
     fulfillment, _ = create_sample_fulfillment(
         user=user,
         request_key="sample-edit-status-key",
-        validated_data={"influencer": influencer, "store": store, "link_type": "YYJL"},
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "EDIT-STATUS-PRODUCT",
+        },
         item_payloads=[],
     )
     client = APIClient()
@@ -190,7 +202,12 @@ def test_invalid_status_transition_rolls_back_fact_edits():
     fulfillment, _ = create_sample_fulfillment(
         user=user,
         request_key="sample-edit-status-rollback-key",
-        validated_data={"influencer": influencer, "store": store, "link_type": "YYJL"},
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "ROLLBACK-STATUS-PRODUCT",
+        },
         item_payloads=[],
     )
     original_version = fulfillment.version
@@ -209,6 +226,50 @@ def test_invalid_status_transition_rolls_back_fact_edits():
     assert fulfillment.notes == ""
     assert fulfillment.status == SampleFulfillment.Status.PENDING
     assert fulfillment.version == original_version
+
+
+def test_terminal_sample_status_requires_explicit_confirmation_on_generic_patch():
+    tenant, user, store, influencer = _records("sample-terminal-confirmation")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-terminal-confirmation-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "TERMINAL-STATUS-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    denied = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {"status": SampleFulfillment.Status.CANCELLED},
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert denied.status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert fulfillment.version == 1
+
+    confirmed = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {
+            "status": SampleFulfillment.Status.CANCELLED,
+            "confirm_terminal": True,
+        },
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert confirmed.status_code == 200, confirmed.data
+    assert confirmed.data["data"]["status"] == SampleFulfillment.Status.CANCELLED
 
 
 def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name():
@@ -240,6 +301,17 @@ def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name()
 
 def test_standalone_sample_uses_type_number_and_does_not_require_outreach_task():
     _, user, store, influencer = _records("standalone-sample")
+    missing_product = SampleFulfillmentSerializer(
+        data={
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "product_name_snapshot": "Standalone product",
+            "link_type": "YYJL",
+        }
+    )
+    assert missing_product.is_valid() is False
+    assert "external_product_id" in missing_product.errors
+
     serializer = SampleFulfillmentSerializer(
         data={
             "influencer": influencer.pk,
@@ -247,6 +319,7 @@ def test_standalone_sample_uses_type_number_and_does_not_require_outreach_task()
             "product_name_snapshot": "Standalone product",
             "external_product_id": "1730000000000000001",
             "link_type": "YYJL",
+            "items": [{"site_code": "PH", "requested_sku": "", "quantity": 1}],
         }
     )
     assert serializer.is_valid(), serializer.errors
@@ -255,13 +328,15 @@ def test_standalone_sample_uses_type_number_and_does_not_require_outreach_task()
         user=user,
         request_key="standalone-sample-key",
         validated_data=serializer.validated_data,
-        item_payloads=[],
+        item_payloads=[{"site_code": "PH", "requested_sku": "", "quantity": 1}],
     )
 
     assert created is True
     assert fulfillment.outreach_task_id is None
     assert fulfillment.owner_id == user.pk
     assert fulfillment.store_id == store.pk
+    assert fulfillment.external_product_id == "1730000000000000001"
+    assert fulfillment.items.get().requested_sku is None
     assert re.fullmatch(r"YYJL\d{4,}", fulfillment.fulfillment_no)
 
 
@@ -345,6 +420,43 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     }
     assert "notes" not in payload["tasks"][0]
     assert "external_id" not in payload["tasks"][0]
+
+
+def test_blacklist_cascade_requires_profile_and_fulfillment_manage_permissions():
+    tenant, user, store, influencer = _records("blacklist-permission")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="blacklist-permission-sample-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "BLACKLIST-PERMISSION-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        f"/api/internal/influencers/{influencer.pk}/blacklist/",
+        {"is_blacklisted": True, "reason": "missing fulfillment permission"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert not InfluencerRestriction.objects.filter(
+        tenant=tenant,
+        influencer=influencer,
+    ).exists()
+    assert not InfluencerRestrictEvent.objects.filter(
+        tenant=tenant,
+        influencer=influencer,
+    ).exists()
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
 
 
 def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
@@ -432,6 +544,87 @@ def test_account_resolve_prefers_blacklisted_duplicate_profile():
     assert response.status_code == 200
     assert response.json()["data"]["id"] == blocked.id
     assert response.json()["data"]["is_blacklisted"] is True
+
+
+def test_account_resolve_reuses_normalized_legacy_name_and_does_not_bypass_blacklist():
+    tenant, user, _, _ = _records("resolve-legacy-name")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    clean = Influencer.objects.create(
+        tenant=tenant,
+        code="legacy-clean",
+        name="Legacy.Creator",
+        handle="",
+        platform="tiktok",
+    )
+    blocked = Influencer.objects.create(
+        tenant=tenant,
+        code="legacy-blocked",
+        name="@LEGACY.CREATOR",
+        handle="",
+        platform="TikTok",
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=blocked,
+        is_blacklisted=True,
+        created_by=user,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": " ＠Ｌｅｇａｃｙ．Ｃｒｅａｔｏｒ "},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    assert response.data["data"]["id"] == blocked.id
+    assert response.data["data"]["is_blacklisted"] is True
+    assert Influencer.objects.filter(tenant=tenant).count() == 3
+    assert clean.id != blocked.id
+
+
+def test_account_resolve_keeps_tenant_and_platform_scope():
+    tenant, user, _, _ = _records("resolve-scope")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    other_platform = Influencer.objects.create(
+        tenant=tenant,
+        code="instagram-scope-creator",
+        name="scoped.creator",
+        handle="",
+        platform="Instagram",
+    )
+    other_tenant, _, _, _ = _records("resolve-scope-other")
+    foreign = Influencer.objects.create(
+        tenant=other_tenant,
+        code="foreign-scope-creator",
+        name="scoped.creator",
+        handle="",
+        platform="TikTok",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "@scoped.creator"},
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    resolved_id = response.data["data"]["id"]
+    resolved = Influencer.objects.get(pk=resolved_id)
+    assert resolved.tenant_id == tenant.id
+    assert resolved.platform == "TikTok"
+    assert resolved_id not in {other_platform.id, foreign.id}
+    assert Influencer.objects.filter(
+        tenant=tenant,
+        name="scoped.creator",
+        platform__iexact="TikTok",
+    ).count() == 1
 
 
 def test_account_resolve_prefers_normalized_handle_over_another_profile_code():

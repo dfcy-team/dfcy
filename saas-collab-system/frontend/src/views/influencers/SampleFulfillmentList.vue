@@ -316,8 +316,7 @@ const exceptionCount = computed(() => rows.value.filter((row) => ['overdue', 'ca
 const rowStores = computed(() => [...new Map(rows.value.filter((row) => row.store).map((row) => [row.store, { id: row.store, name: row.store_name || `店铺 ${row.store}` }])).values()]);
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
-const sampleInfluencerName = (row) => String(row?.influencer_handle || '').trim().replace(/^@+/, '').trim()
-  || row?.influencer_name || row?.influencer;
+const sampleInfluencerName = (row) => row?.influencer_display_name || row?.influencer_name || row?.influencer;
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
 
 function normalizeInfluencerAccount(value) {
@@ -327,7 +326,7 @@ function normalizeInfluencerAccount(value) {
 function dedupeInfluencerCandidates(candidates = []) {
   const unique = new Map();
   for (const candidate of Array.isArray(candidates) ? candidates : []) {
-    const key = normalizeInfluencerAccount(candidate?.handle || candidate?.code) || `id:${candidate?.id}`;
+    const key = normalizeInfluencerAccount(candidate?.handle || candidate?.code || candidate?.name) || `id:${candidate?.id}`;
     const current = unique.get(key);
     if (!current || candidate?.is_blacklisted || Object.values(candidate || {}).filter(hasValue).length > Object.values(current || {}).filter(hasValue).length) {
       unique.set(key, candidate);
@@ -454,8 +453,7 @@ async function selectTask(id) {
 }
 
 function influencerLabel(influencer) {
-  const handle = String(influencer.handle || '').trim().replace(/^@+/, '').trim();
-  const account = handle || influencer.display_name || influencer.name || influencer.code || `达人 ${influencer.id}`;
+  const account = influencer.display_name || influencer.name || influencer.code || `达人 ${influencer.id}`;
   const suffix = [influencer.platform].filter(hasValue).join(' · ');
   return suffix ? `${account}（${suffix}）` : account;
 }
@@ -553,7 +551,7 @@ async function openEdit(row) {
     id: row.influencer,
     name: row.influencer_name,
     code: row.influencer_code,
-    handle: row.influencer_handle,
+    display_name: row.influencer_display_name || row.influencer_name,
     platform: row.influencer_platform,
     is_blacklisted: row.is_blacklisted
   }];
@@ -616,6 +614,16 @@ async function submit() {
 }
 
 async function submitEdit() {
+  let confirmTerminal = false;
+  const terminalStatuses = ['completed', 'cancelled', 'blacklisted'];
+  if (form.status !== editingSample.value.status && terminalStatuses.includes(form.status)) {
+    try {
+      await ElMessageBox.confirm('终态变更会停止后续履约流转，确认继续吗？', '确认终态变更', { type: 'warning' });
+      confirmTerminal = true;
+    } catch {
+      return;
+    }
+  }
   saving.value = true;
   const response = await updateSampleFulfillment(editingSample.value.id, {
     sample_order_no: form.sample_order_no,
@@ -623,6 +631,7 @@ async function submitEdit() {
     link_type: form.link_type,
     quick_tags: form.quick_tags,
     status: form.status,
+    ...(confirmTerminal ? { confirm_terminal: true } : {}),
     items: items.value.map((item) => ({
       site_code: item.site_code,
       requested_sku: item.requested_sku?.trim() || null,

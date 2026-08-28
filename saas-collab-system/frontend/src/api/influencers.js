@@ -399,11 +399,11 @@ export const createSampleFulfillment = (payload, idempotencyKey = requestKey()) 
   'influencers.fulfillment.create'
 );
 
-export const updateSampleFulfillmentStatus = (id, status, version, reason = '') => requestWithMockFallback(
+export const updateSampleFulfillmentStatus = (id, status, version, reason = '', confirmTerminal = false) => requestWithMockFallback(
   {
     method: 'post',
     url: `${API_ROOT}/sample-fulfillments/${id}/status/`,
-    data: { status, ...(reason ? { reason } : {}) },
+    data: { status, ...(reason ? { reason } : {}), ...(confirmTerminal ? { confirm_terminal: true } : {}) },
     ...ifMatchHeaders(version)
   },
   mockWrite({ id, status, version: Number(version || 1) + 1 }),

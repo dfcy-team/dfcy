@@ -228,8 +228,12 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
         "id": influencer.id,
         "code": "creator-active",
         "name": "Active Creator",
+        "display_name": "Active Creator",
         "platform": "tiktok",
+        "status": "active",
+        "is_blacklisted": False,
     }]
+    assert "handle" not in response.data["data"]["influencers"][0]
 
     invalid_priority = client.post("/api/internal/influencers/outreach-tasks/", {
         "task_no": "OPTIONS-BAD-PRIORITY",
@@ -742,6 +746,61 @@ def test_requested_sku_nullable_migration_is_explicitly_irreversible():
         migration.block_reverse(None, None)
 
 
+def test_sample_status_baseline_migration_is_reversible_and_keeps_event_values_compatible():
+    tenant = Tenant.objects.create(name="Status migration tenant", code="status-migration")
+    user, _ = user_with_permissions(tenant, "status-migration-user")
+    store, influencer, task = base_records(tenant, user, "status-migration")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="status-migration-key",
+        validated_data={
+            "fulfillment_no": "STATUS-MIGRATION-SAMPLE",
+            "outreach_task": task,
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+        },
+        item_payloads=[],
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=influencer,
+        is_blacklisted=True,
+        created_by=user,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        status="creating",
+    )
+    legacy_event = FulfillmentStatusEvent.objects.create(
+        tenant=tenant,
+        fulfillment=fulfillment,
+        from_status="creating",
+        to_status="processing",
+        actor=user,
+        reason="legacy status",
+    )
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0012_sample_fulfillment_status_baseline"
+    )
+
+    migration.migrate_status_baseline(django_apps, None)
+
+    fulfillment.refresh_from_db()
+    legacy_event.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.BLACKLISTED
+    assert legacy_event.from_status == SampleFulfillment.Status.BLACKLISTED
+    assert legacy_event.to_status == SampleFulfillment.Status.BLACKLISTED
+
+    migration.restore_status_baseline(django_apps, None)
+
+    fulfillment.refresh_from_db()
+    legacy_event.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.CANCELLED
+    assert legacy_event.from_status == SampleFulfillment.Status.CANCELLED
+    assert legacy_event.to_status == SampleFulfillment.Status.CANCELLED
+
+
 def test_blacklisted_influencer_cannot_receive_sample():
     tenant = Tenant.objects.create(name="Tenant", code="sample-blacklist")
     user, client = user_with_permissions(tenant, "blacklist-manager", "influencers.fulfillment.manage")
@@ -1192,7 +1251,8 @@ def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is
     listed = client.get("/api/internal/influencers/")
     searched = client.get("/api/internal/influencers/", {"search": "secret-handle"})
     item = listed.data["data"]["results"][0]
-    assert item["handle"] == "secret-handle"
+    assert item["display_name"] == "Safe display name"
+    assert "handle" not in item
     for field in ("contact_name", "contact_phone", "contact_email", "notes"):
         assert field not in item
     assert searched.data["data"]["count"] == 1
@@ -1443,6 +1503,75 @@ def test_sample_order_number_marks_new_fulfillment_as_shipped():
     assert fulfillment.store_id == store.pk
     assert fulfillment.status == SampleFulfillment.Status.SHIPPED
     assert fulfillment.shipped_at is not None
+
+
+def test_sample_list_outreach_task_filter_is_exact_and_tenant_scoped():
+    tenant = Tenant.objects.create(name="Sample filter tenant", code="sample-filter")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-filter-user",
+        "influencers.fulfillment.view",
+    )
+    first_store, first_influencer, first_task = base_records(tenant, user, "filter-first")
+    second_store, second_influencer, second_task = base_records(tenant, user, "filter-second")
+    first_sample, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-filter-first-key",
+        validated_data={
+            "fulfillment_no": "SAMPLE-FILTER-FIRST",
+            "outreach_task": first_task,
+            "influencer": first_influencer,
+            "store": first_store,
+            "owner": user,
+        },
+        item_payloads=[],
+    )
+    second_sample, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-filter-second-key",
+        validated_data={
+            "fulfillment_no": "SAMPLE-FILTER-SECOND",
+            "outreach_task": second_task,
+            "influencer": second_influencer,
+            "store": second_store,
+            "owner": user,
+        },
+        item_payloads=[],
+    )
+    other_tenant = Tenant.objects.create(name="Other sample filter tenant", code="sample-filter-other")
+    other_user, _ = user_with_permissions(other_tenant, "sample-filter-other-user")
+    other_store, other_influencer, other_task = base_records(other_tenant, other_user, "filter-other")
+    other_sample, _ = create_sample_fulfillment(
+        user=other_user,
+        request_key="sample-filter-other-key",
+        validated_data={
+            "fulfillment_no": "SAMPLE-FILTER-OTHER",
+            "outreach_task": other_task,
+            "influencer": other_influencer,
+            "store": other_store,
+            "owner": other_user,
+        },
+        item_payloads=[],
+    )
+
+    response = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"outreach_task": first_task.pk, "page": 1, "page_size": 100},
+    )
+
+    assert response.status_code == 200
+    result_ids = {row["id"] for row in response.data["data"]["results"]}
+    assert result_ids == {first_sample.id}
+    assert second_sample.id not in result_ids
+    assert other_sample.id not in result_ids
+    assert client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"outreach_task": other_task.pk},
+    ).data["data"]["count"] == 0
+    assert client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"outreach_task": "not-an-id"},
+    ).status_code == 400
 
 
 def _new_affiliate_order(
@@ -1833,6 +1962,7 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
             "notes": "edited",
             "link_type": "TKOne",
             "quick_tags": ["已发货"],
+            "status": SampleFulfillment.Status.PENDING,
             "items": [
                 {"site_code": "PH", "requested_sku": "SKU-A", "quantity": 2},
                 {"site_code": "PH", "requested_sku": "SKU-B", "quantity": 1},
