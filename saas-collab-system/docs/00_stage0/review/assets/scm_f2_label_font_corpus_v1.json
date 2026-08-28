@@ -1,0 +1,191 @@
+{
+  "schema_version": "sc-f2-label-font-corpus-v1",
+  "encoding": "UTF-8",
+  "bom": false,
+  "line_endings": "LF",
+  "unicode_normalization": "NFC",
+  "positive_samples": [
+    {
+      "id": "fixed-field-labels",
+      "text": "批次号 箱号 装箱版本 包装标准 生成时间 重量 体积 订单号 商品名称 数量"
+    },
+    {
+      "id": "business-identifiers",
+      "text": "PB-20260730-0001 BOX-001 SKU-001"
+    },
+    {
+      "id": "product-electronics",
+      "text": "无线蓝牙耳机 黑色 规格：10×20厘米"
+    },
+    {
+      "id": "product-apparel",
+      "text": "纯棉短袖T恤（白色） 数量：12件"
+    },
+    {
+      "id": "product-household",
+      "text": "不锈钢保温杯 500毫升 ￥99.00"
+    },
+    {
+      "id": "measurements",
+      "text": "温度25℃ / 重量12.500kg / 体积0.125m³"
+    },
+    {
+      "id": "latin-normalized",
+      "text": "Café No. 2 - A/B"
+    },
+    {
+      "id": "cjk-punctuation",
+      "text": "中文，。！？；：“”‘’（）【】《》"
+    }
+  ],
+  "normalization_cases": [
+    {
+      "id": "latin-combining-acute",
+      "input": "Cafe\u0301",
+      "normalized": "Café"
+    }
+  ],
+  "negative_samples": [
+    {
+      "id": "nul-control",
+      "text": "\u0000",
+      "expected_reason": "CONTROL_CHARACTER_FORBIDDEN"
+    },
+    {
+      "id": "zero-width-space",
+      "text": "\u200b",
+      "expected_reason": "ZERO_WIDTH_CHARACTER_FORBIDDEN"
+    },
+    {
+      "id": "variation-selector",
+      "text": "\ufe0f",
+      "expected_reason": "VARIATION_SELECTOR_FORBIDDEN"
+    },
+    {
+      "id": "private-use",
+      "text": "\ue000",
+      "expected_reason": "PRIVATE_USE_CHARACTER_FORBIDDEN"
+    },
+    {
+      "id": "cjk-extension-b",
+      "text": "\ud840\udc00",
+      "expected_reason": "OUT_OF_FROZEN_CJK_SCOPE"
+    },
+    {
+      "id": "emoji",
+      "text": "\ud83d\ude00",
+      "expected_reason": "EMOJI_FORBIDDEN"
+    }
+  ],
+  "positive_codepoints": [
+    "U+0020",
+    "U+002D",
+    "U+002E",
+    "U+002F",
+    "U+0030",
+    "U+0031",
+    "U+0032",
+    "U+0033",
+    "U+0035",
+    "U+0036",
+    "U+0037",
+    "U+0039",
+    "U+0041",
+    "U+0042",
+    "U+0043",
+    "U+004B",
+    "U+004E",
+    "U+004F",
+    "U+0050",
+    "U+0053",
+    "U+0054",
+    "U+0055",
+    "U+0058",
+    "U+0061",
+    "U+0066",
+    "U+0067",
+    "U+006B",
+    "U+006D",
+    "U+006F",
+    "U+00B3",
+    "U+00D7",
+    "U+00E9",
+    "U+2018",
+    "U+2019",
+    "U+201C",
+    "U+201D",
+    "U+2103",
+    "U+3002",
+    "U+300A",
+    "U+300B",
+    "U+3010",
+    "U+3011",
+    "U+4E0D",
+    "U+4E2D",
+    "U+4EF6",
+    "U+4F53",
+    "U+4FDD",
+    "U+51C6",
+    "U+5305",
+    "U+5347",
+    "U+5355",
+    "U+5398",
+    "U+53F7",
+    "U+540D",
+    "U+54C1",
+    "U+5546",
+    "U+5EA6",
+    "U+6064",
+    "U+6210",
+    "U+6279",
+    "U+6570",
+    "U+6587",
+    "U+65E0",
+    "U+65F6",
+    "U+672C",
+    "U+673A",
+    "U+676F",
+    "U+6807",
+    "U+683C",
+    "U+68C9",
+    "U+6B21",
+    "U+6BEB",
+    "U+6E29",
+    "U+7248",
+    "U+7259",
+    "U+751F",
+    "U+767D",
+    "U+77ED",
+    "U+79EF",
+    "U+79F0",
+    "U+7BB1",
+    "U+7C73",
+    "U+7EAF",
+    "U+7EBF",
+    "U+8033",
+    "U+8272",
+    "U+84DD",
+    "U+8896",
+    "U+88C5",
+    "U+89C4",
+    "U+8BA2",
+    "U+91CD",
+    "U+91CF",
+    "U+94A2",
+    "U+9508",
+    "U+95F4",
+    "U+9ED1",
+    "U+FF01",
+    "U+FF08",
+    "U+FF09",
+    "U+FF0C",
+    "U+FF1A",
+    "U+FF1B",
+    "U+FF1F",
+    "U+FFE5"
+  ],
+  "positive_codepoints_count": 105,
+  "positive_codepoints_canonicalization": "ASCII U+XXXX or U+XXXXXX, numeric ascending, one entry per LF-terminated line",
+  "positive_codepoints_sha256": "18817beaf1ec51db9464fa3225ae1c1d4631801a29237c87b3bc727273975232",
+  "scope_statement": "Zero missing glyphs proves only this frozen corpus, not GB18030 or all CJK."
+}

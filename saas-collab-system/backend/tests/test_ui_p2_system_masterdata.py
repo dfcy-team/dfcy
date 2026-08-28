@@ -3,7 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.audit.models import OperationLog
-from apps.integrations.models import PlatformIntegrationConfig
+from apps.integrations.models import PlatformIntegrationConfig, authorization_service_write
 from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.suppliers.models import SupplierTask
@@ -488,22 +488,22 @@ def test_security_operations_exposes_only_credential_metadata():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-security")
     viewer = create_user(tenant, "security-viewer")
     grant(viewer, "security.operations.view")
-    PlatformIntegrationConfig.objects.create(
-        tenant=tenant,
-        platform="other",
-        account_alias="demo-alias",
-        environment="sandbox",
-        status="disabled",
-        credential_ciphertext="not-a-real-secret-ciphertext",
-        credential_key_version="demo-v1",
-        credential_fingerprint="demo-fingerprint",
-        created_by=viewer,
-    )
+    with authorization_service_write():
+        PlatformIntegrationConfig.objects.create(
+            tenant=tenant,
+            platform="other",
+            account_alias="demo-alias",
+            environment="sandbox",
+            status="disabled",
+            credential_key_version="demo-v1",
+            credential_fingerprint="demo-fingerprint",
+            created_by=viewer,
+        )
 
     response = client_for(viewer).get("/api/internal/system/security-operations/")
 
     assert response.status_code == 200
     serialized = str(response.data)
     assert "demo-alias" in serialized and "demo-fingerprint" in serialized
-    assert "not-a-real-secret-ciphertext" not in serialized
+    assert "credential_ciphertext" not in serialized
     assert response.data["data"]["credential_contract"] == "alias_fingerprint_reference_only"

@@ -236,8 +236,6 @@ def finalize_product(*, project_id, actor):
         spu_code=_next_code(ProductSPU, project.tenant, "spu_code", "SPU"),
         product_name=project.product_name,
         category=project.category,
-        development_source=project.development_source,
-        development_project=project,
     )
     now = timezone.now()
     DevelopmentProjectStage.objects.filter(

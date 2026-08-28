@@ -1,0 +1,365 @@
+{
+  "schema_version": "sc-f2-label-renderer-contract-v1",
+  "gate": {
+    "id": "SC-F2-LABEL-FONT-R1-P2-002",
+    "state": "AUTHORIZED_FOR_SC_F2_LABEL_FONT_4_LOCAL_IMPLEMENTATION",
+    "closed_by_review": "SC-F2-LABEL-FONT-R1-P2-002_INDEPENDENT_REVIEW_PASS",
+    "next_stage_after_pass": "SC-F2-LABEL-FONT-4_LOCAL_RENDERER_IMPLEMENTATION",
+    "local_implementation_only": true,
+    "client_integration_authorized": false,
+    "production_authorized": false
+  },
+  "controlled_verifier": {
+    "path": "backend/scripts/verify_sc_f2_label_renderer_contract.py",
+    "sha256": "0b3a678de2240794814f9812d3fdd9602de484eb26fc4db1253dfbdd049b0ca2"
+  },
+  "source_contracts": {
+    "project_baseline": "docs/00_stage0/review/scm_f2_chinese_label_font_asset_project_baseline.md",
+    "api_baseline": "docs/00_stage0/review/scm_f2_2_api_permission_datascope_review_baseline.md",
+    "error_codes": "backend/apps/common/error_codes.py",
+    "v1_renderer": "backend/apps/packing/labels.py",
+    "idempotency_service": "backend/apps/packing/api_idempotency.py"
+  },
+  "asset_bundle": {
+    "bundle_id": "sc-f2-label-font-v1",
+    "repository_path": "backend/apps/packing/assets/fonts/sc-f2-label-font-v1",
+    "bundle_digest_schema": "sc-f2-label-font-bundle-digest-v1",
+    "bundle_digest_sha256": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2",
+    "candidate_manifest_sha256": "e00920a6188621eb80c551a1c380ede83b46f29b23fb6e4ef79c7efcb83dcf46",
+    "candidate_manifest_remains_immutable": true,
+    "authorization_overlay": "THIS_REVIEWED_CONTRACT",
+    "system_font_fallback": false,
+    "runtime_network_fetch": false,
+    "files": [
+      {
+        "path": "LICENSE.txt",
+        "bytes": 4388,
+        "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+      },
+      {
+        "path": "SCF2LabelSans-Bold.ttf",
+        "bytes": 10585916,
+        "sha256": "fb03fe89d24b0b73b184a68d67dafb46132bf52e8685e7c6bfcf69863326cfe4"
+      },
+      {
+        "path": "SCF2LabelSans-Regular.ttf",
+        "bytes": 10596408,
+        "sha256": "976a1010423aeb77217358385e27cdd5ea18afbac4d83c036999d5b9cacaa0b3"
+      },
+      {
+        "path": "manifest.json",
+        "bytes": 5113,
+        "sha256": "e00920a6188621eb80c551a1c380ede83b46f29b23fb6e4ef79c7efcb83dcf46"
+      }
+    ]
+  },
+  "version_dispatch": {
+    "preserved_v1": {
+      "layout_version": "packing-label-v1",
+      "renderer_version": "sc-f2-reportlab-v1",
+      "font_bundle_digest": "sha256(Helvetica|Helvetica-Bold)",
+      "semantic_change_allowed": false
+    },
+    "authorized_v2": {
+      "layout_version": "packing-label-v2-cjk",
+      "renderer_version": "sc-f2-reportlab-v2-cjk",
+      "font_bundle_digest": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2",
+      "font_family": "SC F2 Label Sans",
+      "regular_postscript_name": "SCF2LabelSans-Regular",
+      "bold_postscript_name": "SCF2LabelSans-Bold"
+    },
+    "unknown_tuple": "FAIL_CLOSED_AS_RENDERER_UNAVAILABLE",
+    "old_snapshot_uses_current_active_assets": false,
+    "in_place_version_semantic_change": false
+  },
+  "unicode_policy": {
+    "normalization": "NFC",
+    "normalization_before_snapshot_hash_and_layout": true,
+    "rendered_fields": [
+      "batch_no",
+      "box_no",
+      "standard.code",
+      "standard.version",
+      "standard.title",
+      "item.order_no",
+      "item.sku_code",
+      "item.product_name"
+    ],
+    "corpus": {
+      "path": "docs/00_stage0/review/assets/scm_f2_label_font_corpus_v1.json",
+      "sha256": "4d28a684f034a90a10d9bc4d0e0ccde8ff41435887a1de8b4de55d0e833feb6f",
+      "positive_codepoints_count": 105,
+      "positive_codepoints_sha256": "18817beaf1ec51db9464fa3225ae1c1d4631801a29237c87b3bc727273975232"
+    },
+    "allowed_ranges": [
+      {
+        "name": "PRINTABLE_ASCII",
+        "start": "U+0020",
+        "end": "U+007E"
+      },
+      {
+        "name": "LATIN_1_PRINTABLE",
+        "start": "U+00A0",
+        "end": "U+00FF"
+      },
+      {
+        "name": "CJK_UNIFIED_IDEOGRAPHS",
+        "start": "U+4E00",
+        "end": "U+9FEF"
+      },
+      {
+        "name": "FULLWIDTH_ASCII_FORMS",
+        "start": "U+FF01",
+        "end": "U+FF5E"
+      }
+    ],
+    "allowed_codepoints": [
+      "U+2013",
+      "U+2014",
+      "U+2018",
+      "U+2019",
+      "U+201C",
+      "U+201D",
+      "U+2022",
+      "U+2026",
+      "U+2103",
+      "U+3001",
+      "U+3002",
+      "U+300A",
+      "U+300B",
+      "U+3010",
+      "U+3011",
+      "U+FFE5"
+    ],
+    "frozen_accepted_scope": {
+      "canonicalization": "ASCII U+XXXX or U+XXXXXX, numeric ascending, one LF per entry",
+      "codepoints_count": 21275,
+      "canonical_bytes": 148925,
+      "sha256": "20345144f1e52cd7047c38c24d16740c3ec64b56c06f96ef262feb9d5553d368",
+      "fonttools_version": "4.63.0",
+      "regular_missing": 0,
+      "bold_missing": 0
+    },
+    "zero_width_codepoints": [
+      "U+200B",
+      "U+200C",
+      "U+200D",
+      "U+2060",
+      "U+FEFF"
+    ],
+    "variation_selector_ranges": [
+      {
+        "start": "U+FE00",
+        "end": "U+FE0F"
+      },
+      {
+        "start": "U+0E0100",
+        "end": "U+0E01EF"
+      }
+    ],
+    "emoji_ranges": [
+      {
+        "start": "U+1F000",
+        "end": "U+1FAFF"
+      }
+    ],
+    "forbid_control_categories": true,
+    "forbid_format_categories": true,
+    "forbid_private_use_categories": true,
+    "forbid_unassigned_and_surrogate_categories": true,
+    "forbid_remaining_combining_marks_after_nfc": true,
+    "only_ascii_space_separator": true,
+    "policy_out_of_scope_is_user_error": true,
+    "allowed_scope_missing_from_approved_font_is_asset_error": true,
+    "public_error_does_not_reveal_codepoint": true
+  },
+  "layout_contract": {
+    "page": "A4_PORTRAIT_595.2756x841.8898_PT",
+    "one_box_per_page": true,
+    "batch_box_order": "sequence_ascending",
+    "max_boxes_per_request": 100,
+    "item_area_line_slots_per_box": 24,
+    "product_name_max_wrapped_lines": 2,
+    "minimum_body_font_size_pt": 9,
+    "auto_shrink_below_minimum": false,
+    "width_measurement": "REPORTLAB_PDFMETRICS_STRINGWIDTH_WITH_FROZEN_FONT_AND_SIZE",
+    "line_breaking": "GREEDY_BREAK_AT_ASCII_SPACE_OR_FROZEN_PUNCTUATION_THEN_CODEPOINT",
+    "unbreakable_text": "BREAK_BY_UNICODE_CODEPOINT",
+    "overflow": "REJECT_BEFORE_EVENT_LOG_OR_IDEMPOTENCY_COMMIT",
+    "qr_size_pt": 144,
+    "qr_body_margin_non_overlap_required": true,
+    "text_clipping_or_silent_ellipsis": false,
+    "v1_text_slice_95_preserved_only_in_v1": true
+  },
+  "public_errors": {
+    "UNSUPPORTED_TEXT": {
+      "http_status": 422,
+      "code": "BUSINESS_RULE_VIOLATION",
+      "message": "Label content contains unsupported characters.",
+      "data": null,
+      "content_type": "application/json",
+      "retryable_with_same_payload": false,
+      "retryable_after_input_fix_with_same_key": true,
+      "forbidden_response_headers": [
+        "Content-Disposition",
+        "ETag",
+        "Idempotency-Replayed",
+        "X-Packing-Batch-Version"
+      ]
+    },
+    "LAYOUT_LIMIT_EXCEEDED": {
+      "http_status": 422,
+      "code": "BUSINESS_RULE_VIOLATION",
+      "message": "Label content exceeds the supported layout limits.",
+      "data": null,
+      "content_type": "application/json",
+      "retryable_with_same_payload": false,
+      "retryable_after_input_fix_with_same_key": true,
+      "forbidden_response_headers": [
+        "Content-Disposition",
+        "ETag",
+        "Idempotency-Replayed",
+        "X-Packing-Batch-Version"
+      ]
+    },
+    "RENDERER_UNAVAILABLE": {
+      "http_status": 500,
+      "code": "INTERNAL_ERROR",
+      "message": "Label rendering is temporarily unavailable.",
+      "data": null,
+      "content_type": "application/json",
+      "retryable_with_same_payload": true,
+      "retryable_after_input_fix_with_same_key": false,
+      "forbidden_response_headers": [
+        "Content-Disposition",
+        "ETag",
+        "Idempotency-Replayed",
+        "X-Packing-Batch-Version"
+      ]
+    }
+  },
+  "internal_reason_classes": {
+    "user_text": [
+      "CONTROL_CHARACTER_FORBIDDEN",
+      "ZERO_WIDTH_CHARACTER_FORBIDDEN",
+      "VARIATION_SELECTOR_FORBIDDEN",
+      "PRIVATE_USE_CHARACTER_FORBIDDEN",
+      "FORMAT_CHARACTER_FORBIDDEN",
+      "UNASSIGNED_OR_SURROGATE_FORBIDDEN",
+      "EMOJI_FORBIDDEN",
+      "COMBINING_MARK_OUT_OF_SCOPE",
+      "NON_ASCII_SEPARATOR_FORBIDDEN",
+      "OUT_OF_FROZEN_CJK_SCOPE",
+      "LAYOUT_LINE_LIMIT_EXCEEDED",
+      "LAYOUT_BOX_LIMIT_EXCEEDED"
+    ],
+    "asset_or_service": [
+      "ASSET_MISSING",
+      "ASSET_FILE_SET_MISMATCH",
+      "ASSET_SIZE_MISMATCH",
+      "ASSET_DIGEST_MISMATCH",
+      "LICENSE_OR_MANIFEST_MISMATCH",
+      "FONT_PARSE_FAILED",
+      "FONT_REGISTRATION_FAILED",
+      "GLYPH_MISSING_FROM_APPROVED_ASSET",
+      "SUBSETTING_FAILED",
+      "VERSION_DISPATCH_UNKNOWN",
+      "QR_RENDER_FAILED",
+      "PDF_RENDER_FAILED",
+      "PDF_SAVE_FAILED",
+      "ETAG_FAILED"
+    ]
+  },
+  "response_safety": {
+    "forbidden_echo": [
+      "complete_product_name",
+      "raw_unsupported_text",
+      "unsupported_codepoint",
+      "local_file_path",
+      "font_internal_exception",
+      "stack_trace"
+    ],
+    "forbidden_tokens": [
+      "traceback",
+      "c:\\",
+      "/home/",
+      "/tmp/",
+      ".ttf",
+      "fonttools",
+      "reportlab"
+    ],
+    "validation_data": null,
+    "server_log_may_contain_raw_business_text": false
+  },
+  "idempotency_and_transactions": {
+    "first_user_text_failure": "ROLLBACK_ALL_AND_STORE_NO_IDEMPOTENCY_RECORD",
+    "first_asset_or_renderer_failure": "ROLLBACK_ALL_AND_STORE_NO_IDEMPOTENCY_RECORD",
+    "same_key_after_user_input_fix": "ALLOWED_AS_FRESH_REQUEST_BECAUSE_NO_RECORD_EXISTS",
+    "same_key_after_asset_repair": "ALLOWED_WITH_IDENTICAL_REQUEST_BECAUSE_NO_RECORD_EXISTS",
+    "historical_replay_failure": "RETURN_SAFE_500_WITH_ZERO_WRITES_AND_PRESERVE_RECORD",
+    "historical_replay_after_repair": "RENDER_FROZEN_SNAPSHOT_AND_RETURN_ORIGINAL_BYTES_ETAG",
+    "authorization_before_replay": true,
+    "store_failed_response": false,
+    "pdf_bytes_in_database": false,
+    "first_real_render_before_outer_commit": true
+  },
+  "failure_write_matrix": {
+    "first_request_failure": {
+      "packing_event_delta": 0,
+      "operation_log_delta": 0,
+      "api_idempotency_record_delta": 0,
+      "domain_state_delta": 0
+    },
+    "historical_replay_failure": {
+      "packing_event_delta": 0,
+      "operation_log_delta": 0,
+      "api_idempotency_record_delta": 0,
+      "existing_idempotency_record_mutated": false,
+      "domain_state_delta": 0
+    }
+  },
+  "observability": {
+    "metric": "packing_label_renderer_failure_total",
+    "alert_on_asset_or_service_failure": true,
+    "alert_on_user_text_failure": false,
+    "allowed_dimensions": [
+      "phase",
+      "reason_class",
+      "layout_version",
+      "renderer_version",
+      "font_bundle_digest"
+    ],
+    "forbidden_dimensions": [
+      "tenant_name",
+      "product_name",
+      "raw_text",
+      "local_path",
+      "exception_message"
+    ],
+    "first_phase": "FIRST",
+    "replay_phase": "REPLAY",
+    "asset_health_gate": "FAIL_V2_READINESS_WITHOUT_DISABLING_V1",
+    "automatic_fallback": false
+  },
+  "implementation_acceptance": {
+    "required_test_groups": [
+      "NFC_AND_NEGATIVE_REASON_PRECEDENCE",
+      "ALLOWED_SCOPE_CMAP_COVERAGE",
+      "WIDTH_WRAP_OVERFLOW_AND_ONE_BOX_PER_PAGE",
+      "V1_FIXED_VECTOR_UNCHANGED",
+      "V2_SAME_SNAPSHOT_BYTE_DETERMINISM",
+      "VERSION_TUPLE_DISPATCH_AND_UNKNOWN_TUPLE_FAILURE",
+      "FIRST_FAILURE_FULL_TRANSACTION_ROLLBACK",
+      "SAME_KEY_RETRY_AFTER_INPUT_OR_ASSET_REPAIR",
+      "REPLAY_FAILURE_ZERO_WRITE_AND_RECOVERY",
+      "SAFE_JSON_ERROR_ENVELOPE_AND_HEADER_ABSENCE",
+      "ASSET_MISSING_DIGEST_DRIFT_PARSE_AND_REGISTRATION_FAILURE",
+      "FONTFILE2_TOUNICODE_TEXT_EXTRACTION_AND_VISUAL_REGRESSION",
+      "REAL_MYSQL_TRANSACTION_AND_IDEMPOTENCY",
+      "LOCKED_LINUX_CAPACITY_AND_MEMORY"
+    ],
+    "renderer_source_change_allowed_before_review_pass": false,
+    "client_change_allowed": false,
+    "production_change_allowed": false
+  }
+}
