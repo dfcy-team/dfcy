@@ -1,4 +1,5 @@
 from decimal import Decimal
+import unicodedata
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -18,6 +19,11 @@ SUPPORTED_CURRENCY_CHOICES = (
     ("THB", "THB"),
     ("USD", "USD"),
 )
+
+
+def normalize_tiktok_username(value):
+    value = unicodedata.normalize("NFKC", str(value or ""))
+    return value.strip().lstrip("@").strip().casefold()
 
 
 class ProtectedInfluencerQuerySet(models.QuerySet):

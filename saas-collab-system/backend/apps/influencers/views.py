@@ -10,11 +10,13 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
+from rest_framework.permissions import SAFE_METHODS
 from rest_framework.views import APIView
 
 from apps.audit.services import write_operation_log
 from apps.accounts.models import CustomUser
 from apps.common.responses import paginated_data, success_response
+from apps.development.permissions import any_permission_class
 from apps.masterdata.models import StatusChoices, StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
@@ -73,6 +75,28 @@ class Conflict(APIException):
     status_code = 409
     default_detail = "The resource changed or the idempotency key conflicts."
     default_code = "conflict"
+
+
+CanResolveInfluencerRead = any_permission_class(
+    "influencers.outreach.manage",
+    "influencers.fulfillment.manage",
+)
+RESOLVE_READ_PERMISSION_CODES = (
+    "influencers.outreach.manage",
+    "influencers.fulfillment.manage",
+)
+
+
+def _require_resolve_read_scope(user):
+    for permission_code in RESOLVE_READ_PERMISSION_CODES:
+        try:
+            require_all_scope(user, permission_code)
+        except PermissionDenied:
+            continue
+        return
+    raise PermissionDenied(
+        "This operation requires all-tenant data scope for an influencer resolve permission."
+    )
 
 
 def _pagination(request):
@@ -345,8 +369,13 @@ class InfluencerResolveView(APIView):
     read_permission_code = "influencers.fulfillment.manage"
     write_permission_code = "influencers.fulfillment.manage"
 
+    def get_permissions(self):
+        if self.request.method in SAFE_METHODS:
+            return [CanResolveInfluencerRead()]
+        return super().get_permissions()
+
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        _require_resolve_read_scope(request.user)
         query = str(
             request.query_params.get("q")
             or request.query_params.get("search")
@@ -376,7 +405,7 @@ class InfluencerResolveView(APIView):
     @transaction.atomic
     def post(self, request):
         """Resolve an exact account or create the minimal tenant profile needed for sampling."""
-        require_all_scope(request.user, self.read_permission_code)
+        require_all_scope(request.user, self.write_permission_code)
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )

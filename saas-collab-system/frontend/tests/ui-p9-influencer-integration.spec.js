@@ -12,7 +12,12 @@ vi.mock('../src/api/request', () => ({ requestWithMockFallback: requestMock }));
 vi.mock('../src/mock/influencers', () => ({ influencerMocks: { list: vi.fn() } }));
 vi.mock('../src/stores/auth', () => ({
   useAuthStore: () => ({
-    hasPermission: (permission) => permission === 'influencers.manage' && authContext.canManage
+    hasPermission: (permission) => authContext.canManage && [
+      'influencers.manage',
+      'influencers.outreach.manage',
+      'influencers.fulfillment.manage',
+      'influencers.fulfillment.view'
+    ].includes(permission)
   })
 }));
 
@@ -32,6 +37,8 @@ import {
 } from '../src/api/influencers';
 import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 import InfluencerResourceLibrary from '../src/views/influencers/InfluencerResourceLibrary.vue';
+import OutreachTaskList from '../src/views/influencers/OutreachTaskList.vue';
+import { applyStoreSelection } from '../src/views/influencers/outreachProductMatch';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const tableRows = ref([]);
@@ -231,15 +238,17 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('filterable');
     expect(page).toContain('influencerOptions');
     for (const field of ['influencer_name', 'influencer_handle', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
-    expect(page).toContain('createSampleFulfillment({');
+    expect(page).toContain('sampleVisible');
+    expect(page).toContain('createSampleFulfillment(payload, sampleRequestKey.value)');
+    expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
     expect(page).toContain('outreach_task: task.id');
     expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
     expect(page).toContain('matchOutreachProduct');
-    expect(page).toContain('商品数据未导入');
+    expect(page).toContain('商品数据未匹配');
     expect(page).toContain('已匹配店铺');
-    expect(page).toContain('matchedCandidates.value.forEach');
+    expect(page).toContain('matchedCandidates.value');
     expect(page).toContain('matchedStoreIds.value.map');
     expect(page).toContain('params.status = filters.status');
     expect(page).toContain('params.store = filters.store');
@@ -252,10 +261,19 @@ describe('influencer integration workspace contracts', () => {
 
   it('autofills every matched SKU prefix while keeping the task field editable', () => {
     const page = read('src/views/influencers/OutreachTaskList.vue');
+    const productMatch = read('src/views/influencers/outreachProductMatch.js');
     expect(page).toContain('placeholder="匹配商品后自动填写，也可人工调整"');
-    expect(page).toContain('applyProductCandidate(form, candidate)');
-    expect(page).toContain("candidate.sku_prefixes.join(',')");
+    expect(page).toContain('applyStoreSelection(form, storeId, matchedCandidates.value)');
+    expect(productMatch).toContain('applyProductCandidate(form, candidate)');
+    expect(productMatch).toContain("form.sku_prefix = prefixes.join(',')");
     expect(page).not.toContain('v-if="matchedSkuPrefixes.length > 1"');
+  });
+
+  it('keeps a manually selected store and blank SKU prefix after an unmatched product lookup', () => {
+    const form = { store: null, sku_prefix: '' };
+
+    expect(applyStoreSelection(form, 42, [])).toEqual([]);
+    expect(form).toEqual({ store: 42, sku_prefix: '' });
   });
 
   it('matches the BD fulfillment columns and keeps the two-column create form contracts', () => {
@@ -263,7 +281,9 @@ describe('influencer integration workspace contracts', () => {
     for (const field of ['form.link_type', 'form.influencer', 'form.store', 'form.external_product_id', 'inheritedTask?.sku_prefix', 'requested_sku', 'quantity', 'sample_order_no', 'notes']) expect(page).toContain(field);
     for (const label of ['搜索达人/送样编号/建联编号/产品/订单', '全部店铺', '全部状态', '新增送样', '送样 / 建联编号', '任务 ID', '达人', '店铺', '产品 / SKU / 数量', '商品 ID', '样品订单', '成本', '状态', '备注', '建联日期', '操作']) expect(page).toContain(label);
     for (const field of ['送样履约', '新增送样记录', '送样日期', '达人账号', '达人 ID', '产品 ID', '待发样', 'SKU 与数量', '保存送样']) expect(page).toContain(field);
-    const dialog = page.slice(page.indexOf('<el-dialog v-model="visible"'));
+    const dialogStart = page.indexOf('v-model="visible"');
+    expect(dialogStart).toBeGreaterThan(-1);
+    const dialog = page.slice(dialogStart);
     const dialogOrder = ['送样类型', '送样日期', '达人账号', '达人 ID', '店铺', '样品订单', '产品 ID', '状态', 'SKU 与数量', '备注'];
     let previous = -1;
     for (const field of dialogOrder) {
@@ -273,6 +293,7 @@ describe('influencer integration workspace contracts', () => {
     }
     expect(page).toContain('添加 SKU');
     expect(page).toContain('送样编号由系统按类型自动生成');
+    expect(dialog).toContain(':close-on-click-modal="false"');
     expect(page).not.toContain('label="建联任务" required');
     expect(page).toContain('consumeTaskQuery');
     expect(page).toContain('delete query.outreach_task');
@@ -286,7 +307,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('displayAmount');
     expect(page).toContain("value === null || value === undefined || value === ''");
     expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
-    expect(page).toContain('updateSampleFulfillmentStatus');
+    expect(page).not.toContain('updateSampleFulfillmentStatus');
+    expect(page).toContain('status: form.status');
     expect(page).toContain('outreach_task');
     expect(page).toContain('influencer: form.influencer');
     expect(page).not.toContain('outreach_target: form.outreach_target');
@@ -305,6 +327,80 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('notes: form.notes');
     expect(page).not.toContain('sample_sent_date');
     expect(page).toContain('if (!r.success) return ElMessage.error');
+  });
+
+  it('keeps task and task-sample dialogs open when the backdrop is clicked', () => {
+    const taskPage = read('src/views/influencers/OutreachTaskList.vue');
+    const taskDialogStart = taskPage.indexOf('v-model="createVisible"');
+    const sampleDialogStart = taskPage.indexOf('v-model="sampleVisible"');
+
+    expect(taskDialogStart).toBeGreaterThan(-1);
+    expect(sampleDialogStart).toBeGreaterThan(-1);
+    expect(taskPage.slice(Math.max(0, taskDialogStart - 200), taskDialogStart + 300)).toContain(':close-on-click-modal="false"');
+    expect(taskPage.slice(Math.max(0, sampleDialogStart - 200), sampleDialogStart + 300)).toContain(':close-on-click-modal="false"');
+  });
+
+  it('keeps the influencer row visible when the profile detail request fails', async () => {
+    const row = { id: 17, name: 'Demo Creator', code: 'DEMO-17', platform: 'TikTok', status: 'active' };
+    requestMock.mockImplementation(({ url }) => {
+      if (url === '/api/internal/influencers/') {
+        return { success: true, code: 'OK', message: 'success', data: { count: 1, results: [row] } };
+      }
+      if (url.endsWith('/contacts/') || url.endsWith('/blacklist-history/')) {
+        return { success: true, code: 'OK', message: 'success', data: { count: 0, results: [] } };
+      }
+      return { success: false, code: 'HTTP_500', message: 'detail unavailable', data: null, http_status: 500 };
+    });
+
+    const wrapper = mount(InfluencerResourceLibrary, { global: { stubs: resourceLibraryStubs } });
+    await flushPromises();
+    await wrapper.vm.openDetail(row);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('DEMO-17');
+    expect(wrapper.text()).toContain('detail unavailable');
+  });
+
+  it('opens the task-sourced sample form in place with task context', async () => {
+    requestMock.mockImplementation(({ url }) => {
+      if (url.endsWith('/outreach-task-options/')) {
+        return {
+          success: true,
+          code: 'OK',
+          message: 'success',
+          data: {
+            stores: [{ id: 3, name: 'Creator store', country_code: 'PH' }],
+            bd_users: [],
+            influencers: [{ id: 17, name: 'Demo Creator', handle: 'demo.creator', platform: 'TikTok' }]
+          }
+        };
+      }
+      return { success: true, code: 'OK', message: 'success', data: { count: 0, results: [] } };
+    });
+
+    const wrapper = mount(OutreachTaskList);
+    await flushPromises();
+    const task = {
+      id: 7,
+      task_no: 'DRJL0007',
+      task_name: 'Task product',
+      status: 'pending',
+      store: 3,
+      store_name: 'Creator store',
+      external_product_id: '1730000000000000002',
+      influencer: 17
+    };
+    wrapper.vm.detailTask = task;
+    await wrapper.vm.createSampleFromDetail();
+
+    expect(wrapper.vm.sampleVisible).toBe(true);
+    expect(wrapper.vm.sampleForm).toMatchObject({
+      outreach_task: 7,
+      influencer: 17,
+      store: 3,
+      external_product_id: '1730000000000000002'
+    });
+    expect(requestMock.mock.calls.some(([config]) => config.url.includes('/sample-fulfillments/'))).toBe(false);
   });
 
   it('disables target mutations for read-only, terminal tasks, and terminal target results', () => {

@@ -334,16 +334,16 @@ def _lock_task_relations(
 
 def _product_snapshot(user, task, store):
     product_id = (task.external_product_id or "").strip()
-    product_name = ""
+    product_name = (task.product_name_snapshot or "").strip()
     if task.spu_id:
-        product_name = (
+        product_name = product_name or (
             ProductSPU.objects.filter(pk=task.spu_id, tenant=user.tenant)
             .values_list("product_name", flat=True)
             .first()
             or ""
         )
     if not product_name and product_id:
-        product_name = (
+        product_name = product_name or (
             StoreProductListing.objects.filter(
                 tenant=user.tenant,
                 store_id=store.pk,
@@ -1304,9 +1304,6 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             external_product_id=data.get("external_product_id"),
         )
         product_id, product_name = _product_snapshot(user, task, store)
-        supplied_product_name = str(data.get("product_name_snapshot") or "").strip()
-        if supplied_product_name and product_name and supplied_product_name != product_name:
-            raise ValidationError({"product_name_snapshot": "Product name must match the outreach task."})
     else:
         target = None
         if data.get("link_type") in (None, "", "DRJL"):
@@ -1324,10 +1321,6 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
         owner = _locked_user(user, _pk(data.get("owner") or user.pk))
         product_id = str(data.get("external_product_id") or "").strip()
         product_name = str(data.get("product_name_snapshot") or "").strip()
-        if not product_name:
-            raise ValidationError({"product_name_snapshot": "Product name is required."})
-        if not product_id:
-            raise ValidationError({"external_product_id": "Product ID is required."})
 
     _assert_influencer_not_blacklisted(user=user, influencer=influencer)
 

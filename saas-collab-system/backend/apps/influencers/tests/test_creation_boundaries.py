@@ -4,7 +4,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.influencers.models import Influencer, OutreachTarget, OutreachTask, SampleFulfillment
+from apps.influencers.models import Influencer, InfluencerRestriction, OutreachTarget, OutreachTask, SampleFulfillment
 from apps.influencers.serializers import SampleFulfillmentSerializer, OutreachTaskSerializer
 from apps.influencers.services import create_outreach_task, create_sample_fulfillment
 from apps.masterdata.models import PlatformMaster, StoreMaster
@@ -163,7 +163,7 @@ def test_sample_edit_can_transition_status_atomically():
     fulfillment, _ = create_sample_fulfillment(
         user=user,
         request_key="sample-edit-status-key",
-        validated_data={"influencer": influencer, "store": store},
+        validated_data={"influencer": influencer, "store": store, "link_type": "YYJL"},
         item_payloads=[],
     )
     client = APIClient()
@@ -190,7 +190,7 @@ def test_invalid_status_transition_rolls_back_fact_edits():
     fulfillment, _ = create_sample_fulfillment(
         user=user,
         request_key="sample-edit-status-rollback-key",
-        validated_data={"influencer": influencer, "store": store},
+        validated_data={"influencer": influencer, "store": store, "link_type": "YYJL"},
         item_payloads=[],
     )
     original_version = fulfillment.version

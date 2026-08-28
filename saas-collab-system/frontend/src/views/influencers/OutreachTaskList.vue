@@ -120,6 +120,7 @@
       v-model="createVisible"
       :title="editingTask ? '修改建联任务' : '新建建联任务'"
       width="620px"
+      :close-on-click-modal="false"
       @closed="clearTaskDraft"
     >
       <el-form label-width="110px">
@@ -233,6 +234,39 @@
       </el-table>
     </el-dialog>
 
+    <el-dialog v-model="sampleVisible" title="创建送样" width="700px" :close-on-click-modal="false">
+      <el-form label-width="105px">
+        <el-form-item label="建联任务">
+          <el-input :model-value="`${displayValue(sampleContext?.task_no)} · ${displayValue(sampleContext?.task_name)}`" readonly />
+        </el-form-item>
+        <el-form-item label="达人" required>
+          <el-select v-model="sampleForm.influencer" filterable placeholder="请选择达人">
+            <el-option
+              v-for="influencer in influencerOptions"
+              :key="influencer.id"
+              :label="influencerOptionLabel(influencer)"
+              :value="influencer.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="店铺">
+          <el-input :model-value="displayValue(sampleContext?.store_name || sampleForm.store)" readonly />
+        </el-form-item>
+        <el-form-item label="商品">
+          <el-input :model-value="`${displayValue(sampleContext?.product_name_snapshot || sampleContext?.task_name)} · ID ${displayValue(sampleForm.external_product_id)}`" readonly />
+        </el-form-item>
+        <el-form-item label="样品订单号"><el-input v-model="sampleForm.sample_order_no" placeholder="可先留空" /></el-form-item>
+        <el-form-item label="站点" required><el-input v-model="sampleForm.site_code" placeholder="例如 PH" /></el-form-item>
+        <el-form-item label="送样 SKU"><el-input v-model="sampleForm.requested_sku" placeholder="可暂时为空" /></el-form-item>
+        <el-form-item label="数量" required><el-input-number v-model="sampleForm.quantity" :min="1" :step="1" step-strictly /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="sampleForm.notes" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="sampleVisible = false">取消</el-button>
+        <el-button type="primary" :loading="sampleSaving" @click="submitSample">创建送样</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="detailVisible" direction="rtl" size="560px" :with-header="false" class="task-detail-drawer">
       <div class="drawer-body">
         <div class="drawer-head">
@@ -321,11 +355,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import {
   addOutreachTarget,
   createOutreachTask,
+  createSampleFulfillment,
   deleteOutreachTarget,
   deleteOutreachTask,
   fetchInfluencerResolve,
@@ -348,11 +382,10 @@ import {
   updateOutreachTarget,
   updateOutreachTask
 } from '../../api/influencers';
-import { applyProductCandidate } from './outreachProductMatch';
+import { applyStoreSelection } from './outreachProductMatch';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
-const router = useRouter();
 const rows = ref([]);
 const total = ref(0);
 const page = ref(1);
@@ -402,9 +435,26 @@ const productMatching = ref(false);
 const productMatchHint = ref('');
 const productMatchType = ref('info');
 const productMatchSeq = ref(0);
+const sampleVisible = ref(false);
+const sampleSaving = ref(false);
+const sampleRequestKey = ref('');
+const sampleContext = ref(null);
+const sampleForm = reactive({
+  outreach_task: null,
+  outreach_target: null,
+  influencer: null,
+  store: null,
+  external_product_id: '',
+  sample_order_no: '',
+  notes: '',
+  site_code: 'PH',
+  requested_sku: '',
+  quantity: 1
+});
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
+const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const sampleInfluencerName = (row) => String(row?.influencer_handle || '').trim().replace(/^@+/, '').trim()
   || row?.influencer_name || row?.influencer;
 
@@ -574,8 +624,7 @@ function clearTaskDraft() {
 }
 
 function selectMatchedStore(storeId) {
-  const candidate = matchedCandidates.value.find((item) => item.store_id === storeId);
-  matchedSkuPrefixes.value = applyProductCandidate(form, candidate);
+  matchedSkuPrefixes.value = applyStoreSelection(form, storeId, matchedCandidates.value);
 }
 
 async function matchProduct() {
@@ -794,25 +843,91 @@ function displayAmount(value, row) {
   return currency ? `${value} ${currency}` : String(value);
 }
 
-function openSampleFulfillment(row) {
-  if (!activeTask.value || !row?.id || !canCreateFulfillment.value || isTerminal(activeTask.value)) return;
-  router.push({
-    path: '/influencers/sample-fulfillments',
-    query: {
-      outreach_task: String(activeTask.value.id)
-    }
+function ensureSampleInfluencer(task, target) {
+  const influencerId = target?.influencer ?? task?.influencer ?? null;
+  if (influencerId === null || influencerId === undefined) return null;
+  if (!influencerOptions.value.some((item) => String(item.id) === String(influencerId))) {
+    influencerOptions.value = [{
+      id: influencerId,
+      name: target?.influencer_name || task?.influencer_name || `达人 ${influencerId}`,
+      handle: target?.influencer_handle || task?.influencer_handle || '',
+      code: target?.influencer_code || task?.influencer_code || '',
+      platform: target?.influencer_platform || task?.influencer_platform || ''
+    }, ...influencerOptions.value];
+  }
+  return influencerId;
+}
+
+async function openSampleCreate(task, target = null) {
+  if (!task?.id || !canCreateFulfillment.value || isTerminal(task)) return;
+  if (target && (!target.id || target.is_deleted)) return;
+  if (!await loadTaskOptions(true)) return;
+  const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
+  sampleContext.value = {
+    ...task,
+    store_name: task.store_name || store?.name || task.store,
+    product_name_snapshot: task.product_name_snapshot || task.task_name || ''
+  };
+  Object.assign(sampleForm, {
+    outreach_task: task.id,
+    outreach_target: target?.id || null,
+    influencer: ensureSampleInfluencer(task, target),
+    store: task.store ?? null,
+    external_product_id: task.external_product_id || '',
+    sample_order_no: '',
+    notes: '',
+    site_code: String(task.store_country_code || store?.country_code || 'PH').trim().toUpperCase(),
+    requested_sku: '',
+    quantity: 1
   });
+  sampleRequestKey.value = newRequestKey();
+  sampleVisible.value = true;
+}
+
+function openSampleFulfillment(row) {
+  if (!activeTask.value || !row?.id) return;
+  return openSampleCreate(activeTask.value, row);
 }
 
 function createSampleFromDetail() {
-  const task = detailTask.value;
-  if (!task || !canCreateFulfillment.value || isTerminal(task)) return;
-  router.push({
-    path: '/influencers/sample-fulfillments',
-    query: {
-      outreach_task: String(task.id)
-    }
-  });
+  return openSampleCreate(detailTask.value);
+}
+
+async function submitSample() {
+  if (!canCreateFulfillment.value) return;
+  if (!sampleForm.outreach_task || !sampleForm.influencer || !sampleForm.store) {
+    return ElMessage.warning('请先选择送样达人');
+  }
+  const siteCode = String(sampleForm.site_code || '').trim().toUpperCase();
+  const quantity = Number(sampleForm.quantity);
+  if (!siteCode || !Number.isInteger(quantity) || quantity < 1) {
+    return ElMessage.warning('请填写有效的站点和数量');
+  }
+  sampleSaving.value = true;
+  const payload = {
+    outreach_task: sampleForm.outreach_task,
+    ...(sampleForm.outreach_target ? { outreach_target: sampleForm.outreach_target } : {}),
+    influencer: sampleForm.influencer,
+    store: sampleForm.store,
+    external_product_id: sampleForm.external_product_id,
+    sample_order_no: sampleForm.sample_order_no,
+    notes: sampleForm.notes,
+    link_type: 'DRJL',
+    items: [{
+      site_code: siteCode,
+      requested_sku: String(sampleForm.requested_sku || '').trim() || null,
+      quantity,
+      external_product_id: sampleForm.external_product_id
+    }]
+  };
+  const response = await createSampleFulfillment(payload, sampleRequestKey.value);
+  sampleSaving.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '送样创建失败'));
+  sampleVisible.value = false;
+  sampleRequestKey.value = '';
+  ElMessage.success('送样已创建');
+  await load();
+  if (detailTask.value?.id === sampleForm.outreach_task) await loadDetailData(detailTask.value, false);
 }
 
 async function addTarget() {

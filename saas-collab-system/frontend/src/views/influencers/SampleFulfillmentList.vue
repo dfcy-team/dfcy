@@ -114,7 +114,13 @@
       <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="load" />
     </el-card>
 
-    <el-dialog v-model="visible" class="sample-dialog" width="720px" @closed="discardDraft">
+    <el-dialog
+      v-model="visible"
+      class="sample-dialog"
+      width="720px"
+      :close-on-click-modal="false"
+      @closed="discardDraft"
+    >
       <template #header>
         <div class="dialog-heading">
           <span>送样履约</span>
