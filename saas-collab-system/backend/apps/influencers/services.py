@@ -30,6 +30,7 @@ from .models import (
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
+    normalize_tiktok_username,
 )
 from .attribution import create_sample_attribution_snapshot
 
@@ -1241,16 +1242,26 @@ def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=N
     locked = Influencer.objects.select_for_update().get(
         pk=influencer.pk, tenant_id=user.tenant_id
     )
+    canonical_handle = locked.canonical_handle or normalize_tiktok_username(locked.handle)
+    identity_ids = [locked.pk]
+    if canonical_handle and str(locked.platform or "").casefold() == "tiktok":
+        identity_ids = list(
+            Influencer.objects.select_for_update().filter(
+                tenant_id=user.tenant_id,
+                platform__iexact="TikTok",
+                canonical_handle=canonical_handle,
+            ).values_list("pk", flat=True)
+        )
     latest_action = InfluencerRestrictEvent.objects.filter(
         tenant_id=user.tenant_id,
-        influencer_id=locked.pk,
+        influencer_id__in=identity_ids,
     ).order_by("-occurred_at", "-id").values_list("action", flat=True).first()
     blacklisted = (
         latest_action == InfluencerRestrictEvent.Action.BLACKLIST
         if latest_action is not None
         else InfluencerRestriction.objects.filter(
             tenant_id=user.tenant_id,
-            influencer_id=locked.pk,
+            influencer_id__in=identity_ids,
             is_blacklisted=True,
         ).exists()
     )
@@ -1764,6 +1775,16 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
     influencer = Influencer.objects.select_for_update().get(
         pk=_pk(influencer), tenant=user.tenant
     )
+    canonical_handle = influencer.canonical_handle or normalize_tiktok_username(influencer.handle)
+    identity_ids = [influencer.pk]
+    if canonical_handle and str(influencer.platform or "").casefold() == "tiktok":
+        identity_ids = list(
+            Influencer.objects.select_for_update().filter(
+                tenant=user.tenant,
+                platform__iexact="TikTok",
+                canonical_handle=canonical_handle,
+            ).values_list("pk", flat=True)
+        )
     restriction, _ = InfluencerRestriction.objects.update_or_create(
         tenant=user.tenant,
         influencer=influencer,
@@ -1790,7 +1811,7 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
         rows = list(
             SampleFulfillment.objects.select_for_update().filter(
                 tenant=user.tenant,
-                influencer=influencer,
+                influencer_id__in=identity_ids,
                 is_deleted=False,
             ).exclude(
                 status__in={

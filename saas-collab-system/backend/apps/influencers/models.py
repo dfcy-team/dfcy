@@ -53,6 +53,14 @@ class Influencer(models.Model):
     name = models.CharField(max_length=120)
     platform = models.CharField(max_length=40)
     handle = models.CharField(max_length=255, blank=True, db_comment="TikTok用户名")
+    canonical_handle = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+        db_comment="标准化TikTok用户名",
+    )
     category = models.CharField(max_length=80, blank=True)
     follower_count = models.PositiveBigIntegerField(default=0)
     contact_name = models.CharField(max_length=80, blank=True)
@@ -68,6 +76,17 @@ class Influencer(models.Model):
     class Meta:
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant")]
+
+    def save(self, *args, **kwargs):
+        self.canonical_handle = (
+            normalize_tiktok_username(self.handle)
+            if str(self.platform or "").casefold() == "tiktok"
+            else ""
+        )
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and ({"handle", "platform"} & set(update_fields)):
+            kwargs["update_fields"] = set(update_fields) | {"canonical_handle"}
+        return super().save(*args, **kwargs)
 
 
 class TenantValidatedQuerySet(models.QuerySet):

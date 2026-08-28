@@ -1,6 +1,7 @@
 import re
 
 import pytest
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -14,7 +15,11 @@ from apps.influencers.models import (
     SampleFulfillment,
 )
 from apps.influencers.serializers import OutreachTargetSerializer, SampleFulfillmentSerializer, OutreachTaskSerializer
-from apps.influencers.services import create_outreach_task, create_sample_fulfillment
+from apps.influencers.services import (
+    create_outreach_task,
+    create_sample_fulfillment,
+    set_influencer_blacklist,
+)
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
@@ -135,10 +140,59 @@ def test_outreach_task_can_use_manual_store_when_product_is_not_matched():
 
 def test_tiktok_handle_schema_is_the_canonical_non_nullable_identity_column():
     field = Influencer._meta.get_field("handle")
+    canonical_field = Influencer._meta.get_field("canonical_handle")
 
     assert field.max_length == 255
     assert field.null is False
     assert field.db_comment == "TikTok用户名"
+    assert canonical_field.db_index is True
+
+
+def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling():
+    tenant, user, store, blocked = _records("canonical-blacklist")
+    blocked.handle = "＠ＭＨＡＩＮＥ＿９４"
+    blocked.save(update_fields=["handle"])
+    duplicate = Influencer.objects.create(
+        tenant=tenant,
+        code="canonical-blacklist-duplicate",
+        name="Auxiliary display name",
+        platform="TikTok",
+        handle="mhaine_94",
+    )
+    set_influencer_blacklist(
+        user=user,
+        influencer=blocked,
+        blacklisted=True,
+        reason="identity-level blacklist",
+    )
+
+    assert blocked.canonical_handle == "mhaine_94"
+    assert duplicate.canonical_handle == "mhaine_94"
+    with pytest.raises(ValidationError, match="Blacklisted influencers"):
+        create_sample_fulfillment(
+            user=user,
+            request_key="canonical-blacklist-sample",
+            validated_data={
+                "influencer": duplicate,
+                "store": store,
+                "link_type": "YYJL",
+                "external_product_id": "CANONICAL-BLACKLIST-PRODUCT",
+            },
+            item_payloads=[],
+        )
+
+
+def test_canonical_handle_is_tenant_scoped_and_empty_handle_has_no_shared_identity():
+    tenant, _, _, influencer = _records("canonical-scope")
+    influencer.handle = ""
+    influencer.save(update_fields=["handle"])
+    other_tenant, _, _, foreign = _records("canonical-scope-other")
+    foreign.handle = "＠ＭＨＡＩＮＥ＿９４"
+    foreign.save(update_fields=["handle"])
+
+    assert influencer.canonical_handle == ""
+    assert foreign.canonical_handle == "mhaine_94"
+    assert foreign.tenant_id == other_tenant.id
 
 
 def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_target():

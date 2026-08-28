@@ -1,6 +1,5 @@
 import csv
 import hashlib
-from itertools import chain
 from io import StringIO
 from datetime import timedelta
 
@@ -91,7 +90,6 @@ BLACKLIST_PERMISSION_CODES = (
     "influencers.fulfillment.manage",
 )
 INFLUENCER_OPTION_OVERFETCH_FACTOR = 3
-INFLUENCER_RESOLVE_SCAN_CHUNK_SIZE = 256
 
 
 def _require_resolve_read_scope(user):
@@ -173,38 +171,17 @@ def _influencer_candidates(queryset, *, limit, include_handle=False):
 
 def _resolve_existing_influencer(*, tenant, account, blacklist_subquery):
     """Find one tenant-scoped TikTok profile using normalized account text."""
-    queryset = (
+    candidates = list(
         Influencer.objects.select_for_update()
-        .filter(tenant=tenant, platform__iexact="TikTok")
+        .filter(
+            tenant=tenant,
+            platform__iexact="TikTok",
+            canonical_handle=account,
+        )
         .annotate(is_blacklisted=Exists(blacklist_subquery))
         .order_by("-is_blacklisted", "id")
     )
-    exact_query = Q(handle__iexact=account) | Q(handle__iexact=f"@{account}")
-
-    exact_candidates = list(queryset.filter(exact_query))
-    exact_ids = {candidate.pk for candidate in exact_candidates}
-    remaining_queryset = queryset.exclude(pk__in=exact_ids) if exact_ids else queryset
-    candidates = chain(
-        exact_candidates,
-        remaining_queryset.iterator(
-            chunk_size=INFLUENCER_RESOLVE_SCAN_CHUNK_SIZE,
-        ),
-    )
-    matches = []
-    for candidate in candidates:
-        raw_handle = str(candidate.handle or "").strip()
-        candidate_handle = raw_handle.lstrip("@").strip()
-        if normalize_tiktok_username(raw_handle) != account:
-            continue
-        matches.append(
-            (
-                0 if candidate.is_blacklisted else 1,
-                0 if candidate_handle.casefold() == account else 1,
-                candidate.pk,
-                candidate,
-            )
-        )
-    return min(matches, key=lambda match: match[:3])[3] if matches else None
+    return candidates[0] if candidates else None
 
 
 class InfluencerCollectionView(APIView):
@@ -516,10 +493,24 @@ class InfluencerResolveView(APIView):
                     after_data={"code": influencer.code, "handle": influencer.handle},
                 )
 
-        is_blacklisted = influencer.restrictions.filter(
+        identity_ids = Influencer.objects.filter(
             tenant=request.user.tenant,
-            is_blacklisted=True,
-        ).exists()
+            platform__iexact="TikTok",
+            canonical_handle=influencer.canonical_handle,
+        ).values_list("pk", flat=True)
+        latest_action = InfluencerRestrictEvent.objects.filter(
+            tenant=request.user.tenant,
+            influencer_id__in=identity_ids,
+        ).order_by("-occurred_at", "-id").values_list("action", flat=True).first()
+        is_blacklisted = (
+            latest_action == InfluencerRestrictEvent.Action.BLACKLIST
+            if latest_action is not None
+            else InfluencerRestriction.objects.filter(
+                tenant=request.user.tenant,
+                influencer_id__in=identity_ids,
+                is_blacklisted=True,
+            ).exists()
+        )
         payload = {
             "id": influencer.id,
             "code": influencer.code,
