@@ -1,0 +1,17 @@
+FROM saas-collab-backend:v2.44.47
+
+ARG RELEASE_REVISION
+LABEL org.opencontainers.image.version="2.44.48"
+LABEL org.opencontainers.image.revision="${RELEASE_REVISION}"
+
+WORKDIR /app
+
+COPY backend/apps/products/models.py /app/apps/products/models.py
+COPY backend/apps/products/permissions.py /app/apps/products/permissions.py
+COPY backend/apps/products/serializers.py /app/apps/products/serializers.py
+COPY backend/apps/products/urls.py /app/apps/products/urls.py
+COPY backend/apps/products/views.py /app/apps/products/views.py
+COPY backend/apps/products/migrations/0014_productcategory_row_background_color.py /app/apps/products/migrations/0014_productcategory_row_background_color.py
+COPY backend/apps/permissions/catalog.py /app/apps/permissions/catalog.py
+COPY backend/apps/permissions/migrations/0033_seed_masterdata_settings_permissions.py /app/apps/permissions/migrations/0033_seed_masterdata_settings_permissions.py
+COPY backend/tests/test_foundation_settings.py /app/tests/test_foundation_settings.py

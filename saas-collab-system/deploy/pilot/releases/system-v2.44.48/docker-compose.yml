@@ -1,0 +1,11 @@
+services:
+  migrate:
+    image: saas-collab-backend:v2.44.48
+  backend:
+    image: saas-collab-backend:v2.44.48
+  celery:
+    image: saas-collab-backend:v2.44.48
+  celery-beat:
+    image: saas-collab-backend:v2.44.48
+  frontend:
+    image: saas-collab-frontend:v2.44.48
