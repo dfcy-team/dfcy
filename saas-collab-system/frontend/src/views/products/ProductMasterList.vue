@@ -105,7 +105,11 @@
         >
           <el-table-column type="index" label="序号" width="70" :index="(page - 1) * pageSize + 1" />
           <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
-          <el-table-column prop="spu_code" label="SPU" min-width="150" />
+          <el-table-column prop="spu_code" label="SPU" min-width="150">
+            <template #default="{ row }">
+              <SpuCodeDisplay :code="row.spu_code" />
+            </template>
+          </el-table-column>
           <el-table-column label="SKU" min-width="220">
             <template #default="{ row }">
               <button
@@ -381,6 +385,7 @@ import { useAuthStore } from '../../stores/auth';
 import { apiState, collectionRows, collectionTotal, detailData, stateTagType } from '../../utils/businessResponse';
 import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
 import { buildCategoryTree, categoryRowClass } from '../../utils/productCategoryPresentation';
+import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));

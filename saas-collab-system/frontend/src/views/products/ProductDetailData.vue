@@ -88,7 +88,7 @@
           <el-table-column prop="legacy_spu_code" label="旧 SPU 编码" min-width="125" show-overflow-tooltip />
           <el-table-column prop="legacy_sku_code" label="旧 SKU 编码" min-width="150" show-overflow-tooltip />
           <el-table-column prop="spu_code" label="新 SPU 编码" min-width="125" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.spu_code || '-' }}</template>
+            <template #default="{ row }"><SpuCodeDisplay :code="row.spu_code" /></template>
           </el-table-column>
           <el-table-column prop="sku_code" label="新 SKU 编码" min-width="190" show-overflow-tooltip>
             <template #default="{ row }">{{ row.sku_code || '-' }}</template>
@@ -195,7 +195,7 @@
       <el-descriptions v-if="selectedRow" :column="2" border>
         <el-descriptions-item label="旧 SPU 编码">{{ selectedRow.legacy_spu_code || '-' }}</el-descriptions-item>
         <el-descriptions-item label="旧 SKU 编码">{{ selectedRow.legacy_sku_code || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="新 SPU 编码">{{ selectedRow.spu_code || '待生成' }}</el-descriptions-item>
+        <el-descriptions-item label="新 SPU 编码"><SpuCodeDisplay :code="selectedRow.spu_code" placeholder="待生成" /></el-descriptions-item>
         <el-descriptions-item label="新 SKU 编码">{{ selectedRow.sku_code || '待生成' }}</el-descriptions-item>
         <el-descriptions-item label="SKU商品名称">{{ selectedRow.sku_product_name || '待生成' }}</el-descriptions-item>
         <el-descriptions-item label="SPU商品名称">{{ selectedRow.spu_product_name || '-' }}</el-descriptions-item>
@@ -433,6 +433,7 @@ import {
 import { collectionRows, collectionTotal } from '../../utils/businessResponse';
 import { apiBaseUrl } from '../../api/baseUrl';
 import { buildCategoryTree, categoryRowClass } from '../../utils/productCategoryPresentation';
+import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
