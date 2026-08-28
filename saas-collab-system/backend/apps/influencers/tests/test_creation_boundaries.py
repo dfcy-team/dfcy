@@ -3,6 +3,7 @@ import re
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection
+from django.db.models import Exists
 from django.utils import timezone
 import pytest
 from rest_framework.exceptions import ValidationError
@@ -1490,7 +1491,75 @@ def test_canonical_handle_migration_does_not_guess_identity_from_code_or_name():
     )
 
     snapshot.refresh_from_db()
-    assert snapshot.creator_username == ""
+    assert snapshot.creator_username == "looks.like.a.handle"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_canonical_handle_migration_propagates_blacklist_across_normalized_aliases():
+    tenant, user, store, clean = _records("canonical-blacklist-alias")
+    clean.handle = "duplicate.creator"
+    clean.save(update_fields=["handle"])
+    alias = Influencer.objects.create(
+        tenant=tenant,
+        code="canonical-blacklist-fullwidth",
+        name="Auxiliary display name",
+        handle="duplicate.creator",
+        platform="TikTok",
+    )
+    table = connection.ops.quote_name(Influencer._meta.db_table)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE {table} SET handle = %s WHERE id = %s",
+            ["＠ＤＵＰＬＩＣＡＴＥ．ＣＲＥＡＴＯＲ", alias.pk],
+        )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=clean,
+        is_blacklisted=True,
+        reason="legacy restriction",
+        created_by=user,
+    )
+    fulfillment = SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="canonical-blacklist-sample",
+        request_key="canonical-blacklist-request",
+        request_hash="canonical-blacklist-hash",
+        link_type="YYJL",
+        influencer=alias,
+        store=store,
+        owner=user,
+    )
+    fulfillment_table = connection.ops.quote_name(SampleFulfillment._meta.db_table)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE {fulfillment_table} SET status = %s WHERE id = %s",
+            [SampleFulfillment.Status.SHIPPED, fulfillment.pk],
+        )
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0013_canonical_tiktok_handle"
+    )
+
+    migration.normalize_existing_tiktok_identities(
+        importlib.import_module("django.apps").apps,
+        None,
+    )
+
+    alias.refresh_from_db()
+    fulfillment.refresh_from_db()
+    assert alias.handle == "duplicate.creator"
+    assert InfluencerRestriction.objects.filter(
+        tenant=tenant,
+        influencer=alias,
+        is_blacklisted=True,
+    ).exists()
+    assert fulfillment.status == SampleFulfillment.Status.BLACKLISTED
+    assert fulfillment.version == 2
+    assert fulfillment.status_events.filter(
+        from_status=SampleFulfillment.Status.SHIPPED,
+        to_status=SampleFulfillment.Status.BLACKLISTED,
+        actor=user,
+        reason="legacy restriction",
+    ).exists()
 
 
 def test_canonical_handle_migration_normalizes_fullwidth_handle_and_snapshot():
@@ -1654,6 +1723,41 @@ def test_outreach_manager_search_normalizes_tiktok_handle_alias():
     assert response.status_code == 200
     assert response.json()["data"]["query"] == "mhaine_94"
     assert response.json()["data"]["candidates"][0]["id"] == influencer.id
+
+
+def test_candidate_resolver_fills_limit_after_normalized_handle_dedup():
+    tenant, _, _, first = _records("resolve-candidate-dedup")
+    duplicates = []
+    for index in range(8):
+        duplicates.append(
+            Influencer.objects.create(
+                tenant=tenant,
+                code=f"candidate-dedup-duplicate-{index}",
+                name=f"Duplicate creator {index}",
+                handle="duplicate.creator",
+                platform="TikTok",
+            )
+        )
+    target = Influencer.objects.create(
+        tenant=tenant,
+        code="candidate-dedup-target",
+        name="Unique candidate",
+        handle="unique.creator",
+        platform="TikTok",
+    )
+    blacklist_subquery = influencer_models.active_influencer_restriction_subquery(tenant)
+    queryset = Influencer.objects.filter(
+        tenant=tenant,
+        platform__iexact="TikTok",
+    ).annotate(is_blacklisted=Exists(blacklist_subquery))
+
+    rows = influencer_views._influencer_candidates(
+        queryset,
+        limit=3,
+        include_handle=True,
+    )
+
+    assert [row["id"] for row in rows] == [first.id, duplicates[0].id, target.id]
 
 
 def test_account_resolve_prefers_blacklisted_duplicate_profile():

@@ -93,7 +93,6 @@ BLACKLIST_PERMISSION_CODES = (
     "influencers.manage",
     "influencers.fulfillment.manage",
 )
-INFLUENCER_OPTION_OVERFETCH_FACTOR = 3
 
 
 def _require_resolve_read_scope(user):
@@ -151,8 +150,9 @@ def _query_bool(value, *, field):
 def _influencer_candidates(queryset, *, limit, include_handle=False):
     rows = []
     seen = set()
-    db_limit = max(1, int(limit)) * INFLUENCER_OPTION_OVERFETCH_FACTOR
-    for influencer in queryset.select_related("profile").order_by("-is_blacklisted", "id")[:db_limit]:
+    for influencer in queryset.select_related("profile").order_by(
+        "-is_blacklisted", "id"
+    ).iterator(chunk_size=max(100, int(limit))):
         handle = str(influencer.handle or "").strip().lstrip("@").strip()
         key = (
             f"tiktok:{normalize_tiktok_username(handle)}"
