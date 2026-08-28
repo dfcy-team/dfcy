@@ -1,0 +1,3 @@
+services:
+  frontend:
+    image: saas-collab-frontend:v2.44.46

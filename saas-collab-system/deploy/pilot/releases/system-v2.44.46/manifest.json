@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "release_version": "2.44.46",
+  "status": "candidate_verified",
+  "registered_at": "2026-08-28",
+  "parent_release": "2.44.45",
+  "scope": "highlight category-code segment in formal SPU codes on product master and product detail pages",
+  "target_frontend_image": "saas-collab-frontend:v2.44.46",
+  "frontend_image_base": "saas-collab-frontend:v2.44.45",
+  "backend_image_unchanged": "saas-collab-backend:v2.44.45",
+  "database_migration_required": false,
+  "menu_changed": false,
+  "router_changed": false,
+  "navigation_css_changed": false,
+  "permission_catalog_changed": false,
+  "feature_commit": "5c0f3d2099fafa606dbf89d1f744ecb966e8e07a",
+  "checks": {
+    "protected_source_diff": "pass",
+    "frontend_full_tests": "pass; 248 tests",
+    "frontend_build": "pass",
+    "deployment_performed": false,
+    "deployment_validation": "pending"
+  },
+  "rollback": {
+    "frontend_image": "saas-collab-frontend:v2.44.45",
+    "database_restore_required": false
+  },
+  "release_notes": "docs/06_release/system_v2.44.46.md"
+}
