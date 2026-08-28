@@ -59,7 +59,7 @@ grep -Fxq saas-collab-frontend:v2.44.48 "$release_dir/compose-images.txt"
   -e DB_PASSWORD= \
   -e DB_HOST= \
   -e DB_PORT= \
-  --entrypoint pytest backend -q --nomigrations \
+  --entrypoint pytest backend -q \
   tests/test_foundation_settings.py tests/test_products_api.py tests/test_product_category_metadata.py \
   | tee "$release_dir/backend-targeted-tests.txt"
 
