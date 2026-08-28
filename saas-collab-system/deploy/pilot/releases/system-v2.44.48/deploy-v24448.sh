@@ -64,12 +64,12 @@ grep -Fxq saas-collab-frontend:v2.44.48 "$release_dir/compose-images.txt"
   | tee "$release_dir/backend-targeted-tests.txt"
 
 docker exec application-backend-1 python manage.py shell -c '
-from apps.integrations.models import IntegrationConfig
+from apps.integrations.models import APIIntegrationConfig
 from apps.products.models import ProductCategory, ProductSKU, ProductSPU
 print(f"TENANT1_CATEGORIES={ProductCategory.objects.filter(tenant_id=1).count()}")
 print(f"TENANT1_SPUS={ProductSPU.objects.filter(tenant_id=1).count()}")
 print(f"TENANT1_SKUS={ProductSKU.objects.filter(tenant_id=1).count()}")
-print(f"TENANT1_INTEGRATION_CONFIGS={IntegrationConfig.objects.filter(tenant_id=1).count()}")
+print(f"TENANT1_INTEGRATION_CONFIGS={APIIntegrationConfig.objects.filter(tenant_id=1).count()}")
 ' | tee "$release_dir/tenant1-before.txt"
 
 if [[ "${PRECHECK_ONLY:-0}" == 1 ]]; then
@@ -119,7 +119,7 @@ grep -Fq '[X] 0033_seed_masterdata_settings_permissions' "$release_dir/post-migr
 grep -Fq '[X] 0019_sync_runtime_control_plane' "$release_dir/post-migrations.txt"
 
 docker exec application-backend-1 python manage.py shell -c '
-from apps.integrations.models import IntegrationConfig
+from apps.integrations.models import APIIntegrationConfig
 from apps.permissions.models import Permission, Role
 from apps.products.models import ProductCategory, ProductSKU, ProductSPU
 codes={"masterdata.settings.view", "masterdata.settings.manage"}
@@ -130,7 +130,7 @@ print(f"TENANT1_CATEGORIES={ProductCategory.objects.filter(tenant_id=1).count()}
 print(f"TENANT1_L2_CATEGORIES={ProductCategory.objects.filter(tenant_id=1, level=2).count()}")
 print(f"TENANT1_SPUS={ProductSPU.objects.filter(tenant_id=1).count()}")
 print(f"TENANT1_SKUS={ProductSKU.objects.filter(tenant_id=1).count()}")
-print(f"TENANT1_INTEGRATION_CONFIGS={IntegrationConfig.objects.filter(tenant_id=1).count()}")
+print(f"TENANT1_INTEGRATION_CONFIGS={APIIntegrationConfig.objects.filter(tenant_id=1).count()}")
 print("FOUNDATION_SETTINGS_PERMISSIONS=PASS")
 ' | tee "$release_dir/tenant1-after.txt"
 
