@@ -1448,6 +1448,19 @@ def test_canonical_handle_migration_normalizes_tiktok_records_and_snapshots():
     assert snapshot.creator_username == "mhaine_94"
 
 
+def test_canonical_handle_migration_backfills_before_not_null_constraints():
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0013_canonical_tiktok_handle"
+    )
+
+    assert migration._normalize_tiktok_username(None) == ""
+    assert migration.Migration.operations[0].code is migration.normalize_existing_tiktok_identities
+    assert [operation.name for operation in migration.Migration.operations[1:]] == [
+        "handle",
+        "creator_username",
+    ]
+
+
 def test_canonical_handle_migration_does_not_guess_identity_from_code_or_name():
     tenant, user, store, influencer = _records("canonical-migration-empty")
     influencer.handle = ""

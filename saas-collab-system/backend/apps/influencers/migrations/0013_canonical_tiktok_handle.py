@@ -20,13 +20,10 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
     FulfillmentStatusEvent = apps.get_model("influencers", "FulfillmentStatusEvent")
     Snapshot = apps.get_model("influencers", "BdSampleAttributionSnapshot")
 
-    influencer_ids = list(
-        Influencer.objects.filter(platform__iexact="TikTok").values_list(
-            "id", flat=True
-        )
-    )
-    for influencer_id in influencer_ids:
-        influencer = Influencer.objects.get(pk=influencer_id)
+    for influencer in Influencer.objects.filter(
+        platform__iexact="TikTok",
+    ).only("id", "handle").order_by("id").iterator(chunk_size=1000):
+        influencer_id = influencer.id
         normalized = _normalize_tiktok_username(influencer.handle)
         canonical = normalized if TIKTOK_USERNAME_PATTERN.fullmatch(normalized) else ""
         if canonical != influencer.handle:
@@ -37,9 +34,9 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
                 using=Influencer.objects.db,
             ).filter(pk=influencer_id).update(handle=canonical)
 
-    snapshot_ids = list(Snapshot.objects.values_list("id", flat=True))
-    for snapshot_id in snapshot_ids:
-        snapshot = Snapshot.objects.select_related("influencer").get(pk=snapshot_id)
+    snapshots = Snapshot.objects.select_related("influencer").order_by("id")
+    for snapshot in snapshots.iterator(chunk_size=1000):
+        snapshot_id = snapshot.id
         influencer = snapshot.influencer
         snapshot_handle = _normalize_tiktok_username(snapshot.creator_username)
         canonical = (
@@ -103,16 +100,16 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
                     update_fields=["is_blacklisted", "reason", "created_by"]
                 )
 
-        fulfillment_ids = list(
+        fulfillments = (
             SampleFulfillment.objects.filter(
                 tenant_id=tenant_id,
                 influencer_id__in=influencer_ids,
             )
             .exclude(status__in=terminal_statuses)
-            .values_list("id", flat=True)
+            .order_by("id")
         )
-        for fulfillment_id in fulfillment_ids:
-            fulfillment = SampleFulfillment.objects.get(pk=fulfillment_id)
+        for fulfillment in fulfillments.iterator(chunk_size=1000):
+            fulfillment_id = fulfillment.id
             previous_status = fulfillment.status
             finalized_at = fulfillment.finalized_at or restriction.updated_at
             QuerySet(
@@ -138,6 +135,12 @@ class Migration(migrations.Migration):
     dependencies = [("influencers", "0012_sample_fulfillment_status_baseline")]
 
     operations = [
+        # Normalize legacy NULL/invalid values before enforcing NOT NULL. Some
+        # deployed databases predate the current model state.
+        migrations.RunPython(
+            normalize_existing_tiktok_identities,
+            migrations.RunPython.noop,
+        ),
         migrations.AlterField(
             model_name="influencer",
             name="handle",
@@ -151,9 +154,5 @@ class Migration(migrations.Migration):
             model_name="bdsampleattributionsnapshot",
             name="creator_username",
             field=models.CharField(blank=True, max_length=255),
-        ),
-        migrations.RunPython(
-            normalize_existing_tiktok_identities,
-            migrations.RunPython.noop,
         ),
     ]
