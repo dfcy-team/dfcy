@@ -30,7 +30,7 @@ from .models import (
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
-    normalize_tiktok_username,
+    influencer_identity_queryset,
 )
 from .attribution import create_sample_attribution_snapshot
 
@@ -1238,33 +1238,18 @@ def recompute_outreach_task_completion(*, user, task):
 
 def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=None):
     # Serialize restriction changes with sample/target creation and re-read the
-    # event log while holding the influencer row lock.
+    # active restrictions while holding the influencer identity locks.
     locked = Influencer.objects.select_for_update().get(
         pk=influencer.pk, tenant_id=user.tenant_id
     )
-    canonical_handle = locked.canonical_handle or normalize_tiktok_username(locked.handle)
-    identity_ids = [locked.pk]
-    if canonical_handle and str(locked.platform or "").casefold() == "tiktok":
-        identity_ids = list(
-            Influencer.objects.select_for_update().filter(
-                tenant_id=user.tenant_id,
-                platform__iexact="TikTok",
-                canonical_handle=canonical_handle,
-            ).values_list("pk", flat=True)
-        )
-    latest_action = InfluencerRestrictEvent.objects.filter(
+    identity_ids = list(
+        influencer_identity_queryset(locked, for_update=True).values_list("pk", flat=True)
+    )
+    blacklisted = InfluencerRestriction.objects.filter(
         tenant_id=user.tenant_id,
         influencer_id__in=identity_ids,
-    ).order_by("-occurred_at", "-id").values_list("action", flat=True).first()
-    blacklisted = (
-        latest_action == InfluencerRestrictEvent.Action.BLACKLIST
-        if latest_action is not None
-        else InfluencerRestriction.objects.filter(
-            tenant_id=user.tenant_id,
-            influencer_id__in=identity_ids,
-            is_blacklisted=True,
-        ).exists()
-    )
+        is_blacklisted=True,
+    ).exists()
     if blacklisted:
         detail = {"influencer": message or "Blacklisted influencers cannot receive samples."}
         if code:
@@ -1775,37 +1760,41 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
     influencer = Influencer.objects.select_for_update().get(
         pk=_pk(influencer), tenant=user.tenant
     )
-    canonical_handle = influencer.canonical_handle or normalize_tiktok_username(influencer.handle)
-    identity_ids = [influencer.pk]
-    if canonical_handle and str(influencer.platform or "").casefold() == "tiktok":
-        identity_ids = list(
-            Influencer.objects.select_for_update().filter(
-                tenant=user.tenant,
-                platform__iexact="TikTok",
-                canonical_handle=canonical_handle,
-            ).values_list("pk", flat=True)
-        )
-    restriction, _ = InfluencerRestriction.objects.update_or_create(
-        tenant=user.tenant,
-        influencer=influencer,
-        defaults={
-            "is_blacklisted": blacklisted,
-            "reason": reason,
-            "created_by": user,
-        },
+    identity_profiles = list(
+        influencer_identity_queryset(influencer, for_update=True)
     )
+    identity_ids = [profile.pk for profile in identity_profiles]
     action = (
         InfluencerRestrictEvent.Action.BLACKLIST
         if blacklisted
         else InfluencerRestrictEvent.Action.UNBLACKLIST
     )
-    event = InfluencerRestrictEvent.objects.create(
-        tenant=user.tenant,
-        influencer=influencer,
-        action=action,
-        reason=reason or ("Manual blacklist" if blacklisted else "Manual unblacklist"),
-        actor=user,
-    )
+    event_reason = reason or ("Manual blacklist" if blacklisted else "Manual unblacklist")
+    restriction = None
+    event = None
+    for profile in identity_profiles:
+        current_restriction, _ = InfluencerRestriction.objects.update_or_create(
+            tenant=user.tenant,
+            influencer=profile,
+            defaults={
+                "is_blacklisted": blacklisted,
+                "reason": reason,
+                "created_by": user,
+            },
+        )
+        current_event = InfluencerRestrictEvent.objects.create(
+            tenant=user.tenant,
+            influencer=profile,
+            action=action,
+            reason=event_reason,
+            actor=user,
+        )
+        if profile.pk == influencer.pk:
+            restriction = current_restriction
+            event = current_event
+
+    if restriction is None or event is None:
+        raise ValidationError({"influencer": "Influencer identity group is empty."})
     if blacklisted:
         affected_task_ids = set()
         rows = list(

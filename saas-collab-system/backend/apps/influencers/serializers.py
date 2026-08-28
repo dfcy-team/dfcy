@@ -8,14 +8,13 @@ from .models import (
     InfluencerContact,
     InfluencerProfile,
     InfluencerRestrictEvent,
-    InfluencerRestriction,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
     SampleItem,
     SkuPriceSnapshot,
     VideoResult,
-    normalize_tiktok_username,
+    influencer_has_active_restriction,
 )
 
 
@@ -94,35 +93,22 @@ class InfluencerSerializer(serializers.ModelSerializer):
     def validate_handle(self, value):
         return str(value or "").strip().lstrip("@").strip()
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance is not None and any(
+            field in attrs and getattr(self.instance, field) != attrs[field]
+            for field in ("handle", "platform")
+        ) and influencer_has_active_restriction(self.instance):
+            raise serializers.ValidationError({
+                "handle": "Blacklisted influencer identities cannot change handle or platform.",
+            })
+        return attrs
+
     def get_is_blacklisted(self, obj):
-        canonical_handle = obj.canonical_handle or normalize_tiktok_username(obj.handle)
-        if canonical_handle and str(obj.platform or "").casefold() == "tiktok":
-            identity_ids = Influencer.objects.filter(
-                tenant_id=obj.tenant_id,
-                platform__iexact="TikTok",
-                canonical_handle=canonical_handle,
-            ).values_list("pk", flat=True)
-            latest = InfluencerRestrictEvent.objects.filter(
-                tenant_id=obj.tenant_id,
-                influencer_id__in=identity_ids,
-            ).order_by("-occurred_at", "-id").values_list("action", flat=True).first()
-            if latest is not None:
-                return latest == InfluencerRestrictEvent.Action.BLACKLIST
-            return InfluencerRestriction.objects.filter(
-                tenant_id=obj.tenant_id,
-                influencer_id__in=identity_ids,
-                is_blacklisted=True,
-            ).exists()
-        prefetched = getattr(obj, "_restriction_events", None)
-        if prefetched:
-            return prefetched[0].action == InfluencerRestrictEvent.Action.BLACKLIST
-        restrictions = getattr(obj, "_restriction_rows", None)
-        if restrictions is not None:
-            return bool(restrictions and restrictions[0].is_blacklisted)
-        latest = obj.restrict_events.order_by("-occurred_at", "-id").values_list("action", flat=True).first()
-        if latest is not None:
-            return latest == "blacklist"
-        return obj.restrictions.filter(is_blacklisted=True).exists()
+        annotated = getattr(obj, "_is_blacklisted", None)
+        if annotated is not None:
+            return bool(annotated)
+        return influencer_has_active_restriction(obj)
 
     def get_video_metrics(self, obj):
         # Raw video results can contain millions of rows. Online list/detail

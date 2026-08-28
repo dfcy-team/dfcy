@@ -1,5 +1,7 @@
+import hashlib
 import re
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 import pytest
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
@@ -141,11 +143,36 @@ def test_outreach_task_can_use_manual_store_when_product_is_not_matched():
 def test_tiktok_handle_schema_is_the_canonical_non_nullable_identity_column():
     field = Influencer._meta.get_field("handle")
     canonical_field = Influencer._meta.get_field("canonical_handle")
+    digest_field = Influencer._meta.get_field("canonical_handle_digest")
 
     assert field.max_length == 255
     assert field.null is False
     assert field.db_comment == "TikTok用户名"
     assert canonical_field.db_index is True
+    assert digest_field.max_length == 64
+    assert digest_field.null is False
+    assert any(
+        index.fields == ["tenant", "platform", "canonical_handle_digest"]
+        for index in Influencer._meta.indexes
+    )
+
+
+def test_tiktok_handle_save_dual_writes_canonical_value_and_digest():
+    _, _, _, influencer = _records("canonical-digest")
+    influencer.handle = " ＠ＭＨＡＩＮＥ＿９４ "
+    influencer.save(update_fields=["handle"])
+
+    influencer.refresh_from_db()
+    assert influencer.canonical_handle == "mhaine_94"
+    assert influencer.canonical_handle_digest == hashlib.sha256(
+        b"mhaine_94"
+    ).hexdigest()
+
+    influencer.platform = "Instagram"
+    influencer.save(update_fields=["platform"])
+    influencer.refresh_from_db()
+    assert influencer.canonical_handle == ""
+    assert influencer.canonical_handle_digest == ""
 
 
 def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling():
@@ -168,6 +195,7 @@ def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling()
 
     assert blocked.canonical_handle == "mhaine_94"
     assert duplicate.canonical_handle == "mhaine_94"
+    assert blocked.canonical_handle_digest == duplicate.canonical_handle_digest
     with pytest.raises(ValidationError, match="Blacklisted influencers"):
         create_sample_fulfillment(
             user=user,
@@ -180,6 +208,102 @@ def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling()
             },
             item_payloads=[],
         )
+
+
+def test_blacklist_syncs_duplicate_restrictions_and_any_active_restriction_blocks():
+    tenant, user, store, blocked = _records("canonical-restriction-sync")
+    blocked.handle = "sync.creator"
+    blocked.save(update_fields=["handle"])
+    duplicate = Influencer.objects.create(
+        tenant=tenant,
+        code="canonical-restriction-sync-duplicate",
+        name="Duplicate creator",
+        platform="TikTok",
+        handle="SYNC.CREATOR",
+    )
+
+    set_influencer_blacklist(
+        user=user,
+        influencer=blocked,
+        blacklisted=True,
+        reason="sync blacklist",
+    )
+    restrictions = InfluencerRestriction.objects.filter(
+        tenant=tenant,
+        influencer_id__in=[blocked.id, duplicate.id],
+    )
+    assert restrictions.count() == 2
+    assert set(restrictions.values_list("is_blacklisted", flat=True)) == {True}
+    assert InfluencerRestrictEvent.objects.filter(
+        tenant=tenant,
+        influencer_id__in=[blocked.id, duplicate.id],
+        action=InfluencerRestrictEvent.Action.BLACKLIST,
+    ).count() == 2
+
+    set_influencer_blacklist(
+        user=user,
+        influencer=blocked,
+        blacklisted=False,
+        reason="sync unblacklist",
+    )
+    restrictions = InfluencerRestriction.objects.filter(
+        tenant=tenant,
+        influencer_id__in=[blocked.id, duplicate.id],
+    )
+    assert set(restrictions.values_list("is_blacklisted", flat=True)) == {False}
+
+    duplicate_restriction = restrictions.get(influencer=duplicate)
+    duplicate_restriction.is_blacklisted = True
+    duplicate_restriction.save()
+
+    with pytest.raises(ValidationError, match="Blacklisted influencers"):
+        create_sample_fulfillment(
+            user=user,
+            request_key="canonical-restriction-sync-sample",
+            validated_data={
+                "influencer": blocked,
+                "store": store,
+                "link_type": "YYJL",
+                "external_product_id": "CANONICAL-RESTRICTION-SYNC-PRODUCT",
+            },
+            item_payloads=[],
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("handle", "changed.creator"), ("platform", "Instagram")),
+)
+def test_blacklisted_identity_cannot_change_handle_or_platform(field, value):
+    _, user, _, influencer = _records(f"canonical-change-{field}")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.manage")
+    influencer.handle = "locked.creator"
+    influencer.save(update_fields=["handle"])
+    set_influencer_blacklist(
+        user=user,
+        influencer=influencer,
+        blacklisted=True,
+        reason="locked identity",
+    )
+
+    setattr(influencer, field, value)
+    expected = "locked.creator" if field == "handle" else "tiktok"
+    with pytest.raises(DjangoValidationError, match="Blacklisted influencer identities"):
+        influencer.save(update_fields=[field])
+    influencer.refresh_from_db()
+    assert getattr(influencer, field) == expected
+
+    client = APIClient()
+    client.force_authenticate(user)
+    response = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {field: value},
+        format="json",
+    )
+    assert response.status_code == 400, response.data
+    influencer.refresh_from_db()
+    assert getattr(influencer, field) == expected
 
 
 def test_canonical_handle_is_tenant_scoped_and_empty_handle_has_no_shared_identity():

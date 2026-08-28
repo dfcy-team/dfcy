@@ -39,6 +39,8 @@ from .models import (
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
+    active_influencer_restriction_subquery,
+    influencer_has_active_restriction,
     normalize_tiktok_username,
 )
 from .serializers import (
@@ -171,6 +173,11 @@ def _influencer_candidates(queryset, *, limit, include_handle=False):
 
 def _resolve_existing_influencer(*, tenant, account, blacklist_subquery):
     """Find one tenant-scoped TikTok profile using normalized account text."""
+    direct_blacklist_subquery = InfluencerRestriction.objects.filter(
+        tenant=tenant,
+        influencer_id=OuterRef("pk"),
+        is_blacklisted=True,
+    )
     candidates = list(
         Influencer.objects.select_for_update()
         .filter(
@@ -178,8 +185,11 @@ def _resolve_existing_influencer(*, tenant, account, blacklist_subquery):
             platform__iexact="TikTok",
             canonical_handle=account,
         )
-        .annotate(is_blacklisted=Exists(blacklist_subquery))
-        .order_by("-is_blacklisted", "id")
+        .annotate(
+            is_blacklisted=Exists(blacklist_subquery),
+            direct_is_blacklisted=Exists(direct_blacklist_subquery),
+        )
+        .order_by("-direct_is_blacklisted", "-is_blacklisted", "id")
     )
     return candidates[0] if candidates else None
 
@@ -191,11 +201,7 @@ class InfluencerCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         queryset = Influencer.objects.filter(tenant=request.user.tenant).select_related("profile").prefetch_related(
             Prefetch("restrictions", to_attr="_restriction_rows"),
             Prefetch("restrict_events", queryset=InfluencerRestrictEvent.objects.order_by("-occurred_at", "-id"), to_attr="_restriction_events"),
@@ -417,11 +423,7 @@ class InfluencerResolveView(APIView):
             or request.query_params.get("name")
             or ""
         ).strip()
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         queryset = Influencer.objects.filter(
             tenant=request.user.tenant,
             platform__iexact="TikTok",
@@ -442,11 +444,7 @@ class InfluencerResolveView(APIView):
         if not account or len(account) > 255:
             raise ValidationError({"handle": "TikTok account must be 1-255 characters."})
 
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         influencer = _resolve_existing_influencer(
             tenant=request.user.tenant,
             account=account,
@@ -493,24 +491,7 @@ class InfluencerResolveView(APIView):
                     after_data={"code": influencer.code, "handle": influencer.handle},
                 )
 
-        identity_ids = Influencer.objects.filter(
-            tenant=request.user.tenant,
-            platform__iexact="TikTok",
-            canonical_handle=influencer.canonical_handle,
-        ).values_list("pk", flat=True)
-        latest_action = InfluencerRestrictEvent.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id__in=identity_ids,
-        ).order_by("-occurred_at", "-id").values_list("action", flat=True).first()
-        is_blacklisted = (
-            latest_action == InfluencerRestrictEvent.Action.BLACKLIST
-            if latest_action is not None
-            else InfluencerRestriction.objects.filter(
-                tenant=request.user.tenant,
-                influencer_id__in=identity_ids,
-                is_blacklisted=True,
-            ).exists()
-        )
+        is_blacklisted = influencer_has_active_restriction(influencer)
         payload = {
             "id": influencer.id,
             "code": influencer.code,
@@ -623,11 +604,7 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
@@ -659,11 +636,7 @@ class SampleFulfillmentOptionsView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         search = request.query_params.get("search", "").strip()
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
