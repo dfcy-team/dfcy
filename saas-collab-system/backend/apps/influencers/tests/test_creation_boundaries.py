@@ -773,7 +773,7 @@ def test_task_sample_creation_locks_identity_before_task_and_target(monkeypatch)
 
     fulfillment, created = create_sample_fulfillment(
         user=user,
-        request_key="task-sample-lock-order-key",
+        request_key="outreach-sample-lock-order-key",
         validated_data={
             "outreach_task": task,
             "outreach_target": target,
@@ -869,7 +869,7 @@ def test_influencer_task_creation_locks_identity_before_store_and_owner(monkeypa
 
 
 def test_task_creation_without_influencer_locks_store_before_owner(monkeypatch):
-    _, user, store, _ = _records("task-without-influencer-lock-order")
+    _, user, store, _ = _records("outreach-without-influencer-lock-order")
     events = []
     original_locked_store = influencer_services._locked_store
     original_locked_user = influencer_services._locked_user
