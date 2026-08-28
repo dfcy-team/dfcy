@@ -10,6 +10,7 @@ from apps.sales_management.services import upsert_normalized_order, upsert_norma
 
 from .inventory_snapshot_contract import normalize_inventory_snapshot_record
 from .models import MarketplaceStoreAuthorization, PlatformChoices, SyncJob
+from .platform_capabilities import supports_resource
 from .readonly_clients import (
     JifengWmsReadonlyClient,
     ShopeeReadonlyClient,
@@ -127,7 +128,11 @@ class MockPlatformAdapter(PlatformAdapter):
         ]
         if cursor_value == "done":
             page_records = []
-        return {"records": page_records, "next_cursor": "done"}
+        return {
+            "records": page_records,
+            "next_cursor": "done",
+            "raw_responses": [{"endpoint": "mock://records", "payload": {"records": page_records}}],
+        }
 
     def normalize_record(self, record):
         return {"external_id": record.get("external_id"), "name": record.get("name", "")}
@@ -183,7 +188,17 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         self.client = client
         self.source_run = None
 
-    def _store_authorization(self):
+    def _store_authorization(self, sync_job=None):
+        if sync_job is not None and sync_job.store_authorization_id:
+            authorization = sync_job.store_authorization
+            if (
+                authorization.tenant_id != sync_job.tenant_id
+                or authorization.integration_config_id != self.config.id
+                or authorization.platform != self.config.platform
+                or authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE
+            ):
+                raise ValidationError("Sync job store authorization is not active in the configured tenant scope.")
+            return authorization
         authorization_id = (self.config.platform_config or {}).get("store_authorization_id")
         queryset = MarketplaceStoreAuthorization.objects.filter(
             tenant=self.config.tenant,
@@ -203,8 +218,18 @@ class ProductionReadonlyAdapter(PlatformAdapter):
             raise ValidationError("Sync job and integration config scope do not match.")
         if self.config.environment not in {"pilot", "production"}:
             raise ValidationError("Production adapter requires pilot or production environment.")
+        if not supports_resource(self.config.platform, sync_job.resource_type, self.execution_mode):
+            raise ValidationError("Platform capability registry does not allow this resource and execution mode.")
         if self.config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
-            self.authorization = self._store_authorization()
+            self.authorization = self._store_authorization(sync_job)
+        if sync_job.warehouse_authorization_id:
+            authorization = sync_job.warehouse_authorization
+            if (
+                authorization.tenant_id != sync_job.tenant_id
+                or authorization.integration_config_id != self.config.id
+                or authorization.status != authorization.Status.ACTIVE
+            ):
+                raise ValidationError("Sync job warehouse authorization is not active in the configured tenant scope.")
         self._client().preflight()
 
     def _client(self):
@@ -465,10 +490,12 @@ class JifengInventoryAdapter(ProductionReadonlyAdapter):
 
 def get_adapter_for_config(config, resource_type=None):
     if config.environment == "mock":
-        return MockPlatformAdapter()
+        return MockPlatformAdapter() if supports_resource("mock", resource_type, "mock") else DisabledProductionAdapter()
     if config.environment == "sandbox":
         return SandboxPlaceholderAdapter()
     if config.environment not in {"pilot", "production"}:
+        return DisabledProductionAdapter()
+    if not supports_resource(config.platform, resource_type, "live_readonly"):
         return DisabledProductionAdapter()
     if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
         return MarketplaceOrderAdapter(config)

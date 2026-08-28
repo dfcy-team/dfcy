@@ -2,6 +2,8 @@
 
 from django.core.exceptions import ValidationError
 
+from .platform_capabilities import CAPABILITY_REGISTRY, capability_payload, get_platform_capability
+
 
 REGIONS = [
     {"value": "PH", "label": "Philippines (PH)"},
@@ -138,18 +140,10 @@ API_TYPE_OPTIONS = {
     "inventory": {"value": "inventory", "label": "库存 API"},
 }
 
-PLATFORM_API_TYPES = {
-    "lazada": ("marketplace",),
-    "shopee": ("marketplace", "advertising"),
-    "tiktok": ("marketplace", "advertising"),
-    "jifeng_wms": ("inventory",),
-}
-
-
 def integration_platform_key(*, platform_type="", code="", name=""):
     """Map a platform master row to the integration contract without using its display name in the UI."""
     platform_type = str(platform_type or "").strip().lower()
-    if platform_type in PLATFORM_API_TYPES:
+    if platform_type in CAPABILITY_REGISTRY:
         return platform_type
     aliases = {
         "lazada": "lazada",
@@ -167,7 +161,11 @@ def integration_platform_key(*, platform_type="", code="", name=""):
 
 
 def platform_api_type_options(platform):
-    return [API_TYPE_OPTIONS[value].copy() for value in PLATFORM_API_TYPES.get(str(platform or "").lower(), ())]
+    try:
+        capability = get_platform_capability(platform)
+    except ValidationError:
+        return []
+    return [API_TYPE_OPTIONS[value].copy() for value in capability.api_types]
 
 
 def get_platform_schema(platform, *, environment=None, region=None):
@@ -192,6 +190,7 @@ def get_platform_schema(platform, *, environment=None, region=None):
         ],
         "regions": regions,
         "production_write_enabled": False,
+        "capabilities": capability_payload(platform),
         **SCHEMAS[platform],
         "public_fields": SCHEMAS[platform]["fields"],
     }

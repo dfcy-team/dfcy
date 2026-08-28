@@ -1,11 +1,12 @@
 from django.db import connection
+from django.db.models import Max
 from django.shortcuts import get_object_or_404
 
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 from apps.permissions.ui_p2_scopes import filter_master_data
 from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_store_authorizations
 
-from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig
+from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, WarehouseAuthorization
 
 
 VISIBLE_CONFIG_STATUSES = {"configured", "verified", "active"}
@@ -42,17 +43,14 @@ def _api_type(config, raw_config):
 
 
 def _last_run_map(subject_field, authorization_ids):
-    columns = _table_columns("integrations_syncjob")
-    if subject_field not in columns or "last_run_at" not in columns or not authorization_ids:
+    if subject_field not in {"store_authorization_id", "warehouse_authorization_id"} or not authorization_ids:
         return {}
-    placeholders = ",".join(["%s"] * len(authorization_ids))
-    with connection.cursor() as cursor:
-        cursor.execute(
-            f"SELECT {subject_field},MAX(last_run_at) FROM integrations_syncjob "
-            f"WHERE {subject_field} IN ({placeholders}) GROUP BY {subject_field}",
-            list(authorization_ids),
-        )
-        return dict(cursor.fetchall())
+    rows = (
+        SyncJob.objects.filter(**{f"{subject_field}__in": authorization_ids})
+        .values(subject_field)
+        .annotate(last_run=Max("last_run_at"))
+    )
+    return {row[subject_field]: row["last_run"] for row in rows}
 
 
 def _config_payload(config, api_type):
@@ -143,32 +141,28 @@ def _store_access(user, subject_id):
 
 
 def _warehouse_bindings(user, subject, config_map):
-    table = "integrations_warehouseauthorization"
-    columns = _table_columns(table)
-    required = {"id", "tenant_id", "warehouse_id", "integration_config_id", "status"}
-    if not required.issubset(columns) or not config_map:
+    if not config_map:
         return []
-    selected = [
-        column for column in (
-            "id", "integration_config_id", "provider", "status", "authorized_at",
-            "last_verified_at", "last_error_code",
-        ) if column in columns
-    ]
-    placeholders = ",".join(["%s"] * len(config_map))
-    with connection.cursor() as cursor:
-        cursor.execute(
-            f"SELECT {','.join(selected)} FROM {table} WHERE tenant_id=%s AND warehouse_id=%s "
-            f"AND integration_config_id IN ({placeholders}) ORDER BY updated_at DESC",
-            [user.tenant_id, subject.id, *config_map],
-        )
-        rows = [dict(zip(selected, row)) for row in cursor.fetchall()]
-    last_runs = _last_run_map("warehouse_authorization_id", [row["id"] for row in rows])
+    rows = list(
+        WarehouseAuthorization.objects.filter(
+            tenant_id=user.tenant_id,
+            warehouse=subject,
+            integration_config_id__in=config_map,
+        ).order_by("-updated_at")
+    )
+    last_runs = _last_run_map("warehouse_authorization_id", [row.id for row in rows])
     return [
         {
-            **row,
-            "api_type": config_map[row["integration_config_id"]][1],
-            "account_alias": config_map[row["integration_config_id"]][0].account_alias,
-            "last_run_at": last_runs.get(row["id"]),
+            "id": row.id,
+            "integration_config_id": row.integration_config_id,
+            "provider": row.provider,
+            "status": row.status,
+            "authorized_at": row.authorized_at,
+            "last_verified_at": row.last_verified_at,
+            "last_error_code": row.last_error_code,
+            "api_type": config_map[row.integration_config_id][1],
+            "account_alias": config_map[row.integration_config_id][0].account_alias,
+            "last_run_at": last_runs.get(row.id),
         }
         for row in rows
     ]
