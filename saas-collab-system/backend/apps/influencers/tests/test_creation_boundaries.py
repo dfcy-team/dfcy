@@ -1529,10 +1529,10 @@ def test_canonical_handle_migration_normalizes_fullwidth_handle_and_snapshot():
         pricing_status="pending",
     )
     migration = importlib.import_module(
-        "apps.influencers.migrations.0014_repair_canonical_tiktok_handle"
+        "apps.influencers.migrations.0013_canonical_tiktok_handle"
     )
 
-    migration.repair_canonical_tiktok_identities(
+    migration.normalize_existing_tiktok_identities(
         importlib.import_module("django.apps").apps,
         None,
     )
@@ -1543,7 +1543,7 @@ def test_canonical_handle_migration_normalizes_fullwidth_handle_and_snapshot():
     assert snapshot.creator_username == "mhaine_94"
 
 
-def test_canonical_handle_repair_clears_invalid_handle_and_snapshot():
+def test_canonical_handle_migration_clears_invalid_handle_and_snapshot():
     tenant, user, store, influencer = _records("canonical-migration-invalid-display")
     table = connection.ops.quote_name(Influencer._meta.db_table)
     with connection.cursor() as cursor:
@@ -1579,10 +1579,10 @@ def test_canonical_handle_repair_clears_invalid_handle_and_snapshot():
         pricing_status="pending",
     )
     migration = importlib.import_module(
-        "apps.influencers.migrations.0014_repair_canonical_tiktok_handle"
+        "apps.influencers.migrations.0013_canonical_tiktok_handle"
     )
 
-    migration.repair_canonical_tiktok_identities(
+    migration.normalize_existing_tiktok_identities(
         importlib.import_module("django.apps").apps,
         None,
     )
@@ -1635,6 +1635,25 @@ def test_outreach_manager_can_resolve_existing_influencer():
         tenant=user.tenant,
         handle="outreach-created.creator",
     ).exists()
+
+
+def test_outreach_manager_search_normalizes_tiktok_handle_alias():
+    _, user, _, influencer = _records("outreach-resolve-normalized")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.outreach.manage")
+    influencer.handle = "mhaine_94"
+    influencer.save(update_fields=["handle"])
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get(
+        "/api/internal/influencers/resolve/",
+        {"q": " ＠ＭＨＡＩＮＥ＿９４ "},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["query"] == "mhaine_94"
+    assert response.json()["data"]["candidates"][0]["id"] == influencer.id
 
 
 def test_account_resolve_prefers_blacklisted_duplicate_profile():

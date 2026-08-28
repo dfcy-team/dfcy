@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 from django.db import migrations, models
 
@@ -7,7 +8,8 @@ TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._]{1,255}$")
 
 
 def _normalize_tiktok_username(value):
-    return str(value or "").strip().lstrip("@").strip().lower()
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return normalized.strip().lstrip("@").strip().lower()
 
 
 def normalize_existing_tiktok_identities(apps, schema_editor):

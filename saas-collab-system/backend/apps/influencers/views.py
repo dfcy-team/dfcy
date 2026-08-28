@@ -216,13 +216,16 @@ class InfluencerCollectionView(APIView):
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
-            queryset = queryset.filter(
+            search_filter = (
                 Q(code__icontains=search)
                 | Q(name__icontains=search)
-                | Q(handle__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__display_name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__external_influencer_id__icontains=search)
             )
+            normalized_handle = normalize_tiktok_username(search)
+            if is_valid_tiktok_username(normalized_handle):
+                search_filter |= Q(handle__icontains=normalized_handle)
+            queryset = queryset.filter(search_filter)
         if status:
             queryset = queryset.filter(status=status)
         platform = request.query_params.get("platform", "").strip()
@@ -438,7 +441,7 @@ class InfluencerResolveView(APIView):
 
     def get(self, request):
         _require_resolve_read_scope(request.user)
-        query = str(
+        raw_query = str(
             request.query_params.get("q")
             or request.query_params.get("search")
             or request.query_params.get("handle")
@@ -446,13 +449,14 @@ class InfluencerResolveView(APIView):
             or request.query_params.get("name")
             or ""
         ).strip()
+        query = normalize_tiktok_username(raw_query)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         queryset = Influencer.objects.filter(
             tenant=request.user.tenant,
             platform__iexact="TikTok",
             status=Influencer.Status.ACTIVE,
         ).annotate(is_blacklisted=Exists(blacklist_subquery))
-        if query:
+        if query and is_valid_tiktok_username(query):
             queryset = queryset.filter(handle__icontains=query)
         rows = _influencer_candidates(queryset, limit=50, include_handle=True)
         return success_response({"query": query, "candidates": rows, "results": rows})
@@ -666,8 +670,12 @@ class SampleFulfillmentOptionsView(APIView):
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
         ).annotate(is_blacklisted=Exists(blacklist_subquery))
+        normalized_search = normalize_tiktok_username(search)
         if search:
-            influencers = influencers.filter(handle__icontains=search)
+            if is_valid_tiktok_username(normalized_search):
+                influencers = influencers.filter(handle__icontains=normalized_search)
+            else:
+                influencers = influencers.none()
         tasks = OutreachTask.objects.filter(
             tenant=request.user.tenant,
             is_deleted=False,
@@ -1011,17 +1019,20 @@ class SampleFulfillmentCollectionView(APIView):
             queryset = queryset.filter(store_id=store_id)
         search = request.query_params.get("search", "").strip()
         if search:
-            queryset = queryset.filter(
+            search_filter = (
                 Q(fulfillment_no__icontains=search)
                 | Q(outreach_task__task_no__icontains=search)
                 | Q(outreach_task__task_name__icontains=search)
                 | Q(influencer__name__icontains=search)
-                | Q(influencer__handle__icontains=search)
                 | Q(store__name__icontains=search)
                 | Q(product_name_snapshot__icontains=search)
                 | Q(external_product_id__icontains=search)
                 | Q(sample_order_no__icontains=search)
             )
+            normalized_handle = normalize_tiktok_username(search)
+            if is_valid_tiktok_username(normalized_handle):
+                search_filter |= Q(influencer__handle__icontains=normalized_handle)
+            queryset = queryset.filter(search_filter)
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
