@@ -264,6 +264,38 @@ def test_integration_workspace_links_tenant_scoped_config_jobs_and_runs():
 
 
 @pytest.mark.django_db
+def test_integration_workspace_keeps_unsupported_master_platform_disabled():
+    tenant = Tenant.objects.create(name="Tenant", code="workspace-unsupported-platform")
+    user = create_user(tenant, "workspace-unsupported-user")
+    user.is_superuser = True
+    user.is_staff = True
+    user.save(update_fields=["is_superuser", "is_staff"])
+    grant_integration_access(user)
+    platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="bigseller",
+        name="BigSeller",
+        platform_type=PlatformMaster.PlatformType.BIGSELLER,
+    )
+
+    response = authenticated_client(user).get("/api/internal/integrations/workspace/", {"mode": "configs"})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["reference_options"]["platforms"] == [
+        {
+            "id": platform.id,
+            "value": "bigseller",
+            "code": "bigseller",
+            "name": "BigSeller",
+            "label": "BigSeller（bigseller）",
+            "enabled": False,
+            "api_types": [],
+            "allowed_regions": None,
+        }
+    ]
+
+
+@pytest.mark.django_db
 def test_integration_workspace_operation_endpoints_are_real_and_tenant_scoped():
     tenant = Tenant.objects.create(name="Tenant A", code="workspace-actions-a")
     other_tenant = Tenant.objects.create(name="Tenant B", code="workspace-actions-b")
