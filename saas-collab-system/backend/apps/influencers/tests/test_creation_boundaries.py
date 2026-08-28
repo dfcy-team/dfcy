@@ -1529,10 +1529,10 @@ def test_canonical_handle_migration_normalizes_fullwidth_handle_and_snapshot():
         pricing_status="pending",
     )
     migration = importlib.import_module(
-        "apps.influencers.migrations.0013_canonical_tiktok_handle"
+        "apps.influencers.migrations.0014_repair_canonical_tiktok_handle"
     )
 
-    migration.normalize_existing_tiktok_identities(
+    migration.repair_canonical_tiktok_identities(
         importlib.import_module("django.apps").apps,
         None,
     )
@@ -1541,6 +1541,56 @@ def test_canonical_handle_migration_normalizes_fullwidth_handle_and_snapshot():
     snapshot.refresh_from_db()
     assert influencer.handle == "mhaine_94"
     assert snapshot.creator_username == "mhaine_94"
+
+
+def test_canonical_handle_repair_clears_invalid_handle_and_snapshot():
+    tenant, user, store, influencer = _records("canonical-migration-invalid-display")
+    table = connection.ops.quote_name(Influencer._meta.db_table)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE {table} SET handle = %s WHERE id = %s",
+            ["Legacy Display Name", influencer.pk],
+        )
+    fulfillment = SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="migration-invalid-display-sample",
+        request_key="migration-invalid-display-request",
+        request_hash="migration-invalid-display-hash",
+        link_type="YYJL",
+        influencer=influencer,
+        store=store,
+        owner=user,
+    )
+    snapshot = BdSampleAttributionSnapshot.objects.create(
+        tenant=tenant,
+        fulfillment=fulfillment,
+        owner=user,
+        influencer=influencer,
+        store=store,
+        creator_username="Legacy Display Name",
+        shop_abbr=store.code,
+        site="PH",
+        product_id="migration-invalid-display-product",
+        product_name="Migration product",
+        sku_id="migration-invalid-display-sku",
+        sampled_at=timezone.now(),
+        sample_status=SampleFulfillment.Status.PENDING,
+        currency="PHP",
+        pricing_status="pending",
+    )
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0014_repair_canonical_tiktok_handle"
+    )
+
+    migration.repair_canonical_tiktok_identities(
+        importlib.import_module("django.apps").apps,
+        None,
+    )
+
+    influencer.refresh_from_db()
+    snapshot.refresh_from_db()
+    assert influencer.handle == ""
+    assert snapshot.creator_username == ""
 
 
 def test_fulfillment_account_resolve_rejects_display_name_as_tiktok_handle():

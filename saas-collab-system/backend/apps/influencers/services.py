@@ -17,6 +17,7 @@ from rest_framework.exceptions import ValidationError
 from apps.audit.services import write_operation_log
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
+from apps.tenants.models import Tenant
 
 from .models import (
     FulfillmentStatusEvent,
@@ -1970,6 +1971,9 @@ def restore_sample_fulfillment(*, user, fulfillment, expected_version):
 
 @transaction.atomic
 def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
+    # Identity edits use this same tenant lock, so the canonical handle group
+    # cannot change between reading the selected profile and locking its peers.
+    Tenant.objects.select_for_update().get(pk=user.tenant_id)
     selected = Influencer.objects.get(pk=_pk(influencer), tenant=user.tenant)
     identity_profiles = list(
         influencer_identity_queryset(selected, for_update=True)
