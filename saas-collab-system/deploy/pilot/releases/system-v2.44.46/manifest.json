@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_version": "2.44.46",
-  "status": "candidate_verified",
+  "status": "deployed_server_verified",
   "registered_at": "2026-08-28",
   "parent_release": "2.44.45",
   "scope": "highlight category-code segment in formal SPU codes on product master and product detail pages",
@@ -14,12 +14,29 @@
   "navigation_css_changed": false,
   "permission_catalog_changed": false,
   "feature_commit": "5c0f3d2099fafa606dbf89d1f744ecb966e8e07a",
+  "image_revision": "817f8014ba246550a376435e6b5d160209599cb7",
+  "deployed_frontend_image_id": "sha256:f4e4c504d3dce74e83557b115b33058ed55a83adc052c8984a363cba38fd995f",
+  "deployed_frontend_container_id": "746c7514f4c1f1fa9aa8f660dcd0f5146c882a879dbbcf0ccf79d2a36f3ef99a",
+  "unchanged_backend_container_id": "66af6c724984c5d3f722c01cb535a100309d931ca8562d64c579c9658b071853",
+  "image_archive_sha256": "df87ec2116862061a8f7faafea9ddd23fbc98957352f15820e1412f79ffe66f9",
   "checks": {
     "protected_source_diff": "pass",
     "frontend_full_tests": "pass; 248 tests",
     "frontend_build": "pass",
-    "deployment_performed": false,
-    "deployment_validation": "pending"
+    "runtime_service_identity": "pass; backend, celery, celery-beat and redis container IDs unchanged",
+    "page_status": "pass; root, product master, product details, roles and influencer pages returned HTTP 200",
+    "nginx_configuration": "pass",
+    "spu_category_assets": "pass; component JavaScript and CSS present in deployed container",
+    "navigation_and_permission_assets": "pass; dark navigation CSS and role permission resource present",
+    "fresh_browser_entry": "pass; new bundle loaded without browser console warnings or errors; authenticated product rendering covered by frontend tests because the verification browser had no signed-in session",
+    "recent_resource_404": "pass; none after fresh bundle load",
+    "deployment_performed": true,
+    "deployment_validation": "pass"
+  },
+  "deployment": {
+    "release_directory": "/home/dfcy01/releases/system-v2.44.46-build-20260828",
+    "frontend_only": true,
+    "verified_at": "2026-08-28T09:16:26+08:00"
   },
   "rollback": {
     "frontend_image": "saas-collab-frontend:v2.44.45",
