@@ -1292,7 +1292,7 @@ def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is
         code="safe-code",
         name="Safe display name",
         platform="tiktok",
-        handle="secret-handle",
+        handle="secret.handle",
         contact_name="Private Name",
         contact_phone="13800138000",
         contact_email="private@example.test",
@@ -1300,10 +1300,10 @@ def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is
     )
 
     listed = client.get("/api/internal/influencers/")
-    searched = client.get("/api/internal/influencers/", {"search": "secret-handle"})
+    searched = client.get("/api/internal/influencers/", {"search": "secret.handle"})
     item = listed.data["data"]["results"][0]
     assert item["display_name"] == "Safe display name"
-    assert "handle" not in item
+    assert item["handle"] == "secret.handle"
     for field in ("contact_name", "contact_phone", "contact_email", "notes"):
         assert field not in item
     assert searched.data["data"]["count"] == 1
@@ -1657,8 +1657,8 @@ def _new_affiliate_order(
         quantity=2,
         fully_returned=fully_returned,
         order_status=order_status,
-        creator_username="creator-account",
-        creator_username_normalized="creator-account",
+        creator_username="creator.account",
+        creator_username_normalized="creator.account",
         actual_paid_commission=Decimal("0"),
         estimated_paid_commission=Decimal("10"),
     )
@@ -1681,7 +1681,7 @@ def test_affiliate_order_constraints_are_tenant_scoped_and_csv_replay_is_idempot
 
     csv_path = tmp_path / "affiliate.csv"
     header = "data_time,shop_abbr,site,order_id,product_id,sku_id,creator_username,payment_amount,quantity,currency,fully_returned,order_status,actual_paid_commission,estimated_paid_commission,export_time\n"
-    row = "2026-08-16,store-affiliate,PH,CSV-1,P-1,SKU-1,creator-account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
+    row = "2026-08-16,store-affiliate,PH,CSV-1,P-1,SKU-1,creator.account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
     csv_path.write_text(header + row, encoding="utf-8")
     first_output, second_output = StringIO(), StringIO()
     call_command(
@@ -1746,7 +1746,7 @@ def test_affiliate_csv_rejects_stale_rows_and_counts_same_timestamp_conflicts(tm
     tenant = Tenant.objects.create(name="Affiliate freshness tenant", code="affiliate-freshness")
     csv_path = tmp_path / "affiliate-freshness.csv"
     header = "data_time,shop_abbr,site,order_id,product_id,sku_id,creator_username,payment_amount,quantity,currency,fully_returned,order_status,actual_paid_commission,estimated_paid_commission,export_time\n"
-    initial = "2026-08-16,store-affiliate,PH,CSV-FRESH-1,P-1,SKU-1,creator-account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
+    initial = "2026-08-16,store-affiliate,PH,CSV-FRESH-1,P-1,SKU-1,creator.account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
     csv_path.write_text(header + initial, encoding="utf-8")
     call_command(
         "import_affiliate_orders_csv",
@@ -1807,10 +1807,10 @@ def test_bd_attribution_requires_product_in_strict_mode_and_uses_latest_sample_i
     store = store_for(tenant, "store-affiliate")
     influencer = Influencer.objects.create(
         tenant=tenant,
-        code="creator-account",
+        code="creator.account",
         name="Creator",
         platform="tiktok",
-        handle="creator-account",
+        handle="creator.account",
     )
     task = create_outreach_task(
         user=user,
@@ -1880,10 +1880,10 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     store = store_for(tenant, "store-affiliate")
     influencer = Influencer.objects.create(
         tenant=tenant,
-        code="creator-account",
+        code="creator.account",
         name="Creator",
         platform="tiktok",
-        handle="creator-account",
+        handle="creator.account",
     )
     fulfillment, _ = create_sample_fulfillment(
         user=user,
@@ -2240,7 +2240,7 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
         code="refresh-creator",
         name="Refresh creator",
         platform="tiktok",
-        handle="creator-account",
+        handle="creator.account",
     )
     task = create_outreach_task(
         user=user,
@@ -2310,10 +2310,10 @@ def test_bd_performance_shipped_count_reads_current_fulfillment_fields():
     store = store_for(tenant, "current-shipment-store")
     influencer = Influencer.objects.create(
         tenant=tenant,
-        code="current-shipment-creator",
+        code="current.shipment.creator",
         name="Current shipment creator",
         platform="tiktok",
-        handle="current-shipment-creator",
+        handle="current.shipment.creator",
     )
     task = create_outreach_task(
         user=user,

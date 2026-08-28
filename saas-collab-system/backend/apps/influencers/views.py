@@ -153,7 +153,11 @@ def _influencer_candidates(queryset, *, limit, include_handle=False):
     db_limit = max(1, int(limit)) * INFLUENCER_OPTION_OVERFETCH_FACTOR
     for influencer in queryset.select_related("profile").order_by("-is_blacklisted", "id")[:db_limit]:
         handle = str(influencer.handle or "").strip().lstrip("@").strip()
-        key = normalize_tiktok_username(handle) or f"id:{influencer.pk}"
+        key = (
+            f"tiktok:{normalize_tiktok_username(handle)}"
+            if str(influencer.platform or "").casefold() == "tiktok" and handle
+            else f"id:{influencer.pk}"
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -383,7 +387,9 @@ class InfluencerBlacklistView(APIView):
     def post(self, request, pk):
         _require_blacklist_scope(request.user)
         influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
-        blacklisted = bool(request.data.get("is_blacklisted", request.data.get("blacklisted", True)))
+        blacklisted = request.data.get("is_blacklisted", request.data.get("blacklisted", True))
+        if not isinstance(blacklisted, bool):
+            raise ValidationError({"is_blacklisted": "Expected a JSON boolean."})
         reason = str(request.data.get("reason", "")).strip()
         restriction, event = set_influencer_blacklist(
             user=request.user, influencer=influencer, blacklisted=blacklisted, reason=reason

@@ -1,7 +1,9 @@
+import importlib
 import re
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection
+from django.utils import timezone
 import pytest
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
@@ -13,6 +15,7 @@ from apps.influencers.models import (
     InfluencerProfile,
     InfluencerRestrictEvent,
     InfluencerRestriction,
+    BdSampleAttributionSnapshot,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
@@ -74,11 +77,11 @@ def _grant_all_scope(role, permission_code):
         defaults={"name": permission_code, "module": "influencers", "action": "manage"},
     )
     role.permissions.add(permission)
-    DataScope.objects.create(
+    DataScope.objects.get_or_create(
         tenant=role.tenant,
         role=role,
         scope_type=DataScope.ScopeType.ALL,
-        config={"all": True},
+        defaults={"config": {"all": True}},
     )
 
 
@@ -654,6 +657,29 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     assert outreach_payload["influencers"][0]["handle"] == "option.creator"
 
 
+def test_fulfillment_options_do_not_merge_same_handle_across_platforms():
+    tenant, user, _, influencer = _records("option-platform-scope")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    influencer.handle = "shared.creator"
+    influencer.save(update_fields=["handle"])
+    instagram = Influencer.objects.create(
+        tenant=tenant,
+        code="instagram-shared-creator",
+        name="Instagram creator",
+        handle="shared.creator",
+        platform="Instagram",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/sample-fulfillment-options/")
+
+    assert response.status_code == 200
+    candidate_ids = {item["id"] for item in response.json()["data"]["influencers"]}
+    assert {influencer.id, instagram.id}.issubset(candidate_ids)
+
+
 def test_blacklist_cascade_requires_profile_and_fulfillment_manage_permissions():
     tenant, user, store, influencer = _records("blacklist-permission")
     role = Role.objects.get(tenant=tenant, code="bd")
@@ -689,6 +715,27 @@ def test_blacklist_cascade_requires_profile_and_fulfillment_manage_permissions()
     ).exists()
     fulfillment.refresh_from_db()
     assert fulfillment.status == SampleFulfillment.Status.PENDING
+
+
+def test_blacklist_endpoint_rejects_string_boolean_values():
+    tenant, user, _, influencer = _records("blacklist-boolean")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.manage")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        f"/api/internal/influencers/{influencer.pk}/blacklist/",
+        {"is_blacklisted": "false"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert not InfluencerRestriction.objects.filter(
+        tenant=tenant,
+        influencer=influencer,
+    ).exists()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -748,6 +795,55 @@ def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
     assert created.handle == "new.creator"
     assert created.platform == "TikTok"
     assert Influencer.objects.filter(tenant=tenant, handle="new.creator").count() == 1
+
+
+def test_canonical_handle_migration_normalizes_tiktok_records_and_snapshots():
+    tenant, user, store, influencer = _records("canonical-migration")
+    table = connection.ops.quote_name(Influencer._meta.db_table)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE {table} SET handle = %s WHERE id = %s",
+            [" ＠ＭＨＡＩＮＥ＿９４ ", influencer.pk],
+        )
+    snapshot = BdSampleAttributionSnapshot.objects.create(
+        tenant=tenant,
+        fulfillment=SampleFulfillment.objects.create(
+            tenant=tenant,
+            fulfillment_no="migration-sample",
+            request_key="migration-sample-request",
+            request_hash="migration-sample-hash",
+            link_type="YYJL",
+            influencer=influencer,
+            store=store,
+            owner=user,
+        ),
+        owner=user,
+        influencer=influencer,
+        store=store,
+        creator_username=" @ＭＨＡＩＮＥ＿９４ ",
+        shop_abbr=store.code,
+        site="PH",
+        product_id="migration-product",
+        product_name="Migration product",
+        sku_id="migration-sku",
+        sampled_at=timezone.now(),
+        sample_status=SampleFulfillment.Status.PENDING,
+        currency="PHP",
+        pricing_status="pending",
+    )
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0013_canonical_tiktok_handle"
+    )
+
+    migration.normalize_existing_tiktok_identities(
+        importlib.import_module("django.apps").apps,
+        None,
+    )
+
+    influencer.refresh_from_db()
+    snapshot.refresh_from_db()
+    assert influencer.handle == "mhaine_94"
+    assert snapshot.creator_username == "mhaine_94"
 
 
 def test_fulfillment_account_resolve_rejects_display_name_as_tiktok_handle():

@@ -1239,13 +1239,15 @@ def recompute_outreach_task_completion(*, user, task):
 
 def _assert_influencer_not_blacklisted(*, user, influencer, message=None, code=None):
     # Serialize restriction changes with sample/target creation and re-read the
-    # active restrictions while holding the influencer identity locks.
-    locked = Influencer.objects.select_for_update().get(
-        pk=influencer.pk, tenant_id=user.tenant_id
-    )
-    identity_ids = list(
-        influencer_identity_queryset(locked, for_update=True).values_list("pk", flat=True)
-    )
+    # active restrictions while holding every identity lock in primary-key
+    # order. Do not lock the selected row first: two duplicate profiles could
+    # otherwise acquire the same group in opposite order and deadlock.
+    selected = Influencer.objects.get(pk=influencer.pk, tenant_id=user.tenant_id)
+    identity_profiles = list(influencer_identity_queryset(selected, for_update=True))
+    locked = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
+    if locked is None:
+        raise ValidationError({"influencer": "Influencer identity group is empty."})
+    identity_ids = [profile.pk for profile in identity_profiles]
     blacklisted = InfluencerRestriction.objects.filter(
         tenant_id=user.tenant_id,
         influencer_id__in=identity_ids,
@@ -1758,12 +1760,13 @@ def restore_sample_fulfillment(*, user, fulfillment, expected_version):
 
 @transaction.atomic
 def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
-    influencer = Influencer.objects.select_for_update().get(
-        pk=_pk(influencer), tenant=user.tenant
-    )
+    selected = Influencer.objects.get(pk=_pk(influencer), tenant=user.tenant)
     identity_profiles = list(
-        influencer_identity_queryset(influencer, for_update=True)
+        influencer_identity_queryset(selected, for_update=True)
     )
+    influencer = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
+    if influencer is None:
+        raise ValidationError({"influencer": "Influencer identity group is empty."})
     identity_ids = [profile.pk for profile in identity_profiles]
     action = (
         InfluencerRestrictEvent.Action.BLACKLIST
