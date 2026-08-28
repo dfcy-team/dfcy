@@ -154,7 +154,7 @@ export const menuItems = [
   },
   {
     label: '基础档案',
-    permissions: ['masterdata.view', 'products.master.view', 'products.category.view', 'products.attribute.view', 'products.color.view', 'products.specification.view', 'products.bundle.view'],
+    permissions: ['masterdata.view', 'products.master.view', 'products.category.view', 'products.attribute.view', 'products.color.view', 'products.specification.view', 'products.bundle.view', 'masterdata.settings.view'],
     children: [
       { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
       { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view'] },
@@ -168,7 +168,8 @@ export const menuItems = [
       { path: '/master-data/sites', label: '国家信息', permissions: ['masterdata.view'] },
       { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
       { path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
-      { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] }
+      { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] },
+      { path: '/master-data/settings', label: '基础档案设置', permissions: ['masterdata.settings.view'] }
     ]
   },
   {
@@ -251,6 +252,7 @@ export const routeCapabilities = [
   { path: '/products/details', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/products/platform-details', permissions: ['listings.product_detail.view'], userTypes: ['internal'] },
   { path: '/products/categories', permissions: ['products.category.view'], userTypes: ['internal'] },
+  { path: '/master-data/settings', permissions: ['masterdata.settings.view'], userTypes: ['internal'] },
   { path: '/products/colors', permissions: ['products.color.view'], userTypes: ['internal'] },
   { path: '/products/attributes', permissions: ['products.attribute.view'], userTypes: ['internal'] },
   { path: '/products/specifications', permissions: ['products.specification.view'], userTypes: ['internal'] },

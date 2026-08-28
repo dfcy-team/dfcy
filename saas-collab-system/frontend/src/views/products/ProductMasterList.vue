@@ -100,6 +100,7 @@
           border
           class="product-master-table"
           :row-class-name="productRowClassName"
+          :row-style="productRowStyle"
           empty-text="当前范围暂无商品主数据"
           @selection-change="selectedMasterRows = $event"
         >
@@ -384,7 +385,7 @@ import {
 import { useAuthStore } from '../../stores/auth';
 import { apiState, collectionRows, collectionTotal, detailData, stateTagType } from '../../utils/businessResponse';
 import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
-import { buildCategoryTree, categoryRowClass } from '../../utils/productCategoryPresentation';
+import { buildCategoryTree, categoryRowClass, categoryRowStyle } from '../../utils/productCategoryPresentation';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
@@ -435,6 +436,7 @@ const moveCategoryNode = ref(null);
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
+const productRowStyle = ({ row }) => categoryRowStyle(row, categories.value);
 
 const activeColors = computed(() => colors.value.filter((item) => item?.is_active !== false));
 const skuCategory = computed(() => {
@@ -974,6 +976,10 @@ onMounted(async () => {
 
 .product-master-table :deep(.product-category-tone-4 > td) {
   background-color: #f0fdfa !important;
+}
+
+.product-master-table :deep(.product-category-custom > td) {
+  background-color: var(--product-category-row-background) !important;
 }
 
 .form-control {

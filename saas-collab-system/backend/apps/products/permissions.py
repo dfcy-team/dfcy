@@ -82,6 +82,11 @@ class IsProductCategoryReadOrManage(ProductBusinessPermission):
     write_permission_code = "products.category.manage"
 
 
+class IsMasterdataSettingsReadOrManage(ProductBusinessPermission):
+    read_permission_code = "masterdata.settings.view"
+    write_permission_code = "masterdata.settings.manage"
+
+
 class IsProductColorReadOrManage(ProductBusinessPermission):
     read_permission_code = "products.color.view"
     write_permission_code = "products.color.manage"

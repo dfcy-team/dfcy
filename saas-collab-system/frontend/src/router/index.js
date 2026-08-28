@@ -29,6 +29,7 @@ const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.
 const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
 const PlatformProductDetailList = () => import('../views/masterdata/PlatformProductDetailList.vue');
 const ProductDictionarySettings = () => import('../views/products/ProductDictionarySettings.vue');
+const FoundationSettings = () => import('../views/masterdata/FoundationSettings.vue');
 const ProductBundleManager = () => import('../views/products/ProductBundleManager.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
 const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
@@ -267,6 +268,7 @@ const routes = [
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
+      { path: 'master-data/settings', component: FoundationSettings },
       { path: 'influencers', component: InfluencerList },
       { path: 'influencers/outreach-tasks', component: OutreachTaskList },
       { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },

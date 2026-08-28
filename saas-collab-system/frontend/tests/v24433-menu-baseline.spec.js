@@ -4,7 +4,7 @@ import path from 'node:path';
 import { flattenMenuItems, menuItems } from '../src/router/menu';
 
 describe('V2.44.33 menu baseline', () => {
-  it('keeps the baseline top-level structure and only adds Developer B BD performance', () => {
+  it('keeps the baseline top-level structure and appends the foundation settings entry', () => {
     expect(menuItems.map((item) => item.label)).toEqual([
       '工作台', '产品开发', '全球刊登', '经营分析', '经营决策', '销售管理', '达人管理',
       '流程协同', '业务协同', 'RPA协同', 'API数据接入', '财务中心', '报表中心', '基础档案',
@@ -20,7 +20,7 @@ describe('V2.44.33 menu baseline', () => {
     expect(influencers.children.map((item) => item.label)).toEqual([
       '达人档案', '建联任务', '送样履约', 'BD绩效'
     ]);
-    expect(flattenMenuItems(menuItems)).toHaveLength(99);
+    expect(flattenMenuItems(menuItems)).toHaveLength(100);
   });
 
   it('keeps the V2.44.33 dark desktop and mobile navigation palette', () => {

@@ -1,3 +1,5 @@
+import re
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -19,6 +21,7 @@ class ProductCategory(models.Model):
     english_name = models.CharField(max_length=160, blank=True)
     platform_category_id = models.CharField(max_length=80, blank=True)
     spec_dimensions = models.JSONField(default=list, blank=True)
+    row_background_color = models.CharField(max_length=7, blank=True, default="")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -42,6 +45,11 @@ class ProductCategory(models.Model):
                 raise ValidationError({"parent": "Parent category must belong to the same tenant."})
         if self.level == self.Level.L1 and self.spec_dimensions:
             raise ValidationError({"spec_dimensions": "Specification dimensions can only be configured on L2 or L3 product categories."})
+        if self.row_background_color:
+            if self.level != self.Level.L2:
+                raise ValidationError({"row_background_color": "Row background color can only be configured on an L2 product category."})
+            if not re.fullmatch(r"#[0-9A-Fa-f]{6}", self.row_background_color):
+                raise ValidationError({"row_background_color": "Row background color must use #RRGGBB format."})
         duplicate = ProductCategory.objects.filter(tenant_id=self.tenant_id, parent_id=self.parent_id, code=self.code)
         if self.pk:
             duplicate = duplicate.exclude(pk=self.pk)

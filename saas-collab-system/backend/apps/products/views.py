@@ -58,6 +58,7 @@ from .permissions import (
     IsProductCodeFreezer,
     IsProductColorReadOrManage,
     IsProductMasterReadOrManage,
+    IsMasterdataSettingsReadOrManage,
     IsProductResearchReadOrManage,
     IsProductStatusConfirmer,
     IsProductStatusEvaluator,
@@ -66,6 +67,7 @@ from .permissions import (
 from .serializers import (
     ProductBundleComponentSerializer,
     ProductCategorySerializer,
+    ProductCategoryBackgroundColorBulkSerializer,
     ProductColorSerializer,
     ProductAttributeSerializer,
     ProductLegacyItemSerializer,
@@ -459,6 +461,35 @@ def product_category_detail(request, pk):
     serializer.is_valid(raise_exception=True)
     item = serializer.save()
     return success_response(ProductCategorySerializer(item).data)
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsMasterdataSettingsReadOrManage])
+def product_category_background_colors(request):
+    queryset = ProductCategory.objects.filter(
+        tenant=request.user.tenant,
+        level=ProductCategory.Level.L2,
+    ).order_by("code", "id")
+    if request.method == "GET":
+        return success_response(ProductCategorySerializer(queryset, many=True).data)
+
+    serializer = ProductCategoryBackgroundColorBulkSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    items = serializer.validated_data["items"]
+    categories = {item.id: item for item in queryset.filter(id__in=[row["category_id"] for row in items])}
+    if len(categories) != len(items):
+        return error_response(
+            ErrorCode.VALIDATION_ERROR,
+            "One or more L2 product categories do not belong to the current tenant.",
+            status=400,
+        )
+
+    with transaction.atomic():
+        for row in items:
+            category = categories[row["category_id"]]
+            category.row_background_color = row["row_background_color"].upper()
+            category.save(update_fields=["row_background_color", "updated_at"])
+    return success_response(ProductCategorySerializer(queryset, many=True).data)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
