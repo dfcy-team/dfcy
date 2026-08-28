@@ -1,10 +1,12 @@
 {
   "schema_version": 1,
   "release_version": "2.44.48",
-  "status": "candidate_verified_not_deployed",
+  "status": "deployed_server_verified",
   "registered_at": "2026-08-28",
+  "deployed_at": "2026-08-28T23:52:57+08:00",
   "parent_release": "2.44.47",
   "source_base_commit": "d4d62aa72edd3323e55758060a6dee656fef5651",
+  "image_source_commit": "78ac6ce1d64f1715663b754a4c4d049e2fc1f9a9",
   "scope": "add tenant-scoped foundation settings and configurable L2 product category row background colors",
   "menu_change_scope": "append /master-data/settings as the final child of 基础档案 only",
   "top_level_menu_count": 16,
@@ -16,6 +18,14 @@
   "permission_catalog_sha256": "f762f9253152cc4611524cc757f914dc6a995efdb3a2b6011fb03a9186adcc19",
   "target_backend_image": "saas-collab-backend:v2.44.48",
   "target_frontend_image": "saas-collab-frontend:v2.44.48",
+  "deployed_backend_image_id": "sha256:7aa31bfe65945e5442aebd99b83eaa806a8c9f00e34685a3047483f25cf6bbbd",
+  "deployed_frontend_image_id": "sha256:9a1e8815d0bcdfb15c9704963631845a35e74c6e768bcc6571d523aad1bf1cad",
+  "deployment_evidence_directory": "/home/dfcy01/releases/system-v2.44.48-build-20260828",
+  "pre_deploy_backup": {
+    "path": "/home/dfcy01/releases/system-v2.44.48-build-20260828/pre-deploy-v2.44.48.sql.gz",
+    "size_bytes": 5529602,
+    "sha256": "163be18b5e1066d7e81072832ce1071101905021fbd638102e6b22879be838e8"
+  },
   "database_migration_required": true,
   "database_migrations": [
     "products.0014_productcategory_row_background_color",
@@ -48,8 +58,19 @@
     "navigation_css": "pass; MainLayout.vue unchanged from v2.44.47",
     "permission_boundary": "pass; category CRUD cannot modify the setting and the dedicated endpoint requires settings permissions",
     "tenant_isolation": "pass; covered by endpoint tests",
-    "deployment_performed": false
+    "deployment_performed": true,
+    "server_migrations": "pass; products.0014 and permissions.0033 applied",
+    "tenant1_counts": "pass; categories 68, SPUs 396, SKUs 6604 unchanged",
+    "server_pages": "pass; 6 target routes returned HTTP 200",
+    "server_api_auth": "pass; unauthenticated settings endpoint returned HTTP 401",
+    "server_assets": "pass; menu labels, new settings assets and dark navigation CSS present",
+    "server_logs": "pass; no critical errors in backend, frontend, celery or celery-beat"
   },
+  "corrective_actions": [
+    "A pre-existing pending purchasing.0005 migration was initially applied by the generic migrate command.",
+    "The affected table contained zero rows and the migration was reversed to purchasing.0004 before final validation.",
+    "The release script now targets only permissions.0033 and products.0014 and waits for API readiness."
+  ],
   "rollback": {
     "application_release": "2.44.47",
     "database_restore_required_after_migration": false,
