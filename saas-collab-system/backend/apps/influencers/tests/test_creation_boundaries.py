@@ -177,17 +177,16 @@ def test_tiktok_handle_save_normalizes_the_business_field():
     assert influencer.handle == "Visible.Account"
 
 
-def test_tiktok_handle_normalization_is_strict_and_rejects_fullwidth_aliases():
+def test_tiktok_handle_normalization_canonicalizes_fullwidth_aliases():
     _, _, _, influencer = _records("strict-canonical-handle")
 
     assert normalize_tiktok_username(" @MHAINE_94 ") == "mhaine_94"
-    assert normalize_tiktok_username("＠ＭＨＡＩＮＥ＿９４") == "＠ｍｈａｉｎｅ＿９４"
+    assert normalize_tiktok_username("＠ＭＨＡＩＮＥ＿９４") == "mhaine_94"
 
     influencer.handle = "＠ＭＨＡＩＮＥ＿９４"
-    with pytest.raises(DjangoValidationError, match="TikTok username"):
-        influencer.save(update_fields=["handle"])
+    influencer.save(update_fields=["handle"])
     influencer.refresh_from_db()
-    assert influencer.handle == ""
+    assert influencer.handle == "mhaine_94"
 
 
 def test_switching_to_tiktok_validates_an_existing_handle():
@@ -368,7 +367,7 @@ def test_handle_identity_is_tenant_scoped_and_empty_handle_has_no_shared_identit
 
 
 def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
-    tenant, user, _, first = _records("identity-edit-lock-order")
+    tenant, user, store, first = _records("identity-edit-lock-order")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.manage")
     first.handle = "shared.creator"
@@ -386,6 +385,33 @@ def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
         name="Prospective duplicate",
         platform="TikTok",
         handle="changed.creator",
+    )
+    fulfillment = SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="identity-edit-lock-order-sample",
+        request_key="identity-edit-lock-order-sample-request",
+        request_hash="identity-edit-lock-order-sample-hash",
+        link_type="YYJL",
+        influencer=first,
+        store=store,
+        owner=user,
+    )
+    snapshot = BdSampleAttributionSnapshot.objects.create(
+        tenant=tenant,
+        fulfillment=fulfillment,
+        owner=user,
+        influencer=first,
+        store=store,
+        creator_username="shared.creator",
+        shop_abbr=store.code,
+        site="PH",
+        product_id="identity-edit-product",
+        product_name="Identity edit product",
+        sku_id="identity-edit-sku",
+        sampled_at=timezone.now(),
+        sample_status=SampleFulfillment.Status.PENDING,
+        currency="PHP",
+        pricing_status="pending",
     )
     observed_orders = []
     original_lock = influencer_views.lock_influencer_identity_change
@@ -414,8 +440,15 @@ def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
 
     assert response.status_code == 200, response.data
     assert observed_orders == [[first.pk, selected.pk, prospective.pk]]
+    first.refresh_from_db()
     selected.refresh_from_db()
+    prospective.refresh_from_db()
+    snapshot.refresh_from_db()
+    assert first.handle == "changed.creator"
     assert selected.handle == "changed.creator"
+    assert prospective.handle == "changed.creator"
+    assert snapshot.creator_username == "changed.creator"
+    assert first.name != selected.name
 
 
 def test_identity_edit_cannot_join_blacklisted_handle_group():
@@ -1460,7 +1493,7 @@ def test_canonical_handle_migration_does_not_guess_identity_from_code_or_name():
     assert snapshot.creator_username == ""
 
 
-def test_canonical_handle_migration_clears_fullwidth_handle_and_snapshot():
+def test_canonical_handle_migration_normalizes_fullwidth_handle_and_snapshot():
     tenant, user, store, influencer = _records("canonical-migration-invalid")
     table = connection.ops.quote_name(Influencer._meta.db_table)
     with connection.cursor() as cursor:
@@ -1506,8 +1539,8 @@ def test_canonical_handle_migration_clears_fullwidth_handle_and_snapshot():
 
     influencer.refresh_from_db()
     snapshot.refresh_from_db()
-    assert influencer.handle == ""
-    assert snapshot.creator_username == ""
+    assert influencer.handle == "mhaine_94"
+    assert snapshot.creator_username == "mhaine_94"
 
 
 def test_fulfillment_account_resolve_rejects_display_name_as_tiktok_handle():
@@ -1587,7 +1620,7 @@ def test_account_resolve_prefers_blacklisted_duplicate_profile():
     assert response.json()["data"]["is_blacklisted"] is True
 
 
-def test_account_resolve_rejects_fullwidth_alias_without_nfkc_matching():
+def test_account_resolve_matches_fullwidth_alias_after_nfkc_normalization():
     tenant, user, _, _ = _records("resolve-legacy-handle")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
@@ -1608,7 +1641,8 @@ def test_account_resolve_rejects_fullwidth_alias_without_nfkc_matching():
         format="json",
     )
 
-    assert response.status_code == 400, response.data
+    assert response.status_code == 200, response.data
+    assert response.json()["data"]["handle"] == "legacy.creator"
     assert Influencer.objects.filter(tenant=tenant).count() == count_before
 
 

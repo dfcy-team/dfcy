@@ -1,5 +1,6 @@
 from decimal import Decimal
 import re
+import unicodedata
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -23,7 +24,8 @@ SUPPORTED_CURRENCY_CHOICES = (
 
 
 def normalize_tiktok_username(value):
-    return str(value or "").strip().lstrip("@").strip().lower()
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return normalized.strip().lstrip("@").strip().lower()
 
 
 TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._]{1,255}$")
@@ -89,6 +91,7 @@ class Influencer(models.Model):
         writes_identity = update_fields is None or bool({"handle", "platform"} & update_fields)
 
         def save_identity():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
             if self.pk:
                 persisted = type(self).objects.filter(pk=self.pk).values(
                     "tenant_id", "handle", "platform"
@@ -96,11 +99,30 @@ class Influencer(models.Model):
                 if persisted is not None and (
                     persisted["handle"] != self.handle or persisted["platform"] != self.platform
                 ):
-                    lock_influencer_identity_change(
+                    locked = lock_influencer_identity_change(
                         self,
                         platform=self.platform,
                         handle=self.handle,
                     )
+                    old_identity_ids = getattr(locked, "_old_identity_ids", (self.pk,))
+                    canonical_handle = normalize_tiktok_username(self.handle)
+                    if str(self.platform or "").lower() == "tiktok" and canonical_handle:
+                        models.QuerySet.update(
+                            type(self).objects.filter(
+                                tenant_id=self.tenant_id,
+                                pk__in=old_identity_ids,
+                            ).exclude(pk=self.pk),
+                            platform=self.platform,
+                            handle=canonical_handle,
+                        )
+                        models.QuerySet.update(
+                            BdSampleAttributionSnapshot.objects.filter(
+                                tenant_id=self.tenant_id,
+                                influencer_id__in=old_identity_ids,
+                            ),
+                            creator_username=canonical_handle,
+                            updated_at=timezone.now(),
+                        )
             if str(self.platform or "").lower() == "tiktok":
                 self.handle = normalize_tiktok_username(self.handle)
                 if self.handle and not is_valid_tiktok_username(self.handle):
@@ -229,17 +251,19 @@ def influencer_identity_queryset(
 
 def lock_influencer_identity_change(influencer, *, platform, handle):
     """Lock and validate the current and prospective TikTok identity groups."""
+    Tenant.objects.select_for_update().get(pk=influencer.tenant_id)
     persisted = Influencer.objects.filter(
         tenant_id=influencer.tenant_id,
         pk=influencer.pk,
     ).values("platform", "handle").first()
-    identity_ids = set(
+    old_identity_ids = set(
         influencer_identity_queryset(
             influencer,
             platform=persisted["platform"] if persisted else influencer.platform,
             handle=persisted["handle"] if persisted else influencer.handle,
         ).values_list("pk", flat=True)
     )
+    identity_ids = set(old_identity_ids)
     canonical_handle = normalize_tiktok_username(handle)
     if str(platform or "").lower() == "tiktok" and canonical_handle:
         identity_ids.update(
@@ -255,15 +279,36 @@ def lock_influencer_identity_change(influencer, *, platform, handle):
         .filter(tenant_id=influencer.tenant_id, pk__in=sorted(identity_ids))
         .order_by("pk")
     )
+    # Re-read after acquiring row locks. Influencer writes also lock the tenant,
+    # so the identity set is stable for the remainder of this transaction.
+    final_filter = Q(pk__in=identity_ids)
+    if str(platform or "").lower() == "tiktok" and canonical_handle:
+        final_filter |= Q(
+            platform__iexact="TikTok",
+            handle__iexact=canonical_handle,
+        )
+    final_ids = set(
+        Influencer.objects.filter(
+            tenant_id=influencer.tenant_id,
+        ).filter(final_filter).values_list("pk", flat=True)
+    )
+    if final_ids != identity_ids:
+        locked = list(
+            Influencer.objects.select_for_update()
+            .filter(tenant_id=influencer.tenant_id, pk__in=sorted(final_ids))
+            .order_by("pk")
+        )
     if InfluencerRestriction.objects.filter(
         tenant_id=influencer.tenant_id,
-        influencer_id__in=identity_ids,
+        influencer_id__in=final_ids,
         is_blacklisted=True,
     ).exists():
         raise ValidationError({
             "handle": "Blacklisted influencer identities cannot change handle or platform.",
         })
-    return next(item for item in locked if item.pk == influencer.pk)
+    selected = next(item for item in locked if item.pk == influencer.pk)
+    selected._old_identity_ids = tuple(sorted(old_identity_ids | {influencer.pk}))
+    return selected
 
 
 def influencer_has_active_restriction(

@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 from django.db import migrations, models
 
@@ -7,7 +8,8 @@ TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._]{1,255}$")
 
 
 def _normalize_tiktok_username(value):
-    return str(value or "").strip().lstrip("@").strip().lower()
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return normalized.strip().lstrip("@").strip().lower()
 
 
 def normalize_existing_tiktok_identities(apps, schema_editor):
@@ -16,18 +18,20 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
 
     for influencer in Influencer.objects.filter(platform__iexact="TikTok").iterator():
         normalized = _normalize_tiktok_username(influencer.handle)
-        canonical = normalized if TIKTOK_USERNAME_PATTERN.fullmatch(normalized) else ""
+        canonical = normalized if TIKTOK_USERNAME_PATTERN.fullmatch(normalized) else influencer.handle
         if canonical != influencer.handle:
             influencer.handle = canonical
             influencer.save(update_fields=["handle"])
 
     for snapshot in Snapshot.objects.select_related("influencer").iterator():
         influencer = snapshot.influencer
-        canonical = ""
+        canonical = snapshot.creator_username
         if influencer and str(influencer.platform or "").lower() == "tiktok":
             normalized = _normalize_tiktok_username(influencer.handle)
             if TIKTOK_USERNAME_PATTERN.fullmatch(normalized):
                 canonical = normalized
+            elif not str(influencer.handle or "").strip():
+                canonical = ""
         if canonical != snapshot.creator_username:
             snapshot.creator_username = canonical
             snapshot.save(update_fields=["creator_username"])
