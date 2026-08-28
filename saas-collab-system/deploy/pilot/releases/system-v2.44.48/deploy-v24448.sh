@@ -88,8 +88,11 @@ MYSQL_PWD="$db_password" mysqldump --no-tablespaces --single-transaction --quick
 gzip -t "$release_dir/pre-deploy-v2.44.48.sql.gz"
 sha256sum "$release_dir/pre-deploy-v2.44.48.sql.gz" > "$release_dir/pre-deploy-v2.44.48.sql.gz.sha256"
 
-"${compose[@]}" run --rm --no-deps --entrypoint python backend manage.py migrate --noinput \
-  | tee "$release_dir/production-migration.txt"
+: > "$release_dir/production-migration.txt"
+"${compose[@]}" run --rm --no-deps --entrypoint python backend manage.py migrate permissions 0033 --noinput \
+  | tee -a "$release_dir/production-migration.txt"
+"${compose[@]}" run --rm --no-deps --entrypoint python backend manage.py migrate products 0014 --noinput \
+  | tee -a "$release_dir/production-migration.txt"
 "${compose[@]}" up -d --no-deps backend celery celery-beat frontend
 
 for attempt in $(seq 1 45); do
@@ -100,6 +103,18 @@ for attempt in $(seq 1 45); do
   [[ "$backend_state" == running && "$celery_state" == running && "$celery_beat_state" == running && "$frontend_state" == running ]] && break
   sleep 2
 done
+
+api_ready=0
+for attempt in $(seq 1 45); do
+  settings_api=$(curl -ksS -o "$release_dir/unauth-settings-api.body" -w '%{http_code}' \
+    https://192.168.174.131:8443/api/internal/products/category-background-colors/ || true)
+  if [[ "$settings_api" == 401 ]]; then
+    api_ready=1
+    break
+  fi
+  sleep 2
+done
+test "$api_ready" = 1
 
 test "$(docker inspect application-backend-1 --format '{{.Config.Image}}')" = saas-collab-backend:v2.44.48
 test "$(docker inspect application-celery-1 --format '{{.Config.Image}}')" = saas-collab-backend:v2.44.48
@@ -145,8 +160,6 @@ for path in / /products/master /products/details /master-data/settings /system/r
   test "$code" = 200
 done
 
-settings_api=$(curl -ksS -o "$release_dir/unauth-settings-api.body" -w '%{http_code}' \
-  https://192.168.174.131:8443/api/internal/products/category-background-colors/)
 test "$settings_api" = 401
 printf 'GET /api/internal/products/category-background-colors/ %s\n' "$settings_api" > "$release_dir/unauth-api-status.txt"
 
