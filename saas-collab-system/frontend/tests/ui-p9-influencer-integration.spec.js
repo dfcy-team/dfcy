@@ -38,6 +38,7 @@ import {
 import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 import InfluencerResourceLibrary from '../src/views/influencers/InfluencerResourceLibrary.vue';
 import OutreachTaskList from '../src/views/influencers/OutreachTaskList.vue';
+import { creatorHandleFirst, creatorOptionLabel } from '../src/views/influencers/creatorLabel';
 import { applyStoreSelection } from '../src/views/influencers/outreachProductMatch';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
@@ -237,8 +238,9 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain("priority: 'normal'");
     expect(page).toContain('filterable');
     expect(page).toContain('influencerOptions');
-    for (const field of ['influencer_name', 'influencer_display_name', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
-    expect(page).not.toContain('influencer_handle');
+    for (const field of ['influencer_name', 'influencer_display_name', 'influencer_code', 'influencer_platform', 'influencer_handle']) expect(page).toContain(field);
+    expect(page).toContain('creatorHandleFirst');
+    expect(page).toContain('creatorOptionLabel');
     expect(page).toContain('sampleVisible');
     expect(page).toContain('createSampleFulfillment(payload, sampleRequestKey.value)');
     expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
@@ -303,12 +305,14 @@ describe('influencer integration workspace contracts', () => {
     expect(page).not.toContain('label="产品名称" required');
     expect(page).not.toContain('<b>{{ displayValue(row.product_name_snapshot) }}</b>');
     expect(page).toContain('inheritedTask.value.task_name || inheritedTask.value.external_product_id');
-    expect(page).toContain('价格未匹配');
+    expect(page).toContain('采购成本待匹配');
+    expect(page).not.toContain('价格未匹配');
     expect(page).toContain('statusLabel(FULFILLMENT_STATUS_LABELS');
-    for (const field of ['sales_amount', 'calculated_cost', 'pricing_status', 'price_match_status', 'cost_match_status']) expect(page).toContain(field);
-    expect(page).toContain('PRICING_STATUS_LABELS');
-    expect(page).toContain('displayAmount');
-    expect(page).toContain("value === null || value === undefined || value === ''");
+    for (const field of ['calculated_cost', 'cost_match_status', 'COST_MATCH_STATUS_LABELS', 'costMatchLabel']) expect(page).toContain(field);
+    for (const field of ['sales_amount', 'pricing_status', 'priced_at', 'unit_price', 'unit_cost', 'currency', 'price_match_status', 'price_source', 'price_snapshot_at']) expect(page).not.toContain(field);
+    expect(page).not.toContain('PRICING_STATUS_LABELS');
+    expect(page).not.toContain('displayAmount');
+    expect(page).toContain('fulfillment-note');
     expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
     expect(page).not.toContain('updateSampleFulfillmentStatus');
     expect(page).toContain('ElMessageBox.confirm');
@@ -332,6 +336,19 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('notes: form.notes');
     expect(page).not.toContain('sample_sent_date');
     expect(page).toContain('if (!r.success) return ElMessage.error');
+  });
+
+  it('keeps duplicate display names distinct with handle-first purpose-scoped labels', () => {
+    const first = { handle: 'alpha.creator', display_name: 'Same Name', platform: 'TikTok' };
+    const second = { handle: 'beta.creator', display_name: 'Same Name', platform: 'TikTok' };
+
+    expect(creatorHandleFirst(first)).toBe('alpha.creator');
+    expect(creatorHandleFirst(second)).toBe('beta.creator');
+    expect(creatorOptionLabel(first)).toBe('alpha.creator（Same Name · TikTok）');
+    expect(creatorOptionLabel(second)).toBe('beta.creator（Same Name · TikTok）');
+    expect(creatorOptionLabel(first)).not.toBe(creatorOptionLabel(second));
+    expect(read('src/views/influencers/OutreachTaskList.vue')).toContain('creatorHandleFirst');
+    expect(read('src/views/influencers/SampleFulfillmentList.vue')).toContain('creatorHandleFirst');
   });
 
   it('keeps task and task-sample dialogs open when the backdrop is clicked', () => {

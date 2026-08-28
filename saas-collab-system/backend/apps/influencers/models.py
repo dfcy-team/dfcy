@@ -52,7 +52,7 @@ class Influencer(models.Model):
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=120)
     platform = models.CharField(max_length=40)
-    handle = models.CharField(max_length=120, blank=True)
+    handle = models.CharField(max_length=255, blank=True, db_comment="TikTok用户名")
     category = models.CharField(max_length=80, blank=True)
     follower_count = models.PositiveBigIntegerField(default=0)
     contact_name = models.CharField(max_length=80, blank=True)
@@ -756,7 +756,7 @@ class BdSampleAttributionSnapshot(TenantValidatedModel):
         on_delete=models.PROTECT,
         related_name="bd_sample_attribution_snapshots",
     )
-    creator_username = models.CharField(max_length=160)
+    creator_username = models.CharField(max_length=255, blank=True)
     shop_abbr = models.CharField(max_length=80)
     site = models.CharField(max_length=32)
     product_id = models.CharField(max_length=160, blank=True)

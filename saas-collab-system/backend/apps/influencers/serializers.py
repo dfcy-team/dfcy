@@ -308,6 +308,7 @@ class OutreachTargetSerializer(serializers.ModelSerializer):
     influencer_code = serializers.CharField(source="influencer.code", read_only=True)
     influencer_name = serializers.CharField(source="influencer.name", read_only=True)
     influencer_display_name = serializers.SerializerMethodField()
+    influencer_handle = serializers.CharField(source="influencer.handle", read_only=True)
     influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
 
     def get_influencer_display_name(self, obj):
@@ -317,7 +318,7 @@ class OutreachTargetSerializer(serializers.ModelSerializer):
         model = OutreachTarget
         fields = (
             "id", "tenant_id", "task", "influencer", "influencer_code", "influencer_name",
-            "influencer_display_name",
+            "influencer_display_name", "influencer_handle",
             "influencer_platform", "first_linked_at", "outreach_result",
             "version", "notes", "is_deleted", "deleted_at", "created_at", "updated_at",
         )
@@ -338,14 +339,12 @@ class SampleItemSerializer(serializers.ModelSerializer):
         model = SampleItem
         fields = (
             "id", "sku", "external_product_id", "site_code", "requested_sku", "normalized_sku",
-            "matched_sku_code", "matched_legacy_sku_code", "product_name", "quantity", "unit_price", "unit_cost",
-            "sales_amount", "cost_amount", "currency", "price_match_status", "cost_match_status", "price_source",
-            "cost_source", "price_snapshot_at", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
+            "matched_sku_code", "matched_legacy_sku_code", "product_name", "quantity", "cost_amount",
+            "cost_match_status", "cost_source", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "normalized_sku", "matched_sku_code", "matched_legacy_sku_code", "unit_price", "unit_cost",
-            "sales_amount", "cost_amount", "currency", "price_match_status", "cost_match_status", "price_source",
-            "cost_source", "price_snapshot_at", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
+            "id", "normalized_sku", "matched_sku_code", "matched_legacy_sku_code", "cost_amount",
+            "cost_match_status", "cost_source", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
         )
 
     def validate_requested_sku(self, value):
@@ -380,6 +379,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     influencer_name = serializers.SerializerMethodField()
     influencer_display_name = serializers.SerializerMethodField()
     influencer_code = serializers.CharField(source="influencer.code", read_only=True)
+    influencer_handle = serializers.CharField(source="influencer.handle", read_only=True)
     influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
     owner_name = serializers.SerializerMethodField()
     deleted_by_name = serializers.SerializerMethodField()
@@ -455,17 +455,16 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         fields = (
             "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
             "outreach_target", "influencer", "influencer_name", "influencer_display_name", "influencer_code",
-            "influencer_platform", "store", "store_name", "owner", "owner_name",
+            "influencer_handle", "influencer_platform", "store", "store_name", "owner", "owner_name",
             "product_name_snapshot", "external_product_id", "sample_order_no",
             "link_type", "quick_tags", "sample_sent_at", "shipped_at", "video_deadline_at", "status", "source", "external_id", "version",
-            "notes", "finalized_at", "sku_quantity", "sales_amount", "calculated_cost", "pricing_status",
-            "priced_at", "is_deleted", "deleted_at", "deleted_by", "deleted_by_name", "video_match_count", "video_matches",
+            "notes", "finalized_at", "sku_quantity", "calculated_cost",
+            "is_deleted", "deleted_at", "deleted_by", "deleted_by_name", "video_match_count", "video_matches",
             "items", "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "tenant_id", "sample_sent_at", "shipped_at", "status",
-            "version", "finalized_at", "sku_quantity", "sales_amount", "calculated_cost", "pricing_status",
-            "priced_at", "video_deadline_at", "is_deleted", "deleted_at", "deleted_by", "deleted_by_name",
+            "version", "finalized_at", "sku_quantity", "calculated_cost", "video_deadline_at", "is_deleted", "deleted_at", "deleted_by", "deleted_by_name",
             "video_match_count", "video_matches", "created_at", "updated_at",
         )
 

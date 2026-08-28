@@ -6,13 +6,14 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.influencers.models import (
     Influencer,
+    InfluencerProfile,
     InfluencerRestrictEvent,
     InfluencerRestriction,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
 )
-from apps.influencers.serializers import SampleFulfillmentSerializer, OutreachTaskSerializer
+from apps.influencers.serializers import OutreachTargetSerializer, SampleFulfillmentSerializer, OutreachTaskSerializer
 from apps.influencers.services import create_outreach_task, create_sample_fulfillment
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
@@ -125,12 +126,19 @@ def test_outreach_task_can_use_manual_store_when_product_is_not_matched():
             "target_count": 10,
         }
     )
-
     assert serializer.is_valid(), serializer.errors
     task = create_outreach_task(user=user, validated_data=serializer.validated_data)
     assert task.store_id == store.pk
     assert task.external_product_id == "1737123802146506012"
     assert task.sku_prefix == ""
+
+
+def test_tiktok_handle_schema_is_the_canonical_non_nullable_identity_column():
+    field = Influencer._meta.get_field("handle")
+
+    assert field.max_length == 255
+    assert field.null is False
+    assert field.db_comment == "TikTok用户名"
 
 
 def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_target():
@@ -284,7 +292,7 @@ def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name()
 
     fulfillment, created = create_sample_fulfillment(
         user=user,
-        request_key="task-product-snapshot-key",
+        request_key="sample-product-snapshot-idempotency",
         validated_data={
             "fulfillment_no": "TASK-PRODUCT-SNAPSHOT",
             "outreach_task": task,
@@ -354,6 +362,9 @@ def test_existing_target_payload_remains_compatible():
         task=task,
         influencer=second_influencer,
     )
+    second_influencer.handle = "target.creator"
+    second_influencer.save(update_fields=["handle"])
+    assert OutreachTargetSerializer(target).data["influencer_handle"] == "target.creator"
 
     serializer = SampleFulfillmentSerializer(
         data={
@@ -389,6 +400,8 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     assert denied.status_code == 403
 
     _grant_all_scope(role, "influencers.fulfillment.manage")
+    influencer.handle = "option.creator"
+    influencer.save(update_fields=["handle"])
     task = _task(
         user,
         store,
@@ -407,6 +420,7 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     assert {item["id"] for item in payload["tasks"]} == {task.id}
     assert other_task.id not in {item["id"] for item in payload["tasks"]}
     assert {item["id"] for item in payload["influencers"]} == {influencer.id}
+    assert payload["influencers"][0]["handle"] == "option.creator"
     assert set(payload["tasks"][0]) == {
         "id",
         "task_no",
@@ -420,6 +434,17 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     }
     assert "notes" not in payload["tasks"][0]
     assert "external_id" not in payload["tasks"][0]
+
+    outreach_permission, _ = Permission.objects.get_or_create(
+        code="influencers.outreach.view",
+        defaults={"name": "influencers.outreach.view", "module": "influencers", "action": "view"},
+    )
+    role.permissions.add(outreach_permission)
+    outreach_response = client.get("/api/internal/influencers/outreach-task-options/")
+    assert outreach_response.status_code == 200
+    outreach_payload = outreach_response.json()["data"]
+    assert {item["id"] for item in outreach_payload["influencers"]} == {influencer.id}
+    assert outreach_payload["influencers"][0]["handle"] == "option.creator"
 
 
 def test_blacklist_cascade_requires_profile_and_fulfillment_manage_permissions():
@@ -546,22 +571,22 @@ def test_account_resolve_prefers_blacklisted_duplicate_profile():
     assert response.json()["data"]["is_blacklisted"] is True
 
 
-def test_account_resolve_reuses_normalized_legacy_name_and_does_not_bypass_blacklist():
-    tenant, user, _, _ = _records("resolve-legacy-name")
+def test_account_resolve_reuses_normalized_legacy_handle_and_does_not_bypass_blacklist():
+    tenant, user, _, _ = _records("resolve-legacy-handle")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
     clean = Influencer.objects.create(
         tenant=tenant,
         code="legacy-clean",
-        name="Legacy.Creator",
-        handle="",
+        name="Clean auxiliary name",
+        handle="legacy.creator",
         platform="tiktok",
     )
     blocked = Influencer.objects.create(
         tenant=tenant,
         code="legacy-blocked",
-        name="@LEGACY.CREATOR",
-        handle="",
+        name="Blocked auxiliary name",
+        handle="＠ＬＥＧＡＣＹ．ＣＲＥＡＴＯＲ",
         platform="TikTok",
     )
     InfluencerRestriction.objects.create(
@@ -628,16 +653,18 @@ def test_account_resolve_keeps_tenant_and_platform_scope():
 
 
 def test_account_resolve_prefers_normalized_handle_over_another_profile_code():
-    tenant, user, _, handle_match = _records("resolve-handle-priority")
+    tenant, user, _, code_match = _records("resolve-handle-priority")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
-    handle_match.handle = "mhaine_94"
-    handle_match.save(update_fields=["handle"])
-    Influencer.objects.create(
+    code_match.code = "mhaine_94"
+    code_match.name = "mhaine_94"
+    code_match.handle = "different.creator"
+    code_match.save(update_fields=["code", "name", "handle"])
+    handle_match = Influencer.objects.create(
         tenant=tenant,
-        code="mhaine_94",
-        name="Code collision",
-        handle="another.creator",
+        code="handle-priority-creator",
+        name="Handle match",
+        handle="mhaine_94",
         platform="tiktok",
     )
     client = APIClient()
@@ -652,3 +679,67 @@ def test_account_resolve_prefers_normalized_handle_over_another_profile_code():
     assert response.status_code == 200
     assert response.json()["data"]["id"] == handle_match.id
     assert response.json()["data"]["handle"] == "mhaine_94"
+
+
+def test_account_resolve_ignores_auxiliary_name_and_display_name():
+    tenant, user, _, _ = _records("resolve-auxiliary-name")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    legacy = Influencer.objects.create(
+        tenant=tenant,
+        code="auxiliary-name-creator",
+        name="Shedeserve",
+        handle="canonical.creator",
+        platform="TikTok",
+    )
+    InfluencerProfile.objects.create(
+        tenant=tenant,
+        influencer=legacy,
+        display_name="Shedeserve ✨",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "Shedeserve ✨"},
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    assert response.data["data"]["id"] != legacy.id
+    assert response.data["data"]["handle"] == "shedeserve ✨"
+
+
+def test_account_resolve_scans_legacy_candidates_beyond_the_old_fallback_bound():
+    tenant, user, _, _ = _records("resolve-legacy-overflow")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    for index in range(1001):
+        Influencer.objects.create(
+            tenant=tenant,
+            code=f"legacy-preceding-{index}",
+            name=f"Unrelated legacy creator {index}",
+            handle="",
+            platform="TikTok",
+        )
+    legacy = Influencer.objects.create(
+        tenant=tenant,
+        code="legacy-overflow-target",
+        name="Legacy display only",
+        handle="＠Ｌｅｇａｃｙ．Ｔａｒｇｅｔ",
+        platform="TikTok",
+    )
+    count_before = Influencer.objects.filter(tenant=tenant).count()
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "legacy.target"},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.data
+    assert response.data["data"]["id"] == legacy.id
+    assert Influencer.objects.filter(tenant=tenant).count() == count_before

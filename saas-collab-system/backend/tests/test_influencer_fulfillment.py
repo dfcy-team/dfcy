@@ -59,6 +59,7 @@ from apps.influencers.services import (
 from apps.influencers.attribution import (
     affiliate_order_source_row_key,
     build_bd_performance,
+    influencer_account,
     parse_decimal,
     refresh_order_attributions,
     rule_version_for,
@@ -66,6 +67,35 @@ from apps.influencers.attribution import (
 
 
 pytestmark = pytest.mark.django_db
+
+FULFILLMENT_FORBIDDEN_RESPONSE_FIELDS = {
+    "sales_amount",
+    "pricing_status",
+    "priced_at",
+    "unit_price",
+    "unit_cost",
+    "currency",
+    "price_match_status",
+    "price_source",
+    "price_snapshot_at",
+}
+
+
+def assert_cost_only_fulfillment_payload(payload):
+    def visit(value):
+        if isinstance(value, dict):
+            assert FULFILLMENT_FORBIDDEN_RESPONSE_FIELDS.isdisjoint(value)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    assert "calculated_cost" in payload
+    for item in payload.get("items", []):
+        assert "cost_amount" in item
+        assert "cost_match_status" in item
 
 
 def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
@@ -229,11 +259,11 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
         "code": "creator-active",
         "name": "Active Creator",
         "display_name": "Active Creator",
+        "handle": "active.creator",
         "platform": "tiktok",
         "status": "active",
         "is_blacklisted": False,
     }]
-    assert "handle" not in response.data["data"]["influencers"][0]
 
     invalid_priority = client.post("/api/internal/influencers/outreach-tasks/", {
         "task_no": "OPTIONS-BAD-PRIORITY",
@@ -492,6 +522,8 @@ def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
     tenant = Tenant.objects.create(name="Tenant", code="sample-idempotent")
     user, client = user_with_permissions(tenant, "sample-manager", "influencers.fulfillment.manage")
     store, influencer, task = base_records(tenant, user, "idem")
+    influencer.handle = "active.creator"
+    influencer.save(update_fields=["handle"])
     payload = {
         "fulfillment_no": "SAMPLE-1",
         "outreach_task": task.pk,
@@ -517,8 +549,25 @@ def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
     assert first.status_code == 201
     assert second.status_code == 200
     assert first.data["data"]["id"] == second.data["data"]["id"]
-    assert first.data["data"]["items"][0]["price_match_status"] == "not_imported"
+    assert first.data["data"]["influencer_handle"] == "active.creator"
+    assert_cost_only_fulfillment_payload(first.data["data"])
+    assert_cost_only_fulfillment_payload(second.data["data"])
     assert SampleFulfillment.objects.count() == 1
+
+    view_permission, _ = Permission.objects.get_or_create(
+        code="influencers.fulfillment.view",
+        defaults={"name": "influencers.fulfillment.view", "module": "influencers", "action": "view"},
+    )
+    user.user_roles.filter(role__permissions__code="influencers.fulfillment.manage").first().role.permissions.add(view_permission)
+    fulfillment_id = first.data["data"]["id"]
+    listed = client.get("/api/internal/influencers/sample-fulfillments/")
+    detailed = client.get(f"/api/internal/influencers/sample-fulfillments/{fulfillment_id}/")
+    assert listed.status_code == 200
+    assert detailed.status_code == 200
+    assert listed.data["data"]["results"][0]["influencer_handle"] == "active.creator"
+    assert detailed.data["data"]["influencer_handle"] == "active.creator"
+    assert_cost_only_fulfillment_payload(listed.data["data"]["results"][0])
+    assert_cost_only_fulfillment_payload(detailed.data["data"])
 
     conflicting_payload = {**payload, "fulfillment_no": "SAMPLE-OTHER"}
     conflict = client.post(
@@ -831,7 +880,7 @@ def test_blacklisted_influencer_cannot_receive_sample():
     assert SampleFulfillment.objects.filter(fulfillment_no="SAMPLE-BLOCKED").exists() is False
 
 
-def test_sample_price_match_is_scoped_to_store_and_site():
+def test_sample_price_match_is_internal_and_fulfillment_contract_is_cost_only():
     tenant = Tenant.objects.create(name="Tenant", code="sample-site-price")
     user, client = user_with_permissions(tenant, "site-price-manager", "influencers.fulfillment.manage")
     store, influencer, task = base_records(tenant, user, "site-price")
@@ -868,8 +917,10 @@ def test_sample_price_match_is_scoped_to_store_and_site():
     )
 
     assert response.status_code == 201
-    assert response.data["data"]["items"][0]["unit_price"] == "10.0000"
-    assert response.data["data"]["items"][0]["currency"] == "PHP"
+    assert_cost_only_fulfillment_payload(response.data["data"])
+    item = SampleItem.objects.get(fulfillment__fulfillment_no="SAMPLE-SITE")
+    assert item.unit_price == Decimal("10.0000")
+    assert item.currency == "PHP"
 
 
 def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():
@@ -1873,6 +1924,45 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.owner_id == user.pk
     assert attribution.order_id == order.order_id
     assert attribution.sku_id == order.sku_id
+
+
+def test_sample_attribution_uses_only_the_normalized_tiktok_handle():
+    tenant = Tenant.objects.create(name="Canonical handle tenant", code="canonical-handle-attribution")
+    user = CustomUser.objects.create_user(username="canonical-handle-owner", tenant=tenant)
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "canonical-handle")
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="canonical-handle-creator",
+        name="Shedeserve ✨",
+        platform="tiktok",
+        handle="＠Ｃａｎｏｎｉｃａｌ．Ｃｒｅａｔｏｒ",
+    )
+
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="canonical-handle-sample",
+        validated_data={
+            "fulfillment_no": "CANONICAL-HANDLE-SAMPLE",
+            "link_type": "YYJL",
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+            "external_product_id": "P-CANONICAL-HANDLE",
+        },
+        item_payloads=[],
+    )
+
+    snapshot = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
+    assert snapshot.creator_username == "canonical.creator"
+    name_only = Influencer(
+        tenant=tenant,
+        code="name-only-attribution",
+        name="canonical.creator",
+        platform="tiktok",
+        handle="",
+    )
+    assert influencer_account(name_only) == ""
 
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():

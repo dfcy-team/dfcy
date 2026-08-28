@@ -339,7 +339,7 @@
               <article v-for="sample in detailSamples" :key="sample.id" class="sample-card">
                 <div><b>{{ displayValue(sample.fulfillment_no) }}</b><el-tag size="small">{{ statusLabel(FULFILLMENT_STATUS_LABELS, sample.status) }}</el-tag></div>
                 <p>样品订单：{{ displayValue(sample.sample_order_no) }}</p>
-                <p>达人：{{ displayValue(sampleInfluencerName(sample)) }}　成本：{{ displayAmount(sample.calculated_cost, sample) }}　视频匹配：{{ sample.video_match_count || 0 }}</p>
+                <p>达人：{{ displayValue(sampleInfluencerName(sample)) }}　成本：{{ displayValue(sample.calculated_cost) }}　视频匹配：{{ sample.video_match_count || 0 }}</p>
                 <small>创建时间：{{ displayValue(sample.created_at) }}</small>
               </article>
             </div>
@@ -383,6 +383,7 @@ import {
   updateOutreachTask
 } from '../../api/influencers';
 import { applyStoreSelection } from './outreachProductMatch';
+import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
@@ -455,7 +456,7 @@ const sampleForm = reactive({
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-const sampleInfluencerName = (row) => row?.influencer_display_name || row?.influencer_name || row?.influencer;
+const sampleInfluencerName = (row) => creatorHandleFirst(row);
 
 const filterStoreOptions = computed(() => {
   const optionsById = new Map(storeOptions.value.map((store) => [store.id, store]));
@@ -820,24 +821,17 @@ async function refreshActiveTask() {
 }
 
 function influencerOptionLabel(influencer) {
-  const primary = influencer.display_name || influencer.name || influencer.code || `达人 ${influencer.id}`;
-  const account = [influencer.platform].filter(Boolean).join(' · ');
-  return account ? `${primary}（${account}）` : primary;
+  return creatorOptionLabel(influencer);
 }
 
 function targetDisplayName(row) {
-  return row.influencer_display_name || row.influencer_name || row.influencer_code || (row.influencer ? `达人 ${row.influencer}` : '—');
+  return creatorHandleFirst(row);
 }
 
 function targetAccount(row) {
-  const account = [row.influencer_platform, row.influencer_code].filter(Boolean).join(' · ');
+  const displayName = creatorDisplayName(row);
+  const account = [displayName !== '—' ? displayName : '', row.influencer_platform].filter(Boolean).join(' · ');
   return account || (row.influencer ? `ID ${row.influencer}` : '—');
-}
-
-function displayAmount(value, row) {
-  if (!hasValue(value)) return '—';
-  const currency = row?.items?.find((item) => item.currency)?.currency;
-  return currency ? `${value} ${currency}` : String(value);
 }
 
 function ensureSampleInfluencer(task, target) {
@@ -848,6 +842,7 @@ function ensureSampleInfluencer(task, target) {
       id: influencerId,
       name: target?.influencer_name || task?.influencer_name || `达人 ${influencerId}`,
       display_name: target?.influencer_display_name || task?.influencer_display_name || target?.influencer_name || task?.influencer_name || '',
+      handle: target?.influencer_handle || task?.influencer_handle || '',
       code: target?.influencer_code || task?.influencer_code || '',
       platform: target?.influencer_platform || task?.influencer_platform || ''
     }, ...influencerOptions.value];
@@ -947,7 +942,9 @@ async function searchTargetInfluencers(search) {
 async function resolveSelectedTargetInfluencer(id) {
   const selected = influencerOptions.value.find((item) => String(item.id) === String(id));
   if (!selected) return;
-  const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
+  const account = String(selected.handle || '').trim().replace(/^@+/, '');
+  if (!account) return;
+  const response = await fetchInfluencerResolve(account);
   if (!response.success) return;
   const resolved = (response.data?.candidates || response.data?.results || []).find((item) => String(item.id) === String(id));
   if (resolved) influencerOptions.value = influencerOptions.value.map((item) => String(item.id) === String(id) ? resolved : item);

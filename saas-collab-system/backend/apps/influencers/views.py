@@ -1,5 +1,6 @@
 import csv
 import hashlib
+from itertools import chain
 from io import StringIO
 from datetime import timedelta
 
@@ -90,7 +91,7 @@ BLACKLIST_PERMISSION_CODES = (
     "influencers.fulfillment.manage",
 )
 INFLUENCER_OPTION_OVERFETCH_FACTOR = 3
-INFLUENCER_RESOLVE_FALLBACK_LIMIT = 1000
+INFLUENCER_RESOLVE_SCAN_CHUNK_SIZE = 256
 
 
 def _require_resolve_read_scope(user):
@@ -151,7 +152,7 @@ def _influencer_candidates(queryset, *, limit, include_handle=False):
     db_limit = max(1, int(limit)) * INFLUENCER_OPTION_OVERFETCH_FACTOR
     for influencer in queryset.select_related("profile").order_by("-is_blacklisted", "id")[:db_limit]:
         handle = str(influencer.handle or "").strip().lstrip("@").strip()
-        key = normalize_tiktok_username(handle or influencer.name or influencer.code)
+        key = normalize_tiktok_username(handle) or f"id:{influencer.pk}"
         if key in seen:
             continue
         seen.add(key)
@@ -178,25 +179,32 @@ def _resolve_existing_influencer(*, tenant, account, blacklist_subquery):
         .annotate(is_blacklisted=Exists(blacklist_subquery))
         .order_by("-is_blacklisted", "id")
     )
-    account_variants = (account, f"@{account}")
-    exact_query = Q()
-    for field_name in ("handle", "name", "code"):
-        for variant in account_variants:
-            exact_query |= Q(**{f"{field_name}__iexact": variant})
+    exact_query = Q(handle__iexact=account) | Q(handle__iexact=f"@{account}")
 
-    candidates = list(queryset.filter(exact_query)[:INFLUENCER_RESOLVE_FALLBACK_LIMIT])
-    if not candidates:
-        # NFKC and surrounding whitespace cannot be expressed consistently across
-        # the supported databases, so use a bounded Python normalization fallback.
-        candidates = list(queryset[:INFLUENCER_RESOLVE_FALLBACK_LIMIT])
+    exact_candidates = list(queryset.filter(exact_query))
+    exact_ids = {candidate.pk for candidate in exact_candidates}
+    remaining_queryset = queryset.exclude(pk__in=exact_ids) if exact_ids else queryset
+    candidates = chain(
+        exact_candidates,
+        remaining_queryset.iterator(
+            chunk_size=INFLUENCER_RESOLVE_SCAN_CHUNK_SIZE,
+        ),
+    )
+    matches = []
     for candidate in candidates:
-        normalized_values = {
-            normalize_tiktok_username(getattr(candidate, field_name, ""))
-            for field_name in ("handle", "name", "code")
-        }
-        if account in normalized_values:
-            return candidate
-    return None
+        raw_handle = str(candidate.handle or "").strip()
+        candidate_handle = raw_handle.lstrip("@").strip()
+        if normalize_tiktok_username(raw_handle) != account:
+            continue
+        matches.append(
+            (
+                0 if candidate.is_blacklisted else 1,
+                0 if candidate_handle.casefold() == account else 1,
+                candidate.pk,
+                candidate,
+            )
+        )
+    return min(matches, key=lambda match: match[:3])[3] if matches else None
 
 
 class InfluencerCollectionView(APIView):
@@ -443,11 +451,7 @@ class InfluencerResolveView(APIView):
             status=Influencer.Status.ACTIVE,
         ).annotate(is_blacklisted=Exists(blacklist_subquery))
         if query:
-            queryset = queryset.filter(
-                Q(handle__icontains=query)
-                | Q(code__icontains=query)
-                | Q(name__icontains=query)
-            )
+            queryset = queryset.filter(handle__icontains=query)
         rows = _influencer_candidates(queryset, limit=50, include_handle=True)
         return success_response({"query": query, "candidates": rows, "results": rows})
 
@@ -458,8 +462,8 @@ class InfluencerResolveView(APIView):
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )
-        if not account or len(account) > 120:
-            raise ValidationError({"handle": "TikTok account must be 1-120 characters."})
+        if not account or len(account) > 255:
+            raise ValidationError({"handle": "TikTok account must be 1-255 characters."})
 
         blacklist_subquery = InfluencerRestriction.objects.filter(
             tenant=request.user.tenant,
@@ -493,12 +497,9 @@ class InfluencerResolveView(APIView):
                         )
                 except IntegrityError:
                     continue
-                candidate_values = {
-                    normalize_tiktok_username(getattr(candidate, field_name, ""))
-                    for field_name in ("handle", "name", "code")
-                }
+                candidate_values = normalize_tiktok_username(candidate.handle)
                 if candidate_created or (
-                    candidate.platform.casefold() == "tiktok" and account in candidate_values
+                    candidate.platform.casefold() == "tiktok" and candidate_values == account
                 ):
                     influencer, created = candidate, candidate_created
                     break
@@ -656,7 +657,7 @@ class OutreachTaskOptionsView(APIView):
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
             ],
-            "influencers": _influencer_candidates(influencers, limit=500),
+            "influencers": _influencer_candidates(influencers, limit=500, include_handle=True),
         })
 
 
@@ -677,11 +678,7 @@ class SampleFulfillmentOptionsView(APIView):
             status=Influencer.Status.ACTIVE,
         ).annotate(is_blacklisted=Exists(blacklist_subquery))
         if search:
-            influencers = influencers.filter(
-                Q(code__icontains=search)
-                | Q(name__icontains=search)
-                | Q(handle__icontains=search)
-            )
+            influencers = influencers.filter(handle__icontains=search)
         tasks = OutreachTask.objects.filter(
             tenant=request.user.tenant,
             is_deleted=False,
@@ -702,7 +699,7 @@ class SampleFulfillmentOptionsView(APIView):
                 }
                 for task in tasks
             ],
-            "influencers": _influencer_candidates(influencers, limit=100),
+            "influencers": _influencer_candidates(influencers, limit=100, include_handle=True),
         })
 
 
