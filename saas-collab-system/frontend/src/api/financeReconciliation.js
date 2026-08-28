@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { createIdempotencyKey, requestWithMockFallback } from './request';
 import {
   mockBankReceipts,
   mockReconciliationExceptions,
@@ -8,53 +8,65 @@ import {
   mockWithdrawals
 } from '../mock/financeReconciliation';
 
-export const fetchPlatformStatements = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/finance/statements/' }, mockStatements, 'finance.statements');
+export const fetchPlatformStatements = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/finance/statements/', params }, mockStatements, 'finance.statements');
 
-export const fetchWithdrawalRecords = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/finance/withdrawals/' }, mockWithdrawals, 'finance.withdrawals');
+export const fetchWithdrawalRecords = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/finance/withdrawals/', params }, mockWithdrawals, 'finance.withdrawals');
 
-export const fetchBankReceipts = () =>
-  requestWithMockFallback({ method: 'get', url: '/api/finance/bank-receipts/' }, mockBankReceipts, 'finance.bank_receipts');
+export const fetchBankReceipts = (params = {}) =>
+  requestWithMockFallback({ method: 'get', url: '/api/finance/bank-receipts/', params }, mockBankReceipts, 'finance.bank_receipts');
 
-export const fetchReconciliationMatches = () =>
+export const fetchReconciliationMatches = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/finance/reconciliation/matches/' },
+    { method: 'get', url: '/api/finance/reconciliation/matches/', params },
     mockReconciliationMatches,
     'finance.reconciliation.matches'
   );
 
 export const fetchReconciliationMatchDetail = (id = 1) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/finance/reconciliation/matches/', params: { id } },
+    { method: 'get', url: `/api/finance/reconciliation/matches/${id}/` },
     mockReconciliationMatchDetail,
     'finance.reconciliation.matches.detail'
   );
 
-export const fetchReconciliationExceptions = () =>
+export const fetchReconciliationExceptions = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/finance/reconciliation/exceptions/' },
+    { method: 'get', url: '/api/finance/reconciliation/exceptions/', params },
     mockReconciliationExceptions,
     'finance.reconciliation.exceptions'
   );
 
-export const runReconciliationMock = () =>
+export const runReconciliationMock = (payload = { platform: 'mock', currency: 'USD' }) =>
   requestWithMockFallback(
-    { method: 'post', url: '/api/finance/reconciliation/run-mock/' },
+    {
+      method: 'post',
+      url: '/api/finance/reconciliation/run-mock/',
+      data: payload,
+      headers: { 'Idempotency-Key': createIdempotencyKey('finance-reconcile') }
+    },
     mockReconciliationMatchDetail,
     'finance.reconciliation.run_mock'
   );
 
-export const confirmReconciliationMatch = (id = 1) =>
+export const confirmReconciliationMatch = (id = 1, payload = {}) =>
   requestWithMockFallback(
-    { method: 'post', url: `/api/finance/reconciliation/matches/${id}/confirm/` },
+    { method: 'post', url: `/api/finance/reconciliation/matches/${id}/confirm/`, data: payload },
     mockReconciliationMatchDetail,
     'finance.reconciliation.matches.confirm'
   );
 
-export const rejectReconciliationMatch = (id = 1) =>
+export const rejectReconciliationMatch = (id = 1, payload = {}) =>
   requestWithMockFallback(
-    { method: 'post', url: `/api/finance/reconciliation/matches/${id}/reject/` },
+    { method: 'post', url: `/api/finance/reconciliation/matches/${id}/reject/`, data: payload },
     mockReconciliationMatchDetail,
     'finance.reconciliation.matches.reject'
+  );
+
+export const resolveReconciliationException = (id, payload) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/finance/reconciliation/exceptions/${id}/resolve/`, data: payload },
+    mockReconciliationExceptions,
+    'finance.reconciliation.exceptions.resolve'
   );

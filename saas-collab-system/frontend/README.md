@@ -1,5 +1,13 @@
 # frontend
 
+## 销售库存财务对账模块
+
+- 销售总览、销售分析和库存分析复用 `/api/internal/analytics/*`；库存预警与补货建议分别使用 `/api/internal/alerts/inventory/*` 和 `/api/internal/replenishment/recommendations/*`。
+- 财务页面只调用 `/api/finance/*`，集合统一解析 `count/next/previous/results`，并展示 loading、empty、error、forbidden 和 degraded 状态。
+- 对账 `run-mock` 携带非敏感 `Idempotency-Key`；确认/拒绝使用 `finance.reconcile`，异常处理使用独立 `finance.exception.handle`。前端权限仅改善交互，最终授权和 `data_scope` 以后端为准。
+- 银行账号只展示掩码。页面不连接真实平台、银行或支付系统，不执行付款、转账、提现，也不会从补货建议自动创建采购订单。
+- `VITE_USE_MOCK=true` 使用合成 Mock；`false` 才请求 `VITE_API_BASE_URL`。Local Sandbox JWT 复验完成前，总接口映射保持 `pending`。
+
 ## Phase 3 analytics and decision pages
 
 - Added business overview, sales and inventory analytics, inventory alerts, replenishment suggestions, lifecycle reviews, business alerts, configuration governance, read-only finance analytics, and report export audit guidance.

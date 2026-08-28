@@ -174,6 +174,7 @@ def test_inventory_alert_api_tenant_data_scope_and_action_permissions():
         DataScope.ScopeType.CUSTOM,
         {"sku_ids": [sku.id], "warehouse_codes": ["DEMO-WH"]},
     )
+    grant(viewer, "analytics.view")
     grant(
         evaluator,
         "alerts.evaluate",

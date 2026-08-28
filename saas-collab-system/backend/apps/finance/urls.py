@@ -9,7 +9,9 @@ from .views import (
     import_demo_withdrawal_view,
     reconciliation_exception_collection,
     reconciliation_match_collection,
+    reconciliation_match_detail,
     reject_reconciliation_match,
+    resolve_reconciliation_exception,
     run_mock_reconciliation_view,
     statement_collection,
     withdrawal_collection,
@@ -31,6 +33,11 @@ urlpatterns = [
     path("bank-receipts/", bank_receipt_collection, name="finance-bank-receipt-collection"),
     path("bank-receipts/import-demo/", import_demo_bank_receipt_view, name="finance-bank-receipt-import-demo"),
     path("reconciliation/matches/", reconciliation_match_collection, name="finance-reconciliation-match-collection"),
+    path(
+        "reconciliation/matches/<int:pk>/",
+        reconciliation_match_detail,
+        name="finance-reconciliation-match-detail",
+    ),
     path("reconciliation/run-mock/", run_mock_reconciliation_view, name="finance-reconciliation-run-mock"),
     path(
         "reconciliation/matches/<int:pk>/confirm/",
@@ -46,5 +53,10 @@ urlpatterns = [
         "reconciliation/exceptions/",
         reconciliation_exception_collection,
         name="finance-reconciliation-exception-collection",
+    ),
+    path(
+        "reconciliation/exceptions/<int:pk>/resolve/",
+        resolve_reconciliation_exception,
+        name="finance-reconciliation-exception-resolve",
     ),
 ]

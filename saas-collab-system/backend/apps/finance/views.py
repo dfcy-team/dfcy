@@ -1,18 +1,29 @@
-from django.shortcuts import get_object_or_404
 from django.core.paginator import Paginator
 from django.db.models import Count, Sum
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.decorators import api_view
 from rest_framework.decorators import permission_classes
 
-from apps.common.responses import success_response
-from apps.permissions.api_permissions import IsFinanceImporter, IsFinanceReconciler, IsFinanceUser, IsFinanceViewer
-from apps.permissions.ui_p6_scopes import filter_finance_queryset
+from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
+from apps.common.responses import paginated_data, success_response
+from apps.permissions.api_permissions import (
+    IsFinanceExceptionHandler,
+    IsFinanceImporter,
+    IsFinanceReconciler,
+    IsFinanceUser,
+    IsFinanceViewer,
+)
+from apps.permissions.ui_p6_scopes import filter_finance_queryset, finance_values_allowed
 from .models import BankReceiptImport, FinanceAuditLog, PlatformStatement, ReconciliationException, ReconciliationMatch, WithdrawalRecord
 from .serializers import (
     BankReceiptImportSerializer,
+    FinanceCollectionQuerySerializer,
+    FinanceDemoImportSerializer,
     FinanceAnalyticsQuerySerializer,
+    FinanceReconciliationRunSerializer,
     PlatformStatementSerializer,
+    ReconciliationDecisionSerializer,
+    ReconciliationExceptionResolutionSerializer,
     ReconciliationExceptionSerializer,
     ReconciliationMatchSerializer,
     WithdrawalRecordSerializer,
@@ -23,9 +34,52 @@ from .services import (
     import_demo_statement,
     import_demo_withdrawal,
     reject_match,
+    resolve_exception,
     run_mock_reconciliation,
     write_finance_audit_log,
 )
+
+
+def _collection_query(request):
+    serializer = FinanceCollectionQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
+
+
+def _filter_collection(queryset, query, *, platform_field="platform", currency_field="currency"):
+    if query.get("platform"):
+        queryset = queryset.filter(**{platform_field: query["platform"]})
+    if query.get("currency"):
+        queryset = queryset.filter(**{currency_field: query["currency"]})
+    if query.get("status"):
+        queryset = queryset.filter(status=query["status"])
+    return queryset.distinct()
+
+
+def _collection_response(request, queryset, serializer_class, query):
+    return success_response(
+        paginated_data(
+            request,
+            queryset,
+            serializer_class,
+            page=query["page"],
+            page_size=query["page_size"],
+        )
+    )
+
+
+def _validated_demo_import(request):
+    serializer = FinanceDemoImportSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    values = serializer.validated_data
+    if not finance_values_allowed(
+        request.user,
+        "finance.import",
+        platform=values["platform"],
+        currency=values["currency"],
+    ):
+        raise DataScopeDenied("Demo import is outside the authorized finance data scope.")
+    return values
 
 
 @api_view(["GET"])
@@ -37,14 +91,24 @@ def health(request):
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def statement_collection(request):
-    queryset = PlatformStatement.objects.filter(tenant=request.user.tenant)
-    return success_response(PlatformStatementSerializer(queryset, many=True).data)
+    query = _collection_query(request)
+    queryset = filter_finance_queryset(
+        request.user,
+        PlatformStatement.objects.filter(tenant=request.user.tenant),
+        "finance.view",
+    )
+    return _collection_response(request, _filter_collection(queryset, query), PlatformStatementSerializer, query)
 
 
 @api_view(["POST"])
 @permission_classes([IsFinanceImporter])
 def import_demo_statement_view(request):
-    statement = import_demo_statement(request.user.tenant)
+    values = _validated_demo_import(request)
+    statement = import_demo_statement(
+        request.user.tenant,
+        platform=values["platform"],
+        currency=values["currency"],
+    )
     write_finance_audit_log(request.user.tenant, request.user, "import_demo_statement", statement)
     return success_response(PlatformStatementSerializer(statement).data, status=201)
 
@@ -52,14 +116,24 @@ def import_demo_statement_view(request):
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def withdrawal_collection(request):
-    queryset = WithdrawalRecord.objects.filter(tenant=request.user.tenant)
-    return success_response(WithdrawalRecordSerializer(queryset, many=True).data)
+    query = _collection_query(request)
+    queryset = filter_finance_queryset(
+        request.user,
+        WithdrawalRecord.objects.filter(tenant=request.user.tenant),
+        "finance.view",
+    )
+    return _collection_response(request, _filter_collection(queryset, query), WithdrawalRecordSerializer, query)
 
 
 @api_view(["POST"])
 @permission_classes([IsFinanceImporter])
 def import_demo_withdrawal_view(request):
-    withdrawal = import_demo_withdrawal(request.user.tenant)
+    values = _validated_demo_import(request)
+    withdrawal = import_demo_withdrawal(
+        request.user.tenant,
+        platform=values["platform"],
+        currency=values["currency"],
+    )
     write_finance_audit_log(request.user.tenant, request.user, "import_demo_withdrawal", withdrawal)
     return success_response(WithdrawalRecordSerializer(withdrawal).data, status=201)
 
@@ -67,14 +141,31 @@ def import_demo_withdrawal_view(request):
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def bank_receipt_collection(request):
-    queryset = BankReceiptImport.objects.filter(tenant=request.user.tenant)
-    return success_response(BankReceiptImportSerializer(queryset, many=True).data)
+    query = _collection_query(request)
+    queryset = filter_finance_queryset(
+        request.user,
+        BankReceiptImport.objects.filter(tenant=request.user.tenant),
+        "finance.view",
+        platform_field="reconciliation_matches__statement__platform",
+    )
+    queryset = _filter_collection(
+        queryset,
+        query,
+        platform_field="reconciliation_matches__statement__platform",
+    )
+    return _collection_response(request, queryset, BankReceiptImportSerializer, query)
 
 
 @api_view(["POST"])
 @permission_classes([IsFinanceImporter])
 def import_demo_bank_receipt_view(request):
-    receipt = import_demo_bank_receipt(request.user.tenant, account_hint=request.data.get("account_hint", "demo-account"))
+    values = _validated_demo_import(request)
+    receipt = import_demo_bank_receipt(
+        request.user.tenant,
+        account_hint=values["account_hint"],
+        platform=values["platform"],
+        currency=values["currency"],
+    )
     write_finance_audit_log(
         request.user.tenant,
         request.user,
@@ -88,14 +179,56 @@ def import_demo_bank_receipt_view(request):
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def reconciliation_match_collection(request):
-    queryset = ReconciliationMatch.objects.filter(tenant=request.user.tenant)
-    return success_response(ReconciliationMatchSerializer(queryset, many=True).data)
+    query = _collection_query(request)
+    queryset = filter_finance_queryset(
+        request.user,
+        ReconciliationMatch.objects.filter(tenant=request.user.tenant),
+        "finance.view",
+        platform_field="statement__platform",
+        currency_field="statement__currency",
+    )
+    queryset = _filter_collection(
+        queryset,
+        query,
+        platform_field="statement__platform",
+        currency_field="statement__currency",
+    )
+    return _collection_response(request, queryset, ReconciliationMatchSerializer, query)
+
+
+@api_view(["GET"])
+@permission_classes([IsFinanceViewer])
+def reconciliation_match_detail(request, pk):
+    queryset = filter_finance_queryset(
+        request.user,
+        ReconciliationMatch.objects.filter(tenant=request.user.tenant),
+        "finance.view",
+        platform_field="statement__platform",
+        currency_field="statement__currency",
+    )
+    match = get_scoped_object_or_404(queryset, pk=pk)
+    return success_response(ReconciliationMatchSerializer(match).data)
 
 
 @api_view(["POST"])
 @permission_classes([IsFinanceReconciler])
 def run_mock_reconciliation_view(request):
-    match = run_mock_reconciliation(request.user.tenant)
+    serializer = FinanceReconciliationRunSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    values = serializer.validated_data
+    if not finance_values_allowed(
+        request.user,
+        "finance.reconcile",
+        platform=values["platform"],
+        currency=values["currency"],
+    ):
+        raise DataScopeDenied("Reconciliation run is outside the authorized finance data scope.")
+    match = run_mock_reconciliation(
+        request.user.tenant,
+        platform=values["platform"],
+        currency=values["currency"],
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    )
     write_finance_audit_log(
         request.user.tenant,
         request.user,
@@ -109,7 +242,15 @@ def run_mock_reconciliation_view(request):
 @api_view(["POST"])
 @permission_classes([IsFinanceReconciler])
 def confirm_reconciliation_match(request, pk):
-    match = get_object_or_404(ReconciliationMatch, pk=pk, tenant=request.user.tenant)
+    ReconciliationDecisionSerializer(data=request.data).is_valid(raise_exception=True)
+    queryset = filter_finance_queryset(
+        request.user,
+        ReconciliationMatch.objects.filter(tenant=request.user.tenant),
+        "finance.reconcile",
+        platform_field="statement__platform",
+        currency_field="statement__currency",
+    )
+    match = get_scoped_object_or_404(queryset, pk=pk)
     match = confirm_match(match, request.user)
     return success_response(ReconciliationMatchSerializer(match).data)
 
@@ -117,16 +258,59 @@ def confirm_reconciliation_match(request, pk):
 @api_view(["POST"])
 @permission_classes([IsFinanceReconciler])
 def reject_reconciliation_match(request, pk):
-    match = get_object_or_404(ReconciliationMatch, pk=pk, tenant=request.user.tenant)
-    match = reject_match(match, request.user, reason=request.data.get("reason", ""))
+    serializer = ReconciliationDecisionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    queryset = filter_finance_queryset(
+        request.user,
+        ReconciliationMatch.objects.filter(tenant=request.user.tenant),
+        "finance.reconcile",
+        platform_field="statement__platform",
+        currency_field="statement__currency",
+    )
+    match = get_scoped_object_or_404(queryset, pk=pk)
+    match = reject_match(match, request.user, reason=serializer.validated_data["reason"])
     return success_response(ReconciliationMatchSerializer(match).data)
 
 
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def reconciliation_exception_collection(request):
-    queryset = ReconciliationException.objects.filter(tenant=request.user.tenant)
-    return success_response(ReconciliationExceptionSerializer(queryset, many=True).data)
+    query = _collection_query(request)
+    queryset = filter_finance_queryset(
+        request.user,
+        ReconciliationException.objects.filter(tenant=request.user.tenant),
+        "finance.view",
+        platform_field="reconciliation_match__statement__platform",
+        currency_field="reconciliation_match__statement__currency",
+    )
+    queryset = _filter_collection(
+        queryset,
+        query,
+        platform_field="reconciliation_match__statement__platform",
+        currency_field="reconciliation_match__statement__currency",
+    )
+    return _collection_response(request, queryset, ReconciliationExceptionSerializer, query)
+
+
+@api_view(["POST"])
+@permission_classes([IsFinanceExceptionHandler])
+def resolve_reconciliation_exception(request, pk):
+    serializer = ReconciliationExceptionResolutionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    queryset = filter_finance_queryset(
+        request.user,
+        ReconciliationException.objects.filter(tenant=request.user.tenant),
+        "finance.exception.handle",
+        platform_field="reconciliation_match__statement__platform",
+        currency_field="reconciliation_match__statement__currency",
+    )
+    exception = get_scoped_object_or_404(queryset, pk=pk)
+    exception = resolve_exception(
+        exception,
+        request.user,
+        resolution_note=serializer.validated_data["resolution_note"],
+    )
+    return success_response(ReconciliationExceptionSerializer(exception).data)
 
 
 def _audit_analytics_view(request, action):

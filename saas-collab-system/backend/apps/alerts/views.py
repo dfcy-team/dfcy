@@ -33,10 +33,11 @@ from .serializers import (
 from .services import assign_inventory_alert, close_inventory_alert, evaluate_inventory_alert, silence_inventory_alert
 
 
-def _alert_queryset(request):
+def _alert_queryset(request, permission_code="alerts.view"):
     return filter_inventory_alerts(
         request.user,
         InventoryAlert.objects.select_related("rule", "spu", "sku", "assigned_to").prefetch_related("events"),
+        permission_code,
     )
 
 
@@ -77,6 +78,7 @@ def inventory_alert_evaluate_mock(request):
         sku=sku,
         spu=spu,
         extra_constraints={"warehouse_codes": values.get("warehouse_code", "")},
+        permission_code="alerts.evaluate",
     ):
         raise PermissionDenied("Inventory alert target is outside the authorized data scope.")
     alert, created = evaluate_inventory_alert(tenant=request.user.tenant, rule=rule, sku=sku, spu=spu, **values)
@@ -89,7 +91,7 @@ def inventory_alert_evaluate_mock(request):
 def inventory_alert_assign(request, pk):
     serializer = InventoryAlertAssignSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    alert = get_object_or_404(_alert_queryset(request), pk=pk)
+    alert = get_object_or_404(_alert_queryset(request, "alerts.manage"), pk=pk)
     assignee = get_object_or_404(
         CustomUser,
         pk=serializer.validated_data["assigned_to_id"],
@@ -105,7 +107,7 @@ def inventory_alert_assign(request, pk):
 def inventory_alert_silence(request, pk):
     serializer = InventoryAlertSilenceSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    alert = get_object_or_404(_alert_queryset(request), pk=pk)
+    alert = get_object_or_404(_alert_queryset(request, "alerts.manage"), pk=pk)
     return success_response(
         InventoryAlertSerializer(
             silence_inventory_alert(alert=alert, actor=request.user, minutes=serializer.validated_data.get("minutes"))
@@ -118,7 +120,7 @@ def inventory_alert_silence(request, pk):
 def inventory_alert_close(request, pk):
     serializer = InventoryAlertCloseSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    alert = get_object_or_404(_alert_queryset(request), pk=pk)
+    alert = get_object_or_404(_alert_queryset(request, "alerts.manage"), pk=pk)
     return success_response(
         InventoryAlertSerializer(
             close_inventory_alert(alert=alert, actor=request.user, reason=serializer.validated_data["reason"])
@@ -126,10 +128,11 @@ def inventory_alert_close(request, pk):
     )
 
 
-def _business_alert_queryset(request):
+def _business_alert_queryset(request, permission_code="alerts.view"):
     return filter_business_alerts(
         request.user,
         BusinessAlert.objects.select_related("rule", "assigned_to").prefetch_related("action_logs"),
+        permission_code,
     )
 
 
@@ -167,6 +170,7 @@ def business_alert_evaluate_mock(request):
             "business_types": values["business_type"],
             "business_ids": values["business_id"],
         },
+        permission_code="alerts.evaluate",
     ):
         raise PermissionDenied("Business alert target is outside the authorized data scope.")
     alert, created = evaluate_business_alert(tenant=request.user.tenant, rule=rule, **values)
@@ -181,7 +185,7 @@ def business_alert_evaluate_mock(request):
 def business_alert_assign(request, pk):
     serializer = BusinessAlertAssignSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    alert = get_object_or_404(_business_alert_queryset(request), pk=pk)
+    alert = get_object_or_404(_business_alert_queryset(request, "alerts.manage"), pk=pk)
     assignee = get_object_or_404(
         CustomUser,
         pk=serializer.validated_data["assigned_to_id"],
@@ -203,7 +207,7 @@ def business_alert_assign(request, pk):
 def business_alert_silence(request, pk):
     serializer = BusinessAlertSilenceSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    alert = get_object_or_404(_business_alert_queryset(request), pk=pk)
+    alert = get_object_or_404(_business_alert_queryset(request, "alerts.manage"), pk=pk)
     alert = silence_business_alert(
         alert=alert,
         actor=request.user,
@@ -218,6 +222,6 @@ def business_alert_silence(request, pk):
 def business_alert_close(request, pk):
     serializer = BusinessAlertCloseSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    alert = get_object_or_404(_business_alert_queryset(request), pk=pk)
+    alert = get_object_or_404(_business_alert_queryset(request, "alerts.manage"), pk=pk)
     alert = close_business_alert(alert=alert, actor=request.user, note=serializer.validated_data["note"])
     return success_response(BusinessAlertSerializer(alert).data)

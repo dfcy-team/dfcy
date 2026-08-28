@@ -1,5 +1,17 @@
 import { successResponse } from './index';
 
+export const mockInventoryAlerts = () => successResponse({
+  api_status: 'mock',
+  count: 3,
+  next: null,
+  previous: null,
+  results: [
+    { alert_id: 'DEMO-INV-001', sku_code: 'DEMO-SKU-NORMAL', warehouse: 'DEMO-WH-A', alert_type: 'normal', risk_level: 'low', cover_days: 15, reason: 'Synthetic stock is within the configured range.', quality_status: 'good', evidence: { source: 'synthetic' } },
+    { alert_id: 'DEMO-INV-002', sku_code: 'DEMO-SKU-STOCKOUT', warehouse: 'DEMO-WH-A', alert_type: 'stockout', risk_level: 'high', cover_days: 0, reason: 'Synthetic available stock is zero.', quality_status: 'good', evidence: { source: 'synthetic' } },
+    { alert_id: 'DEMO-INV-003', sku_code: 'DEMO-SKU-OVERSTOCK', warehouse: 'DEMO-WH-B', alert_type: 'overstock', risk_level: 'medium', cover_days: 500, reason: 'Synthetic coverage exceeds the demo threshold.', quality_status: 'good', evidence: { source: 'synthetic' } }
+  ]
+});
+
 export const mockBusinessAlerts = () => successResponse({
   status: 'mock', api_status: 'mock',
   summary: [

@@ -74,7 +74,8 @@ def test_finance_user_can_import_and_list_demo_records():
     assert receipt_response.json()["data"]["masked_account"] == "****1234"
     assert "demo-account-1234" not in str(receipt_response.json())
     assert list_response.status_code == 200
-    assert len(list_response.json()["data"]) == 1
+    assert list_response.json()["data"]["count"] == 1
+    assert len(list_response.json()["data"]["results"]) == 1
 
 
 @pytest.mark.django_db
@@ -147,7 +148,7 @@ def test_finance_queries_are_tenant_scoped():
     response = authenticated_client(user_a).get("/api/finance/statements/")
 
     assert response.status_code == 200
-    assert response.json()["data"] == []
+    assert response.json()["data"]["results"] == []
 
 
 @pytest.mark.django_db
@@ -201,7 +202,7 @@ def test_confirm_requires_finance_permission_and_rejects_duplicate_confirmation(
     assert plain_response.status_code == 403
     assert finance_response.status_code == 200
     assert finance_response.json()["data"]["status"] == ReconciliationMatch.Status.CONFIRMED
-    assert duplicate_response.status_code == 400
+    assert duplicate_response.status_code == 409
     assert FinanceAuditLog.objects.filter(action="confirm_reconciliation_match").exists()
 
 
@@ -219,7 +220,7 @@ def test_difference_amount_creates_exception_and_audit_log():
     assert response.json()["data"]["difference_amount"] == "-5.00"
     assert ReconciliationException.objects.count() == 1
     assert exception_response.status_code == 200
-    assert exception_response.json()["data"][0]["difference_amount"] == "-5.00"
+    assert exception_response.json()["data"]["results"][0]["difference_amount"] == "-5.00"
     assert FinanceAuditLog.objects.filter(action="run_mock_reconciliation").exists()
 
 
@@ -246,7 +247,7 @@ def test_reject_match_records_audit_and_blocks_repeat_handling():
 
     assert reject_response.status_code == 200
     assert reject_response.json()["data"]["status"] == ReconciliationMatch.Status.REJECTED
-    assert repeat_response.status_code == 400
+    assert repeat_response.status_code == 409
     assert FinanceAuditLog.objects.filter(action="reject_reconciliation_match").exists()
 
 

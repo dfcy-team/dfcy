@@ -1,7 +1,7 @@
 <template>
   <Phase2DataPage
     title="对账匹配详情"
-    note="后端阶段2仅提供 GET /api/finance/reconciliation/matches/ 集合查询；详情页使用集合数据展示。"
+    note="GET /api/finance/reconciliation/matches/{id}/；数据范围和资源存在性以后端为准。"
     risk-note="确认或拒绝对账结果必须走 /api/finance/* 后端授权接口。"
     mode="detail"
     :loader="() => fetchReconciliationMatchDetail(route.params.id || 1)"
@@ -45,7 +45,7 @@ const actionConfigs = [
     label: '拒绝匹配',
     permission: 'finance.reconcile',
     confirmMessage: '拒绝对账匹配将调用后端财务 reject 接口。',
-    handler: () => rejectReconciliationMatch(route.params.id || 1)
+    handler: () => rejectReconciliationMatch(route.params.id || 1, { reason: 'Rejected by authorized demo review.' })
   }
 ];
 </script>

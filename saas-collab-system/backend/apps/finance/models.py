@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.tenants.models import Tenant
@@ -81,6 +82,30 @@ class BankReceiptImport(models.Model):
         ]
 
 
+class ReconciliationMatchQuerySet(models.QuerySet):
+    REVIEW_FIELDS = {"status", "reviewed_by", "reviewed_by_id", "reviewed_at"}
+
+    def update(self, **kwargs):
+        if self.REVIEW_FIELDS & set(kwargs):
+            raise ValidationError("Reconciliation state changes require the audited service.")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if self.REVIEW_FIELDS & set(fields):
+            raise ValidationError("Reconciliation state changes require the audited service.")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, objs, **kwargs):
+        if any(
+            obj.status != ReconciliationMatch.Status.SUGGESTED
+            or obj.reviewed_by_id
+            or obj.reviewed_at
+            for obj in objs
+        ):
+            raise ValidationError("Reconciliation state changes require the audited service.")
+        return super().bulk_create(objs, **kwargs)
+
+
 class ReconciliationMatch(models.Model):
     class MatchType(models.TextChoices):
         AUTO_SUGGESTED = "auto_suggested", "Auto suggested"
@@ -108,9 +133,72 @@ class ReconciliationMatch(models.Model):
         blank=True,
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    idempotency_key = models.CharField(max_length=64, blank=True)
+    objects = ReconciliationMatchQuerySet.as_manager()
 
     class Meta:
         ordering = ["tenant_id", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "idempotency_key"],
+                condition=~models.Q(idempotency_key=""),
+                name="uniq_finance_match_idempotency",
+            ),
+        ]
+
+    def clean(self):
+        if self._state.adding and (
+            self.status != self.Status.SUGGESTED or self.reviewed_by_id or self.reviewed_at
+        ):
+            raise ValidationError("New reconciliation matches must start as unreviewed suggestions.")
+        related = (self.statement, self.withdrawal, self.bank_receipt)
+        if any(item.tenant_id != self.tenant_id for item in related):
+            raise ValidationError("Reconciliation sources must belong to the same tenant.")
+        if self.reviewed_by_id and (
+            self.reviewed_by.tenant_id != self.tenant_id or self.reviewed_by.user_type != "internal"
+        ):
+            raise ValidationError("Reviewer must be an internal user in the same tenant.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and not getattr(self, "_review_service_write", False):
+            current = type(self).objects.filter(pk=self.pk).values(
+                "status", "reviewed_by_id", "reviewed_at"
+            ).first()
+            if current and any(
+                current[field] != getattr(self, field)
+                for field in ("status", "reviewed_by_id", "reviewed_at")
+            ):
+                raise ValidationError("Reconciliation state changes require the audited service.")
+        self.full_clean()
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            self._review_service_write = False
+
+
+class ReconciliationExceptionQuerySet(models.QuerySet):
+    RESOLUTION_FIELDS = {"status", "assigned_to", "assigned_to_id", "resolution_note", "resolved_at"}
+
+    def update(self, **kwargs):
+        if self.RESOLUTION_FIELDS & set(kwargs):
+            raise ValidationError("Reconciliation exception changes require the audited service.")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if self.RESOLUTION_FIELDS & set(fields):
+            raise ValidationError("Reconciliation exception changes require the audited service.")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, objs, **kwargs):
+        if any(
+            obj.status != ReconciliationException.Status.OPEN
+            or obj.assigned_to_id
+            or obj.resolution_note
+            or obj.resolved_at
+            for obj in objs
+        ):
+            raise ValidationError("Reconciliation exception changes require the audited service.")
+        return super().bulk_create(objs, **kwargs)
 
 
 class ReconciliationException(models.Model):
@@ -142,9 +230,52 @@ class ReconciliationException(models.Model):
     resolution_note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
+    objects = ReconciliationExceptionQuerySet.as_manager()
 
     class Meta:
         ordering = ["tenant_id", "-created_at"]
+
+    def clean(self):
+        if self._state.adding and (
+            self.status != self.Status.OPEN
+            or self.assigned_to_id
+            or self.resolution_note
+            or self.resolved_at
+        ):
+            raise ValidationError("New reconciliation exceptions must start open and unassigned.")
+        if self.reconciliation_match.tenant_id != self.tenant_id:
+            raise ValidationError("Reconciliation exception and match must belong to the same tenant.")
+        if self.assigned_to_id and (
+            self.assigned_to.tenant_id != self.tenant_id or self.assigned_to.user_type != "internal"
+        ):
+            raise ValidationError("Exception assignee must be an internal user in the same tenant.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and not getattr(self, "_resolution_service_write", False):
+            current = type(self).objects.filter(pk=self.pk).values(
+                "status", "assigned_to_id", "resolution_note", "resolved_at"
+            ).first()
+            if current and any(
+                current[field] != getattr(self, field)
+                for field in ("status", "assigned_to_id", "resolution_note", "resolved_at")
+            ):
+                raise ValidationError("Reconciliation exception changes require the audited service.")
+        self.full_clean()
+        try:
+            super().save(*args, **kwargs)
+        finally:
+            self._resolution_service_write = False
+
+
+class FinanceAuditLogQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Finance audit logs are immutable.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Finance audit logs are immutable.")
+
+    def delete(self):
+        raise ValidationError("Finance audit logs are immutable.")
 
 
 class FinanceAuditLog(models.Model):
@@ -155,6 +286,15 @@ class FinanceAuditLog(models.Model):
     object_id = models.CharField(max_length=80)
     masked_detail = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = FinanceAuditLogQuerySet.as_manager()
 
     class Meta:
         ordering = ["tenant_id", "-created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Finance audit logs are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Finance audit logs are immutable.")
