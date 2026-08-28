@@ -1,0 +1,223 @@
+{
+  "schema_version": "shopapi-handoff.v1",
+  "synthetic": true,
+  "description": "Synthetic warehouse master data and normalized inventory snapshots for the read-only Jifeng WMS handoff.",
+  "api_example": {
+    "provider": "jifeng_wms",
+    "resource_type": "inventory_snapshot",
+    "mode": "read_only",
+    "request_template": {
+      "pageNo": 1,
+      "pageSize": 50,
+      "warehouse": "HZ001"
+    },
+    "normalized_contract": "inventory_snapshot.v1"
+  },
+  "stores": [],
+  "warehouses": [
+    {
+      "id": "warehouse-my-hz001",
+      "code": "HZ001",
+      "name": "极风 WMS HZ001",
+      "country_code": "MY",
+      "warehouse_type": "third_party",
+      "status": "active"
+    },
+    {
+      "id": "warehouse-ph-demo",
+      "code": "DEMO-PH-WH-01",
+      "name": "示例菲律宾仓",
+      "country_code": "PH",
+      "warehouse_type": "third_party",
+      "status": "active"
+    },
+    {
+      "id": "warehouse-ph-ph001",
+      "code": "PH001",
+      "name": "极风 WMS PH001",
+      "country_code": "PH",
+      "warehouse_type": "third_party",
+      "status": "active"
+    },
+    {
+      "id": "warehouse-th-thtb",
+      "code": "THTB",
+      "name": "极风 WMS THTB",
+      "country_code": "TH",
+      "warehouse_type": "third_party",
+      "status": "active"
+    }
+  ],
+  "integration_configs": [
+    {
+      "id": "config-wms-my",
+      "platform": "jifeng_wms",
+      "account_alias": "synthetic-jifeng-wms-my",
+      "environment": "mock",
+      "regions": ["MY"]
+    },
+    {
+      "id": "config-wms-ph",
+      "platform": "jifeng_wms",
+      "account_alias": "synthetic-jifeng-wms-ph",
+      "environment": "mock",
+      "regions": ["PH"]
+    },
+    {
+      "id": "config-wms-th",
+      "platform": "jifeng_wms",
+      "account_alias": "synthetic-jifeng-wms-th",
+      "environment": "mock",
+      "regions": ["TH"]
+    }
+  ],
+  "store_authorizations": [],
+  "sync_jobs": [
+    {
+      "id": "job-inventory-my",
+      "config_id": "config-wms-my",
+      "resource_type": "inventory_snapshot"
+    },
+    {
+      "id": "job-inventory-ph",
+      "config_id": "config-wms-ph",
+      "resource_type": "inventory_snapshot"
+    },
+    {
+      "id": "job-inventory-th",
+      "config_id": "config-wms-th",
+      "resource_type": "inventory_snapshot"
+    }
+  ],
+  "sync_runs": [
+    {
+      "id": "run-inventory-my",
+      "job_id": "job-inventory-my",
+      "run_id": "synthetic-wms-my-20260827",
+      "status": "success",
+      "started_at": "2026-08-27T00:00:00Z",
+      "finished_at": "2026-08-27T00:00:02Z",
+      "fetched_count": 2,
+      "created_count": 2,
+      "updated_count": 0,
+      "skipped_count": 0,
+      "failed_count": 0
+    },
+    {
+      "id": "run-inventory-ph",
+      "job_id": "job-inventory-ph",
+      "run_id": "synthetic-wms-ph-20260827",
+      "status": "success",
+      "started_at": "2026-08-27T00:01:00Z",
+      "finished_at": "2026-08-27T00:01:02Z",
+      "fetched_count": 2,
+      "created_count": 2,
+      "updated_count": 0,
+      "skipped_count": 0,
+      "failed_count": 0
+    },
+    {
+      "id": "run-inventory-th",
+      "job_id": "job-inventory-th",
+      "run_id": "synthetic-wms-th-20260827",
+      "status": "success",
+      "started_at": "2026-08-27T00:02:00Z",
+      "finished_at": "2026-08-27T00:02:02Z",
+      "fetched_count": 2,
+      "created_count": 2,
+      "updated_count": 0,
+      "skipped_count": 0,
+      "failed_count": 0
+    }
+  ],
+  "sales_orders": [],
+  "sales_order_items": [],
+  "refund_returns": [],
+  "refund_return_items": [],
+  "inventory_snapshots": [
+    {
+      "source_run_id": "run-inventory-my",
+      "warehouse_id": "warehouse-my-hz001",
+      "site_code": "MY",
+      "source_sku": "SYNTHETIC-MY-001",
+      "seller_sku": "SYNTHETIC-MY-001",
+      "on_hand_qty": 120,
+      "available_qty": 92,
+      "reserved_qty": 18,
+      "in_transit_qty": 20,
+      "pending_putaway_qty": 8,
+      "defective_qty": 2,
+      "snapshot_at_utc": "2026-08-27T00:00:00Z"
+    },
+    {
+      "source_run_id": "run-inventory-my",
+      "warehouse_id": "warehouse-my-hz001",
+      "site_code": "MY",
+      "source_sku": "SYNTHETIC-MY-002",
+      "seller_sku": "SYNTHETIC-MY-002",
+      "on_hand_qty": 64,
+      "available_qty": 51,
+      "reserved_qty": 9,
+      "in_transit_qty": 12,
+      "pending_putaway_qty": 3,
+      "defective_qty": 1,
+      "snapshot_at_utc": "2026-08-27T00:00:00Z"
+    },
+    {
+      "source_run_id": "run-inventory-ph",
+      "warehouse_id": "warehouse-ph-ph001",
+      "site_code": "PH",
+      "source_sku": "SYNTHETIC-PH-001",
+      "seller_sku": "SYNTHETIC-PH-001",
+      "on_hand_qty": 88,
+      "available_qty": 70,
+      "reserved_qty": 12,
+      "in_transit_qty": 16,
+      "pending_putaway_qty": 4,
+      "defective_qty": 2,
+      "snapshot_at_utc": "2026-08-27T00:01:00Z"
+    },
+    {
+      "source_run_id": "run-inventory-ph",
+      "warehouse_id": "warehouse-ph-demo",
+      "site_code": "PH",
+      "source_sku": "SYNTHETIC-PH-DEMO-001",
+      "seller_sku": "SYNTHETIC-PH-DEMO-001",
+      "on_hand_qty": 20,
+      "available_qty": 18,
+      "reserved_qty": 2,
+      "in_transit_qty": 0,
+      "pending_putaway_qty": 0,
+      "defective_qty": 0,
+      "snapshot_at_utc": "2026-08-27T00:01:00Z"
+    },
+    {
+      "source_run_id": "run-inventory-th",
+      "warehouse_id": "warehouse-th-thtb",
+      "site_code": "TH",
+      "source_sku": "SYNTHETIC-TH-001",
+      "seller_sku": "SYNTHETIC-TH-001",
+      "on_hand_qty": 75,
+      "available_qty": 59,
+      "reserved_qty": 11,
+      "in_transit_qty": 10,
+      "pending_putaway_qty": 4,
+      "defective_qty": 1,
+      "snapshot_at_utc": "2026-08-27T00:02:00Z"
+    },
+    {
+      "source_run_id": "run-inventory-th",
+      "warehouse_id": "warehouse-th-thtb",
+      "site_code": "TH",
+      "source_sku": "SYNTHETIC-TH-002",
+      "seller_sku": "SYNTHETIC-TH-002",
+      "on_hand_qty": 42,
+      "available_qty": 34,
+      "reserved_qty": 5,
+      "in_transit_qty": 6,
+      "pending_putaway_qty": 2,
+      "defective_qty": 1,
+      "snapshot_at_utc": "2026-08-27T00:02:00Z"
+    }
+  ]
+}
