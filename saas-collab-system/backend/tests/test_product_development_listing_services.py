@@ -77,7 +77,8 @@ def test_duplicate_check_and_finalize_are_tenant_scoped_and_idempotent():
     replay, replay_created = finalize_product(project_id=project.id, actor=user)
     assert created is True and replay_created is False
     assert replay.id == product.id
-    assert product.development_project_id == project.id
+    project.refresh_from_db()
+    assert project.finalized_product_id == product.id
 
 
 def test_acceptance_main_flow_records_each_stage_product_link_and_notification():
@@ -112,7 +113,6 @@ def test_acceptance_main_flow_records_each_stage_product_link_and_notification()
     assert created is True
     assert project.stage == DevelopmentProject.Stage.FINALIZED
     assert project.finalized_product_id == product.id
-    assert product.development_project_id == project.id
     assert list(project.stage_records.values_list("stage", flat=True)) == [
         DevelopmentProject.Stage.DESIGN,
         DevelopmentProject.Stage.SAMPLING,

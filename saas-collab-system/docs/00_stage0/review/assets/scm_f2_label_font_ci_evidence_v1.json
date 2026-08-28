@@ -1,0 +1,195 @@
+{
+  "candidate": {
+    "bundle_digest": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2",
+    "corpus_codepoints": 105,
+    "manifest_sha256": "e00920a6188621eb80c551a1c380ede83b46f29b23fb6e4ef79c7efcb83dcf46"
+  },
+  "ci_environment_variable": "true",
+  "controlled_scripts": [
+    {
+      "path": "backend/scripts/verify_sc_f2_font_bundle.py",
+      "sha256": "23c0ab79c4b45396343d90cf286e38820419671f5c7eb8eaa79e83749cc54427"
+    },
+    {
+      "path": "backend/scripts/probe_sc_f2_font_pdf.py",
+      "sha256": "c06eb57a591cf30e4344687f14d8885dffa4bbdcef08d9e3eee09cd3d4087fa0"
+    },
+    {
+      "path": "backend/scripts/inspect_sc_f2_probe_pdf.py",
+      "sha256": "31789c7837adbb86e39cf8cc96fd4033d06397c984d46158103bdc835784b32b"
+    },
+    {
+      "path": "backend/scripts/probe_sc_f2_font_memory.py",
+      "sha256": "4b242d1f52f7caba04c1c1b95f151e952882edb7c53087fbb0600cb7a5891b4b"
+    },
+    {
+      "path": "backend/scripts/run_sc_f2_font_ci_gate.py",
+      "sha256": "6d2ea1eb5ab1c729a05356d261b56d856cc9d7c9c431f693a6ebc16ab003f14b"
+    }
+  ],
+  "environment": {
+    "container_image": "python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de",
+    "install_mode": "pip --no-index --no-deps from hash-verified wheels",
+    "installed_distributions": {
+      "charset-normalizer": "3.4.9",
+      "fonttools": "4.63.0",
+      "pillow": "12.3.0",
+      "pypdf": "6.10.0",
+      "reportlab": "4.5.1"
+    },
+    "network": "none",
+    "python_version": "3.12.13",
+    "wheel_artifacts": [
+      {
+        "bytes": 1164562,
+        "filename": "fonttools-4.63.0-py3-none-any.whl",
+        "name": "fonttools",
+        "platform": "any",
+        "sha256": "445af2eab030a16b9171ea8bdda7ebf7d96bda2df88ee182a464252f6e05e20d",
+        "version": "4.63.0"
+      },
+      {
+        "bytes": 1957812,
+        "filename": "reportlab-4.5.1-py3-none-any.whl",
+        "name": "reportlab",
+        "platform": "any",
+        "sha256": "06fce8cb56c83307cfa4909cdf4e6a2ddbb44e5d6ef4d2edca896d7e9769f091",
+        "version": "4.5.1"
+      },
+      {
+        "bytes": 6940830,
+        "filename": "pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "name": "pillow",
+        "platform": "linux-amd64-cp312",
+        "sha256": "78cb2c6865a35ab8ff8b75fd122f6033b92a62c82801110e48ddd6c936a45d91",
+        "version": "12.3.0"
+      },
+      {
+        "bytes": 64538,
+        "filename": "charset_normalizer-3.4.9-py3-none-any.whl",
+        "name": "charset-normalizer",
+        "platform": "any",
+        "sha256": "68e5f26a1ad57ded6d1cfb85331d1c1a195314756471d97758c48498bb4dcdf5",
+        "version": "3.4.9"
+      },
+      {
+        "bytes": 334459,
+        "filename": "pypdf-6.10.0-py3-none-any.whl",
+        "name": "pypdf",
+        "platform": "any",
+        "sha256": "90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de",
+        "version": "6.10.0"
+      }
+    ]
+  },
+  "execution_scope": "ARCHITECTURE_HOST_CONTAINER_CI_REHEARSAL",
+  "hundred_page_probe": {
+    "elapsed_ms": 337.69,
+    "pages": 100,
+    "pdf_bytes": 137608,
+    "pdf_sha256": "20017c2845ef5e36efa566018446d175d5e1a65ebcd12de74dfcfab747783b35",
+    "positive_samples_per_page": 8,
+    "process_max_rss_kib": 88008,
+    "python_tracemalloc_peak_bytes": 10969248,
+    "reportlab_version": "4.5.1",
+    "result": "PASS"
+  },
+  "memory_probe": {
+    "budgets": {
+      "concurrent_aggregate_worker_rss_max_kib": 229376,
+      "concurrent_total_rss_max_kib": 245760,
+      "concurrent_worker_current_rss_max_kib": 131072,
+      "concurrent_workers": 2,
+      "first_render_peak_rss_max_kib": 131072,
+      "steady_current_growth_max_kib": 16384
+    },
+    "concurrent": {
+      "aggregate_with_controller_rss_kib": 201652,
+      "aggregate_worker_rss_kib": 178560,
+      "controller_rss_kib": 23092,
+      "worker_current_rss_kib": [
+        89192,
+        89368
+      ],
+      "worker_results": [
+        {
+          "baseline_rss_kib": 23028,
+          "elapsed_ms": 375.669,
+          "first_render_current_rss_kib": 89108,
+          "first_render_pdf": {
+            "bytes": 44872,
+            "sha256": "a0f0cba1d29b36bc2f69de88781a4793fec238a9a00cc0f7aab3d43434572e0e"
+          },
+          "first_render_peak_rss_kib": 89356,
+          "registered_rss_kib": 78944,
+          "steady_current_growth_from_first_kib": 84,
+          "steady_current_rss_kib": 89192,
+          "steady_peak_growth_from_first_kib": 0,
+          "steady_peak_rss_kib": 89356,
+          "steady_renders": 10
+        },
+        {
+          "baseline_rss_kib": 23236,
+          "elapsed_ms": 368.229,
+          "first_render_current_rss_kib": 89284,
+          "first_render_pdf": {
+            "bytes": 44872,
+            "sha256": "a0f0cba1d29b36bc2f69de88781a4793fec238a9a00cc0f7aab3d43434572e0e"
+          },
+          "first_render_peak_rss_kib": 89364,
+          "registered_rss_kib": 79120,
+          "steady_current_growth_from_first_kib": 84,
+          "steady_current_rss_kib": 89368,
+          "steady_peak_growth_from_first_kib": 0,
+          "steady_peak_rss_kib": 89364,
+          "steady_renders": 10
+        }
+      ],
+      "workers": 2
+    },
+    "first_and_steady": {
+      "baseline_rss_kib": 23052,
+      "elapsed_ms": 382.464,
+      "first_render_current_rss_kib": 88724,
+      "first_render_pdf": {
+        "bytes": 44872,
+        "sha256": "a0f0cba1d29b36bc2f69de88781a4793fec238a9a00cc0f7aab3d43434572e0e"
+      },
+      "first_render_peak_rss_kib": 88788,
+      "registered_rss_kib": 78832,
+      "steady_current_growth_from_first_kib": 92,
+      "steady_current_rss_kib": 88816,
+      "steady_peak_growth_from_first_kib": 0,
+      "steady_peak_rss_kib": 88788,
+      "steady_renders": 10
+    },
+    "metric_contract": {
+      "concurrent": "simultaneous current RSS after each isolated worker rendered and held",
+      "first": "fresh subprocess peak RSS after font registration and first PDF",
+      "steady": "current RSS growth after repeated PDFs in the same subprocess"
+    },
+    "result": "PASS",
+    "schema_version": "sc-f2-label-font-memory-probe-v1",
+    "violations": []
+  },
+  "pdf_inspection": {
+    "embedded_truetype_with_tounicode": true,
+    "no_helvetica_text_draw": true,
+    "page_count": true,
+    "text_extraction": true
+  },
+  "result": "PASS",
+  "schema_version": "sc-f2-label-font-ci-evidence-v1",
+  "two_page_probe": {
+    "elapsed_ms": 46.339,
+    "pages": 2,
+    "pdf_bytes": 44883,
+    "pdf_sha256": "c3c6689a66411a2bf2dfc903285e7061d38b5e30c8560801cbb252618992a624",
+    "positive_samples_per_page": 8,
+    "process_max_rss_kib": 88372,
+    "python_tracemalloc_peak_bytes": 10628085,
+    "reportlab_version": "4.5.1",
+    "result": "PASS"
+  },
+  "violations": []
+}
