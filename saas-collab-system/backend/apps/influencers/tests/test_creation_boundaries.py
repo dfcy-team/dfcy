@@ -1,11 +1,13 @@
 import re
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import connection
 import pytest
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.influencers import services as influencer_services
 from apps.influencers.models import (
     Influencer,
     InfluencerProfile,
@@ -167,6 +169,26 @@ def test_tiktok_handle_save_normalizes_the_business_field():
     influencer.save(update_fields=["platform", "handle"])
     influencer.refresh_from_db()
     assert influencer.handle == "Visible.Account"
+
+
+def test_switching_to_tiktok_validates_an_existing_handle():
+    _, _, _, influencer = _records("tiktok-platform-validation")
+    influencer.platform = "Instagram"
+    influencer.handle = "Display Name"
+    influencer.save(update_fields=["platform", "handle"])
+
+    serializer = InfluencerSerializer(
+        influencer,
+        data={"platform": "TikTok"},
+        partial=True,
+    )
+
+    assert serializer.is_valid() is False
+    assert "handle" in serializer.errors
+
+    influencer.platform = "TikTok"
+    with pytest.raises(DjangoValidationError, match="TikTok username"):
+        influencer.save(update_fields=["platform"])
 
 
 def test_influencer_api_exposes_handle_but_not_identity_helpers():
@@ -667,6 +689,38 @@ def test_blacklist_cascade_requires_profile_and_fulfillment_manage_permissions()
     ).exists()
     fulfillment.refresh_from_db()
     assert fulfillment.status == SampleFulfillment.Status.PENDING
+
+
+@pytest.mark.django_db(transaction=True)
+def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch):
+    _, user, store, influencer = _records("blacklist-on-commit")
+    task = _task(user, store, influencer)
+    create_sample_fulfillment(
+        user=user,
+        request_key="blacklist-on-commit-sample-key",
+        validated_data={
+            "outreach_task": task,
+            "influencer": influencer,
+        },
+        item_payloads=[],
+    )
+
+    observed_atomic_states = []
+    locked_task = influencer_services._locked_task
+
+    def observe_locked_task(*args, **kwargs):
+        observed_atomic_states.append(connection.in_atomic_block)
+        return locked_task(*args, **kwargs)
+
+    monkeypatch.setattr(influencer_services, "_locked_task", observe_locked_task)
+    set_influencer_blacklist(
+        user=user,
+        influencer=influencer,
+        blacklisted=True,
+        reason="on-commit task recompute",
+    )
+
+    assert observed_atomic_states == [True]
 
 
 def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():

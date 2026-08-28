@@ -1183,6 +1183,7 @@ def published_video_results_queryset(fulfillment):
     )
 
 
+@transaction.atomic
 def recompute_outreach_task_completion(*, user, task):
     """Complete an active task once its effective, non-deleted samples reach the target."""
     task = _locked_task(user, _pk(task))

@@ -98,13 +98,15 @@ class InfluencerSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         platform = attrs.get("platform", getattr(self.instance, "platform", ""))
-        if str(platform or "").casefold() == "tiktok" and "handle" in attrs:
-            handle = normalize_tiktok_username(attrs["handle"])
-            if not handle or not is_valid_tiktok_username(handle):
+        if str(platform or "").strip().casefold() == "tiktok":
+            raw_handle = attrs["handle"] if "handle" in attrs else getattr(self.instance, "handle", "")
+            handle = normalize_tiktok_username(raw_handle)
+            if ("handle" in attrs and not handle) or (handle and not is_valid_tiktok_username(handle)):
                 raise serializers.ValidationError({
                     "handle": "TikTok username may contain only letters, numbers, periods, and underscores.",
                 })
-            attrs["handle"] = handle
+            if "handle" in attrs:
+                attrs["handle"] = handle
         if self.instance is not None and any(
             field in attrs and getattr(self.instance, field) != attrs[field]
             for field in ("handle", "platform")

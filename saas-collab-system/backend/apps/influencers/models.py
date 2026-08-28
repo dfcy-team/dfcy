@@ -94,6 +94,10 @@ class Influencer(models.Model):
                     _assert_influencer_identity_change_allowed(self, persisted)
             if str(self.platform or "").casefold() == "tiktok":
                 self.handle = normalize_tiktok_username(self.handle)
+                if self.handle and not is_valid_tiktok_username(self.handle):
+                    raise ValidationError({
+                        "handle": "TikTok username may contain only letters, numbers, periods, and underscores.",
+                    })
                 if update_fields is not None:
                     kwargs["update_fields"] = update_fields | {"handle"}
             return super(Influencer, self).save(*args, **kwargs)
