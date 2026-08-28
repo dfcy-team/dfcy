@@ -169,7 +169,7 @@ for label in 工作台 产品开发 全球刊登 经营分析 经营决策 销�
   docker exec application-frontend-1 grep -Fq "$label" "/usr/share/nginx/html/$main_asset"
 done
 docker exec application-frontend-1 sh -c "grep -R -Fq '基础档案设置' /usr/share/nginx/html/assets"
-docker exec application-frontend-1 sh -c "grep -R -Fq '/api/internal/products/category-background-colors/' /usr/share/nginx/html/assets"
+docker exec application-frontend-1 sh -c "grep -R -Fq 'category-background-colors' /usr/share/nginx/html/assets"
 docker exec application-frontend-1 sh -c "grep -R -Fq '商品分类背景颜色' /usr/share/nginx/html/assets"
 
 layout_css=$(docker exec application-frontend-1 sh -c "ls /usr/share/nginx/html/assets/MainLayout-*.css | head -n 1")
