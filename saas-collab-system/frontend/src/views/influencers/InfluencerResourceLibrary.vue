@@ -25,7 +25,7 @@
       </div>
 
       <el-table v-loading="loading" :data="rows" empty-text="暂无达人档案" @row-click="openDetail">
-        <el-table-column label="达人" min-width="190"><template #default="{ row }"><b>{{ displayValue(row.name) }}</b><small>{{ displayValue(row.code) }} · {{ displayValue(row.handle) }}</small></template></el-table-column>
+        <el-table-column label="达人" min-width="190"><template #default="{ row }"><b>{{ influencerDisplayName(row) }}</b><small>{{ displayValue(row.code) }} · {{ displayValue(row.handle) }}</small></template></el-table-column>
         <el-table-column prop="platform" label="平台" width="100" />
         <el-table-column prop="category" label="内容赛道" min-width="125" />
         <el-table-column label="粉丝数" min-width="110"><template #default="{ row }">{{ formatCount(row.follower_count) }}</template></el-table-column>
@@ -121,6 +121,8 @@ const form = reactive(blankForm());
 const canManage = computed(() => auth.hasPermission('influencers.manage'));
 const activeCount = computed(() => rows.value.filter((row) => row.status === 'active').length); const cooperatingCount = computed(() => rows.value.filter((row) => row.cooperation_status === 'cooperating').length); const blacklistedCount = computed(() => rows.value.filter((row) => row.is_blacklisted).length);
 const displayValue = (value) => value === undefined || value === null || value === '' ? '—' : String(value);
+const influencerDisplayName = (row) => String(row?.handle || '').trim().replace(/^@+/, '').trim()
+  || row?.profile?.display_name || row?.name || row?.code || '—';
 const formatCount = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString('zh-CN') : '—';
 const formatJson = (value) => { try { return JSON.stringify(value || {}, null, 2); } catch { return '—'; } };
 const cooperationLabel = (status) => INFLUENCER_COOPERATION_STATUS_LABELS[status] || '未分层'; const cooperationTag = (status) => ({ contacted: 'warning', cooperating: 'success', paused: 'info' }[status] || '');

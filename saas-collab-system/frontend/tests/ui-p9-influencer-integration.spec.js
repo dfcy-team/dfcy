@@ -230,9 +230,10 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain("priority: 'normal'");
     expect(page).toContain('filterable');
     expect(page).toContain('influencerOptions');
-    for (const field of ['influencer_name', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
-    expect(page).toContain("path: '/influencers/sample-fulfillments'");
-    expect(page).toContain('outreach_task: String(task.id)');
+    for (const field of ['influencer_name', 'influencer_handle', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
+    expect(page).toContain('createSampleFulfillment({');
+    expect(page).toContain('outreach_task: task.id');
+    expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
     expect(page).toContain('matchOutreachProduct');
@@ -317,19 +318,19 @@ describe('influencer integration workspace contracts', () => {
   it('keeps priority values and fulfillment transitions aligned with backend contracts', () => {
     expect(OUTREACH_PRIORITY_LABELS).toEqual({ low: '低', normal: '普通', high: '高', urgent: '紧急' });
     expect(Object.keys(OUTREACH_PRIORITY_LABELS)).toEqual(['low', 'normal', 'high', 'urgent']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.pending).toEqual(['processing', 'creating', 'blank', 'cancelled']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.processing).toEqual(['shipped', 'cancelled']);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.pending).toEqual(['shipped', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.shipped).toEqual(['delivered', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.delivered).toEqual(['completed', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.completed).toEqual([]);
     expect(FULFILLMENT_STATUS_TRANSITIONS.cancelled).toEqual([]);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.blacklisted).toEqual([]);
 
     requestMock.mockReturnValue({ success: true });
-    updateSampleFulfillmentStatus(8, 'processing', 2);
+    updateSampleFulfillmentStatus(8, 'shipped', 2);
     expect(requestMock.mock.calls.at(-1)[0]).toMatchObject({
       method: 'post',
       url: '/api/internal/influencers/sample-fulfillments/8/status/',
-      data: { status: 'processing' },
+      data: { status: 'shipped' },
       headers: { 'If-Match': '"2"' }
     });
   });

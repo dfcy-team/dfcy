@@ -60,14 +60,17 @@ SAMPLE_COMPLETION_STATUSES = frozenset(
     }
 )
 SAMPLE_TERMINAL_STATUSES = frozenset(
-    {SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED}
+    {
+        SampleFulfillment.Status.COMPLETED,
+        SampleFulfillment.Status.CANCELLED,
+        SampleFulfillment.Status.BLACKLISTED,
+    }
 )
 SAMPLE_TIMEOUT_CANDIDATE_STATUSES = frozenset(
     {
         SampleFulfillment.Status.PENDING,
         SampleFulfillment.Status.SHIPPED,
         SampleFulfillment.Status.DELIVERED,
-        SampleFulfillment.Status.CREATING,
     }
 )
 SAMPLE_VIDEO_RECONCILE_STATUSES = frozenset(
@@ -956,6 +959,8 @@ def update_outreach_target(
 def _maybe_auto_complete_outreach_task(user, task):
     if task.status not in {OutreachTask.Status.PENDING, OutreachTask.Status.IN_PROGRESS}:
         return task
+    if task.target_count <= 0:
+        return task
     rows = list(
         OutreachTarget.objects.filter(
             tenant=user.tenant, task=task, is_deleted=False
@@ -963,7 +968,7 @@ def _maybe_auto_complete_outreach_task(user, task):
     )
     if not rows or OutreachTarget.OutreachResult.PENDING in rows:
         return task
-    if task.target_count and len(rows) < task.target_count:
+    if len(rows) < task.target_count:
         return task
     now = timezone.now()
     changes = {
@@ -1189,10 +1194,7 @@ def recompute_outreach_task_completion(*, user, task):
         tenant=user.tenant,
         outreach_task=task,
         is_deleted=False,
-    ).filter(
-        Q(status__in=SAMPLE_COMPLETION_STATUSES)
-        | Q(video_results__published_at__isnull=False)
-    ).distinct().count()
+    ).filter(status__in=SAMPLE_COMPLETION_STATUSES).distinct().count()
     if task.target_count <= 0 or completed_count < task.target_count:
         return task
 
@@ -1390,19 +1392,6 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             ) from exc
         raise
 
-    if has_sample_order:
-        QuerySet.update(
-            SampleFulfillment.objects.filter(
-                pk=fulfillment.pk,
-                tenant=user.tenant,
-                status=SampleFulfillment.Status.PENDING,
-            ),
-            status=SampleFulfillment.Status.SHIPPED,
-            shipped_at=initial_shipped_at,
-            updated_at=timezone.now(),
-        )
-        fulfillment.refresh_from_db()
-
     fulfillment = _recalculate_sample_pricing(
         user=user,
         fulfillment=fulfillment,
@@ -1419,10 +1408,30 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
         tenant=user.tenant,
         fulfillment=fulfillment,
         from_status="",
-        to_status=fulfillment.status,
+        to_status=SampleFulfillment.Status.PENDING,
         actor=user,
         reason="created",
     )
+    if has_sample_order:
+        before_version = fulfillment.version
+        _cas_state_update(
+            fulfillment,
+            tenant=user.tenant,
+            expected_status=SampleFulfillment.Status.PENDING,
+            expected_version=before_version,
+            status=SampleFulfillment.Status.SHIPPED,
+            shipped_at=initial_shipped_at,
+            version=before_version + 1,
+            updated_at=timezone.now(),
+        )
+        FulfillmentStatusEvent.objects.create(
+            tenant=user.tenant,
+            fulfillment=fulfillment,
+            from_status=SampleFulfillment.Status.PENDING,
+            to_status=SampleFulfillment.Status.SHIPPED,
+            actor=user,
+            reason="sample_order_no_added",
+        )
     _audit(
         user,
         "sample_create",
@@ -1452,36 +1461,6 @@ def transition_sample_fulfillment(*, user, fulfillment, status, expected_version
         raise ValidationError({"status": "Unsupported fulfillment status."})
     allowed = {
         SampleFulfillment.Status.PENDING: {
-            SampleFulfillment.Status.PROCESSING,
-            SampleFulfillment.Status.CREATING,
-            SampleFulfillment.Status.BLANK,
-            SampleFulfillment.Status.CANCELLED,
-        },
-        SampleFulfillment.Status.CREATING: {
-            SampleFulfillment.Status.PUBLISHED,
-            SampleFulfillment.Status.BLANK,
-            SampleFulfillment.Status.CANCELLED,
-        },
-        SampleFulfillment.Status.PUBLISHED: {
-            SampleFulfillment.Status.LIVE_CREATOR,
-            SampleFulfillment.Status.OVERDUE,
-            SampleFulfillment.Status.CANCELLED,
-        },
-        SampleFulfillment.Status.LIVE_CREATOR: {
-            SampleFulfillment.Status.OVERDUE,
-            SampleFulfillment.Status.COMPLETED,
-            SampleFulfillment.Status.CANCELLED,
-        },
-        SampleFulfillment.Status.OVERDUE: {
-            SampleFulfillment.Status.PUBLISHED,
-            SampleFulfillment.Status.COMPLETED,
-            SampleFulfillment.Status.CANCELLED,
-        },
-        SampleFulfillment.Status.BLANK: {
-            SampleFulfillment.Status.CREATING,
-            SampleFulfillment.Status.CANCELLED,
-        },
-        SampleFulfillment.Status.PROCESSING: {
             SampleFulfillment.Status.SHIPPED,
             SampleFulfillment.Status.CANCELLED,
         },
@@ -1493,8 +1472,23 @@ def transition_sample_fulfillment(*, user, fulfillment, status, expected_version
             SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
+        SampleFulfillment.Status.PUBLISHED: {
+            SampleFulfillment.Status.LIVE_CREATOR,
+            SampleFulfillment.Status.COMPLETED,
+            SampleFulfillment.Status.CANCELLED,
+        },
+        SampleFulfillment.Status.LIVE_CREATOR: {
+            SampleFulfillment.Status.COMPLETED,
+            SampleFulfillment.Status.CANCELLED,
+        },
+        SampleFulfillment.Status.OVERDUE: {
+            SampleFulfillment.Status.PUBLISHED,
+            SampleFulfillment.Status.COMPLETED,
+            SampleFulfillment.Status.CANCELLED,
+        },
         SampleFulfillment.Status.COMPLETED: set(),
         SampleFulfillment.Status.CANCELLED: set(),
+        SampleFulfillment.Status.BLACKLISTED: set(),
     }
     if status not in allowed[fulfillment.status]:
         raise ValidationError(
@@ -1507,15 +1501,11 @@ def transition_sample_fulfillment(*, user, fulfillment, status, expected_version
         "version": fulfillment.version + 1,
         "updated_at": now,
     }
-    if status == SampleFulfillment.Status.PROCESSING and fulfillment.sample_sent_at is None:
-        changes["sample_sent_at"] = now
-        if fulfillment.video_deadline_at is None:
-            changes["video_deadline_at"] = now + timedelta(days=20)
     if status == SampleFulfillment.Status.SHIPPED and fulfillment.shipped_at is None:
         changes["shipped_at"] = now
         if fulfillment.video_deadline_at is None:
             changes["video_deadline_at"] = now + timedelta(days=20)
-    if status in {SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED}:
+    if status in SAMPLE_TERMINAL_STATUSES:
         changes["finalized_at"] = now
     _cas_state_update(
         fulfillment,
@@ -1599,6 +1589,17 @@ def update_sample_fulfillment(
         "calculated_cost": str(fulfillment.calculated_cost) if fulfillment.calculated_cost is not None else None,
     }
     now = timezone.now()
+    auto_ship = (
+        fulfillment.status == SampleFulfillment.Status.PENDING
+        and bool(str(changes.get("sample_order_no", fulfillment.sample_order_no) or "").strip())
+    )
+    before_status = fulfillment.status
+    if auto_ship:
+        changes.update(
+            status=SampleFulfillment.Status.SHIPPED,
+            shipped_at=fulfillment.shipped_at or now,
+            video_deadline_at=fulfillment.video_deadline_at or now + timedelta(days=20),
+        )
     changes.update(version=fulfillment.version + 1, updated_at=now)
     updated = QuerySet.update(
         SampleFulfillment.objects.filter(
@@ -1615,6 +1616,15 @@ def update_sample_fulfillment(
             code="conflict",
         )
     fulfillment.refresh_from_db()
+    if auto_ship:
+        FulfillmentStatusEvent.objects.create(
+            tenant=user.tenant,
+            fulfillment=fulfillment,
+            from_status=before_status,
+            to_status=SampleFulfillment.Status.SHIPPED,
+            actor=user,
+            reason="sample_order_no_added",
+        )
 
     if has_item_change:
         payloads = list(item_payloads or [])
@@ -1739,6 +1749,84 @@ def restore_sample_fulfillment(*, user, fulfillment, expected_version):
     if task is not None:
         recompute_outreach_task_completion(user=user, task=task)
     return fulfillment
+
+
+@transaction.atomic
+def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
+    influencer = Influencer.objects.select_for_update().get(
+        pk=_pk(influencer), tenant=user.tenant
+    )
+    restriction, _ = InfluencerRestriction.objects.update_or_create(
+        tenant=user.tenant,
+        influencer=influencer,
+        defaults={
+            "is_blacklisted": blacklisted,
+            "reason": reason,
+            "created_by": user,
+        },
+    )
+    action = (
+        InfluencerRestrictEvent.Action.BLACKLIST
+        if blacklisted
+        else InfluencerRestrictEvent.Action.UNBLACKLIST
+    )
+    event = InfluencerRestrictEvent.objects.create(
+        tenant=user.tenant,
+        influencer=influencer,
+        action=action,
+        reason=reason or ("Manual blacklist" if blacklisted else "Manual unblacklist"),
+        actor=user,
+    )
+    if blacklisted:
+        affected_task_ids = set()
+        rows = list(
+            SampleFulfillment.objects.select_for_update().filter(
+                tenant=user.tenant,
+                influencer=influencer,
+                is_deleted=False,
+            ).exclude(
+                status__in={
+                    SampleFulfillment.Status.COMPLETED,
+                    SampleFulfillment.Status.CANCELLED,
+                    SampleFulfillment.Status.BLACKLISTED,
+                }
+            )
+        )
+        now = timezone.now()
+        for fulfillment in rows:
+            before_status = fulfillment.status
+            before_version = fulfillment.version
+            _cas_state_update(
+                fulfillment,
+                tenant=user.tenant,
+                expected_status=before_status,
+                expected_version=before_version,
+                status=SampleFulfillment.Status.BLACKLISTED,
+                finalized_at=now,
+                version=before_version + 1,
+                updated_at=now,
+            )
+            FulfillmentStatusEvent.objects.create(
+                tenant=user.tenant,
+                fulfillment=fulfillment,
+                from_status=before_status,
+                to_status=SampleFulfillment.Status.BLACKLISTED,
+                actor=user,
+                reason=reason or "influencer_blacklisted",
+            )
+            _audit(
+                user,
+                "sample_blacklist",
+                "sample_fulfillment",
+                fulfillment,
+                before={"status": before_status, "version": before_version},
+                after={"status": fulfillment.status, "version": fulfillment.version},
+            )
+            if fulfillment.outreach_task_id:
+                affected_task_ids.add(fulfillment.outreach_task_id)
+        for task_id in affected_task_ids:
+            recompute_outreach_task_completion(user=user, task=task_id)
+    return restriction, event
 
 
 @transaction.atomic

@@ -105,6 +105,27 @@ def test_outreach_task_number_is_server_owned_and_collision_retry_is_safe(monkey
     assert "task_no" not in serializer.validated_data
 
 
+def test_outreach_task_can_use_manual_store_when_product_is_not_matched():
+    _, user, store, _ = _records("task-unmatched-product")
+
+    serializer = OutreachTaskSerializer(
+        data={
+            "task_name": "Unmatched product remains creatable",
+            "store": store.pk,
+            "owner": user.pk,
+            "external_product_id": "1737123802146506012",
+            "sku_prefix": "",
+            "target_count": 10,
+        }
+    )
+
+    assert serializer.is_valid(), serializer.errors
+    task = create_outreach_task(user=user, validated_data=serializer.validated_data)
+    assert task.store_id == store.pk
+    assert task.external_product_id == "1737123802146506012"
+    assert task.sku_prefix == ""
+
+
 def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_target():
     _, user, store, influencer = _records("targetless-sample")
     task = _task(user, store)
@@ -133,6 +154,88 @@ def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_
     )
     assert missing_influencer.is_valid() is False
     assert "influencer" in missing_influencer.errors
+
+
+def test_sample_edit_can_transition_status_atomically():
+    tenant, user, store, influencer = _records("sample-edit-status")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-edit-status-key",
+        validated_data={"influencer": influencer, "store": store},
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {"notes": "edited", "status": SampleFulfillment.Status.SHIPPED},
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert response.status_code == 200, response.data
+    fulfillment.refresh_from_db()
+    assert fulfillment.notes == "edited"
+    assert fulfillment.status == SampleFulfillment.Status.SHIPPED
+    assert fulfillment.sample_sent_at is not None
+
+
+def test_invalid_status_transition_rolls_back_fact_edits():
+    tenant, user, store, influencer = _records("sample-edit-status-rollback")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-edit-status-rollback-key",
+        validated_data={"influencer": influencer, "store": store},
+        item_payloads=[],
+    )
+    original_version = fulfillment.version
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {"notes": "must roll back", "status": SampleFulfillment.Status.COMPLETED},
+        format="json",
+        HTTP_IF_MATCH=f'"{original_version}"',
+    )
+
+    assert response.status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.notes == ""
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert fulfillment.version == original_version
+
+
+def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name():
+    _, user, store, influencer = _records("task-product-snapshot")
+    task = _task(
+        user,
+        store,
+        task_name="Task-facing product name",
+        external_product_id="1730000000000000002",
+        product_name_snapshot="Task product snapshot",
+    )
+
+    fulfillment, created = create_sample_fulfillment(
+        user=user,
+        request_key="task-product-snapshot-key",
+        validated_data={
+            "fulfillment_no": "TASK-PRODUCT-SNAPSHOT",
+            "outreach_task": task,
+            "influencer": influencer,
+            "product_name_snapshot": "Stale client product name",
+        },
+        item_payloads=[],
+    )
+
+    assert created is True
+    assert fulfillment.external_product_id == task.external_product_id
+    assert fulfillment.product_name_snapshot == "Task product snapshot"
 
 
 def test_standalone_sample_uses_type_number_and_does_not_require_outreach_task():
@@ -269,3 +372,90 @@ def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
     assert created.handle == "new.creator"
     assert created.platform == "TikTok"
     assert Influencer.objects.filter(tenant=tenant, handle="new.creator").count() == 1
+
+
+def test_outreach_manager_can_resolve_existing_influencer():
+    _, user, _, influencer = _records("outreach-resolve")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.outreach.manage")
+    influencer.handle = "outreach.creator"
+    influencer.save(update_fields=["handle"])
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/resolve/", {"q": "outreach.creator"})
+
+    assert response.status_code == 200
+    assert response.json()["data"]["candidates"][0]["id"] == influencer.id
+
+    create_response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "outreach-created.creator"},
+        format="json",
+    )
+
+    assert create_response.status_code == 403
+    assert not Influencer.objects.filter(
+        tenant=user.tenant,
+        handle="outreach-created.creator",
+    ).exists()
+
+
+def test_account_resolve_prefers_blacklisted_duplicate_profile():
+    tenant, user, _, clean = _records("resolve-blacklisted-duplicate")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    clean.handle = "duplicate.creator"
+    clean.save(update_fields=["handle"])
+    blocked = Influencer.objects.create(
+        tenant=tenant,
+        code="creator-blocked-duplicate",
+        name="Blocked duplicate",
+        handle="duplicate.creator",
+        platform="tiktok",
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=blocked,
+        is_blacklisted=True,
+        created_by=user,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "@duplicate.creator"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == blocked.id
+    assert response.json()["data"]["is_blacklisted"] is True
+
+
+def test_account_resolve_prefers_normalized_handle_over_another_profile_code():
+    tenant, user, _, handle_match = _records("resolve-handle-priority")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    handle_match.handle = "mhaine_94"
+    handle_match.save(update_fields=["handle"])
+    Influencer.objects.create(
+        tenant=tenant,
+        code="mhaine_94",
+        name="Code collision",
+        handle="another.creator",
+        platform="tiktok",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "＠ＭＨＡＩＮＥ＿９４"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == handle_match.id
+    assert response.json()["data"]["handle"] == "mhaine_94"

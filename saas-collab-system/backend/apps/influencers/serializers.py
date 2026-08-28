@@ -43,9 +43,7 @@ class InfluencerRestrictEventSerializer(serializers.ModelSerializer):
 
 
 class InfluencerSerializer(serializers.ModelSerializer):
-    # Handles are accepted on controlled writes but are not exposed by the
-    # public collection/detail representation.
-    handle = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    handle = serializers.CharField(required=False, allow_blank=True)
     tenant_id = serializers.IntegerField(read_only=True)
     is_blacklisted = serializers.SerializerMethodField()
     video_metrics = serializers.SerializerMethodField()
@@ -72,6 +70,9 @@ class InfluencerSerializer(serializers.ModelSerializer):
         if queryset.exists():
             raise serializers.ValidationError("Code must be unique within the current tenant.")
         return value
+
+    def validate_handle(self, value):
+        return str(value or "").strip().lstrip("@").strip()
 
     def get_is_blacklisted(self, obj):
         prefetched = getattr(obj, "_restriction_events", None)
@@ -158,9 +159,6 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
                 published_at__isnull=False,
             )
             matched_videos = published_video_rows.count()
-            matched_sample_ids = set(
-                published_video_rows.values_list("sample_fulfillment_id", flat=True)
-            )
         else:
             sample_rows = [(sample.id, sample.status) for sample in prefetched_samples]
             sample_ids = [sample_id for sample_id, _ in sample_rows]
@@ -168,20 +166,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
                 len(getattr(sample, "_published_video_results", []))
                 for sample in prefetched_samples
             )
-            matched_sample_ids = {
-                sample.id
-                for sample in prefetched_samples
-                if getattr(sample, "_published_video_results", [])
-            }
-        protected_statuses = {
-            SampleFulfillment.Status.PUBLISHED,
-            SampleFulfillment.Status.LIVE_CREATOR,
-            SampleFulfillment.Status.COMPLETED,
-            SampleFulfillment.Status.CANCELLED,
-        }
         for sample_id, status in sample_rows:
-            if sample_id in matched_sample_ids and status not in protected_statuses:
-                status = SampleFulfillment.Status.PUBLISHED
             counts[status] = counts.get(status, 0) + 1
         completed = sum(
             counts.get(status, 0)
@@ -304,12 +289,14 @@ class OutreachTargetSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     influencer_code = serializers.CharField(source="influencer.code", read_only=True)
     influencer_name = serializers.CharField(source="influencer.name", read_only=True)
+    influencer_handle = serializers.CharField(source="influencer.handle", read_only=True)
     influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
 
     class Meta:
         model = OutreachTarget
         fields = (
             "id", "tenant_id", "task", "influencer", "influencer_code", "influencer_name",
+            "influencer_handle",
             "influencer_platform", "first_linked_at", "outreach_result",
             "version", "notes", "is_deleted", "deleted_at", "created_at", "updated_at",
         )
@@ -370,6 +357,9 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     outreach_task_name = serializers.CharField(source="outreach_task.task_name", read_only=True)
     store_name = serializers.CharField(source="store.name", read_only=True)
     influencer_name = serializers.SerializerMethodField()
+    influencer_handle = serializers.CharField(source="influencer.handle", read_only=True)
+    influencer_code = serializers.CharField(source="influencer.code", read_only=True)
+    influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
     owner_name = serializers.SerializerMethodField()
     deleted_by_name = serializers.SerializerMethodField()
     video_match_count = serializers.SerializerMethodField()
@@ -380,8 +370,8 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         if not value:
             return ""
         return (
-            getattr(value, "name", "")
-            or getattr(value, "handle", "")
+            getattr(value, "handle", "")
+            or getattr(value, "name", "")
             or getattr(value, "full_name", "")
             or getattr(value, "username", "")
         )
@@ -441,7 +431,8 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         model = SampleFulfillment
         fields = (
             "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
-            "outreach_target", "influencer", "influencer_name", "store", "store_name", "owner", "owner_name",
+            "outreach_target", "influencer", "influencer_name", "influencer_handle", "influencer_code",
+            "influencer_platform", "store", "store_name", "owner", "owner_name",
             "product_name_snapshot", "external_product_id", "sample_order_no",
             "link_type", "quick_tags", "sample_sent_at", "shipped_at", "video_deadline_at", "status", "source", "external_id", "version",
             "notes", "finalized_at", "sku_quantity", "sales_amount", "calculated_cost", "pricing_status",
@@ -485,7 +476,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
 
 
 class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
-    """Allow-list for fact edits; status and lifecycle metadata remain service-owned."""
+    """Allow-list for fact edits; lifecycle metadata remains service-owned."""
 
     items = SampleItemSerializer(many=True, required=False)
     append_items = SampleItemSerializer(many=True, required=False, write_only=True)
@@ -500,6 +491,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
             "notes",
             "link_type",
             "quick_tags",
+            "status",
             "items",
             "append_items",
             "items_mode",

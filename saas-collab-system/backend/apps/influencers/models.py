@@ -331,16 +331,14 @@ class SampleFulfillment(StateMachineTenantModel):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
-        PROCESSING = "processing", "Processing"
         SHIPPED = "shipped", "Shipped"
         DELIVERED = "delivered", "Delivered"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
-        CREATING = "creating", "Creating"
         PUBLISHED = "published", "Published"
         LIVE_CREATOR = "live_creator", "Live creator"
         OVERDUE = "overdue", "Overdue"
-        BLANK = "blank", "Blank"
+        BLACKLISTED = "blacklisted", "Blacklisted"
 
     fulfillment_no = models.CharField(max_length=80)
     request_key = models.CharField(max_length=128)

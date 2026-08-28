@@ -25,6 +25,7 @@ from apps.influencers.models import (
     BdSampleAttributionSnapshot,
     Influencer,
     InfluencerRestriction,
+    FulfillmentStatusEvent,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
@@ -573,11 +574,11 @@ def test_workflow_models_require_audited_state_machine_writes_and_stale_versions
     )
     assert response.status_code == 201
     fulfillment = SampleFulfillment.objects.get(pk=response.data["data"]["id"])
-    fulfillment.status = SampleFulfillment.Status.PROCESSING
+    fulfillment.status = SampleFulfillment.Status.SHIPPED
     with pytest.raises(DjangoValidationError):
         fulfillment.save()
     fulfillment.refresh_from_db()
-    fulfillment.status = SampleFulfillment.Status.PROCESSING
+    fulfillment.status = SampleFulfillment.Status.SHIPPED
     with pytest.raises(DjangoValidationError):
         fulfillment.save(update_fields=["status"])
     fulfillment.refresh_from_db()
@@ -602,10 +603,10 @@ def test_workflow_models_require_audited_state_machine_writes_and_stale_versions
     transition_sample_fulfillment(
         user=user,
         fulfillment=fulfillment,
-        status=SampleFulfillment.Status.PROCESSING,
+        status=SampleFulfillment.Status.SHIPPED,
         expected_version=1,
     )
-    assert fulfillment.status_events.filter(to_status=SampleFulfillment.Status.PROCESSING).exists()
+    assert fulfillment.status_events.filter(to_status=SampleFulfillment.Status.SHIPPED).exists()
     assert OperationLog.objects.filter(tenant=tenant, action="outreach_status", object_id=str(task.pk)).exists()
     assert OperationLog.objects.filter(tenant=tenant, action="sample_status", object_id=str(fulfillment.pk)).exists()
 
@@ -1168,7 +1169,7 @@ def test_0025_grants_new_permissions_to_manager_and_administrator_roles():
     assert expected <= set(administrator.permissions.values_list("code", flat=True))
 
 
-def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_is_versioned():
+def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is_versioned():
     tenant = Tenant.objects.create(name="Tenant", code="sensitive-profile")
     _, client = user_with_permissions(
         tenant,
@@ -1191,9 +1192,10 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
     listed = client.get("/api/internal/influencers/")
     searched = client.get("/api/internal/influencers/", {"search": "secret-handle"})
     item = listed.data["data"]["results"][0]
-    for field in ("handle", "contact_name", "contact_phone", "contact_email", "notes"):
+    assert item["handle"] == "secret-handle"
+    for field in ("contact_name", "contact_phone", "contact_email", "notes"):
         assert field not in item
-    assert searched.data["data"]["count"] == 0
+    assert searched.data["data"]["count"] == 1
 
     version = influencer.updated_at.isoformat()
     first = client.post(
@@ -1294,6 +1296,32 @@ def test_single_target_terminal_result_auto_completes_task_once():
     assert second.status_code == 409
     assert task.status == OutreachTask.Status.COMPLETED
     assert task.finalized_at == finalized_at
+
+
+def test_zero_target_count_does_not_auto_complete_outreach_task():
+    tenant = Tenant.objects.create(name="Tenant", code="a2-zero-target")
+    user, client = user_with_permissions(
+        tenant,
+        "a2-zero-target-user",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    _, influencer, task = base_records(tenant, user, "a2-zero-target")
+    task.target_count = 0
+    task.save(update_fields=["target_count"])
+    target = OutreachTarget.objects.get(task=task, influencer=influencer)
+
+    response = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{target.pk}/",
+        {"outreach_result": "success"},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    task.refresh_from_db()
+
+    assert response.status_code == 200
+    assert task.status != OutreachTask.Status.COMPLETED
+    assert task.finalized_at is None
 
 
 def test_blacklisted_influencer_cannot_be_added_to_outreach_task():
@@ -1815,6 +1843,13 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
     )
     assert edited.status_code == 200
     assert edited.data["data"]["version"] == 2
+    assert edited.data["data"]["status"] == SampleFulfillment.Status.SHIPPED
+    assert FulfillmentStatusEvent.objects.filter(
+        fulfillment_id=fulfillment_id,
+        from_status=SampleFulfillment.Status.PENDING,
+        to_status=SampleFulfillment.Status.SHIPPED,
+        reason="sample_order_no_added",
+    ).exists()
     assert edited.data["data"]["link_type"] == "TKOne"
     assert edited.data["data"]["sku_quantity"] == 3
 
@@ -1830,6 +1865,18 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
         {"include_deleted": "true"},
     )
     assert deleted_list.data["data"]["count"] == 1
+    deleted_only = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"deleted_only": "true"},
+    )
+    assert deleted_only.status_code == 200
+    assert deleted_only.data["data"]["count"] == 1
+    assert all(row["is_deleted"] for row in deleted_only.data["data"]["results"])
+    conflicting_deleted_filters = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"deleted_only": "true", "include_deleted": "true"},
+    )
+    assert conflicting_deleted_filters.status_code == 400
 
     restored = client.post(
         f"/api/internal/influencers/sample-fulfillments/{fulfillment_id}/restore/",
@@ -1837,6 +1884,13 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
     )
     assert restored.status_code == 200
     assert restored.data["data"]["is_deleted"] is False
+
+
+def test_sample_fulfillment_public_status_choices_are_the_controlled_baseline():
+    assert set(SampleFulfillment.Status.values) == {
+        "pending", "shipped", "delivered", "completed", "cancelled",
+        "published", "live_creator", "overdue", "blacklisted",
+    }
 
 
 def test_sample_timeout_video_recovery_and_task_completion_summary_are_idempotent():

@@ -37,6 +37,7 @@ from .models import (
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
+    normalize_tiktok_username,
 )
 from .serializers import (
     InfluencerSerializer,
@@ -61,6 +62,7 @@ from .services import (
     soft_delete_sample_fulfillment,
     transition_outreach_task,
     transition_sample_fulfillment,
+    set_influencer_blacklist,
     update_sample_fulfillment,
     update_outreach_task,
     update_outreach_target,
@@ -104,6 +106,27 @@ def _query_bool(value, *, field):
     raise ValidationError({field: "Expected true or false."})
 
 
+def _influencer_candidates(queryset, *, limit):
+    rows = []
+    seen = set()
+    for influencer in queryset.select_related("profile").order_by("-is_blacklisted", "id"):
+        handle = str(influencer.handle or "").strip().lstrip("@").strip()
+        key = normalize_tiktok_username(handle or influencer.code)
+        if key in seen:
+            continue
+        seen.add(key)
+        profile = getattr(influencer, "profile", None)
+        rows.append({
+            "id": influencer.id, "code": influencer.code, "name": influencer.name,
+            "display_name": getattr(profile, "display_name", "") or influencer.name,
+            "handle": handle, "platform": influencer.platform, "status": influencer.status,
+            "is_blacklisted": bool(influencer.is_blacklisted),
+        })
+        if len(rows) >= limit:
+            break
+    return rows
+
+
 class InfluencerCollectionView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
@@ -127,6 +150,7 @@ class InfluencerCollectionView(APIView):
             queryset = queryset.filter(
                 Q(code__icontains=search)
                 | Q(name__icontains=search)
+                | Q(handle__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__display_name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__external_influencer_id__icontains=search)
             )
@@ -292,21 +316,13 @@ class InfluencerBlacklistView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     write_permission_code = "influencers.manage"
 
-    @transaction.atomic
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
         blacklisted = bool(request.data.get("is_blacklisted", request.data.get("blacklisted", True)))
         reason = str(request.data.get("reason", "")).strip()
-        restriction, _ = InfluencerRestriction.objects.update_or_create(
-            tenant=request.user.tenant,
-            influencer=influencer,
-            defaults={"is_blacklisted": blacklisted, "reason": reason, "created_by": request.user},
-        )
-        action = InfluencerRestrictEvent.Action.BLACKLIST if blacklisted else InfluencerRestrictEvent.Action.UNBLACKLIST
-        event = InfluencerRestrictEvent.objects.create(
-            tenant=request.user.tenant, influencer=influencer, action=action,
-            reason=reason or ("Manual blacklist" if blacklisted else "Manual unblacklist"), actor=request.user,
+        restriction, event = set_influencer_blacklist(
+            user=request.user, influencer=influencer, blacklisted=blacklisted, reason=reason
         )
         return success_response({"is_blacklisted": restriction.is_blacklisted, "event": InfluencerRestrictEventSerializer(event).data})
 
@@ -354,37 +370,39 @@ class InfluencerResolveView(APIView):
                 | Q(code__icontains=query)
                 | Q(name__icontains=query)
             )
-        rows = []
-        for influencer in queryset.order_by("name", "code")[:50]:
-            rows.append(
-                {
-                    "id": influencer.id,
-                    "code": influencer.code,
-                    "name": influencer.name,
-                    "handle": influencer.handle,
-                    "platform": influencer.platform,
-                    "status": influencer.status,
-                    "is_blacklisted": influencer.is_blacklisted,
-                }
-            )
+        rows = _influencer_candidates(queryset, limit=50)
         return success_response({"query": query, "candidates": rows, "results": rows})
 
     @transaction.atomic
     def post(self, request):
         """Resolve an exact account or create the minimal tenant profile needed for sampling."""
         require_all_scope(request.user, self.read_permission_code)
-        account = str(request.data.get("handle") or request.data.get("account") or "").strip()
-        account = account.lstrip("@").strip()
+        account = normalize_tiktok_username(
+            request.data.get("handle") or request.data.get("account") or ""
+        )
         if not account or len(account) > 120:
             raise ValidationError({"handle": "TikTok account must be 1-120 characters."})
 
+        blacklist_subquery = InfluencerRestriction.objects.filter(
+            tenant=request.user.tenant,
+            influencer_id=OuterRef("pk"),
+            is_blacklisted=True,
+        )
         influencer = (
             Influencer.objects.select_for_update()
-            .filter(tenant=request.user.tenant)
-            .filter(Q(handle__iexact=account) | Q(code__iexact=account))
-            .order_by("id")
+            .filter(tenant=request.user.tenant, handle__iexact=account)
+            .annotate(is_blacklisted=Exists(blacklist_subquery))
+            .order_by("-is_blacklisted", "id")
             .first()
         )
+        if influencer is None:
+            influencer = (
+                Influencer.objects.select_for_update()
+                .filter(tenant=request.user.tenant, code__iexact=account)
+                .annotate(is_blacklisted=Exists(blacklist_subquery))
+                .order_by("-is_blacklisted", "id")
+                .first()
+            )
         created = False
         if influencer is None:
             digest = hashlib.sha256(
@@ -463,10 +481,13 @@ class OutreachTaskCollectionView(APIView):
                 distinct=True,
             )
         )
-        include_deleted = request.query_params.get("include_deleted", "").lower() in {
-            "1", "true", "yes"
-        }
-        if not include_deleted:
+        if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
+            raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
+        deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")
+        include_deleted = _query_bool(request.query_params.get("include_deleted", "false"), field="include_deleted")
+        if deleted_only:
+            queryset = queryset.filter(is_deleted=True)
+        elif not include_deleted:
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
@@ -521,10 +542,15 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
+        blacklist_subquery = InfluencerRestriction.objects.filter(
+            tenant=request.user.tenant,
+            influencer_id=OuterRef("pk"),
+            is_blacklisted=True,
+        )
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
-        ).order_by("name", "code")[:500]
+        ).annotate(is_blacklisted=Exists(blacklist_subquery))
         stores = stores[:200]
         return success_response({
             "stores": [
@@ -541,15 +567,7 @@ class OutreachTaskOptionsView(APIView):
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
             ],
-            "influencers": [
-                {
-                    "id": influencer.id,
-                    "code": influencer.code,
-                    "name": influencer.name,
-                    "platform": influencer.platform,
-                }
-                for influencer in influencers
-            ],
+            "influencers": _influencer_candidates(influencers, limit=500),
         })
 
 
@@ -560,17 +578,21 @@ class SampleFulfillmentOptionsView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         search = request.query_params.get("search", "").strip()
+        blacklist_subquery = InfluencerRestriction.objects.filter(
+            tenant=request.user.tenant,
+            influencer_id=OuterRef("pk"),
+            is_blacklisted=True,
+        )
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
-        )
+        ).annotate(is_blacklisted=Exists(blacklist_subquery))
         if search:
             influencers = influencers.filter(
                 Q(code__icontains=search)
                 | Q(name__icontains=search)
                 | Q(handle__icontains=search)
             )
-        influencers = influencers.order_by("name", "code")[:100]
         tasks = OutreachTask.objects.filter(
             tenant=request.user.tenant,
             is_deleted=False,
@@ -591,16 +613,7 @@ class SampleFulfillmentOptionsView(APIView):
                 }
                 for task in tasks
             ],
-            "influencers": [
-                {
-                    "id": influencer.id,
-                    "code": influencer.code,
-                    "name": influencer.name,
-                    "handle": influencer.handle,
-                    "platform": influencer.platform,
-                }
-                for influencer in influencers
-            ],
+            "influencers": _influencer_candidates(influencers, limit=100),
         })
 
 
@@ -899,10 +912,13 @@ class SampleFulfillmentCollectionView(APIView):
                 to_attr="_published_video_results",
             ),
         )
-        include_deleted = request.query_params.get("include_deleted", "").lower() in {
-            "1", "true", "yes"
-        }
-        if not include_deleted:
+        if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
+            raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
+        deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")
+        include_deleted = _query_bool(request.query_params.get("include_deleted", "false"), field="include_deleted")
+        if deleted_only:
+            queryset = queryset.filter(is_deleted=True)
+        elif not include_deleted:
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
@@ -993,19 +1009,36 @@ class SampleFulfillmentDetailView(APIView):
         serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         validated = dict(serializer.validated_data)
+        requested_status = validated.pop("status", None)
         item_payloads = validated.pop("items", None)
         append_item_payloads = validated.pop("append_items", None)
         items_mode = validated.pop("items_mode", "replace")
+        expected_version = _expected_version(request)
+        has_fact_changes = bool(validated) or item_payloads is not None or append_item_payloads is not None
         try:
-            fulfillment = update_sample_fulfillment(
-                user=request.user,
-                fulfillment=fulfillment,
-                expected_version=_expected_version(request),
-                validated_data=validated,
-                item_payloads=item_payloads,
-                append_item_payloads=append_item_payloads,
-                items_mode=items_mode,
-            )
+            with transaction.atomic():
+                if has_fact_changes:
+                    fulfillment = update_sample_fulfillment(
+                        user=request.user,
+                        fulfillment=fulfillment,
+                        expected_version=expected_version,
+                        validated_data=validated,
+                        item_payloads=item_payloads,
+                        append_item_payloads=append_item_payloads,
+                        items_mode=items_mode,
+                    )
+                if requested_status and requested_status != fulfillment.status:
+                    fulfillment = transition_sample_fulfillment(
+                        user=request.user,
+                        fulfillment=fulfillment,
+                        status=requested_status,
+                        expected_version=fulfillment.version,
+                        reason="manual_edit",
+                    )
+                elif not has_fact_changes and not requested_status:
+                    raise ValidationError(
+                        {"detail": "At least one editable fulfillment field is required."}
+                    )
         except ValidationError as exc:
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc

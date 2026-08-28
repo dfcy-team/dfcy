@@ -33,7 +33,7 @@
           <el-option v-for="dispatcher in dispatcherOptions" :key="dispatcher.id" :label="dispatcher.name" :value="dispatcher.id" />
         </el-select>
         <el-checkbox v-model="filters.normalOnly" @change="applyFilters">正常任务</el-checkbox>
-        <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
+        <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新建任务</el-button>
@@ -305,7 +305,7 @@
               <article v-for="sample in detailSamples" :key="sample.id" class="sample-card">
                 <div><b>{{ displayValue(sample.fulfillment_no) }}</b><el-tag size="small">{{ statusLabel(FULFILLMENT_STATUS_LABELS, sample.status) }}</el-tag></div>
                 <p>样品订单：{{ displayValue(sample.sample_order_no) }}</p>
-                <p>达人：{{ displayValue(sample.influencer_name || sample.influencer) }}　成本：{{ displayAmount(sample.calculated_cost, sample) }}　视频匹配：{{ sample.video_match_count || 0 }}</p>
+                <p>达人：{{ displayValue(sampleInfluencerName(sample)) }}　成本：{{ displayAmount(sample.calculated_cost, sample) }}　视频匹配：{{ sample.video_match_count || 0 }}</p>
                 <small>创建时间：{{ displayValue(sample.created_at) }}</small>
               </article>
             </div>
@@ -378,7 +378,7 @@ const storeOptions = ref([]);
 const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, includeDeleted: false });
+const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -405,6 +405,8 @@ const productMatchSeq = ref(0);
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
+const sampleInfluencerName = (row) => String(row?.influencer_handle || '').trim().replace(/^@+/, '').trim()
+  || row?.influencer_name || row?.influencer;
 
 const filterStoreOptions = computed(() => {
   const optionsById = new Map(storeOptions.value.map((store) => [store.id, store]));
@@ -485,7 +487,7 @@ async function load() {
   if (filters.search.trim()) params.search = filters.search.trim();
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
-  if (filters.includeDeleted) params.include_deleted = 'true';
+  if (filters.deletedOnly) params.deleted_only = 'true';
   const r = await fetchOutreachTasks(params);
   loading.value = false;
   if (r.success) {
@@ -502,7 +504,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, includeDeleted: false });
+  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
   applyFilters();
 }
 
@@ -602,7 +604,7 @@ async function matchProduct() {
   matchedStoreIds.value = candidates.map((item) => item.store_id);
   if (!candidates.length) {
     productMatchType.value = 'warning';
-    productMatchHint.value = '商品数据未导入，请手动选择店铺和填写 SKU 前缀';
+    productMatchHint.value = '商品数据未匹配，不影响创建；请手动选择店铺，SKU 前缀可填写或留空';
     return;
   }
   if (r.data?.unique) {
@@ -770,17 +772,19 @@ async function refreshActiveTask() {
 }
 
 function influencerOptionLabel(influencer) {
-  const primary = influencer.name || influencer.code || `达人 ${influencer.id}`;
-  const account = [influencer.platform, influencer.handle].filter(Boolean).join(' · ');
+  const handle = String(influencer.handle || '').trim().replace(/^@+/, '').trim();
+  const primary = handle || influencer.display_name || influencer.name || influencer.code || `达人 ${influencer.id}`;
+  const account = [influencer.platform].filter(Boolean).join(' · ');
   return account ? `${primary}（${account}）` : primary;
 }
 
 function targetDisplayName(row) {
-  return row.influencer_name || row.influencer_code || (row.influencer ? `达人 ${row.influencer}` : '—');
+  const handle = String(row.influencer_handle || '').trim().replace(/^@+/, '').trim();
+  return handle || row.influencer_name || row.influencer_code || (row.influencer ? `达人 ${row.influencer}` : '—');
 }
 
 function targetAccount(row) {
-  const account = [row.influencer_platform, row.influencer_code].filter(Boolean).join(' · ');
+  const account = [row.influencer_platform, row.influencer_handle || row.influencer_code].filter(Boolean).join(' · ');
   return account || (row.influencer ? `ID ${row.influencer}` : '—');
 }
 
