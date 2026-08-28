@@ -41,6 +41,7 @@ from .models import (
     VideoResult,
     active_influencer_restriction_subquery,
     influencer_has_active_restriction,
+    is_valid_tiktok_username,
     normalize_tiktok_username,
 )
 from .serializers import (
@@ -183,7 +184,7 @@ def _resolve_existing_influencer(*, tenant, account, blacklist_subquery):
         .filter(
             tenant=tenant,
             platform__iexact="TikTok",
-            canonical_handle=account,
+            handle__iexact=account,
         )
         .annotate(
             is_blacklisted=Exists(blacklist_subquery),
@@ -441,8 +442,10 @@ class InfluencerResolveView(APIView):
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )
-        if not account or len(account) > 255:
-            raise ValidationError({"handle": "TikTok account must be 1-255 characters."})
+        if not account or not is_valid_tiktok_username(account):
+            raise ValidationError({
+                "handle": "TikTok username may contain only letters, numbers, periods, and underscores.",
+            })
 
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         influencer = _resolve_existing_influencer(

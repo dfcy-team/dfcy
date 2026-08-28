@@ -1,4 +1,3 @@
-import hashlib
 import re
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -16,7 +15,12 @@ from apps.influencers.models import (
     OutreachTask,
     SampleFulfillment,
 )
-from apps.influencers.serializers import OutreachTargetSerializer, SampleFulfillmentSerializer, OutreachTaskSerializer
+from apps.influencers.serializers import (
+    InfluencerSerializer,
+    OutreachTargetSerializer,
+    OutreachTaskSerializer,
+    SampleFulfillmentSerializer,
+)
 from apps.influencers.services import (
     create_outreach_task,
     create_sample_fulfillment,
@@ -142,37 +146,39 @@ def test_outreach_task_can_use_manual_store_when_product_is_not_matched():
 
 def test_tiktok_handle_schema_is_the_canonical_non_nullable_identity_column():
     field = Influencer._meta.get_field("handle")
-    canonical_field = Influencer._meta.get_field("canonical_handle")
-    digest_field = Influencer._meta.get_field("canonical_handle_digest")
 
     assert field.max_length == 255
     assert field.null is False
     assert field.db_comment == "TikTok用户名"
-    assert canonical_field.db_index is True
-    assert digest_field.max_length == 64
-    assert digest_field.null is False
-    assert any(
-        index.fields == ["tenant", "platform", "canonical_handle_digest"]
-        for index in Influencer._meta.indexes
-    )
+    assert not hasattr(Influencer(), "canonical_handle")
+    assert not hasattr(Influencer(), "canonical_handle_digest")
 
 
-def test_tiktok_handle_save_dual_writes_canonical_value_and_digest():
-    _, _, _, influencer = _records("canonical-digest")
+def test_tiktok_handle_save_normalizes_the_business_field():
+    _, _, _, influencer = _records("canonical-handle")
     influencer.handle = " ＠ＭＨＡＩＮＥ＿９４ "
     influencer.save(update_fields=["handle"])
 
     influencer.refresh_from_db()
-    assert influencer.canonical_handle == "mhaine_94"
-    assert influencer.canonical_handle_digest == hashlib.sha256(
-        b"mhaine_94"
-    ).hexdigest()
+    assert influencer.handle == "mhaine_94"
 
     influencer.platform = "Instagram"
-    influencer.save(update_fields=["platform"])
+    influencer.handle = "Visible.Account"
+    influencer.save(update_fields=["platform", "handle"])
     influencer.refresh_from_db()
-    assert influencer.canonical_handle == ""
-    assert influencer.canonical_handle_digest == ""
+    assert influencer.handle == "Visible.Account"
+
+
+def test_influencer_api_exposes_handle_but_not_identity_helpers():
+    _, _, _, influencer = _records("handle-output")
+    influencer.handle = "mhaine_94"
+    influencer.save(update_fields=["handle"])
+
+    payload = InfluencerSerializer(influencer).data
+
+    assert payload["handle"] == "mhaine_94"
+    assert "canonical_handle" not in payload
+    assert "canonical_handle_digest" not in payload
 
 
 def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling():
@@ -193,9 +199,10 @@ def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling()
         reason="identity-level blacklist",
     )
 
-    assert blocked.canonical_handle == "mhaine_94"
-    assert duplicate.canonical_handle == "mhaine_94"
-    assert blocked.canonical_handle_digest == duplicate.canonical_handle_digest
+    blocked.refresh_from_db()
+    duplicate.refresh_from_db()
+    assert blocked.handle == "mhaine_94"
+    assert duplicate.handle == "mhaine_94"
     with pytest.raises(ValidationError, match="Blacklisted influencers"):
         create_sample_fulfillment(
             user=user,
@@ -306,7 +313,7 @@ def test_blacklisted_identity_cannot_change_handle_or_platform(field, value):
     assert getattr(influencer, field) == expected
 
 
-def test_canonical_handle_is_tenant_scoped_and_empty_handle_has_no_shared_identity():
+def test_handle_identity_is_tenant_scoped_and_empty_handle_has_no_shared_identity():
     tenant, _, _, influencer = _records("canonical-scope")
     influencer.handle = ""
     influencer.save(update_fields=["handle"])
@@ -314,8 +321,8 @@ def test_canonical_handle_is_tenant_scoped_and_empty_handle_has_no_shared_identi
     foreign.handle = "＠ＭＨＡＩＮＥ＿９４"
     foreign.save(update_fields=["handle"])
 
-    assert influencer.canonical_handle == ""
-    assert foreign.canonical_handle == "mhaine_94"
+    assert influencer.handle == ""
+    assert foreign.handle == "mhaine_94"
     assert foreign.tenant_id == other_tenant.id
 
 
@@ -689,6 +696,23 @@ def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
     assert Influencer.objects.filter(tenant=tenant, handle="new.creator").count() == 1
 
 
+def test_fulfillment_account_resolve_rejects_display_name_as_tiktok_handle():
+    _, user, _, _ = _records("resolve-display-name")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"handle": "She deserve ✨"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert not Influencer.objects.filter(tenant=user.tenant, name="She deserve ✨").exists()
+
+
 def test_outreach_manager_can_resolve_existing_influencer():
     _, user, _, influencer = _records("outreach-resolve")
     role = user.user_roles.get().role
@@ -884,9 +908,9 @@ def test_account_resolve_ignores_auxiliary_name_and_display_name():
         format="json",
     )
 
-    assert response.status_code == 201, response.data
-    assert response.data["data"]["id"] != legacy.id
-    assert response.data["data"]["handle"] == "shedeserve ✨"
+    assert response.status_code == 400, response.data
+    assert Influencer.objects.filter(tenant=tenant).count() == 2
+    assert Influencer.objects.get(pk=legacy.pk).handle == "canonical.creator"
 
 
 def test_account_resolve_scans_legacy_candidates_beyond_the_old_fallback_bound():

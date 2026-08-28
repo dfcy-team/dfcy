@@ -1,5 +1,5 @@
-import hashlib
 from decimal import Decimal
+import re
 import unicodedata
 
 from django.conf import settings
@@ -28,9 +28,11 @@ def normalize_tiktok_username(value):
     return value.strip().lstrip("@").strip().casefold()
 
 
-def digest_tiktok_username(value):
-    canonical = normalize_tiktok_username(value)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest() if canonical else ""
+TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._]{1,255}$")
+
+
+def is_valid_tiktok_username(value):
+    return bool(TIKTOK_USERNAME_PATTERN.fullmatch(normalize_tiktok_username(value)))
 
 
 class ProtectedInfluencerQuerySet(models.QuerySet):
@@ -60,21 +62,6 @@ class Influencer(models.Model):
     name = models.CharField(max_length=120)
     platform = models.CharField(max_length=40)
     handle = models.CharField(max_length=255, blank=True, db_comment="TikTok用户名")
-    canonical_handle = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        db_index=True,
-        editable=False,
-        db_comment="标准化TikTok用户名",
-    )
-    canonical_handle_digest = models.CharField(
-        max_length=64,
-        blank=True,
-        default="",
-        editable=False,
-        db_comment="标准化TikTok用户名SHA-256摘要",
-    )
     category = models.CharField(max_length=80, blank=True)
     follower_count = models.PositiveBigIntegerField(default=0)
     contact_name = models.CharField(max_length=80, blank=True)
@@ -90,12 +77,6 @@ class Influencer(models.Model):
     class Meta:
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant")]
-        indexes = [
-            models.Index(
-                fields=["tenant", "platform", "canonical_handle_digest"],
-                name="idx_inf_tenant_platform_digest",
-            ),
-        ]
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
@@ -105,24 +86,16 @@ class Influencer(models.Model):
         def save_identity():
             if self.pk:
                 persisted = type(self).objects.filter(pk=self.pk).values(
-                    "tenant_id", "handle", "platform", "canonical_handle_digest"
+                    "tenant_id", "handle", "platform"
                 ).first()
                 if persisted is not None and (
                     persisted["handle"] != self.handle or persisted["platform"] != self.platform
                 ):
                     _assert_influencer_identity_change_allowed(self, persisted)
-            canonical = (
-                normalize_tiktok_username(self.handle)
-                if str(self.platform or "").casefold() == "tiktok"
-                else ""
-            )
-            self.canonical_handle = canonical
-            self.canonical_handle_digest = digest_tiktok_username(canonical)
-            if update_fields is not None:
-                kwargs["update_fields"] = update_fields | {
-                    "canonical_handle",
-                    "canonical_handle_digest",
-                }
+            if str(self.platform or "").casefold() == "tiktok":
+                self.handle = normalize_tiktok_username(self.handle)
+                if update_fields is not None:
+                    kwargs["update_fields"] = update_fields | {"handle"}
             return super(Influencer, self).save(*args, **kwargs)
 
         if writes_identity:
@@ -221,7 +194,6 @@ def influencer_identity_queryset(
     *,
     platform=None,
     handle=None,
-    digest=None,
     for_update=False,
 ):
     """Return the tenant-scoped identity group, always retaining the current profile."""
@@ -229,13 +201,12 @@ def influencer_identity_queryset(
         return Influencer.objects.none()
     platform = influencer.platform if platform is None else platform
     handle = influencer.handle if handle is None else handle
-    if digest is None:
-        digest = digest_tiktok_username(handle)
+    canonical_handle = normalize_tiktok_username(handle)
     identity_filter = Q(pk=influencer.pk)
-    if str(platform or "").casefold() == "tiktok" and digest:
+    if str(platform or "").casefold() == "tiktok" and canonical_handle:
         identity_filter |= Q(
             platform__iexact="TikTok",
-            canonical_handle_digest=digest,
+            handle__iexact=canonical_handle,
         )
     queryset = Influencer.objects.filter(
         tenant_id=influencer.tenant_id,
@@ -248,14 +219,12 @@ def influencer_has_active_restriction(
     *,
     platform=None,
     handle=None,
-    digest=None,
     for_update=False,
 ):
     identity_queryset = influencer_identity_queryset(
         influencer,
         platform=platform,
         handle=handle,
-        digest=digest,
         for_update=for_update,
     )
     identity_ids = identity_queryset.values_list("pk", flat=True)
@@ -273,7 +242,6 @@ def _assert_influencer_identity_change_allowed(influencer, persisted):
         influencer,
         platform=persisted["platform"],
         handle=persisted["handle"],
-        digest=persisted["canonical_handle_digest"] or None,
         for_update=True,
     ):
         raise ValidationError({
@@ -287,8 +255,8 @@ def active_influencer_restriction_subquery(tenant):
         Q(influencer__tenant_id=tenant_id)
         & Q(influencer__platform__iexact="TikTok")
         & Q(influencer__platform__iexact=OuterRef("platform"))
-        & Q(influencer__canonical_handle_digest=OuterRef("canonical_handle_digest"))
-        & Q(influencer__canonical_handle_digest__gt="")
+        & Q(influencer__handle__iexact=OuterRef("handle"))
+        & Q(influencer__handle__gt="")
     )
     return InfluencerRestriction.objects.filter(
         tenant_id=tenant_id,

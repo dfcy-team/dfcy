@@ -15,6 +15,8 @@ from .models import (
     SkuPriceSnapshot,
     VideoResult,
     influencer_has_active_restriction,
+    is_valid_tiktok_username,
+    normalize_tiktok_username,
 )
 
 
@@ -57,7 +59,7 @@ class InfluencerRestrictEventSerializer(serializers.ModelSerializer):
 
 
 class InfluencerSerializer(serializers.ModelSerializer):
-    handle = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    handle = serializers.CharField(required=False, allow_blank=True)
     display_name = serializers.SerializerMethodField()
     tenant_id = serializers.IntegerField(read_only=True)
     is_blacklisted = serializers.SerializerMethodField()
@@ -91,10 +93,18 @@ class InfluencerSerializer(serializers.ModelSerializer):
         return value
 
     def validate_handle(self, value):
-        return str(value or "").strip().lstrip("@").strip()
+        return str(value or "").strip()
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        platform = attrs.get("platform", getattr(self.instance, "platform", ""))
+        if str(platform or "").casefold() == "tiktok" and "handle" in attrs:
+            handle = normalize_tiktok_username(attrs["handle"])
+            if not handle or not is_valid_tiktok_username(handle):
+                raise serializers.ValidationError({
+                    "handle": "TikTok username may contain only letters, numbers, periods, and underscores.",
+                })
+            attrs["handle"] = handle
         if self.instance is not None and any(
             field in attrs and getattr(self.instance, field) != attrs[field]
             for field in ("handle", "platform")
