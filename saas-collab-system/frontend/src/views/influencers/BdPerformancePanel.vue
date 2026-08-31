@@ -10,7 +10,7 @@
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-date-picker v-model="filters.startDay" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
-        <el-date-picker v-model="filters.endDay" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
+        <el-date-picker v-model="filters.endDay" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" :disabled-date="isEndDateDisabled" />
         <el-select v-model="filters.currency" placeholder="金额币种">
           <el-option v-for="item in BD_PERFORMANCE_CURRENCIES" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -107,10 +107,30 @@ function formatVideo(row) {
   if (performance.value?.video_available === false || ['unavailable', 'not_precomputed', 'pending'].includes(status) || !status) return '待预计算';
   return row.video_count ?? row.video_results ?? row.videos ?? '—';
 }
+function calendarDayCount(startDay, endDay) {
+  const start = Date.parse(`${startDay}T00:00:00Z`);
+  const end = Date.parse(`${endDay}T00:00:00Z`);
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.floor((end - start) / 86400000) + 1 : null;
+}
+function isEndDateDisabled(value) {
+  if (!filters.startDay) return false;
+  const start = new Date(`${filters.startDay}T00:00:00`);
+  const maximum = new Date(start);
+  maximum.setDate(maximum.getDate() + 30);
+  return value < start || value > maximum;
+}
 function validateDates() {
   if (!filters.startDay || !filters.endDay) return '请选择完整日期范围';
   if (filters.startDay > filters.endDay) return '开始日期不能晚于结束日期';
+  const dayCount = calendarDayCount(filters.startDay, filters.endDay);
+  if (dayCount === null) return '日期格式不正确，请重新选择日期';
+  if (dayCount > 31) return `统计范围最多支持 31 个自然日，当前为 ${dayCount} 天，请调整结束日期`;
   return '';
+}
+function performanceErrorMessage(response) {
+  const message = response?.message || '';
+  if (/date range must not exceed|日期范围.*超过/i.test(message)) return '统计范围最多支持 31 个自然日，请调整开始或结束日期';
+  return message || '绩效聚合数据加载失败';
 }
 async function load() {
   const validationMessage = validateDates();
@@ -119,7 +139,7 @@ async function load() {
   try {
     const response = await fetchBdPerformance({ start_date: filters.startDay, end_date: filters.endDay, currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics });
     if (!response?.success) {
-      rows.value = []; performance.value = {}; errorMessage.value = response?.message || '绩效聚合数据加载失败'; state.value = 'error'; return;
+      rows.value = []; performance.value = {}; errorMessage.value = performanceErrorMessage(response); state.value = 'error'; return;
     }
     performance.value = response.data || {};
     rows.value = collectionRows(response.data);

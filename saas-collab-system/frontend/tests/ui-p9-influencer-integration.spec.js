@@ -159,6 +159,8 @@ describe('influencer integration workspace contracts', () => {
     expect(performance).toContain('fetchBdPerformance');
     expect(performance).toContain('downloadCsv');
     expect(performance).toContain('待预计算');
+    expect(performance).toContain(':disabled-date="isEndDateDisabled"');
+    expect(performance).toContain('统计范围最多支持 31 个自然日');
     expect(performance).not.toMatch(/CN[¥￥]\s*[1-9]/);
   });
 
@@ -353,6 +355,10 @@ describe('influencer integration workspace contracts', () => {
     expect(resourcePage).toContain("const influencerDisplayName = (row) => row?.handle");
     expect(resourcePage).toContain('label="TikTok用户名"');
     expect(resourcePage).toContain('displayValue(detail.handle)');
+    expect(resourcePage).toContain('label="达人名称"');
+    expect(resourcePage).toContain('label="档案链接"');
+    expect(resourcePage).toContain('append-to-body');
+    expect(resourcePage).toContain('await Promise.all([fetchInfluencer(row.id), fetchInfluencerContacts(row.id)])');
   });
 
   it('keeps task and task-sample dialogs open when the backdrop is clicked', () => {
