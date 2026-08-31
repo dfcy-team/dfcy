@@ -2,6 +2,7 @@ import importlib
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
+from types import SimpleNamespace
 
 import pytest
 from django.apps import apps as django_apps
@@ -10,6 +11,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
 from django.db.migrations.exceptions import IrreversibleError
+from django.db.migrations.state import ProjectState
 from django.db.models import BooleanField, Value
 from django.db.models.query import QuerySet
 from django.utils import timezone
@@ -25,6 +27,7 @@ from apps.influencers.models import (
     BdSampleAttributionSnapshot,
     Influencer,
     InfluencerRestriction,
+    FulfillmentStatusEvent,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
@@ -58,7 +61,7 @@ from apps.influencers.services import (
 from apps.influencers.attribution import (
     affiliate_order_source_row_key,
     build_bd_performance,
-    normalize_account,
+    influencer_account,
     parse_decimal,
     refresh_order_attributions,
     rule_version_for,
@@ -67,10 +70,34 @@ from apps.influencers.attribution import (
 
 pytestmark = pytest.mark.django_db
 
+FULFILLMENT_FORBIDDEN_RESPONSE_FIELDS = {
+    "sales_amount",
+    "pricing_status",
+    "priced_at",
+    "unit_price",
+    "unit_cost",
+    "currency",
+    "price_match_status",
+    "price_source",
+    "price_snapshot_at",
+}
 
-def test_normalize_account_handles_tiktok_username_variants():
-    assert normalize_account("  @Creator.Name  ") == "creator.name"
-    assert normalize_account("＠Ｃｒｅａｔｏｒ") == "creator"
+
+def assert_cost_only_fulfillment_payload(payload):
+    def visit(value):
+        if isinstance(value, dict):
+            assert FULFILLMENT_FORBIDDEN_RESPONSE_FIELDS.isdisjoint(value)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    assert "calculated_cost" in payload
+    for item in payload.get("items", []):
+        assert "cost_amount" in item
+        assert "cost_match_status" in item
 
 
 def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
@@ -233,8 +260,10 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
         "id": influencer.id,
         "code": "creator-active",
         "name": "Active Creator",
-        "platform": "tiktok",
+        "display_name": "Active Creator",
         "handle": "active.creator",
+        "platform": "tiktok",
+        "status": "active",
         "is_blacklisted": False,
     }]
 
@@ -495,6 +524,8 @@ def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
     tenant = Tenant.objects.create(name="Tenant", code="sample-idempotent")
     user, client = user_with_permissions(tenant, "sample-manager", "influencers.fulfillment.manage")
     store, influencer, task = base_records(tenant, user, "idem")
+    influencer.handle = "active.creator"
+    influencer.save(update_fields=["handle"])
     payload = {
         "fulfillment_no": "SAMPLE-1",
         "outreach_task": task.pk,
@@ -520,8 +551,25 @@ def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
     assert first.status_code == 201
     assert second.status_code == 200
     assert first.data["data"]["id"] == second.data["data"]["id"]
-    assert first.data["data"]["items"][0]["price_match_status"] == "not_imported"
+    assert first.data["data"]["influencer_handle"] == "active.creator"
+    assert_cost_only_fulfillment_payload(first.data["data"])
+    assert_cost_only_fulfillment_payload(second.data["data"])
     assert SampleFulfillment.objects.count() == 1
+
+    view_permission, _ = Permission.objects.get_or_create(
+        code="influencers.fulfillment.view",
+        defaults={"name": "influencers.fulfillment.view", "module": "influencers", "action": "view"},
+    )
+    user.user_roles.filter(role__permissions__code="influencers.fulfillment.manage").first().role.permissions.add(view_permission)
+    fulfillment_id = first.data["data"]["id"]
+    listed = client.get("/api/internal/influencers/sample-fulfillments/")
+    detailed = client.get(f"/api/internal/influencers/sample-fulfillments/{fulfillment_id}/")
+    assert listed.status_code == 200
+    assert detailed.status_code == 200
+    assert listed.data["data"]["results"][0]["influencer_handle"] == "active.creator"
+    assert detailed.data["data"]["influencer_handle"] == "active.creator"
+    assert_cost_only_fulfillment_payload(listed.data["data"]["results"][0])
+    assert_cost_only_fulfillment_payload(detailed.data["data"])
 
     conflicting_payload = {**payload, "fulfillment_no": "SAMPLE-OTHER"}
     conflict = client.post(
@@ -581,11 +629,11 @@ def test_workflow_models_require_audited_state_machine_writes_and_stale_versions
     )
     assert response.status_code == 201
     fulfillment = SampleFulfillment.objects.get(pk=response.data["data"]["id"])
-    fulfillment.status = SampleFulfillment.Status.PROCESSING
+    fulfillment.status = SampleFulfillment.Status.SHIPPED
     with pytest.raises(DjangoValidationError):
         fulfillment.save()
     fulfillment.refresh_from_db()
-    fulfillment.status = SampleFulfillment.Status.PROCESSING
+    fulfillment.status = SampleFulfillment.Status.SHIPPED
     with pytest.raises(DjangoValidationError):
         fulfillment.save(update_fields=["status"])
     fulfillment.refresh_from_db()
@@ -610,10 +658,10 @@ def test_workflow_models_require_audited_state_machine_writes_and_stale_versions
     transition_sample_fulfillment(
         user=user,
         fulfillment=fulfillment,
-        status=SampleFulfillment.Status.PROCESSING,
+        status=SampleFulfillment.Status.SHIPPED,
         expected_version=1,
     )
-    assert fulfillment.status_events.filter(to_status=SampleFulfillment.Status.PROCESSING).exists()
+    assert fulfillment.status_events.filter(to_status=SampleFulfillment.Status.SHIPPED).exists()
     assert OperationLog.objects.filter(tenant=tenant, action="outreach_status", object_id=str(task.pk)).exists()
     assert OperationLog.objects.filter(tenant=tenant, action="sample_status", object_id=str(fulfillment.pk)).exists()
 
@@ -749,6 +797,76 @@ def test_requested_sku_nullable_migration_is_explicitly_irreversible():
         migration.block_reverse(None, None)
 
 
+def test_sample_status_baseline_migration_preserves_event_history_and_blocks_unapply(monkeypatch):
+    tenant = Tenant.objects.create(name="Status migration tenant", code="status-migration")
+    user, _ = user_with_permissions(tenant, "status-migration-user")
+    store, influencer, task = base_records(tenant, user, "status-migration")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="status-migration-key",
+        validated_data={
+            "fulfillment_no": "STATUS-MIGRATION-SAMPLE",
+            "outreach_task": task,
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+        },
+        item_payloads=[],
+    )
+    InfluencerRestriction.objects.create(
+        tenant=tenant,
+        influencer=influencer,
+        is_blacklisted=True,
+        created_by=user,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        status="creating",
+    )
+    legacy_event = FulfillmentStatusEvent.objects.create(
+        tenant=tenant,
+        fulfillment=fulfillment,
+        from_status="creating",
+        to_status="processing",
+        actor=user,
+        reason="legacy status",
+    )
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0012_sample_fulfillment_status_baseline"
+    )
+
+    migration.migrate_status_baseline(django_apps, None)
+
+    fulfillment.refresh_from_db()
+    legacy_event.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.BLACKLISTED
+    assert legacy_event.from_status == "creating"
+    assert legacy_event.to_status == "processing"
+
+    migration_definition = migration.Migration(
+        "0012_sample_fulfillment_status_baseline",
+        "influencers",
+    )
+    operation = migration_definition.operations[0]
+    backwards_calls = []
+    monkeypatch.setattr(
+        migration_definition.operations[1],
+        "database_backwards",
+        lambda *args, **kwargs: backwards_calls.append("status"),
+    )
+    schema_editor = SimpleNamespace(
+        atomic_migration=True,
+        connection=SimpleNamespace(alias="default"),
+    )
+
+    assert operation.code is migration.migrate_status_baseline
+    assert operation.reverse_code is None
+    assert operation.reversible is False
+    with pytest.raises(IrreversibleError, match="is not reversible"):
+        migration_definition.unapply(ProjectState(), schema_editor)
+    assert backwards_calls == []
+
+
 def test_blacklisted_influencer_cannot_receive_sample():
     tenant = Tenant.objects.create(name="Tenant", code="sample-blacklist")
     user, client = user_with_permissions(tenant, "blacklist-manager", "influencers.fulfillment.manage")
@@ -779,7 +897,7 @@ def test_blacklisted_influencer_cannot_receive_sample():
     assert SampleFulfillment.objects.filter(fulfillment_no="SAMPLE-BLOCKED").exists() is False
 
 
-def test_sample_price_match_is_scoped_to_store_and_site():
+def test_sample_price_match_is_internal_and_fulfillment_contract_is_cost_only():
     tenant = Tenant.objects.create(name="Tenant", code="sample-site-price")
     user, client = user_with_permissions(tenant, "site-price-manager", "influencers.fulfillment.manage")
     store, influencer, task = base_records(tenant, user, "site-price")
@@ -816,8 +934,10 @@ def test_sample_price_match_is_scoped_to_store_and_site():
     )
 
     assert response.status_code == 201
-    assert response.data["data"]["items"][0]["unit_price"] == "10.0000"
-    assert response.data["data"]["items"][0]["currency"] == "PHP"
+    assert_cost_only_fulfillment_payload(response.data["data"])
+    item = SampleItem.objects.get(fulfillment__fulfillment_no="SAMPLE-SITE")
+    assert item.unit_price == Decimal("10.0000")
+    assert item.currency == "PHP"
 
 
 def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():
@@ -1176,7 +1296,7 @@ def test_0025_grants_new_permissions_to_manager_and_administrator_roles():
     assert expected <= set(administrator.permissions.values_list("code", flat=True))
 
 
-def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_is_versioned():
+def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is_versioned():
     tenant = Tenant.objects.create(name="Tenant", code="sensitive-profile")
     _, client = user_with_permissions(
         tenant,
@@ -1189,7 +1309,7 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
         code="safe-code",
         name="Safe display name",
         platform="tiktok",
-        handle="secret-handle",
+        handle="secret.handle",
         contact_name="Private Name",
         contact_phone="13800138000",
         contact_email="private@example.test",
@@ -1197,11 +1317,13 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
     )
 
     listed = client.get("/api/internal/influencers/")
-    searched = client.get("/api/internal/influencers/", {"search": "secret-handle"})
+    searched = client.get("/api/internal/influencers/", {"search": "secret.handle"})
     item = listed.data["data"]["results"][0]
-    for field in ("handle", "contact_name", "contact_phone", "contact_email", "notes"):
+    assert item["display_name"] == "Safe display name"
+    assert item["handle"] == "secret.handle"
+    for field in ("contact_name", "contact_phone", "contact_email", "notes"):
         assert field not in item
-    assert searched.data["data"]["count"] == 0
+    assert searched.data["data"]["count"] == 1
 
     version = influencer.updated_at.isoformat()
     first = client.post(
@@ -1302,6 +1424,32 @@ def test_single_target_terminal_result_auto_completes_task_once():
     assert second.status_code == 409
     assert task.status == OutreachTask.Status.COMPLETED
     assert task.finalized_at == finalized_at
+
+
+def test_zero_target_count_does_not_auto_complete_outreach_task():
+    tenant = Tenant.objects.create(name="Tenant", code="a2-zero-target")
+    user, client = user_with_permissions(
+        tenant,
+        "a2-zero-target-user",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    _, influencer, task = base_records(tenant, user, "a2-zero-target")
+    task.target_count = 0
+    task.save(update_fields=["target_count"])
+    target = OutreachTarget.objects.get(task=task, influencer=influencer)
+
+    response = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/targets/{target.pk}/",
+        {"outreach_result": "success"},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    task.refresh_from_db()
+
+    assert response.status_code == 200
+    assert task.status != OutreachTask.Status.COMPLETED
+    assert task.finalized_at is None
 
 
 def test_blacklisted_influencer_cannot_be_added_to_outreach_task():
@@ -1425,6 +1573,75 @@ def test_sample_order_number_marks_new_fulfillment_as_shipped():
     assert fulfillment.shipped_at is not None
 
 
+def test_sample_list_outreach_task_filter_is_exact_and_tenant_scoped():
+    tenant = Tenant.objects.create(name="Sample filter tenant", code="sample-filter")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-filter-user",
+        "influencers.fulfillment.view",
+    )
+    first_store, first_influencer, first_task = base_records(tenant, user, "filter-first")
+    second_store, second_influencer, second_task = base_records(tenant, user, "filter-second")
+    first_sample, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-filter-first-key",
+        validated_data={
+            "fulfillment_no": "SAMPLE-FILTER-FIRST",
+            "outreach_task": first_task,
+            "influencer": first_influencer,
+            "store": first_store,
+            "owner": user,
+        },
+        item_payloads=[],
+    )
+    second_sample, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-filter-second-key",
+        validated_data={
+            "fulfillment_no": "SAMPLE-FILTER-SECOND",
+            "outreach_task": second_task,
+            "influencer": second_influencer,
+            "store": second_store,
+            "owner": user,
+        },
+        item_payloads=[],
+    )
+    other_tenant = Tenant.objects.create(name="Other sample filter tenant", code="sample-filter-other")
+    other_user, _ = user_with_permissions(other_tenant, "sample-filter-other-user")
+    other_store, other_influencer, other_task = base_records(other_tenant, other_user, "filter-other")
+    other_sample, _ = create_sample_fulfillment(
+        user=other_user,
+        request_key="sample-filter-other-key",
+        validated_data={
+            "fulfillment_no": "SAMPLE-FILTER-OTHER",
+            "outreach_task": other_task,
+            "influencer": other_influencer,
+            "store": other_store,
+            "owner": other_user,
+        },
+        item_payloads=[],
+    )
+
+    response = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"outreach_task": first_task.pk, "page": 1, "page_size": 100},
+    )
+
+    assert response.status_code == 200
+    result_ids = {row["id"] for row in response.data["data"]["results"]}
+    assert result_ids == {first_sample.id}
+    assert second_sample.id not in result_ids
+    assert other_sample.id not in result_ids
+    assert client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"outreach_task": other_task.pk},
+    ).data["data"]["count"] == 0
+    assert client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"outreach_task": "not-an-id"},
+    ).status_code == 400
+
+
 def _new_affiliate_order(
     tenant,
     *,
@@ -1433,7 +1650,6 @@ def _new_affiliate_order(
     fully_returned="否",
     order_status="completed",
     order_id=None,
-    sku_id="SKU-1",
 ):
     order_id = order_id or f"ORDER-{data_time.timestamp()}"
     order = AffiliateOrderSnapshot(
@@ -1444,7 +1660,7 @@ def _new_affiliate_order(
             shop_abbr="store-affiliate",
             site="PH",
             order_id=order_id,
-            sku_id=sku_id,
+            sku_id="SKU-1",
         ),
         row_hash="a" * 64,
         data_time=data_time,
@@ -1452,14 +1668,14 @@ def _new_affiliate_order(
         site="PH",
         order_id=order_id,
         product_id=product_id,
-        sku_id=sku_id,
+        sku_id="SKU-1",
         payment_amount=Decimal("1000"),
         currency="PHP",
         quantity=2,
         fully_returned=fully_returned,
         order_status=order_status,
-        creator_username="creator-account",
-        creator_username_normalized="creator-account",
+        creator_username="creator.account",
+        creator_username_normalized="creator.account",
         actual_paid_commission=Decimal("0"),
         estimated_paid_commission=Decimal("10"),
     )
@@ -1482,7 +1698,7 @@ def test_affiliate_order_constraints_are_tenant_scoped_and_csv_replay_is_idempot
 
     csv_path = tmp_path / "affiliate.csv"
     header = "data_time,shop_abbr,site,order_id,product_id,sku_id,creator_username,payment_amount,quantity,currency,fully_returned,order_status,actual_paid_commission,estimated_paid_commission,export_time\n"
-    row = "2026-08-16,store-affiliate,PH,CSV-1,P-1,SKU-1,creator-account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
+    row = "2026-08-16,store-affiliate,PH,CSV-1,P-1,SKU-1,creator.account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
     csv_path.write_text(header + row, encoding="utf-8")
     first_output, second_output = StringIO(), StringIO()
     call_command(
@@ -1547,7 +1763,7 @@ def test_affiliate_csv_rejects_stale_rows_and_counts_same_timestamp_conflicts(tm
     tenant = Tenant.objects.create(name="Affiliate freshness tenant", code="affiliate-freshness")
     csv_path = tmp_path / "affiliate-freshness.csv"
     header = "data_time,shop_abbr,site,order_id,product_id,sku_id,creator_username,payment_amount,quantity,currency,fully_returned,order_status,actual_paid_commission,estimated_paid_commission,export_time\n"
-    initial = "2026-08-16,store-affiliate,PH,CSV-FRESH-1,P-1,SKU-1,creator-account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
+    initial = "2026-08-16,store-affiliate,PH,CSV-FRESH-1,P-1,SKU-1,creator.account,100,1,PHP,否,completed,0,10,2026-08-17T10:00:00+00:00\n"
     csv_path.write_text(header + initial, encoding="utf-8")
     call_command(
         "import_affiliate_orders_csv",
@@ -1601,17 +1817,17 @@ def test_affiliate_decimal_limits_and_currency_allowlist_are_exact():
         order.full_clean()
 
 
-def test_bd_attribution_requires_product_in_strict_mode_and_uses_earliest_sample_in_fallback():
+def test_bd_attribution_requires_product_in_strict_mode_and_uses_latest_sample_in_fallback():
     tenant = Tenant.objects.create(name="Attribution tenant", code="attribution-rules")
     user, _ = user_with_permissions(tenant, "attribution-owner")
     make_bd_owner(tenant, user)
     store = store_for(tenant, "store-affiliate")
     influencer = Influencer.objects.create(
         tenant=tenant,
-        code="creator-account",
+        code="creator.account",
         name="Creator",
         platform="tiktok",
-        handle="creator-account",
+        handle="creator.account",
     )
     task = create_outreach_task(
         user=user,
@@ -1654,52 +1870,7 @@ def test_bd_attribution_requires_product_in_strict_mode_and_uses_earliest_sample
     fallback = refresh_order_attributions(tenant=tenant, attribution="fallback")
     assert fallback["created"] == 1
     attribution = BdOrderAttributionSnapshot.objects.get(order_snapshot=other_product, rule="fallback")
-    assert attribution.sample_attribution_id == old_sample.pk
-
-
-def test_missing_creator_handle_sentinel_never_receives_order_attribution():
-    tenant = Tenant.objects.create(name="Missing handle tenant", code="missing-handle-attribution")
-    user, _ = user_with_permissions(tenant, "missing-handle-owner")
-    make_bd_owner(tenant, user)
-    store = store_for(tenant, "store-affiliate")
-    influencer = Influencer.objects.create(
-        tenant=tenant,
-        code="missing-handle-creator",
-        name="Creator without handle",
-        platform="tiktok",
-        handle="",
-    )
-    task = create_outreach_task(
-        user=user,
-        validated_data={
-            "task_no": "MISSING-HANDLE-TASK",
-            "influencer": influencer,
-            "store": store,
-            "owner": user,
-            "external_product_id": "P-1",
-        },
-    )
-    fulfillment, _ = create_sample_fulfillment(
-        user=user,
-        request_key="missing-handle-request-001",
-        validated_data={
-            "fulfillment_no": "MISSING-HANDLE-SAMPLE",
-            "outreach_task": task,
-            "influencer": influencer,
-        },
-        item_payloads=[],
-    )
-    sample = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
-    sample.sampled_at = timezone.now() - timedelta(days=2)
-    sample.product_id = "P-1"
-    sample.save(update_fields=["sampled_at", "product_id", "updated_at"])
-
-    order = _new_affiliate_order(tenant, data_time=timezone.now() - timedelta(days=1))
-    order.creator_username = sample.creator_username
-    order.save(update_fields=["creator_username", "creator_username_normalized", "updated_at"])
-
-    assert refresh_order_attributions(tenant=tenant, attribution="strict")["created"] == 0
-    assert BdOrderAttributionSnapshot.objects.filter(order_snapshot=order).exists() is False
+    assert attribution.sample_attribution_id == new_sample.pk
 
     refunded = _new_affiliate_order(
         tenant,
@@ -1719,65 +1890,6 @@ def test_missing_creator_handle_sentinel_never_receives_order_attribution():
     assert not BdOrderAttributionSnapshot.objects.filter(order_snapshot__in=[refunded, cancelled]).exists()
 
 
-def test_bd_attribution_does_not_cross_sku_or_use_legacy_display_name_snapshot():
-    tenant = Tenant.objects.create(name="Attribution guard tenant", code="attribution-guards")
-    user, _ = user_with_permissions(tenant, "attribution-guard-owner")
-    make_bd_owner(tenant, user)
-    store = store_for(tenant, "store-affiliate")
-    influencer = Influencer.objects.create(
-        tenant=tenant,
-        code="creator-code",
-        name="Display Name",
-        platform="tiktok",
-        handle="creator-account",
-    )
-    task = create_outreach_task(
-        user=user,
-        validated_data={
-            "task_no": "ATTRIBUTION-GUARD-TASK",
-            "influencer": influencer,
-            "store": store,
-            "owner": user,
-            "external_product_id": "P-1",
-        },
-    )
-    target, _ = add_outreach_target(user=user, task=task, influencer=influencer)
-    fulfillment, _ = create_sample_fulfillment(
-        user=user,
-        request_key="attribution-guard-sample",
-        validated_data={
-            "fulfillment_no": "ATTRIBUTION-GUARD-SAMPLE",
-            "outreach_task": task,
-            "outreach_target": target,
-        },
-        item_payloads=[],
-    )
-    sample = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
-    sample.sampled_at = timezone.now() - timedelta(days=2)
-    sample.product_id = "P-1"
-    sample.sku_id = "SKU-A"
-    sample.save()
-
-    different_sku = _new_affiliate_order(
-        tenant,
-        data_time=timezone.now() - timedelta(days=1),
-        sku_id="SKU-B",
-    )
-    assert refresh_order_attributions(tenant=tenant, attribution="strict")["created"] == 0
-    assert not BdOrderAttributionSnapshot.objects.filter(order_snapshot=different_sku).exists()
-
-    sample.creator_username = influencer.name
-    sample.sku_id = "SKU-1"
-    sample.save()
-    matching_sku = _new_affiliate_order(
-        tenant,
-        data_time=timezone.now() - timedelta(hours=12),
-        order_id="ORDER-LEGACY-DISPLAY-NAME",
-    )
-    assert refresh_order_attributions(tenant=tenant, attribution="strict")["created"] == 0
-    assert not BdOrderAttributionSnapshot.objects.filter(order_snapshot=matching_sku).exists()
-
-
 def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku():
     tenant = Tenant.objects.create(name="Standalone attribution tenant", code="standalone-attribution")
     user = CustomUser.objects.create_user(username="standalone-owner", tenant=tenant)
@@ -1785,10 +1897,10 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     store = store_for(tenant, "store-affiliate")
     influencer = Influencer.objects.create(
         tenant=tenant,
-        code="creator-account",
+        code="creator.account",
         name="Creator",
         platform="tiktok",
-        handle="creator-account",
+        handle="creator.account",
     )
     fulfillment, _ = create_sample_fulfillment(
         user=user,
@@ -1829,6 +1941,45 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.owner_id == user.pk
     assert attribution.order_id == order.order_id
     assert attribution.sku_id == order.sku_id
+
+
+def test_sample_attribution_uses_only_the_normalized_tiktok_handle():
+    tenant = Tenant.objects.create(name="Canonical handle tenant", code="canonical-handle-attribution")
+    user = CustomUser.objects.create_user(username="canonical-handle-owner", tenant=tenant)
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "canonical-handle")
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="canonical-handle-creator",
+        name="Shedeserve ✨",
+        platform="tiktok",
+        handle=" @CANONICAL.CREATOR ",
+    )
+
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="canonical-handle-sample",
+        validated_data={
+            "fulfillment_no": "CANONICAL-HANDLE-SAMPLE",
+            "link_type": "YYJL",
+            "influencer": influencer,
+            "store": store,
+            "owner": user,
+            "external_product_id": "P-CANONICAL-HANDLE",
+        },
+        item_payloads=[],
+    )
+
+    snapshot = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
+    assert snapshot.creator_username == "canonical.creator"
+    name_only = Influencer(
+        tenant=tenant,
+        code="name-only-attribution",
+        name="canonical.creator",
+        platform="tiktok",
+        handle="",
+    )
+    assert influencer_account(name_only) == ""
 
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():
@@ -1918,6 +2069,7 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
             "notes": "edited",
             "link_type": "TKOne",
             "quick_tags": ["已发货"],
+            "status": SampleFulfillment.Status.PENDING,
             "items": [
                 {"site_code": "PH", "requested_sku": "SKU-A", "quantity": 2},
                 {"site_code": "PH", "requested_sku": "SKU-B", "quantity": 1},
@@ -1928,6 +2080,13 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
     )
     assert edited.status_code == 200
     assert edited.data["data"]["version"] == 2
+    assert edited.data["data"]["status"] == SampleFulfillment.Status.SHIPPED
+    assert FulfillmentStatusEvent.objects.filter(
+        fulfillment_id=fulfillment_id,
+        from_status=SampleFulfillment.Status.PENDING,
+        to_status=SampleFulfillment.Status.SHIPPED,
+        reason="sample_order_no_added",
+    ).exists()
     assert edited.data["data"]["link_type"] == "TKOne"
     assert edited.data["data"]["sku_quantity"] == 3
 
@@ -1943,6 +2102,18 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
         {"include_deleted": "true"},
     )
     assert deleted_list.data["data"]["count"] == 1
+    deleted_only = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"deleted_only": "true"},
+    )
+    assert deleted_only.status_code == 200
+    assert deleted_only.data["data"]["count"] == 1
+    assert all(row["is_deleted"] for row in deleted_only.data["data"]["results"])
+    conflicting_deleted_filters = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"deleted_only": "true", "include_deleted": "true"},
+    )
+    assert conflicting_deleted_filters.status_code == 400
 
     restored = client.post(
         f"/api/internal/influencers/sample-fulfillments/{fulfillment_id}/restore/",
@@ -1950,6 +2121,13 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_co
     )
     assert restored.status_code == 200
     assert restored.data["data"]["is_deleted"] is False
+
+
+def test_sample_fulfillment_public_status_choices_are_the_controlled_baseline():
+    assert set(SampleFulfillment.Status.values) == {
+        "pending", "shipped", "delivered", "completed", "cancelled",
+        "published", "live_creator", "overdue", "blacklisted",
+    }
 
 
 def test_sample_timeout_video_recovery_and_task_completion_summary_are_idempotent():
@@ -2079,7 +2257,7 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
         code="refresh-creator",
         name="Refresh creator",
         platform="tiktok",
-        handle="creator-account",
+        handle="creator.account",
     )
     task = create_outreach_task(
         user=user,
@@ -2130,7 +2308,8 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
     assert performance["totals"]["item_quantity"] == 2
     assert performance["totals"]["valid_orders"] == 1
 
-    # A later refunded export must invalidate the earlier completed fact.
+    first_order.fully_returned = "是"
+    first_order.save(update_fields=["fully_returned"])
     second_order.fully_returned = "是"
     second_order.save(update_fields=["fully_returned"])
     invalidated = refresh_order_attributions(tenant=tenant, attribution="strict")
@@ -2148,10 +2327,10 @@ def test_bd_performance_shipped_count_reads_current_fulfillment_fields():
     store = store_for(tenant, "current-shipment-store")
     influencer = Influencer.objects.create(
         tenant=tenant,
-        code="current-shipment-creator",
+        code="current.shipment.creator",
         name="Current shipment creator",
         platform="tiktok",
-        handle="current-shipment-creator",
+        handle="current.shipment.creator",
     )
     task = create_outreach_task(
         user=user,

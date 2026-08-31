@@ -8,3 +8,12 @@ export function applyProductCandidate(form, candidate) {
   form.sku_prefix = prefixes.join(',');
   return prefixes;
 }
+
+export function applyStoreSelection(form, storeId, candidates = []) {
+  const candidate = candidates.find((item) => String(item.store_id) === String(storeId));
+  if (!candidate) {
+    form.store = storeId;
+    return [];
+  }
+  return applyProductCandidate(form, candidate);
+}

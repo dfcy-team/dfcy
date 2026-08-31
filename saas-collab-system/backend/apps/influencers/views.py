@@ -3,25 +3,26 @@ import hashlib
 from io import StringIO
 from datetime import timedelta
 
-from django.db import transaction
-from django.db.models import Count, Exists, Max, OuterRef, Prefetch, Q
+from django.db import IntegrityError, transaction
+from django.db.models import Exists, Max, OuterRef, Prefetch, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
+from rest_framework.permissions import SAFE_METHODS
 from rest_framework.views import APIView
 
 from apps.audit.services import write_operation_log
 from apps.accounts.models import CustomUser
 from apps.common.responses import paginated_data, success_response
+from apps.development.permissions import any_permission_class
 from apps.masterdata.models import StatusChoices, StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope
 
 from .attribution import (
-    MISSING_CREATOR_HANDLE_SENTINEL_PREFIX,
     build_bd_performance,
     default_performance_dates,
     parse_performance_date,
@@ -38,6 +39,10 @@ from .models import (
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
+    active_influencer_restriction_subquery,
+    influencer_has_active_restriction,
+    is_valid_tiktok_username,
+    lock_influencer_identity_change,
     normalize_tiktok_username,
 )
 from .serializers import (
@@ -63,6 +68,7 @@ from .services import (
     soft_delete_sample_fulfillment,
     transition_outreach_task,
     transition_sample_fulfillment,
+    set_influencer_blacklist,
     update_sample_fulfillment,
     update_outreach_task,
     update_outreach_target,
@@ -73,6 +79,41 @@ class Conflict(APIException):
     status_code = 409
     default_detail = "The resource changed or the idempotency key conflicts."
     default_code = "conflict"
+
+
+CanResolveInfluencerRead = any_permission_class(
+    "influencers.outreach.manage",
+    "influencers.fulfillment.manage",
+)
+RESOLVE_READ_PERMISSION_CODES = (
+    "influencers.outreach.manage",
+    "influencers.fulfillment.manage",
+)
+BLACKLIST_PERMISSION_CODES = (
+    "influencers.manage",
+    "influencers.fulfillment.manage",
+)
+
+
+def _require_resolve_read_scope(user):
+    for permission_code in RESOLVE_READ_PERMISSION_CODES:
+        try:
+            require_all_scope(user, permission_code)
+        except PermissionDenied:
+            continue
+        return
+    raise PermissionDenied(
+        "This operation requires all-tenant data scope for an influencer resolve permission."
+    )
+
+
+def _require_blacklist_scope(user):
+    for permission_code in BLACKLIST_PERMISSION_CODES:
+        if not check_user_permission(user, permission_code):
+            raise PermissionDenied(
+                "Blacklist changes require profile and fulfillment manage permissions."
+            )
+        require_all_scope(user, permission_code)
 
 
 def _pagination(request):
@@ -106,6 +147,59 @@ def _query_bool(value, *, field):
     raise ValidationError({field: "Expected true or false."})
 
 
+def _influencer_candidates(queryset, *, limit, include_handle=False):
+    rows = []
+    seen = set()
+    for influencer in queryset.select_related("profile").order_by(
+        "-is_blacklisted", "id"
+    ).iterator(chunk_size=max(100, int(limit))):
+        handle = str(influencer.handle or "").strip().lstrip("@").strip()
+        key = (
+            f"tiktok:{normalize_tiktok_username(handle)}"
+            if str(influencer.platform or "").lower() == "tiktok" and handle
+            else f"id:{influencer.pk}"
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        profile = getattr(influencer, "profile", None)
+        row = {
+            "id": influencer.id, "code": influencer.code, "name": influencer.name,
+            "display_name": getattr(profile, "display_name", "") or influencer.name,
+            "platform": influencer.platform, "status": influencer.status,
+            "is_blacklisted": bool(influencer.is_blacklisted),
+        }
+        if include_handle:
+            row["handle"] = handle
+        rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _resolve_existing_influencer(*, tenant, account, blacklist_subquery):
+    """Find one tenant-scoped TikTok profile using normalized account text."""
+    direct_blacklist_subquery = InfluencerRestriction.objects.filter(
+        tenant=tenant,
+        influencer_id=OuterRef("pk"),
+        is_blacklisted=True,
+    )
+    candidates = list(
+        Influencer.objects.select_for_update()
+        .filter(
+            tenant=tenant,
+            platform__iexact="TikTok",
+            handle__iexact=account,
+        )
+        .annotate(
+            is_blacklisted=Exists(blacklist_subquery),
+            direct_is_blacklisted=Exists(direct_blacklist_subquery),
+        )
+        .order_by("-direct_is_blacklisted", "-is_blacklisted", "id")
+    )
+    return candidates[0] if candidates else None
+
+
 class InfluencerCollectionView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
@@ -113,11 +207,7 @@ class InfluencerCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         queryset = Influencer.objects.filter(tenant=request.user.tenant).select_related("profile").prefetch_related(
             Prefetch("restrictions", to_attr="_restriction_rows"),
             Prefetch("restrict_events", queryset=InfluencerRestrictEvent.objects.order_by("-occurred_at", "-id"), to_attr="_restriction_events"),
@@ -126,12 +216,16 @@ class InfluencerCollectionView(APIView):
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
-            queryset = queryset.filter(
+            search_filter = (
                 Q(code__icontains=search)
                 | Q(name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__display_name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__external_influencer_id__icontains=search)
             )
+            normalized_handle = normalize_tiktok_username(search)
+            if is_valid_tiktok_username(normalized_handle):
+                search_filter |= Q(handle__icontains=normalized_handle)
+            queryset = queryset.filter(search_filter)
         if status:
             queryset = queryset.filter(status=status)
         platform = request.query_params.get("platform", "").strip()
@@ -196,10 +290,25 @@ class InfluencerDetailView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        writes_identity = bool({"handle", "platform"}.intersection(request.data))
+        queryset = Influencer.objects if writes_identity else Influencer.objects.select_for_update()
+        instance = get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
         before = {"code": instance.code, "status": instance.status}
         serializer = InfluencerSerializer(instance, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        if writes_identity:
+            instance = lock_influencer_identity_change(
+                instance,
+                platform=serializer.validated_data.get("platform", instance.platform),
+                handle=serializer.validated_data.get("handle", instance.handle),
+            )
+            serializer = InfluencerSerializer(
+                instance,
+                data=request.data,
+                partial=True,
+                context={"request": request},
+            )
+            serializer.is_valid(raise_exception=True)
         instance = serializer.save()
         write_operation_log(
             tenant=request.user.tenant,
@@ -294,21 +403,15 @@ class InfluencerBlacklistView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     write_permission_code = "influencers.manage"
 
-    @transaction.atomic
     def post(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
-        influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
-        blacklisted = bool(request.data.get("is_blacklisted", request.data.get("blacklisted", True)))
+        _require_blacklist_scope(request.user)
+        influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        blacklisted = request.data.get("is_blacklisted", request.data.get("blacklisted", True))
+        if not isinstance(blacklisted, bool):
+            raise ValidationError({"is_blacklisted": "Expected a JSON boolean."})
         reason = str(request.data.get("reason", "")).strip()
-        restriction, _ = InfluencerRestriction.objects.update_or_create(
-            tenant=request.user.tenant,
-            influencer=influencer,
-            defaults={"is_blacklisted": blacklisted, "reason": reason, "created_by": request.user},
-        )
-        action = InfluencerRestrictEvent.Action.BLACKLIST if blacklisted else InfluencerRestrictEvent.Action.UNBLACKLIST
-        event = InfluencerRestrictEvent.objects.create(
-            tenant=request.user.tenant, influencer=influencer, action=action,
-            reason=reason or ("Manual blacklist" if blacklisted else "Manual unblacklist"), actor=request.user,
+        restriction, event = set_influencer_blacklist(
+            user=request.user, influencer=influencer, blacklisted=blacklisted, reason=reason
         )
         return success_response({"is_blacklisted": restriction.is_blacklisted, "event": InfluencerRestrictEventSerializer(event).data})
 
@@ -324,56 +427,21 @@ class InfluencerBlacklistHistoryView(APIView):
         return success_response(InfluencerRestrictEventSerializer(rows, many=True).data)
 
 
-INFLUENCER_RESOLVE_PERMISSION_CODES = (
-    "influencers.fulfillment.manage",
-    "influencers.outreach.manage",
-)
-INFLUENCER_RESOLVE_WRITE_PERMISSION_CODES = (
-    "influencers.fulfillment.manage",
-)
-
-
-def require_influencer_resolve_scope(user, permission_codes=INFLUENCER_RESOLVE_PERMISSION_CODES):
-    for permission_code in permission_codes:
-        if not check_user_permission(user, permission_code):
-            continue
-        try:
-            require_all_scope(user, permission_code)
-            return
-        except PermissionDenied:
-            continue
-    raise PermissionDenied("Creator resolution requires fulfillment or outreach management scope.")
-
-
-class InfluencerResolvePermission(DeclaredApplicationPermission):
-    def has_permission(self, request, view):
-        user = request.user
-        if not (
-            user
-            and user.is_authenticated
-            and user.user_type == CustomUser.UserType.INTERNAL
-        ):
-            return False
-        try:
-            permission_codes = (
-                INFLUENCER_RESOLVE_WRITE_PERMISSION_CODES
-                if request.method == "POST"
-                else INFLUENCER_RESOLVE_PERMISSION_CODES
-            )
-            require_influencer_resolve_scope(user, permission_codes)
-            return True
-        except PermissionDenied:
-            return False
-
-
 class InfluencerResolveView(APIView):
     """Resolve creator accounts without exposing cross-tenant profile data."""
 
-    permission_classes = [InfluencerResolvePermission]
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.fulfillment.manage"
+    write_permission_code = "influencers.fulfillment.manage"
+
+    def get_permissions(self):
+        if self.request.method in SAFE_METHODS:
+            return [CanResolveInfluencerRead()]
+        return super().get_permissions()
 
     def get(self, request):
-        require_influencer_resolve_scope(request.user)
-        query = str(
+        _require_resolve_read_scope(request.user)
+        raw_query = str(
             request.query_params.get("q")
             or request.query_params.get("search")
             or request.query_params.get("handle")
@@ -381,98 +449,66 @@ class InfluencerResolveView(APIView):
             or request.query_params.get("name")
             or ""
         ).strip()
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        query = normalize_tiktok_username(raw_query)
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         queryset = Influencer.objects.filter(
             tenant=request.user.tenant,
+            platform__iexact="TikTok",
             status=Influencer.Status.ACTIVE,
         ).annotate(is_blacklisted=Exists(blacklist_subquery))
-        if query:
-            queryset = queryset.filter(
-                Q(handle__icontains=query)
-                | Q(code__icontains=query)
-                | Q(name__icontains=query)
-            )
-        rows = []
-        for influencer in queryset.order_by("name", "code")[:50]:
-            rows.append(
-                {
-                    "id": influencer.id,
-                    "code": influencer.code,
-                    "name": influencer.name,
-                    "handle": influencer.handle,
-                    "platform": influencer.platform,
-                    "status": influencer.status,
-                    "is_blacklisted": influencer.is_blacklisted,
-                }
-            )
+        if query and is_valid_tiktok_username(query):
+            queryset = queryset.filter(handle__icontains=query)
+        rows = _influencer_candidates(queryset, limit=50, include_handle=True)
         return success_response({"query": query, "candidates": rows, "results": rows})
 
     @transaction.atomic
     def post(self, request):
         """Resolve an exact account or create the minimal tenant profile needed for sampling."""
-        require_influencer_resolve_scope(
-            request.user,
-            INFLUENCER_RESOLVE_WRITE_PERMISSION_CODES,
-        )
+        require_all_scope(request.user, self.write_permission_code)
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )
-        if (
-            not account
-            or len(account) > 120
-            or account.startswith(MISSING_CREATOR_HANDLE_SENTINEL_PREFIX)
-        ):
-            raise ValidationError({"handle": "TikTok account must be 1-120 characters."})
+        if not account or not is_valid_tiktok_username(account):
+            raise ValidationError({
+                "handle": "TikTok username may contain only letters, numbers, periods, and underscores.",
+            })
 
-        blacklist_subquery = InfluencerRestriction.objects.filter(
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
+        influencer = _resolve_existing_influencer(
             tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
+            account=account,
+            blacklist_subquery=blacklist_subquery,
         )
-        exact_candidates = list(
-            Influencer.objects.select_for_update()
-            .filter(tenant=request.user.tenant)
-            .filter(Q(handle__iexact=account) | Q(code__iexact=account))
-            .annotate(is_blacklisted=Exists(blacklist_subquery))
-            .order_by("-is_blacklisted", "id")
-        )
-        tenant_candidates = (
-            Influencer.objects.select_for_update()
-            .filter(tenant=request.user.tenant)
-            .annotate(is_blacklisted=Exists(blacklist_subquery))
-            .order_by("id")
-        )
-        candidates_by_id = {candidate.id: candidate for candidate in exact_candidates}
-        for candidate in tenant_candidates:
-            if account in {
-                normalize_tiktok_username(candidate.handle),
-                normalize_tiktok_username(candidate.code),
-            }:
-                candidates_by_id[candidate.id] = candidate
-        candidates = sorted(
-            candidates_by_id.values(),
-            key=lambda candidate: (not candidate.is_blacklisted, candidate.id),
-        )
-        influencer = candidates[0] if candidates else None
         created = False
         if influencer is None:
             digest = hashlib.sha256(
                 f"{request.user.tenant_id}:{account}".encode("utf-8")
             ).hexdigest()[:20]
-            influencer, created = Influencer.objects.get_or_create(
-                tenant=request.user.tenant,
-                code=f"tk-{digest}",
-                defaults={
-                    "name": account,
-                    "handle": account,
-                    "platform": "TikTok",
-                    "status": Influencer.Status.ACTIVE,
-                },
-            )
+            base_code = f"tk-{digest}"
+            for suffix in range(100):
+                code = base_code if suffix == 0 else f"{base_code[:72]}-{suffix}"
+                try:
+                    with transaction.atomic():
+                        candidate, candidate_created = Influencer.objects.get_or_create(
+                            tenant=request.user.tenant,
+                            code=code,
+                            defaults={
+                                "name": account,
+                                "handle": account,
+                                "platform": "TikTok",
+                                "status": Influencer.Status.ACTIVE,
+                            },
+                        )
+                except IntegrityError:
+                    continue
+                candidate_values = normalize_tiktok_username(candidate.handle)
+                if candidate_created or (
+                    candidate.platform.lower() == "tiktok" and candidate_values == account
+                ):
+                    influencer, created = candidate, candidate_created
+                    break
+            else:
+                raise ValidationError({"handle": "Unable to allocate a tenant-scoped influencer profile."})
             if created:
                 write_operation_log(
                     tenant=request.user.tenant,
@@ -484,7 +520,7 @@ class InfluencerResolveView(APIView):
                     after_data={"code": influencer.code, "handle": influencer.handle},
                 )
 
-        is_blacklisted = bool(getattr(influencer, "is_blacklisted", False)) or influencer.restrictions.filter(is_blacklisted=True).exists()
+        is_blacklisted = influencer_has_active_restriction(influencer)
         payload = {
             "id": influencer.id,
             "code": influencer.code,
@@ -510,7 +546,7 @@ class OutreachTaskCollectionView(APIView):
             queryset=SampleFulfillment.objects.filter(
                 tenant=request.user.tenant,
                 is_deleted=False,
-            ).prefetch_related(
+            ).select_related("influencer").prefetch_related(
                 Prefetch(
                     "video_results",
                     queryset=VideoResult.objects.filter(
@@ -522,24 +558,27 @@ class OutreachTaskCollectionView(APIView):
             ),
             to_attr="_active_samples",
         )
+        active_targets = Prefetch(
+            "targets",
+            queryset=OutreachTarget.objects.filter(
+                tenant=request.user.tenant,
+                is_deleted=False,
+            ).select_related("influencer"),
+            to_attr="_active_targets",
+        )
         queryset = OutreachTask.objects.filter(
             tenant=request.user.tenant,
         ).select_related("influencer", "store", "owner", "dispatcher", "spu").prefetch_related(
-            active_samples
-        ).annotate(
-            active_linked_count=Count(
-                "targets",
-                filter=Q(
-                    targets__tenant=request.user.tenant,
-                    targets__is_deleted=False,
-                ),
-                distinct=True,
-            )
+            active_samples,
+            active_targets,
         )
-        include_deleted = request.query_params.get("include_deleted", "").lower() in {
-            "1", "true", "yes"
-        }
-        if not include_deleted:
+        if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
+            raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
+        deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")
+        include_deleted = _query_bool(request.query_params.get("include_deleted", "false"), field="include_deleted")
+        if deleted_only:
+            queryset = queryset.filter(is_deleted=True)
+        elif not include_deleted:
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
@@ -594,15 +633,11 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery)).order_by("name", "code")[:500]
+        ).annotate(is_blacklisted=Exists(blacklist_subquery))
         stores = stores[:200]
         return success_response({
             "stores": [
@@ -619,17 +654,7 @@ class OutreachTaskOptionsView(APIView):
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
             ],
-            "influencers": [
-                {
-                    "id": influencer.id,
-                    "code": influencer.code,
-                    "name": influencer.name,
-                    "handle": influencer.handle,
-                    "platform": influencer.platform,
-                    "is_blacklisted": influencer.is_blacklisted,
-                }
-                for influencer in influencers
-            ],
+            "influencers": _influencer_candidates(influencers, limit=500, include_handle=True),
         })
 
 
@@ -640,22 +665,17 @@ class SampleFulfillmentOptionsView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         search = request.query_params.get("search", "").strip()
-        blacklist_subquery = InfluencerRestriction.objects.filter(
-            tenant=request.user.tenant,
-            influencer_id=OuterRef("pk"),
-            is_blacklisted=True,
-        )
+        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         influencers = Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
         ).annotate(is_blacklisted=Exists(blacklist_subquery))
+        normalized_search = normalize_tiktok_username(search)
         if search:
-            influencers = influencers.filter(
-                Q(code__icontains=search)
-                | Q(name__icontains=search)
-                | Q(handle__icontains=search)
-            )
-        influencers = influencers.order_by("name", "code")[:100]
+            if is_valid_tiktok_username(normalized_search):
+                influencers = influencers.filter(handle__icontains=normalized_search)
+            else:
+                influencers = influencers.none()
         tasks = OutreachTask.objects.filter(
             tenant=request.user.tenant,
             is_deleted=False,
@@ -676,17 +696,7 @@ class SampleFulfillmentOptionsView(APIView):
                 }
                 for task in tasks
             ],
-            "influencers": [
-                {
-                    "id": influencer.id,
-                    "code": influencer.code,
-                    "name": influencer.name,
-                    "handle": influencer.handle,
-                    "platform": influencer.platform,
-                    "is_blacklisted": influencer.is_blacklisted,
-                }
-                for influencer in influencers
-            ],
+            "influencers": _influencer_candidates(influencers, limit=100, include_handle=True),
         })
 
 
@@ -857,7 +867,7 @@ class OutreachTargetCollectionView(APIView):
             tenant=request.user.tenant,
             task=task,
             is_deleted=False,
-        ).select_related("influencer")
+        ).select_related("influencer", "influencer__profile")
         page, page_size = _pagination(request)
         return success_response(
             paginated_data(
@@ -973,7 +983,7 @@ class SampleFulfillmentCollectionView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).select_related(
-            "outreach_task", "influencer", "store", "owner", "deleted_by"
+            "outreach_task", "influencer", "influencer__profile", "store", "owner", "deleted_by"
         ).prefetch_related(
             "items",
             Prefetch(
@@ -985,30 +995,44 @@ class SampleFulfillmentCollectionView(APIView):
                 to_attr="_published_video_results",
             ),
         )
-        include_deleted = request.query_params.get("include_deleted", "").lower() in {
-            "1", "true", "yes"
-        }
-        if not include_deleted:
+        if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
+            raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
+        deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")
+        include_deleted = _query_bool(request.query_params.get("include_deleted", "false"), field="include_deleted")
+        if deleted_only:
+            queryset = queryset.filter(is_deleted=True)
+        elif not include_deleted:
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
             queryset = queryset.filter(status=status)
+        outreach_task_id = request.query_params.get("outreach_task", "").strip()
+        if outreach_task_id:
+            if not outreach_task_id.isdigit() or int(outreach_task_id) < 1:
+                raise ValidationError({"outreach_task": "outreach_task must be a positive integer."})
+            queryset = queryset.filter(
+                outreach_task_id=int(outreach_task_id),
+                outreach_task__tenant=request.user.tenant,
+            )
         store_id = request.query_params.get("store", "").strip()
         if store_id:
             queryset = queryset.filter(store_id=store_id)
         search = request.query_params.get("search", "").strip()
         if search:
-            queryset = queryset.filter(
+            search_filter = (
                 Q(fulfillment_no__icontains=search)
                 | Q(outreach_task__task_no__icontains=search)
                 | Q(outreach_task__task_name__icontains=search)
                 | Q(influencer__name__icontains=search)
-                | Q(influencer__handle__icontains=search)
                 | Q(store__name__icontains=search)
                 | Q(product_name_snapshot__icontains=search)
                 | Q(external_product_id__icontains=search)
                 | Q(sample_order_no__icontains=search)
             )
+            normalized_handle = normalize_tiktok_username(search)
+            if is_valid_tiktok_username(normalized_handle):
+                search_filter |= Q(influencer__handle__icontains=normalized_handle)
+            queryset = queryset.filter(search_filter)
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
@@ -1076,21 +1100,19 @@ class SampleFulfillmentDetailView(APIView):
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
         fulfillment = self._get(request, pk)
+        initial_status = fulfillment.status
         serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         validated = dict(serializer.validated_data)
         requested_status = validated.pop("status", None)
+        confirm_terminal = validated.pop("confirm_terminal", False)
         item_payloads = validated.pop("items", None)
         append_item_payloads = validated.pop("append_items", None)
         items_mode = validated.pop("items_mode", "replace")
+        expected_version = _expected_version(request)
+        has_fact_changes = bool(validated) or item_payloads is not None or append_item_payloads is not None
         try:
             with transaction.atomic():
-                expected_version = _expected_version(request)
-                has_fact_changes = (
-                    bool(validated)
-                    or item_payloads is not None
-                    or append_item_payloads is not None
-                )
                 if has_fact_changes:
                     fulfillment = update_sample_fulfillment(
                         user=request.user,
@@ -1101,16 +1123,16 @@ class SampleFulfillmentDetailView(APIView):
                         append_item_payloads=append_item_payloads,
                         items_mode=items_mode,
                     )
-                    expected_version = fulfillment.version
-                if requested_status and requested_status != fulfillment.status:
+                if requested_status and requested_status != initial_status:
                     fulfillment = transition_sample_fulfillment(
                         user=request.user,
                         fulfillment=fulfillment,
                         status=requested_status,
-                        expected_version=expected_version,
-                        reason="edited with fulfillment facts",
+                        expected_version=fulfillment.version,
+                        reason="manual_edit",
+                        confirm_terminal=confirm_terminal,
                     )
-                elif not has_fact_changes:
+                elif not has_fact_changes and not requested_status:
                     raise ValidationError(
                         {"detail": "At least one editable fulfillment field is required."}
                     )
@@ -1186,6 +1208,9 @@ class SampleFulfillmentStatusView(APIView):
         fulfillment = get_object_or_404(
             SampleFulfillment, tenant=request.user.tenant, pk=pk, is_deleted=False
         )
+        confirm_terminal = request.data.get("confirm_terminal", False)
+        if not isinstance(confirm_terminal, bool):
+            raise ValidationError({"confirm_terminal": "confirm_terminal must be a boolean."})
         try:
             fulfillment = transition_sample_fulfillment(
                 user=request.user,
@@ -1193,6 +1218,7 @@ class SampleFulfillmentStatusView(APIView):
                 status=request.data.get("status", ""),
                 expected_version=_expected_version(request),
                 reason=request.data.get("reason", ""),
+                confirm_terminal=confirm_terminal,
             )
         except ValidationError as exc:
             if exc.get_codes() == {"version": "conflict"}:

@@ -27,16 +27,14 @@ export const OUTREACH_RESULT_LABELS = Object.freeze({
 
 export const FULFILLMENT_STATUS_LABELS = Object.freeze({
   pending: '待处理',
-  processing: '处理中',
   shipped: '已发货',
   delivered: '已送达',
   completed: '已完成',
   cancelled: '已取消',
-  creating: '创建中',
   published: '已发布',
-  live_creator: '达人直播中',
+  live_creator: '直播达人',
   overdue: '已逾期',
-  blank: '空白'
+  blacklisted: '已拉黑'
 });
 
 export const FULFILLMENT_LINK_TYPE_LABELS = Object.freeze({
@@ -48,17 +46,15 @@ export const FULFILLMENT_LINK_TYPE_LABELS = Object.freeze({
 });
 
 export const FULFILLMENT_STATUS_TRANSITIONS = Object.freeze({
-  pending: Object.freeze(['processing', 'creating', 'blank', 'cancelled']),
-  creating: Object.freeze(['published', 'blank', 'cancelled']),
-  published: Object.freeze(['live_creator', 'overdue', 'cancelled']),
-  live_creator: Object.freeze(['overdue', 'completed', 'cancelled']),
-  overdue: Object.freeze(['completed', 'cancelled']),
-  blank: Object.freeze(['creating', 'cancelled']),
-  processing: Object.freeze(['shipped', 'cancelled']),
+  pending: Object.freeze(['shipped', 'cancelled']),
   shipped: Object.freeze(['delivered', 'cancelled']),
   delivered: Object.freeze(['completed', 'cancelled']),
+  published: Object.freeze(['live_creator', 'completed', 'cancelled']),
+  live_creator: Object.freeze(['completed', 'cancelled']),
+  overdue: Object.freeze(['published', 'completed', 'cancelled']),
   completed: Object.freeze([]),
-  cancelled: Object.freeze([])
+  cancelled: Object.freeze([]),
+  blacklisted: Object.freeze([])
 });
 
 export const PRICING_STATUS_LABELS = Object.freeze({
@@ -403,11 +399,11 @@ export const createSampleFulfillment = (payload, idempotencyKey = requestKey()) 
   'influencers.fulfillment.create'
 );
 
-export const updateSampleFulfillmentStatus = (id, status, version, reason = '') => requestWithMockFallback(
+export const updateSampleFulfillmentStatus = (id, status, version, reason = '', confirmTerminal = false) => requestWithMockFallback(
   {
     method: 'post',
     url: `${API_ROOT}/sample-fulfillments/${id}/status/`,
-    data: { status, ...(reason ? { reason } : {}) },
+    data: { status, ...(reason ? { reason } : {}), ...(confirmTerminal ? { confirm_terminal: true } : {}) },
     ...ifMatchHeaders(version)
   },
   mockWrite({ id, status, version: Number(version || 1) + 1 }),

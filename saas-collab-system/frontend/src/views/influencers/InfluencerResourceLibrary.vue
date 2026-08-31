@@ -25,7 +25,7 @@
       </div>
 
       <el-table v-loading="loading" :data="rows" empty-text="暂无达人档案" @row-click="openDetail">
-        <el-table-column label="达人" min-width="190"><template #default="{ row }"><b>{{ displayValue(row.name) }}</b><small>{{ displayValue(row.code) }} · {{ displayValue(row.handle) }}</small></template></el-table-column>
+        <el-table-column label="达人" min-width="190"><template #default="{ row }"><b>{{ influencerDisplayName(row) }}</b><small>{{ displayValue(row.code) }} · {{ displayValue(row.display_name) }}</small></template></el-table-column>
         <el-table-column prop="platform" label="平台" width="100" />
         <el-table-column prop="category" label="内容赛道" min-width="125" />
         <el-table-column label="粉丝数" min-width="110"><template #default="{ row }">{{ formatCount(row.follower_count) }}</template></el-table-column>
@@ -41,7 +41,7 @@
         <el-form-item label="达人编码" required><el-input v-model="form.code" :disabled="Boolean(editing)" /></el-form-item>
         <el-form-item label="达人名称" required><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="平台" required><el-input v-model="form.platform" placeholder="例如 TikTok" /></el-form-item>
-        <el-form-item label="账号"><el-input v-model="form.handle" placeholder="不含或包含 @ 均可" /></el-form-item>
+        <el-form-item label="账号"><el-input v-model="form.handle" :disabled="Boolean(editing)" placeholder="仅新建或账号解析时录入" /></el-form-item>
         <el-form-item label="内容赛道"><el-input v-model="form.category" /></el-form-item>
         <el-form-item label="粉丝数"><el-input-number v-model="form.follower_count" :min="0" controls-position="right" /></el-form-item>
         <el-form-item label="合作分层"><el-select v-model="form.cooperation_status"><el-option v-for="(label, value) in INFLUENCER_COOPERATION_STATUS_LABELS" :key="value" :label="label" :value="value" /></el-select></el-form-item>
@@ -78,14 +78,15 @@
 
     <el-drawer v-model="detailVisible" :title="detail?.name || '达人详情'" size="560px">
       <div v-if="detailLoading" class="drawer-state">正在加载达人详情...</div>
-      <el-alert v-else-if="detailError" type="error" :title="detailError" show-icon :closable="false" />
       <template v-else-if="detail">
+        <el-alert v-if="detailError" type="warning" :title="detailError" show-icon :closable="false" />
         <div class="drawer-actions"><el-button v-if="canManage" type="primary" plain @click="openEdit(detail)">编辑档案</el-button><el-button v-if="canManage" :type="detail.is_blacklisted ? 'success' : 'danger'" plain @click="toggleBlacklist(detail)">{{ detail.is_blacklisted ? '解除黑名单' : '加入黑名单' }}</el-button></div>
-        <el-descriptions :column="2" border><el-descriptions-item label="达人编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="平台账号">{{ displayValue(detail.handle) }}</el-descriptions-item><el-descriptions-item label="内容赛道">{{ displayValue(detail.category) }}</el-descriptions-item><el-descriptions-item label="粉丝数">{{ formatCount(detail.follower_count) }}</el-descriptions-item><el-descriptions-item label="合作分层">{{ cooperationLabel(detail.cooperation_status) }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ detail.status === 'active' ? '正常' : '停用' }}</el-descriptions-item></el-descriptions>
+        <el-descriptions :column="2" border><el-descriptions-item label="TikTok用户名">{{ displayValue(detail.handle) }}</el-descriptions-item><el-descriptions-item label="达人编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="展示名称">{{ displayValue(detail.display_name || detail.profile?.display_name) }}</el-descriptions-item><el-descriptions-item label="内容赛道">{{ displayValue(detail.category) }}</el-descriptions-item><el-descriptions-item label="粉丝数">{{ formatCount(detail.follower_count) }}</el-descriptions-item><el-descriptions-item label="合作分层">{{ cooperationLabel(detail.cooperation_status) }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ detail.status === 'active' ? '正常' : '停用' }}</el-descriptions-item></el-descriptions>
         <h3>扩展档案</h3><el-descriptions v-if="detail.profile" :column="2" border><el-descriptions-item label="展示名称">{{ displayValue(detail.profile.display_name) }}</el-descriptions-item><el-descriptions-item label="外部达人 ID">{{ displayValue(detail.profile.external_influencer_id) }}</el-descriptions-item><el-descriptions-item label="等级">{{ displayValue(detail.profile.level) }}</el-descriptions-item><el-descriptions-item label="层级">{{ displayValue(detail.profile.tier) }}</el-descriptions-item><el-descriptions-item label="市场">{{ displayValue(detail.profile.market) }}</el-descriptions-item><el-descriptions-item label="档案平台">{{ displayValue(detail.profile.platforms?.join?.(', ') || detail.profile.platforms) }}</el-descriptions-item><el-descriptions-item label="内容类型">{{ displayValue(detail.profile.content_types?.join?.(', ') || detail.profile.content_types) }}</el-descriptions-item><el-descriptions-item label="档案链接">{{ displayValue(detail.profile.profile_url) }}</el-descriptions-item><el-descriptions-item label="平均视频播放">{{ formatCount(detail.profile.average_video_views) }}</el-descriptions-item><el-descriptions-item label="平均直播观看">{{ formatCount(detail.profile.average_live_views) }}</el-descriptions-item><el-descriptions-item label="档案启用">{{ detail.profile.is_active ? '是' : '否' }}</el-descriptions-item><el-descriptions-item label="重复说明">{{ displayValue(detail.profile.duplicate_reason) }}</el-descriptions-item><el-descriptions-item label="商品合作次数">{{ displayValue(detail.profile.product_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="首次合作时间">{{ displayValue(detail.profile.first_cooperation_at) }}</el-descriptions-item><el-descriptions-item label="合作次数">{{ displayValue(detail.profile.cooperation_count) }}</el-descriptions-item><el-descriptions-item label="完成合作次数">{{ displayValue(detail.profile.completed_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="完成履约次数">{{ displayValue(detail.profile.fulfilled_cooperation_count) }}</el-descriptions-item><el-descriptions-item label="履约率">{{ displayValue(detail.profile.fulfillment_rate) }}</el-descriptions-item><el-descriptions-item label="内容完成率">{{ displayValue(detail.profile.content_completion_rate) }}</el-descriptions-item><el-descriptions-item label="历史 GMV">{{ displayValue(detail.profile.historical_gmv) }}</el-descriptions-item><el-descriptions-item label="历史订单数">{{ displayValue(detail.profile.historical_orders) }}</el-descriptions-item><el-descriptions-item label="档案备注">{{ displayValue(detail.profile.profile_notes) }}</el-descriptions-item><el-descriptions-item label="历史表现 JSON">{{ formatJson(detail.profile.historical_performance) }}</el-descriptions-item><el-descriptions-item label="创建时间">{{ displayValue(detail.profile.created_at) }}</el-descriptions-item><el-descriptions-item label="更新时间">{{ displayValue(detail.profile.updated_at) }}</el-descriptions-item></el-descriptions>
         <h3>联系渠道</h3><div v-if="detail.contacts?.length" class="contact-list"><div v-for="contact in detail.contacts" :key="contact.id || contact.key"><b>{{ INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel }}</b><span>{{ displayValue(contact.masked_value || contact.value) }}</span><small>{{ contact.label || (contact.is_primary ? '主渠道' : '') }}</small></div></div><p v-else class="muted">暂无联系渠道</p>
         <h3>黑名单历史</h3><el-timeline v-if="detail.blacklist_history?.length"><el-timeline-item v-for="event in detail.blacklist_history" :key="event.id || `${event.action}-${event.occurred_at}`" :timestamp="formatTime(event.occurred_at || event.created_at)">{{ event.action === 'blacklist' ? '加入黑名单' : '解除黑名单' }}：{{ event.reason || '未填写原因' }}</el-timeline-item></el-timeline><p v-else class="muted">暂无黑名单历史</p>
       </template>
+      <el-alert v-else-if="detailError" type="error" :title="detailError" show-icon :closable="false" />
     </el-drawer>
   </section>
 </template>
@@ -121,6 +122,7 @@ const form = reactive(blankForm());
 const canManage = computed(() => auth.hasPermission('influencers.manage'));
 const activeCount = computed(() => rows.value.filter((row) => row.status === 'active').length); const cooperatingCount = computed(() => rows.value.filter((row) => row.cooperation_status === 'cooperating').length); const blacklistedCount = computed(() => rows.value.filter((row) => row.is_blacklisted).length);
 const displayValue = (value) => value === undefined || value === null || value === '' ? '—' : String(value);
+const influencerDisplayName = (row) => row?.handle || row?.display_name || row?.profile?.display_name || row?.name || row?.code || '—';
 const formatCount = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString('zh-CN') : '—';
 const formatJson = (value) => { try { return JSON.stringify(value || {}, null, 2); } catch { return '—'; } };
 const cooperationLabel = (status) => INFLUENCER_COOPERATION_STATUS_LABELS[status] || '未分层'; const cooperationTag = (status) => ({ contacted: 'warning', cooperating: 'success', paused: 'info' }[status] || '');
@@ -142,7 +144,12 @@ function removeContact(index) { if (form.contacts.length === 1) return; form.con
 function openCreate() { if (!canManage.value) return; editing.value = null; resetForm(); editVisible.value = true; }
 function openEdit(row) { if (!canManage.value) return; editing.value = row; Object.assign(form, { ...blankForm(), ...row, profile: profileForm(row.profile), contacts: (row.contacts || []).map((contact) => ({ ...contact, key: contact.id || `${contact.channel}-${contact.value}` })) }); editVisible.value = true; }
 function profilePayload() { const profile = form.profile; return { display_name: profile.display_name.trim(), external_influencer_id: profile.external_influencer_id.trim(), level: profile.level.trim(), tier: profile.tier.trim(), average_video_views: Number(profile.average_video_views || 0), average_live_views: Number(profile.average_live_views || 0), is_active: Boolean(profile.is_active), market: profile.market.trim(), platforms: profile.platforms.split(',').map((item) => item.trim()).filter(Boolean), content_types: profile.content_types.split(',').map((item) => item.trim()).filter(Boolean), profile_url: profile.profile_url.trim(), duplicate_reason: profile.duplicate_reason.trim(), profile_notes: profile.profile_notes.trim() }; }
-function payload() { return { code: form.code.trim(), name: form.name.trim(), platform: form.platform.trim(), handle: form.handle.trim(), category: form.category.trim(), follower_count: Number(form.follower_count || 0), cooperation_status: form.cooperation_status, profile: profilePayload() }; }
+function payload() {
+  const data = { code: form.code.trim(), name: form.name.trim(), platform: form.platform.trim(), category: form.category.trim(), follower_count: Number(form.follower_count || 0), cooperation_status: form.cooperation_status, profile: profilePayload() };
+  const handle = form.handle.trim();
+  if (handle) data.handle = handle;
+  return data;
+}
 function contactsPayload() { return form.contacts.filter((contact) => contact.value.trim()).map(({ key, id, ...contact }) => ({ ...contact, value: contact.value.trim() })); }
 async function save() {
   if (!canManage.value) return;
