@@ -6,12 +6,10 @@ from django.utils import timezone
 
 
 LEGACY_STATUSES = ("processing", "creating", "blank")
-FORWARD_STATUSES = ("pending", "shipped", "published", "overdue", "blacklisted")
 
 
 def migrate_status_baseline(apps, schema_editor):
     SampleFulfillment = apps.get_model("influencers", "SampleFulfillment")
-    FulfillmentStatusEvent = apps.get_model("influencers", "FulfillmentStatusEvent")
     InfluencerRestriction = apps.get_model("influencers", "InfluencerRestriction")
     VideoResult = apps.get_model("influencers", "VideoResult")
     now = timezone.now()
@@ -61,37 +59,15 @@ def migrate_status_baseline(apps, schema_editor):
     )
     QuerySet.update(rows(), status="pending")
 
-    # Legacy event values follow the final status of their fulfillment. The
-    # two field updates are set-based and leave unrelated event values intact.
-    for mapped in FORWARD_STATUSES:
-        events = FulfillmentStatusEvent.objects.filter(fulfillment__status=mapped)
-        QuerySet.update(
-            events.filter(from_status__in=LEGACY_STATUSES),
-            from_status=mapped,
-        )
-        QuerySet.update(
-            events.filter(to_status__in=LEGACY_STATUSES),
-            to_status=mapped,
-        )
-
-
 def restore_status_baseline(apps, schema_editor):
     SampleFulfillment = apps.get_model("influencers", "SampleFulfillment")
-    FulfillmentStatusEvent = apps.get_model("influencers", "FulfillmentStatusEvent")
 
-    # 0011 has no blacklisted value. Cancellation is the compatible terminal
-    # value and is also safe for the reverse event history.
+    # 0011 has no blacklisted value, so cancellation is the only compatible
+    # terminal fallback. Event rows are deliberately left untouched: their
+    # legacy values are audit history, not a copy of the current status.
     QuerySet.update(
         SampleFulfillment.objects.filter(status="blacklisted"),
         status="cancelled",
-    )
-    QuerySet.update(
-        FulfillmentStatusEvent.objects.filter(from_status="blacklisted"),
-        from_status="cancelled",
-    )
-    QuerySet.update(
-        FulfillmentStatusEvent.objects.filter(to_status="blacklisted"),
-        to_status="cancelled",
     )
 
 

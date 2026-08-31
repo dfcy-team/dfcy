@@ -1,9 +1,15 @@
 import importlib
 import re
+from datetime import timedelta
+from decimal import Decimal
+from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection
+from django.db.migrations.exceptions import IrreversibleError
+from django.db.migrations.state import ProjectState
 from django.db.models import Exists
+from django.db.models.query import QuerySet
 from django.utils import timezone
 import pytest
 from rest_framework.exceptions import ValidationError
@@ -22,6 +28,7 @@ from apps.influencers.models import (
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
+    SampleItem,
     normalize_tiktok_username,
 )
 from apps.influencers.serializers import (
@@ -1448,17 +1455,40 @@ def test_canonical_handle_migration_normalizes_tiktok_records_and_snapshots():
     assert snapshot.creator_username == "mhaine_94"
 
 
-def test_canonical_handle_migration_backfills_before_not_null_constraints():
-    migration = importlib.import_module(
+def test_canonical_handle_migration_rejects_unapply_before_field_ddl(monkeypatch):
+    migration_module = importlib.import_module(
         "apps.influencers.migrations.0013_canonical_tiktok_handle"
     )
+    migration = migration_module.Migration(
+        "0013_canonical_tiktok_handle",
+        "influencers",
+    )
+    operation = migration.operations[0]
+    backwards_calls = []
+    for alter_field in migration.operations[1:]:
+        monkeypatch.setattr(
+            alter_field,
+            "database_backwards",
+            lambda *args, field_name=alter_field.name, **kwargs: backwards_calls.append(
+                field_name
+            ),
+        )
+    schema_editor = SimpleNamespace(
+        atomic_migration=True,
+        connection=SimpleNamespace(alias="default"),
+    )
 
-    assert migration._normalize_tiktok_username(None) == ""
-    assert migration.Migration.operations[0].code is migration.normalize_existing_tiktok_identities
-    assert [operation.name for operation in migration.Migration.operations[1:]] == [
+    assert migration_module._normalize_tiktok_username(None) == ""
+    assert operation.code is migration_module.normalize_existing_tiktok_identities
+    assert operation.reverse_code is None
+    assert operation.reversible is False
+    assert [operation.name for operation in migration.operations[1:]] == [
         "handle",
         "creator_username",
     ]
+    with pytest.raises(IrreversibleError, match="is not reversible"):
+        migration.unapply(ProjectState(), schema_editor)
+    assert backwards_calls == []
 
 
 def test_canonical_handle_migration_does_not_guess_identity_from_code_or_name():
@@ -1525,7 +1555,7 @@ def test_canonical_handle_migration_propagates_blacklist_across_normalized_alias
             f"UPDATE {table} SET handle = %s WHERE id = %s",
             ["＠ＤＵＰＬＩＣＡＴＥ．ＣＲＥＡＴＯＲ", alias.pk],
         )
-    InfluencerRestriction.objects.create(
+    restriction = InfluencerRestriction.objects.create(
         tenant=tenant,
         influencer=clean,
         is_blacklisted=True,
@@ -1541,6 +1571,19 @@ def test_canonical_handle_migration_propagates_blacklist_across_normalized_alias
         influencer=alias,
         store=store,
         owner=user,
+    )
+    item = SampleItem.objects.create(
+        tenant=tenant,
+        fulfillment=fulfillment,
+        site_code="PH",
+        requested_sku="canonical-blacklist-sku",
+        quantity=2,
+        unit_cost=Decimal("4.0000"),
+        cost_amount=Decimal("8.0000"),
+    )
+    QuerySet.update(
+        InfluencerRestriction.objects.filter(pk=restriction.pk),
+        updated_at=fulfillment.created_at - timedelta(days=1),
     )
     fulfillment_table = connection.ops.quote_name(SampleFulfillment._meta.db_table)
     with connection.cursor() as cursor:
@@ -1559,12 +1602,19 @@ def test_canonical_handle_migration_propagates_blacklist_across_normalized_alias
 
     alias.refresh_from_db()
     fulfillment.refresh_from_db()
+    item.refresh_from_db()
     assert alias.handle == "duplicate.creator"
     assert InfluencerRestriction.objects.filter(
         tenant=tenant,
         influencer=alias,
         is_blacklisted=True,
     ).exists()
+    assert fulfillment.finalized_at >= fulfillment.created_at
+    assert fulfillment.updated_at >= fulfillment.created_at
+    assert fulfillment.finalized_at == fulfillment.created_at
+    assert fulfillment.updated_at == fulfillment.created_at
+    assert item.unit_cost == Decimal("4.0000")
+    assert item.cost_amount == Decimal("8.0000")
     assert fulfillment.status == SampleFulfillment.Status.BLACKLISTED
     assert fulfillment.version == 2
     assert fulfillment.status_events.filter(

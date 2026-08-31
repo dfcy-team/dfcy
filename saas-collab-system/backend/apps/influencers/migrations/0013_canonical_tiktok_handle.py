@@ -111,7 +111,12 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
         for fulfillment in fulfillments.iterator(chunk_size=1000):
             fulfillment_id = fulfillment.id
             previous_status = fulfillment.status
-            finalized_at = fulfillment.finalized_at or restriction.updated_at
+            blacklist_at = max(restriction.updated_at, fulfillment.created_at)
+            finalized_at = max(
+                fulfillment.finalized_at or blacklist_at,
+                fulfillment.created_at,
+            )
+            updated_at = max(blacklist_at, finalized_at)
             QuerySet(
                 model=SampleFulfillment,
                 using=SampleFulfillment.objects.db,
@@ -119,7 +124,7 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
                 status="blacklisted",
                 finalized_at=finalized_at,
                 version=fulfillment.version + 1,
-                updated_at=restriction.updated_at,
+                updated_at=updated_at,
             )
             FulfillmentStatusEvent.objects.create(
                 tenant_id=tenant_id,
@@ -137,10 +142,9 @@ class Migration(migrations.Migration):
     operations = [
         # Normalize legacy NULL/invalid values before enforcing NOT NULL. Some
         # deployed databases predate the current model state.
-        migrations.RunPython(
-            normalize_existing_tiktok_identities,
-            migrations.RunPython.noop,
-        ),
+        # Deliberately omit reverse_code. Django preflights reversibility before
+        # executing any reverse database operation in this migration.
+        migrations.RunPython(normalize_existing_tiktok_identities),
         migrations.AlterField(
             model_name="influencer",
             name="handle",

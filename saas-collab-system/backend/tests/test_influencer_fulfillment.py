@@ -795,7 +795,7 @@ def test_requested_sku_nullable_migration_is_explicitly_irreversible():
         migration.block_reverse(None, None)
 
 
-def test_sample_status_baseline_migration_is_reversible_and_keeps_event_values_compatible():
+def test_sample_status_baseline_migration_preserves_event_history_and_reverses_status():
     tenant = Tenant.objects.create(name="Status migration tenant", code="status-migration")
     user, _ = user_with_permissions(tenant, "status-migration-user")
     store, influencer, task = base_records(tenant, user, "status-migration")
@@ -838,16 +838,16 @@ def test_sample_status_baseline_migration_is_reversible_and_keeps_event_values_c
     fulfillment.refresh_from_db()
     legacy_event.refresh_from_db()
     assert fulfillment.status == SampleFulfillment.Status.BLACKLISTED
-    assert legacy_event.from_status == SampleFulfillment.Status.BLACKLISTED
-    assert legacy_event.to_status == SampleFulfillment.Status.BLACKLISTED
+    assert legacy_event.from_status == "creating"
+    assert legacy_event.to_status == "processing"
 
     migration.restore_status_baseline(django_apps, None)
 
     fulfillment.refresh_from_db()
     legacy_event.refresh_from_db()
     assert fulfillment.status == SampleFulfillment.Status.CANCELLED
-    assert legacy_event.from_status == SampleFulfillment.Status.CANCELLED
-    assert legacy_event.to_status == SampleFulfillment.Status.CANCELLED
+    assert legacy_event.from_status == "creating"
+    assert legacy_event.to_status == "processing"
 
 
 def test_blacklisted_influencer_cannot_receive_sample():
