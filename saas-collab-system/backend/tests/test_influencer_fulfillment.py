@@ -2,6 +2,7 @@ import importlib
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
+from types import SimpleNamespace
 
 import pytest
 from django.apps import apps as django_apps
@@ -10,6 +11,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
 from django.db.migrations.exceptions import IrreversibleError
+from django.db.migrations.state import ProjectState
 from django.db.models import BooleanField, Value
 from django.db.models.query import QuerySet
 from django.utils import timezone
@@ -795,7 +797,7 @@ def test_requested_sku_nullable_migration_is_explicitly_irreversible():
         migration.block_reverse(None, None)
 
 
-def test_sample_status_baseline_migration_preserves_event_history_and_reverses_status():
+def test_sample_status_baseline_migration_preserves_event_history_and_blocks_unapply(monkeypatch):
     tenant = Tenant.objects.create(name="Status migration tenant", code="status-migration")
     user, _ = user_with_permissions(tenant, "status-migration-user")
     store, influencer, task = base_records(tenant, user, "status-migration")
@@ -841,13 +843,28 @@ def test_sample_status_baseline_migration_preserves_event_history_and_reverses_s
     assert legacy_event.from_status == "creating"
     assert legacy_event.to_status == "processing"
 
-    migration.restore_status_baseline(django_apps, None)
+    migration_definition = migration.Migration(
+        "0012_sample_fulfillment_status_baseline",
+        "influencers",
+    )
+    operation = migration_definition.operations[0]
+    backwards_calls = []
+    monkeypatch.setattr(
+        migration_definition.operations[1],
+        "database_backwards",
+        lambda *args, **kwargs: backwards_calls.append("status"),
+    )
+    schema_editor = SimpleNamespace(
+        atomic_migration=True,
+        connection=SimpleNamespace(alias="default"),
+    )
 
-    fulfillment.refresh_from_db()
-    legacy_event.refresh_from_db()
-    assert fulfillment.status == SampleFulfillment.Status.CANCELLED
-    assert legacy_event.from_status == "creating"
-    assert legacy_event.to_status == "processing"
+    assert operation.code is migration.migrate_status_baseline
+    assert operation.reverse_code is None
+    assert operation.reversible is False
+    with pytest.raises(IrreversibleError, match="is not reversible"):
+        migration_definition.unapply(ProjectState(), schema_editor)
+    assert backwards_calls == []
 
 
 def test_blacklisted_influencer_cannot_receive_sample():

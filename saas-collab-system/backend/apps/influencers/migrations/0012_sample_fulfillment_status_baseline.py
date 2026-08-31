@@ -59,23 +59,14 @@ def migrate_status_baseline(apps, schema_editor):
     )
     QuerySet.update(rows(), status="pending")
 
-def restore_status_baseline(apps, schema_editor):
-    SampleFulfillment = apps.get_model("influencers", "SampleFulfillment")
-
-    # 0011 has no blacklisted value, so cancellation is the only compatible
-    # terminal fallback. Event rows are deliberately left untouched: their
-    # legacy values are audit history, not a copy of the current status.
-    QuerySet.update(
-        SampleFulfillment.objects.filter(status="blacklisted"),
-        status="cancelled",
-    )
-
-
 class Migration(migrations.Migration):
     dependencies = [("influencers", "0011_tiktok_video_data_layer")]
 
     operations = [
-        migrations.RunPython(migrate_status_baseline, restore_status_baseline),
+        # This maps legacy statuses using current fulfillment facts. The source
+        # status cannot be reconstructed after migration, so it must not be
+        # downgraded as though the operation were reversible.
+        migrations.RunPython(migrate_status_baseline),
         migrations.AlterField(
             model_name="samplefulfillment",
             name="status",
