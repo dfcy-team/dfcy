@@ -116,7 +116,12 @@ def normalize_existing_tiktok_identities(apps, schema_editor):
                 fulfillment.finalized_at or blacklist_at,
                 fulfillment.created_at,
             )
-            updated_at = max(blacklist_at, finalized_at)
+            updated_at = max(
+                blacklist_at,
+                finalized_at,
+                fulfillment.updated_at,
+                fulfillment.created_at,
+            )
             QuerySet(
                 model=SampleFulfillment,
                 using=SampleFulfillment.objects.db,

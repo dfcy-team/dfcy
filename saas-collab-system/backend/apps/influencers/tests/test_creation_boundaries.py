@@ -1585,6 +1585,11 @@ def test_canonical_handle_migration_propagates_blacklist_across_normalized_alias
         InfluencerRestriction.objects.filter(pk=restriction.pk),
         updated_at=fulfillment.created_at - timedelta(days=1),
     )
+    original_updated_at = fulfillment.created_at + timedelta(days=1)
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        updated_at=original_updated_at,
+    )
     fulfillment_table = connection.ops.quote_name(SampleFulfillment._meta.db_table)
     with connection.cursor() as cursor:
         cursor.execute(
@@ -1612,7 +1617,7 @@ def test_canonical_handle_migration_propagates_blacklist_across_normalized_alias
     assert fulfillment.finalized_at >= fulfillment.created_at
     assert fulfillment.updated_at >= fulfillment.created_at
     assert fulfillment.finalized_at == fulfillment.created_at
-    assert fulfillment.updated_at == fulfillment.created_at
+    assert fulfillment.updated_at == original_updated_at
     assert item.unit_cost == Decimal("4.0000")
     assert item.cost_amount == Decimal("8.0000")
     assert fulfillment.status == SampleFulfillment.Status.BLACKLISTED
