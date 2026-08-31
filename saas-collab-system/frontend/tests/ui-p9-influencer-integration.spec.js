@@ -12,7 +12,12 @@ vi.mock('../src/api/request', () => ({ requestWithMockFallback: requestMock }));
 vi.mock('../src/mock/influencers', () => ({ influencerMocks: { list: vi.fn() } }));
 vi.mock('../src/stores/auth', () => ({
   useAuthStore: () => ({
-    hasPermission: (permission) => permission === 'influencers.manage' && authContext.canManage
+    hasPermission: (permission) => authContext.canManage && [
+      'influencers.manage',
+      'influencers.outreach.manage',
+      'influencers.fulfillment.manage',
+      'influencers.fulfillment.view'
+    ].includes(permission)
   })
 }));
 
@@ -32,6 +37,9 @@ import {
 } from '../src/api/influencers';
 import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 import InfluencerResourceLibrary from '../src/views/influencers/InfluencerResourceLibrary.vue';
+import OutreachTaskList from '../src/views/influencers/OutreachTaskList.vue';
+import { creatorHandleFirst, creatorOptionLabel } from '../src/views/influencers/creatorLabel';
+import { applyStoreSelection } from '../src/views/influencers/outreachProductMatch';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const tableRows = ref([]);
@@ -151,6 +159,8 @@ describe('influencer integration workspace contracts', () => {
     expect(performance).toContain('fetchBdPerformance');
     expect(performance).toContain('downloadCsv');
     expect(performance).toContain('待预计算');
+    expect(performance).toContain(':disabled-date="isEndDateDisabled"');
+    expect(performance).toContain('统计范围最多支持 31 个自然日');
     expect(performance).not.toMatch(/CN[¥￥]\s*[1-9]/);
   });
 
@@ -197,12 +207,13 @@ describe('influencer integration workspace contracts', () => {
 
   it('aligns the outreach workspace with the BD task view and exposes the task detail loop', () => {
     const page = read('src/views/influencers/OutreachTaskList.vue');
-    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owner']) expect(page).toContain(field);
+    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owner', 'status']) expect(page).toContain(field);
     for (const contract of [
       'linked_count',
       'target_count',
       'dispatch_time',
       'started_at',
+      'finalized_at',
       '查看详情',
       '修改',
       '删除',
@@ -217,7 +228,7 @@ describe('influencer integration workspace contracts', () => {
     ]) expect(page).toContain(contract);
     expect(page).not.toContain('达人目标');
     for (const label of ['全部任务', '进行中', '已建联', '送样记录', '搜索任务/店铺/商品/负责人', '全部状态', '全部店铺', '全部下发人', '正常任务', '任务履约反馈', '目标进度']) expect(page).toContain(label);
-    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '负责人', '状态', '任务下发人', '开始时间', '下发时间', '操作']) expect(page).toContain(`label="${column}"`);
+    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '负责人', '状态', '任务下发人', '开始时间', '下发时间', '任务完成时间', '操作']) expect(page).toContain(`label="${column}"`);
     expect(read('src/api/influencers.js')).toContain('黑名单');
     expect(read('src/api/influencers.js')).toContain('终态');
     expect(read('src/api/influencers.js')).toContain("'If-Match'");
@@ -230,31 +241,48 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain("priority: 'normal'");
     expect(page).toContain('filterable');
     expect(page).toContain('influencerOptions');
-    for (const field of ['influencer_name', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
-    expect(page).toContain("path: '/influencers/sample-fulfillments'");
-    expect(page).toContain('outreach_task: String(task.id)');
+    for (const field of ['influencer_name', 'influencer_display_name', 'influencer_code', 'influencer_platform', 'influencer_handle']) expect(page).toContain(field);
+    expect(page).toContain('creatorHandleFirst');
+    expect(page).toContain('creatorOptionLabel');
+    expect(page).toContain('sampleVisible');
+    expect(page).toContain('createSampleFulfillment(payload, sampleRequestKey.value)');
+    expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
+    expect(page).toContain('outreach_task: task.id');
+    expect(page).toContain('fetchSampleFulfillments({ outreach_task: task.id');
+    expect(page).not.toContain('search: task.task_no');
+    expect(page).not.toContain("path: '/influencers/sample-fulfillments'");
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
     expect(page).toContain('matchOutreachProduct');
-    expect(page).toContain('商品数据未导入');
+    expect(page).toContain('商品数据未匹配');
     expect(page).toContain('已匹配店铺');
-    expect(page).toContain('matchedCandidates.value.forEach');
+    expect(page).toContain('matchedCandidates.value');
     expect(page).toContain('matchedStoreIds.value.map');
     expect(page).toContain('params.status = filters.status');
     expect(page).toContain('params.store = filters.store');
     expect(page).toContain('matchesDispatcher');
     expect(page).toContain("row.priority === 'normal'");
-    expect(page).toContain('sample_fulfillment_count');
+    expect(page).toContain('sample_fulfillment_completed_count');
+    expect(page).toContain('status: form.status');
     expect(page).toContain('displayValue(row.notes)');
     expect(page).toContain('<style scoped>');
   });
 
   it('autofills every matched SKU prefix while keeping the task field editable', () => {
     const page = read('src/views/influencers/OutreachTaskList.vue');
+    const productMatch = read('src/views/influencers/outreachProductMatch.js');
     expect(page).toContain('placeholder="匹配商品后自动填写，也可人工调整"');
-    expect(page).toContain('applyProductCandidate(form, candidate)');
-    expect(page).toContain("candidate.sku_prefixes.join(',')");
+    expect(page).toContain('applyStoreSelection(form, storeId, matchedCandidates.value)');
+    expect(productMatch).toContain('applyProductCandidate(form, candidate)');
+    expect(productMatch).toContain("form.sku_prefix = prefixes.join(',')");
     expect(page).not.toContain('v-if="matchedSkuPrefixes.length > 1"');
+  });
+
+  it('keeps a manually selected store and blank SKU prefix after an unmatched product lookup', () => {
+    const form = { store: null, sku_prefix: '' };
+
+    expect(applyStoreSelection(form, 42, [])).toEqual([]);
+    expect(form).toEqual({ store: 42, sku_prefix: '' });
   });
 
   it('matches the BD fulfillment columns and keeps the two-column create form contracts', () => {
@@ -262,7 +290,9 @@ describe('influencer integration workspace contracts', () => {
     for (const field of ['form.link_type', 'form.influencer', 'form.store', 'form.external_product_id', 'inheritedTask?.sku_prefix', 'requested_sku', 'quantity', 'sample_order_no', 'notes']) expect(page).toContain(field);
     for (const label of ['搜索达人/送样编号/建联编号/产品/订单', '全部店铺', '全部状态', '新增送样', '送样 / 建联编号', '任务 ID', '达人', '店铺', '产品 / SKU / 数量', '商品 ID', '样品订单', '成本', '状态', '备注', '建联日期', '操作']) expect(page).toContain(label);
     for (const field of ['送样履约', '新增送样记录', '送样日期', '达人账号', '达人 ID', '产品 ID', '待发样', 'SKU 与数量', '保存送样']) expect(page).toContain(field);
-    const dialog = page.slice(page.indexOf('<el-dialog v-model="visible"'));
+    const dialogStart = page.indexOf('v-model="visible"');
+    expect(dialogStart).toBeGreaterThan(-1);
+    const dialog = page.slice(dialogStart);
     const dialogOrder = ['送样类型', '送样日期', '达人账号', '达人 ID', '店铺', '样品订单', '产品 ID', '状态', 'SKU 与数量', '备注'];
     let previous = -1;
     for (const field of dialogOrder) {
@@ -272,20 +302,26 @@ describe('influencer integration workspace contracts', () => {
     }
     expect(page).toContain('添加 SKU');
     expect(page).toContain('送样编号由系统按类型自动生成');
+    expect(dialog).toContain(':close-on-click-modal="false"');
     expect(page).not.toContain('label="建联任务" required');
     expect(page).toContain('consumeTaskQuery');
     expect(page).toContain('delete query.outreach_task');
     expect(page).not.toContain('label="产品名称" required');
     expect(page).not.toContain('<b>{{ displayValue(row.product_name_snapshot) }}</b>');
     expect(page).toContain('inheritedTask.value.task_name || inheritedTask.value.external_product_id');
-    expect(page).toContain('价格未匹配');
+    expect(page).toContain('采购成本待匹配');
+    expect(page).not.toContain('价格未匹配');
     expect(page).toContain('statusLabel(FULFILLMENT_STATUS_LABELS');
-    for (const field of ['sales_amount', 'calculated_cost', 'pricing_status', 'price_match_status', 'cost_match_status']) expect(page).toContain(field);
-    expect(page).toContain('PRICING_STATUS_LABELS');
-    expect(page).toContain('displayAmount');
-    expect(page).toContain("value === null || value === undefined || value === ''");
+    for (const field of ['calculated_cost', 'cost_match_status', 'COST_MATCH_STATUS_LABELS', 'costMatchLabel']) expect(page).toContain(field);
+    for (const field of ['sales_amount', 'pricing_status', 'priced_at', 'unit_price', 'unit_cost', 'currency', 'price_match_status', 'price_source', 'price_snapshot_at']) expect(page).not.toContain(field);
+    expect(page).not.toContain('PRICING_STATUS_LABELS');
+    expect(page).not.toContain('displayAmount');
+    expect(page).toContain('fulfillment-note');
     expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
-    expect(page).toContain('updateSampleFulfillmentStatus');
+    expect(page).not.toContain('updateSampleFulfillmentStatus');
+    expect(page).toContain('ElMessageBox.confirm');
+    expect(page).toContain('confirm_terminal');
+    expect(page).toContain('status: form.status');
     expect(page).toContain('outreach_task');
     expect(page).toContain('influencer: form.influencer');
     expect(page).not.toContain('outreach_target: form.outreach_target');
@@ -306,6 +342,102 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('if (!r.success) return ElMessage.error');
   });
 
+  it('keeps duplicate display names distinct with handle-first purpose-scoped labels', () => {
+    const first = { handle: 'alpha.creator', display_name: 'Same Name', platform: 'TikTok' };
+    const second = { handle: 'beta.creator', display_name: 'Same Name', platform: 'TikTok' };
+
+    expect(creatorHandleFirst(first)).toBe('alpha.creator');
+    expect(creatorHandleFirst(second)).toBe('beta.creator');
+    expect(creatorOptionLabel(first)).toBe('alpha.creator（TikTok）');
+    expect(creatorOptionLabel(second)).toBe('beta.creator（TikTok）');
+    expect(creatorOptionLabel(first)).not.toContain('Same Name');
+    expect(creatorOptionLabel(first)).not.toBe(creatorOptionLabel(second));
+    expect(read('src/views/influencers/OutreachTaskList.vue')).toContain('creatorHandleFirst');
+    expect(read('src/views/influencers/SampleFulfillmentList.vue')).toContain('creatorHandleFirst');
+    const resourcePage = read('src/views/influencers/InfluencerResourceLibrary.vue');
+    expect(resourcePage).toContain("const influencerDisplayName = (row) => row?.handle");
+    expect(resourcePage).toContain('label="TikTok用户名"');
+    expect(resourcePage).toContain('displayValue(detail.handle)');
+    expect(resourcePage).toContain('label="达人名称"');
+    expect(resourcePage).toContain('label="档案链接"');
+    expect(resourcePage).toContain('append-to-body');
+    expect(resourcePage).toContain('await Promise.all([fetchInfluencer(row.id), fetchInfluencerContacts(row.id)])');
+  });
+
+  it('keeps task and task-sample dialogs open when the backdrop is clicked', () => {
+    const taskPage = read('src/views/influencers/OutreachTaskList.vue');
+    const taskDialogStart = taskPage.indexOf('v-model="createVisible"');
+    const sampleDialogStart = taskPage.indexOf('v-model="sampleVisible"');
+
+    expect(taskDialogStart).toBeGreaterThan(-1);
+    expect(sampleDialogStart).toBeGreaterThan(-1);
+    expect(taskPage.slice(Math.max(0, taskDialogStart - 200), taskDialogStart + 300)).toContain(':close-on-click-modal="false"');
+    expect(taskPage.slice(Math.max(0, sampleDialogStart - 200), sampleDialogStart + 300)).toContain(':close-on-click-modal="false"');
+  });
+
+  it('keeps the influencer row visible when the profile detail request fails', async () => {
+    const row = { id: 17, name: 'Demo Creator', code: 'DEMO-17', platform: 'TikTok', status: 'active' };
+    requestMock.mockImplementation(({ url }) => {
+      if (url === '/api/internal/influencers/') {
+        return { success: true, code: 'OK', message: 'success', data: { count: 1, results: [row] } };
+      }
+      if (url.endsWith('/contacts/') || url.endsWith('/blacklist-history/')) {
+        return { success: true, code: 'OK', message: 'success', data: { count: 0, results: [] } };
+      }
+      return { success: false, code: 'HTTP_500', message: 'detail unavailable', data: null, http_status: 500 };
+    });
+
+    const wrapper = mount(InfluencerResourceLibrary, { global: { stubs: resourceLibraryStubs } });
+    await flushPromises();
+    await wrapper.vm.openDetail(row);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('DEMO-17');
+    expect(wrapper.text()).toContain('detail unavailable');
+  });
+
+  it('opens the task-sourced sample form in place with task context', async () => {
+    requestMock.mockImplementation(({ url }) => {
+      if (url.endsWith('/outreach-task-options/')) {
+        return {
+          success: true,
+          code: 'OK',
+          message: 'success',
+          data: {
+            stores: [{ id: 3, name: 'Creator store', country_code: 'PH' }],
+            bd_users: [],
+            influencers: [{ id: 17, name: 'Demo Creator', display_name: 'Demo Creator', platform: 'TikTok' }]
+          }
+        };
+      }
+      return { success: true, code: 'OK', message: 'success', data: { count: 0, results: [] } };
+    });
+
+    const wrapper = mount(OutreachTaskList);
+    await flushPromises();
+    const task = {
+      id: 7,
+      task_no: 'DRJL0007',
+      task_name: 'Task product',
+      status: 'pending',
+      store: 3,
+      store_name: 'Creator store',
+      external_product_id: '1730000000000000002',
+      influencer: 17
+    };
+    wrapper.vm.detailTask = task;
+    await wrapper.vm.createSampleFromDetail();
+
+    expect(wrapper.vm.sampleVisible).toBe(true);
+    expect(wrapper.vm.sampleForm).toMatchObject({
+      outreach_task: 7,
+      influencer: 17,
+      store: 3,
+      external_product_id: '1730000000000000002'
+    });
+    expect(requestMock.mock.calls.some(([config]) => config.url.includes('/sample-fulfillments/'))).toBe(false);
+  });
+
   it('disables target mutations for read-only, terminal tasks, and terminal target results', () => {
     const page = read('src/views/influencers/OutreachTaskList.vue');
     expect(page).toMatch(/:disabled="!canManage \|\| isTerminal\(activeTask\)"/);
@@ -317,19 +449,19 @@ describe('influencer integration workspace contracts', () => {
   it('keeps priority values and fulfillment transitions aligned with backend contracts', () => {
     expect(OUTREACH_PRIORITY_LABELS).toEqual({ low: '低', normal: '普通', high: '高', urgent: '紧急' });
     expect(Object.keys(OUTREACH_PRIORITY_LABELS)).toEqual(['low', 'normal', 'high', 'urgent']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.pending).toEqual(['processing', 'creating', 'blank', 'cancelled']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.processing).toEqual(['shipped', 'cancelled']);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.pending).toEqual(['shipped', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.shipped).toEqual(['delivered', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.delivered).toEqual(['completed', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.completed).toEqual([]);
     expect(FULFILLMENT_STATUS_TRANSITIONS.cancelled).toEqual([]);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.blacklisted).toEqual([]);
 
     requestMock.mockReturnValue({ success: true });
-    updateSampleFulfillmentStatus(8, 'processing', 2);
+    updateSampleFulfillmentStatus(8, 'shipped', 2);
     expect(requestMock.mock.calls.at(-1)[0]).toMatchObject({
       method: 'post',
       url: '/api/internal/influencers/sample-fulfillments/8/status/',
-      data: { status: 'processing' },
+      data: { status: 'shipped' },
       headers: { 'If-Match': '"2"' }
     });
   });

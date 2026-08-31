@@ -33,7 +33,7 @@
           <el-option v-for="dispatcher in dispatcherOptions" :key="dispatcher.id" :label="dispatcher.name" :value="dispatcher.id" />
         </el-select>
         <el-checkbox v-model="filters.normalOnly" @change="applyFilters">正常任务</el-checkbox>
-        <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
+        <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新建任务</el-button>
@@ -92,10 +92,13 @@
           <template #default="{ row }">{{ displayValue(row.notes) }}</template>
         </el-table-column>
         <el-table-column prop="started_at" label="开始时间" min-width="165">
-          <template #default="{ row }">{{ displayValue(row.started_at) }}</template>
+          <template #default="{ row }">{{ formatTaskTime(row.started_at) }}</template>
         </el-table-column>
         <el-table-column prop="dispatch_time" label="下发时间" min-width="165">
-          <template #default="{ row }">{{ displayValue(row.dispatch_time) }}</template>
+          <template #default="{ row }">{{ formatTaskTime(row.dispatch_time) }}</template>
+        </el-table-column>
+        <el-table-column prop="finalized_at" label="任务完成时间" min-width="165">
+          <template #default="{ row }">{{ formatTaskTime(row.finalized_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" min-width="205" fixed="right">
           <template #default="{ row }">
@@ -120,6 +123,7 @@
       v-model="createVisible"
       :title="editingTask ? '修改建联任务' : '新建建联任务'"
       width="620px"
+      :close-on-click-modal="false"
       @closed="clearTaskDraft"
     >
       <el-form label-width="110px">
@@ -151,6 +155,13 @@
           <el-input v-model="form.sku_prefix" placeholder="匹配商品后自动填写，也可人工调整" />
         </el-form-item>
         <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
+        <el-form-item v-if="editingTask" label="任务状态" required>
+          <el-select v-model="form.status">
+            <el-option v-for="value in editableTaskStatuses" :key="value" :label="statusLabel(OUTREACH_STATUS_LABELS, value)" :value="value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingTask" label="开始时间"><el-input :model-value="formatTaskTime(form.started_at)" readonly /></el-form-item>
+        <el-form-item v-if="editingTask" label="任务完成时间"><el-input :model-value="formatTaskTime(form.finalized_at)" readonly /></el-form-item>
         <el-form-item label="负责人（BD）" required>
           <el-select v-model="form.owner" filterable placeholder="按姓名或账号搜索">
             <el-option v-for="user in bdOptions" :key="user.id" :label="`${user.full_name || user.username}（${user.username}）`" :value="user.id" />
@@ -233,6 +244,39 @@
       </el-table>
     </el-dialog>
 
+    <el-dialog v-model="sampleVisible" title="创建送样" width="700px" :close-on-click-modal="false">
+      <el-form label-width="105px">
+        <el-form-item label="建联任务">
+          <el-input :model-value="`${displayValue(sampleContext?.task_no)} · ${displayValue(sampleContext?.task_name)}`" readonly />
+        </el-form-item>
+        <el-form-item label="达人" required>
+          <el-select v-model="sampleForm.influencer" filterable placeholder="请选择达人">
+            <el-option
+              v-for="influencer in influencerOptions"
+              :key="influencer.id"
+              :label="influencerOptionLabel(influencer)"
+              :value="influencer.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="店铺">
+          <el-input :model-value="displayValue(sampleContext?.store_name || sampleForm.store)" readonly />
+        </el-form-item>
+        <el-form-item label="商品">
+          <el-input :model-value="`${displayValue(sampleContext?.product_name_snapshot || sampleContext?.task_name)} · ID ${displayValue(sampleForm.external_product_id)}`" readonly />
+        </el-form-item>
+        <el-form-item label="样品订单号"><el-input v-model="sampleForm.sample_order_no" placeholder="可先留空" /></el-form-item>
+        <el-form-item label="站点" required><el-input v-model="sampleForm.site_code" placeholder="例如 PH" /></el-form-item>
+        <el-form-item label="送样 SKU"><el-input v-model="sampleForm.requested_sku" placeholder="可暂时为空" /></el-form-item>
+        <el-form-item label="数量" required><el-input-number v-model="sampleForm.quantity" :min="1" :step="1" step-strictly /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="sampleForm.notes" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="sampleVisible = false">取消</el-button>
+        <el-button type="primary" :loading="sampleSaving" @click="submitSample">创建送样</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="detailVisible" direction="rtl" size="560px" :with-header="false" class="task-detail-drawer">
       <div class="drawer-body">
         <div class="drawer-head">
@@ -274,10 +318,10 @@
               <div><span>目标进度</span><b>{{ detailProgressLabel }}</b></div>
               <div><span>负责人</span><b>{{ displayValue(detailTask.owner_name || detailTask.owner) }}</b></div>
               <div><span>任务下发人</span><b>{{ displayValue(detailTask.dispatcher_name || detailTask.dispatcher_id) }}</b></div>
-              <div><span>开始时间</span><b>{{ displayValue(detailTask.started_at) }}</b></div>
-              <div><span>下发时间</span><b>{{ displayValue(detailTask.dispatch_time) }}</b></div>
-              <div><span>建联时间</span><b>{{ displayValue(detailTask.outreach_at) }}</b></div>
-              <div><span>完成时间</span><b>{{ displayValue(detailTask.finalized_at) }}</b></div>
+              <div><span>开始时间</span><b>{{ formatTaskTime(detailTask.started_at) }}</b></div>
+              <div><span>下发时间</span><b>{{ formatTaskTime(detailTask.dispatch_time) }}</b></div>
+              <div><span>建联时间</span><b>{{ formatTaskTime(detailTask.outreach_at) }}</b></div>
+              <div><span>任务完成时间</span><b>{{ formatTaskTime(detailTask.finalized_at) }}</b></div>
             </div>
             <div class="detail-validation">
               <b>送样完成校验</b>
@@ -305,7 +349,7 @@
               <article v-for="sample in detailSamples" :key="sample.id" class="sample-card">
                 <div><b>{{ displayValue(sample.fulfillment_no) }}</b><el-tag size="small">{{ statusLabel(FULFILLMENT_STATUS_LABELS, sample.status) }}</el-tag></div>
                 <p>样品订单：{{ displayValue(sample.sample_order_no) }}</p>
-                <p>达人：{{ displayValue(sample.influencer_name || sample.influencer) }}　成本：{{ displayAmount(sample.calculated_cost, sample) }}　视频匹配：{{ sample.video_match_count || 0 }}</p>
+                <p>达人：{{ displayValue(sampleInfluencerName(sample)) }}　成本：{{ displayValue(sample.calculated_cost) }}　视频匹配：{{ sample.video_match_count || 0 }}</p>
                 <small>创建时间：{{ displayValue(sample.created_at) }}</small>
               </article>
             </div>
@@ -321,11 +365,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import {
   addOutreachTarget,
   createOutreachTask,
+  createSampleFulfillment,
   deleteOutreachTarget,
   deleteOutreachTask,
   fetchInfluencerResolve,
@@ -348,11 +392,11 @@ import {
   updateOutreachTarget,
   updateOutreachTask
 } from '../../api/influencers';
-import { applyProductCandidate } from './outreachProductMatch';
+import { applyStoreSelection } from './outreachProductMatch';
+import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
-const router = useRouter();
 const rows = ref([]);
 const total = ref(0);
 const page = ref(1);
@@ -378,7 +422,7 @@ const storeOptions = ref([]);
 const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, includeDeleted: false });
+const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -391,7 +435,10 @@ const form = reactive({
   external_product_id: '',
   sku_prefix: '',
   target_count: 1,
-  owner: null
+  owner: null,
+  status: 'pending',
+  started_at: null,
+  finalized_at: null
 });
 const targetForm = reactive({ influencer: null, notes: '' });
 const selectedTargetInfluencer = computed(() => influencerOptions.value.find((item) => String(item.id) === String(targetForm.influencer)) || null);
@@ -402,9 +449,34 @@ const productMatching = ref(false);
 const productMatchHint = ref('');
 const productMatchType = ref('info');
 const productMatchSeq = ref(0);
+const sampleVisible = ref(false);
+const sampleSaving = ref(false);
+const sampleRequestKey = ref('');
+const sampleContext = ref(null);
+const sampleForm = reactive({
+  outreach_task: null,
+  outreach_target: null,
+  influencer: null,
+  store: null,
+  external_product_id: '',
+  sample_order_no: '',
+  notes: '',
+  site_code: 'PH',
+  requested_sku: '',
+  quantity: 1
+});
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
+const formatTaskTime = (value) => {
+  if (!hasValue(value)) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return displayValue(value);
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
+const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+const sampleInfluencerName = (row) => creatorHandleFirst(row);
 
 const filterStoreOptions = computed(() => {
   const optionsById = new Map(storeOptions.value.map((store) => [store.id, store]));
@@ -441,7 +513,7 @@ const visibleStoreOptions = computed(() => {
 
 const isTerminal = (row) => ['completed', 'cancelled'].includes(row?.status);
 const isTargetTerminal = (row) => ['success', 'rejected', 'no_response', 'blocked'].includes(row?.outreach_result);
-const sampleProgressCount = (row) => Number(row?.sample_fulfillment_count ?? row?.fulfillment_count ?? row?.sample_count ?? 0);
+const sampleProgressCount = (row) => Number(row?.sample_fulfillment_completed_count ?? row?.completion_validation?.completed_count ?? 0);
 const progress = (row) => row.target_count ? Math.min(100, Math.round(sampleProgressCount(row) * 100 / row.target_count)) : 0;
 const progressLabel = (row) => `${displayValue(sampleProgressCount(row))}/${displayValue(row.target_count)}`;
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
@@ -453,6 +525,10 @@ const taskStatusTransitions = {
 };
 const taskStatusActionLabel = (status) => ({ in_progress: '开始任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
 const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
+const editableTaskStatuses = computed(() => {
+  const current = editingTask.value?.status || 'pending';
+  return [current, ...nextTaskStatuses(editingTask.value)].filter((value, index, values) => values.indexOf(value) === index);
+});
 const rowClassName = () => 'clickable-task-row';
 
 const visibleRows = computed(() => rows.value.filter((row) => {
@@ -485,7 +561,7 @@ async function load() {
   if (filters.search.trim()) params.search = filters.search.trim();
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
-  if (filters.includeDeleted) params.include_deleted = 'true';
+  if (filters.deletedOnly) params.deleted_only = 'true';
   const r = await fetchOutreachTasks(params);
   loading.value = false;
   if (r.success) {
@@ -502,7 +578,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, includeDeleted: false });
+  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
   applyFilters();
 }
 
@@ -542,7 +618,10 @@ async function openCreate() {
     external_product_id: '',
     sku_prefix: '',
     target_count: 1,
-    owner: null
+    owner: null,
+    status: 'pending',
+    started_at: null,
+    finalized_at: null
   });
   clearProductMatch();
   if (!await loadTaskOptions(true)) return;
@@ -561,7 +640,10 @@ async function openEdit(row) {
     external_product_id: row.external_product_id || '',
     sku_prefix: row.sku_prefix || '',
     target_count: row.target_count ?? 0,
-    owner: row.owner ?? null
+    owner: row.owner ?? null,
+    status: row.status || 'pending',
+    started_at: row.started_at || null,
+    finalized_at: row.finalized_at || null
   });
   clearProductMatch();
   createVisible.value = true;
@@ -572,8 +654,7 @@ function clearTaskDraft() {
 }
 
 function selectMatchedStore(storeId) {
-  const candidate = matchedCandidates.value.find((item) => item.store_id === storeId);
-  matchedSkuPrefixes.value = applyProductCandidate(form, candidate);
+  matchedSkuPrefixes.value = applyStoreSelection(form, storeId, matchedCandidates.value);
 }
 
 async function matchProduct() {
@@ -602,7 +683,7 @@ async function matchProduct() {
   matchedStoreIds.value = candidates.map((item) => item.store_id);
   if (!candidates.length) {
     productMatchType.value = 'warning';
-    productMatchHint.value = '商品数据未导入，请手动选择店铺和填写 SKU 前缀';
+    productMatchHint.value = '商品数据未匹配，不影响创建；请手动选择店铺，SKU 前缀可填写或留空';
     return;
   }
   if (r.data?.unique) {
@@ -621,7 +702,13 @@ async function submit() {
   if (editingTask.value) return submitEdit();
   if (!form.task_name || !form.store || !form.owner) return ElMessage.warning('请填写必填字段');
   saving.value = true;
-  const { task_no: ignoredTaskNo, ...payload } = form;
+  const {
+    task_no: ignoredTaskNo,
+    status: ignoredStatus,
+    started_at: ignoredStartedAt,
+    finalized_at: ignoredFinalizedAt,
+    ...payload
+  } = form;
   const r = await createOutreachTask(payload);
   saving.value = false;
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
@@ -640,7 +727,8 @@ async function submitEdit() {
     external_product_id: form.external_product_id,
     sku_prefix: form.sku_prefix,
     target_count: form.target_count,
-    owner: form.owner
+    owner: form.owner,
+    status: form.status
   };
   const r = await updateOutreachTask(editingTask.value.id, payload, editingTask.value.version);
   saving.value = false;
@@ -691,8 +779,8 @@ async function loadDetailData(task, showLoading = true) {
   if (!task?.id) return;
   const taskId = task.id;
   if (showLoading) detailLoading.value = true;
-  const sampleRequest = canViewFulfillment.value && task.task_no
-    ? fetchSampleFulfillments({ search: task.task_no, page: 1, page_size: 100 })
+  const sampleRequest = canViewFulfillment.value && task.id
+    ? fetchSampleFulfillments({ outreach_task: task.id, page: 1, page_size: 100 })
     : Promise.resolve(null);
   const [taskResponse, progressResponse, sampleResponse] = await Promise.all([
     fetchOutreachTask(taskId, { include_deleted: task.is_deleted ? 'true' : undefined }),
@@ -706,7 +794,7 @@ async function loadDetailData(task, showLoading = true) {
   if (progressResponse?.success) detailProgress.value = detailData(progressResponse.data);
   else failures.push('进度加载失败');
   if (sampleResponse?.success) {
-    detailSamples.value = collectionRows(sampleResponse.data).filter((sample) => String(sample.outreach_task) === String(taskId));
+    detailSamples.value = collectionRows(sampleResponse.data);
   } else if (canViewFulfillment.value) {
     failures.push('送样信息加载失败');
   }
@@ -770,45 +858,105 @@ async function refreshActiveTask() {
 }
 
 function influencerOptionLabel(influencer) {
-  const primary = influencer.name || influencer.code || `达人 ${influencer.id}`;
-  const account = [influencer.platform, influencer.handle].filter(Boolean).join(' · ');
-  return account ? `${primary}（${account}）` : primary;
+  return creatorOptionLabel(influencer);
 }
 
 function targetDisplayName(row) {
-  return row.influencer_name || row.influencer_code || (row.influencer ? `达人 ${row.influencer}` : '—');
+  return creatorHandleFirst(row);
 }
 
 function targetAccount(row) {
-  const account = [row.influencer_platform, row.influencer_code].filter(Boolean).join(' · ');
+  const displayName = creatorDisplayName(row);
+  const account = [displayName !== '—' ? displayName : '', row.influencer_platform].filter(Boolean).join(' · ');
   return account || (row.influencer ? `ID ${row.influencer}` : '—');
 }
 
-function displayAmount(value, row) {
-  if (!hasValue(value)) return '—';
-  const currency = row?.items?.find((item) => item.currency)?.currency;
-  return currency ? `${value} ${currency}` : String(value);
+function ensureSampleInfluencer(task, target) {
+  const influencerId = target?.influencer ?? task?.influencer ?? null;
+  if (influencerId === null || influencerId === undefined) return null;
+  if (!influencerOptions.value.some((item) => String(item.id) === String(influencerId))) {
+    influencerOptions.value = [{
+      id: influencerId,
+      name: target?.influencer_name || task?.influencer_name || `达人 ${influencerId}`,
+      display_name: target?.influencer_display_name || task?.influencer_display_name || target?.influencer_name || task?.influencer_name || '',
+      handle: target?.influencer_handle || task?.influencer_handle || '',
+      code: target?.influencer_code || task?.influencer_code || '',
+      platform: target?.influencer_platform || task?.influencer_platform || ''
+    }, ...influencerOptions.value];
+  }
+  return influencerId;
+}
+
+async function openSampleCreate(task, target = null) {
+  if (!task?.id || !canCreateFulfillment.value || isTerminal(task)) return;
+  if (target && (!target.id || target.is_deleted)) return;
+  if (!await loadTaskOptions(true)) return;
+  const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
+  sampleContext.value = {
+    ...task,
+    store_name: task.store_name || store?.name || task.store,
+    product_name_snapshot: task.product_name_snapshot || task.task_name || ''
+  };
+  Object.assign(sampleForm, {
+    outreach_task: task.id,
+    outreach_target: target?.id || null,
+    influencer: ensureSampleInfluencer(task, target),
+    store: task.store ?? null,
+    external_product_id: task.external_product_id || '',
+    sample_order_no: '',
+    notes: '',
+    site_code: String(task.store_country_code || store?.country_code || 'PH').trim().toUpperCase(),
+    requested_sku: '',
+    quantity: 1
+  });
+  sampleRequestKey.value = newRequestKey();
+  sampleVisible.value = true;
 }
 
 function openSampleFulfillment(row) {
-  if (!activeTask.value || !row?.id || !canCreateFulfillment.value || isTerminal(activeTask.value)) return;
-  router.push({
-    path: '/influencers/sample-fulfillments',
-    query: {
-      outreach_task: String(activeTask.value.id)
-    }
-  });
+  if (!activeTask.value || !row?.id) return;
+  return openSampleCreate(activeTask.value, row);
 }
 
 function createSampleFromDetail() {
-  const task = detailTask.value;
-  if (!task || !canCreateFulfillment.value || isTerminal(task)) return;
-  router.push({
-    path: '/influencers/sample-fulfillments',
-    query: {
-      outreach_task: String(task.id)
-    }
-  });
+  return openSampleCreate(detailTask.value);
+}
+
+async function submitSample() {
+  if (!canCreateFulfillment.value) return;
+  if (!sampleForm.outreach_task || !sampleForm.influencer || !sampleForm.store) {
+    return ElMessage.warning('请先选择送样达人');
+  }
+  const siteCode = String(sampleForm.site_code || '').trim().toUpperCase();
+  const quantity = Number(sampleForm.quantity);
+  if (!siteCode || !Number.isInteger(quantity) || quantity < 1) {
+    return ElMessage.warning('请填写有效的站点和数量');
+  }
+  sampleSaving.value = true;
+  const payload = {
+    outreach_task: sampleForm.outreach_task,
+    ...(sampleForm.outreach_target ? { outreach_target: sampleForm.outreach_target } : {}),
+    influencer: sampleForm.influencer,
+    store: sampleForm.store,
+    external_product_id: sampleForm.external_product_id,
+    sample_order_no: sampleForm.sample_order_no,
+    notes: sampleForm.notes,
+    link_type: 'DRJL',
+    items: [{
+      site_code: siteCode,
+      requested_sku: String(sampleForm.requested_sku || '').trim() || null,
+      quantity,
+      external_product_id: sampleForm.external_product_id
+    }]
+  };
+  const response = await createSampleFulfillment(payload, sampleRequestKey.value);
+  sampleSaving.value = false;
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '送样创建失败'));
+  sampleVisible.value = false;
+  sampleRequestKey.value = '';
+  ElMessage.success('送样已创建');
+  await load();
+  if (detailTask.value?.id === sampleForm.outreach_task) await loadDetailData(detailTask.value, false);
 }
 
 async function addTarget() {
@@ -831,7 +979,9 @@ async function searchTargetInfluencers(search) {
 async function resolveSelectedTargetInfluencer(id) {
   const selected = influencerOptions.value.find((item) => String(item.id) === String(id));
   if (!selected) return;
-  const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
+  const account = String(selected.handle || '').trim().replace(/^@+/, '');
+  if (!account) return;
+  const response = await fetchInfluencerResolve(account);
   if (!response.success) return;
   const resolved = (response.data?.candidates || response.data?.results || []).find((item) => String(item.id) === String(id));
   if (resolved) influencerOptions.value = influencerOptions.value.map((item) => String(item.id) === String(id) ? resolved : item);
