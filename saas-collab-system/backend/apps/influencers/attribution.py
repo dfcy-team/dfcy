@@ -9,7 +9,7 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Max, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.exceptions import ValidationError
@@ -21,9 +21,11 @@ from .models import (
     BdOrderAttributionSnapshot,
     BdSampleAttributionSnapshot,
     ExchangeRate,
+    OutreachTarget,
     OutreachTask,
     SampleFulfillment,
     SUPPORTED_CURRENCY_CHOICES,
+    influencer_identity_key,
     normalize_tiktok_username,
 )
 
@@ -595,27 +597,38 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
                 if base_currency:
                     bucket["missing_exchange_rates"].add(base_currency)
 
-    task_rows = (
+    task_rows = list(
         OutreachTask.objects.filter(
             tenant=tenant,
             is_deleted=False,
             created_at__gte=start_dt,
             created_at__lt=end_dt,
         )
-        .annotate(
-            active_linked_count=Count(
-                "targets",
-                filter=Q(targets__tenant=tenant, targets__is_deleted=False),
-                distinct=True,
-            )
-        )
-        .values("owner_id", "active_linked_count")
+        .values("id", "owner_id")
     )
     for row in task_rows:
         bucket = buckets[row["owner_id"]]
         bucket["task_count"] += 1
-        bucket["linked_count"] += row["active_linked_count"] or 0
         owner_ids.add(row["owner_id"])
+
+    task_owners = {row["id"]: row["owner_id"] for row in task_rows}
+    linked_identities = set()
+    target_rows = OutreachTarget.objects.filter(
+        tenant=tenant,
+        task_id__in=task_owners,
+        is_deleted=False,
+    ).values_list("task_id", "influencer_id", "influencer__platform", "influencer__handle")
+    for task_id, influencer_id, platform, handle in target_rows.iterator(chunk_size=1000):
+        identity = influencer_identity_key(
+            influencer_id=influencer_id,
+            platform=platform,
+            handle=handle,
+        )
+        task_identity = (task_id, identity)
+        if task_identity in linked_identities:
+            continue
+        linked_identities.add(task_identity)
+        buckets[task_owners[task_id]]["linked_count"] += 1
 
     sample_rows = BdSampleAttributionSnapshot.objects.filter(
         tenant=tenant,

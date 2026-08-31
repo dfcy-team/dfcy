@@ -795,7 +795,7 @@ def create_outreach_task(*, user, validated_data):
 
 @transaction.atomic
 def update_outreach_task(*, user, task, validated_data, expected_version):
-    """Safely edit mutable task facts without touching workflow state timestamps."""
+    """Safely edit task facts and delegate status timestamps to the state machine."""
     task = _locked_task(user, _pk(task))
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot be updated."})
@@ -811,8 +811,19 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
 
     data = dict(validated_data)
-    if not data:
+    requested_status = data.pop("status", None)
+    if not data and requested_status is None:
         raise ValidationError({"detail": "At least one editable task field is required."})
+
+    if not data:
+        if requested_status == task.status:
+            return task
+        return transition_outreach_task(
+            user=user,
+            task=task,
+            status=requested_status,
+            expected_version=expected_version,
+        )
 
     changes = {}
     if "task_name" in data:
@@ -904,6 +915,15 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         before=before,
         after=after,
     )
+    if requested_status is not None and requested_status != task.status:
+        task = transition_outreach_task(
+            user=user,
+            task=task,
+            status=requested_status,
+            expected_version=task.version,
+        )
+    if "target_count" in data:
+        task = recompute_outreach_task_completion(user=user, task=task)
     return task
 
 
