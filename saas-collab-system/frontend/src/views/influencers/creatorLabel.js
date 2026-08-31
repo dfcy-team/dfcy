@@ -7,10 +7,8 @@ export function normalizedCreatorHandle(value) {
 }
 
 export function creatorDisplayName(value = {}) {
-  const name = value.display_name
-    || value.influencer_display_name
-    || value.name
-    || value.influencer_name
+  const name = value.handle
+    || value.influencer_handle
     || value.code
     || value.influencer_code;
   if (hasValue(name)) return String(name);
@@ -25,12 +23,8 @@ export function creatorHandleFirst(value = {}) {
 
 export function creatorOptionLabel(value = {}) {
   const handle = normalizedCreatorHandle(value.handle ?? value.influencer_handle);
-  const displayName = creatorDisplayName(value);
-  const primary = handle || displayName;
+  const primary = handle || creatorDisplayName(value);
   const details = [];
-  if (handle && displayName && normalizedCreatorHandle(displayName).toLowerCase() !== handle.toLowerCase()) {
-    details.push(displayName);
-  }
   const platform = value.platform || value.influencer_platform;
   if (hasValue(platform)) details.push(String(platform));
   return details.length ? `${primary}（${details.join(' · ')}）` : primary;
