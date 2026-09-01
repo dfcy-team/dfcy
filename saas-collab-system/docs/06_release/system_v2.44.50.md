@@ -75,7 +75,10 @@ custody、frontend 镜像。镜像内测试在任何运行容器切换前执行�
 
 - backend：`test_custody_security_gate.py`、
   `test_integration_credential_maintenance.py`、`test_database_settings.py`；
-- custody：`test_custody_service.py`。
+- custody：`test_custody_service.py`。该门禁保持 sidecar 的非 root UID/GID，
+  从 `/tmp` 执行并显式使用 `pytest -c /dev/null /app/tests/test_custody_service.py`；
+  镜像仅以 `0444` 复制 sidecar 所需的 `apps` 包文件，避免读取继承镜像中
+  root-only 的 `/app/pytest.ini`，不放宽宿主或运行时权限。
 
 随后先启动并等待 sidecar health，再切换 backend/celery/celery-beat/frontend。
 脚本不调用 `migrate`、`makemigrations`、`docker compose down` 或生产 DDL。

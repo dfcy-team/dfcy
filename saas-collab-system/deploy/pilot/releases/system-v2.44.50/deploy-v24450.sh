@@ -103,7 +103,11 @@ done
   --entrypoint pytest backend -q \
   tests/test_custody_security_gate.py tests/test_integration_credential_maintenance.py tests/test_database_settings.py \
   > "$evidence_dir/predeploy-backend-tests.txt" 2>&1
-"${compose[@]}" run --rm --no-deps --entrypoint pytest custody-sidecar -q /app/tests/test_custody_service.py \
+# Run from writable /tmp so pytest never needs to read the inherited
+# root-owned /app/pytest.ini.  PYTHONPATH keeps the explicitly copied package
+# importable while preserving the sidecar's non-root UID/GID.
+"${compose[@]}" run --rm --no-deps -w /tmp -e PYTHONPATH=/app \
+  --entrypoint pytest custody-sidecar -c /dev/null /app/tests/test_custody_service.py \
   > "$evidence_dir/predeploy-sidecar-tests.txt" 2>&1
 
 # Start the sidecar separately so its health gate is satisfied before workers

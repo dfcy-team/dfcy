@@ -188,7 +188,11 @@ done
   -e DB_USER= -e DB_PASSWORD= -e DB_HOST= -e DB_PORT= \
   --entrypoint pytest backend -q \
   tests/test_custody_security_gate.py tests/test_integration_credential_maintenance.py tests/test_database_settings.py
-"${compose[@]}" run --rm --no-deps --entrypoint pytest custody-sidecar -q /app/tests/test_custody_service.py
+# Keep the authoritative sidecar gate non-root and independent of the
+# inherited root-owned /app/pytest.ini.  /app remains on PYTHONPATH because
+# the test imports the package copied into the image.
+"${compose[@]}" run --rm --no-deps -w /tmp -e PYTHONPATH=/app \
+  --entrypoint pytest custody-sidecar -c /dev/null /app/tests/test_custody_service.py
 
 if [ -f "$evidence_dir/pre-deploy-migrations.txt" ]; then
   "${compose[@]}" exec -T backend python manage.py showmigrations integrations > "$evidence_dir/post-deploy-migrations.txt"

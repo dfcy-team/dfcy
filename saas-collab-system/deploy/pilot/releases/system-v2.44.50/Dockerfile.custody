@@ -11,9 +11,17 @@ WORKDIR /app
 RUN python -m pip install --no-cache-dir --default-timeout 300 --retries 10 \
     "cryptography>=42.0,<50.0"
 
-COPY backend/apps/integrations/custody_service.py /app/apps/integrations/custody_service.py
-COPY backend/apps/integrations/file_custody.py /app/apps/integrations/file_custody.py
-COPY backend/tests/test_custody_service.py /app/tests/test_custody_service.py
+# V2.44.49 may carry root-only package paths.  Keep the sidecar non-root and
+# make only the package directories/files needed by this image traversable and
+# readable; do not relax permissions on the inherited application tree.
+RUN mkdir -p /app/apps/integrations /app/tests \
+    && chmod 0755 /app/apps /app/apps/integrations /app/tests
+
+COPY --chown=1000:1000 --chmod=0444 backend/apps/__init__.py /app/apps/__init__.py
+COPY --chown=1000:1000 --chmod=0444 backend/apps/integrations/__init__.py /app/apps/integrations/__init__.py
+COPY --chown=1000:1000 --chmod=0444 backend/apps/integrations/custody_service.py /app/apps/integrations/custody_service.py
+COPY --chown=1000:1000 --chmod=0444 backend/apps/integrations/file_custody.py /app/apps/integrations/file_custody.py
+COPY --chown=1000:1000 --chmod=0444 backend/tests/test_custody_service.py /app/tests/test_custody_service.py
 
 # Numeric identity is deliberate: the host bootstrap prepares matching
 # ownership on the dedicated encrypted-data and key files.
