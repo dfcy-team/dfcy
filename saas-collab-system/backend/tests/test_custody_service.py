@@ -20,7 +20,15 @@ def _write_secret(path: Path, value: str, mode=0o400):
     return path
 
 
-def _request(service, path, *, method="POST", payload=None, token="sidecar-token", content_type="application/json"):
+def _request(
+    service,
+    path,
+    *,
+    method="POST",
+    payload=None,
+    token="placeholder-sidecar-token",
+    content_type="application/json",
+):
     body = b"" if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
     environ = {
         "REQUEST_METHOD": method,
@@ -44,7 +52,7 @@ def _request(service, path, *, method="POST", payload=None, token="sidecar-token
 @pytest.fixture
 def service(tmp_path):
     key_file = _write_secret(tmp_path / "fernet.key", Fernet.generate_key().decode("ascii"))
-    token_file = _write_secret(tmp_path / "service.token", "sidecar-token")
+    token_file = _write_secret(tmp_path / "service.token", "placeholder-sidecar-token")
     return CustodyService(
         storage_path=tmp_path / "records",
         encryption_key_file=key_file,
@@ -160,18 +168,30 @@ def test_sidecar_rotation_is_atomic_and_revoke_is_contract_compatible(service):
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode checks are not available on Windows")
 def test_key_file_requires_absolute_owner_read_only_non_symlink_path(tmp_path):
-    token_file = _write_secret(tmp_path / "service.token", "sidecar-token")
+    token_file = _write_secret(tmp_path / "service.token", "placeholder-sidecar-token")
     key_file = _write_secret(tmp_path / "fernet.key", Fernet.generate_key().decode("ascii"))
     with pytest.raises(CustodyServiceConfigurationError):
-        CustodyService(storage_path=tmp_path / "records", encryption_key_file="relative.key", auth_token="x")
+        CustodyService(
+            storage_path=tmp_path / "records",
+            encryption_key_file="relative.key",
+            auth_token="placeholder-x",
+        )
     os.chmod(key_file, 0o644)
     with pytest.raises(CustodyServiceConfigurationError):
-        CustodyService(storage_path=tmp_path / "records-unsafe", encryption_key_file=key_file, auth_token="x")
+        CustodyService(
+            storage_path=tmp_path / "records-unsafe",
+            encryption_key_file=key_file,
+            auth_token="placeholder-x",
+        )
     os.chmod(key_file, 0o400)
     link = tmp_path / "fernet-link.key"
     link.symlink_to(key_file)
     with pytest.raises(CustodyServiceConfigurationError):
-        CustodyService(storage_path=tmp_path / "records-link", encryption_key_file=link, auth_token="x")
+        CustodyService(
+            storage_path=tmp_path / "records-link",
+            encryption_key_file=link,
+            auth_token="placeholder-x",
+        )
     assert EncryptedFileCredentialStore(tmp_path / "records-ok", key_file)
     assert token_file.exists()
 

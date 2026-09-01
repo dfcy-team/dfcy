@@ -77,6 +77,13 @@
                 />
               </el-select>
             </el-form-item>
+            <el-alert
+              v-if="selectedConfig(apiType) && !selectedConfig(apiType).oauth_ready"
+              :title="oauthBlockerText(selectedConfig(apiType))"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
           </el-form>
 
           <div class="section-actions">
@@ -84,7 +91,7 @@
               v-if="subjectType === 'store' && canAuthorize(apiType)"
               :type="primaryBinding(apiType) ? 'default' : 'primary'"
               :loading="busy === `authorize-${apiType}`"
-              :disabled="!selectedConfig(apiType)"
+              :disabled="!selectedConfig(apiType) || !selectedConfig(apiType).oauth_ready"
               @click="authorizeStore(apiType)"
             >
               {{ authorizeLabel(apiType) }}
@@ -201,6 +208,33 @@ function selectedConfig(apiType) {
   return configsFor(apiType).find((config) => config.id === (binding?.integration_config_id || selections[apiType])) || null;
 }
 
+const oauthBlockerLabels = {
+  config_missing: '未找到接入配置',
+  platform_mismatch: '平台与接入配置不一致',
+  environment_not_live: '配置不是受控试运行或生产环境',
+  platform_network_mode_disabled: '正式平台网络模式尚未启用',
+  platform_security_not_approved: '正式平台安全审批尚未启用',
+  credential_custody_not_approved: '独立凭据保管服务尚未就绪',
+  outbound_host_allowlist_missing: '平台出口域名白名单尚未配置',
+  platform_contract_not_enabled: '平台合同开关尚未批准',
+  network_not_approved: '平台网络访问尚未批准',
+  write_sync_enabled: '生产写同步必须关闭',
+  config_not_approved: '接入配置尚未完成审核',
+  credential_not_configured: '开发者凭据尚未配置',
+  credential_reference_missing: '开发者凭据引用缺失',
+  contract_not_approved: '平台合同版本尚未批准',
+  callback_missing: 'Shopee 授权回调地址尚未配置',
+  callback_allowlist_missing: '生产回调白名单尚未配置',
+  callback_mismatch: '授权回调地址与平台登记值不一致',
+  callback_not_allowlisted: '授权回调地址不在生产白名单',
+  public_app_id_missing: '平台应用标识尚未配置',
+};
+
+function oauthBlockerText(config) {
+  const reasons = (config?.oauth_blockers || []).map((code) => oauthBlockerLabels[code] || code);
+  return reasons.length ? `暂不可授权：${reasons.join('；')}。请先到“连接配置”完成整改。` : '';
+}
+
 function canAuthorize(apiType) {
   const platform = access.value?.subject?.platform;
   return ['lazada', 'shopee', 'tiktok'].includes(platform)
@@ -239,6 +273,10 @@ async function load() {
 async function authorizeStore(apiType) {
   const config = selectedConfig(apiType);
   if (!config) return;
+  if (!config.oauth_ready) {
+    ElMessage.warning(oauthBlockerText(config) || '当前接入配置尚未达到授权条件。');
+    return;
+  }
   busy.value = `authorize-${apiType}`;
   try {
     const response = await startStoreAuthorization({
