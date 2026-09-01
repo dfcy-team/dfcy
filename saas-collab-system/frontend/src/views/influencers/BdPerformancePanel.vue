@@ -10,7 +10,7 @@
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-date-picker v-model="filters.startDay" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
-        <el-date-picker v-model="filters.endDay" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
+        <el-date-picker v-model="filters.endDay" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" :disabled-date="isEndDateDisabled" />
         <el-select v-model="filters.currency" placeholder="金额币种">
           <el-option v-for="item in BD_PERFORMANCE_CURRENCIES" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -64,7 +64,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { BD_PERFORMANCE_CURRENCIES, fetchBdPerformance } from '../../api/influencers';
 import { collectionRows } from '../../utils/businessResponse';
-import { defaultCompletedDateRange } from './performanceDate';
+import { bdPerformanceErrorMessage, calendarDayCount, defaultCompletedDateRange, isDateRangeWithinLimit } from './performanceDate';
 
 const filters = reactive({ ...defaultCompletedDateRange(), currency: 'CNY', attribution: 'strict', metrics: 'core' });
 const rows = ref([]);
@@ -107,25 +107,34 @@ function formatVideo(row) {
   if (performance.value?.video_available === false || ['unavailable', 'not_precomputed', 'pending'].includes(status) || !status) return '待预计算';
   return row.video_count ?? row.video_results ?? row.videos ?? '—';
 }
+function isEndDateDisabled(value) {
+  if (!filters.startDay) return false;
+  const endDay = `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  return !isDateRangeWithinLimit(filters.startDay, endDay);
+}
 function validateDates() {
   if (!filters.startDay || !filters.endDay) return '请选择完整日期范围';
   if (filters.startDay > filters.endDay) return '开始日期不能晚于结束日期';
+  const dayCount = calendarDayCount(filters.startDay, filters.endDay);
+  if (dayCount === null) return '日期格式不正确，请重新选择日期';
+  if (dayCount > 31) return `统计范围最多支持 31 个自然日，当前为 ${dayCount} 天，请调整结束日期`;
   return '';
 }
+function clearResults() { rows.value = []; performance.value = {}; }
 async function load() {
   const validationMessage = validateDates();
-  if (validationMessage) { errorMessage.value = validationMessage; state.value = 'error'; return; }
+  if (validationMessage) { clearResults(); errorMessage.value = validationMessage; state.value = 'error'; return; }
   loading.value = true; state.value = 'loading'; errorMessage.value = '';
   try {
     const response = await fetchBdPerformance({ start_date: filters.startDay, end_date: filters.endDay, currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics });
     if (!response?.success) {
-      rows.value = []; performance.value = {}; errorMessage.value = response?.message || '绩效聚合数据加载失败'; state.value = 'error'; return;
+      clearResults(); errorMessage.value = bdPerformanceErrorMessage(response); state.value = 'error'; return;
     }
     performance.value = response.data || {};
     rows.value = collectionRows(response.data);
     state.value = rows.value.length ? 'ready' : 'empty';
   } catch (error) {
-    rows.value = []; performance.value = {}; errorMessage.value = error?.message || '绩效聚合数据加载失败'; state.value = 'error';
+    clearResults(); errorMessage.value = error?.message || '绩效聚合数据加载失败'; state.value = 'error';
   } finally { loading.value = false; }
 }
 function csvEscape(value) { return `"${String(value ?? '').replaceAll('"', '""')}"`; }
