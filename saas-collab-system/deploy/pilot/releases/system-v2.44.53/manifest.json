@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "release_version": "2.44.53",
-  "status": "deployed_pending_owner_verification",
+  "status": "owner_verified",
   "deployed_at_utc": "2026-09-01T11:56:48Z",
   "parent_release": "2.44.52",
   "candidate_commit": "37eaa4a3344be9d3a3c6897e6e4936972a429c40",
@@ -38,8 +38,10 @@
     "custody_recreated": false,
     "redis_recreated": false
   },
-  "owner_verification": "pending",
-  "owner_verification_required": true,
+  "owner_verification": "accepted",
+  "owner_verification_required": false,
+  "owner_verified_at_utc": "2026-09-01T12:14:31Z",
+  "owner_verified_at_local": "2026-09-01T20:14:31+0800",
   "rollback": {
     "application_release": "2.44.52",
     "database_restore_required": false
