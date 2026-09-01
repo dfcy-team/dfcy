@@ -1395,9 +1395,37 @@ def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch
         },
         item_payloads=[],
     )
+    completed_influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="blacklist-rollback-completed",
+        name="Completed creator",
+        platform="TikTok",
+        handle="blacklist.rollback.completed",
+    )
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), influencer=None)
+    task.refresh_from_db()
+    completed_sample = SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="blacklist-rollback-completed-sample",
+        request_key="blacklist-rollback-completed-key",
+        request_hash="blacklist-rollback-completed-hash",
+        link_type="YYJL",
+        outreach_task=task,
+        influencer=completed_influencer,
+        store=store,
+        owner=user,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=completed_sample.pk),
+        status=SampleFulfillment.Status.PUBLISHED,
+    )
     original_updated_at = influencer.updated_at
+    original_task_status = task.status
+    original_task_version = task.version
+    recompute = influencer_services.recompute_outreach_task_completion
 
     def fail_recompute(*args, **kwargs):
+        recompute(*args, **kwargs)
         raise RuntimeError("injected recompute failure")
 
     monkeypatch.setattr(influencer_services, "recompute_outreach_task_completion", fail_recompute)
@@ -1412,8 +1440,11 @@ def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch
 
     influencer.refresh_from_db()
     fulfillment.refresh_from_db()
+    task.refresh_from_db()
     assert influencer.updated_at == original_updated_at
     assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert task.status == original_task_status
+    assert task.version == original_task_version
     assert not InfluencerRestriction.objects.filter(tenant=tenant, influencer=influencer).exists()
     assert not InfluencerRestrictEvent.objects.filter(tenant=tenant, influencer=influencer).exists()
 
