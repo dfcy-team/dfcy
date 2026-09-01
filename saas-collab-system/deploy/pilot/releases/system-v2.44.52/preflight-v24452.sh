@@ -72,7 +72,7 @@ done < <(git -C "$repo_dir" diff --name-only "$base_commit" "$candidate")
 assert_no_sensitive_bundle_files
 [ -f "$source_dir/backend/apps/masterdata/migrations/0009_warehouse_service_platform.py" ] || fail "0009 migration file is missing from candidate source."
 [ "$(sha256sum "$source_dir/backend/apps/masterdata/migrations/0009_warehouse_service_platform.py" | cut -d' ' -f1)" = \
-  8a8cab4e4e4937f548ddc2003a791baad025b39222556df5725ecae4b6aa34b9 ] || fail "0009 migration digest differs from reviewed candidate."
+  1391cfdce4813e873cf53d696564d86d317dc63df080b4dc829885a578782818 ] || fail "0009 migration digest differs from reviewed candidate."
 
 expected_user=$(env_value PILOT_APPLICATION_DB_USER)
 expected_name=$(env_value PILOT_APPLICATION_DB_NAME)
