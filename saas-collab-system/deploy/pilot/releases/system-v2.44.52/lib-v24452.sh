@@ -60,10 +60,23 @@ load_compose_chain() {
   [ -f "$base_compose" ] || fail "missing application base compose file."
   local chain
   chain=$(env_value PILOT_RELEASE_COMPOSE_CHAIN)
-  [ -n "$chain" ] || fail "PILOT_RELEASE_COMPOSE_CHAIN is required; do not guess the runtime chain."
-  compose=(docker compose --project-name application --env-file "$env_file" -f "$base_compose")
+  compose=(docker compose --project-name application --env-file "$env_file")
   local path
-  IFS=':' read -r -a configured_chain <<< "$chain"
+  if [ -n "$chain" ]; then
+    IFS=':' read -r -a configured_chain <<< "$chain"
+  else
+    # Older production baselines did not persist PILOT_RELEASE_COMPOSE_CHAIN
+    # in .env.pilot. The current frontend container label is Compose's
+    # authoritative record of the exact files that created the running
+    # mixed V2.44.50/V2.44.51 baseline; read it rather than guessing or
+    # copying the protected environment file.
+    local config_csv
+    config_csv=$(docker inspect application-frontend-1 \
+      --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null) || \
+      fail "cannot read the running Compose file chain."
+    [ -n "$config_csv" ] || fail "running Compose file chain is empty."
+    IFS=',' read -r -a configured_chain <<< "$config_csv"
+  fi
   [ "${#configured_chain[@]}" -gt 0 ] || fail "PILOT_RELEASE_COMPOSE_CHAIN is empty."
   for path in "${configured_chain[@]}"; do
     [ -n "$path" ] || fail "PILOT_RELEASE_COMPOSE_CHAIN contains an empty path."

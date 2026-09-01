@@ -32,8 +32,10 @@ VM 的 `.env.pilot` 在运行时读取，不进入 Git、镜像、参数记录�
 
 ## 构建、发布与复核顺序
 
-1. 在受保护 `.env.pilot` 中填入准确的当前 Compose 链 `PILOT_RELEASE_COMPOSE_CHAIN`，
-   并确认 `PILOT_REPO_DIR` / `PILOT_SOURCE_DIR` 指向上面的 reviewed source。
+1. 可在受保护 `.env.pilot` 中显式填写准确的当前 Compose 链
+   `PILOT_RELEASE_COMPOSE_CHAIN`；若旧基线没有该项，脚本只读使用当前
+   `application-frontend-1` 的 Compose 配置标签并逐项校验文件存在。
+   同时确认 `PILOT_REPO_DIR` / `PILOT_SOURCE_DIR` 指向上面的 reviewed source。
 2. 架构员执行 `./preflight-v24452.sh` 或 `./deploy-v24452.sh --precheck-only`。
    该阶段检查 Git ancestry、严格 changed-path allowlist、当前混合版本、custody
    health、凭据挂载隔离和 Compose 解析，不切换容器、不执行 DDL。
