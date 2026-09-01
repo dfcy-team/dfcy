@@ -121,7 +121,7 @@ while IFS= read -r changed_path; do
     deploy/pilot/releases/system-v2.44.50/*) ;;
     *) fail "candidate contains an unapproved path: $changed_path" ;;
   esac
-done < <(git -C "$source_dir" diff --name-only "$base_commit" "$release_revision")
+done < <(git -C "$source_dir" diff --name-only --relative "$base_commit" "$release_revision")
 
 for required in \
   backend/apps/integrations/custody.py \
