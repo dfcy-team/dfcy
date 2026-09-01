@@ -16,6 +16,10 @@ fail() {
   exit 1
 }
 
+env_value() {
+  sed -n "s/^$1=//p" "$env_file" | tail -n 1 | tr -d '\r'
+}
+
 candidate=$(tr -d '[:space:]' < "$release_dir/candidate-commit.txt")
 printf '%s' "$candidate" | grep -Eq '^[0-9a-f]{40}$' || fail "candidate commit is invalid."
 compose_chain=(
