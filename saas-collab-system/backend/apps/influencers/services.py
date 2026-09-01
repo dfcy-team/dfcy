@@ -1990,7 +1990,7 @@ def restore_sample_fulfillment(*, user, fulfillment, expected_version):
 
 
 @transaction.atomic
-def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
+def set_influencer_blacklist(*, user, influencer, blacklisted, reason="", expected_updated_at=None):
     # Identity edits use this same tenant lock, so the canonical handle group
     # cannot change between reading the selected profile and locking its peers.
     Tenant.objects.select_for_update().get(pk=user.tenant_id)
@@ -2001,6 +2001,11 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
     influencer = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
     if influencer is None:
         raise ValidationError({"influencer": "Influencer identity group is empty."})
+    if expected_updated_at is not None and influencer.updated_at != expected_updated_at:
+        raise ValidationError(
+            {"If-Match": "Influencer was changed by another request."},
+            code="conflict",
+        )
     identity_ids = [profile.pk for profile in identity_profiles]
     action = (
         InfluencerRestrictEvent.Action.BLACKLIST
@@ -2033,6 +2038,13 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
 
     if restriction is None or event is None:
         raise ValidationError({"influencer": "Influencer identity group is empty."})
+    identity_updated_at = timezone.now()
+    QuerySet.update(
+        Influencer.objects.filter(tenant=user.tenant, pk__in=identity_ids),
+        updated_at=identity_updated_at,
+    )
+    for profile in identity_profiles:
+        profile.updated_at = identity_updated_at
     if blacklisted:
         affected_task_ids = set()
         rows = list(

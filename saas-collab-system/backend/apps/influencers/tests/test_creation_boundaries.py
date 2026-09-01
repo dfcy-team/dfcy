@@ -444,6 +444,7 @@ def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
         f"/api/internal/influencers/{selected.pk}/",
         {"handle": "changed.creator"},
         format="json",
+        HTTP_IF_MATCH=selected.updated_at.isoformat(),
     )
 
     assert response.status_code == 200, response.data
@@ -1338,9 +1339,11 @@ def test_blacklist_endpoint_rejects_string_boolean_values():
         f"/api/internal/influencers/{influencer.pk}/blacklist/",
         {"is_blacklisted": "false"},
         format="json",
+        HTTP_IF_MATCH=influencer.updated_at.isoformat(),
     )
 
     assert response.status_code == 400
+    assert "is_blacklisted" in str(response.data)
     assert not InfluencerRestriction.objects.filter(
         tenant=tenant,
         influencer=influencer,

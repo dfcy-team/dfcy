@@ -394,6 +394,7 @@ import {
 } from '../../api/influencers';
 import { applyStoreSelection } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
+import { completedFulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
@@ -508,7 +509,7 @@ const visibleStoreOptions = computed(() => {
 
 const isTerminal = (row) => ['completed', 'cancelled'].includes(row?.status);
 const isTargetTerminal = (row) => ['success', 'rejected', 'no_response', 'blocked'].includes(row?.outreach_result);
-const sampleProgressCount = (row) => Number(row?.sample_fulfillment_completed_count ?? row?.completion_validation?.completed_count ?? 0);
+const sampleProgressCount = (row) => completedFulfillmentCount(row);
 const progress = (row) => row.target_count ? Math.min(100, Math.round(sampleProgressCount(row) * 100 / row.target_count)) : 0;
 const progressLabel = (row) => `${displayValue(sampleProgressCount(row))}/${displayValue(row.target_count)}`;
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
@@ -546,8 +547,7 @@ const taskStats = computed(() => {
   };
 });
 const detailProgressLabel = computed(() => {
-  const row = detailProgress.value || detailTask.value || {};
-  return `${displayValue(sampleProgressCount(row))}/${displayValue(row.target_count)}`;
+  return outreachProgressLabel(detailProgress.value, detailTask.value);
 });
 
 async function load() {
@@ -714,6 +714,13 @@ async function submit() {
 
 async function submitEdit() {
   if (!form.task_name || !form.store || !form.owner) return ElMessage.warning('请填写必填字段');
+  if (requiresCancellationConfirmation(editingTask.value?.status, form.status)) {
+    try {
+      await ElMessageBox.confirm('取消后不可恢复，确认取消该任务吗？', '确认取消', { type: 'warning' });
+    } catch {
+      return;
+    }
+  }
   saving.value = true;
   const payload = {
     task_name: form.task_name,

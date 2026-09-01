@@ -3,7 +3,7 @@ import hashlib
 from io import StringIO
 from datetime import timedelta
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Exists, Max, OuterRef, Prefetch, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -136,6 +136,29 @@ def _expected_version(request):
 
 def _optional_expected_version(request):
     return _expected_version(request) if request.headers.get("If-Match") else None
+
+
+def _assert_influencer_version(request, influencer):
+    expected_updated_at = _expected_influencer_updated_at(request)
+    if expected_updated_at != influencer.updated_at:
+        raise Conflict({"If-Match": "Influencer was changed by another request."})
+
+
+def _expected_influencer_updated_at(request):
+    raw_version = request.headers.get("If-Match", "").strip().strip('"')
+    expected_updated_at = parse_datetime(raw_version)
+    if expected_updated_at is None:
+        raise ValidationError({"If-Match": "The current updated_at timestamp is required."})
+    return expected_updated_at
+
+
+def _advance_influencer_version(influencer):
+    updated_at = timezone.now()
+    models.QuerySet.update(
+        Influencer.objects.filter(pk=influencer.pk, tenant_id=influencer.tenant_id),
+        updated_at=updated_at,
+    )
+    influencer.updated_at = updated_at
 
 
 def _query_bool(value, *, field):
@@ -309,6 +332,7 @@ class InfluencerDetailView(APIView):
                 context={"request": request},
             )
             serializer.is_valid(raise_exception=True)
+        _assert_influencer_version(request, instance)
         instance = serializer.save()
         write_operation_log(
             tenant=request.user.tenant,
@@ -332,12 +356,7 @@ class InfluencerStatusView(APIView):
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
         instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
-        raw_version = request.headers.get("If-Match", "").strip().strip('"')
-        expected_updated_at = parse_datetime(raw_version)
-        if expected_updated_at is None:
-            raise ValidationError({"If-Match": "The current updated_at timestamp is required."})
-        if expected_updated_at != instance.updated_at:
-            raise Conflict({"If-Match": "Influencer was changed by another request."})
+        _assert_influencer_version(request, instance)
         status = request.data.get("status")
         if status not in Influencer.Status.values:
             raise ValidationError({"status": "Status must be active or inactive."})
@@ -372,6 +391,7 @@ class InfluencerContactsView(APIView):
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
         influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        _assert_influencer_version(request, influencer)
         payload = request.data.get("contacts", [])
         if not isinstance(payload, list):
             raise ValidationError({"contacts": "Must be a list."})
@@ -382,7 +402,11 @@ class InfluencerContactsView(APIView):
             (row.channel, row.value): row
             for row in influencer.contacts.filter(tenant=request.user.tenant)
         }
-        influencer.contacts.filter(tenant=request.user.tenant).update(is_active=False, is_primary=False)
+        for row in existing.values():
+            if row.is_active or row.is_primary:
+                row.is_active = False
+                row.is_primary = False
+                row.save(update_fields=["is_active", "is_primary", "updated_at"])
         created = []
         for serializer in serializers:
             values = serializer.validated_data
@@ -396,6 +420,7 @@ class InfluencerContactsView(APIView):
                 row.full_clean()
                 row.save(update_fields=["label", "is_primary", "is_active", "updated_at"])
             created.append(row)
+        _advance_influencer_version(influencer)
         return success_response(InfluencerContactSerializer(created, many=True).data)
 
 
@@ -403,16 +428,27 @@ class InfluencerBlacklistView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     write_permission_code = "influencers.manage"
 
+    @transaction.atomic
     def post(self, request, pk):
         _require_blacklist_scope(request.user)
         influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        expected_updated_at = _expected_influencer_updated_at(request)
         blacklisted = request.data.get("is_blacklisted", request.data.get("blacklisted", True))
         if not isinstance(blacklisted, bool):
             raise ValidationError({"is_blacklisted": "Expected a JSON boolean."})
         reason = str(request.data.get("reason", "")).strip()
-        restriction, event = set_influencer_blacklist(
-            user=request.user, influencer=influencer, blacklisted=blacklisted, reason=reason
-        )
+        try:
+            restriction, event = set_influencer_blacklist(
+                user=request.user,
+                influencer=influencer,
+                blacklisted=blacklisted,
+                reason=reason,
+                expected_updated_at=expected_updated_at,
+            )
+        except ValidationError as exc:
+            if "conflict" in str(exc.get_codes()):
+                raise Conflict(exc.detail) from exc
+            raise
         return success_response({"is_blacklisted": restriction.is_blacklisted, "event": InfluencerRestrictEventSerializer(event).data})
 
 

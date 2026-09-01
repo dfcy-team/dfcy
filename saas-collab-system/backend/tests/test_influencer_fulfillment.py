@@ -1378,6 +1378,89 @@ def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is
     assert stale.status_code == 409
 
 
+def test_influencer_profile_contacts_and_blacklist_reject_stale_versions():
+    tenant = Tenant.objects.create(name="Tenant", code="influencer-cas")
+    _, client = user_with_permissions(
+        tenant,
+        "influencer-cas-manager",
+        "influencers.view",
+        "influencers.manage",
+        "influencers.fulfillment.manage",
+    )
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="cas-creator",
+        name="CAS creator",
+        platform="tiktok",
+        handle="cas.creator",
+    )
+    duplicate = Influencer.objects.create(
+        tenant=tenant,
+        code="cas-creator-duplicate",
+        name="CAS creator duplicate",
+        platform="TikTok",
+        handle="CAS.CREATOR",
+    )
+
+    profile_version = influencer.updated_at.isoformat()
+    profile = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {"name": "Updated creator"},
+        format="json",
+        HTTP_IF_MATCH=profile_version,
+    )
+    stale_profile = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {"name": "Stale creator"},
+        format="json",
+        HTTP_IF_MATCH=profile_version,
+    )
+    assert profile.status_code == 200
+    assert stale_profile.status_code == 409
+
+    influencer.refresh_from_db()
+    contacts_version = influencer.updated_at.isoformat()
+    contacts = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {"contacts": []},
+        format="json",
+        HTTP_IF_MATCH=contacts_version,
+    )
+    stale_contacts = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {"contacts": []},
+        format="json",
+        HTTP_IF_MATCH=contacts_version,
+    )
+    assert contacts.status_code == 200, contacts.data
+    assert stale_contacts.status_code == 409
+
+    influencer.refresh_from_db()
+    blacklist_version = influencer.updated_at.isoformat()
+    duplicate_version = duplicate.updated_at.isoformat()
+    blacklist = client.post(
+        f"/api/internal/influencers/{influencer.pk}/blacklist/",
+        {"is_blacklisted": True, "reason": "CAS regression"},
+        format="json",
+        HTTP_IF_MATCH=blacklist_version,
+    )
+    stale_blacklist = client.post(
+        f"/api/internal/influencers/{influencer.pk}/blacklist/",
+        {"is_blacklisted": False, "reason": "stale"},
+        format="json",
+        HTTP_IF_MATCH=blacklist_version,
+    )
+    stale_duplicate_blacklist = client.post(
+        f"/api/internal/influencers/{duplicate.pk}/blacklist/",
+        {"is_blacklisted": False, "reason": "stale duplicate"},
+        format="json",
+        HTTP_IF_MATCH=duplicate_version,
+    )
+    assert blacklist.status_code == 200
+    assert stale_blacklist.status_code == 409
+    assert stale_duplicate_blacklist.status_code == 409
+
+
 def test_outreach_task_supports_multiple_targets_linked_count_and_soft_delete():
     tenant = Tenant.objects.create(name="Tenant", code="a2-multiple-targets")
     user, client = user_with_permissions(
