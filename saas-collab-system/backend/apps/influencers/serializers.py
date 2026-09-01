@@ -82,7 +82,7 @@ class InfluencerSerializer(serializers.ModelSerializer):
         )
 
     def get_display_name(self, obj):
-        return _safe_display_name(obj)
+        return obj.handle or obj.code
 
     def validate_code(self, value):
         request = self.context["request"]
@@ -317,7 +317,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
 
 
 class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
-    """Allow-list for task detail edits; workflow state is service-owned."""
+    """Allow-list task edits while the service owns workflow timestamps."""
 
     class Meta:
         model = OutreachTask
@@ -329,6 +329,7 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
             "sku_prefix",
             "target_count",
             "owner",
+            "status",
         )
         extra_kwargs = {
             "task_name": {"required": False, "allow_blank": True},
@@ -353,7 +354,7 @@ class OutreachTargetSerializer(serializers.ModelSerializer):
     influencer_platform = serializers.CharField(source="influencer.platform", read_only=True)
 
     def get_influencer_display_name(self, obj):
-        return _safe_display_name(obj.influencer)
+        return obj.influencer.handle or obj.influencer.code
 
     class Meta:
         model = OutreachTarget
@@ -432,10 +433,10 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         return _safe_display_name(value)
 
     def get_influencer_name(self, obj):
-        return self._display_name(obj.influencer)
+        return obj.influencer.handle or obj.influencer.code
 
     def get_influencer_display_name(self, obj):
-        return self._display_name(obj.influencer)
+        return obj.influencer.handle or obj.influencer.code
 
     def get_owner_name(self, obj):
         return self._display_name(obj.owner)

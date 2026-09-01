@@ -92,10 +92,13 @@
           <template #default="{ row }">{{ displayValue(row.notes) }}</template>
         </el-table-column>
         <el-table-column prop="started_at" label="开始时间" min-width="165">
-          <template #default="{ row }">{{ displayValue(row.started_at) }}</template>
+          <template #default="{ row }">{{ formatTaskTime(row.started_at) }}</template>
         </el-table-column>
         <el-table-column prop="dispatch_time" label="下发时间" min-width="165">
-          <template #default="{ row }">{{ displayValue(row.dispatch_time) }}</template>
+          <template #default="{ row }">{{ formatTaskTime(row.dispatch_time) }}</template>
+        </el-table-column>
+        <el-table-column prop="finalized_at" label="任务完成时间" min-width="165">
+          <template #default="{ row }">{{ formatTaskTime(row.finalized_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" min-width="205" fixed="right">
           <template #default="{ row }">
@@ -152,6 +155,13 @@
           <el-input v-model="form.sku_prefix" placeholder="匹配商品后自动填写，也可人工调整" />
         </el-form-item>
         <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
+        <el-form-item v-if="editingTask" label="任务状态" required>
+          <el-select v-model="form.status">
+            <el-option v-for="value in editableTaskStatuses" :key="value" :label="statusLabel(OUTREACH_STATUS_LABELS, value)" :value="value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="editingTask" label="开始时间"><el-input :model-value="formatTaskTime(form.started_at)" readonly /></el-form-item>
+        <el-form-item v-if="editingTask" label="任务完成时间"><el-input :model-value="formatTaskTime(form.finalized_at)" readonly /></el-form-item>
         <el-form-item label="负责人（BD）" required>
           <el-select v-model="form.owner" filterable placeholder="按姓名或账号搜索">
             <el-option v-for="user in bdOptions" :key="user.id" :label="`${user.full_name || user.username}（${user.username}）`" :value="user.id" />
@@ -308,10 +318,10 @@
               <div><span>目标进度</span><b>{{ detailProgressLabel }}</b></div>
               <div><span>负责人</span><b>{{ displayValue(detailTask.owner_name || detailTask.owner) }}</b></div>
               <div><span>任务下发人</span><b>{{ displayValue(detailTask.dispatcher_name || detailTask.dispatcher_id) }}</b></div>
-              <div><span>开始时间</span><b>{{ displayValue(detailTask.started_at) }}</b></div>
-              <div><span>下发时间</span><b>{{ displayValue(detailTask.dispatch_time) }}</b></div>
-              <div><span>建联时间</span><b>{{ displayValue(detailTask.outreach_at) }}</b></div>
-              <div><span>完成时间</span><b>{{ displayValue(detailTask.finalized_at) }}</b></div>
+              <div><span>开始时间</span><b>{{ formatTaskTime(detailTask.started_at) }}</b></div>
+              <div><span>下发时间</span><b>{{ formatTaskTime(detailTask.dispatch_time) }}</b></div>
+              <div><span>建联时间</span><b>{{ formatTaskTime(detailTask.outreach_at) }}</b></div>
+              <div><span>任务完成时间</span><b>{{ formatTaskTime(detailTask.finalized_at) }}</b></div>
             </div>
             <div class="detail-validation">
               <b>送样完成校验</b>
@@ -384,6 +394,8 @@ import {
 } from '../../api/influencers';
 import { applyStoreSelection } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
+import { completedFulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation } from './outreachTaskState';
+import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
@@ -425,7 +437,10 @@ const form = reactive({
   external_product_id: '',
   sku_prefix: '',
   target_count: 1,
-  owner: null
+  owner: null,
+  status: 'pending',
+  started_at: null,
+  finalized_at: null
 });
 const targetForm = reactive({ influencer: null, notes: '' });
 const selectedTargetInfluencer = computed(() => influencerOptions.value.find((item) => String(item.id) === String(targetForm.influencer)) || null);
@@ -455,6 +470,7 @@ const sampleForm = reactive({
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
+const formatTaskTime = (value) => formatTaskDateTime(value);
 const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const sampleInfluencerName = (row) => creatorHandleFirst(row);
 
@@ -493,7 +509,7 @@ const visibleStoreOptions = computed(() => {
 
 const isTerminal = (row) => ['completed', 'cancelled'].includes(row?.status);
 const isTargetTerminal = (row) => ['success', 'rejected', 'no_response', 'blocked'].includes(row?.outreach_result);
-const sampleProgressCount = (row) => Number(row?.sample_fulfillment_count ?? row?.fulfillment_count ?? row?.sample_count ?? 0);
+const sampleProgressCount = (row) => completedFulfillmentCount(row);
 const progress = (row) => row.target_count ? Math.min(100, Math.round(sampleProgressCount(row) * 100 / row.target_count)) : 0;
 const progressLabel = (row) => `${displayValue(sampleProgressCount(row))}/${displayValue(row.target_count)}`;
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
@@ -505,6 +521,10 @@ const taskStatusTransitions = {
 };
 const taskStatusActionLabel = (status) => ({ in_progress: '开始任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
 const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
+const editableTaskStatuses = computed(() => {
+  const current = editingTask.value?.status || 'pending';
+  return [current, ...nextTaskStatuses(editingTask.value)].filter((value, index, values) => values.indexOf(value) === index);
+});
 const rowClassName = () => 'clickable-task-row';
 
 const visibleRows = computed(() => rows.value.filter((row) => {
@@ -527,8 +547,7 @@ const taskStats = computed(() => {
   };
 });
 const detailProgressLabel = computed(() => {
-  const row = detailProgress.value || detailTask.value || {};
-  return `${displayValue(sampleProgressCount(row))}/${displayValue(row.target_count)}`;
+  return outreachProgressLabel(detailProgress.value, detailTask.value);
 });
 
 async function load() {
@@ -594,7 +613,10 @@ async function openCreate() {
     external_product_id: '',
     sku_prefix: '',
     target_count: 1,
-    owner: null
+    owner: null,
+    status: 'pending',
+    started_at: null,
+    finalized_at: null
   });
   clearProductMatch();
   if (!await loadTaskOptions(true)) return;
@@ -613,7 +635,10 @@ async function openEdit(row) {
     external_product_id: row.external_product_id || '',
     sku_prefix: row.sku_prefix || '',
     target_count: row.target_count ?? 0,
-    owner: row.owner ?? null
+    owner: row.owner ?? null,
+    status: row.status || 'pending',
+    started_at: row.started_at || null,
+    finalized_at: row.finalized_at || null
   });
   clearProductMatch();
   createVisible.value = true;
@@ -672,7 +697,13 @@ async function submit() {
   if (editingTask.value) return submitEdit();
   if (!form.task_name || !form.store || !form.owner) return ElMessage.warning('请填写必填字段');
   saving.value = true;
-  const { task_no: ignoredTaskNo, ...payload } = form;
+  const {
+    task_no: ignoredTaskNo,
+    status: ignoredStatus,
+    started_at: ignoredStartedAt,
+    finalized_at: ignoredFinalizedAt,
+    ...payload
+  } = form;
   const r = await createOutreachTask(payload);
   saving.value = false;
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
@@ -683,6 +714,13 @@ async function submit() {
 
 async function submitEdit() {
   if (!form.task_name || !form.store || !form.owner) return ElMessage.warning('请填写必填字段');
+  if (requiresCancellationConfirmation(editingTask.value?.status, form.status)) {
+    try {
+      await ElMessageBox.confirm('取消后不可恢复，确认取消该任务吗？', '确认取消', { type: 'warning' });
+    } catch {
+      return;
+    }
+  }
   saving.value = true;
   const payload = {
     task_name: form.task_name,
@@ -691,7 +729,8 @@ async function submitEdit() {
     external_product_id: form.external_product_id,
     sku_prefix: form.sku_prefix,
     target_count: form.target_count,
-    owner: form.owner
+    owner: form.owner,
+    status: form.status
   };
   const r = await updateOutreachTask(editingTask.value.id, payload, editingTask.value.version);
   saving.value = false;

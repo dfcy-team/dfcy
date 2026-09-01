@@ -1197,6 +1197,42 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
     assert client.get(f"/api/internal/influencers/outreach-tasks/{task.pk}/").status_code == 404
 
 
+def test_outreach_task_edit_status_uses_state_machine_timestamps():
+    tenant = Tenant.objects.create(name="Task Status Edit Tenant", code="task-status-edit")
+    user, client = user_with_permissions(
+        tenant,
+        "task-status-editor",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    _, _, task = base_records(tenant, user, "task-status-edit")
+
+    started = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"task_name": "Started in edit", "status": OutreachTask.Status.IN_PROGRESS},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    assert started.status_code == 200
+    task.refresh_from_db()
+    assert task.status == OutreachTask.Status.IN_PROGRESS
+    assert task.started_at is not None
+    assert task.finalized_at is None
+    started_at = task.started_at
+
+    completed = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"status": OutreachTask.Status.COMPLETED},
+        format="json",
+        HTTP_IF_MATCH=f'"{task.version}"',
+    )
+    assert completed.status_code == 200
+    task.refresh_from_db()
+    assert task.status == OutreachTask.Status.COMPLETED
+    assert task.started_at == started_at
+    assert task.finalized_at is not None
+
+
 @pytest.mark.parametrize("terminal_status", [OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED])
 def test_terminal_outreach_tasks_reject_business_and_attribution_updates(terminal_status):
     tenant = Tenant.objects.create(name="Terminal Edit Tenant", code=f"terminal-edit-{terminal_status}")
@@ -1319,7 +1355,7 @@ def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is
     listed = client.get("/api/internal/influencers/")
     searched = client.get("/api/internal/influencers/", {"search": "secret.handle"})
     item = listed.data["data"]["results"][0]
-    assert item["display_name"] == "Safe display name"
+    assert item["display_name"] == "secret.handle"
     assert item["handle"] == "secret.handle"
     for field in ("contact_name", "contact_phone", "contact_email", "notes"):
         assert field not in item
@@ -1340,6 +1376,89 @@ def test_influencer_private_fields_are_hidden_handle_is_searchable_and_status_is
     )
     assert first.status_code == 200
     assert stale.status_code == 409
+
+
+def test_influencer_profile_contacts_and_blacklist_reject_stale_versions():
+    tenant = Tenant.objects.create(name="Tenant", code="influencer-cas")
+    _, client = user_with_permissions(
+        tenant,
+        "influencer-cas-manager",
+        "influencers.view",
+        "influencers.manage",
+        "influencers.fulfillment.manage",
+    )
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="cas-creator",
+        name="CAS creator",
+        platform="tiktok",
+        handle="cas.creator",
+    )
+    duplicate = Influencer.objects.create(
+        tenant=tenant,
+        code="cas-creator-duplicate",
+        name="CAS creator duplicate",
+        platform="TikTok",
+        handle="CAS.CREATOR",
+    )
+
+    profile_version = influencer.updated_at.isoformat()
+    profile = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {"name": "Updated creator"},
+        format="json",
+        HTTP_IF_MATCH=profile_version,
+    )
+    stale_profile = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {"name": "Stale creator"},
+        format="json",
+        HTTP_IF_MATCH=profile_version,
+    )
+    assert profile.status_code == 200
+    assert stale_profile.status_code == 409
+
+    influencer.refresh_from_db()
+    contacts_version = influencer.updated_at.isoformat()
+    contacts = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {"contacts": []},
+        format="json",
+        HTTP_IF_MATCH=contacts_version,
+    )
+    stale_contacts = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {"contacts": []},
+        format="json",
+        HTTP_IF_MATCH=contacts_version,
+    )
+    assert contacts.status_code == 200, contacts.data
+    assert stale_contacts.status_code == 409
+
+    influencer.refresh_from_db()
+    blacklist_version = influencer.updated_at.isoformat()
+    duplicate_version = duplicate.updated_at.isoformat()
+    blacklist = client.post(
+        f"/api/internal/influencers/{influencer.pk}/blacklist/",
+        {"is_blacklisted": True, "reason": "CAS regression"},
+        format="json",
+        HTTP_IF_MATCH=blacklist_version,
+    )
+    stale_blacklist = client.post(
+        f"/api/internal/influencers/{influencer.pk}/blacklist/",
+        {"is_blacklisted": False, "reason": "stale"},
+        format="json",
+        HTTP_IF_MATCH=blacklist_version,
+    )
+    stale_duplicate_blacklist = client.post(
+        f"/api/internal/influencers/{duplicate.pk}/blacklist/",
+        {"is_blacklisted": False, "reason": "stale duplicate"},
+        format="json",
+        HTTP_IF_MATCH=duplicate_version,
+    )
+    assert blacklist.status_code == 200
+    assert stale_blacklist.status_code == 409
+    assert stale_duplicate_blacklist.status_code == 409
 
 
 def test_outreach_task_supports_multiple_targets_linked_count_and_soft_delete():
@@ -2318,6 +2437,49 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
         tenant=tenant,
         rule_version=rule_version_for("strict"),
     ).exists()
+
+
+def test_bd_performance_deduplicates_task_targets_by_canonical_handle():
+    tenant = Tenant.objects.create(name="Canonical performance tenant", code="canonical-performance")
+    user, _ = user_with_permissions(tenant, "canonical-performance-owner")
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "canonical-performance-store")
+    first = Influencer.objects.create(
+        tenant=tenant,
+        code="canonical-performance-first",
+        name="Decorative nickname one",
+        platform="tiktok",
+        handle="same.creator",
+    )
+    second = Influencer.objects.create(
+        tenant=tenant,
+        code="canonical-performance-second",
+        name="Decorative nickname two",
+        platform="tiktok",
+        handle="same.creator",
+    )
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_no": "CANONICAL-PERFORMANCE-TASK",
+            "influencer": first,
+            "store": store,
+            "owner": user,
+            "target_count": 2,
+        },
+    )
+    OutreachTarget.objects.create(tenant=tenant, task=task, influencer=second)
+
+    report_date = timezone.localtime(task.created_at).date()
+    performance = build_bd_performance(
+        tenant=tenant,
+        start_date=report_date,
+        end_date=report_date,
+        currency="PHP",
+    )
+
+    assert performance["totals"]["task_count"] == 1
+    assert performance["totals"]["linked_count"] == 1
 
 
 def test_bd_performance_shipped_count_reads_current_fulfillment_fields():

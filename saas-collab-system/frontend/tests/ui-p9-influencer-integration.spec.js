@@ -208,12 +208,13 @@ describe('influencer integration workspace contracts', () => {
 
   it('aligns the outreach workspace with the BD task view and exposes the task detail loop', () => {
     const page = read('src/views/influencers/OutreachTaskList.vue');
-    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owner']) expect(page).toContain(field);
+    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owner', 'status']) expect(page).toContain(field);
     for (const contract of [
       'linked_count',
       'target_count',
       'dispatch_time',
       'started_at',
+      'finalized_at',
       '查看详情',
       '修改',
       '删除',
@@ -228,7 +229,7 @@ describe('influencer integration workspace contracts', () => {
     ]) expect(page).toContain(contract);
     expect(page).not.toContain('达人目标');
     for (const label of ['全部任务', '进行中', '已建联', '送样记录', '搜索任务/店铺/商品/负责人', '全部状态', '全部店铺', '全部下发人', '正常任务', '任务履约反馈', '目标进度']) expect(page).toContain(label);
-    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '负责人', '状态', '任务下发人', '开始时间', '下发时间', '操作']) expect(page).toContain(`label="${column}"`);
+    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '负责人', '状态', '任务下发人', '开始时间', '下发时间', '任务完成时间', '操作']) expect(page).toContain(`label="${column}"`);
     expect(read('src/api/influencers.js')).toContain('黑名单');
     expect(read('src/api/influencers.js')).toContain('终态');
     expect(read('src/api/influencers.js')).toContain("'If-Match'");
@@ -262,7 +263,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('params.store = filters.store');
     expect(page).toContain('matchesDispatcher');
     expect(page).toContain("row.priority === 'normal'");
-    expect(page).toContain('sample_fulfillment_count');
+    expect(page).toContain('sample_fulfillment_completed_count');
+    expect(page).toContain('status: form.status');
     expect(page).toContain('displayValue(row.notes)');
     expect(page).toContain('<style scoped>');
   });
@@ -347,8 +349,9 @@ describe('influencer integration workspace contracts', () => {
 
     expect(creatorHandleFirst(first)).toBe('alpha.creator');
     expect(creatorHandleFirst(second)).toBe('beta.creator');
-    expect(creatorOptionLabel(first)).toBe('alpha.creator（Same Name · TikTok）');
-    expect(creatorOptionLabel(second)).toBe('beta.creator（Same Name · TikTok）');
+    expect(creatorOptionLabel(first)).toBe('alpha.creator（TikTok）');
+    expect(creatorOptionLabel(second)).toBe('beta.creator（TikTok）');
+    expect(creatorOptionLabel(first)).not.toContain('Same Name');
     expect(creatorOptionLabel(first)).not.toBe(creatorOptionLabel(second));
     expect(read('src/views/influencers/OutreachTaskList.vue')).toContain('creatorHandleFirst');
     expect(read('src/views/influencers/SampleFulfillmentList.vue')).toContain('creatorHandleFirst');

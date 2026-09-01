@@ -374,6 +374,47 @@ def test_handle_identity_is_tenant_scoped_and_empty_handle_has_no_shared_identit
     assert foreign.tenant_id == other_tenant.id
 
 
+def test_non_identity_edit_locks_tenant_before_influencer(monkeypatch):
+    _, user, _, influencer = _records("profile-edit-lock-order")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.manage")
+    events = []
+    original_tenant_lock = influencer_views._lock_influencer_write_tenant
+    original_get_object_or_404 = influencer_views.get_object_or_404
+
+    def observe_tenant_lock(*args, **kwargs):
+        events.append("tenant")
+        return original_tenant_lock(*args, **kwargs)
+
+    def observe_influencer_lock(queryset, *args, **kwargs):
+        if getattr(queryset.query, "select_for_update", False):
+            events.append("influencer")
+        return original_get_object_or_404(queryset, *args, **kwargs)
+
+    monkeypatch.setattr(
+        influencer_views,
+        "_lock_influencer_write_tenant",
+        observe_tenant_lock,
+    )
+    monkeypatch.setattr(
+        influencer_views,
+        "get_object_or_404",
+        observe_influencer_lock,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {"name": "Updated profile name"},
+        format="json",
+        HTTP_IF_MATCH=influencer.updated_at.isoformat(),
+    )
+
+    assert response.status_code == 200, response.data
+    assert events[:2] == ["tenant", "influencer"]
+
+
 def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
     tenant, user, store, first = _records("identity-edit-lock-order")
     role = user.user_roles.get().role
@@ -444,6 +485,7 @@ def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
         f"/api/internal/influencers/{selected.pk}/",
         {"handle": "changed.creator"},
         format="json",
+        HTTP_IF_MATCH=selected.updated_at.isoformat(),
     )
 
     assert response.status_code == 200, response.data
@@ -1338,9 +1380,11 @@ def test_blacklist_endpoint_rejects_string_boolean_values():
         f"/api/internal/influencers/{influencer.pk}/blacklist/",
         {"is_blacklisted": "false"},
         format="json",
+        HTTP_IF_MATCH=influencer.updated_at.isoformat(),
     )
 
     assert response.status_code == 400
+    assert "is_blacklisted" in str(response.data)
     assert not InfluencerRestriction.objects.filter(
         tenant=tenant,
         influencer=influencer,
@@ -1348,7 +1392,7 @@ def test_blacklist_endpoint_rejects_string_boolean_values():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch):
+def test_blacklist_recomputes_related_tasks_inside_the_blacklist_transaction(monkeypatch):
     _, user, store, influencer = _records("blacklist-on-commit")
     task = _task(user, store, influencer)
     create_sample_fulfillment(
@@ -1361,11 +1405,11 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
         item_payloads=[],
     )
 
-    observed_atomic_states = []
+    observed_savepoint_states = []
     locked_task = influencer_services._locked_task
 
     def observe_locked_task(*args, **kwargs):
-        observed_atomic_states.append(connection.in_atomic_block)
+        observed_savepoint_states.append(bool(connection.savepoint_ids))
         return locked_task(*args, **kwargs)
 
     monkeypatch.setattr(influencer_services, "_locked_task", observe_locked_task)
@@ -1373,10 +1417,77 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
         user=user,
         influencer=influencer,
         blacklisted=True,
-        reason="on-commit task recompute",
+        reason="atomic task recompute",
     )
 
-    assert observed_atomic_states == [True]
+    assert observed_savepoint_states == [True]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch):
+    tenant, user, store, influencer = _records("blacklist-rollback")
+    task = _task(user, store, influencer)
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="blacklist-rollback-sample-key",
+        validated_data={
+            "outreach_task": task,
+            "influencer": influencer,
+        },
+        item_payloads=[],
+    )
+    completed_influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="blacklist-rollback-completed",
+        name="Completed creator",
+        platform="TikTok",
+        handle="blacklist.rollback.completed",
+    )
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), influencer=None)
+    task.refresh_from_db()
+    completed_sample = SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="blacklist-rollback-completed-sample",
+        request_key="blacklist-rollback-completed-key",
+        request_hash="blacklist-rollback-completed-hash",
+        link_type="YYJL",
+        outreach_task=task,
+        influencer=completed_influencer,
+        store=store,
+        owner=user,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=completed_sample.pk),
+        status=SampleFulfillment.Status.PUBLISHED,
+    )
+    original_updated_at = influencer.updated_at
+    original_task_status = task.status
+    original_task_version = task.version
+    recompute = influencer_services.recompute_outreach_task_completion
+
+    def fail_recompute(*args, **kwargs):
+        recompute(*args, **kwargs)
+        raise RuntimeError("injected recompute failure")
+
+    monkeypatch.setattr(influencer_services, "recompute_outreach_task_completion", fail_recompute)
+
+    with pytest.raises(RuntimeError, match="injected recompute failure"):
+        set_influencer_blacklist(
+            user=user,
+            influencer=influencer,
+            blacklisted=True,
+            reason="rollback all changes",
+        )
+
+    influencer.refresh_from_db()
+    fulfillment.refresh_from_db()
+    task.refresh_from_db()
+    assert influencer.updated_at == original_updated_at
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert task.status == original_task_status
+    assert task.version == original_task_version
+    assert not InfluencerRestriction.objects.filter(tenant=tenant, influencer=influencer).exists()
+    assert not InfluencerRestrictEvent.objects.filter(tenant=tenant, influencer=influencer).exists()
 
 
 def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
