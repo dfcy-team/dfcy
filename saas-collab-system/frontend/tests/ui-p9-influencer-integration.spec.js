@@ -159,6 +159,9 @@ describe('influencer integration workspace contracts', () => {
     expect(performance).toContain('fetchBdPerformance');
     expect(performance).toContain('downloadCsv');
     expect(performance).toContain('待预计算');
+    expect(performance).toContain(':disabled-date="isEndDateDisabled"');
+    expect(performance).toContain('统计范围最多支持 31 个自然日');
+    expect(performance).toContain('clearResults(); errorMessage.value = validationMessage');
     expect(performance).not.toMatch(/CN[¥￥]\s*[1-9]/);
   });
 
