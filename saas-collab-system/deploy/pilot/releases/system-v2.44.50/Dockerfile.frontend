@@ -1,0 +1,8 @@
+FROM saas-collab-frontend:v2.44.49
+
+ARG RELEASE_REVISION
+LABEL org.opencontainers.image.version="2.44.50"
+LABEL org.opencontainers.image.revision="${RELEASE_REVISION}"
+
+# No frontend business change is included in this security iteration; the
+# image is relabelled so the four-service runtime has one release version.

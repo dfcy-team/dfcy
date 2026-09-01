@@ -2,8 +2,11 @@
 
 import http.client
 import json
+import os
+from pathlib import Path
 import socket
 import ssl
+import stat
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -36,14 +39,85 @@ def get_allowed_hosts():
     custody = str(getattr(settings, "LIVE_CUSTODY_SERVICE_HOST", "") or "").lower()
     if custody:
         hosts.add(custody)
+    custody_url = str(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "") or "").strip()
+    try:
+        custody_parsed = urllib.parse.urlparse(custody_url)
+    except (TypeError, ValueError):
+        custody_parsed = None
+    if custody_parsed is not None and custody_parsed.hostname:
+        hosts.add(custody_parsed.hostname.lower())
     return hosts
 
 
+def _configured_custody_endpoint():
+    """Return the exact custody host/port tuple allowed for non-443 traffic."""
+    raw_url = str(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "") or "").strip()
+    if not raw_url:
+        return None
+    try:
+        parsed = urllib.parse.urlparse(raw_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        return parsed.hostname.lower(), parsed.port or 443
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_configured_custody_destination(parsed):
+    endpoint = _configured_custody_endpoint()
+    if endpoint is None or not parsed.hostname:
+        return False
+    try:
+        port = parsed.port or 443
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and (parsed.hostname.lower(), port) == endpoint
+
+
+def _validated_custody_ca_file():
+    """Validate the optional custody CA path before handing it to SSL."""
+    raw_path = str(getattr(settings, "LIVE_CUSTODY_CA_FILE", "") or "").strip()
+    if not raw_path:
+        return ""
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Custody CA file must be an absolute path.")
+    try:
+        file_stat = candidate.lstat()
+    except OSError:
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Custody CA file is unavailable.") from None
+    if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Custody CA file is unavailable.")
+    if os.name != "nt":
+        mode = stat.S_IMODE(file_stat.st_mode)
+        if mode & 0o077 or mode & 0o111 or not mode & 0o400 or mode not in {0o400, 0o600}:
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Custody CA file permissions are unsafe.")
+    return str(candidate)
+
+
 def assert_host_allowed(url):
-    parsed = urllib.parse.urlparse(str(url))
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+    except (TypeError, ValueError):
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Only approved HTTPS destinations are permitted.") from None
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Only approved HTTPS destinations are permitted.")
-    if parsed.port not in (None, 443):
+    try:
+        configured_custody = _is_configured_custody_destination(parsed)
+        port = parsed.port
+    except ValueError:
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Only approved HTTPS destinations are permitted.") from None
+    # Platform API traffic remains pinned to HTTPS/443.  A non-standard port
+    # is permitted only when the complete host/port pair matches the exact
+    # independently configured custody URL.
+    if port not in (None, 443) and not configured_custody:
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Non-standard outbound ports are not permitted.")
     if parsed.hostname.lower() not in get_allowed_hosts():
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Outbound host is not approved.")
@@ -62,11 +136,18 @@ def _bounded_float(value, *, minimum, maximum, name):
 def _default_transport(method, url, *, data=None, headers=None, connect_timeout=None, read_timeout=None):
     """Perform one request with independent connect/read timeouts and CA validation."""
     parsed = urllib.parse.urlparse(url)
+    tls_context = ssl.create_default_context()
+    if _is_configured_custody_destination(parsed):
+        ca_file = _validated_custody_ca_file()
+        if ca_file:
+            # Keep the public system trust store and add the private custody
+            # CA only for this exact configured host/port.
+            tls_context.load_verify_locations(cafile=ca_file)
     connection = http.client.HTTPSConnection(
         parsed.hostname,
         parsed.port or 443,
         timeout=connect_timeout,
-        context=ssl.create_default_context(),
+        context=tls_context,
     )
     path = parsed.path or "/"
     if parsed.query:

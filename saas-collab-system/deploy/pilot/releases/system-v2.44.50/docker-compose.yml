@@ -1,0 +1,131 @@
+services:
+  # Deliberately keep the inherited migrate service out of normal starts.
+  # V2.44.50 has no database migration.
+  migrate:
+    profiles:
+      - migration-disabled
+
+  backend:
+    image: saas-collab-backend:v2.44.50
+    depends_on:
+      custody-sidecar:
+        condition: service_healthy
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      # External marketplace live access remains closed for this iteration.
+      PLATFORM_NETWORK_MODE: ""
+      LIVE_PLATFORM_SECURITY_APPROVED: "false"
+      LIVE_PLATFORM_ALLOWED_HOSTS: ""
+      LIVE_READONLY_SYNC_ENABLED: "false"
+    volumes:
+      - ${PILOT_CUSTODY_SERVICE_TOKEN_PATH:?Set PILOT_CUSTODY_SERVICE_TOKEN_PATH}:/run/secrets/custody-service.token:ro
+      - ${PILOT_CUSTODY_CA_PATH:?Set PILOT_CUSTODY_CA_PATH}:/run/secrets/custody-ca.pem:ro
+
+  celery:
+    image: saas-collab-backend:v2.44.50
+    depends_on:
+      custody-sidecar:
+        condition: service_healthy
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      PLATFORM_NETWORK_MODE: ""
+      LIVE_PLATFORM_SECURITY_APPROVED: "false"
+      LIVE_PLATFORM_ALLOWED_HOSTS: ""
+      LIVE_READONLY_SYNC_ENABLED: "false"
+    volumes:
+      - ${PILOT_CUSTODY_SERVICE_TOKEN_PATH:?Set PILOT_CUSTODY_SERVICE_TOKEN_PATH}:/run/secrets/custody-service.token:ro
+      - ${PILOT_CUSTODY_CA_PATH:?Set PILOT_CUSTODY_CA_PATH}:/run/secrets/custody-ca.pem:ro
+
+  celery-beat:
+    image: saas-collab-backend:v2.44.50
+    depends_on:
+      custody-sidecar:
+        condition: service_healthy
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      PLATFORM_NETWORK_MODE: ""
+      LIVE_PLATFORM_SECURITY_APPROVED: "false"
+      LIVE_PLATFORM_ALLOWED_HOSTS: ""
+      LIVE_READONLY_SYNC_ENABLED: "false"
+    volumes:
+      - ${PILOT_CUSTODY_SERVICE_TOKEN_PATH:?Set PILOT_CUSTODY_SERVICE_TOKEN_PATH}:/run/secrets/custody-service.token:ro
+      - ${PILOT_CUSTODY_CA_PATH:?Set PILOT_CUSTODY_CA_PATH}:/run/secrets/custody-ca.pem:ro
+
+  frontend:
+    image: saas-collab-frontend:v2.44.50
+
+  custody-sidecar:
+    image: saas-collab-custody:v2.44.50
+    # The sidecar never needs root.  The bootstrap script prepares the host
+    # mounts for this numeric identity before Compose is started.
+    user: "${PILOT_CUSTODY_SIDECAR_UID:-1000}:${PILOT_CUSTODY_SIDECAR_GID:-1000}"
+    entrypoint: []
+    command:
+      - gunicorn
+      - apps.integrations.custody_service:application
+      - --bind
+      - 0.0.0.0:8443
+      - --workers
+      - "2"
+      - --timeout
+      - "60"
+      - --certfile
+      - /etc/custody/tls/tls.crt
+      - --keyfile
+      - /run/secrets/custody-tls.key
+      - --access-logfile
+      - "-"
+      - --error-logfile
+      - "-"
+    environment:
+      CUSTODY_SERVICE_STORAGE_PATH: /var/lib/saas-collab-custody
+      CUSTODY_SERVICE_KEY_FILE: /run/secrets/custody-master.key
+      CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      CUSTODY_SERVICE_TLS_CERT_FILE: /etc/custody/tls/tls.crt
+      CUSTODY_SERVICE_TLS_KEY_FILE: /run/secrets/custody-tls.key
+    volumes:
+      # Only this sidecar receives the master key, encrypted data directory,
+      # and TLS private key. Never add these mounts to backend/celery.
+      - ${PILOT_CUSTODY_MASTER_KEY_PATH:?Set PILOT_CUSTODY_MASTER_KEY_PATH}:/run/secrets/custody-master.key:ro
+      - ${PILOT_CUSTODY_DATA_PATH:?Set PILOT_CUSTODY_DATA_PATH}:/var/lib/saas-collab-custody
+      - ${PILOT_CUSTODY_TLS_CERT_PATH:?Set PILOT_CUSTODY_TLS_CERT_PATH}:/etc/custody/tls/tls.crt:ro
+      - ${PILOT_CUSTODY_TLS_KEY_PATH:?Set PILOT_CUSTODY_TLS_KEY_PATH}:/run/secrets/custody-tls.key:ro
+      - ${PILOT_CUSTODY_SERVICE_TOKEN_PATH:?Set PILOT_CUSTODY_SERVICE_TOKEN_PATH}:/run/secrets/custody-service.token:ro
+      - ${PILOT_CUSTODY_CA_PATH:?Set PILOT_CUSTODY_CA_PATH}:/run/secrets/custody-ca.pem:ro
+    expose:
+      - "8443"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import ssl,urllib.request;
+          c=ssl.create_default_context(cafile='/run/secrets/custody-ca.pem');
+          urllib.request.urlopen('https://custody-sidecar:8443/healthz', context=c, timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    networks:
+      - pilot-internal

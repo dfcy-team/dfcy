@@ -52,6 +52,17 @@ LIVE_CUSTODY_SERVICE_TOKEN = os.getenv(
     "LIVE_CUSTODY_SERVICE_TOKEN",
     os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN", ""),
 ).strip()
+# A token file is the preferred production transport for the sidecar bearer
+# credential.  It is intentionally empty by default and is validated by the
+# custody client before it can satisfy the live capability gate.
+LIVE_CUSTODY_SERVICE_TOKEN_FILE = os.getenv(
+    "LIVE_CUSTODY_SERVICE_TOKEN_FILE",
+    os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE", ""),
+).strip()
+# Optional private CA bundle for the custody endpoint.  It is consulted only
+# for the exact custody host/port, while platform traffic retains the system
+# trust store.  Keep the setting as a path, never certificate contents.
+LIVE_CUSTODY_CA_FILE = os.getenv("LIVE_CUSTODY_CA_FILE", "").strip()
 CREDENTIAL_CUSTODY_PATH = os.getenv(
     "CREDENTIAL_CUSTODY_PATH",
     "/var/lib/saas-collab/credentials" if DEBUG else "",

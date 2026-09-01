@@ -1,0 +1,19 @@
+FROM saas-collab-backend:v2.44.49
+
+ARG RELEASE_REVISION
+LABEL org.opencontainers.image.version="2.44.50"
+LABEL org.opencontainers.image.revision="${RELEASE_REVISION}"
+
+WORKDIR /app
+
+# The sidecar is independent from the business image. Install the crypto
+# library here so the V2.44.49 application image remains the immutable base.
+RUN python -m pip install --no-cache-dir "cryptography>=42.0,<50.0"
+
+COPY backend/apps/integrations/custody_service.py /app/apps/integrations/custody_service.py
+COPY backend/apps/integrations/file_custody.py /app/apps/integrations/file_custody.py
+COPY backend/tests/test_custody_service.py /app/tests/test_custody_service.py
+
+# Numeric identity is deliberate: the host bootstrap prepares matching
+# ownership on the dedicated encrypted-data and key files.
+USER 1000:1000

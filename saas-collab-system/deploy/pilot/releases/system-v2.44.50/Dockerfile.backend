@@ -1,0 +1,20 @@
+FROM saas-collab-backend:v2.44.49
+
+ARG RELEASE_REVISION
+LABEL org.opencontainers.image.version="2.44.50"
+LABEL org.opencontainers.image.revision="${RELEASE_REVISION}"
+
+WORKDIR /app
+
+# This is an allowlisted, migration-free application delta.  The business
+# image never receives the custody master key/data/TLS key; only the read-only
+# service-token and CA mounts from docker-compose.yml are added at runtime.
+COPY backend/apps/integrations/custody.py /app/apps/integrations/custody.py
+COPY backend/apps/integrations/capability.py /app/apps/integrations/capability.py
+COPY backend/apps/integrations/net_guard.py /app/apps/integrations/net_guard.py
+COPY backend/config/settings/base.py /app/config/settings/base.py
+# Keep the Linux-image gate runnable without expanding the application
+# surface; these are test-only copies and are never imported at runtime.
+COPY backend/tests/test_custody_security_gate.py /app/tests/test_custody_security_gate.py
+COPY backend/tests/test_integration_credential_maintenance.py /app/tests/test_integration_credential_maintenance.py
+COPY backend/tests/test_database_settings.py /app/tests/test_database_settings.py

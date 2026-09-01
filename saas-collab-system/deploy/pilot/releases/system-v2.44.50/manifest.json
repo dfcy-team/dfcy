@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "release_version": "2.44.50",
+  "status": "candidate",
+  "parent_release": "2.44.49",
+  "source_base_commit": "61c68a59323e70dab226b5c6f441bf1bb14a00b3",
+  "candidate_commit_file": "candidate-commit.txt",
+  "deployed_tag": "v2.44.50-deployed",
+  "canonical_ref": "refs/baselines/canonical-deployed",
+  "scope": "integrations.credential_custody",
+  "database_migration_required": false,
+  "database_migrations": "NONE",
+  "external_platform_live": false,
+  "images": {
+    "backend": "saas-collab-backend:v2.44.50",
+    "frontend": "saas-collab-frontend:v2.44.50",
+    "custody": "saas-collab-custody:v2.44.50"
+  },
+  "mount_boundary": {
+    "sidecar_only": [
+      "/run/secrets/custody-master.key",
+      "/run/secrets/custody-tls.key",
+      "/var/lib/saas-collab-custody"
+    ],
+    "business_read_only": [
+      "/run/secrets/custody-service.token",
+      "/run/secrets/custody-ca.pem"
+    ]
+  },
+  "checks": {
+    "candidate_must_descend_from_parent": true,
+    "predeploy_tests_in_linux_images": true,
+    "sidecar_host_port": "none",
+    "production_ddl": "forbidden",
+    "docker_migration_service": "disabled",
+    "owner_verification": "required_after_register"
+  },
+  "release_notes": "docs/06_release/system_v2.44.50.md"
+}

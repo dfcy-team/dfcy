@@ -15,8 +15,11 @@ Design rules (from the task book):
 """
 
 from pathlib import Path
+import urllib.parse
 
 from django.conf import settings
+
+from .custody import CustodyError, resolve_service_auth_token, validate_custody_service_url
 
 CAPABILITY_MOCK = "pending/mock"
 CAPABILITY_LIVE_VALIDATION = "pending/live-validation"
@@ -46,12 +49,15 @@ def approved_custody_configured():
     backend = str(getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") or "").strip().lower()
     if backend == "http":
         service_url = str(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "") or "").strip()
-        service_token = str(
-            getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
-            or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
-            or ""
-        ).strip()
-        return bool(service_url) and bool(service_token)
+        configured_host = str(getattr(settings, "LIVE_CUSTODY_SERVICE_HOST", "") or "").strip().lower()
+        try:
+            parsed = urllib.parse.urlparse(validate_custody_service_url(service_url))
+            service_token = resolve_service_auth_token()
+        except CustodyError:
+            return False
+        if configured_host and configured_host != str(parsed.hostname or "").lower():
+            return False
+        return bool(service_token)
     if backend == "file":
         # File custody can support explicit local synthetic/test operations,
         # but it is never an approved live credential boundary.

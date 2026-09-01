@@ -1,0 +1,38 @@
+services:
+  # Rollback is application-only.  Do not start the inherited migrate service
+  # and keep the external marketplace network closed during the switch.
+  backend:
+    environment:
+      LIVE_CUSTODY_BACKEND: refuse
+      LIVE_CUSTODY_SERVICE_URL: ""
+      LIVE_CUSTODY_SERVICE_HOST: ""
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: ""
+      LIVE_CUSTODY_CA_FILE: ""
+      PLATFORM_NETWORK_MODE: ""
+      LIVE_PLATFORM_SECURITY_APPROVED: "false"
+      LIVE_PLATFORM_ALLOWED_HOSTS: ""
+      LIVE_READONLY_SYNC_ENABLED: "false"
+
+  celery:
+    environment:
+      LIVE_CUSTODY_BACKEND: refuse
+      LIVE_CUSTODY_SERVICE_URL: ""
+      LIVE_CUSTODY_SERVICE_HOST: ""
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: ""
+      LIVE_CUSTODY_CA_FILE: ""
+      PLATFORM_NETWORK_MODE: ""
+      LIVE_PLATFORM_SECURITY_APPROVED: "false"
+      LIVE_PLATFORM_ALLOWED_HOSTS: ""
+      LIVE_READONLY_SYNC_ENABLED: "false"
+
+  celery-beat:
+    environment:
+      LIVE_CUSTODY_BACKEND: refuse
+      LIVE_CUSTODY_SERVICE_URL: ""
+      LIVE_CUSTODY_SERVICE_HOST: ""
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: ""
+      LIVE_CUSTODY_CA_FILE: ""
+      PLATFORM_NETWORK_MODE: ""
+      LIVE_PLATFORM_SECURITY_APPROVED: "false"
+      LIVE_PLATFORM_ALLOWED_HOSTS: ""
+      LIVE_READONLY_SYNC_ENABLED: "false"
