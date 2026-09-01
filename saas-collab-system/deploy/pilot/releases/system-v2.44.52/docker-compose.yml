@@ -1,0 +1,67 @@
+services:
+  # This service is profile-gated. The deploy wrapper invokes the exact
+  # migration explicitly; a normal `up` can never run production DDL.
+  migrate:
+    image: saas-collab-backend:v2.44.52
+    profiles:
+      - migration-manual
+    command:
+      - python
+      - manage.py
+      - migrate
+      - masterdata
+      - 0009_warehouse_service_platform
+      - --noinput
+    restart: "no"
+
+  backend:
+    image: saas-collab-backend:v2.44.52
+    depends_on:
+      custody-sidecar:
+        condition: service_healthy
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      # Keep production write/sync capabilities fail-closed in this release.
+      LIVE_READONLY_SYNC_ENABLED: "false"
+    volumes:
+      - ${PILOT_CUSTODY_SERVICE_TOKEN_PATH:?Set PILOT_CUSTODY_SERVICE_TOKEN_PATH}:/run/secrets/custody-service.token:ro
+      - ${PILOT_CUSTODY_CA_PATH:?Set PILOT_CUSTODY_CA_PATH}:/run/secrets/custody-ca.pem:ro
+
+  celery:
+    image: saas-collab-backend:v2.44.52
+    depends_on:
+      custody-sidecar:
+        condition: service_healthy
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      LIVE_READONLY_SYNC_ENABLED: "false"
+    volumes:
+      - ${PILOT_CUSTODY_SERVICE_TOKEN_PATH:?Set PILOT_CUSTODY_SERVICE_TOKEN_PATH}:/run/secrets/custody-service.token:ro
+      - ${PILOT_CUSTODY_CA_PATH:?Set PILOT_CUSTODY_CA_PATH}:/run/secrets/custody-ca.pem:ro
+
+  celery-beat:
+    image: saas-collab-backend:v2.44.52
+    depends_on:
+      custody-sidecar:
+        condition: service_healthy
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      LIVE_READONLY_SYNC_ENABLED: "false"
+    volumes:
+      - ${PILOT_CUSTODY_SERVICE_TOKEN_PATH:?Set PILOT_CUSTODY_SERVICE_TOKEN_PATH}:/run/secrets/custody-service.token:ro
+      - ${PILOT_CUSTODY_CA_PATH:?Set PILOT_CUSTODY_CA_PATH}:/run/secrets/custody-ca.pem:ro
+
+  frontend:
+    image: saas-collab-frontend:v2.44.52
