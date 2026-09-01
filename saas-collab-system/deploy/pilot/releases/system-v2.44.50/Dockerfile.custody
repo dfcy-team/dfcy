@@ -8,7 +8,8 @@ WORKDIR /app
 
 # The sidecar is independent from the business image. Install the crypto
 # library here so the V2.44.49 application image remains the immutable base.
-RUN python -m pip install --no-cache-dir "cryptography>=42.0,<50.0"
+RUN python -m pip install --no-cache-dir --default-timeout 300 --retries 10 \
+    "cryptography>=42.0,<50.0"
 
 COPY backend/apps/integrations/custody_service.py /app/apps/integrations/custody_service.py
 COPY backend/apps/integrations/file_custody.py /app/apps/integrations/file_custody.py
