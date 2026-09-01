@@ -22,6 +22,19 @@ control_root=${PILOT_RELEASE_CONTROL_ROOT:-/opt/saas-collab/release-control/unif
 legacy_root=${PILOT_LEGACY_RELEASE_CONTROL_ROOT:-/opt/saas-collab/release-control/shared-version-ledger}
 mirror=${PILOT_RELEASE_MIRROR:-/home/dfcy01/releases/developer-a-authorized-releases/git-mirror.git}
 
+# V2.44.50 established these dedicated host paths. They are non-secret path
+# names, not credential contents. Export stable defaults so an older
+# .env.pilot does not need to be copied or edited merely to render the
+# existing custody mounts in the Compose chain.
+export PILOT_CUSTODY_SIDECAR_UID=${PILOT_CUSTODY_SIDECAR_UID:-1000}
+export PILOT_CUSTODY_SIDECAR_GID=${PILOT_CUSTODY_SIDECAR_GID:-1000}
+export PILOT_CUSTODY_MASTER_KEY_PATH=${PILOT_CUSTODY_MASTER_KEY_PATH:-/srv/saas-collab/custody-secrets/custody-master.key}
+export PILOT_CUSTODY_DATA_PATH=${PILOT_CUSTODY_DATA_PATH:-/srv/saas-collab/custody-data}
+export PILOT_CUSTODY_SERVICE_TOKEN_PATH=${PILOT_CUSTODY_SERVICE_TOKEN_PATH:-/srv/saas-collab/custody-secrets/custody-service.token}
+export PILOT_CUSTODY_CA_PATH=${PILOT_CUSTODY_CA_PATH:-/srv/saas-collab/custody-secrets/custody-ca.pem}
+export PILOT_CUSTODY_TLS_CERT_PATH=${PILOT_CUSTODY_TLS_CERT_PATH:-/srv/saas-collab/custody-secrets/custody-tls.crt}
+export PILOT_CUSTODY_TLS_KEY_PATH=${PILOT_CUSTODY_TLS_KEY_PATH:-/srv/saas-collab/custody-secrets/custody-tls.key}
+
 fail() {
   echo "V2.44.52 release blocked: $*" >&2
   exit 1
