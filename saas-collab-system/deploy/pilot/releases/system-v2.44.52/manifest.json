@@ -1,0 +1,47 @@
+{
+  "schema_version": 3,
+  "release_version": "2.44.52",
+  "status": "candidate",
+  "parent_release": "2.44.51",
+  "source_base_commit": "db8a4dabfaac40f0baef444ff0de26abe7d98091",
+  "candidate_commit": "e3dc85b948ffa7ddee9bf5ffc7e3ae16d95d4644",
+  "deployed_tag": "v2.44.52-deployed",
+  "canonical_ref": "refs/baselines/canonical-deployed",
+  "scope": "Shopee production OAuth readiness and warehouse service-platform binding",
+  "baseline_components": {
+    "backend": "2.44.50",
+    "celery": "2.44.50",
+    "celery_beat": "2.44.50",
+    "frontend": "2.44.51",
+    "custody": "2.44.50 (healthy)"
+  },
+  "target_images": {
+    "backend": "saas-collab-backend:v2.44.52",
+    "celery": "saas-collab-backend:v2.44.52",
+    "celery_beat": "saas-collab-backend:v2.44.52",
+    "frontend": "saas-collab-frontend:v2.44.52",
+    "custody": "saas-collab-custody:v2.44.50"
+  },
+  "database_migration_required": true,
+  "database_migrations": ["masterdata.0009_warehouse_service_platform"],
+  "database_account_policy": "application .env.pilot connection only; saas_collab_pilot_user on saas_collab_pilot",
+  "forbidden_database_auth": ".influencers-migration.cnf; INFLUENCERS_MIGRATOR is SELECT-only and must not be granted privileges",
+  "database_backup_required_before_apply": true,
+  "external_platform_write_sync": false,
+  "tag_creation_by_bundle": false,
+  "checks": {
+    "candidate_descends_from_parent": true,
+    "predeploy_backend_tests": "run by deploy-v24452.sh in isolated SQLite",
+    "migration_plan_must_be_exact": true,
+    "custody_rebuild": false,
+    "owner_verification": "required after register"
+  },
+  "rollback": {
+    "application_release": "2.44.51",
+    "backend_image": "saas-collab-backend:v2.44.50",
+    "frontend_image": "saas-collab-frontend:v2.44.51",
+    "custody_image": "saas-collab-custody:v2.44.50",
+    "database_restore_or_reverse": "not automatic; retain 0009 and use the pre-deploy backup only after architect review"
+  },
+  "release_notes": "docs/06_release/system_v2.44.52.md"
+}

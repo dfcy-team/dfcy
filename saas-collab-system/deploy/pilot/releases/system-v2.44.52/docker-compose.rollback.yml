@@ -1,0 +1,27 @@
+services:
+  # Application-only rollback. The 0009 migration remains applied because
+  # reversing it could destroy classified data or a warehouse relationship.
+  migrate:
+    profiles:
+      - migration-disabled
+
+  backend:
+    image: saas-collab-backend:v2.44.50
+    environment:
+      LIVE_READONLY_SYNC_ENABLED: "false"
+
+  celery:
+    image: saas-collab-backend:v2.44.50
+    environment:
+      LIVE_READONLY_SYNC_ENABLED: "false"
+
+  celery-beat:
+    image: saas-collab-backend:v2.44.50
+    environment:
+      LIVE_READONLY_SYNC_ENABLED: "false"
+
+  frontend:
+    image: saas-collab-frontend:v2.44.51
+
+  custody-sidecar:
+    image: saas-collab-custody:v2.44.50
