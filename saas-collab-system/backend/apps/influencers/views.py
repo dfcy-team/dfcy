@@ -21,6 +21,7 @@ from apps.masterdata.models import StatusChoices, StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope
+from apps.tenants.models import Tenant
 
 from .attribution import (
     build_bd_performance,
@@ -159,6 +160,11 @@ def _advance_influencer_version(influencer):
         updated_at=updated_at,
     )
     influencer.updated_at = updated_at
+
+
+def _lock_influencer_write_tenant(user):
+    """Keep every influencer write on the tenant -> influencer lock order."""
+    return Tenant.objects.select_for_update().get(pk=user.tenant_id)
 
 
 def _query_bool(value, *, field):
@@ -313,6 +319,7 @@ class InfluencerDetailView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         writes_identity = bool({"handle", "platform"}.intersection(request.data))
         queryset = Influencer.objects if writes_identity else Influencer.objects.select_for_update()
         instance = get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
