@@ -103,3 +103,109 @@ def test_legacy_wms_credential_can_be_replaced_and_checked_without_external_call
     finally:
         reset_custody_backend_cache()
         settings.disable()
+
+
+@pytest.mark.django_db
+def test_shopee_credential_maintenance_persists_only_approved_callback_and_custody_reference(tmp_path):
+    tenant = Tenant.objects.create(name="Shopee Tenant", code="shopee-credential-test")
+    user, client = _client_with_permissions(tenant)
+    callback_url = "https://xtsy.example.test/api/internal/integrations/store-authorizations/oauth/callback/shopee/"
+    config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="shopee",
+        account_alias="Shopee production",
+        environment="production",
+        status=PlatformIntegrationConfig.Status.VERIFIED,
+        regions=["PH"],
+        contract_version="v2",
+        platform_config={"api_type": "marketplace", "partner_id": "2038415"},
+        network_enabled=True,
+        created_by=user,
+    )
+    settings = override_settings(
+        DEBUG=True,
+        LIVE_CUSTODY_BACKEND="file",
+        CREDENTIAL_CUSTODY_PATH=str(tmp_path / "custody"),
+        LIVE_SHOPEE_REDIRECT_URI=callback_url,
+        LIVE_OAUTH_REDIRECT_ALLOWLIST=[callback_url],
+    )
+    settings.enable()
+    reset_custody_backend_cache()
+    try:
+        secret = "placeholder-partner-key"
+        response = client.post(
+            f"/api/internal/integrations/configs/{config.id}/credentials/rotate/",
+            {
+                "version": config.config_version,
+                "reason": "configure approved Shopee production callback",
+                "credentials": {
+                    "partner_id": "2038415",
+                    "partner_key": secret,
+                    "redirect_uri": callback_url,
+                },
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="shopee-production-credential-1",
+        )
+
+        assert response.status_code == 200, response.json()
+        assert secret not in json.dumps(response.json())
+        config.refresh_from_db()
+        assert config.callback_url == callback_url
+        assert config.credential_id.startswith("cred_")
+        assert config.credential_status == PlatformIntegrationConfig.CredentialStatus.CONFIGURED
+        assert config.sync_read_enabled is True
+        assert config.sync_write_enabled is False
+    finally:
+        reset_custody_backend_cache()
+        settings.disable()
+
+
+@pytest.mark.django_db
+def test_shopee_credential_maintenance_rejects_unregistered_callback(tmp_path):
+    tenant = Tenant.objects.create(name="Shopee Tenant 2", code="shopee-callback-reject")
+    user, client = _client_with_permissions(tenant)
+    approved = "https://xtsy.example.test/api/internal/integrations/store-authorizations/oauth/callback/shopee/"
+    config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="shopee",
+        account_alias="Shopee production",
+        environment="production",
+        status=PlatformIntegrationConfig.Status.VERIFIED,
+        regions=["PH"],
+        contract_version="v2",
+        platform_config={"api_type": "marketplace", "partner_id": "2038415"},
+        network_enabled=True,
+        created_by=user,
+    )
+    settings = override_settings(
+        LIVE_CUSTODY_BACKEND="file",
+        CREDENTIAL_CUSTODY_PATH=str(tmp_path / "custody"),
+        LIVE_SHOPEE_REDIRECT_URI=approved,
+        LIVE_OAUTH_REDIRECT_ALLOWLIST=[approved],
+    )
+    settings.enable()
+    reset_custody_backend_cache()
+    try:
+        response = client.post(
+            f"/api/internal/integrations/configs/{config.id}/credentials/rotate/",
+            {
+                "version": config.config_version,
+                "reason": "reject unregistered callback",
+                "credentials": {
+                    "partner_id": "2038415",
+                    "partner_key": "placeholder-partner-key",
+                    "redirect_uri": "https://evil.example.test/callback",
+                },
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="shopee-production-credential-reject-1",
+        )
+
+        assert response.status_code == 400
+        config.refresh_from_db()
+        assert config.callback_url == ""
+        assert config.credential_id == ""
+    finally:
+        reset_custody_backend_cache()
+        settings.disable()

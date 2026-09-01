@@ -244,6 +244,7 @@
         <template v-else-if="activeConfig?.platform === 'shopee'">
           <el-form-item label="Partner ID"><el-input v-model="credentialForm.partner_id" inputmode="numeric" maxlength="32" placeholder="留空保留现值" /></el-form-item>
           <el-form-item label="Partner Key"><el-input v-model="credentialForm.partner_key" type="password" autocomplete="new-password" placeholder="输入新的 Partner Key" /></el-form-item>
+          <el-form-item label="授权回调地址" class="wide"><el-input v-model="credentialForm.redirect_uri" type="url" maxlength="500" placeholder="https://your-domain.example/api/internal/integrations/store-authorizations/oauth/callback/shopee/" /></el-form-item>
         </template>
         <template v-else-if="activeConfig?.platform === 'tiktok' && activeConfig?.api_type === 'advertising'">
           <el-form-item label="App ID"><el-input v-model="credentialForm.ads_app_id" maxlength="255" placeholder="留空保留现值" /></el-form-item>
@@ -635,7 +636,7 @@ function credentialPayload() {
   const keys = platform === 'lazada'
     ? ['app_key', 'app_secret', 'redirect_uri']
     : platform === 'shopee'
-    ? ['partner_id', 'partner_key']
+    ? ['partner_id', 'partner_key', 'redirect_uri']
     : platform === 'jifeng_wms'
       ? ['api_base_url', 'domain', 'client_id', 'client_secret']
       : apiType === 'advertising'

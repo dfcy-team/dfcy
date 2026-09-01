@@ -6,6 +6,7 @@ from apps.masterdata.models import StoreMaster, WarehouseMaster
 from apps.permissions.ui_p2_scopes import filter_master_data
 from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_store_authorizations
 
+from .live_providers import integration_config_oauth_blockers
 from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, WarehouseAuthorization
 
 
@@ -54,6 +55,7 @@ def _last_run_map(subject_field, authorization_ids):
 
 
 def _config_payload(config, api_type):
+    oauth_blockers = integration_config_oauth_blockers(config.platform, config) if config.platform == "shopee" else []
     return {
         "id": config.id,
         "platform": config.platform,
@@ -64,6 +66,8 @@ def _config_payload(config, api_type):
         "regions": config.regions or [],
         "callback_url": config.callback_url,
         "scopes": config.scopes or [],
+        "oauth_ready": not oauth_blockers,
+        "oauth_blockers": oauth_blockers,
     }
 
 
