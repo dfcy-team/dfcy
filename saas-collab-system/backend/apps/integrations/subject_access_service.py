@@ -1,11 +1,19 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection
 from django.db.models import Max
 from django.shortcuts import get_object_or_404
 
-from apps.masterdata.models import StoreMaster, WarehouseMaster
+from apps.masterdata.models import (
+    StoreMaster,
+    WarehouseMaster,
+    WAREHOUSE_SERVICE_PLATFORM_TYPES,
+    WAREHOUSE_TYPE_TO_PLATFORM_TYPE,
+)
 from apps.permissions.ui_p2_scopes import filter_master_data
 from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_store_authorizations
 
+from .platform_capabilities import get_platform_capability
+from .platform_schema_service import integration_platform_key
 from .live_providers import integration_config_oauth_blockers
 from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, WarehouseAuthorization
 
@@ -172,17 +180,44 @@ def _warehouse_bindings(user, subject, config_map):
     ]
 
 
+def _warehouse_provider(subject):
+    service_platform = subject.service_platform
+    if service_platform is None:
+        raise ValueError("仓库尚未绑定仓储服务平台，无法开启库存 API 接入。")
+    if service_platform.status != "active":
+        raise ValueError("仓库绑定的仓储服务平台已停用，请先启用该平台。")
+    if service_platform.platform_type not in WAREHOUSE_SERVICE_PLATFORM_TYPES:
+        raise ValueError("仓库绑定的平台不是仓储服务平台类型，已阻断 API 接入。")
+    if service_platform.platform_type != WAREHOUSE_TYPE_TO_PLATFORM_TYPE.get(subject.warehouse_type):
+        raise ValueError("仓库类型与仓储服务平台类型不一致，已阻断 API 接入。")
+    provider = integration_platform_key(
+        platform_type=service_platform.platform_type,
+        code=service_platform.code,
+        name=service_platform.name,
+    )
+    if not provider:
+        raise ValueError("仓储服务平台尚未匹配受支持的库存 API 服务商，请先维护平台档案。")
+    try:
+        capability = get_platform_capability(provider)
+    except DjangoValidationError as exc:
+        raise ValueError("仓储服务平台的 API 能力未注册，已阻断库存 API 接入。") from exc
+    if "inventory" not in capability.api_types:
+        raise ValueError("仓储服务平台未提供库存 API 能力，已阻断接入。")
+    return provider
+
+
 def _warehouse_access(user, subject_id):
     subject = get_object_or_404(
         filter_master_data(
             user,
-            WarehouseMaster.objects.filter(tenant=user.tenant),
+            WarehouseMaster.objects.filter(tenant=user.tenant).select_related("service_platform"),
             "masterdata.view",
             "warehouses",
         ),
         pk=subject_id,
     )
-    configs = _visible_configs(user, platform="jifeng_wms", country_code=subject.country_code)
+    provider = _warehouse_provider(subject)
+    configs = _visible_configs(user, platform=provider, country_code=subject.country_code)
     config_map = {config.id: (config, api_type) for config, api_type in configs}
     return {
         "subject_type": "warehouse",
@@ -191,8 +226,10 @@ def _warehouse_access(user, subject_id):
             "code": subject.code,
             "name": subject.name,
             "country_code": subject.country_code,
-            "platform": "jifeng_wms",
-            "platform_name": "极风 WMS",
+            "platform": provider,
+            "platform_name": subject.service_platform.name,
+            "service_platform_id": subject.service_platform.id,
+            "service_platform_type": subject.service_platform.platform_type,
         },
         "api_types": ["inventory"],
         "configs": [_config_payload(config, api_type) for config, api_type in configs],

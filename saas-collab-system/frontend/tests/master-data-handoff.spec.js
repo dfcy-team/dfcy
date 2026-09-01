@@ -42,6 +42,20 @@ describe('基础档案交接包界面契约', () => {
     expect(warehouse).not.toContain("{ prop: 'last_sync_at'");
   });
 
+  it('区分仓储平台与商城平台并按仓库类型绑定 API 服务商', () => {
+    const platform = read('src/views/masterdata/PlatformMasterList.vue');
+    const store = read('src/views/masterdata/StoreMasterList.vue');
+    const warehouse = read('src/views/masterdata/WarehouseMasterList.vue');
+    expect(platform).toContain("{ label: '三方仓服务', value: 'warehouse_third_party' }");
+    expect(platform).toContain("{ label: '平台仓服务', value: 'warehouse_platform' }");
+    expect(store).toContain(".filter((row) => !String(row.platform_type || '').startsWith('warehouse_'))");
+    expect(warehouse).toContain("fetchPlatforms({ status: 'active', page: 1, page_size: 100 })");
+    expect(warehouse).toContain("service_platform_id");
+    expect(warehouse).toContain("servicePlatformTypeByWarehouseType");
+    expect(warehouse).toContain("row.api_access_available");
+    expect(warehouse).toContain("API 接入（待配置）");
+  });
+
   it('接入配置下拉项由服务端基础档案和能力数据驱动', () => {
     const workspace = read('src/views/integrations/IntegrationWorkspace.vue');
     expect(workspace).toContain('data.value.reference_options?.platforms');
@@ -70,5 +84,6 @@ describe('基础档案交接包界面契约', () => {
     expect(page).toContain('v-if="editHandler && manageAccess.visible"');
     expect(page).toContain("showPageSize ? 'sizes, prev, pager, next, jumper'");
     expect(page).toContain('field.onChange?.($event, resourceForm)');
+    expect(page).toContain("typeof field.options === 'function'");
   });
 });

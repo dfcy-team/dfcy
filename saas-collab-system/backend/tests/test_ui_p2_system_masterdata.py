@@ -4,7 +4,14 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.audit.models import OperationLog
 from apps.integrations.models import PlatformIntegrationConfig, authorization_service_write
-from apps.masterdata.models import CountrySiteMaster, PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
+from apps.masterdata.models import (
+    CountrySiteMaster,
+    PlatformMaster,
+    StatusChoices,
+    StoreMaster,
+    SupplierMaster,
+    WarehouseMaster,
+)
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.suppliers.models import SupplierTask
 from apps.tenants.models import Department, Tenant
@@ -440,6 +447,219 @@ def test_store_rejects_platform_outside_tenant_scope():
     )
 
     assert response.status_code == 400
+
+
+def test_store_rejects_warehouse_service_platform():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-store-warehouse-platform")
+    manager = create_user(tenant, "store-warehouse-platform-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    warehouse_platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="myjf",
+        name="马来极风",
+        platform_type=PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY,
+        status=StatusChoices.ACTIVE,
+    )
+
+    response = client_for(manager).post(
+        "/api/internal/master-data/stores/",
+        {
+            "platform_id": warehouse_platform.pk,
+            "code": "invalid-warehouse-platform-store",
+            "name": "Invalid store",
+            "country_code": "MY",
+            "currency": "MYR",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "仓储服务平台" in str(response.data)
+
+
+def test_warehouse_service_platform_binding_is_tenant_active_and_type_safe():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-warehouse-service-platform")
+    other = Tenant.objects.create(name="Other", code="ui-p2-warehouse-service-platform-other")
+    manager = create_user(tenant, "warehouse-service-platform-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    service_platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="myjf",
+        name="马来极风",
+        platform_type=PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY,
+        status=StatusChoices.ACTIVE,
+    )
+    foreign_platform = PlatformMaster.objects.create(
+        tenant=other,
+        code="myjf",
+        name="Foreign WMS",
+        platform_type=PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY,
+        status=StatusChoices.ACTIVE,
+    )
+    client = client_for(manager)
+
+    owned = client.post(
+        "/api/internal/master-data/warehouses/",
+        {
+            "code": "owned-warehouse",
+            "name": "Owned warehouse",
+            "country_code": "MY",
+            "warehouse_type": WarehouseMaster.WarehouseType.OWNED,
+        },
+        format="json",
+    )
+    assert owned.status_code == 201
+    assert owned.data["data"]["service_platform_id"] is None
+    assert owned.data["data"]["api_access_available"] is False
+
+    third_party = client.post(
+        "/api/internal/master-data/warehouses/",
+        {
+            "code": "third-party-warehouse",
+            "name": "Third party warehouse",
+            "country_code": "MY",
+            "warehouse_type": WarehouseMaster.WarehouseType.THIRD_PARTY,
+            "service_platform_id": service_platform.pk,
+        },
+        format="json",
+    )
+    assert third_party.status_code == 201
+    payload = third_party.data["data"]
+    assert payload["service_platform_id"] == service_platform.pk
+    assert payload["service_platform_name"] == "马来极风"
+    assert payload["service_platform_type"] == PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY
+    assert payload["service_platform_integration_key"] == "jifeng_wms"
+    assert payload["api_access_available"] is True
+
+    missing_binding = client.post(
+        "/api/internal/master-data/warehouses/",
+        {
+            "code": "missing-service-platform",
+            "name": "Missing service platform",
+            "country_code": "MY",
+            "warehouse_type": WarehouseMaster.WarehouseType.THIRD_PARTY,
+        },
+        format="json",
+    )
+    assert missing_binding.status_code == 400
+    assert "必须绑定" in str(missing_binding.data)
+
+    mismatched_binding = client.post(
+        "/api/internal/master-data/warehouses/",
+        {
+            "code": "mismatched-service-platform",
+            "name": "Mismatched service platform",
+            "country_code": "MY",
+            "warehouse_type": WarehouseMaster.WarehouseType.OWNED,
+            "service_platform_id": service_platform.pk,
+        },
+        format="json",
+    )
+    assert mismatched_binding.status_code == 400
+    assert "类型必须与仓库类型一致" in str(mismatched_binding.data)
+
+    foreign_binding = client.post(
+        "/api/internal/master-data/warehouses/",
+        {
+            "code": "foreign-service-platform",
+            "name": "Foreign service platform",
+            "country_code": "MY",
+            "warehouse_type": WarehouseMaster.WarehouseType.THIRD_PARTY,
+            "service_platform_id": foreign_platform.pk,
+        },
+        format="json",
+    )
+    assert foreign_binding.status_code == 400
+
+    patch_type = client.patch(
+        f"/api/internal/master-data/warehouses/{third_party.data['data']['id']}/",
+        {"warehouse_type": WarehouseMaster.WarehouseType.PLATFORM},
+        format="json",
+    )
+    assert patch_type.status_code == 400
+
+
+def test_platform_with_active_warehouse_service_reference_cannot_be_disabled():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-warehouse-reference")
+    manager = create_user(tenant, "warehouse-reference-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    service_platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="warehouse-platform",
+        name="Warehouse platform",
+        platform_type=PlatformMaster.PlatformType.WAREHOUSE_PLATFORM,
+        status=StatusChoices.ACTIVE,
+    )
+    WarehouseMaster.objects.create(
+        tenant=tenant,
+        code="active-platform-warehouse",
+        name="Active platform warehouse",
+        country_code="PH",
+        warehouse_type=WarehouseMaster.WarehouseType.PLATFORM,
+        service_platform=service_platform,
+        status=StatusChoices.ACTIVE,
+    )
+
+    response = client_for(manager).post(
+        f"/api/internal/master-data/platforms/{service_platform.pk}/status/",
+        {"status": StatusChoices.INACTIVE},
+        format="json",
+    )
+
+    assert response.status_code == 409
+    service_platform.refresh_from_db()
+    assert service_platform.status == StatusChoices.ACTIVE
+
+
+def test_referenced_platform_type_cannot_cross_store_and_warehouse_boundaries():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-platform-type-boundary")
+    manager = create_user(tenant, "platform-type-boundary-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    marketplace = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="shopee-boundary",
+        name="Shopee boundary",
+        platform_type=PlatformMaster.PlatformType.SHOPEE,
+    )
+    StoreMaster.objects.create(
+        tenant=tenant,
+        platform=marketplace,
+        code="store-boundary",
+        name="Store boundary",
+        country_code="PH",
+        currency="PHP",
+    )
+    service_platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="myjf-boundary",
+        name="Warehouse boundary",
+        platform_type=PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY,
+    )
+    WarehouseMaster.objects.create(
+        tenant=tenant,
+        code="warehouse-boundary",
+        name="Warehouse boundary",
+        country_code="MY",
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+        service_platform=service_platform,
+    )
+    client = client_for(manager)
+
+    marketplace_response = client.patch(
+        f"/api/internal/master-data/platforms/{marketplace.pk}/",
+        {"platform_type": PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY},
+        format="json",
+    )
+    warehouse_response = client.patch(
+        f"/api/internal/master-data/platforms/{service_platform.pk}/",
+        {"platform_type": PlatformMaster.PlatformType.OTHER},
+        format="json",
+    )
+
+    assert marketplace_response.status_code == 400
+    assert warehouse_response.status_code == 400
+    assert "已有店铺引用" in str(marketplace_response.data)
+    assert "已有仓库引用" in str(warehouse_response.data)
 
 
 def test_platform_with_active_store_cannot_be_disabled():
