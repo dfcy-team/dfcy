@@ -63,6 +63,7 @@ def test_only_authenticated_http_custody_can_satisfy_live_gate(backend, debug, t
         LIVE_CUSTODY_BACKEND=backend,
         CREDENTIAL_CUSTODY_PATH=str(tmp_path),
         LIVE_CUSTODY_SERVICE_URL="https://custody.example.test",
+        LIVE_CUSTODY_SERVICE_HOST="",
         LIVE_CUSTODY_SERVICE_TOKEN=token,
         LIVE_CUSTODY_SERVICE_TOKEN_FILE="",
         LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE="",
