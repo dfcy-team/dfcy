@@ -1,0 +1,47 @@
+{
+  "schema_version": 3,
+  "release_version": "2.44.53",
+  "status": "deployed_pending_owner_verification",
+  "deployed_at_utc": "2026-09-01T11:56:48Z",
+  "parent_release": "2.44.52",
+  "candidate_commit": "37eaa4a3344be9d3a3c6897e6e4936972a429c40",
+  "deployed_tag": "v2.44.53-deployed",
+  "source_actor": "developer_b",
+  "release_actor": "architect",
+  "scope": "influencers",
+  "target_images": {
+    "backend": "saas-collab-backend:v2.44.53",
+    "celery": "saas-collab-backend:v2.44.53",
+    "celery_beat": "saas-collab-backend:v2.44.53",
+    "frontend": "saas-collab-frontend:v2.44.53",
+    "custody": "saas-collab-custody:v2.44.50"
+  },
+  "deployed_image_digests": {
+    "backend": "sha256:8c3018ce6d92f5c91eef03cab6b8265eef21d8afa85f30ddc320831a95a01d64",
+    "frontend": "sha256:f039951cff087e3dfa5fc9fd50494c55a1caaf3d478305d95c041518848d403b",
+    "custody": "sha256:cd2116019e90dd33f0b4e9f2f8fd0a3689ba1982596121fb0be15890dfb0b382"
+  },
+  "database_migration_required": false,
+  "database_migrations": [],
+  "menu_changed": false,
+  "router_changed": false,
+  "permission_catalog_changed": false,
+  "non_influencer_menu_snapshot_sha256": "5929734b5edb3bc6acdb509bd71fa93213a652256b527da6b5c8313d49a9c1fc",
+  "deployment_evidence_directory": "/home/dfcy01/releases/system-v2.44.53-pr63-20260901",
+  "checks": {
+    "local_backend": "630 passed, 3 skipped",
+    "local_frontend": "261 passed",
+    "github_required_checks": "10 passed",
+    "server_influencer_tests": "107 passed",
+    "server_migration_check": "no changes detected",
+    "runtime_pages": "7 passed",
+    "custody_recreated": false,
+    "redis_recreated": false
+  },
+  "owner_verification": "pending",
+  "owner_verification_required": true,
+  "rollback": {
+    "application_release": "2.44.52",
+    "database_restore_required": false
+  }
+}
