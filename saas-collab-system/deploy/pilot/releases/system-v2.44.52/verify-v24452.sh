@@ -60,7 +60,7 @@ fi
   || fail "Django makemigrations check failed."
 "${compose[@]}" exec -T backend python manage.py showmigrations masterdata > "$evidence_dir/post-migrations-masterdata.txt" 2>&1 \
   || fail "post-deploy migration state could not be read."
-grep -Eq '^\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$evidence_dir/post-migrations-masterdata.txt" \
+grep -Eq '^[[:space:]]*\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$evidence_dir/post-migrations-masterdata.txt" \
   || fail "masterdata.0009_warehouse_service_platform is not applied."
 
 # Verify the data-side effects without returning credentials, tokens, names,

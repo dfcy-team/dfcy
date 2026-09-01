@@ -46,8 +46,8 @@ post_migrations="$evidence_dir/post-migrations-masterdata.txt"
 "${compose[@]}" run --rm --no-deps "${migration_env[@]}" \
   --entrypoint python backend manage.py showmigrations masterdata \
   > "$pre_migrations" 2>&1 || fail "unable to read pre-migration state."
-grep -Eq '^\[[Xx]\][[:space:]]+0008_' "$pre_migrations" || fail "required masterdata.0008 baseline is not applied."
-if grep -Eq '^\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$pre_migrations"; then
+grep -Eq '^[[:space:]]*\[[Xx]\][[:space:]]+0008_' "$pre_migrations" || fail "required masterdata.0008 baseline is not applied."
+if grep -Eq '^[[:space:]]*\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$pre_migrations"; then
   fail "masterdata.0009 is already applied; refusing a duplicate release migration."
 fi
 
@@ -89,7 +89,7 @@ chmod 600 "$backup_path" "$backup_sha_path"
 "${compose[@]}" run --rm --no-deps "${migration_env[@]}" \
   --entrypoint python backend manage.py showmigrations masterdata \
   > "$post_migrations" 2>&1 || fail "unable to read post-migration state."
-grep -Eq '^\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$post_migrations" || \
+grep -Eq '^[[:space:]]*\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$post_migrations" || \
   fail "masterdata.0009 is not marked applied after migration."
 
 printf 'BACKUP_VALIDATION=PASS\nBACKUP_PATH=%s\nBACKUP_SHA256=%s\nDATABASE_ACCOUNT=%s\nDATABASE_NAME=%s\nMIGRATION_PLAN=masterdata.0009_warehouse_service_platform\nMIGRATION_APPLY=PASS\n' \

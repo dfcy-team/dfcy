@@ -51,7 +51,7 @@ sidecar_health=$(docker inspect application-custody-sidecar-1 --format '{{.State
 [ "$sidecar_health" = healthy ] || fail "custody sidecar is not healthy."
 
 "${compose[@]}" exec -T backend python manage.py showmigrations masterdata > "$evidence_dir/post-verify-migrations.txt" 2>&1 || fail "cannot read migration state."
-grep -Eq '^\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$evidence_dir/post-verify-migrations.txt" || fail "masterdata.0009 is not applied."
+grep -Eq '^[[:space:]]*\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$evidence_dir/post-verify-migrations.txt" || fail "masterdata.0009 is not applied."
 printf 'POST_VERIFY=PASS\nOWNER_VERIFICATION_REQUIRED=TRUE\nVERSION=%s\nDATABASE_MIGRATION=masterdata.0009_warehouse_service_platform\n' "$version" \
   > "$evidence_dir/post-verify-status.txt"
 chmod 600 "$evidence_dir/post-verify-status.txt"

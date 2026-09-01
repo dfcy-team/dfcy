@@ -31,7 +31,7 @@ docker ps --format '{{.Names}}|{{.Image}}|{{.ID}}|{{.Status}}' > "$evidence_dir/
 # it never reverses a migration, restores a database, or deletes custody data.
 "${compose[@]}" exec -T backend python manage.py showmigrations masterdata \
   > "$evidence_dir/rollback-migrations.txt" 2>&1 || fail "cannot read current migration state."
-grep -Eq '^\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$evidence_dir/rollback-migrations.txt" || \
+grep -Eq '^[[:space:]]*\[[Xx]\][[:space:]]+0009_warehouse_service_platform' "$evidence_dir/rollback-migrations.txt" || \
   fail "masterdata.0009 is not recorded as applied; refuse an application-only rollback."
 
 rollback_compose=("${compose[@]}" -f "$release_dir/docker-compose.rollback.yml")
