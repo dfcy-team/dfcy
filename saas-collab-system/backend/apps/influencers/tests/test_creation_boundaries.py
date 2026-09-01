@@ -1351,7 +1351,7 @@ def test_blacklist_endpoint_rejects_string_boolean_values():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch):
+def test_blacklist_recomputes_related_tasks_inside_the_blacklist_transaction(monkeypatch):
     _, user, store, influencer = _records("blacklist-on-commit")
     task = _task(user, store, influencer)
     create_sample_fulfillment(
@@ -1364,11 +1364,11 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
         item_payloads=[],
     )
 
-    observed_atomic_states = []
+    observed_savepoint_states = []
     locked_task = influencer_services._locked_task
 
     def observe_locked_task(*args, **kwargs):
-        observed_atomic_states.append(connection.in_atomic_block)
+        observed_savepoint_states.append(bool(connection.savepoint_ids))
         return locked_task(*args, **kwargs)
 
     monkeypatch.setattr(influencer_services, "_locked_task", observe_locked_task)
@@ -1376,10 +1376,46 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
         user=user,
         influencer=influencer,
         blacklisted=True,
-        reason="on-commit task recompute",
+        reason="atomic task recompute",
     )
 
-    assert observed_atomic_states == [True]
+    assert observed_savepoint_states == [True]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch):
+    tenant, user, store, influencer = _records("blacklist-rollback")
+    task = _task(user, store, influencer)
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="blacklist-rollback-sample-key",
+        validated_data={
+            "outreach_task": task,
+            "influencer": influencer,
+        },
+        item_payloads=[],
+    )
+    original_updated_at = influencer.updated_at
+
+    def fail_recompute(*args, **kwargs):
+        raise RuntimeError("injected recompute failure")
+
+    monkeypatch.setattr(influencer_services, "recompute_outreach_task_completion", fail_recompute)
+
+    with pytest.raises(RuntimeError, match="injected recompute failure"):
+        set_influencer_blacklist(
+            user=user,
+            influencer=influencer,
+            blacklisted=True,
+            reason="rollback all changes",
+        )
+
+    influencer.refresh_from_db()
+    fulfillment.refresh_from_db()
+    assert influencer.updated_at == original_updated_at
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert not InfluencerRestriction.objects.filter(tenant=tenant, influencer=influencer).exists()
+    assert not InfluencerRestrictEvent.objects.filter(tenant=tenant, influencer=influencer).exists()
 
 
 def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():

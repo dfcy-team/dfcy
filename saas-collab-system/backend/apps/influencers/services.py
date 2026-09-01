@@ -2092,16 +2092,10 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason="", expect
             )
             if fulfillment.outreach_task_id:
                 affected_task_ids.add(fulfillment.outreach_task_id)
-        # Sample creation locks task -> influencer, while blacklist propagation
-        # locks influencer -> fulfillment. Recompute tasks only after this
-        # transaction commits so the two paths cannot form a reverse lock chain.
-        task_ids = tuple(sorted(affected_task_ids))
-        if task_ids:
-            def recompute_tasks_after_commit():
-                for task_id in task_ids:
-                    recompute_outreach_task_completion(user=user, task=task_id)
-
-            transaction.on_commit(recompute_tasks_after_commit)
+        # Identity and fulfillment paths now share the tenant-first lock order.
+        # Keep task recomputation in this transaction so blacklist propagation is atomic.
+        for task_id in sorted(affected_task_ids):
+            recompute_outreach_task_completion(user=user, task=task_id)
     return restriction, event
 
 
