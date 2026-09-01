@@ -39,7 +39,12 @@ def test_http_custody_requires_authentication_and_sends_bearer_header():
 
 
 def test_http_custody_rejects_missing_service_authentication():
-    with override_settings(LIVE_CUSTODY_SERVICE_TOKEN="", LIVE_CUSTODY_SERVICE_AUTH_TOKEN=""):
+    with override_settings(
+        LIVE_CUSTODY_SERVICE_TOKEN="",
+        LIVE_CUSTODY_SERVICE_AUTH_TOKEN="",
+        LIVE_CUSTODY_SERVICE_TOKEN_FILE="",
+        LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE="",
+    ):
         with pytest.raises(CustodyError, match="authentication is not configured"):
             HttpCustodyBackend("https://custody.example.test", _Client())
 
@@ -59,6 +64,8 @@ def test_only_authenticated_http_custody_can_satisfy_live_gate(backend, debug, t
         CREDENTIAL_CUSTODY_PATH=str(tmp_path),
         LIVE_CUSTODY_SERVICE_URL="https://custody.example.test",
         LIVE_CUSTODY_SERVICE_TOKEN=token,
+        LIVE_CUSTODY_SERVICE_TOKEN_FILE="",
+        LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE="",
         LIVE_PLATFORM_ALLOWED_HOSTS=["platform.example.test"],
         PLATFORM_NETWORK_MODE="approved-live-test",
         LIVE_PLATFORM_SECURITY_APPROVED=True,
