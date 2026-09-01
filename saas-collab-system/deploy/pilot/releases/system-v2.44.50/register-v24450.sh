@@ -129,13 +129,13 @@ atomic_write "$legacy_marker_path" "$owner_marker"
 unified_current_payload=$(jq -n \
   --arg version "$version" --arg parent "$parent_version" --arg commit "$candidate" --arg tag "$tag" \
   --arg canonical "$canonical_ref" --arg backend "$backend_digest" --arg frontend "$frontend_digest" --arg custody "$custody_digest" \
-  --arg now_utc "$now_utc" --arg now_local "$now_local" --arg scope "$scope" \
+  --arg now_utc "$now_utc" --arg now_local "$now_local" --arg scope "$scope" --arg evidence "$evidence_dir" \
   '{schema_version:2,captured_date:($now_utc|split("T")[0]),current_release_version:$version,parent_release_version:$parent,git_commit:$commit,git_tag:$tag,canonical_ref:$canonical,source_manifest:$evidence,runtime_frontend_image:"saas-collab-frontend:v2.44.50",runtime_frontend_digest:$frontend,runtime_backend_image:"saas-collab-backend:v2.44.50",runtime_backend_digest:$backend,runtime_custody_image:"saas-collab-custody:v2.44.50",runtime_custody_digest:$custody,runtime_celery_image:"saas-collab-backend:v2.44.50",runtime_celery_beat_image:"saas-collab-backend:v2.44.50",status:"deployed_pending_owner_verification",release_actor:"architect",source_actor:"architect",release_scope:$scope,release_record:"/opt/saas-collab/release-control/unified/releases/2.44.50/release-record.json",database_migrations:"NONE",menu_changed:false,router_changed:false,permission_catalog_changed:false,owner_verification:"pending",owner_verification_required:true,deployed_at_utc:$now_utc,deployed_at_local:$now_local}')
 atomic_write "$unified_current" "$unified_current_payload"
 
 legacy_current_payload=$(jq -n \
   --arg version "$version" --arg parent "$parent_version" --arg commit "$candidate" --arg tag "$tag" \
-  --arg backend "$backend_digest" --arg frontend "$frontend_digest" --arg custody "$custody_digest" --arg now_utc "$now_utc" --arg now_local "$now_local" --arg scope "$scope" \
+  --arg backend "$backend_digest" --arg frontend "$frontend_digest" --arg custody "$custody_digest" --arg now_utc "$now_utc" --arg now_local "$now_local" --arg scope "$scope" --arg evidence "$evidence_dir" \
   '{schema_version:1,current_release_version:$version,parent_release_version:$parent,git_commit:$commit,git_tag:$tag,canonical_ref:"refs/baselines/canonical-deployed",source_manifest:$evidence,runtime_frontend_image:"saas-collab-frontend:v2.44.50",runtime_frontend_image_id:$frontend,runtime_frontend_digest:$frontend,runtime_backend_image:"saas-collab-backend:v2.44.50",runtime_backend_image_id:$backend,runtime_backend_digest:$backend,runtime_custody_image:"saas-collab-custody:v2.44.50",runtime_custody_image_id:$custody,status:"deployed_pending_owner_verification",release_actor:"architect",source_actor:"architect",release_scope:$scope,menu_baseline:"2.44.48",permission_ui_baseline:"2.44.48",menu_changed:false,router_changed:false,permission_catalog_changed:false,database_migrations:"NONE",owner_verification:"pending",owner_verification_required:true,deployed_at_utc:$now_utc,deployed_at_local:$now_local}')
 atomic_write "$legacy_current" "$legacy_current_payload"
 
