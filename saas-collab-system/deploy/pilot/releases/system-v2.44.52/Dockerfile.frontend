@@ -11,6 +11,10 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ ./
+# One frontend contract test reads the production Nginx cache policy from
+# ../deploy/pilot/application/nginx.conf. Copy only that reviewed, non-secret
+# file into the same relative location used by the repository checkout.
+COPY deploy/pilot/application/nginx.conf /deploy/pilot/application/nginx.conf
 RUN VITE_USE_MOCK=true npm run test
 RUN npm run build
 
