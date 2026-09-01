@@ -31,11 +31,15 @@ class _Client:
 
 def test_http_custody_requires_authentication_and_sends_bearer_header():
     client = _Client()
-    backend = HttpCustodyBackend("https://custody.example.test", client, service_auth_token="custody-token")
+    backend = HttpCustodyBackend(
+        "https://custody.example.test",
+        client,
+        service_auth_token="placeholder-custody-token",
+    )
 
     assert backend.retrieve_secret("cred_1") == "resolved-value"
-    assert client.calls[0]["headers"] == {"Authorization": "Bearer custody-token"}
-    assert "custody-token" not in json.dumps(client.calls[0]["body"] or {})
+    assert client.calls[0]["headers"] == {"Authorization": "Bearer placeholder-custody-token"}
+    assert "placeholder-custody-token" not in json.dumps(client.calls[0]["body"] or {})
 
 
 def test_http_custody_rejects_missing_service_authentication():

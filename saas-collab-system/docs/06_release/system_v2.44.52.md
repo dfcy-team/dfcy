@@ -14,6 +14,7 @@
 3. 修正“凭据保存后只读同步开启，但 OAuth readiness 要求只读同步关闭”的冲突；只读同步不再阻断 OAuth，写同步仍 fail closed。
 4. 店铺 API 接入弹窗显示非敏感阻断原因；未就绪时禁用授权并且不发送空 `redirect_uri`。
 5. 新增 `repair_shopee_callback` 受控命令，仅补齐一个精确配置的 callback；默认 dry-run，`--apply` 才写入并产生审计。
+6. 修复基线 CI guard 对只读 volume `service.token:ro` 的误报，并统一测试凭据为明确 placeholder；不修改运行凭据。
 
 ## 正式环境执行顺序
 
