@@ -158,7 +158,12 @@
             :clearable="field.clearable === true"
             @change="field.onChange?.($event, resourceForm)"
           >
-            <el-option v-for="option in field.options || []" :key="option.value" :label="option.label" :value="option.value" />
+            <el-option
+              v-for="option in (typeof field.options === 'function' ? field.options(resourceForm) : field.options || [])"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
           </el-select>
           <el-input
             v-else

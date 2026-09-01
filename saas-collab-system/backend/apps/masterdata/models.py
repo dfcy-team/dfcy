@@ -22,6 +22,9 @@ class PlatformMaster(models.Model):
         TIKTOK = "tiktok", "TikTok"
         LAZADA = "lazada", "LAZADA"
         TEMU = "temu", "TEMU"
+        WAREHOUSE_OWNED = "warehouse_owned", "自营仓服务"
+        WAREHOUSE_THIRD_PARTY = "warehouse_third_party", "三方仓服务"
+        WAREHOUSE_PLATFORM = "warehouse_platform", "平台仓服务"
         OTHER = "other", "Other"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_masters")
@@ -73,6 +76,19 @@ class StoreMaster(models.Model):
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_store_master_code")]
 
 
+WAREHOUSE_SERVICE_PLATFORM_TYPES = frozenset({
+    PlatformMaster.PlatformType.WAREHOUSE_OWNED,
+    PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY,
+    PlatformMaster.PlatformType.WAREHOUSE_PLATFORM,
+})
+
+WAREHOUSE_TYPE_TO_PLATFORM_TYPE = {
+    "owned": PlatformMaster.PlatformType.WAREHOUSE_OWNED,
+    "third_party": PlatformMaster.PlatformType.WAREHOUSE_THIRD_PARTY,
+    "platform": PlatformMaster.PlatformType.WAREHOUSE_PLATFORM,
+}
+
+
 class CountrySiteMaster(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="country_site_masters")
     code = models.SlugField(max_length=80)
@@ -104,6 +120,13 @@ class WarehouseMaster(models.Model):
     name = models.CharField(max_length=120)
     country_code = models.CharField(max_length=8)
     warehouse_type = models.CharField(max_length=30, choices=WarehouseType.choices)
+    service_platform = models.ForeignKey(
+        PlatformMaster,
+        on_delete=models.PROTECT,
+        related_name="service_warehouses",
+        null=True,
+        blank=True,
+    )
     status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
