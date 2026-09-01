@@ -394,6 +394,7 @@ import {
 } from '../../api/influencers';
 import { applyStoreSelection } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
+import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
@@ -468,13 +469,7 @@ const sampleForm = reactive({
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
-const formatTaskTime = (value) => {
-  if (!hasValue(value)) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return displayValue(value);
-  const pad = (part) => String(part).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-};
+const formatTaskTime = (value) => formatTaskDateTime(value);
 const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const sampleInfluencerName = (row) => creatorHandleFirst(row);
 
