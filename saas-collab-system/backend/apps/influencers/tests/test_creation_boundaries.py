@@ -1253,7 +1253,7 @@ def test_existing_target_payload_remains_compatible():
     assert fulfillment.influencer_id == second_influencer.pk
 
 
-def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task_fields():
+def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task_fields(monkeypatch):
     tenant, user, store, influencer = _records("fulfillment-options")
     role = user.user_roles.get().role
     client = APIClient()
@@ -1307,6 +1307,19 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     outreach_payload = outreach_response.json()["data"]
     assert {item["id"] for item in outreach_payload["influencers"]} == {influencer.id}
     assert outreach_payload["influencers"][0]["handle"] == "option.creator"
+
+    def reject_influencer_scan(*args, **kwargs):
+        raise AssertionError("Core outreach task options must not scan influencers or blacklist state.")
+
+    monkeypatch.setattr(influencer_views, "_influencer_candidates", reject_influencer_scan)
+    edit_options_response = client.get(
+        "/api/internal/influencers/outreach-task-options/?include_influencers=false"
+    )
+    assert edit_options_response.status_code == 200
+    edit_options_payload = edit_options_response.json()["data"]
+    assert "influencers" not in edit_options_payload
+    assert {item["id"] for item in edit_options_payload["stores"]} == {store.id}
+    assert {item["id"] for item in edit_options_payload["bd_users"]} == {user.id}
 
 
 def test_fulfillment_options_do_not_merge_same_handle_across_platforms():

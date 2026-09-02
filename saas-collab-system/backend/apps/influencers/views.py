@@ -666,6 +666,12 @@ class OutreachTaskOptionsView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
+        raw_include_influencers = request.query_params.get("include_influencers")
+        include_influencers = (
+            True
+            if raw_include_influencers is None
+            else _query_bool(raw_include_influencers, field="include_influencers")
+        )
         stores = StoreMaster.objects.filter(
             tenant=request.user.tenant,
             status=StatusChoices.ACTIVE,
@@ -679,13 +685,8 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
-        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        influencers = Influencer.objects.filter(
-            tenant=request.user.tenant,
-            status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery))
         stores = stores[:200]
-        return success_response({
+        payload = {
             "stores": [
                 {
                     "id": store.id,
@@ -700,8 +701,19 @@ class OutreachTaskOptionsView(APIView):
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
             ],
-            "influencers": _influencer_candidates(influencers, limit=500, include_handle=True),
-        })
+        }
+        if include_influencers:
+            blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
+            influencers = Influencer.objects.filter(
+                tenant=request.user.tenant,
+                status=Influencer.Status.ACTIVE,
+            ).annotate(is_blacklisted=Exists(blacklist_subquery))
+            payload["influencers"] = _influencer_candidates(
+                influencers,
+                limit=500,
+                include_handle=True,
+            )
+        return success_response(payload)
 
 
 class SampleFulfillmentOptionsView(APIView):
