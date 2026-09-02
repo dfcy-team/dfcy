@@ -31,32 +31,6 @@ copy .env.example .env
 
 Do not commit `.env`. The example file contains placeholders only.
 
-## Mini Program sandbox authentication
-
-Mini Program authentication uses the dedicated `/api/miniapp/auth/*` contract.
-Development defaults to a local sandbox; production forces the capability to
-`disabled` until a separate WeChat credential and security review is complete.
-
-Bind a non-RPA test user without storing the raw provider subject:
-
-```powershell
-python manage.py bind_miniapp_identity --username demo --subject device-001
-```
-
-The Mini Program can then submit `sandbox:device-001`. Internal administration
-tokens and refresh tokens are rejected by the Mini Program channel.
-
-## Release contracts
-
-The `apps.releases` domain freezes one candidate commit, required gates,
-independent approvals, one immutable artifact, optimistic versions,
-idempotency digests, and immutable audit events.
-
-Internal APIs are available under `/api/internal/releases/`. Mini Program
-endpoints under `/api/miniapp/releases/` are read-only and require the
-`release.contract.view` permission plus an authorized data scope. Release
-actions only record controlled results; they do not call a real platform.
-
 ## Database Migrations
 
 ```powershell
@@ -83,18 +57,6 @@ python manage.py sync_permissions
 cd saas-collab-system/backend
 pytest
 ```
-
-## Mini Program platform login
-
-Mini Program authentication defaults to fail-closed. Local sandbox mode accepts only pre-bound test subjects. Real WeChat login requires all three server-side variables:
-
-- `MINIAPP_AUTH_MODE=platform`
-- `MINIAPP_APP_ID`
-- `MINIAPP_APP_SECRET`
-
-The Mini Program sends only the one-time `wx.login` code. The backend exchanges it through WeChat `code2Session`, hashes the returned openid for identity lookup, and discards `session_key`. AppSecret, raw openid, and `session_key` are never returned to clients or stored in the database.
-
-Production startup rejects unsupported auth modes and rejects platform mode when either credential is missing.
 
 ## Phase 1 Test Reproducibility
 

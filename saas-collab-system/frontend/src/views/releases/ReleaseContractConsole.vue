@@ -119,14 +119,6 @@
             审批
           </el-button>
           <el-button
-            v-if="canApprove && row.status === 'rollback_required'"
-            size="small"
-            type="warning"
-            @click="openApproval(row)"
-          >
-            回滚审批
-          </el-button>
-          <el-button
             v-if="canExecute && row.status === 'approved'"
             size="small"
             type="primary"
@@ -515,13 +507,6 @@ function openGate(row) {
 
 function openApproval(row) {
   activeContract.value = row;
-  if (row.status === 'rollback_required') {
-    approvalForm.approval_type = 'rollback';
-    approvalForm.decision = 'approved';
-    approvalForm.reason = '';
-    approvalOpen.value = true;
-    return;
-  }
   const decided = new Set((row.approvals || []).map((item) => item.approval_type));
   approvalForm.approval_type = ['business', 'technical', 'security'].find((item) => !decided.has(item)) || 'business';
   approvalForm.decision = 'approved';

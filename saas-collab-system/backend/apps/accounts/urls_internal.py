@@ -1,17 +1,12 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
-
-from .views import InternalLoginView, current_user, internal_health
+from .views import InternalLoginView, InternalTokenRefreshView, current_user, internal_health
 from .system_views import (
     DepartmentCollectionView,
-    DepartmentDetailView,
     PermissionCollectionView,
     RoleCollectionView,
     RolePermissionView,
     SecurityOperationsView,
     UserCollectionView,
-    UserDetailView,
-    UserPasswordResetView,
     UserRoleOptionCollectionView,
     UserRoleView,
     UserStatusView,
@@ -21,14 +16,11 @@ from .system_views import (
 urlpatterns = [
     path("health/", internal_health, name="internal-health"),
     path("auth/login/", InternalLoginView.as_view(), name="internal-auth-login"),
-    path("auth/refresh/", TokenRefreshView.as_view(), name="internal-auth-refresh"),
+    path("auth/refresh/", InternalTokenRefreshView.as_view(), name="internal-auth-refresh"),
     path("auth/me/", current_user, name="internal-auth-me"),
     path("system/departments/", DepartmentCollectionView.as_view(), name="system-department-collection"),
-    path("system/departments/<int:pk>/", DepartmentDetailView.as_view(), name="system-department-detail"),
     path("system/users/", UserCollectionView.as_view(), name="system-user-collection"),
-    path("system/users/<int:pk>/", UserDetailView.as_view(), name="system-user-detail"),
     path("system/users/<int:pk>/status/", UserStatusView.as_view(), name="system-user-status"),
-    path("system/users/<int:pk>/password-reset/", UserPasswordResetView.as_view(), name="system-user-password-reset"),
     path("system/users/<int:pk>/roles/", UserRoleView.as_view(), name="system-user-roles"),
     path("system/user-role-options/", UserRoleOptionCollectionView.as_view(), name="system-user-role-options"),
     path("system/roles/", RoleCollectionView.as_view(), name="system-role-collection"),

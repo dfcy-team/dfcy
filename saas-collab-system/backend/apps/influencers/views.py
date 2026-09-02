@@ -47,12 +47,14 @@ from .models import (
 )
 from .serializers import (
     InfluencerSerializer,
+    InfluencerPublicSerializer,
     InfluencerContactSerializer,
     InfluencerRestrictEventSerializer,
     OutreachTargetSerializer,
     OutreachTaskSerializer,
     OutreachTaskUpdateSerializer,
     SampleFulfillmentSerializer,
+    SampleFulfillmentPricingSerializer,
     SampleFulfillmentUpdateSerializer,
     SkuPriceSnapshotSerializer,
 )
@@ -222,9 +224,6 @@ class InfluencerCollectionView(APIView):
                 | Q(profile__tenant=request.user.tenant, profile__display_name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__external_influencer_id__icontains=search)
             )
-            normalized_handle = normalize_tiktok_username(search)
-            if is_valid_tiktok_username(normalized_handle):
-                search_filter |= Q(handle__icontains=normalized_handle)
             queryset = queryset.filter(search_filter)
         if status:
             queryset = queryset.filter(status=status)
@@ -251,7 +250,7 @@ class InfluencerCollectionView(APIView):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
         page, page_size = _pagination(request)
-        return success_response(paginated_data(request, queryset, InfluencerSerializer, page=page, page_size=page_size))
+        return success_response(paginated_data(request, queryset, InfluencerPublicSerializer, page=page, page_size=page_size))
 
     @transaction.atomic
     def post(self, request):
@@ -268,7 +267,7 @@ class InfluencerCollectionView(APIView):
             object_id=instance.pk,
             after_data={"code": instance.code, "status": instance.status},
         )
-        return success_response(InfluencerSerializer(instance).data, status=201)
+        return success_response(InfluencerPublicSerializer(instance).data, status=201)
 
 
 class InfluencerDetailView(APIView):
@@ -285,7 +284,7 @@ class InfluencerDetailView(APIView):
 
     def get(self, request, pk):
         require_all_scope(request.user, self.read_permission_code)
-        return success_response(InfluencerSerializer(self.get_object(request, pk)).data)
+        return success_response(InfluencerPublicSerializer(self.get_object(request, pk)).data)
 
     @transaction.atomic
     def patch(self, request, pk):
@@ -320,7 +319,7 @@ class InfluencerDetailView(APIView):
             before_data=before,
             after_data={"code": instance.code, "status": instance.status},
         )
-        return success_response(InfluencerSerializer(instance).data)
+        return success_response(InfluencerPublicSerializer(instance).data)
 
 
 class InfluencerStatusView(APIView):
@@ -354,7 +353,7 @@ class InfluencerStatusView(APIView):
             before_data={"status": before},
             after_data={"status": status},
         )
-        return success_response(InfluencerSerializer(instance).data)
+        return success_response(InfluencerPublicSerializer(instance).data)
 
 
 class InfluencerContactsView(APIView):
@@ -654,7 +653,32 @@ class OutreachTaskOptionsView(APIView):
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
             ],
-            "influencers": _influencer_candidates(influencers, limit=500, include_handle=True),
+            # Fulfillment managers need the canonical account to select the
+            # creator for a sample.  Outreach-only readers receive the stable
+            # profile identity without the handle, keeping this endpoint
+            # least-privilege by permission rather than by caller convention.
+            "influencers": (
+                _influencer_candidates(
+                    influencers,
+                    limit=500,
+                    include_handle=True,
+                )
+                if check_user_permission(
+                    request.user,
+                    "influencers.fulfillment.manage",
+                )
+                else [
+                    {
+                        key: candidate[key]
+                        for key in ("id", "code", "name", "platform")
+                    }
+                    for candidate in _influencer_candidates(
+                        influencers,
+                        limit=500,
+                        include_handle=False,
+                    )
+                ]
+            ),
         })
 
 
@@ -1060,7 +1084,10 @@ class SampleFulfillmentCollectionView(APIView):
                 raise Conflict(exc.detail) from exc
             raise
         fulfillment = SampleFulfillment.objects.prefetch_related("items").get(pk=fulfillment.pk)
-        return success_response(SampleFulfillmentSerializer(fulfillment).data, status=201 if created else 200)
+        return success_response(
+            SampleFulfillmentPricingSerializer(fulfillment).data,
+            status=201 if created else 200,
+        )
 
 
 class SampleFulfillmentDetailView(APIView):
@@ -1095,6 +1122,8 @@ class SampleFulfillmentDetailView(APIView):
             "1", "true", "yes"
         }
         fulfillment = self._get(request, pk, include_deleted=include_deleted)
+        # Detail reads use the redacted contract; pricing snapshots are only
+        # returned from an explicitly authorized write response.
         return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
     def patch(self, request, pk):
@@ -1141,7 +1170,7 @@ class SampleFulfillmentDetailView(APIView):
                 raise Conflict(exc.detail) from exc
             raise
         fulfillment = self._get(request, pk)
-        return success_response(SampleFulfillmentSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
 
     def delete(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
@@ -1156,7 +1185,7 @@ class SampleFulfillmentDetailView(APIView):
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(SampleFulfillmentSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
 
 
 class SampleFulfillmentRestoreView(APIView):
@@ -1195,7 +1224,7 @@ class SampleFulfillmentRestoreView(APIView):
                 to_attr="_published_video_results",
             ),
         ).get(pk=fulfillment.pk, tenant=request.user.tenant)
-        return success_response(SampleFulfillmentSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
 
 
 class SampleFulfillmentStatusView(APIView):
@@ -1224,7 +1253,7 @@ class SampleFulfillmentStatusView(APIView):
             if exc.get_codes() == {"version": "conflict"}:
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(SampleFulfillmentSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
 
 
 class ProductPriceLookupView(APIView):

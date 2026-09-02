@@ -40,6 +40,8 @@ HEADER_ALIASES.update({
     # localized headers.  ``_key`` removes separators when resolving aliases.
     "platform": "platform", "store": "store", "store_code": "store_code", "store_name": "store_name",
     "platform_product_id": "platform_product_id", "platform_variant_id": "platform_variant_id", "platform_sku": "platform_sku",
+    "variant_id": "platform_variant_id", "variant id": "platform_variant_id", "platform variant id": "platform_variant_id",
+    "product_id": "platform_product_id", "product id": "platform_product_id", "platform product id": "platform_product_id",
     "source_old_sku_code": "source_old_sku_code", "title": "title", "variant": "variant",
     "sku_prefix": "sku_prefix", "shop_abbr": "shop_abbr", "sales_status": "sales_status",
     "owner": "owner", "leader": "leader", "category_l1": "category_l1", "category_l2": "category_l2", "category_l3": "category_l3",
@@ -62,6 +64,7 @@ IMPORT_CREATE_BATCH_SIZE = 1000
 IMPORT_UPDATE_BATCH_SIZE = 100
 IMPORT_UPDATE_WORK_CHUNK_SIZE = 500
 IMPORT_EXISTING_QUERY_CHUNK_SIZE = 2000
+UNMATCHED_SAMPLE_LIMIT = 100
 
 # The key columns are already constrained by the lookup and must not be
 # rewritten.  All remaining fields are values supplied by an import and are
@@ -524,4 +527,118 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
         "errors": errors,
         "skipped": len(errors),
         "partial_success": bool(errors and plans),
+    }
+
+
+def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
+    """Update platform product IDs by existing tenant-scoped variant IDs."""
+
+    errors = []
+    rows_seen = 0
+    candidates = []
+    for sheet_name, rows in parse_import_rows(raw, filename):
+        for row_index, row in enumerate(rows, start=2):
+            rows_seen += 1
+            variant_id = _text(row.get("platform_variant_id"))
+            product_id = _text(row.get("platform_product_id"))
+            if not variant_id:
+                errors.append({"row": row_index, "sheet": sheet_name, "code": "missing_variant_id", "message": "缺少变体ID。"})
+                continue
+            if not product_id:
+                errors.append({"row": row_index, "sheet": sheet_name, "code": "missing_product_id", "message": "缺少平台商品ID。"})
+                continue
+            candidates.append({"row": row_index, "sheet": sheet_name, "variant_id": variant_id, "product_id": product_id})
+
+    by_variant = defaultdict(list)
+    for item in candidates:
+        by_variant[item["variant_id"]].append(item)
+    groups = []
+    for variant_id, group in by_variant.items():
+        product_ids = {item["product_id"] for item in group}
+        if len(product_ids) > 1:
+            for item in group:
+                errors.append({
+                    "row": item["row"],
+                    "sheet": item["sheet"],
+                    "code": "duplicate_variant_product_id",
+                    "message": "同一变体ID在文件中对应多个平台商品ID，已跳过。",
+                })
+            continue
+        groups.append({"variant_id": variant_id, "product_id": group[0]["product_id"], "rows": group})
+
+    updated = 0
+    unchanged = 0
+    unmatched = 0
+    unmatched_unique_count = 0
+    unmatched_variant_seen = set()
+    unmatched_sample = []
+    ambiguous = 0
+    changed_items = []
+    with transaction.atomic():
+        for group_chunk in _chunks(groups, IMPORT_EXISTING_QUERY_CHUNK_SIZE):
+            variant_ids = [group["variant_id"] for group in group_chunk]
+            queryset = PlatformProductDetail.objects.filter(
+                tenant=tenant,
+                platform_variant_id__in=variant_ids,
+            )
+            if not dry_run:
+                queryset = queryset.select_for_update()
+            matches_by_variant = defaultdict(list)
+            for item in queryset:
+                matches_by_variant[item.platform_variant_id].append(item)
+
+            for group in group_chunk:
+                rows = group["rows"]
+                matches = matches_by_variant.get(group["variant_id"], [])
+                if not matches:
+                    unmatched += len(rows)
+                    if group["variant_id"] not in unmatched_variant_seen:
+                        unmatched_variant_seen.add(group["variant_id"])
+                        unmatched_unique_count += 1
+                        if len(unmatched_sample) < UNMATCHED_SAMPLE_LIMIT:
+                            unmatched_sample.append(group["variant_id"])
+                    continue
+                if len(matches) > 1:
+                    ambiguous += len(rows)
+                    for row in rows:
+                        errors.append({
+                            "row": row["row"],
+                            "sheet": row["sheet"],
+                            "code": "ambiguous_variant_id",
+                            "message": "当前租户内该变体ID对应多个平台/店铺记录，无法确定更新对象。",
+                        })
+                    continue
+                item = matches[0]
+                if item.platform_product_id == group["product_id"]:
+                    unchanged += len(rows)
+                    continue
+                item.platform_product_id = group["product_id"]
+                item.updated_at = timezone.now()
+                if not dry_run:
+                    changed_items.append(item)
+                updated += 1
+                unchanged += max(0, len(rows) - 1)
+
+        if not dry_run and changed_items:
+            PlatformProductDetail.objects.bulk_update(
+                changed_items,
+                ["platform_product_id", "updated_at"],
+                batch_size=IMPORT_UPDATE_BATCH_SIZE,
+            )
+
+    return {
+        "dry_run": dry_run,
+        "total": rows_seen,
+        "valid": sum(len(group["rows"]) for group in groups),
+        "updated": updated,
+        "unchanged": unchanged,
+        "unmatched": unmatched,
+        "unmatched_unique": unmatched_unique_count,
+        "unmatched_sample": unmatched_sample,
+        "unmatched_sample_limit": UNMATCHED_SAMPLE_LIMIT,
+        "unmatched_remaining": max(0, unmatched_unique_count - len(unmatched_sample)),
+        "ambiguous": ambiguous,
+        "errors": errors,
+        "skipped": max(0, rows_seen - updated - unchanged),
+        "partial_success": bool((updated or unchanged) and (rows_seen - updated - unchanged)),
     }

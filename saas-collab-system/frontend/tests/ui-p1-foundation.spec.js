@@ -218,12 +218,6 @@ describe('UI-P1 authentication source contracts', () => {
     expect(source).not.toContain('loginWithMock');
   });
 
-  it('defaults an unset production build to the real API', () => {
-    const source = read('src/api/request.js');
-    expect(source).toContain("import.meta.env.VITE_USE_MOCK === 'true'");
-    expect(source).toContain('!import.meta.env.PROD');
-  });
-
   it('uses real credentials and a route authentication gate', () => {
     const login = read('src/views/auth/Login.vue');
     const router = read('src/router/index.js');

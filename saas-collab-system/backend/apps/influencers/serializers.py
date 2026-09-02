@@ -147,6 +147,22 @@ class InfluencerSerializer(serializers.ModelSerializer):
         return instance
 
 
+class InfluencerPublicSerializer(InfluencerSerializer):
+    """Redacted profile representation used by API read endpoints.
+
+    The base serializer remains useful for controlled internal writes and
+    service-level contracts, but a TikTok handle is an account identifier and
+    must not be emitted by ordinary list/detail responses.  Keeping the
+    redaction in a dedicated serializer avoids accidentally reintroducing the
+    field when the write allow-list changes.
+    """
+
+    def get_fields(self):
+        fields = super().get_fields()
+        fields.pop("handle", None)
+        return fields
+
+
 class OutreachTaskSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     dispatcher_id = serializers.IntegerField(read_only=True)
@@ -536,6 +552,33 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         if len(normalized) > 20:
             raise serializers.ValidationError("At most 20 quick tags are allowed.")
         return normalized
+
+
+class SampleItemPricingSerializer(SampleItemSerializer):
+    """Fulfillment-manage response with the approved price-match facts.
+
+    Price snapshots are operational facts needed by a fulfillment manager at
+    write time.  They remain read-only and are deliberately not added to the
+    base item serializer used by ordinary list/detail reads.
+    """
+
+    class Meta(SampleItemSerializer.Meta):
+        fields = SampleItemSerializer.Meta.fields + (
+            "unit_price",
+            "currency",
+            "price_match_status",
+        )
+        read_only_fields = SampleItemSerializer.Meta.read_only_fields + (
+            "unit_price",
+            "currency",
+            "price_match_status",
+        )
+
+
+class SampleFulfillmentPricingSerializer(SampleFulfillmentSerializer):
+    """Internal fulfillment-manage representation with pricing snapshots."""
+
+    items = SampleItemPricingSerializer(many=True, required=False)
 
 
 class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):

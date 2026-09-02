@@ -11,6 +11,7 @@
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('stores', payload)"
     :edit-handler="(id, payload) => updateMasterData('stores', id, payload)"
+    :delete-handler="(id) => deleteMasterData('stores', id)"
     :status-handler="(row, status) => updateMasterDataStatus('stores', row.id, status)"
     create-permission="masterdata.manage"
     manage-permission="masterdata.manage"
@@ -18,8 +19,10 @@
     <template #actions>
       <el-button type="primary" plain @click="openMigrationPreview">站点映射预览</el-button>
       <el-button type="primary" plain @click="importOpen = true">导入店铺档案</el-button>
+      <el-button type="primary" plain @click="downloadTemplate">下载 CSV 导入模板</el-button>
     </template>
     <template #row-actions="{ row }">
+      <el-button link type="primary" @click.stop="openApiAccess(row)">API 接入</el-button>
       <el-button link type="primary" @click.stop="openCapabilityMatrix(row)">能力矩阵</el-button>
     </template>
   </AdminResourcePage>
@@ -135,6 +138,13 @@
     </el-table>
     <template #footer><el-button @click="capabilityOpen = false">关闭</el-button><el-button plain :disabled="!capabilitySuggestions.length || capabilityLoading" @click="applyCapabilitySuggestions">载入建议</el-button><el-button type="primary" :loading="capabilitySaving" :disabled="!selectedAuthorizationId" @click="saveCapabilities">确认保存</el-button></template>
   </el-dialog>
+
+  <SubjectApiAccessDialog
+    v-model="apiAccessOpen"
+    subject-type="store"
+    :row="selectedStore"
+    @changed="resourcePage?.loadData()"
+  />
 </template>
 
 <script setup>
@@ -142,13 +152,14 @@ import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
+import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
 import { fetchUsers } from '../../api/systemAdmin';
 import { fetchProductCategories } from '../../api/products';
 import { fetchConnectionCapabilities, fetchStoreAuthorizations, updateConnectionCapabilities } from '../../api/integrations';
 import { getActionAccess } from '../../utils/actionAccess';
 import { useAuthStore } from '../../stores/auth';
 import {
-  applyPlatformSiteMigration, createMasterData, fetchCountrySites, fetchPlatforms, fetchPlatformSiteMigrationPreview,
+  applyPlatformSiteMigration, createMasterData, deleteMasterData, fetchCountrySites, fetchPlatforms, fetchPlatformSiteMigrationPreview,
   fetchPlatformSites, fetchStores, importStores,
   updateMasterData, updateMasterDataStatus,
 } from '../../api/masterData';
@@ -167,7 +178,7 @@ const columns = [
 ];
 
 const platformOptions = ref([]); const platformSites = ref([]); const platformSiteOptions = ref([]); const countryOptions = ref([]); const categoryOptions = ref([]); const userOptions = ref([]);
-const importOpen = ref(false); const importFile = ref(null); const importing = ref(false);
+const importOpen = ref(false); const importFile = ref(null); const importing = ref(false); const apiAccessOpen = ref(false);
 const capabilityOpen = ref(false); const capabilityLoading = ref(false); const capabilitySaving = ref(false);
 const selectedStore = ref(null); const authorizationOptions = ref([]); const selectedAuthorizationId = ref(null); const capabilityRows = ref([]);
 const capabilitySuggestions = ref([]);
@@ -199,6 +210,22 @@ function applyPlatformSite(value, form) {
   form.currency = site.currency_code || form.currency || '';
   form.settlement_currency = site.currency_code || form.settlement_currency || '';
   form.timezone = site.timezone || form.timezone || 'UTC';
+}
+
+function openApiAccess(row) {
+  selectedStore.value = row;
+  apiAccessOpen.value = true;
+}
+
+function downloadTemplate() {
+  const headers = ['code', 'name', 'platform_store_name', 'platform', 'country_code', 'currency', 'timezone', 'category', 'operator', 'bd', 'leader', 'is_connected', 'tactical_client', 'status'];
+  const blob = new Blob([`\uFEFF${headers.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'stores-import-template.csv';
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 const formFields = computed(() => [
@@ -385,11 +412,13 @@ async function confirmMigration() {
 
 async function loadReferenceOptions() {
   const [platformResponse, platformSiteResponse, siteResponse, categoryResponse, usersResponse] = await Promise.all([
-    fetchPlatforms({ page: 1, page_size: 100, status: 'active' }), fetchPlatformSites({ page: 1, page_size: 100, status: 'active' }), fetchCountrySites({ page: 1, page_size: 100, status: 'active' }),
+    fetchPlatforms({ status: 'active', page: 1, page_size: 100 }), fetchPlatformSites({ page: 1, page_size: 100, status: 'active' }), fetchCountrySites({ status: 'active', page: 1, page_size: 100 }),
     fetchProductCategories({ page: 1, page_size: 100, level: 1 }), fetchUsers({ page: 1, page_size: 100, status: 'active' }),
   ]);
   const platforms = results(platformResponse); platformSites.value = results(platformSiteResponse); const sites = results(siteResponse); const categories = results(categoryResponse); const users = results(usersResponse);
-  platformOptions.value = platforms.map((item) => ({ label: `${item.name || item.code} · ${item.code}`, value: item.id }));
+  platformOptions.value = platforms
+    .filter((row) => !String(row.platform_type || '').startsWith('warehouse_'))
+    .map((item) => ({ label: `${item.name || item.code} · ${item.code}`, value: item.id }));
   platformSiteOptions.value = platformSites.value.map(toPlatformSiteOption);
   countryOptions.value = sites.map((item) => ({ label: `${item.name || item.code} · ${String(item.country_code || '').toUpperCase()}`, value: String(item.country_code || '').toUpperCase(), currency: String(item.currency || '').trim().toUpperCase(), timezone: String(item.timezone || '').trim() })).filter((item) => item.value);
   categoryOptions.value = categories.filter((item) => item.level === 1 && item.is_active !== false).map((item) => ({ label: `${item.code} · ${item.name}`, value: item.id }));

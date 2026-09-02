@@ -150,6 +150,7 @@ def integration_platform_key(*, platform_type="", code="", name=""):
         "shopee": "shopee",
         "tiktok": "tiktok",
         "tiktokshop": "tiktok",
+        "myjf": "jifeng_wms",
         "jifengwms": "jifeng_wms",
         "极风wms": "jifeng_wms",
     }

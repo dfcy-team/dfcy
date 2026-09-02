@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster
 from apps.products.coding_services import category_path
 from apps.products.models import ProductCategory
 
@@ -113,6 +114,29 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
     assigned_to_id = serializers.IntegerField(source="project.assigned_to_id", read_only=True)
     formal_spu_code = serializers.CharField(source="formal_product.spu_code", read_only=True, allow_null=True)
     formal_product_id = serializers.IntegerField(read_only=True, allow_null=True)
+    trial_spu_code = serializers.CharField(source="trial_product.spu_code", read_only=True, allow_null=True)
+    trial_product_id = serializers.IntegerField(read_only=True, allow_null=True)
+    trial_sku_code = serializers.CharField(source="trial_sku.sku_code", read_only=True, allow_null=True)
+    trial_sku_id = serializers.IntegerField(read_only=True, allow_null=True)
+    formal_sku_code = serializers.CharField(source="formal_sku.sku_code", read_only=True, allow_null=True)
+    formal_sku_id = serializers.IntegerField(read_only=True, allow_null=True)
+    platform_code = serializers.CharField(source="platform_master.code", read_only=True, allow_null=True)
+    platform_name = serializers.CharField(source="platform_master.name", read_only=True, allow_null=True)
+    store_code = serializers.CharField(source="store_master.code", read_only=True, allow_null=True)
+    store_name = serializers.CharField(source="store_master.name", read_only=True, allow_null=True)
+    store_country_code = serializers.CharField(source="store_master.country_code", read_only=True, allow_null=True)
+    platform_id = serializers.PrimaryKeyRelatedField(
+        source="platform_master",
+        queryset=PlatformMaster.objects.none(),
+        required=False,
+        write_only=True,
+    )
+    store_id = serializers.PrimaryKeyRelatedField(
+        source="store_master",
+        queryset=StoreMaster.objects.none(),
+        required=False,
+        write_only=True,
+    )
     category_name = serializers.CharField(source="category_node.name", read_only=True, allow_null=True)
     category_level = serializers.IntegerField(source="category_node.level", read_only=True, allow_null=True)
     category_path = serializers.SerializerMethodField()
@@ -139,40 +163,16 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
             "project_stage",
             "project_status",
             "target_sites",
-            "assigned_to_id",
             "archive_no",
-            "product_name",
-            "category",
-            "category_node",
-            "category_name",
-            "category_level",
-            "category_path",
-            "platform",
-            "site",
-            "inventory_mode",
-            "virtual_inventory_sku",
-            "virtual_inventory_qty",
-            "test_result",
-            "test_notes",
-            "status",
-            "formal_product",
-            "formal_product_id",
-            "formal_spu_code",
-            "created_by_id",
-            "updated_by_id",
-            "trial_confirmed_by_id",
-            "trial_confirmed_at",
-            "formalized_by_id",
-            "formalized_at",
-            "confirmed_by_id",
-            "confirmed_at",
-            "converted_by_id",
-            "converted_at",
-            "is_virtual",
-            "virtual_inventory",
-            "created_at",
-            "updated_at",
-            "events",
+            "product_name", "development_spu_code", "season_code", "category", "category_node", "category_name",
+            "category_level", "category_path", "platform_master", "platform_id", "platform_code", "platform_name",
+            "store_master", "store_id", "store_code", "store_name", "store_country_code", "platform", "site",
+            "inventory_mode", "virtual_inventory_sku", "virtual_inventory_qty", "test_result", "test_notes", "status",
+            "formal_product", "formal_product_id", "formal_spu_code", "formal_sku_id", "formal_sku_code",
+            "trial_product_id", "trial_spu_code", "trial_sku_id", "trial_sku_code", "trial_confirmed_by_id",
+            "trial_confirmed_at", "formalized_by_id", "formalized_at", "confirmed_by_id", "confirmed_at",
+            "converted_by_id", "converted_at", "is_virtual", "virtual_inventory", "assigned_to_id", "created_by_id",
+            "updated_by_id", "created_at", "updated_at", "events",
         )
         read_only_fields = (
             "id",
@@ -183,6 +183,9 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
             "status",
             "formal_product",
             "formal_spu_code",
+            "formal_sku_id", "formal_sku_code", "trial_product_id", "trial_spu_code", "trial_sku_id", "trial_sku_code",
+            "platform_code", "platform_name", "store_code", "store_name", "store_country_code",
+            "development_spu_code", "season_code",
             "created_by_id",
             "updated_by_id",
             "trial_confirmed_by_id",
@@ -196,8 +199,10 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "product_name": {"required": False},
             "category": {"required": False, "allow_blank": True},
-            "platform": {"required": False},
-            "site": {"required": False},
+            "platform": {"required": False, "allow_null": True},
+            "site": {"required": False, "allow_null": True},
+            "platform_master": {"required": False, "allow_null": True},
+            "store_master": {"required": False, "allow_null": True},
             "virtual_inventory_qty": {"required": False, "min_value": 0},
             "test_notes": {"required": False, "allow_blank": True},
         }
@@ -215,6 +220,18 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
             if tenant_id
             else ProductCategory.objects.none()
         )
+        self.fields["platform_master"].queryset = (
+            PlatformMaster.objects.filter(tenant_id=tenant_id, status=StatusChoices.ACTIVE)
+            if tenant_id
+            else PlatformMaster.objects.none()
+        )
+        self.fields["store_master"].queryset = (
+            StoreMaster.objects.select_related("platform").filter(tenant_id=tenant_id, status=StatusChoices.ACTIVE)
+            if tenant_id
+            else StoreMaster.objects.none()
+        )
+        self.fields["platform_id"].queryset = self.fields["platform_master"].queryset
+        self.fields["store_id"].queryset = self.fields["store_master"].queryset
 
     def validate_project(self, value):
         request = self.context.get("request")
@@ -248,6 +265,10 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
                 "category_node",
                 "platform",
                 "site",
+                "platform_master",
+                "platform_id",
+                "store_master",
+                "store_id",
                 "virtual_inventory_qty",
                 "test_notes",
             }
@@ -256,10 +277,43 @@ class DevelopmentProductArchiveSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {field: "Only a virtual trial archive can be edited." for field in attempted}
                 )
+        if self.instance is not None and self.instance.trial_product_id:
+            attempted_codes = {"development_spu_code", "season_code"}.intersection(self.initial_data)
+            if attempted_codes:
+                raise serializers.ValidationError({field: "Development coding is immutable after trial generation." for field in attempted_codes})
 
         project = attrs.get("project")
         if project is None and self.instance is not None:
             project = self.instance.project
+        request = self.context.get("request")
+        tenant_id = getattr(getattr(request, "user", None), "tenant_id", None)
+        current_platform = getattr(self.instance, "platform_master", None)
+        current_store = getattr(self.instance, "store_master", None)
+        platform = attrs.get("platform_master", current_platform)
+        store = attrs.get("store_master", current_store)
+        if platform is not None:
+            if platform.tenant_id != tenant_id or platform.status != StatusChoices.ACTIVE:
+                raise serializers.ValidationError({"platform_master": "Platform must be active and belong to the current tenant."})
+        if store is not None:
+            if store.tenant_id != tenant_id or store.status != StatusChoices.ACTIVE:
+                raise serializers.ValidationError({"store_master": "Store must be active and belong to the current tenant."})
+            if platform is None:
+                platform = store.platform
+                attrs["platform_master"] = platform
+            if platform.tenant_id != tenant_id or platform.status != StatusChoices.ACTIVE:
+                raise serializers.ValidationError({"platform_master": "Platform must be active and belong to the current tenant."})
+            if store.platform_id != platform.id:
+                raise serializers.ValidationError({"store_master": "Store must belong to the selected platform."})
+            supplied_site = attrs.get("site", getattr(self.instance, "site", ""))
+            if supplied_site and str(supplied_site).strip().casefold() not in {"internal", str(store.country_code).strip().casefold()}:
+                raise serializers.ValidationError({"site": "Site must match the selected store country."})
+            attrs["site"] = str(store.country_code).strip().upper()
+        if platform is not None:
+            supplied_platform = attrs.get("platform", getattr(self.instance, "platform", ""))
+            if supplied_platform and str(supplied_platform).strip().casefold() not in {"internal", str(platform.code).strip().casefold()}:
+                raise serializers.ValidationError({"platform": "Platform snapshot must match the selected platform."})
+            attrs["platform"] = str(platform.code).strip()
+
         category = attrs.get("category_node")
         if category is None and project is not None:
             # Explicit archive selection wins; otherwise carry the project

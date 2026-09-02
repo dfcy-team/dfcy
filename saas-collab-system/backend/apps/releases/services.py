@@ -37,6 +37,8 @@ REQUIRED_APPROVAL_TYPES = (
 
 
 def required_gate_codes(contract):
+    """Return the gates required for the contract's target environment."""
+
     if contract.environment == ReleaseContract.Environment.PRODUCTION:
         return RECORDABLE_GATE_CODES
     return REQUIRED_GATE_CODES

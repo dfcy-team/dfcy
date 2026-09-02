@@ -21,35 +21,10 @@ class RPATaskListSerializer(serializers.ModelSerializer):
     class Meta:
         model = RPATask
         fields = (
-            "id", "task_id", "task_type", "business_type", "business_id", "status", "execution_mode", "priority",
+            "id", "task_id", "task_type", "business_type", "business_id", "status", "priority",
             "agent", "retry_count", "max_retry_count", "manual_assignee", "manual_reason",
             "manual_assigned_at", "claimed_at", "started_at", "finished_at", "created_at", "updated_at",
         )
-
-
-class RPATaskCreateSerializer(serializers.ModelSerializer):
-    confirm_production = serializers.BooleanField(write_only=True, required=False, default=False)
-
-    class Meta:
-        model = RPATask
-        fields = (
-            "task_type", "business_type", "business_id", "execution_mode", "priority",
-            "payload", "max_retry_count", "confirm_production",
-        )
-
-    def validate_payload(self, value):
-        if not isinstance(value, dict):
-            raise serializers.ValidationError("Payload must be a JSON object.")
-        return sanitize_sensitive_data(value)
-
-    def validate(self, attrs):
-        mode = attrs.get("execution_mode", RPATask.ExecutionMode.DRY_RUN)
-        if mode == RPATask.ExecutionMode.PRODUCTION and not attrs.pop("confirm_production", False):
-            raise serializers.ValidationError(
-                {"confirm_production": "Production tasks require explicit confirmation."}
-            )
-        attrs.pop("confirm_production", None)
-        return attrs
 
 
 class RPATaskStepLogSerializer(serializers.ModelSerializer):

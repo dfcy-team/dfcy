@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-from apps.masterdata.models import SupplierMaster
+from apps.masterdata.models import PlatformMaster, StoreMaster, SupplierMaster
 from apps.products.models import ProductCategory, ProductResearch, ProductSPU
 from apps.tenants.models import Tenant
 
@@ -349,9 +349,25 @@ class DevelopmentProductArchive(models.Model):
     )
     archive_no = models.CharField(max_length=80)
     product_name = models.CharField(max_length=200)
+    development_spu_code = models.CharField(max_length=80, blank=True)
+    season_code = models.CharField(max_length=1, default="0", blank=True)
     category = models.CharField(max_length=120, blank=True)
     category_node = models.ForeignKey(
         ProductCategory,
+        on_delete=models.PROTECT,
+        related_name="development_product_archives",
+        null=True,
+        blank=True,
+    )
+    platform_master = models.ForeignKey(
+        PlatformMaster,
+        on_delete=models.PROTECT,
+        related_name="development_product_archives",
+        null=True,
+        blank=True,
+    )
+    store_master = models.ForeignKey(
+        StoreMaster,
         on_delete=models.PROTECT,
         related_name="development_product_archives",
         null=True,
@@ -373,6 +389,27 @@ class DevelopmentProductArchive(models.Model):
         ProductSPU,
         on_delete=models.PROTECT,
         related_name="development_product_archive",
+        null=True,
+        blank=True,
+    )
+    trial_product = models.ForeignKey(
+        ProductSPU,
+        on_delete=models.PROTECT,
+        related_name="development_trial_archives",
+        null=True,
+        blank=True,
+    )
+    trial_sku = models.ForeignKey(
+        "products.ProductSKU",
+        on_delete=models.PROTECT,
+        related_name="development_trial_archives",
+        null=True,
+        blank=True,
+    )
+    formal_sku = models.ForeignKey(
+        "products.ProductSKU",
+        on_delete=models.PROTECT,
+        related_name="formalized_development_archives",
         null=True,
         blank=True,
     )
@@ -414,6 +451,11 @@ class DevelopmentProductArchive(models.Model):
                 fields=["tenant", "archive_no"],
                 name="uniq_dev_product_archive_no",
             ),
+            models.UniqueConstraint(
+                fields=["tenant", "development_spu_code"],
+                condition=~models.Q(development_spu_code=""),
+                name="uniq_dev_archive_dev_spu_code",
+            ),
         ]
         indexes = [
             models.Index(
@@ -423,6 +465,14 @@ class DevelopmentProductArchive(models.Model):
             models.Index(
                 fields=["tenant", "platform", "site"],
                 name="idx_dev_product_archive_market",
+            ),
+            models.Index(
+                fields=["tenant", "platform_master"],
+                name="idx_dev_archive_platform_ref",
+            ),
+            models.Index(
+                fields=["tenant", "store_master"],
+                name="idx_dev_archive_store_ref",
             ),
         ]
 

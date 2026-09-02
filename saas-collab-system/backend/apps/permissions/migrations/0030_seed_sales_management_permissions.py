@@ -41,7 +41,7 @@ def seed_sales_management_permissions(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [("permissions", "0029_seed_development_product_archive_permissions")]
+    dependencies = [("permissions", "0029_sync_development_product_archive_permission_metadata")]
 
     operations = [
         migrations.RunPython(seed_sales_management_permissions, migrations.RunPython.noop),

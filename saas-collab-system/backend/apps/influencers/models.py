@@ -28,7 +28,13 @@ def normalize_tiktok_username(value):
     return normalized.strip().lstrip("@").strip().lower()
 
 
-TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._]{1,255}$")
+# TikTok's current UI generally documents letters, digits, periods, and
+# underscores.  Existing tenant data also contains handles with a hyphen
+# (usually imported from creator reports), so keep that legacy identity
+# addressable instead of rejecting it at the model boundary.  The value is
+# still normalized, length-limited, and tenant-scoped before it is used as an
+# identity key.
+TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{1,255}$")
 
 
 def is_valid_tiktok_username(value):
@@ -698,6 +704,15 @@ class SampleFulfillment(StateMachineTenantModel):
                 raise ValidationError({"influencer": "Influencer must match the outreach target."})
             if target["is_deleted"] and self._state.adding:
                 raise ValidationError({"outreach_target": "Deleted outreach targets cannot receive samples."})
+
+
+# ``processing`` was part of the pre-baseline fulfillment state machine and is
+# still present in some imported workflow records.  Migration 0012 maps legacy
+# rows to the canonical lifecycle statuses and deliberately removes it from
+# the advertised choices, but retaining a non-enum compatibility constant lets
+# old service callers inspect and transition those records without changing
+# the current database schema or public choice list.
+SampleFulfillment.Status.PROCESSING = "processing"
 
 
 class SampleItem(TenantValidatedModel):

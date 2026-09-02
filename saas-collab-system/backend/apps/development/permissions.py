@@ -66,6 +66,10 @@ CanManageProductArchives = any_permission_class(
     "development.product_archive.manage",
     "development.project.manage",
 )
+# Trial SKU generation is a mutation of the virtual archive and therefore
+# shares the archive-manage boundary; keep the explicit name for older API
+# clients and route imports.
+CanGenerateProductArchives = CanManageProductArchives
 CanConfirmProductArchives = any_permission_class(
     "development.product_archive.confirm",
     "development.project.approve",

@@ -61,7 +61,29 @@
       <el-form label-position="top">
         <el-form-item label="商品名称"><el-input v-model="requirement.product_name" /></el-form-item>
         <el-alert v-if="masterDataError" :title="masterDataError" type="warning" :closable="false" show-icon />
-        <div class="form-grid"><el-form-item label="品类"><el-select v-model="requirement.category_node" filterable clearable placeholder="请选择分类"><el-option v-for="category in categories.filter((item) => item.is_active)" :key="category.id" :label="`L${category.level} ${category.code} ${category.name}`" :value="category.id" /></el-select></el-form-item><el-form-item label="目标站点"><el-select v-model="requirement.target_sites" multiple filterable clearable placeholder="请选择启用站点"><el-option v-for="site in sites" :key="site.id" :label="`${site.code} · ${site.name}`" :value="site.id" /></el-select></el-form-item></div>
+        <el-alert title="候选款登记只做完整性校验、分类归属和重复提醒，不设置独立强制需求审核" type="info" :closable="false" show-icon />
+        <div class="form-grid">
+          <el-form-item label="开发类型" required>
+            <el-select v-model="requirement.development_type" filterable @change="onDevelopmentTypeChange">
+              <el-option v-for="item in developmentTypes" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="测款模式" required>
+            <el-select v-model="requirement.trial_mode" filterable>
+              <el-option v-for="item in trialModes" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="商品分类（允许 L2/L3）" required>
+            <el-select v-model="requirement.category_node" filterable clearable placeholder="请选择 L2 或 L3 分类">
+              <el-option v-for="category in categories.filter((item) => item.is_active && [2, 3].includes(Number(item.level)))" :key="category.id" :label="`L${category.level} ${category.code} ${category.name}`" :value="category.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="目标站点"><el-select v-model="requirement.target_sites" multiple filterable clearable placeholder="请选择启用站点"><el-option v-for="site in sites" :key="site.id" :label="`${site.code} · ${site.name}`" :value="site.id" /></el-select></el-form-item>
+          <el-form-item v-if="requirement.development_type !== 'self_design'" label="工厂原型号" required><el-input v-model="requirement.original_model" placeholder="工厂选款或微改款需填写原型号" /></el-form-item>
+          <el-form-item v-if="requirement.development_type === 'self_design'" label="设计文件" required><el-input v-model="requirement.design_files" placeholder="填写设计文件或附件引用，多个值用逗号分隔" /></el-form-item>
+          <el-form-item v-if="requirement.development_type === 'self_design'" label="设计稿发送日期" required><el-date-picker v-model="requirement.design_sent_date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        </div>
+        <p class="field-help">实际小单测款达标可直接转正；虚拟库存测款达标后先进入上新计划。</p>
         <el-collapse><el-collapse-item title="补充市场数据（选填）"><el-form-item label="参考链接"><el-input v-model="requirement.reference_link" /></el-form-item><el-form-item label="提报理由"><el-input v-model="requirement.reason" type="textarea" /></el-form-item></el-collapse-item></el-collapse>
       </el-form>
 
@@ -140,7 +162,9 @@ const metas = { requirements:['选品提报','快速提报、自动去重并跟�
 const meta = computed(() => ({ title: metas[mode.value]?.[0] || '产品开发', subtitle: metas[mode.value]?.[1] || '' }));
 const rows = ref([]); const loading = ref(false); const saving = ref(false); const search = ref(''); const stageFilter = ref(''); const siteFilter = ref('');
 const drawerOpen = ref(false); const selected = ref(null); const requirementOpen = ref(false); const projectOpen = ref(false); const salesOpen = ref(false);
-const requirement = reactive({ id: null, research_no:'', product_name:'', category:'', category_node:null, target_sites:[], target_site_ids:[], reference_link:'', reason:'', platform:'', competitor_url:'', estimated_sales:0, estimated_gross_margin:null, risk_points:[] });
+const requirement = reactive({ id: null, research_no:'', product_name:'', category:'', category_node:null, target_sites:[], target_site_ids:[], reference_link:'', reason:'', platform:'', competitor_url:'', estimated_sales:0, estimated_gross_margin:null, risk_points:[], development_type:'factory_selection', trial_mode:'small_order', original_model:'', design_files:'', design_sent_date:'' });
+const developmentTypes = [{ value: 'factory_selection', label: '工厂选款' }, { value: 'self_design', label: '自有设计（轻量）' }, { value: 'micro_revision', label: '微改款（预留）' }];
+const trialModes = [{ value: 'small_order', label: '实际小单测款' }, { value: 'virtual', label: '虚拟库存测款' }];
 const newProject = reactive({ product_name:'', assigned_to:1, target_sites:[], planned_launch_date:'', development_source:'internal', project_no:`DEV-${Date.now()}` });
 const csvText = ref('spu_code,site,platform,snapshot_date,daily_sales_qty,daily_sales_amount_usd,ad_spend\n');
 const sites = ref([]); const categories = ref([]); const masterDataError = ref('');
@@ -194,6 +218,7 @@ async function selectCompetitorReport(report){ const id = reportIdentifier(repor
 async function loadRequirementAssociations(){ if (!requirement.id) return; associationsLoading.value = true; const response = await fetchRequirementCompetitorAssociations(requirement.id); associationsLoading.value = false; if (!response?.success) return; const data = response.data || {}; requirementAssociations.value = Array.isArray(data) ? data : (data.items || data.results || []); }
 async function removeRequirementAssociation(association){ if (!requirement.id || !association?.id) return; associationsLoading.value = true; const response = await deleteRequirementCompetitorAssociation(requirement.id, association.id); associationsLoading.value = false; if (response?.success) { requirementAssociations.value = requirementAssociations.value.filter((item) => item.id !== association.id); ElMessage.success('关联已删除'); } else ElMessage.error(response?.message || '关联删除失败。'); }
 function applyCompetitorReport(){ if (!selectedCompetitorReport.value) return; competitorPickerOpen.value = false; if (!requirementOpen.value) requirementOpen.value = true; }
+function onDevelopmentTypeChange(value){ if (value === 'self_design' && !requirement.original_model) requirement.original_model = '无（自有设计）'; if (value !== 'self_design' && requirement.original_model === '无（自有设计）') requirement.original_model = ''; }
 async function loadEvidence(){ if (!selectedCompetitorReport.value) return; evidenceLoading.value = true; const response = await fetchCompetitorReportEvidence(reportIdentifier(selectedCompetitorReport.value), { page: evidencePage.value, page_size: evidencePageSize.value }); evidenceLoading.value = false; if (!response?.success) { ElMessage.warning(response?.message || '评价证据暂不可用。'); return; } const data = response.data || {}; const raw = Array.isArray(data) ? data : (data.items || data.results || []); evidenceRows.value = raw.map((item) => ({ ...item, id: item.id || item.evidence_id, text: item.text || item.review || item.original_text || '', attribute_name: item.attribute_name || item.attribute_code || '未分类' })); evidenceTotal.value = Number(data.total ?? data.count ?? evidenceRows.value.length); evidenceLoaded.value = true; }
 async function changeEvidencePage(page){ evidencePage.value = page; await loadEvidence(); }
 function handleEvidenceSelection(selection){ const currentIds = new Set(selection.map((item) => item.id).filter(Boolean)); const pageIds = new Set(evidenceRows.value.map((item) => item.id).filter(Boolean)); selectedEvidenceIds.value = [...new Set([...selectedEvidenceIds.value.filter((id) => !pageIds.has(id)), ...currentIds])]; }
@@ -240,7 +265,8 @@ async function saveCompetitorAssociation(){
 }
 async function saveRequirement(){
   const researchNo = requirement.research_no || generatedResearchNo();
-  const payload = { research_no: researchNo, product_name: requirement.product_name, platform: requirement.platform || 'multi-site', category_node: requirement.category_node || null, target_site_ids: [...(requirement.target_sites || [])], competitor_url: requirement.competitor_url || '', estimated_sales: Number(requirement.estimated_sales || 0), estimated_gross_margin: requirement.estimated_gross_margin, risk_points: [...(requirement.risk_points || []), ...(requirement.reason ? [requirement.reason] : [])] };
+  const designFiles = Array.isArray(requirement.design_files) ? requirement.design_files : String(requirement.design_files || '').split(',').map((item) => item.trim()).filter(Boolean);
+  const payload = { research_no: researchNo, product_name: requirement.product_name, platform: requirement.platform || 'multi-site', category_node: requirement.category_node || null, target_site_ids: [...(requirement.target_sites || [])], competitor_url: requirement.competitor_url || '', estimated_sales: Number(requirement.estimated_sales || 0), estimated_gross_margin: requirement.estimated_gross_margin, risk_points: [...(requirement.risk_points || []), ...(requirement.reason ? [requirement.reason] : [])], development_type: requirement.development_type, trial_mode: requirement.trial_mode, original_model: requirement.development_type === 'self_design' ? '无（自有设计）' : String(requirement.original_model || '').trim(), design_files: requirement.development_type === 'self_design' ? designFiles : [], design_sent_date: requirement.development_type === 'self_design' ? requirement.design_sent_date || null : null };
   const response = await createDevelopmentRequirement(payload);
   if (!response?.success) { ElMessage.error(response?.message || '选品需求保存失败。'); return null; }
   const item = response.data || {};

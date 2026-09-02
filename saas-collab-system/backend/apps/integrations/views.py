@@ -108,6 +108,7 @@ from .serializers import (
     SyncJobSerializer,
     SyncAlertIncidentSerializer,
     SyncRunSerializer,
+    validate_marketplace_callback_url,
 )
 from .store_mapping_service import create_store_mapping, update_store_mapping
 from .adapters import MockPlatformAdapter, get_adapter_for_config
@@ -719,13 +720,21 @@ def _credential_update_parts(config, values):
         if values.get("app_secret"):
             secret_values["app_secret"] = values["app_secret"]
     elif config.platform == PlatformChoices.SHOPEE:
-        unsupported = set(values) - {"partner_id", "partner_key"}
+        unsupported = set(values) - {"partner_id", "partner_key", "redirect_uri"}
         if unsupported:
             raise ValidationError("Shopee 凭据字段与当前配置不匹配。")
         partner_id = str(values.get("partner_id") or platform_config.get("partner_id") or identity).strip()
+        redirect_uri = str(values.get("redirect_uri") or config.callback_url or "").strip()
         if not partner_id.isdigit() or int(partner_id) <= 0:
             raise ValidationError({"credentials": {"partner_id": "Partner ID 必须是正整数。"}})
+        if not redirect_uri:
+            raise ValidationError({"credentials": {"redirect_uri": "Shopee 授权回调地址不能为空。"}})
         platform_config["partner_id"] = partner_id
+        callback_url = validate_marketplace_callback_url(
+            redirect_uri,
+            environment=config.environment,
+            platform=config.platform,
+        )
         if values.get("partner_key"):
             secret_values["partner_key"] = values["partner_key"]
     elif config.platform == PlatformChoices.TIKTOK and api_type == "advertising":

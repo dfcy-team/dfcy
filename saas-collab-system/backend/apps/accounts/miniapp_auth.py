@@ -12,6 +12,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import ContractViolation
 
+from .credential_auth import credential_lease_active
 from .models import CustomUser, MiniAppIdentity
 
 
@@ -121,7 +122,7 @@ def authenticate_miniapp_code(code):
         )
         .first()
     )
-    if identity is None or identity.user.user_type == CustomUser.UserType.RPA:
+    if identity is None or identity.user.user_type == CustomUser.UserType.RPA or not credential_lease_active(identity.user):
         raise ContractViolation(
             "The Mini Program identity is not bound or is unavailable.",
             error_code=ErrorCode.MINIAPP_IDENTITY_UNBOUND,
@@ -133,6 +134,12 @@ def authenticate_miniapp_code(code):
 
 
 def issue_miniapp_tokens(user):
+    if not credential_lease_active(user):
+        raise ContractViolation(
+            "The Mini Program user credential is unavailable.",
+            error_code=ErrorCode.MINIAPP_TOKEN_INVALID,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
     refresh = RefreshToken.for_user(user)
     refresh["channel"] = MINIAPP_TOKEN_CHANNEL
     refresh["tenant_id"] = user.tenant_id
@@ -163,6 +170,12 @@ def refresh_miniapp_tokens(refresh):
     if user is None:
         raise ContractViolation(
             "The Mini Program user is unavailable.",
+            error_code=ErrorCode.MINIAPP_TOKEN_INVALID,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    if not credential_lease_active(user):
+        raise ContractViolation(
+            "The Mini Program user credential is unavailable.",
             error_code=ErrorCode.MINIAPP_TOKEN_INVALID,
             status_code=status.HTTP_401_UNAUTHORIZED,
         )

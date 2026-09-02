@@ -158,7 +158,13 @@ async function loadData() {
     if (!response.success) throw new Error(response.message || '接口返回失败');
     rows.value = getRows(response.data);
     detail.value = getDetail(response.data);
-    dataStatus.value = response.data?.api_status || response.data?.status || 'mock';
+    // A successful envelope without an authoritative status is not evidence
+    // of a live backend connection; keep the UI pending until one is supplied.
+    dataStatus.value = response.data?.api_status
+      || response.data?.status
+      || response.api_status
+      || response.status
+      || 'pending';
     if (response.data?.api_status === 'fallback') message.value = response.message;
   } catch (error) {
     dataStatus.value = 'error';

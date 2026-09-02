@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { flattenMenuItems, menuItems } from '../src/router/menu';
 
-describe('V2.44.33 menu baseline', () => {
-  it('keeps the baseline top-level structure and only adds Developer B BD performance', () => {
+describe('current deployment menu baseline', () => {
+  it('keeps the deployed top-level structure while exposing the added supply-chain and multi-platform workspaces', () => {
     expect(menuItems.map((item) => item.label)).toEqual([
-      '工作台', '产品开发', '全球刊登', '经营分析', '经营决策', '销售管理', '达人管理',
+      '工作台', '产品开发', '供应链协同', '多平台刊登', '经营分析', '经营决策', '销售管理', '达人管理',
       '流程协同', '业务协同', 'RPA协同', 'API数据接入', '财务中心', '报表中心', '基础档案',
       '系统治理', '治理与试点'
     ]);
@@ -20,15 +20,16 @@ describe('V2.44.33 menu baseline', () => {
     expect(influencers.children.map((item) => item.label)).toEqual([
       '达人档案', '建联任务', '送样履约', 'BD绩效'
     ]);
-    expect(flattenMenuItems(menuItems)).toHaveLength(99);
+    expect(flattenMenuItems(menuItems)).toHaveLength(98);
   });
 
-  it('keeps the V2.44.33 dark desktop and mobile navigation palette', () => {
+  it('keeps the current dark desktop and mobile navigation palette', () => {
     const layout = fs.readFileSync(path.resolve(process.cwd(), 'src/layouts/MainLayout.vue'), 'utf8');
-    expect(layout).toContain('background: #173550');
-    expect(layout).toContain('--el-menu-text-color: #dce8f2');
-    expect(layout).toContain('background: #2f6f9f');
-    expect(layout).toContain('.mobile-sidebar-drawer .el-drawer__body');
-    expect(layout).not.toContain('background: #fff;\n}\n\n.brand');
+    for (const color of ['#101827', '#0b1220', '#1e293b', '#1d4ed8', '#1e40af', '#cbd5e1', '#f8fafc']) {
+      expect(layout).toContain(color);
+    }
+    expect(layout).toContain('class="navigation-surface"');
+    expect(layout).toContain('class="navigation-drawer"');
+    expect(layout).toContain(':global(.navigation-drawer .el-drawer__body)');
   });
 });

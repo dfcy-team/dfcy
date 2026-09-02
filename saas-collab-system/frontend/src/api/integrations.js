@@ -61,6 +61,74 @@ export const fetchIntegrationConfigDetail = (id = 1) =>
     'integrations.configs.detail'
   );
 
+// Subject-scoped access is used by the master-data pages to show the
+// currently bound API capabilities and to keep authorization in the same
+// guarded integration workflow as the configuration pages.
+export const fetchSubjectApiAccess = (subjectType, subjectId) =>
+  requestWithMockFallback(
+    {
+      method: 'get',
+      url: '/api/internal/integrations/subject-api-access/',
+      params: { subject_type: subjectType, subject_id: subjectId }
+    },
+    () => ({ success: true, code: 'OK', message: 'mock', data: null }),
+    'integrations.subject_api_access'
+  );
+
+export const startStoreAuthorization = (payload) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/start/', data: payload },
+    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟模式不发起平台授权', data: null }),
+    'integrations.store_authorizations.oauth_start'
+  );
+
+export const completeSyntheticStoreAuthorization = (platform, params) =>
+  requestWithMockFallback(
+    { method: 'get', url: `/api/internal/integrations/store-authorizations/oauth/callback/${platform}/`, params },
+    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟授权回调不可用', data: null }),
+    'integrations.store_authorizations.oauth_callback'
+  );
+
+export const createIntegrationConfig = (payload) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/integrations/workspace-configs/', data: payload },
+    mockIntegrationConfigDetail,
+    'integrations.configs.create'
+  );
+
+export const rotateIntegrationSecretValues = (id, payload, idempotencyKey) =>
+  requestWithMockFallback(
+    {
+      method: 'post',
+      url: `/api/internal/integrations/configs/${id}/credentials/rotate/`,
+      data: payload,
+      headers: { 'Idempotency-Key': idempotencyKey }
+    },
+    mockIntegrationConfigDetail,
+    'integrations.configs.credentials.rotate'
+  );
+
+export const checkIntegrationReference = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/reference-check/`, data: {} },
+    mockIntegrationConfigDetail,
+    'integrations.configs.reference_check'
+  );
+
+export const checkIntegrationConsistency = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/consistency-check/`, data: {} },
+    mockIntegrationConfigDetail,
+    'integrations.configs.consistency_check'
+  );
+
+export const checkIntegrationReadonlyConnection = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/readonly-check/`, data: {} },
+    mockIntegrationConfigDetail,
+    'integrations.configs.readonly_check'
+  );
+
 export const updateIntegrationConfig = (id, payload) =>
   requestWithMockFallback(
     { method: 'patch', url: `/api/internal/integrations/configs/${id}/`, data: payload },
@@ -73,6 +141,13 @@ export const disableIntegrationConfig = (id) =>
     { method: 'post', url: `/api/internal/integrations/configs/${id}/disable/`, data: {} },
     () => mockIntegrationConfigDetail(id),
     'integrations.configs.disable'
+  );
+
+export const deleteIntegrationConfig = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/delete/`, data: {} },
+    () => ({ success: true, code: 'OK', message: 'deleted', data: { id, deleted: true } }),
+    'integrations.configs.delete'
   );
 
 export const verifyIntegrationConfig = (id) =>
@@ -170,6 +245,52 @@ export const disableSyncJob = (id = 1) =>
     { method: 'post', url: `/api/internal/integrations/sync-jobs/${id}/disable/` },
     mockSyncJobs,
     'integrations.sync_jobs.disable'
+  );
+
+export const runSyncJob = (id, idempotencyKey) =>
+  requestWithMockFallback(
+    {
+      method: 'post',
+      url: `/api/internal/integrations/sync-jobs/${id}/run/`,
+      data: idempotencyKey ? { idempotency_key: idempotencyKey } : {}
+    },
+    mockSyncRunDetail,
+    'integrations.sync_jobs.run'
+  );
+
+export const updateSyncJob = (id, payload) =>
+  requestWithMockFallback(
+    { method: 'patch', url: `/api/internal/integrations/sync-jobs/${id}/`, data: payload },
+    mockSyncJobs,
+    'integrations.sync_jobs.update'
+  );
+
+export const toggleSyncJob = (id, enabled) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/sync-jobs/${id}/toggle/`, data: { enabled } },
+    mockSyncJobs,
+    'integrations.sync_jobs.toggle'
+  );
+
+export const previewSyncJobDelete = (id) =>
+  requestWithMockFallback(
+    { method: 'get', url: `/api/internal/integrations/sync-jobs/${id}/delete/` },
+    () => ({ success: true, code: 'OK', message: 'preview', data: { can_delete: false, blockers: [] } }),
+    'integrations.sync_jobs.delete_preview'
+  );
+
+export const deleteSyncJob = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/sync-jobs/${id}/delete/`, data: {} },
+    mockSyncJobs,
+    'integrations.sync_jobs.delete'
+  );
+
+export const retrySyncRun = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/sync-runs/${id}/retry/`, data: {} },
+    mockSyncRunDetail,
+    'integrations.sync_runs.retry'
   );
 
 export const fetchApiSyncTasks = () =>

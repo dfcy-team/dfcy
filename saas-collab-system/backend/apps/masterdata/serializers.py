@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from apps.accounts.models import CustomUser
@@ -5,7 +6,7 @@ from apps.products.models import ProductCategory
 
 from .models import (
     CountrySiteMaster, PlatformMaster, PlatformSiteMaster, StatusChoices, StoreMaster,
-    SupplierMaster, WarehouseMaster,
+    SupplierMaster, WarehouseMaster, WAREHOUSE_SERVICE_PLATFORM_TYPES, WAREHOUSE_TYPE_TO_PLATFORM_TYPE,
 )
 from .platform_catalog import normalize_platform_code, platform_catalog_item
 
@@ -272,12 +273,135 @@ class CountrySiteMasterSerializer(TenantOwnedSerializer):
 
 
 class WarehouseMasterSerializer(TenantOwnedSerializer):
+    service_platform_id = serializers.PrimaryKeyRelatedField(
+        source="service_platform",
+        queryset=PlatformMaster.objects.none(),
+        required=False,
+        allow_null=True,
+    )
+    service_platform_name = serializers.CharField(source="service_platform.name", read_only=True, allow_null=True)
+    service_platform_type = serializers.CharField(source="service_platform.platform_type", read_only=True, allow_null=True)
+    service_platform_integration_key = serializers.SerializerMethodField()
+    api_access_available = serializers.SerializerMethodField()
+    api_connected = serializers.SerializerMethodField()
+    site_code = serializers.SerializerMethodField()
+    last_sync_at = serializers.SerializerMethodField()
+    last_sync_status = serializers.SerializerMethodField()
+
     class Meta:
         model = WarehouseMaster
         fields = (
             "id", "tenant_id", "code", "name", "country_code", "warehouse_type", "status", "created_at", "updated_at",
+            "service_platform_id", "service_platform_name", "service_platform_type", "service_platform_integration_key",
+            "api_access_available", "api_connected", "site_code", "last_sync_at", "last_sync_status",
         )
-        read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
+        read_only_fields = (
+            "id", "tenant_id", "created_at", "updated_at", "api_connected", "site_code", "last_sync_at", "last_sync_status",
+            "service_platform_name", "service_platform_type", "service_platform_integration_key", "api_access_available",
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        tenant_id = getattr(getattr(request, "user", None), "tenant_id", None)
+        if tenant_id:
+            self.fields["service_platform_id"].queryset = PlatformMaster.objects.filter(
+                tenant_id=tenant_id,
+                status=StatusChoices.ACTIVE,
+                platform_type__in=WAREHOUSE_SERVICE_PLATFORM_TYPES,
+            )
+
+    def _service_platform_key(self, obj):
+        if not obj or not obj.service_platform:
+            return ""
+        from apps.integrations.platform_schema_service import integration_platform_key
+
+        return integration_platform_key(
+            platform_type=obj.service_platform.platform_type,
+            code=obj.service_platform.code,
+            name=obj.service_platform.name,
+        )
+
+    def get_service_platform_integration_key(self, obj):
+        return self._service_platform_key(obj)
+
+    def get_api_access_available(self, obj):
+        if not obj.service_platform or obj.service_platform.status != StatusChoices.ACTIVE:
+            return False
+        expected_type = WAREHOUSE_TYPE_TO_PLATFORM_TYPE.get(obj.warehouse_type)
+        if obj.service_platform.platform_type != expected_type:
+            return False
+        provider = self._service_platform_key(obj)
+        if not provider:
+            return False
+        from apps.integrations.platform_capabilities import get_platform_capability
+
+        try:
+            return "inventory" in get_platform_capability(provider).api_types
+        except DjangoValidationError:
+            return False
+
+    def validate_service_platform_id(self, value):
+        request = self.context["request"]
+        if value.tenant_id != request.user.tenant_id:
+            raise serializers.ValidationError("仓储服务平台必须属于当前租户。")
+        if value.status != StatusChoices.ACTIVE:
+            raise serializers.ValidationError("仓储服务平台必须处于启用状态。")
+        if value.platform_type not in WAREHOUSE_SERVICE_PLATFORM_TYPES:
+            raise serializers.ValidationError("所选平台不是仓储服务平台类型。")
+        return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        warehouse_type = attrs.get("warehouse_type", getattr(self.instance, "warehouse_type", None))
+        service_platform = attrs.get("service_platform", getattr(self.instance, "service_platform", None))
+        expected_platform_type = WAREHOUSE_TYPE_TO_PLATFORM_TYPE.get(warehouse_type)
+        if expected_platform_type is None:
+            raise serializers.ValidationError({"warehouse_type": "仓库类型无效。"})
+        if service_platform:
+            request = self.context["request"]
+            if service_platform.tenant_id != request.user.tenant_id:
+                raise serializers.ValidationError({"service_platform_id": "仓储服务平台必须属于当前租户。"})
+            if service_platform.status != StatusChoices.ACTIVE:
+                raise serializers.ValidationError({"service_platform_id": "仓储服务平台必须处于启用状态。"})
+        if service_platform is None:
+            if warehouse_type != WarehouseMaster.WarehouseType.OWNED:
+                raise serializers.ValidationError({"service_platform_id": "三方仓和平台仓必须绑定仓储服务平台。"})
+        elif service_platform.platform_type != expected_platform_type:
+            raise serializers.ValidationError({"service_platform_id": "仓储服务平台类型必须与仓库类型一致。"})
+        return attrs
+
+    def _latest_snapshot(self, obj):
+        from apps.commerce.models import InventorySnapshot
+
+        if not hasattr(obj, "_latest_inventory_snapshot"):
+            obj._latest_inventory_snapshot = InventorySnapshot.objects.filter(
+                tenant=obj.tenant, warehouse=obj
+            ).select_related("source_run").order_by("-snapshot_at_utc").first()
+        return obj._latest_inventory_snapshot
+
+    def get_api_connected(self, obj):
+        if not self.get_api_access_available(obj):
+            return False
+        from apps.integrations.models import WarehouseAuthorization
+
+        return WarehouseAuthorization.objects.filter(
+            tenant_id=obj.tenant_id,
+            warehouse_id=obj.id,
+            status__in=["authorized", WarehouseAuthorization.Status.ACTIVE],
+        ).exists()
+
+    def get_site_code(self, obj):
+        snapshot = self._latest_snapshot(obj)
+        return snapshot.site_code if snapshot else ""
+
+    def get_last_sync_at(self, obj):
+        snapshot = self._latest_snapshot(obj)
+        return snapshot.source_run.finished_at if snapshot and snapshot.source_run else None
+
+    def get_last_sync_status(self, obj):
+        snapshot = self._latest_snapshot(obj)
+        return snapshot.source_run.status if snapshot and snapshot.source_run else "pending"
 
 
 class SupplierMasterSerializer(TenantOwnedSerializer):

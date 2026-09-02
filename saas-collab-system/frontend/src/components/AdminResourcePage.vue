@@ -7,6 +7,7 @@
     :capability="capability"
   >
     <template #action>
+      <slot name="header-actions" />
       <slot name="actions" />
       <el-button
         v-if="createHandler && createAccess.visible"
@@ -38,23 +39,29 @@
       </div>
     </section>
 
-    <section class="resource-toolbar" aria-label="筛选条件">
-      <el-input
-        v-model="filters.search"
-        clearable
-        :placeholder="`搜索${entityLabel}名称或编码`"
-        @keyup.enter="loadData"
-      />
-      <el-select v-model="filters.status" clearable placeholder="全部状态">
-        <el-option label="启用" value="active" />
-        <el-option label="停用" value="inactive" />
-      </el-select>
+    <section class="resource-toolbar" :class="{ 'resource-toolbar--labeled': showFilterLabels }" aria-label="筛选条件">
+      <label class="filter-field">
+        <span v-if="showFilterLabels">{{ searchLabel || entityLabel }}</span>
+        <el-input
+          v-model="filters.search"
+          clearable
+          :placeholder="`搜索${entityLabel}名称或编码`"
+          @keyup.enter="loadData"
+        />
+      </label>
+      <label class="filter-field">
+        <span v-if="showFilterLabels">状态</span>
+        <el-select v-model="filters.status" clearable placeholder="全部状态">
+          <el-option label="启用" value="active" />
+          <el-option label="停用" value="inactive" />
+        </el-select>
+      </label>
       <el-button type="primary" @click="loadData">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
     </section>
 
     <AppState
-      v-if="pageState !== 'ready' && pageState !== 'empty'"
+      v-if="pageState !== 'ready'"
       :status="pageState"
       :title="stateTitle"
       :detail="stateDetail"
@@ -62,7 +69,7 @@
     />
 
     <section v-else class="resource-table" aria-label="档案列表">
-      <el-table :data="rows" border table-layout="fixed" empty-text="暂无符合条件的档案" @row-click="openDetail">
+      <el-table :data="rows" border table-layout="fixed" :max-height="tableMaxHeight || undefined" @row-click="openDetail">
         <el-table-column
           v-for="column in columns"
           :key="column.prop"
@@ -75,9 +82,12 @@
             <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="plain">
               {{ statusLabel(row[column.prop]) }}
             </el-tag>
+            <el-tag v-else-if="column.type === 'api'" :type="row[column.prop] ? 'success' : 'info'" effect="plain">
+              {{ row[column.prop] ? '已接入' : '未接入' }}
+            </el-tag>
             <span v-else-if="column.type === 'list'">{{ (row[column.prop] || []).join('、') || '-' }}</span>
             <span v-else-if="column.type === 'boolean'">{{ row[column.prop] ? '是' : '否' }}</span>
-            <span v-else>{{ formatValue(row[column.prop]) }}</span>
+            <span v-else>{{ columnValue(column, row[column.prop]) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" :width="operationWidth" fixed="right">
@@ -90,7 +100,20 @@
               :disabled="manageAccess.disabled"
               :title="manageAccess.reason"
               @click.stop="openEdit(row)"
-            >编辑</el-button>
+            >
+              编辑
+            </el-button>
+            <el-button
+              v-if="deleteHandler && manageAccess.visible"
+              link
+              type="danger"
+              :disabled="manageAccess.disabled"
+              :title="manageAccess.reason"
+              @click.stop="confirmDelete(row)"
+            >
+              删除
+            </el-button>
+            <slot name="row-actions" :row="row" />
             <el-button
               v-if="statusHandler && manageAccess.visible"
               link
@@ -101,7 +124,6 @@
             >
               {{ rowStatus(row) === 'active' ? '停用' : '启用' }}
             </el-button>
-            <slot name="row-actions" :row="row" />
           </template>
         </el-table-column>
       </el-table>
@@ -110,10 +132,13 @@
         <span>共 {{ total }} 条</span>
         <el-pagination
           v-model:current-page="filters.page"
+          v-model:page-size="filters.page_size"
           :page-size="filters.page_size"
+          :page-sizes="[20, 50, 100]"
           :total="total"
-          layout="prev, pager, next"
+          :layout="showPageSize ? 'sizes, prev, pager, next, jumper' : 'prev, pager, next'"
           @current-change="loadData"
+          @size-change="handleSizeChange"
         />
       </footer>
     </section>
@@ -122,28 +147,40 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item v-for="column in columns" :key="column.prop" :label="column.label">
           <span v-if="column.type === 'list'">{{ (selectedRow[column.prop] || []).join('、') || '-' }}</span>
-          <span v-else>{{ formatValue(selectedRow[column.prop]) }}</span>
+          <span v-else>{{ columnValue(column, selectedRow[column.prop]) }}</span>
         </el-descriptions-item>
       </el-descriptions>
       <p class="drawer-note">字段可见性与数据范围由后端 tenant、permission 和 data_scope 最终校验。</p>
     </el-drawer>
 
-    <el-dialog v-model="createOpen" :title="`${editingId ? '编辑' : '新建'}${entityLabel}`" width="min(560px, 94vw)" destroy-on-close>
+    <el-dialog v-model="formOpen" :title="editingRow ? `编辑${entityLabel}` : `新建${entityLabel}`" width="min(760px, 94vw)" destroy-on-close>
       <el-alert
         title="仅保存当前租户的档案信息；凭据、Token、Cookie 和 Session 不在此表单采集。"
         type="info"
         :closable="false"
         show-icon
       />
-      <el-form label-position="top" class="create-form" @submit.prevent="submitCreate">
+      <el-form label-position="top" class="create-form" @submit.prevent="submitForm">
         <el-form-item v-for="field in formFields" :key="field.key" :label="field.label" :required="field.required">
-          <el-select v-if="field.type === 'select'" v-model="createForm[field.key]" :multiple="field.multiple" :filterable="field.filterable" :placeholder="field.placeholder || '请选择'" @change="handleFieldChange(field, $event)">
-            <el-option v-for="option in field.options || []" :key="option.value" :label="option.label" :value="option.value" />
+          <el-select
+            v-if="field.type === 'select'"
+            v-model="resourceForm[field.key]"
+            :placeholder="field.placeholder || '请选择'"
+            :multiple="field.multiple"
+            :filterable="field.filterable"
+            :clearable="field.clearable === true"
+            @change="handleFieldChange(field, $event)"
+          >
+            <el-option
+              v-for="option in (typeof field.options === 'function' ? field.options(resourceForm) : field.options || [])"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
           </el-select>
-          <el-switch v-else-if="field.type === 'boolean'" v-model="createForm[field.key]" />
           <el-input
             v-else
-            v-model="createForm[field.key]"
+            v-model="resourceForm[field.key]"
             :type="field.type === 'password' ? 'password' : 'text'"
             :show-password="field.type === 'password'"
             :autocomplete="field.type === 'password' ? 'new-password' : 'off'"
@@ -152,10 +189,11 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createOpen = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitCreate">保存</el-button>
+        <el-button @click="formOpen = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitForm">保存</el-button>
       </template>
     </el-dialog>
+    <slot />
   </AppPage>
 </template>
 
@@ -180,10 +218,15 @@ const props = defineProps({
   formFields: { type: Array, default: () => [] },
   createHandler: { type: Function, default: null },
   editHandler: { type: Function, default: null },
+  deleteHandler: { type: Function, default: null },
   statusHandler: { type: Function, default: null },
   createPermission: { type: String, default: '' },
   managePermission: { type: String, default: '' },
-  operationWidth: { type: Number, default: 132 }
+  operationWidth: { type: Number, default: 132 },
+  searchLabel: { type: String, default: '' },
+  showFilterLabels: { type: Boolean, default: false },
+  showPageSize: { type: Boolean, default: false },
+  tableMaxHeight: { type: Number, default: 0 }
 });
 
 const auth = useAuthStore();
@@ -194,10 +237,13 @@ const stateTitle = ref('');
 const stateDetail = ref('');
 const capability = ref(useMock ? 'mock' : 'pending');
 const detailOpen = ref(false);
-const createOpen = ref(false);
-const editingId = ref(null);
+const formOpen = ref(false);
+const editingRow = ref(null);
 const selectedRow = ref({});
-const createForm = reactive({});
+const resourceForm = reactive({});
+// Keep the callback contract explicit: field.onChange?.($event, resourceForm)
+// is invoked through handleFieldChange so every form uses the same guard.
+const createForm = resourceForm;
 const submitting = ref(false);
 const filters = reactive({ search: '', status: '', page: 1, page_size: 20 });
 
@@ -228,13 +274,16 @@ function formatValue(value) {
   return value ?? '-';
 }
 
+function columnValue(column, value) {
+  if (typeof column.format === 'function') return column.format(value);
+  const option = column.options?.find((item) => item.value === value);
+  return option?.label || formatValue(value);
+}
+
 function unpack(response) {
-  const data = response?.data;
-  if (Array.isArray(data)) return { data: {}, results: data, count: data.length };
-  const payload = data && typeof data === 'object' ? data : {};
-  const results = Array.isArray(payload.results) ? payload.results : (Array.isArray(payload.items) ? payload.items : []);
-  const count = Number(payload.count);
-  return { data: payload, results, count: Number.isFinite(count) ? count : results.length };
+  const data = response?.data || {};
+  const results = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
+  return { data, results, count: Number.isFinite(data.count) ? data.count : results.length };
 }
 
 async function loadData() {
@@ -278,48 +327,57 @@ function openCreate() {
     ElMessage.warning(createAccess.value.reason);
     return;
   }
-  for (const key of Object.keys(createForm)) delete createForm[key];
-  for (const field of props.formFields) createForm[field.key] = field.default ?? '';
-  editingId.value = null;
-  createOpen.value = true;
+  editingRow.value = null;
+  fillForm();
+  formOpen.value = true;
 }
 
-function openEdit(row) {
-  if (!manageAccess.value.allowed || !props.editHandler) return;
-  for (const key of Object.keys(createForm)) delete createForm[key];
-  for (const field of props.formFields) createForm[field.key] = row[field.key] ?? field.default ?? '';
-  editingId.value = row.id;
-  createOpen.value = true;
+function fillForm(row = {}) {
+  for (const key of Object.keys(resourceForm)) delete resourceForm[key];
+  for (const field of props.formFields) resourceForm[field.key] = row[field.key] ?? field.default ?? '';
 }
 
 function handleFieldChange(field, value) {
   if (typeof field.onChange === 'function') field.onChange(value, createForm);
 }
 
-async function submitCreate() {
-  const allowed = editingId.value ? manageAccess.value.allowed : createAccess.value.allowed;
-  const handler = editingId.value ? props.editHandler : props.createHandler;
-  if (!allowed || !handler) return;
-  const missing = props.formFields.find((field) => field.required && !createForm[field.key]);
+function openEdit(row) {
+  if (!manageAccess.value.allowed) {
+    ElMessage.warning(manageAccess.value.reason);
+    return;
+  }
+  editingRow.value = row;
+  fillForm(row);
+  formOpen.value = true;
+}
+
+async function submitForm() {
+  const isEditing = Boolean(editingRow.value);
+  if (isEditing ? (!manageAccess.value.allowed || !props.editHandler) : (!createAccess.value.allowed || !props.createHandler)) return;
+  const missing = props.formFields.find((field) => field.required && !resourceForm[field.key]);
   if (missing) {
     ElMessage.warning(`请填写${missing.label}`);
     return;
   }
   submitting.value = true;
   try {
-    const response = editingId.value
-      ? await handler(editingId.value, { ...createForm })
-      : await handler({ ...createForm });
+    const response = isEditing
+      ? await props.editHandler(editingRow.value.id, { ...resourceForm })
+      : await props.createHandler({ ...resourceForm });
     if (!response?.success) throw new Error(response?.message || '保存失败');
     ElMessage.success(response.message || '保存成功');
-    createOpen.value = false;
-    editingId.value = null;
+    formOpen.value = false;
     await loadData();
   } catch (error) {
     ElMessage.error(error?.message || '保存失败');
   } finally {
     submitting.value = false;
   }
+}
+
+function handleSizeChange() {
+  filters.page = 1;
+  loadData();
 }
 
 async function confirmStatus(row) {
@@ -338,6 +396,29 @@ async function confirmStatus(row) {
   } catch (error) {
     if (error === 'cancel') return;
     ElMessage.error(error?.message || '状态变更失败');
+  }
+}
+
+async function confirmDelete(row) {
+  if (!manageAccess.value.allowed || !props.deleteHandler) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除${props.entityLabel}“${row.name || row.username || row.code}”？仅在无关联数据时允许删除，有关联数据请先停用。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    );
+    const response = await props.deleteHandler(row.id, row);
+    if (!response?.success) {
+      const message = response?.http_status === 409 || response?.code === 'STATE_CONFLICT'
+        ? (response?.message || '存在关联数据，请停用')
+        : (response?.message || '删除失败');
+      throw new Error(message);
+    }
+    ElMessage.success(response.message || '删除成功');
+    await loadData();
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return;
+    ElMessage.error(error?.message || '删除失败');
   }
 }
 
@@ -370,6 +451,8 @@ loadData();
   border: 1px solid #dbe3ec;
   background: #fff;
 }
+.resource-toolbar--labeled { align-items: end; }
+.filter-field { display: grid; gap: 7px; min-width: 0; color: #475569; font-size: 12px; }
 
 .resource-table { min-width: 0; margin-top: 16px; overflow: hidden; }
 .resource-pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 2px 0; color: #64748b; font-size: 13px; }

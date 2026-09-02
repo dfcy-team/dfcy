@@ -203,6 +203,8 @@ class MasterDataCollectionView(APIView):
         queryset = filter_master_data(request.user, queryset, self.read_permission_code, resource)
         if resource == "stores":
             queryset = queryset.select_related("platform", "platform_site", "category", "operator", "bd", "leader")
+        if resource == "warehouses":
+            queryset = queryset.select_related("service_platform")
         if resource == "platform-sites":
             queryset = queryset.select_related("platform")
         search = request.query_params.get("search", "").strip()

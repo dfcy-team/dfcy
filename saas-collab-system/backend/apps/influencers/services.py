@@ -72,6 +72,9 @@ SAMPLE_TERMINAL_STATUSES = frozenset(
 SAMPLE_TIMEOUT_CANDIDATE_STATUSES = frozenset(
     {
         SampleFulfillment.Status.PENDING,
+        # Keep processing records from the pre-0012 state machine eligible for
+        # the same timeout reconciliation while they are being normalized.
+        SampleFulfillment.Status.PROCESSING,
         SampleFulfillment.Status.SHIPPED,
         SampleFulfillment.Status.DELIVERED,
     }
@@ -1640,7 +1643,12 @@ def transition_sample_fulfillment(
         raise ValidationError(
             {"version": "Fulfillment was changed by another request."}, code="conflict"
         )
-    if status not in SampleFulfillment.Status.values:
+    # ``processing`` is a legacy state retained as a service compatibility
+    # value (see models.py).  It is intentionally not part of the current
+    # model choices, but old callers may still need the audited transition.
+    supported_statuses = set(SampleFulfillment.Status.values)
+    supported_statuses.add(SampleFulfillment.Status.PROCESSING)
+    if status not in supported_statuses:
         raise ValidationError({"status": "Unsupported fulfillment status."})
     if (
         status in SAMPLE_TERMINAL_STATUSES
@@ -1653,6 +1661,11 @@ def transition_sample_fulfillment(
         )
     allowed = {
         SampleFulfillment.Status.PENDING: {
+            SampleFulfillment.Status.PROCESSING,
+            SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.CANCELLED,
+        },
+        SampleFulfillment.Status.PROCESSING: {
             SampleFulfillment.Status.SHIPPED,
             SampleFulfillment.Status.CANCELLED,
         },

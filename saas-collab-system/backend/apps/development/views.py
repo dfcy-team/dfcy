@@ -20,6 +20,7 @@ from .permissions import (
     CanManageCosts,
     CanManageProjects,
     CanManageProductArchives,
+    CanGenerateProductArchives,
     CanConfirmProductArchives,
     CanManageCompetitorLinks,
     CanReviewRequirements,
@@ -46,6 +47,7 @@ from .services import (
     confirm_product_archive,
     finalize_product,
     formalize_product_archive,
+    generate_trial_product,
     get_competitor_report_client,
     import_sales_csv,
     list_competitor_links,
@@ -220,6 +222,39 @@ def product_archive_confirm(request, pk):
         {
             "archive": DevelopmentProductArchiveSerializer(archive).data,
             "changed": changed,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([CanGenerateProductArchives])
+def product_archive_generate_trial(request, pk):
+    archive, changed = generate_trial_product(
+        archive_id=pk,
+        actor=request.user,
+        data=request.data,
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    )
+    archive = (
+        DevelopmentProductArchive.objects.select_related(
+            "project", "category_node", "formal_product", "formal_sku", "trial_product", "trial_sku",
+            "platform_master", "store_master", "created_by", "updated_by",
+        )
+        .prefetch_related("events__actor")
+        .get(pk=archive.pk, tenant=request.user.tenant)
+    )
+    return success_response(
+        {
+            "archive": DevelopmentProductArchiveSerializer(archive).data,
+            "changed": changed,
+            "development_spu_code": archive.development_spu_code,
+            "trial_product_id": archive.trial_product_id,
+            "trial_spu_code": archive.trial_product.spu_code if archive.trial_product_id else "",
+            "trial_sku_id": archive.trial_sku_id,
+            "trial_sku_code": archive.trial_sku.sku_code if archive.trial_sku_id else "",
+            "formal_product_id": archive.formal_product_id,
+            "formal_sku_id": archive.formal_sku_id,
+            "formal_sku_code": archive.formal_sku.sku_code if archive.formal_sku_id else "",
         }
     )
 

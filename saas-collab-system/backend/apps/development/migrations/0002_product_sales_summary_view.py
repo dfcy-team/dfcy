@@ -61,11 +61,6 @@ def drop_sales_summary_view(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    # MySQL cannot execute DROP/CREATE VIEW inside Django's atomic migration
-    # wrapper. The operations below are idempotent, so execute them without an
-    # outer transaction on databases that cannot roll DDL back.
-    atomic = False
-
     dependencies = [("development", "0001_initial")]
 
     operations = [

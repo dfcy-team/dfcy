@@ -1,6 +1,78 @@
 import { requestApi, requestWithMockFallback, useMock } from './request';
 import { successResponse } from '../mock';
 
+// Keep the development workflow resources behind one tenant-scoped factory so
+// each workspace uses the same list/detail/create/update contract.
+const DEVELOPMENT_API_ROOT = '/api/internal/development';
+const collectionUrl = (resource) => `${DEVELOPMENT_API_ROOT}/${resource}/`;
+const resourceApi = (resource) => ({
+  list: (params = {}) => requestApi({ url: collectionUrl(resource), method: 'get', params }),
+  get: (id) => requestApi({ url: `${collectionUrl(resource)}${id}/`, method: 'get' }),
+  create: (data) => requestApi({ url: collectionUrl(resource), method: 'post', data }),
+  update: (id, data) => requestApi({ url: `${collectionUrl(resource)}${id}/`, method: 'patch', data }),
+  remove: (id) => requestApi({ url: `${collectionUrl(resource)}${id}/`, method: 'delete' })
+});
+
+const candidatesApi = resourceApi('candidates');
+const competitorsApi = resourceApi('competitors');
+const projectsApi = resourceApi('projects');
+const samplesApi = resourceApi('samples');
+const quotationsApi = resourceApi('quotations');
+const listingDecisionsApi = resourceApi('listing-decisions');
+const trialsApi = resourceApi('trials');
+const trialMetricsApi = resourceApi('trial-metrics');
+const launchPlansApi = resourceApi('launch-plans');
+const reorderDecisionsApi = resourceApi('reorder-decisions');
+const eliminationsApi = resourceApi('eliminations');
+const eventsApi = resourceApi('events');
+const settingsApi = resourceApi('settings');
+
+export const fetchDevelopmentCandidates = (params = {}) => candidatesApi.list(params);
+export const fetchDevelopmentCandidate = (id) => candidatesApi.get(id);
+export const createDevelopmentCandidate = (data) => candidatesApi.create(data);
+export const updateDevelopmentCandidate = (id, data) => candidatesApi.update(id, data);
+export const deleteDevelopmentCandidate = (id) => candidatesApi.remove(id);
+export const fetchDevelopmentCompetitors = (params = {}) => competitorsApi.list(params);
+export const fetchDevelopmentSamples = (params = {}) => samplesApi.list(params);
+export const fetchDevelopmentSample = (id) => samplesApi.get(id);
+export const createDevelopmentSample = (data) => samplesApi.create(data);
+export const updateDevelopmentSample = (id, data) => samplesApi.update(id, data);
+export const fetchDevelopmentQuotations = (params = {}) => quotationsApi.list(params);
+export const fetchDevelopmentQuotation = (id) => quotationsApi.get(id);
+export const createDevelopmentQuotation = (data) => quotationsApi.create(data);
+export const updateDevelopmentQuotation = (id, data) => quotationsApi.update(id, data);
+export const fetchDevelopmentListingDecisions = (params = {}) => listingDecisionsApi.list(params);
+export const fetchDevelopmentListingDecision = (id) => listingDecisionsApi.get(id);
+export const createDevelopmentListingDecision = (data) => listingDecisionsApi.create(data);
+export const updateDevelopmentListingDecision = (id, data) => listingDecisionsApi.update(id, data);
+export const fetchDevelopmentTrials = (params = {}) => trialsApi.list(params);
+export const fetchDevelopmentTrial = (id) => trialsApi.get(id);
+export const createDevelopmentTrial = (data) => trialsApi.create(data);
+export const updateDevelopmentTrial = (id, data) => trialsApi.update(id, data);
+export const fetchDevelopmentTrialMetrics = (params = {}) => trialMetricsApi.list(params);
+export const fetchDevelopmentTrialMetric = (id) => trialMetricsApi.get(id);
+export const createDevelopmentTrialMetric = (data) => trialMetricsApi.create(data);
+export const updateDevelopmentTrialMetric = (id, data) => trialMetricsApi.update(id, data);
+export const fetchDevelopmentLaunchPlans = (params = {}) => launchPlansApi.list(params);
+export const fetchDevelopmentLaunchPlan = (id) => launchPlansApi.get(id);
+export const createDevelopmentLaunchPlan = (data) => launchPlansApi.create(data);
+export const updateDevelopmentLaunchPlan = (id, data) => launchPlansApi.update(id, data);
+export const fetchDevelopmentReorderDecisions = (params = {}) => reorderDecisionsApi.list(params);
+export const fetchDevelopmentReorderDecision = (id) => reorderDecisionsApi.get(id);
+export const createDevelopmentReorderDecision = (data) => reorderDecisionsApi.create(data);
+export const updateDevelopmentReorderDecision = (id, data) => reorderDecisionsApi.update(id, data);
+export const fetchDevelopmentEliminations = (params = {}) => eliminationsApi.list(params);
+export const fetchDevelopmentElimination = (id) => eliminationsApi.get(id);
+export const createDevelopmentElimination = (data) => eliminationsApi.create(data);
+export const updateDevelopmentElimination = (id, data) => eliminationsApi.update(id, data);
+export const fetchDevelopmentEvents = (params = {}) => eventsApi.list(params);
+export const fetchDevelopmentEvent = (id) => eventsApi.get(id);
+export const createDevelopmentEvent = (data) => eventsApi.create(data);
+export const fetchDevelopmentSettings = (params = {}) => settingsApi.list(params);
+export const fetchDevelopmentSetting = (id) => settingsApi.get(id);
+export const createDevelopmentSetting = (data) => settingsApi.create(data);
+export const updateDevelopmentSetting = (id, data) => settingsApi.update(id, data);
+
 const projects = [
   { id: 1, project_no: 'DEV-20260803-018', product_name: '便携折叠电热水壶', assigned_to_name: '张三', target_sites: ['TH','MY','SG'], stage: 'sampling', estimated_margin_rate: 0.326, planned_launch_date: '2026-08-28', status: 'active' },
   { id: 2, project_no: 'DEV-20260803-017', product_name: '硅胶折叠收纳套装', assigned_to_name: '李四', target_sites: ['ID','PH'], stage: 'design', estimated_margin_rate: 0.312, planned_launch_date: '2026-09-05', status: 'active' },

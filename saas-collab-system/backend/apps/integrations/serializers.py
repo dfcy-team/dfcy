@@ -47,6 +47,37 @@ def _is_approved_callback_transport(callback_url, environment, platform):
     )
 
 
+def validate_marketplace_callback_url(callback_url, *, environment, platform):
+    """Validate a callback URL against transport, registration and allowlist policy."""
+
+    callback_url = serializers.URLField(max_length=500).run_validation(callback_url)
+    if not _is_approved_callback_transport(callback_url, environment, platform):
+        raise serializers.ValidationError(
+            "Callback URL must use HTTPS; controlled Pilot testing may use only the exact "
+            "http://127.0.0.1:8000 marketplace callback."
+        )
+    redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
+    expected_callback = {
+        PlatformChoices.LAZADA: getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
+        PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
+        PlatformChoices.TIKTOK: getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
+    }.get(platform, "")
+    if expected_callback and callback_url != expected_callback:
+        raise serializers.ValidationError("Callback URL does not match the platform registration.")
+    if redirect_allowlist and callback_url not in redirect_allowlist:
+        raise serializers.ValidationError("Callback URL is not in the approved allowlist.")
+    if (
+        environment
+        in {
+            PlatformIntegrationConfig.Environment.PILOT,
+            PlatformIntegrationConfig.Environment.PRODUCTION,
+        }
+        and not redirect_allowlist
+    ):
+        raise serializers.ValidationError("Live callback allowlist approval is not configured.")
+    return callback_url
+
+
 class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
@@ -151,34 +182,21 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         callback_url = attrs.get("callback_url", getattr(self.instance, "callback_url", ""))
         if platform in marketplace_platforms and not callback_url:
             raise serializers.ValidationError({"callback_url": "Platform callback URL is required."})
-        if callback_url and not _is_approved_callback_transport(callback_url, environment, platform):
-            raise serializers.ValidationError(
-                {
-                    "callback_url": (
+        if callback_url:
+            try:
+                if platform in marketplace_platforms:
+                    attrs["callback_url"] = validate_marketplace_callback_url(
+                        callback_url,
+                        environment=environment,
+                        platform=platform,
+                    )
+                elif not _is_approved_callback_transport(callback_url, environment, platform):
+                    raise serializers.ValidationError(
                         "Callback URL must use HTTPS; controlled Pilot testing may use only the exact "
                         "http://127.0.0.1:8000 marketplace callback."
                     )
-                }
-            )
-        redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
-        expected_callback = {
-            PlatformChoices.LAZADA: getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
-            PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
-            PlatformChoices.TIKTOK: getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
-        }.get(platform, "")
-        if expected_callback and callback_url != expected_callback:
-            raise serializers.ValidationError({"callback_url": "Callback URL does not match the platform registration."})
-        if callback_url and redirect_allowlist and callback_url not in redirect_allowlist:
-            raise serializers.ValidationError({"callback_url": "Callback URL is not in the approved allowlist."})
-        if (
-            platform in marketplace_platforms
-            and environment in {
-                PlatformIntegrationConfig.Environment.PILOT,
-                PlatformIntegrationConfig.Environment.PRODUCTION,
-            }
-            and not redirect_allowlist
-        ):
-            raise serializers.ValidationError({"callback_url": "Live callback allowlist approval is not configured."})
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"callback_url": exc.detail}) from exc
         connect_timeout = attrs.get(
             "connect_timeout_seconds", getattr(self.instance, "connect_timeout_seconds", 3)
         )

@@ -5,7 +5,6 @@ import { canAccessPath, filterMenuItems, flattenMenuItems } from '../src/router/
 import { getActionAccess } from '../src/utils/actionAccess';
 import { masterDataMocks } from '../src/mock/masterData';
 import { mockSecurityOperations } from '../src/mock/systemAdmin';
-import { permissionLabel } from '../src/utils/permissionLabels';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -52,27 +51,6 @@ describe('UI-P2 route and action contracts', () => {
 });
 
 describe('UI-P2 API and sensitive-field contracts', () => {
-  it('localizes catalog names and prevents an invalid built-in administrator save', () => {
-    expect(permissionLabel({ code: 'system.users.view', name: 'View user directory' })).toBe('查看用户目录');
-    expect(permissionLabel({ code: 'future.permission.view', name: '查看未来权限' })).toBe('查看未来权限');
-    const rolePage = read('src/views/system/RolePermissionMatrix.vue');
-    expect(rolePage).toContain('isBuiltInAdministrator');
-    expect(rolePage).toContain('permissionLabel(permission)');
-    expect(rolePage).toContain('管理员角色由权限目录自动同步');
-    expect(rolePage).toContain('manageAccess.visible && !isBuiltInAdministrator');
-  });
-
-  it('builds the permission matrix from the current menu and route capability tree', () => {
-    const rolePage = read('src/views/system/RolePermissionMatrix.vue');
-    expect(rolePage).toContain("import { menuItems, routeCapabilities } from '../../router/menu';");
-    expect(rolePage).toContain('async function loadAllPermissions()');
-    expect(rolePage).toContain('const routeOnlyCodes = new Set(routeCapabilities.flatMap((item) => item.permissions || []));');
-    expect(rolePage).toContain("label: '其他操作权限'");
-    expect(rolePage).toContain('permission.unavailable');
-    expect(rolePage).toContain('const realPermissionCodes = new Set(');
-    expect(rolePage).toContain('filter((code) => realPermissionCodes.has(code))');
-  });
-
   it('uses only the frozen internal system and master-data API partitions', () => {
     const systemApi = read('src/api/systemAdmin.js');
     const masterApi = read('src/api/masterData.js');

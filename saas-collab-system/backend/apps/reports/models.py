@@ -434,7 +434,7 @@ class ReportExportRequest(models.Model):
         SALES_DETAILS = "sales_details", "Sales details"
 
     class Status(models.TextChoices):
-        COMPLETED = "completed", "Completed placeholder"
+        COMPLETED = "completed", "Completed"
         REJECTED = "rejected", "Rejected"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="report_export_requests")
@@ -449,6 +449,10 @@ class ReportExportRequest(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices)
     row_count = models.PositiveIntegerField(default=0)
     masked_file_reference = models.CharField(max_length=240, blank=True)
+    file_format = models.CharField(max_length=10, default="csv")
+    storage_key = models.CharField(max_length=255, blank=True)
+    file_sha256 = models.CharField(max_length=64, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.CharField(max_length=200, blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
@@ -464,8 +468,12 @@ class ReportExportRequest(models.Model):
     def clean(self):
         if self.requested_by_id and self.requested_by.tenant_id != self.tenant_id:
             raise ValidationError("Report export requester must belong to the same tenant.")
-        if self.masked_file_reference and not self.masked_file_reference.startswith("placeholder://"):
-            raise ValidationError("Only placeholder export references are allowed in phase 3.")
+        if self.masked_file_reference and not self.masked_file_reference.startswith(("placeholder://", "export://")):
+            raise ValidationError("Export reference scheme is not allowed.")
+        if self.file_format not in {"csv", "txt"}:
+            raise ValidationError("Export format must be csv or txt.")
+        if self.storage_key and (self.storage_key.startswith(("/", "\\")) or ".." in self.storage_key.split("/")):
+            raise ValidationError("Export storage key must be a safe relative path.")
 
     def save(self, *args, **kwargs):
         if not getattr(self, "_export_service_write", False):
@@ -483,6 +491,7 @@ class ReportExportRequest(models.Model):
 class ReportExportAuditLogQuerySet(models.QuerySet):
     def update(self, **kwargs):
         raise ValidationError("Report export audit logs are immutable.")
+
     def bulk_update(self, objs, fields, batch_size=None):
         raise ValidationError("Report export audit logs are immutable.")
 

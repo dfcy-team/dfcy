@@ -58,6 +58,15 @@ export const updateMasterData = (resource, id, payload) => requestWithMockFallba
   mockWrite({ id, ...payload }), `masterdata.${resource}.update`
 );
 
+// Deletion is intentionally exposed only for master-data resources. The
+// backend rejects referenced records with STATE_CONFLICT; callers surface that
+// response as a stop/deactivate instruction instead of hiding the conflict.
+export const deleteMasterData = (resource, id) => requestWithMockFallback(
+  { method: 'delete', url: `/api/internal/master-data/${resource}/${id}/` },
+  mockWrite({ id }),
+  `masterdata.${resource}.delete`
+);
+
 export const importStores = (file, { dryRun = false } = {}) => {
   const data = new FormData();
   data.append('file', file);

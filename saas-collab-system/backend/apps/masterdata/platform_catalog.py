@@ -15,6 +15,10 @@ P3 = (
     "jumia", "magalu", "americanas", "bigcommerce", "magento", "wix",
     "custom_store", "regional_other",
 )
+# Warehouse service platform types are master-data values too.  Keeping them
+# in the same catalog makes the catalog the single source for platform
+# selectors while preserving the existing warehouse model choices.
+WAREHOUSE_SERVICE = ("warehouse_owned", "warehouse_third_party", "warehouse_platform")
 
 LABELS = {
     "tiktok": "TikTok Shop", "temu": "Temu", "amazon": "Amazon",
@@ -29,6 +33,7 @@ LABELS = {
     "megamarket": "MegaMarket", "magalu": "Magalu", "bigcommerce": "BigCommerce",
     "custom_store": "Custom Store", "regional_other": "Regional Other",
     "bigseller": "BigSeller", "other": "Other",
+    "warehouse_owned": "自营仓服务", "warehouse_third_party": "三方仓服务", "warehouse_platform": "平台仓服务",
 }
 CANONICAL_CODES = {"tiktok": "TIKTOK_SHOP"}
 ALIASES = {
@@ -44,6 +49,8 @@ def _label(value):
 
 
 def _category(value):
+    if value in WAREHOUSE_SERVICE:
+        return "WAREHOUSE_SERVICE"
     if value == "tiktok":
         return "SOCIAL_COMMERCE"
     if value in {"shopify", "woocommerce", "shopline", "shoplazza", "bigcommerce", "magento", "wix", "custom_store"}:
@@ -79,6 +86,7 @@ PLATFORM_CATALOG = tuple(
     + [_entry(value, "P1") for value in P1]
     + [_entry(value, "P2") for value in P2]
     + [_entry(value, "P3") for value in P3]
+    + [_entry(value, "P3") for value in WAREHOUSE_SERVICE]
     + [_entry("bigseller", "LEGACY"), _entry("other", "P3")]
 )
 PLATFORM_BY_VALUE = {item["value"]: item for item in PLATFORM_CATALOG}

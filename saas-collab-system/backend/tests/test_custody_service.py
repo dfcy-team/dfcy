@@ -163,15 +163,15 @@ def test_key_file_requires_absolute_owner_read_only_non_symlink_path(tmp_path):
     token_file = _write_secret(tmp_path / "service.token", "sidecar-token")
     key_file = _write_secret(tmp_path / "fernet.key", Fernet.generate_key().decode("ascii"))
     with pytest.raises(CustodyServiceConfigurationError):
-        CustodyService(storage_path=tmp_path / "records", encryption_key_file="relative.key", auth_token="x")
+        CustodyService(storage_path=tmp_path / "records", encryption_key_file="relative.key", auth_token="not-a-real-token")
     os.chmod(key_file, 0o644)
     with pytest.raises(CustodyServiceConfigurationError):
-        CustodyService(storage_path=tmp_path / "records-unsafe", encryption_key_file=key_file, auth_token="x")
+        CustodyService(storage_path=tmp_path / "records-unsafe", encryption_key_file=key_file, auth_token="not-a-real-token")
     os.chmod(key_file, 0o400)
     link = tmp_path / "fernet-link.key"
     link.symlink_to(key_file)
     with pytest.raises(CustodyServiceConfigurationError):
-        CustodyService(storage_path=tmp_path / "records-link", encryption_key_file=link, auth_token="x")
+        CustodyService(storage_path=tmp_path / "records-link", encryption_key_file=link, auth_token="not-a-real-token")
     assert EncryptedFileCredentialStore(tmp_path / "records-ok", key_file)
     assert token_file.exists()
 

@@ -35,9 +35,7 @@ class Migration(migrations.Migration):
                 ('platform', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='listing_templates', to='masterdata.platformmaster')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_templates', to='tenants.tenant')),
             ],
-            options={
-                'ordering': ['tenant_id', 'template_no', '-version'],
-            },
+            options={'ordering': ['tenant_id', 'template_no', '-version']},
         ),
         migrations.CreateModel(
             name='ListingProfile',
@@ -64,9 +62,7 @@ class Migration(migrations.Migration):
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_profiles', to='tenants.tenant')),
                 ('template', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='profiles', to='listings.listingtemplate')),
             ],
-            options={
-                'ordering': ['tenant_id', '-updated_at'],
-            },
+            options={'ordering': ['tenant_id', '-updated_at']},
         ),
         migrations.CreateModel(
             name='ListingVariant',
@@ -81,9 +77,7 @@ class Migration(migrations.Migration):
                 ('profile', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='variants', to='listings.listingprofile')),
                 ('sku', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='listing_variants', to='products.productsku')),
             ],
-            options={
-                'ordering': ['profile_id', 'seller_sku'],
-            },
+            options={'ordering': ['profile_id', 'seller_sku']},
         ),
         migrations.CreateModel(
             name='ListingChangeLog',
@@ -97,10 +91,7 @@ class Migration(migrations.Migration):
                 ('changed_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='listing_changes', to=settings.AUTH_USER_MODEL)),
                 ('profile', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='change_logs', to='listings.listingprofile')),
             ],
-            options={
-                'ordering': ['profile_id', '-created_at'],
-                'indexes': [models.Index(fields=['profile', 'created_at'], name='idx_listing_change')],
-            },
+            options={'ordering': ['profile_id', '-created_at'], 'indexes': [models.Index(fields=['profile', 'created_at'], name='idx_listing_change')]},
         ),
         migrations.CreateModel(
             name='ListingPublicationJob',
@@ -120,34 +111,12 @@ class Migration(migrations.Migration):
                 ('requested_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='requested_listing_jobs', to=settings.AUTH_USER_MODEL)),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='listing_publication_jobs', to='tenants.tenant')),
             ],
-            options={
-                'ordering': ['tenant_id', '-created_at'],
-                'indexes': [models.Index(fields=['tenant', 'status', 'created_at'], name='idx_listing_job_status')],
-                'constraints': [models.UniqueConstraint(fields=('tenant', 'idempotency_key'), name='uniq_listing_job_key')],
-            },
+            options={'ordering': ['tenant_id', '-created_at'], 'indexes': [models.Index(fields=['tenant', 'status', 'created_at'], name='idx_listing_job_status')], 'constraints': [models.UniqueConstraint(fields=('tenant', 'idempotency_key'), name='uniq_listing_job_key')]},
         ),
-        migrations.AddIndex(
-            model_name='listingtemplate',
-            index=models.Index(fields=['tenant', 'platform', 'country_code'], name='idx_listing_template_site'),
-        ),
-        migrations.AddConstraint(
-            model_name='listingtemplate',
-            constraint=models.UniqueConstraint(fields=('tenant', 'template_no', 'version'), name='uniq_listing_template_ver'),
-        ),
-        migrations.AddIndex(
-            model_name='listingprofile',
-            index=models.Index(fields=['tenant', 'store', 'status'], name='idx_listing_store_status'),
-        ),
-        migrations.AddIndex(
-            model_name='listingprofile',
-            index=models.Index(fields=['tenant', 'product'], name='idx_listing_product'),
-        ),
-        migrations.AddConstraint(
-            model_name='listingprofile',
-            constraint=models.UniqueConstraint(fields=('tenant', 'profile_no'), name='uniq_listing_profile_no'),
-        ),
-        migrations.AddConstraint(
-            model_name='listingvariant',
-            constraint=models.UniqueConstraint(fields=('profile', 'seller_sku'), name='uniq_listing_seller_sku'),
-        ),
+        migrations.AddIndex(model_name='listingtemplate', index=models.Index(fields=['tenant', 'platform', 'country_code'], name='idx_listing_template_site')),
+        migrations.AddConstraint(model_name='listingtemplate', constraint=models.UniqueConstraint(fields=('tenant', 'template_no', 'version'), name='uniq_listing_template_ver')),
+        migrations.AddIndex(model_name='listingprofile', index=models.Index(fields=['tenant', 'store', 'status'], name='idx_listing_store_status')),
+        migrations.AddIndex(model_name='listingprofile', index=models.Index(fields=['tenant', 'product'], name='idx_listing_product')),
+        migrations.AddConstraint(model_name='listingprofile', constraint=models.UniqueConstraint(fields=('tenant', 'profile_no'), name='uniq_listing_profile_no')),
+        migrations.AddConstraint(model_name='listingvariant', constraint=models.UniqueConstraint(fields=('profile', 'seller_sku'), name='uniq_listing_seller_sku')),
     ]

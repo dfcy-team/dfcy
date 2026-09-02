@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import CustomUser, ExternalUserProfile, InternalUserProfile, MiniAppIdentity
+from .models import CustomUser, ExternalUserProfile, InternalUserProfile
 
 
 @admin.register(CustomUser)
@@ -43,14 +43,3 @@ class ExternalUserProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "tenant", "supplier_id", "company_name", "contact_name")
     list_filter = ("tenant",)
     search_fields = ("user__username", "user__email", "company_name", "contact_name")
-
-
-@admin.register(MiniAppIdentity)
-class MiniAppIdentityAdmin(admin.ModelAdmin):
-    list_display = ("provider", "user", "status", "last_login_at", "created_at")
-    list_filter = ("provider", "status")
-    search_fields = ("user__username", "user__email", "subject_digest")
-    readonly_fields = ("provider", "subject_digest", "user", "created_at", "updated_at", "last_login_at")
-
-    def has_add_permission(self, request):
-        return False
