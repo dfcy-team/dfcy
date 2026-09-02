@@ -176,6 +176,7 @@ describe('influencer integration workspace contracts', () => {
     expect(library).toMatch(/label="平均视频播放"[^\n]+disabled/);
     expect(library).toMatch(/label="平均直播观看"[^\n]+disabled/);
     expect(library).not.toMatch(/function profilePayload\(\)[^\n]+average_video_views/);
+    expect(library).toContain("联系方式加载失败，已取消编辑以保护现有数据");
     expect(performancePage).toContain('<h1>BD 绩效</h1>');
     expect(performancePage).toContain('按日期范围查看达人开拓、送样投入与合作产出。');
     expect(performancePage).toContain('<BdPerformancePanel />');
