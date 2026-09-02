@@ -128,8 +128,8 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(storePage).toContain('currency: String(item.currency ||');
     expect(resourcePage).toContain('@change="handleFieldChange(field, $event)"');
     expect(resourcePage).toContain('field.onChange(value, createForm)');
-    expect(resourcePage).toContain(':multiple="field.multiple"');
-    expect(resourcePage).toContain(':filterable="field.filterable"');
+    expect(resourcePage).toContain(':multiple="field.multiple === true"');
+    expect(resourcePage).toContain(':filterable="field.filterable !== false"');
     for (const field of ["prop: 'country_code'", "prop: 'currency'", "prop: 'timezone'"]) {
       expect(countryPage).toContain(field);
     }
