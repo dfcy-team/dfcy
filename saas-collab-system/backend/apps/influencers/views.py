@@ -3,7 +3,7 @@ import hashlib
 from io import StringIO
 from datetime import timedelta
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Exists, Max, OuterRef, Prefetch, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -21,6 +21,7 @@ from apps.masterdata.models import StatusChoices, StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope
+from apps.tenants.models import Tenant
 
 from .attribution import (
     build_bd_performance,
@@ -97,6 +98,10 @@ BLACKLIST_PERMISSION_CODES = (
 )
 
 
+def _lock_influencer_write_tenant(user):
+    return Tenant.objects.select_for_update().get(pk=user.tenant_id)
+
+
 def _require_resolve_read_scope(user):
     for permission_code in RESOLVE_READ_PERMISSION_CODES:
         try:
@@ -138,6 +143,29 @@ def _expected_version(request):
 
 def _optional_expected_version(request):
     return _expected_version(request) if request.headers.get("If-Match") else None
+
+
+def _assert_influencer_version(request, influencer):
+    expected_updated_at = _expected_influencer_updated_at(request)
+    if expected_updated_at != influencer.updated_at:
+        raise Conflict({"If-Match": "Influencer was changed by another request."})
+
+
+def _expected_influencer_updated_at(request):
+    raw_version = request.headers.get("If-Match", "").strip().strip('"')
+    expected_updated_at = parse_datetime(raw_version)
+    if expected_updated_at is None:
+        raise ValidationError({"If-Match": "The current updated_at timestamp is required."})
+    return expected_updated_at
+
+
+def _advance_influencer_version(influencer):
+    updated_at = timezone.now()
+    models.QuerySet.update(
+        Influencer.objects.filter(pk=influencer.pk, tenant_id=influencer.tenant_id),
+        updated_at=updated_at,
+    )
+    influencer.updated_at = updated_at
 
 
 def _query_bool(value, *, field):
@@ -255,6 +283,7 @@ class InfluencerCollectionView(APIView):
     @transaction.atomic
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         serializer = InfluencerSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         instance = serializer.save(tenant=request.user.tenant)
@@ -289,6 +318,7 @@ class InfluencerDetailView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         writes_identity = bool({"handle", "platform"}.intersection(request.data))
         queryset = Influencer.objects if writes_identity else Influencer.objects.select_for_update()
         instance = get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
@@ -308,6 +338,7 @@ class InfluencerDetailView(APIView):
                 context={"request": request},
             )
             serializer.is_valid(raise_exception=True)
+        _assert_influencer_version(request, instance)
         instance = serializer.save()
         write_operation_log(
             tenant=request.user.tenant,
@@ -330,13 +361,9 @@ class InfluencerStatusView(APIView):
     @transaction.atomic
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
-        raw_version = request.headers.get("If-Match", "").strip().strip('"')
-        expected_updated_at = parse_datetime(raw_version)
-        if expected_updated_at is None:
-            raise ValidationError({"If-Match": "The current updated_at timestamp is required."})
-        if expected_updated_at != instance.updated_at:
-            raise Conflict({"If-Match": "Influencer was changed by another request."})
+        _assert_influencer_version(request, instance)
         status = request.data.get("status")
         if status not in Influencer.Status.values:
             raise ValidationError({"status": "Status must be active or inactive."})
@@ -370,7 +397,9 @@ class InfluencerContactsView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        _assert_influencer_version(request, influencer)
         payload = request.data.get("contacts", [])
         if not isinstance(payload, list):
             raise ValidationError({"contacts": "Must be a list."})
@@ -464,6 +493,7 @@ class InfluencerResolveView(APIView):
     def post(self, request):
         """Resolve an exact account or create the minimal tenant profile needed for sampling."""
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )

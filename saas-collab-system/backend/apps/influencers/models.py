@@ -139,10 +139,11 @@ class Influencer(models.Model):
                     kwargs["update_fields"] = update_fields | {"handle"}
             return super(Influencer, self).save(*args, **kwargs)
 
-        if writes_identity:
-            with transaction.atomic():
+        with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
+            if writes_identity:
                 return save_identity()
-        return super().save(*args, **kwargs)
+            return super().save(*args, **kwargs)
 
 
 class TenantValidatedQuerySet(models.QuerySet):
@@ -226,6 +227,7 @@ class InfluencerRestriction(TenantValidatedModel):
 
     def save(self, *args, **kwargs):
         with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
             Influencer.objects.select_for_update().get(pk=self.influencer_id, tenant_id=self.tenant_id)
             return super().save(*args, **kwargs)
 
@@ -1191,6 +1193,7 @@ class InfluencerContact(TenantValidatedModel):
 
     def save(self, *args, **kwargs):
         with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
             Influencer.objects.select_for_update().get(
                 pk=self.influencer_id,
                 tenant_id=self.tenant_id,
