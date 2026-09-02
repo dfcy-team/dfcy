@@ -205,6 +205,23 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class ReadinessContractRepairSerializer(serializers.Serializer):
+    """Validate the explicit confirmation used by the readiness contract action."""
+
+    confirm = serializers.BooleanField(required=True)
+    dry_run = serializers.BooleanField(required=False, default=False)
+    expected_version = serializers.IntegerField(required=True, min_value=1)
+
+
+class ReadonlyApprovalSerializer(serializers.Serializer):
+    """Validate the small, non-secret production-readonly state transition."""
+
+    approved = serializers.BooleanField(required=True)
+    confirm = serializers.BooleanField(required=True)
+    expected_version = serializers.IntegerField(required=True, min_value=1)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=240, trim_whitespace=True)
+
+
 class RotateCredentialsSerializer(serializers.Serializer):
     credential_id = serializers.CharField(max_length=160)
     token_id = serializers.CharField(max_length=160)

@@ -1,15 +1,17 @@
-from django.shortcuts import get_object_or_404
+import hashlib
+import json
 import uuid
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection, transaction
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.error_codes import ErrorCode
-from apps.common.exceptions import DataScopeDenied, StateConflict, get_scoped_object_or_404
+from apps.common.exceptions import DataScopeDenied, IdempotencyConflict, StateConflict, get_scoped_object_or_404
 from apps.common.responses import success_response
 from apps.common.query import pagination_query, positive_int
 from apps.common.responses import paginated_data
@@ -74,7 +76,11 @@ from .models import (
     WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema
-from .readiness_service import build_platform_readiness
+from .readiness_service import (
+    BLOCKER_LABELS,
+    build_config_readiness,
+    build_platform_readiness,
+)
 from .product_mapping_service import (
     confirm_product_mapping,
     create_product_mapping,
@@ -94,6 +100,8 @@ from .serializers import (
     PlatformIntegrationConfigSerializer,
     ProductMappingCreateSerializer,
     ProductMappingUpdateSerializer,
+    ReadinessContractRepairSerializer,
+    ReadonlyApprovalSerializer,
     RotateCredentialsSerializer,
     StoreMappingCreateSerializer,
     StoreMappingUpdateSerializer,
@@ -209,6 +217,258 @@ def _get_config_for_user(request, pk, permission_code):
         permission_code,
     )
     return get_scoped_object_or_404(queryset, pk=pk)
+
+
+def _readiness_digest(payload):
+    """Create a stable digest without retaining request secrets."""
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _readiness_operation_identity(request, action, config, payload):
+    """Return operation and payload digests used for idempotent page actions."""
+    payload_digest = _readiness_digest(payload)
+    header_key = str(request.headers.get("Idempotency-Key") or "").strip()
+    if header_key and not 8 <= len(header_key) <= 120:
+        raise ValidationError({"Idempotency-Key": "Idempotency-Key must contain 8 to 120 characters."})
+    if header_key:
+        operation_digest = _readiness_digest({"source": "header", "key": header_key})
+    else:
+        # The UI does not need to manufacture a header: the explicit action
+        # payload, including expected_version, is itself a deterministic key.
+        operation_digest = _readiness_digest(
+            {"source": "payload", "action": action, "config_id": config.id, "payload": payload}
+        )
+    return operation_digest, payload_digest
+
+
+def _find_readiness_operation(config, action, operation_digest, payload_digest):
+    """Find a previous page action while detecting reused keys with new data."""
+    queryset = IntegrationAuditLog.objects.filter(
+        tenant=config.tenant,
+        integration_config=config,
+        action=action,
+    ).order_by("-id")
+    for audit in queryset:
+        detail = audit.masked_detail if isinstance(audit.masked_detail, dict) else {}
+        if detail.get("idempotency_key_hash") != operation_digest:
+            continue
+        if detail.get("payload_digest") != payload_digest:
+            raise IdempotencyConflict("The idempotency key was already used for a different readiness action.")
+        return audit
+    return None
+
+
+def _readiness_action_response(config, *, operation, replay=False, target_contract=None, dry_run=False, changed=False):
+    """Build the common response for a readiness mutation or dry-run."""
+    row = build_config_readiness(config)
+    data = {
+        "config": row,
+        "config_version": config.config_version,
+        "idempotent_replay": bool(replay),
+        "operation": operation,
+        "dry_run": bool(dry_run),
+        "changed": bool(changed),
+    }
+    if target_contract is not None:
+        data["target_contract_version"] = target_contract
+    return data
+
+
+def _require_shopee_readiness_config(config):
+    if str(config.platform or "").lower() != PlatformChoices.SHOPEE:
+        raise ValidationError({"platform": "当前页面动作仅适用于 Shopee 接入配置。"})
+    try:
+        return get_platform_schema(
+            PlatformChoices.SHOPEE,
+            environment=config.environment,
+        )["contract_versions"][0]
+    except Exception as exc:
+        raise ValidationError({"contract_version": "无法读取 Shopee 当前批准的合同版本。"}) from exc
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigDetailUser])
+def repair_readiness_contract(request, pk):
+    """Dry-run or repair one tenant-scoped Shopee contract version."""
+    config = _get_config_for_user(request, pk, "integrations.config.update")
+    serializer = ReadinessContractRepairSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    payload = dict(serializer.validated_data)
+    dry_run = bool(payload["dry_run"])
+    if not dry_run and payload["confirm"] is not True:
+        raise ValidationError({"confirm": "应用合同版本修复必须显式确认。"})
+    target_contract = _require_shopee_readiness_config(config)
+    action = "repair_platform_contract"
+    operation_digest, payload_digest = _readiness_operation_identity(request, action, config, payload)
+
+    with transaction.atomic():
+        locked = PlatformIntegrationConfig.objects.select_for_update().get(
+            pk=config.pk,
+            tenant=request.user.tenant,
+        )
+        existing = _find_readiness_operation(locked, action, operation_digest, payload_digest)
+        if existing is not None:
+            return success_response(
+                _readiness_action_response(
+                    locked,
+                    operation=action,
+                    replay=True,
+                    target_contract=target_contract,
+                    dry_run=bool((existing.masked_detail or {}).get("dry_run")),
+                    changed=bool((existing.masked_detail or {}).get("changed")),
+                ),
+                message="合同版本修复操作已幂等完成。",
+            )
+        if not dry_run and payload["expected_version"] != locked.config_version:
+            raise StateConflict("配置版本已变化，请刷新准备度后再修复合同版本。")
+        before_version = locked.config_version
+        before_contract = locked.contract_version
+        changed = locked.contract_version != target_contract
+        if not dry_run and changed:
+            locked.contract_version = target_contract
+            locked.config_version += 1
+            locked.save(update_fields=["contract_version", "config_version", "updated_at"])
+        _write_audit_log(
+            locked,
+            request.user,
+            action,
+            detail={
+                "operation": "repair_contract",
+                "dry_run": dry_run,
+                "changed": changed,
+                "contract_version_before": before_contract,
+                "target_contract_version": target_contract,
+                "config_version_before": before_version,
+                "config_version_after": locked.config_version,
+                "idempotency_key_hash": operation_digest,
+                "payload_digest": payload_digest,
+            },
+        )
+        # For a dry-run the current version is still the version the caller
+        # supplied; expose whether an apply would be safe without changing it.
+        response_data = _readiness_action_response(
+            locked,
+            operation=action,
+            target_contract=target_contract,
+            dry_run=dry_run,
+            changed=changed,
+        )
+        response_data["can_apply"] = bool(
+            dry_run and payload["expected_version"] == locked.config_version and changed
+        ) if dry_run else False
+    return success_response(
+        response_data,
+        message="合同版本预览完成。" if dry_run else ("合同版本已修复。" if changed else "合同版本已是最新版本。"),
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigVerifier])
+def set_readiness_readonly_approval(request, pk):
+    """Approve or revoke only the tenant config's production-readonly flags."""
+    config = _get_config_for_user(request, pk, "integrations.config.verify")
+    serializer = ReadonlyApprovalSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    payload = dict(serializer.validated_data)
+    if payload["confirm"] is not True:
+        raise ValidationError({"confirm": "生产只读审批操作必须显式确认。"})
+    reason = str(payload.get("reason") or "").strip()
+    if len(reason) < 5:
+        raise ValidationError({"reason": "请填写至少 5 个字符的审批或撤销原因。"})
+    payload["reason"] = reason
+    target_contract = _require_shopee_readiness_config(config)
+    action = "approve_platform_readonly" if payload["approved"] else "revoke_platform_readonly"
+    operation_digest, payload_digest = _readiness_operation_identity(request, action, config, payload)
+
+    with transaction.atomic():
+        locked = PlatformIntegrationConfig.objects.select_for_update().get(
+            pk=config.pk,
+            tenant=request.user.tenant,
+        )
+        existing = _find_readiness_operation(locked, action, operation_digest, payload_digest)
+        if existing is not None:
+            return success_response(
+                _readiness_action_response(
+                    locked,
+                    operation=action,
+                    replay=True,
+                    target_contract=target_contract,
+                    changed=bool((existing.masked_detail or {}).get("changed")),
+                ),
+                message="生产只读审批操作已幂等完成。",
+            )
+        if payload["expected_version"] != locked.config_version:
+            raise StateConflict("配置版本已变化，请刷新准备度后再执行生产只读审批。")
+        before = {
+            "network_enabled": bool(locked.network_enabled),
+            "sync_read_enabled": bool(locked.sync_read_enabled),
+            "sync_write_enabled": bool(locked.sync_write_enabled),
+        }
+        if payload["approved"]:
+            row = build_config_readiness(locked)
+            # network_not_approved is the single state this action is meant to
+            # enable.  All other provider/global blockers must already pass.
+            blockers = [
+                code
+                for code in row["blocker_codes"]
+                if code not in {"network_not_approved", "readonly_not_approved"}
+            ]
+            if blockers:
+                raise ValidationError(
+                    {
+                        "detail": "当前配置尚未满足生产只读审批条件。",
+                        "blocker_codes": blockers,
+                        "blocker_summary": "；".join(BLOCKER_LABELS.get(code, code) for code in blockers),
+                    }
+                )
+            changed = not (locked.network_enabled and locked.sync_read_enabled)
+            if changed:
+                locked.network_enabled = True
+                locked.sync_read_enabled = True
+                # This action intentionally does not write sync_write_enabled.
+                locked.config_version += 1
+                locked.save(update_fields=["network_enabled", "sync_read_enabled", "config_version", "updated_at"])
+        else:
+            changed = bool(locked.network_enabled or locked.sync_read_enabled)
+            if changed:
+                locked.network_enabled = False
+                locked.sync_read_enabled = False
+                locked.config_version += 1
+                locked.save(update_fields=["network_enabled", "sync_read_enabled", "config_version", "updated_at"])
+        _write_audit_log(
+            locked,
+            request.user,
+            action,
+            detail={
+                "operation": "approve_readonly" if payload["approved"] else "revoke_readonly",
+                "approved": bool(payload["approved"]),
+                "changed": changed,
+                "reason_recorded": True,
+                "config_version_before": payload["expected_version"],
+                "config_version_after": locked.config_version,
+                "before": before,
+                "after": {
+                    "network_enabled": bool(locked.network_enabled),
+                    "sync_read_enabled": bool(locked.sync_read_enabled),
+                    "sync_write_enabled": bool(locked.sync_write_enabled),
+                },
+                "idempotency_key_hash": operation_digest,
+                "payload_digest": payload_digest,
+            },
+        )
+        response_data = _readiness_action_response(
+            locked,
+            operation=action,
+            target_contract=target_contract,
+            changed=changed,
+        )
+    return success_response(
+        response_data,
+        message=("生产只读审批已完成。" if payload["approved"] else "生产只读审批已撤销。")
+        if changed
+        else ("生产只读审批已处于目标状态。" if payload["approved"] else "生产只读审批本来就是撤销状态。"),
+    )
 
 
 @api_view(["GET", "POST"])

@@ -6,6 +6,16 @@ from . import views
 urlpatterns = [
     path("workspace/", views.integration_workspace_view, name="integration-workspace"),
     path("readiness/", views.platform_integration_readiness, name="platform-integration-readiness"),
+    path(
+        "readiness/configs/<int:pk>/repair-contract/",
+        views.repair_readiness_contract,
+        name="platform-readiness-contract-repair",
+    ),
+    path(
+        "readiness/configs/<int:pk>/readonly-approval/",
+        views.set_readiness_readonly_approval,
+        name="platform-readiness-readonly-approval",
+    ),
     path("subject-api-access/", views.subject_api_access_detail, name="subject-api-access-detail"),
     path("platform-schemas/<str:platform>/", views.platform_config_schema, name="platform-config-schema"),
     path("configs/", views.integration_config_collection, name="integration-config-collection"),

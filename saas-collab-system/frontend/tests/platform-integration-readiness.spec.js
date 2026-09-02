@@ -15,12 +15,25 @@ describe('平台接入真实准备度契约', () => {
   it('展示配置概况和可执行的待处理项', () => {
     expect(page).toContain('config_summary');
     expect(page).toContain('blocker_summary');
-    expect(page).toContain('真实只读接入条件');
+    expect(page).toContain('平台生产只读状态');
+    expect(page).toContain('全局安全门');
+    expect(page).toContain('只读同步开关');
   });
 
-  it('不提供生产启用或写入操作', () => {
-    expect(page).not.toContain('生产启用禁用');
-    expect(page).not.toContain(':actions=');
+  it('提供租户范围内的整改和生产只读审批闭环', () => {
+    expect(page).toContain('修复合同版本');
+    expect(page).toContain('审批生产只读');
+    expect(page).toContain('撤销只读审批');
+    expect(page).toContain('维护凭据并执行检查');
+    expect(page).toContain('授权 Shopee 店铺');
+    expect(api).toContain('/repair-contract/');
+    expect(api).toContain('/readonly-approval/');
+  });
+
+  it('审批动作按现有细粒度权限控制且不开放生产写入', () => {
+    expect(page).toContain("auth.hasPermission('integrations.config.update')");
+    expect(page).toContain("auth.hasPermission('integrations.config.verify')");
     expect(page).toContain('生产写入始终关闭');
+    expect(page).not.toContain('sync_write_enabled: true');
   });
 });

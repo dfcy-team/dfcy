@@ -40,6 +40,20 @@ export const fetchPlatformIntegrationReadiness = () =>
     'integrations.readiness'
   );
 
+export const repairPlatformIntegrationContract = (id, payload) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/readiness/configs/${id}/repair-contract/`, data: payload },
+    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟模式不修改生产接入配置。', data: null }),
+    'integrations.readiness.repair_contract'
+  );
+
+export const setPlatformIntegrationReadonlyApproval = (id, payload) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/readiness/configs/${id}/readonly-approval/`, data: payload },
+    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟模式不执行生产只读审批。', data: null }),
+    'integrations.readiness.readonly_approval'
+  );
+
 export const fetchIntegrationConfigDetail = (id = 1) =>
   requestWithMockFallback(
     { method: 'get', url: `/api/internal/integrations/configs/${id}/` },
