@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 9444
+  },
+  "tls": {
+    "cert_file": "/etc/saas-collab/runner/tls/runner.crt",
+    "key_file": "/etc/saas-collab/runner/tls/runner.key",
+    "client_ca_file": "/etc/saas-collab/runner/tls/backend-ca.pem",
+    "require_client_certificate": false
+  },
+  "auth": {
+    "token_file": "/etc/saas-collab/runner/secrets/runner.token"
+  },
+  "paths": {
+    "state_file": "/var/lib/saas-collab/pilot-runner/state.sqlite3",
+    "audit_file": "/var/lib/saas-collab/pilot-runner/audit.jsonl",
+    "evidence_dir": "/var/lib/saas-collab/pilot-runner/evidence",
+    "candidate_manifest_file": "/etc/saas-collab/runner/approved-candidate.json"
+  },
+  "limits": {
+    "max_body_bytes": 65536,
+    "max_concurrent": 2,
+    "max_operation_timeout_seconds": 1800,
+    "request_timeout_seconds": 15,
+    "max_performance_rps": 5,
+    "max_performance_concurrency": 4,
+    "max_performance_duration_seconds": 60
+  },
+  "environments": {
+    "pilot": {
+      "operations": {
+        "deploy": {
+          "argv": [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/local/sbin/saas-collab-pilot-runner-deploy"
+          ],
+          "timeout_seconds": 1800
+        },
+        "recovery": {
+          "argv": [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/local/sbin/saas-collab-pilot-runner-recovery"
+          ],
+          "timeout_seconds": 600
+        },
+        "rollback": {
+          "argv": [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/local/sbin/saas-collab-pilot-runner-rollback"
+          ],
+          "timeout_seconds": 900
+        },
+        "performance": {
+          "mode": "http",
+          "timeout_seconds": 120,
+          "targets": {
+            "demo-app": "https://pilot-app.internal.example/api/internal/health/"
+          },
+          "profiles": {
+            "demo": {
+              "target": "demo-app",
+              "rps": 2,
+              "concurrency": 2,
+              "duration_seconds": 10,
+              "request_timeout_seconds": 5,
+              "method": "GET",
+              "headers": {
+                "X-Pilot-Performance-Probe": "demo"
+              }
+            },
+            "synthetic": {
+              "target": "demo-app",
+              "rps": 2,
+              "concurrency": 2,
+              "duration_seconds": 30,
+              "request_timeout_seconds": 5,
+              "method": "GET",
+              "headers": {
+                "X-Pilot-Performance-Probe": "synthetic"
+              }
+            },
+            "smoke": {
+              "target": "demo-app",
+              "rps": 2,
+              "concurrency": 2,
+              "duration_seconds": 10,
+              "request_timeout_seconds": 5,
+              "method": "GET",
+              "headers": {
+                "X-Pilot-Performance-Probe": "smoke"
+              }
+            }
+          }
+        }
+      }
+    },
+    "controlled-pilot": {
+      "operations": {
+        "deploy": {
+          "argv": [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/local/sbin/saas-collab-pilot-runner-deploy"
+          ],
+          "timeout_seconds": 1800
+        },
+        "recovery": {
+          "argv": [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/local/sbin/saas-collab-pilot-runner-recovery"
+          ],
+          "timeout_seconds": 600
+        },
+        "rollback": {
+          "argv": [
+            "/usr/bin/sudo",
+            "-n",
+            "/usr/local/sbin/saas-collab-pilot-runner-rollback"
+          ],
+          "timeout_seconds": 900
+        },
+        "performance": {
+          "mode": "http",
+          "timeout_seconds": 120,
+          "targets": {
+            "demo-app": "https://pilot-app.internal.example/api/internal/health/"
+          },
+          "profiles": {
+            "demo": {
+              "target": "demo-app",
+              "rps": 2,
+              "concurrency": 2,
+              "duration_seconds": 10,
+              "request_timeout_seconds": 5,
+              "method": "GET",
+              "headers": {
+                "X-Pilot-Performance-Probe": "demo"
+              }
+            },
+            "synthetic": {
+              "target": "demo-app",
+              "rps": 2,
+              "concurrency": 2,
+              "duration_seconds": 30,
+              "request_timeout_seconds": 5,
+              "method": "GET",
+              "headers": {
+                "X-Pilot-Performance-Probe": "synthetic"
+              }
+            },
+            "smoke": {
+              "target": "demo-app",
+              "rps": 2,
+              "concurrency": 2,
+              "duration_seconds": 10,
+              "request_timeout_seconds": 5,
+              "method": "GET",
+              "headers": {
+                "X-Pilot-Performance-Probe": "smoke"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

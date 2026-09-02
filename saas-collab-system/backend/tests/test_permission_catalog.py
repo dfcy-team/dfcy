@@ -6,6 +6,21 @@ from apps.permissions.catalog import PERMISSION_DEFINITIONS, permission_defaults
 from apps.permissions.models import Permission
 
 
+def test_pilot_production_execution_permissions_are_distinct_catalog_entries():
+    execution_codes = {
+        "pilot.performance.execute",
+        "pilot.recovery.execute",
+        "pilot.release.execute",
+        "pilot.release.rollback.execute",
+    }
+    catalog_codes = {definition["code"] for definition in PERMISSION_DEFINITIONS}
+
+    assert execution_codes <= catalog_codes
+    assert "pilot.performance.record" not in execution_codes
+    assert "pilot.recovery.record" not in execution_codes
+    assert "pilot.release.record" not in execution_codes
+
+
 @pytest.mark.django_db
 def test_permission_catalog_is_seeded_with_current_metadata():
     for definition in PERMISSION_DEFINITIONS:

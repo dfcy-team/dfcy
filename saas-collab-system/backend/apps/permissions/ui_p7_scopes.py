@@ -21,11 +21,14 @@ SCOPE_KEYS = {
     "pilot.recovery.plan": {"environment_ids", "recovery_plan_ids"},
     "pilot.recovery.review": {"environment_ids", "recovery_plan_ids"},
     "pilot.recovery.record": {"environment_ids", "recovery_plan_ids"},
+    "pilot.recovery.execute": {"environment_ids", "recovery_plan_ids"},
     "pilot.release.view": {"environment_ids", "release_plan_ids", "release_channels"},
     "pilot.release.plan": {"environment_ids", "release_plan_ids", "release_channels"},
     "pilot.release.review": {"environment_ids", "release_plan_ids", "release_channels"},
     "pilot.release.record": {"environment_ids", "release_plan_ids", "release_channels"},
     "pilot.release.rollback": {"environment_ids", "release_plan_ids", "release_channels"},
+    "pilot.release.execute": {"environment_ids", "release_plan_ids", "release_channels"},
+    "pilot.release.rollback.execute": {"environment_ids", "release_plan_ids", "release_channels"},
     "pilot.capacity.view": {"environment_ids", "service_names", "metric_codes"},
 }
 

@@ -23,6 +23,7 @@ ci_check() {
     "$control_dir/bin/developer-a-ci-dispatch"
     "$control_dir/bin/production-deploy"
     "$control_dir/bin/production-rollback"
+    "$control_dir/bin/production-recovery"
     "$control_dir/bin/production-health-check"
     "$control_dir/bin/production-backup"
     "$control_dir/bin/production-baseline-check"
@@ -62,10 +63,7 @@ ci_check() {
 }
 
 runtime_check() {
-  if [[ "$(id -u)" -ne 0 ]]; then
-    [[ "$(id -un)" = "dfcy01" ]] || fail 'runtime baseline verification must run as root or dfcy01.'
-    [[ "$(stat -c '%U' "$CONTROL_ROOT" 2>/dev/null)" = "dfcy01" ]] || fail 'non-root runtime control must be owned by dfcy01.'
-  fi
+  [[ "$(id -u)" -eq 0 ]] || fail 'runtime baseline verification must run as root.'
   local env_file="$CONTROL_ROOT/config/.env.production"
   local pointer="$CONTROL_ROOT/config/env.path"
   if [[ -f "$pointer" ]]; then
@@ -76,11 +74,53 @@ runtime_check() {
   local mode
   mode=$(stat -c '%a' "$env_file" 2>/dev/null) || fail 'cannot inspect runtime environment file.'
   [[ "$mode" = 400 || "$mode" = 600 ]] || fail 'runtime environment file must have mode 0400 or 0600.'
+  local owner
+  owner=$(stat -c '%U' "$env_file" 2>/dev/null) || fail 'cannot inspect runtime environment ownership.'
+  [[ "$owner" = root ]] || fail 'runtime environment file must be root-owned.'
+
+  # The deploy account is an explicit trust boundary. Docker group membership
+  # is equivalent to root on a Docker host, so refuse the configuration even
+  # when the fixed sudoers/forced-command path is otherwise valid.
+  local deploy_user
+  deploy_user=$(sed -n 's/^PRODUCTION_DEPLOY_USER=//p' "$env_file" | tail -n 1 | tr -d '\r')
+  deploy_user=${deploy_user:-dfcy01}
+  [[ "$deploy_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail 'PRODUCTION_DEPLOY_USER is invalid.'
+  id "$deploy_user" >/dev/null 2>&1 || fail 'configured production deploy user does not exist.'
+  if id -nG "$deploy_user" | tr ' ' '\n' | grep -qx docker; then
+    fail 'production deploy user must not belong to the docker group.'
+  fi
+
+  # A production deploy is never allowed to reach the migration service
+  # without an owner-managed pre-migration backup hook.  Read only these
+  # non-secret control values; do not source the live environment here.
+  local require_backup backup_command backup_owner backup_mode
+  require_backup=$(sed -n 's/^PRODUCTION_REQUIRE_BACKUP=//p' "$env_file" | tail -n 1 | tr -d '\r')
+  [[ "$require_backup" = true ]] || fail 'PRODUCTION_REQUIRE_BACKUP=true is required.'
+  backup_command=$(sed -n 's/^PRODUCTION_BACKUP_COMMAND=//p' "$env_file" | tail -n 1 | tr -d '\r')
+  [[ "$backup_command" = /* && "$backup_command" != *$'\n'* && "$backup_command" != *$'\r'* ]] || fail 'a root-owned absolute production backup command is required.'
+  [[ -x "$backup_command" && ! -L "$backup_command" && -f "$backup_command" ]] || fail 'the production backup command is missing or unsafe.'
+  backup_owner=$(stat -c '%U' "$backup_command" 2>/dev/null) || fail 'cannot inspect production backup command ownership.'
+  [[ "$backup_owner" = root ]] || fail 'production backup command must be root-owned.'
+  backup_mode=$(stat -c '%a' "$backup_command" 2>/dev/null) || fail 'cannot inspect production backup command permissions.'
+  (( (8#$backup_mode & 0022) == 0 )) || fail 'production backup command must not be group/world writable.'
 
   local baseline="$CONTROL_ROOT/config/baseline.sha256"
   [[ -f "$baseline" && ! -L "$baseline" ]] || fail 'runtime baseline ledger is missing.'
   mode=$(stat -c '%a' "$baseline" 2>/dev/null) || fail 'cannot inspect runtime baseline ledger.'
   [[ "$mode" = 400 || "$mode" = 600 ]] || fail 'runtime baseline ledger must have mode 0400 or 0600.'
+
+  # The deploy account may invoke the fixed sudo entrypoints but must not be
+  # able to rewrite the control tree, current ledger, or runner inputs.  A
+  # writable control tree would turn the forced command into arbitrary root
+  # code execution, so reject it before any deployment/recovery action.
+  local owner path
+  for path in "$CONTROL_ROOT" "$CONTROL_ROOT/bin" "$CONTROL_ROOT/lib" "$CONTROL_ROOT/config" "$CONTROL_ROOT/ledger" "$CONTROL_ROOT/releases" "$CONTROL_ROOT/current.json" "$CONTROL_ROOT/previous.json" "$CONTROL_ROOT/production-compose.yml" "$baseline"; do
+    [[ -e "$path" && ! -L "$path" ]] || fail 'a production control path is missing or symbolic.'
+    owner=$(stat -c '%U' "$path" 2>/dev/null) || fail 'cannot inspect production control ownership.'
+    [[ "$owner" = root ]] || fail 'production control paths must be root-owned.'
+    mode=$(stat -c '%a' "$path" 2>/dev/null) || fail 'cannot inspect production control permissions.'
+    (( (8#$mode & 0022) == 0 )) || fail 'production control paths must not be group/world writable.'
+  done
 
   (cd / && sha256sum -c "$baseline" >/dev/null) || fail 'installed production control files differ from the baseline ledger.'
   printf 'PRODUCTION_BASELINE_RUNTIME=PASS\n'

@@ -719,6 +719,30 @@ PERMISSION_DEFINITIONS = (
         "action": "topology.verify", "description": "Run fixed topology dry-run validation without remote execution.",
     },
     {
+        "code": "pilot.performance.view", "name": "View pilot performance", "module": "pilot",
+        "action": "performance.view", "description": "View scoped pilot performance records without external execution.",
+    },
+    {
+        "code": "pilot.performance.plan", "name": "Plan pilot performance", "module": "pilot",
+        "action": "performance.plan", "description": "Plan scoped pilot performance records without external execution.",
+    },
+    {
+        "code": "pilot.performance.review", "name": "Review pilot performance", "module": "pilot",
+        "action": "performance.review", "description": "Review scoped pilot performance records without external execution.",
+    },
+    {
+        "code": "pilot.performance.record", "name": "Record pilot performance", "module": "pilot",
+        "action": "performance.record", "description": "Record scoped pilot performance records without external execution.",
+    },
+    {
+        "code": "pilot.performance.execute", "name": "Execute pilot performance", "module": "pilot",
+        "action": "performance.execute", "description": "Execute approved pilot performance runs through the allow-listed runner.",
+    },
+    {
+        "code": "pilot.performance.cancel", "name": "Cancel pilot performance", "module": "pilot",
+        "action": "performance.cancel", "description": "Cancel scoped pilot performance records without external execution.",
+    },
+    {
         "code": "pilot.recovery.view", "name": "View recovery plans", "module": "pilot",
         "action": "recovery.view", "description": "View authorized recovery plans and drill evidence.",
     },
@@ -733,6 +757,10 @@ PERMISSION_DEFINITIONS = (
     {
         "code": "pilot.recovery.record", "name": "Record recovery evidence", "module": "pilot",
         "action": "recovery.record", "description": "Record externally performed recovery drill outcomes.",
+    },
+    {
+        "code": "pilot.recovery.execute", "name": "Execute recovery drills", "module": "pilot",
+        "action": "recovery.execute", "description": "Execute approved recovery plans through the allow-listed runner.",
     },
     {
         "code": "pilot.release.view", "name": "View release plans", "module": "pilot",
@@ -751,8 +779,16 @@ PERMISSION_DEFINITIONS = (
         "action": "release.record", "description": "Record externally performed release outcomes.",
     },
     {
+        "code": "pilot.release.execute", "name": "Execute pilot releases", "module": "pilot",
+        "action": "release.execute", "description": "Deploy approved pilot releases through the allow-listed runner.",
+    },
+    {
         "code": "pilot.release.rollback", "name": "Review and record rollback", "module": "pilot",
         "action": "release.rollback", "description": "Approve and record externally performed rollback outcomes.",
+    },
+    {
+        "code": "pilot.release.rollback.execute", "name": "Execute pilot rollbacks", "module": "pilot",
+        "action": "release.rollback.execute", "description": "Roll back approved pilot releases through the allow-listed runner.",
     },
     {
         "code": "pilot.capacity.view", "name": "View pilot capacity", "module": "pilot",
@@ -947,6 +983,12 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "pilot.readiness.view": "查看试点就绪度",
     "pilot.topology.view": "查看试点拓扑",
     "pilot.topology.verify": "验证试点拓扑",
+    "pilot.performance.view": "查看试点性能",
+    "pilot.performance.plan": "规划试点性能",
+    "pilot.performance.review": "审核试点性能",
+    "pilot.performance.record": "记录试点性能",
+    "pilot.performance.execute": "执行试点性能",
+    "pilot.performance.cancel": "取消试点性能",
     "pilot.recovery.view": "查看恢复计划",
     "pilot.recovery.plan": "规划恢复演练",
     "pilot.recovery.review": "审核恢复计划",
@@ -955,7 +997,9 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "pilot.release.plan": "规划试点发布",
     "pilot.release.review": "审核试点发布",
     "pilot.release.record": "记录发布证据",
+    "pilot.release.execute": "执行试点发布",
     "pilot.release.rollback": "审核并记录回滚",
+    "pilot.release.rollback.execute": "执行试点回滚",
     "pilot.capacity.view": "查看试点容量",
     "pilot.control.view": "查看试点控制台",
     "pilot.security_review.view": "查看试点安全评审",

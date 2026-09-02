@@ -159,7 +159,7 @@ def _validate_controlled_references(actor, environment, evidence_refs, *, target
         alias=target_alias,
     ).exists():
         raise ContractViolation(
-            "Verification target_alias is not registered for the current tenant and environment.",
+            "The performance/verification target_alias is not registered for the current tenant and environment.",
             error_code=ErrorCode.VALIDATION_ERROR,
             status_code=422,
         )
@@ -183,7 +183,7 @@ def create_resource(model, *, actor, environment, data, idempotency_key, permiss
             actor,
             environment,
             data.get("evidence_refs"),
-            target_alias=data.get("target_alias") if model is VerificationRun else None,
+            target_alias=data.get("target_alias") if model in (VerificationRun, PerformanceRun) else None,
         )
     code_prefix = {
         SecurityReview: "SEC",
@@ -253,7 +253,11 @@ def patch_resource(instance, *, actor, data, permission):
             actor,
             target_environment,
             data.get("evidence_refs", instance.evidence_refs),
-            target_alias=data.get("target_alias", instance.target_alias) if isinstance(instance, VerificationRun) else None,
+            target_alias=(
+                data.get("target_alias", instance.target_alias)
+                if isinstance(instance, (VerificationRun, PerformanceRun))
+                else None
+            ),
         )
     before_environment = instance.environment.code
     changed = []

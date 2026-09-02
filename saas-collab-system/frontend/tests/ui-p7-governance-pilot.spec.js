@@ -3,9 +3,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { normalizeLoginResponse } from '../src/api/auth';
-import { mockAuthUser } from '../src/mock/auth';
-import { mockCapacityObservations, mockRecoveryAction, mockRecoveryPlan, mockReleaseAction, mockReleasePlan } from '../src/mock/pilot';
 import { canAccessPath } from '../src/router/menu';
+import { permissionLabel } from '../src/utils/permissionLabels';
+import { mockAuthUser, mockCurrentUser } from '../src/mock/auth';
+import { mockCapacityObservations } from '../src/mock/pilot';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -42,12 +43,31 @@ describe('UI-P7 governance and controlled pilot', () => {
     }
   });
 
-  it('grants mock actions by exact action permission', () => {
-    expect(mockAuthUser.permissions).toEqual(expect.arrayContaining([
-      'governance.api.check', 'governance.assistants.evaluate', 'pilot.topology.verify',
-      'pilot.recovery.plan', 'pilot.recovery.review', 'pilot.recovery.record',
-      'pilot.release.plan', 'pilot.release.review', 'pilot.release.record', 'pilot.release.rollback'
-    ]));
+  it('keeps production action permissions separate from record and view permissions', () => {
+    const pages = [
+      read('src/views/pilot/P8WorkflowWorkspace.vue'),
+      read('src/views/pilot/PilotWorkflow.vue')
+    ].join('\n');
+    expect(pages).toContain("pilot.performance.execute");
+    expect(pages).toContain("pilot.recovery.execute");
+    expect(pages).toContain("pilot.release.execute");
+    expect(pages).toContain("pilot.release.rollback.execute");
+    expect(pages).not.toMatch(/canRecord.*execute|record.*execute/i);
+    expect(permissionLabel('pilot.performance.execute')).toBe('执行性能验证');
+    expect(permissionLabel('pilot.recovery.execute')).toBe('执行恢复作业');
+    expect(permissionLabel('pilot.release.execute')).toBe('执行生产部署');
+    expect(permissionLabel('pilot.release.rollback.execute')).toBe('执行生产回滚');
+  });
+
+  it('includes execution permissions in the local candidate user returned by mockCurrentUser', () => {
+    const executionPermissions = [
+      'pilot.performance.execute',
+      'pilot.recovery.execute',
+      'pilot.release.execute',
+      'pilot.release.rollback.execute'
+    ];
+    expect(mockAuthUser.permissions).toEqual(expect.arrayContaining(executionPermissions));
+    expect(mockCurrentUser()).toMatchObject({ success: true, data: { permissions: expect.arrayContaining(executionPermissions) } });
   });
 
   it('uses only internal governance and pilot API partitions', () => {
@@ -58,13 +78,22 @@ describe('UI-P7 governance and controlled pilot', () => {
     expect(`${governance}${pilot}`).not.toMatch(/\/api\/rpa\/|\/api\/finance\/|\/admin\//);
   });
 
-  it('keeps fixed checks in mock and real evidence in sandbox until E2E', () => {
+  it('uses live governance and pilot APIs without fallback or forced capability downgrades', () => {
     const governance = read('src/api/governance.js');
     const pilot = read('src/api/pilot.js');
-    expect(governance).toContain("response.data.api_status = 'sandbox'");
-    expect(pilot).toContain("response.data.api_status = 'sandbox'");
-    expect(read('src/mock/governance.js')).toContain("evidence_status: 'fixed_demo'");
-    expect(read('src/mock/pilot.js')).toContain("api_status: 'mock'");
+    expect(governance).toContain("import { requestApi } from './request'");
+    expect(pilot).toContain("import { requestApi } from './request'");
+    expect(`${governance}${pilot}`).not.toContain('requestWithMockFallback');
+    expect(`${governance}${pilot}`).not.toMatch(/requestWithMockFallback|api_status = ['\"](?:sandbox|pending|mock)/);
+    expect(governance).toContain('/api/internal/governance/api-contracts/check-mock/');
+    expect(pilot).toContain('/api/internal/pilot/topology/verify-mock/');
+    expect(governance).toContain('/assistants/${id}/evaluations/');
+    expect(governance).toContain('/assistant-evaluations/${id}/');
+    expect(pilot).toContain('/performance-runs/${id}/execute/');
+    expect(pilot).toContain('/recovery-plans/${id}/execute/');
+    expect(pilot).toContain('/release-plans/${id}/execute/');
+    expect(pilot).toContain('/release-plans/${id}/execute-rollback/');
+    expect(pilot).toContain('/executions/');
   });
 
   it('does not expose infrastructure or high-risk execution controls', () => {
@@ -72,14 +101,15 @@ describe('UI-P7 governance and controlled pilot', () => {
       read('src/views/pilot/ReadinessDashboard.vue'), read('src/views/pilot/TopologyOverview.vue'),
       read('src/views/pilot/CapacityDashboard.vue'), read('src/views/pilot/PilotWorkflow.vue')
     ].join('\n');
-    expect(pages).not.toMatch(/WebShell|executeSql|dockerExec|sshCommand|deployNow|restoreNow|connectPlatform/);
-    expect(pages).toContain('不会执行部署');
-    expect(pages).toContain('仅记录已在受控主机完成的外部操作');
+    expect(pages).not.toMatch(/WebShell|executeSql|dockerExec|sshCommand|deployNow|restoreNow|connectPlatform|evaluate-mock|verify-mock/);
+    expect(pages).toContain('执行部署');
+    expect(pages).toContain('执行恢复');
+    expect(pages).toContain('执行回滚');
   });
 
   it('uses idempotency keys for every write API', () => {
-    expect(read('src/api/governance.js')).toContain("'Idempotency-Key': idempotency()");
-    expect(read('src/api/pilot.js')).toContain("'Idempotency-Key': idempotency()");
+    expect(read('src/api/governance.js')).toMatch(/['\"]Idempotency-Key['\"]:\s*idempotency\(/);
+    expect(read('src/api/pilot.js')).toMatch(/['\"]Idempotency-Key['\"]:\s*idempotency\(/);
   });
 
   it('uses the exact UI-P7 response fields in mocks and pages', () => {
@@ -99,23 +129,26 @@ describe('UI-P7 governance and controlled pilot', () => {
     const workflowPage = read('src/views/pilot/PilotWorkflow.vue');
     expect(governancePage).toContain('route.params.id');
     expect(governancePage).toContain('loadDetail(route.params.id, false)');
-    for (const permission of ['.plan', '.review', '.record', 'pilot.release.rollback']) expect(workflowPage).toContain(permission);
-    for (const action of ['schedule', 'start', 'record-result', 'resume', 'cancel', 'approve-rollback', 'resume-rollback', 'record-rollback']) expect(workflowPage).toContain(action);
+    for (const permission of ['.plan', '.review', '.execute', 'pilot.release.rollback.execute']) expect(`${workflowPage}${read('src/views/pilot/P8WorkflowWorkspace.vue')}`).toContain(permission);
+    for (const action of ['schedule', 'execute', 'cancel', 'approve-rollback']) expect(`${workflowPage}${read('src/api/pilot.js')}`).toContain(action);
   });
 
-  it('keeps mock workflows stateful without adding execution endpoints', () => {
-    const mock = read('src/mock/pilot.js');
-    expect(mock).toContain("'submit-review': 'review_pending'");
-    expect(mock).toContain("'record-rollback': payload?.rollback_status");
-    expect(mock).not.toMatch(/dockerExec|sshCommand|executeSql|WebShell|\/api\/rpa\//i);
+  it('exposes execution state and does not manufacture workflow results in views', () => {
+    const pages = [read('src/views/pilot/P8WorkflowWorkspace.vue'), read('src/views/pilot/PilotWorkflow.vue'), read('src/views/pilot/ControlRoom.vue')].join('\n');
+    expect(pages).toContain('queued');
+    expect(pages).toContain('running');
+    expect(pages).toContain('passed');
+    expect(pages).toContain('failed');
+    expect(pages).toContain('fetchExecutions');
+    expect(pages).not.toMatch(/demo[-_]|fixed demo|Mock|mock/i);
   });
 
-  it('advances recovery and release dry-run state without executing infrastructure', () => {
-    expect(mockRecoveryPlan(1).data.status).toBe('draft');
-    expect(mockRecoveryAction(1, 'submit-review', {}).data.status).toBe('review_pending');
-    expect(mockRecoveryAction(1, 'approve', {}).data.status).toBe('approved');
-    expect(mockReleasePlan(1).data.status).toBe('draft');
-    expect(mockReleaseAction(1, 'submit-review', {}).data.status).toBe('review_pending');
-    expect(mockReleaseAction(1, 'approve', {}).data.status).toBe('approved');
+  it('keeps production operation controls behind explicit confirmation and permission', () => {
+    const release = read('src/views/pilot/PilotWorkflow.vue');
+    const p8 = read('src/views/pilot/P8WorkflowWorkspace.vue');
+    expect(release).toContain('ElMessageBox.confirm');
+    expect(p8).toContain('ElMessageBox.confirm');
+    expect(release).toContain('pilot.release.rollback.execute');
+    expect(release).toContain('row.rollback_approval_ref');
   });
 });

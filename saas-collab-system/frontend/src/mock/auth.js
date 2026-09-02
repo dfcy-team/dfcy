@@ -34,13 +34,13 @@ export const mockAuthUser = {
     'governance.api.view', 'governance.api.check',
     'governance.assistants.view', 'governance.assistants.evaluate',
     'pilot.readiness.view', 'pilot.topology.view', 'pilot.topology.verify',
-    'pilot.recovery.view', 'pilot.recovery.plan', 'pilot.recovery.review', 'pilot.recovery.record',
-    'pilot.release.view', 'pilot.release.plan', 'pilot.release.review', 'pilot.release.record', 'pilot.release.rollback',
+    'pilot.recovery.view', 'pilot.recovery.plan', 'pilot.recovery.review', 'pilot.recovery.record', 'pilot.recovery.execute',
+    'pilot.release.view', 'pilot.release.plan', 'pilot.release.review', 'pilot.release.record', 'pilot.release.rollback', 'pilot.release.execute', 'pilot.release.rollback.execute',
     'pilot.capacity.view',
     'pilot.control.view',
     'pilot.security_review.view', 'pilot.security_review.plan', 'pilot.security_review.review',
     'pilot.verification.view', 'pilot.verification.plan', 'pilot.verification.review', 'pilot.verification.record', 'pilot.verification.cancel',
-    'pilot.performance.view', 'pilot.performance.plan', 'pilot.performance.review', 'pilot.performance.record', 'pilot.performance.cancel',
+    'pilot.performance.view', 'pilot.performance.plan', 'pilot.performance.review', 'pilot.performance.record', 'pilot.performance.cancel', 'pilot.performance.execute',
     'pilot.entry.view', 'pilot.entry.plan', 'pilot.entry.review'
   ],
   data_scope: []

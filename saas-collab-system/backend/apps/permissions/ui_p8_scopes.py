@@ -23,6 +23,7 @@ SCOPE_KEYS = {
     "pilot.performance.plan": {"pilot_environments", "performance_run_ids"},
     "pilot.performance.review": {"pilot_environments", "performance_run_ids"},
     "pilot.performance.record": {"pilot_environments", "performance_run_ids"},
+    "pilot.performance.execute": {"pilot_environments", "performance_run_ids"},
     "pilot.performance.cancel": {"pilot_environments", "performance_run_ids"},
     "pilot.entry.view": {"pilot_environments", "entry_decision_ids"},
     "pilot.entry.plan": {"pilot_environments", "entry_decision_ids"},

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source /usr/local/lib/saas-collab/pilot-runner-action-common.sh
+run_recovery "$@"
