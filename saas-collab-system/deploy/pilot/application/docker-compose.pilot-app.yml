@@ -39,6 +39,16 @@ services:
       --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-60}
       --access-logfile - --error-logfile -
     restart: unless-stopped
+    environment:
+      OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
+      PILOT_RUNNER_URL: ${PILOT_RUNNER_URL:?Set PILOT_RUNNER_URL in .env.pilot}
+      PILOT_RUNNER_ALLOWED_HOSTS: ${PILOT_RUNNER_ALLOWED_HOSTS:?Set PILOT_RUNNER_ALLOWED_HOSTS in .env.pilot}
+      PILOT_RUNNER_TOKEN_FILE: /run/secrets/pilot-runner.token
+      PILOT_RUNNER_CA_FILE: /run/secrets/pilot-runner-ca.pem
+    volumes:
+      - ${PILOT_OPENAI_API_KEY_PATH:?Set PILOT_OPENAI_API_KEY_PATH in .env.pilot}:/run/secrets/openai-api.key:ro
+      - ${PILOT_RUNNER_TOKEN_PATH:?Set PILOT_RUNNER_TOKEN_PATH in .env.pilot}:/run/secrets/pilot-runner.token:ro
+      - ${PILOT_RUNNER_CA_PATH:?Set PILOT_RUNNER_CA_PATH in .env.pilot}:/run/secrets/pilot-runner-ca.pem:ro
     ports:
       - "127.0.0.1:${PILOT_APP_PORT:-8000}:8000"
     networks:
@@ -53,6 +63,16 @@ services:
       - ${PILOT_ENV_FILE:-.env.pilot}
     command: celery -A config worker --loglevel=info
     restart: unless-stopped
+    environment:
+      OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
+      PILOT_RUNNER_URL: ${PILOT_RUNNER_URL:?Set PILOT_RUNNER_URL in .env.pilot}
+      PILOT_RUNNER_ALLOWED_HOSTS: ${PILOT_RUNNER_ALLOWED_HOSTS:?Set PILOT_RUNNER_ALLOWED_HOSTS in .env.pilot}
+      PILOT_RUNNER_TOKEN_FILE: /run/secrets/pilot-runner.token
+      PILOT_RUNNER_CA_FILE: /run/secrets/pilot-runner-ca.pem
+    volumes:
+      - ${PILOT_OPENAI_API_KEY_PATH:?Set PILOT_OPENAI_API_KEY_PATH in .env.pilot}:/run/secrets/openai-api.key:ro
+      - ${PILOT_RUNNER_TOKEN_PATH:?Set PILOT_RUNNER_TOKEN_PATH in .env.pilot}:/run/secrets/pilot-runner.token:ro
+      - ${PILOT_RUNNER_CA_PATH:?Set PILOT_RUNNER_CA_PATH in .env.pilot}:/run/secrets/pilot-runner-ca.pem:ro
     networks:
       - pilot-internal
     depends_on:

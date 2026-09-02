@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.tenants.models import Tenant
@@ -79,3 +80,96 @@ class AssistantDefinition(models.Model):
 
     class Meta:
         ordering = ["code", "id"]
+
+
+class AssistantEvaluationJobQuerySet(models.QuerySet):
+    """Execution records are append-only except through the task service."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Assistant evaluation jobs must be changed through the execution service.")
+
+    def delete(self):
+        raise ValidationError("Assistant evaluation jobs cannot be deleted.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Assistant evaluation jobs must be changed through the execution service.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Assistant evaluation jobs must be created through the execution service.")
+
+
+class AssistantEvaluationJob(models.Model):
+    """Durable, tenant-scoped asynchronous assistant evaluation."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    objects = AssistantEvaluationJobQuerySet.as_manager()
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        related_name="governance_assistant_evaluation_jobs",
+    )
+    assistant = models.ForeignKey(
+        AssistantDefinition,
+        on_delete=models.PROTECT,
+        related_name="evaluation_jobs",
+    )
+    requested_by = models.ForeignKey(
+        "accounts.CustomUser",
+        on_delete=models.PROTECT,
+        related_name="governance_assistant_evaluation_jobs_requested",
+    )
+    scenario = models.CharField(max_length=40)
+    demo_input_ref = models.SlugField(max_length=110)
+    # Synthetic public-demo cases are retained only for the lifetime of the
+    # durable job so a Celery worker can resume/inspect the exact request. The
+    # API never accepts credentials, URLs, or business-data classes here.
+    test_input = models.TextField(blank=True)
+    expected_output = models.TextField(blank=True)
+    reason = models.CharField(max_length=500)
+    assistant_version = models.PositiveIntegerField()
+    idempotency_key_hash = models.CharField(max_length=64)
+    request_fingerprint = models.CharField(max_length=64)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    celery_task_id = models.CharField(max_length=255, blank=True)
+    response_id = models.CharField(max_length=255, blank=True)
+    model = models.CharField(max_length=120, blank=True)
+    token_usage = models.JSONField(default=dict, blank=True)
+    result = models.TextField(blank=True)
+    assistant_output = models.TextField(blank=True)
+    passed = models.BooleanField(null=True, blank=True)
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    findings = models.JSONField(default=list, blank=True)
+    result_summary = models.CharField(max_length=1000, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.CharField(max_length=1000, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "idempotency_key_hash"],
+                name="uniq_assistant_eval_idempotency",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status", "created_at"], name="idx_assistant_eval_status"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and not getattr(self, "_execution_service_write", False):
+            raise ValidationError("Assistant evaluation jobs must be changed through the execution service.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Assistant evaluation jobs cannot be deleted.")

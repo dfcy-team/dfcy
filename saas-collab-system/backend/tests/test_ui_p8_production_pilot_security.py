@@ -192,7 +192,7 @@ def test_performance_thresholds_are_json_safe_and_no_load_test_is_executed():
     register_default_controls(tenant, env)
     grant(user, ["pilot.performance.view", "pilot.performance.plan"])
     response = client_for(user).post("/api/internal/pilot/performance-runs/", {
-        "scenario": "Synthetic read-only dashboard workload", "environment": "pilot", "workload_profile": "synthetic",
+        "scenario": "Synthetic read-only dashboard workload", "target_alias": "demo-app", "environment": "pilot", "workload_profile": "synthetic",
         "max_rps": 20, "concurrency": 5, "duration_seconds": 60,
         "thresholds": {"p95_ms_max": 800, "error_rate_max": 0.01, "cpu_percent_max": 80, "memory_percent_max": 80},
         "evidence_refs": ["demo-performance-plan"],
@@ -419,7 +419,7 @@ def entry_sources(tenant, env, user):
     )
     performance = controlled_create(
         PerformanceRun,
-        tenant=tenant, environment=env, code="PERF-ENTRY", scenario="Synthetic entry evidence", workload_profile="synthetic",
+        tenant=tenant, environment=env, code="PERF-ENTRY", scenario="Synthetic entry evidence", target_alias="demo-app", workload_profile="synthetic",
         max_rps=10, concurrency=2, duration_seconds=30,
         thresholds={"p95_ms_max": 800, "error_rate_max": 0.01, "cpu_percent_max": 80, "memory_percent_max": 80},
         evidence_refs=["demo-performance-result"], status="passed", creator=user, owner=user, reviewer=user,

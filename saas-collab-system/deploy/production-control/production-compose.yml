@@ -47,6 +47,11 @@ services:
       --access-logfile - --error-logfile -
     restart: unless-stopped
     environment:
+      OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
+      PILOT_RUNNER_URL: ${PRODUCTION_RUNNER_URL:?PRODUCTION_RUNNER_URL is required}
+      PILOT_RUNNER_ALLOWED_HOSTS: ${PRODUCTION_RUNNER_ALLOWED_HOSTS:?PRODUCTION_RUNNER_ALLOWED_HOSTS is required}
+      PILOT_RUNNER_TOKEN_FILE: /run/secrets/pilot-runner.token
+      PILOT_RUNNER_CA_FILE: /run/secrets/pilot-runner-ca.pem
       LIVE_CUSTODY_BACKEND: http
       LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
       LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
@@ -60,6 +65,9 @@ services:
       LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
       LIVE_SHOPEE_CONTRACT_APPROVED: "true"
     volumes:
+      - ${PRODUCTION_OPENAI_API_KEY_PATH:?PRODUCTION_OPENAI_API_KEY_PATH is required}:/run/secrets/openai-api.key:ro
+      - ${PRODUCTION_RUNNER_TOKEN_PATH:?PRODUCTION_RUNNER_TOKEN_PATH is required}:/run/secrets/pilot-runner.token:ro
+      - ${PRODUCTION_RUNNER_CA_PATH:?PRODUCTION_RUNNER_CA_PATH is required}:/run/secrets/pilot-runner-ca.pem:ro
       - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
       - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
     ports:
@@ -78,6 +86,8 @@ services:
       start_period: 30s
     networks:
       - production-internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -91,6 +101,11 @@ services:
     command: celery -A config worker --loglevel=info
     restart: unless-stopped
     environment:
+      OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
+      PILOT_RUNNER_URL: ${PRODUCTION_RUNNER_URL:?PRODUCTION_RUNNER_URL is required}
+      PILOT_RUNNER_ALLOWED_HOSTS: ${PRODUCTION_RUNNER_ALLOWED_HOSTS:?PRODUCTION_RUNNER_ALLOWED_HOSTS is required}
+      PILOT_RUNNER_TOKEN_FILE: /run/secrets/pilot-runner.token
+      PILOT_RUNNER_CA_FILE: /run/secrets/pilot-runner-ca.pem
       LIVE_CUSTODY_BACKEND: http
       LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
       LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
@@ -104,10 +119,15 @@ services:
       LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
       LIVE_SHOPEE_CONTRACT_APPROVED: "true"
     volumes:
+      - ${PRODUCTION_OPENAI_API_KEY_PATH:?PRODUCTION_OPENAI_API_KEY_PATH is required}:/run/secrets/openai-api.key:ro
+      - ${PRODUCTION_RUNNER_TOKEN_PATH:?PRODUCTION_RUNNER_TOKEN_PATH is required}:/run/secrets/pilot-runner.token:ro
+      - ${PRODUCTION_RUNNER_CA_PATH:?PRODUCTION_RUNNER_CA_PATH is required}:/run/secrets/pilot-runner-ca.pem:ro
       - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
       - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
     networks:
       - production-internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy

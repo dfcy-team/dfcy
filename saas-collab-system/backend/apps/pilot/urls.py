@@ -16,6 +16,14 @@ from .views import (
     TopologyView,
 )
 from .ui_p8_views import ControlRoomView, ResourceActionView, ResourceCollectionView, ResourceDetailView
+from .execution_views import (
+    PerformanceExecutionView,
+    RecoveryExecutionView,
+    ReleaseExecutionView,
+    ReleaseRollbackExecutionView,
+    PilotExecutionCollectionView,
+    PilotExecutionDetailView,
+)
 
 
 urlpatterns = [
@@ -37,6 +45,7 @@ urlpatterns = [
     path("performance-runs/<int:pk>/approve/", ResourceActionView.as_view(resource="performance", action_name="approve"), name="pilot-performance-approve"),
     path("performance-runs/<int:pk>/record-result/", ResourceActionView.as_view(resource="performance", action_name="record-result"), name="pilot-performance-result"),
     path("performance-runs/<int:pk>/cancel/", ResourceActionView.as_view(resource="performance", action_name="cancel"), name="pilot-performance-cancel"),
+    path("performance-runs/<int:pk>/execute/", PerformanceExecutionView.as_view(), name="pilot-performance-execute"),
     path("entry-decisions/", ResourceCollectionView.as_view(resource="entry"), name="pilot-entry-decisions"),
     path("entry-decisions/<int:pk>/", ResourceDetailView.as_view(resource="entry"), name="pilot-entry-decision-detail"),
     path("entry-decisions/<int:pk>/submit/", ResourceActionView.as_view(resource="entry", action_name="submit"), name="pilot-entry-submit"),
@@ -54,6 +63,7 @@ urlpatterns = [
     path("recovery-plans/<int:pk>/reject/", RecoveryPlanActionView.as_view(action_name="reject"), name="pilot-recovery-reject"),
     path("recovery-plans/<int:pk>/schedule/", RecoveryPlanActionView.as_view(action_name="schedule"), name="pilot-recovery-schedule"),
     path("recovery-plans/<int:pk>/start/", RecoveryPlanActionView.as_view(action_name="start"), name="pilot-recovery-start"),
+    path("recovery-plans/<int:pk>/execute/", RecoveryExecutionView.as_view(), name="pilot-recovery-execute"),
     path("recovery-plans/<int:pk>/resume/", RecoveryPlanActionView.as_view(action_name="resume"), name="pilot-recovery-resume"),
     path("recovery-plans/<int:pk>/cancel/", RecoveryPlanActionView.as_view(action_name="cancel"), name="pilot-recovery-cancel"),
     path("recovery-drills/", RecoveryDrillListView.as_view(), name="pilot-recovery-drills"),
@@ -65,10 +75,15 @@ urlpatterns = [
     path("release-plans/<int:pk>/reject/", ReleasePlanActionView.as_view(action_name="reject"), name="pilot-release-reject"),
     path("release-plans/<int:pk>/schedule/", ReleasePlanActionView.as_view(action_name="schedule"), name="pilot-release-schedule"),
     path("release-plans/<int:pk>/start/", ReleasePlanActionView.as_view(action_name="start"), name="pilot-release-start"),
+    path("release-plans/<int:pk>/execute/", ReleaseExecutionView.as_view(), name="pilot-release-execute"),
     path("release-plans/<int:pk>/resume/", ReleasePlanActionView.as_view(action_name="resume"), name="pilot-release-resume"),
     path("release-plans/<int:pk>/cancel/", ReleasePlanActionView.as_view(action_name="cancel"), name="pilot-release-cancel"),
     path("release-plans/<int:pk>/record-result/", ReleasePlanActionView.as_view(action_name="record-result"), name="pilot-release-result"),
     path("release-plans/<int:pk>/approve-rollback/", ReleasePlanActionView.as_view(action_name="approve-rollback"), name="pilot-release-approve-rollback"),
     path("release-plans/<int:pk>/resume-rollback/", ReleasePlanActionView.as_view(action_name="resume-rollback"), name="pilot-release-resume-rollback"),
     path("release-plans/<int:pk>/record-rollback/", ReleasePlanActionView.as_view(action_name="record-rollback"), name="pilot-release-record-rollback"),
+    path("release-plans/<int:pk>/rollback/execute/", ReleaseRollbackExecutionView.as_view(), name="pilot-release-rollback-execute"),
+    path("release-plans/<int:pk>/execute-rollback/", ReleaseRollbackExecutionView.as_view(), name="pilot-release-execute-rollback"),
+    path("executions/", PilotExecutionCollectionView.as_view(), name="pilot-executions"),
+    path("executions/<int:pk>/", PilotExecutionDetailView.as_view(), name="pilot-execution-detail"),
 ]

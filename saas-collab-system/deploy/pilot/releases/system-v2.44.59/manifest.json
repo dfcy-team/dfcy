@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "template_only": true,
+  "release_version": "2.44.59",
+  "parent_release": "2.44.58",
+  "source_base_commit": "7fd5f7f35630a10a5b88da9ae228deb9c31aee08",
+  "release_sha": null,
+  "parent_release_sha": null,
+  "backend_image": null,
+  "frontend_image": null,
+  "redis_image": null,
+  "migration_sha256": null,
+  "actor": null,
+  "registry_user": null,
+  "release_plan": {
+    "version": "2.44.59",
+    "ref": "release/system-v2.44.59"
+  },
+  "rollback_reason": null,
+  "ci_attestation": {
+    "main_ancestry": false,
+    "image_digests": false,
+    "migration_digest": false
+  },
+  "candidate_manifest_file": "/etc/saas-collab/runner/approved-candidate.json",
+  "notes": "Template only. CI and the architect must fill immutable release fields, verify the current VM ledger, and atomically stage a separate approved candidate before any runner operation."
+}

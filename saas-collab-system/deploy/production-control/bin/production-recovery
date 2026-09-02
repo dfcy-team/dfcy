@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Reconcile the running production services to the owner-registered current
+# release.  This is intentionally separate from deploy and rollback: it never
+# accepts image, release, registry, or reason arguments and never runs migrate.
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/../lib/production-common.sh"
+
+require_control_identity
+require_command jq
+require_command date
+load_production_env
+init_compose
+[[ -x "$SCRIPT_DIR/production-baseline-check" ]] || die 'runtime baseline checker is not installed.'
+"$SCRIPT_DIR/production-baseline-check" --runtime >/dev/null
+ensure_control_dirs
+acquire_release_lock
+
+current_file=${PRODUCTION_CURRENT_FILE:-$CONTROL_ROOT/current.json}
+secure_path "$current_file" 'current release metadata'
+metadata_fields_are_valid "$current_file" || die 'current release metadata is invalid.'
+
+# The current ledger is the only source of runtime images.  This avoids
+# allowing an environment value or runner request to select arbitrary images.
+export PRODUCTION_BACKEND_IMAGE="$(json_field "$current_file" '.backend_image')"
+export PRODUCTION_FRONTEND_IMAGE="$(json_field "$current_file" '.frontend_image')"
+export PRODUCTION_REDIS_IMAGE="$(json_field "$current_file" '.redis_image')"
+required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
+redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
+[[ "$redis_service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'Redis service name is invalid.'
+IFS=, read -r -a services_array <<< "$required_services"
+for service in "${services_array[@]}"; do
+  [[ "$service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'a required service name is invalid.'
+done
+
+"${COMPOSE[@]}" config --quiet >/dev/null
+# Recovery never starts the migration service.  It only reconciles the
+# owner-registered application services and then performs the existing health
+# check, preserving the production-control lock and audit boundary.
+"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null
+"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
+"$SCRIPT_DIR/production-health-check" --quiet >/dev/null
+append_audit 'recovery' 'success' "$(json_field "$current_file" '.release_sha')" 'pilot-runner' 'reconciled owner-registered current release; migration service was not started'
+printf 'PRODUCTION_RECOVERY=PASS\n'

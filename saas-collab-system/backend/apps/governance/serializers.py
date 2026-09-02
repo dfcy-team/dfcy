@@ -1,12 +1,14 @@
 import json
+import re
 import unicodedata
 
+from django.conf import settings
 from rest_framework import serializers, status
 
 from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import ContractViolation
 
-from .models import ApiContract, AssistantDefinition
+from .models import ApiContract, AssistantDefinition, AssistantEvaluationJob
 
 
 class ApiContractSummarySerializer(serializers.ModelSerializer):
@@ -51,7 +53,7 @@ class AssistantSummarySerializer(serializers.ModelSerializer):
         model = AssistantDefinition
         fields = (
             "id", "code", "name", "status", "capability_declarations", "data_classes",
-            "tool_allowlist", "human_confirmation_required", "updated_at",
+            "tool_allowlist", "human_confirmation_required", "version", "updated_at",
         )
 
     def get_data_classes(self, obj):
@@ -133,3 +135,82 @@ class AssistantEvaluationSerializer(StrictSerializer):
     demo_input_ref = serializers.RegexField(r"^demo-[a-z0-9-]{1,100}$")
     version = serializers.IntegerField(min_value=1)
     reason = serializers.CharField(min_length=1, max_length=500)
+
+
+class AssistantEvaluationRequestSerializer(StrictSerializer):
+    """Strict request contract for a real, tool-free evaluation job."""
+
+    scenario = serializers.ChoiceField(
+        choices=("catalog_review", "readiness_summary", "risk_summary"),
+    )
+    input = serializers.CharField(min_length=1, max_length=10000, trim_whitespace=True)
+    expected_output = serializers.CharField(min_length=1, max_length=10000, trim_whitespace=True)
+    version = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(min_length=1, max_length=500, trim_whitespace=True)
+
+    def _validate_demo_text(self, value, field_name):
+        maximum = min(10000, max(256, int(getattr(settings, "OPENAI_MAX_INPUT_CHARS", 12000))))
+        if len(value) > maximum:
+            raise serializers.ValidationError(f"{field_name} exceeds the configured input limit.")
+        # Public-demo cases must not become a covert credential or endpoint
+        # transport. This is deliberately conservative and fail-closed.
+        if re.search(
+            r"(?:https?://|(?:password|passwd|token|cookie|session|api[_-]?key|api[_-]?secret)\s*[:=]|"
+            r"(?:mysql|postgres|redis)://|(?:^|\s)[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}(?:\s|$))",
+            value,
+            re.IGNORECASE,
+        ):
+            raise serializers.ValidationError("Evaluation input must be synthetic public-demo text without secrets, URLs, or personal data.")
+        return value
+
+    def validate_input(self, value):
+        return self._validate_demo_text(value, "input")
+
+    def validate_expected_output(self, value):
+        return self._validate_demo_text(value, "expected_output")
+
+    def validate_reason(self, value):
+        return self._validate_demo_text(value, "reason")
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        maximum = min(20000, max(512, int(getattr(settings, "OPENAI_MAX_INPUT_CHARS", 12000))))
+        if len(attrs["input"]) + len(attrs["expected_output"]) > maximum:
+            raise serializers.ValidationError("input and expected_output exceed the configured request limit together.")
+        return attrs
+
+
+class AssistantEvaluationJobSerializer(serializers.ModelSerializer):
+    assistant_id = serializers.IntegerField(read_only=True)
+    input_length = serializers.SerializerMethodField()
+    expected_output_length = serializers.SerializerMethodField()
+    api_status = serializers.SerializerMethodField()
+    api_status_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssistantEvaluationJob
+        fields = (
+            "id", "assistant_id", "scenario", "demo_input_ref", "reason",
+            "input_length", "expected_output_length",
+            "assistant_version", "status", "attempts", "celery_task_id",
+            "response_id", "model", "token_usage", "result", "assistant_output",
+            "passed", "score", "findings", "result_summary", "error_code", "error_message", "started_at", "finished_at", "created_at",
+            "updated_at", "api_status", "api_status_code",
+        )
+        read_only_fields = fields
+
+    def get_api_status(self, obj):
+        from .execution import openai_dependency_status
+
+        return openai_dependency_status()["status"]
+
+    def get_api_status_code(self, obj):
+        from .execution import openai_dependency_status
+
+        return openai_dependency_status()["code"]
+
+    def get_input_length(self, obj):
+        return len(obj.test_input or "")
+
+    def get_expected_output_length(self, obj):
+        return len(obj.expected_output or "")

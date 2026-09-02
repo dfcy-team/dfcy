@@ -1,16 +1,48 @@
-import { requestWithMockFallback, withApiStatus } from './request';
-import { mockApiContractCheck, mockApiContractDetail, mockApiContracts, mockAssistantDetail, mockAssistantEvaluation, mockAssistants } from '../mock/governance';
+import { requestApi } from './request';
 
-const sandbox = async (request) => {
-  const response = withApiStatus(await request, 'sandbox');
-  if (response?.success && response.data?.api_status === 'connected') response.data.api_status = 'sandbox';
-  return response;
-};
-const idempotency = () => `ui-p7-governance-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const idempotency = (prefix = 'ui-governance') => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-export const fetchApiContracts = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/governance/api-contracts/', params }, mockApiContracts, 'governance.api'));
-export const fetchApiContract = (id) => sandbox(requestWithMockFallback({ method: 'get', url: `/api/internal/governance/api-contracts/${id}/` }, () => mockApiContractDetail(id), 'governance.api.detail'));
-export const checkApiContractMock = (payload) => requestWithMockFallback({ method: 'post', url: '/api/internal/governance/api-contracts/check-mock/', data: payload, headers: { 'Idempotency-Key': idempotency() } }, mockApiContractCheck, 'governance.api.check');
-export const fetchAssistants = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/governance/assistants/', params }, mockAssistants, 'governance.assistants'));
-export const fetchAssistant = (id) => sandbox(requestWithMockFallback({ method: 'get', url: `/api/internal/governance/assistants/${id}/` }, () => mockAssistantDetail(id), 'governance.assistants.detail'));
-export const evaluateAssistantMock = (id, payload) => requestWithMockFallback({ method: 'post', url: `/api/internal/governance/assistants/${id}/evaluate-mock/`, data: payload, headers: { 'Idempotency-Key': idempotency() } }, mockAssistantEvaluation, 'governance.assistants.evaluate');
+// Governance reads and writes always use the authenticated API. A failed
+// request is returned to the view unchanged; no client-side records are substituted.
+export const fetchApiContracts = (params = {}) => requestApi({
+  method: 'get',
+  url: '/api/internal/governance/api-contracts/',
+  params
+});
+
+export const fetchApiContract = (id) => requestApi({
+  method: 'get',
+  url: `/api/internal/governance/api-contracts/${id}/`
+});
+
+export const checkApiContract = (payload) => requestApi({
+  method: 'post',
+  url: '/api/internal/governance/api-contracts/check-mock/',
+  data: payload,
+  headers: { 'Idempotency-Key': idempotency('ui-governance-contract-check') }
+});
+
+export const fetchAssistants = (params = {}) => requestApi({
+  method: 'get',
+  url: '/api/internal/governance/assistants/',
+  params
+});
+
+export const fetchAssistant = (id) => requestApi({
+  method: 'get',
+  url: `/api/internal/governance/assistants/${id}/`
+});
+
+/** Start a real, server-side assistant evaluation job. */
+export const createAssistantEvaluation = (id, payload) => requestApi({
+  method: 'post',
+  url: `/api/internal/governance/assistants/${id}/evaluations/`,
+  data: payload,
+  headers: { 'Idempotency-Key': idempotency('ui-governance-assistant-evaluation') }
+});
+
+/** Read a single evaluation job, including status, result and audit details. */
+export const fetchAssistantEvaluation = (id) => requestApi({
+  method: 'get',
+  url: `/api/internal/governance/assistant-evaluations/${id}/`
+});

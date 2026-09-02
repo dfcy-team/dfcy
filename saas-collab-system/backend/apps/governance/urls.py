@@ -8,6 +8,11 @@ from .views import (
     AssistantDetailView,
     AssistantEvaluateMockView,
 )
+from .views_execution import (
+    AssistantEvaluateView,
+    AssistantEvaluationJobCollectionView,
+    AssistantEvaluationJobDetailView,
+)
 
 
 urlpatterns = [
@@ -17,4 +22,10 @@ urlpatterns = [
     path("assistants/", AssistantCollectionView.as_view(), name="governance-assistants"),
     path("assistants/<int:pk>/", AssistantDetailView.as_view(), name="governance-assistant-detail"),
     path("assistants/<int:pk>/evaluate-mock/", AssistantEvaluateMockView.as_view(), name="governance-assistant-evaluate-mock"),
+    path("assistants/<int:pk>/evaluate/", AssistantEvaluateView.as_view(), name="governance-assistant-evaluate"),
+    path("assistants/<int:pk>/evaluations/", AssistantEvaluateView.as_view(), name="governance-assistant-evaluations-create"),
+    path("assistant-evaluations/", AssistantEvaluationJobCollectionView.as_view(), name="governance-assistant-evaluations"),
+    path("assistant-evaluations/<int:pk>/", AssistantEvaluationJobDetailView.as_view(), name="governance-assistant-evaluation-detail"),
+    # Compatibility alias used by early UI builds.
+    path("assistants/evaluations/<int:pk>/", AssistantEvaluationJobDetailView.as_view(), name="governance-assistant-evaluation-alias"),
 ]
