@@ -10,6 +10,7 @@
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('platforms', payload)"
     :edit-handler="(id, payload) => updateMasterData('platforms', id, payload)"
+    :delete-handler="(id) => deleteMasterData('platforms', id)"
     :status-handler="(row, status) => updateMasterDataStatus('platforms', row.id, status)"
     create-permission="masterdata.manage"
     manage-permission="masterdata.manage"
@@ -22,7 +23,7 @@
 
 <script setup>
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
-import { createMasterData, fetchPlatforms, updateMasterData, updateMasterDataStatus } from '../../api/masterData';
+import { createMasterData, deleteMasterData, fetchPlatforms, updateMasterData, updateMasterDataStatus } from '../../api/masterData';
 
 const platformTypes = [
   { label: 'Lazada', value: 'lazada' }, { label: 'Shopee', value: 'shopee' },

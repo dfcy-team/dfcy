@@ -9,15 +9,17 @@
     :columns="columns"
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('suppliers', payload)"
+    :delete-handler="(id) => deleteMasterData('suppliers', id)"
     :status-handler="(row, status) => updateMasterDataStatus('suppliers', row.id, status)"
     create-permission="masterdata.manage"
     manage-permission="masterdata.manage"
+    :operation-width="190"
   />
 </template>
 
 <script setup>
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
-import { createMasterData, fetchSupplierMasters, updateMasterDataStatus } from '../../api/masterData';
+import { createMasterData, deleteMasterData, fetchSupplierMasters, updateMasterDataStatus } from '../../api/masterData';
 
 const columns = [
   { prop: 'code', label: '供应商编码', width: 170 }, { prop: 'name', label: '供应商名称', width: 220 },

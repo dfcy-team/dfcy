@@ -11,6 +11,7 @@
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('stores', payload)"
     :edit-handler="(id, payload) => updateMasterData('stores', id, payload)"
+    :delete-handler="(id) => deleteMasterData('stores', id)"
     :status-handler="(row, status) => updateMasterDataStatus('stores', row.id, status)"
     create-permission="masterdata.manage"
     manage-permission="masterdata.manage"
@@ -76,6 +77,7 @@ import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
 import {
   createMasterData,
+  deleteMasterData,
   fetchCountrySites,
   fetchPlatforms,
   fetchStores,

@@ -416,7 +416,7 @@ def product_attribute_detail(request, pk):
         return success_response(ProductAttributeSerializer(item).data)
     if request.method == "DELETE":
         if ProductSPU.objects.filter(tenant=request.user.tenant, season_code=item.code).exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "属性已被商品使用，不能删除。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "属性存在关联数据，请停用。", status=409)
         item.delete()
         return success_response({"deleted": True})
     serializer = ProductAttributeSerializer(item, data=request.data, partial=True, context=_serializer_context(request))
@@ -450,9 +450,9 @@ def product_category_detail(request, pk):
     item = get_object_or_404(ProductCategory, pk=pk, tenant=request.user.tenant)
     if request.method == "DELETE":
         if item.children.exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "请先删除下级分类。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "分类存在关联数据（含下级分类），请停用。", status=409)
         if item.products.exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "分类已被商品使用，不能删除。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "分类存在关联数据，请停用。", status=409)
         item.delete()
         return success_response({"deleted": True})
     if request.method == "GET":
@@ -548,7 +548,7 @@ def product_color_detail(request, pk):
     item = get_object_or_404(ProductColor, pk=pk, tenant=request.user.tenant)
     if request.method == "DELETE":
         if ProductSKU.objects.filter(tenant=request.user.tenant, color_code=item.code).exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "颜色已被 SKU 使用，不能删除。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "颜色存在关联数据，请停用。", status=409)
         item.delete()
         return success_response({"deleted": True})
     if request.method == "GET":

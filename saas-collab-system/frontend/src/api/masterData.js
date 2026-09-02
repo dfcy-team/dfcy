@@ -27,6 +27,10 @@ export const updateMasterData = (resource, id, payload) => requestWithMockFallba
   { method: 'patch', url: `/api/internal/master-data/${resource}/${id}/`, data: payload },
   mockWrite({ id, ...payload }), `masterdata.${resource}.update`
 );
+export const deleteMasterData = (resource, id) => requestWithMockFallback(
+  { method: 'delete', url: `/api/internal/master-data/${resource}/${id}/` },
+  mockWrite({ id }), `masterdata.${resource}.delete`
+);
 
 export const importStores = (file, { dryRun = false } = {}) => {
   const data = new FormData();

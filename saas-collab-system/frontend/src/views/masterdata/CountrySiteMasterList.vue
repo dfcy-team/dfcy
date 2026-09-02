@@ -10,6 +10,7 @@
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('sites', payload)"
     :edit-handler="(id, payload) => updateMasterData('sites', id, payload)"
+    :delete-handler="(id) => deleteMasterData('sites', id)"
     :status-handler="(row, status) => updateMasterDataStatus('sites', row.id, status)"
     create-permission="masterdata.manage"
     manage-permission="masterdata.manage"
@@ -22,7 +23,7 @@
 
 <script setup>
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
-import { createMasterData, fetchCountrySites, updateMasterData, updateMasterDataStatus } from '../../api/masterData';
+import { createMasterData, deleteMasterData, fetchCountrySites, updateMasterData, updateMasterDataStatus } from '../../api/masterData';
 
 const columns = [
   { prop: 'code', label: '国家档案编码', width: 150 }, { prop: 'name', label: '国家名称', width: 180 },

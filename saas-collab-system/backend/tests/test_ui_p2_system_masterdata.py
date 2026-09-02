@@ -732,6 +732,123 @@ def test_supplier_contacts_are_never_returned_in_plaintext():
     assert "contact_email" not in item and "contact_phone" not in item
 
 
+def test_unreferenced_master_data_can_be_deleted_and_is_audited():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-safe-delete")
+    manager = create_user(tenant, "safe-delete-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    supplier = SupplierMaster.objects.create(tenant=tenant, code="unused", name="Unused supplier")
+
+    response = client_for(manager).delete(
+        f"/api/internal/master-data/suppliers/{supplier.pk}/"
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"] == {"deleted": True, "id": supplier.pk}
+    assert not SupplierMaster.objects.filter(pk=supplier.pk).exists()
+    audit = OperationLog.objects.get(tenant=tenant, action="delete", object_id=str(supplier.pk))
+    assert audit.object_type == "suppliers"
+    assert audit.before_data == {"code": "unused", "status": "active"}
+
+
+def test_referenced_master_data_returns_conflict_and_must_be_disabled():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-safe-delete-reference")
+    manager = create_user(tenant, "safe-delete-reference-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="shopee",
+        name="Shopee",
+        platform_type=PlatformMaster.PlatformType.SHOPEE,
+    )
+    StoreMaster.objects.create(
+        tenant=tenant,
+        platform=platform,
+        code="store-ph",
+        name="Store PH",
+        country_code="PH",
+        currency="PHP",
+        timezone="Asia/Manila",
+    )
+
+    response = client_for(manager).delete(
+        f"/api/internal/master-data/platforms/{platform.pk}/"
+    )
+
+    assert response.status_code == 409
+    assert response.data["code"] == "STATE_CONFLICT"
+    assert "存在关联数据，请停用" in response.data["message"]
+    assert PlatformMaster.objects.filter(pk=platform.pk).exists()
+
+
+def test_country_code_reference_is_tenant_scoped_for_safe_delete():
+    tenant = Tenant.objects.create(name="Tenant A", code="ui-p2-safe-delete-site-a")
+    other = Tenant.objects.create(name="Tenant B", code="ui-p2-safe-delete-site-b")
+    manager = create_user(tenant, "safe-delete-site-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="shopee",
+        name="Shopee",
+        platform_type=PlatformMaster.PlatformType.SHOPEE,
+    )
+    foreign_platform = PlatformMaster.objects.create(
+        tenant=other,
+        code="shopee",
+        name="Shopee",
+        platform_type=PlatformMaster.PlatformType.SHOPEE,
+    )
+    referenced = CountrySiteMaster.objects.create(
+        tenant=tenant, code="country-ph", name="Philippines", country_code="PH"
+    )
+    cross_tenant_only = CountrySiteMaster.objects.create(
+        tenant=tenant, code="country-th", name="Thailand", country_code="TH"
+    )
+    StoreMaster.objects.create(
+        tenant=tenant,
+        platform=platform,
+        code="store-ph",
+        name="Store PH",
+        country_code="PH",
+        currency="PHP",
+        timezone="Asia/Manila",
+    )
+    StoreMaster.objects.create(
+        tenant=other,
+        platform=foreign_platform,
+        code="store-th",
+        name="Store TH",
+        country_code="TH",
+        currency="THB",
+        timezone="Asia/Bangkok",
+    )
+    client = client_for(manager)
+
+    blocked = client.delete(f"/api/internal/master-data/sites/{referenced.pk}/")
+    deleted = client.delete(f"/api/internal/master-data/sites/{cross_tenant_only.pk}/")
+
+    assert blocked.status_code == 409
+    assert CountrySiteMaster.objects.filter(pk=referenced.pk).exists()
+    assert deleted.status_code == 200
+    assert not CountrySiteMaster.objects.filter(pk=cross_tenant_only.pk).exists()
+
+
+def test_master_data_delete_cannot_cross_tenant_boundary():
+    tenant = Tenant.objects.create(name="Tenant A", code="ui-p2-safe-delete-own")
+    other = Tenant.objects.create(name="Tenant B", code="ui-p2-safe-delete-foreign")
+    manager = create_user(tenant, "safe-delete-own-manager")
+    grant(manager, "masterdata.view", "masterdata.manage")
+    foreign_supplier = SupplierMaster.objects.create(
+        tenant=other, code="foreign", name="Foreign supplier"
+    )
+
+    response = client_for(manager).delete(
+        f"/api/internal/master-data/suppliers/{foreign_supplier.pk}/"
+    )
+
+    assert response.status_code == 404
+    assert SupplierMaster.objects.filter(pk=foreign_supplier.pk).exists()
+
+
 def test_security_operations_exposes_only_credential_metadata():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-security")
     viewer = create_user(tenant, "security-viewer")

@@ -10,6 +10,7 @@
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('warehouses', payload)"
     :edit-handler="(id, payload) => updateMasterData('warehouses', id, payload)"
+    :delete-handler="(id) => deleteMasterData('warehouses', id)"
     :status-handler="(row, status) => updateMasterDataStatus('warehouses', row.id, status)"
     create-permission="masterdata.manage"
     manage-permission="masterdata.manage"
@@ -39,6 +40,7 @@ import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
 import {
   createMasterData,
+  deleteMasterData,
   fetchCountrySites,
   fetchPlatforms,
   fetchWarehouses,

@@ -101,6 +101,16 @@
             >
               编辑
             </el-button>
+            <el-button
+              v-if="deleteHandler && manageAccess.visible"
+              link
+              type="danger"
+              :disabled="manageAccess.disabled"
+              :title="manageAccess.reason"
+              @click.stop="confirmDelete(row)"
+            >
+              删除
+            </el-button>
             <slot name="row-actions" :row="row" />
             <el-button
               v-if="statusHandler && manageAccess.visible"
@@ -205,6 +215,7 @@ const props = defineProps({
   formFields: { type: Array, default: () => [] },
   createHandler: { type: Function, default: null },
   editHandler: { type: Function, default: null },
+  deleteHandler: { type: Function, default: null },
   statusHandler: { type: Function, default: null },
   createPermission: { type: String, default: '' },
   managePermission: { type: String, default: '' },
@@ -375,6 +386,29 @@ async function confirmStatus(row) {
   } catch (error) {
     if (error === 'cancel') return;
     ElMessage.error(error?.message || '状态变更失败');
+  }
+}
+
+async function confirmDelete(row) {
+  if (!manageAccess.value.allowed || !props.deleteHandler) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除${props.entityLabel}“${row.name || row.username || row.code}”？仅在无关联数据时允许删除，有关联数据请先停用。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    );
+    const response = await props.deleteHandler(row.id, row);
+    if (!response?.success) {
+      const message = response?.http_status === 409 || response?.code === 'STATE_CONFLICT'
+        ? (response?.message || '存在关联数据，请停用')
+        : (response?.message || '删除失败');
+      throw new Error(message);
+    }
+    ElMessage.success(response.message || '删除成功');
+    await loadData();
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return;
+    ElMessage.error(error?.message || '删除失败');
   }
 }
 

@@ -4,15 +4,19 @@ import re
 import zipfile
 from xml.etree import ElementTree
 
+from django.apps import apps as django_apps
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Q
+from django.db.models.deletion import ProtectedError, RestrictedError
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.views import APIView
 
 from apps.audit.services import write_operation_log
 from apps.common.exceptions import StateConflict
-from apps.common.responses import paginated_data, success_response
+from apps.common.error_codes import ErrorCode
+from apps.common.responses import error_response, paginated_data, success_response
 from apps.accounts.models import CustomUser
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.ui_p2_scopes import filter_master_data, require_all_scope
@@ -21,12 +25,90 @@ from apps.suppliers.models import SupplierTask
 
 from .models import (
     PlatformMaster,
+    CountrySiteMaster,
     StatusChoices,
     StoreMaster,
     SupplierMaster,
     WAREHOUSE_SERVICE_PLATFORM_TYPES,
 )
 from .serializers import MODEL_BY_RESOURCE, SERIALIZER_BY_RESOURCE
+
+
+RESOURCE_LABELS = {
+    "platforms": "平台档案",
+    "stores": "店铺档案",
+    "sites": "国家信息",
+    "warehouses": "仓库档案",
+    "suppliers": "供应商档案",
+}
+
+
+def _reverse_references(instance):
+    """Return related rows that would be affected by a physical delete.
+
+    This deliberately checks every reverse relation, including CASCADE and
+    SET_NULL relations.  A master-data record is never physically removed
+    while another row points at it; callers can use the existing status action
+    to deactivate it instead.  The instance was already selected through the
+    current tenant/data scope, so no unscoped object lookup is introduced.
+    """
+    references = []
+    for relation in instance._meta.related_objects:
+        accessor = relation.get_accessor_name()
+        if not accessor or accessor == "+":
+            continue
+        try:
+            related = getattr(instance, accessor)
+        except (AttributeError, ObjectDoesNotExist):
+            continue
+        if relation.one_to_one:
+            exists = related is not None
+        else:
+            exists = related.exists()
+        if exists:
+            references.append(relation.related_model._meta.verbose_name)
+    return sorted(set(references))
+
+
+def _textual_references(instance):
+    """Find tenant rows that refer to a country/site by its stable code.
+
+    CountrySiteMaster predates the FK-based archive models and is referenced
+    by country/site code in a few operational tables.  Those references do
+    not appear in ``related_objects``; inspect only tenant-owned models with
+    the explicit country/site code field and never scan arbitrary text fields.
+    """
+    if not isinstance(instance, CountrySiteMaster):
+        return []
+    code_values = {str(instance.country_code or "").strip().upper()}
+    if instance.code:
+        code_values.add(str(instance.code).strip().upper())
+    code_values.discard("")
+    if not code_values:
+        return []
+    references = []
+    for model in django_apps.get_models():
+        if model is CountrySiteMaster:
+            continue
+        field_names = {field.name for field in model._meta.concrete_fields}
+        if "tenant" not in field_names:
+            continue
+        for field_name in ("country_code", "site_code"):
+            if field_name not in field_names:
+                continue
+            query = model._default_manager.filter(tenant_id=instance.tenant_id)
+            code_filter = Q()
+            for code in code_values:
+                code_filter |= Q(**{f"{field_name}__iexact": code})
+            query = query.filter(code_filter)
+            if query.exists():
+                references.append(model._meta.verbose_name)
+                break
+    return references
+
+
+def master_data_references(instance):
+    return sorted(set(_reverse_references(instance) + _textual_references(instance)))
 
 
 def positive_int(value, default, maximum=100):
@@ -329,6 +411,42 @@ class MasterDataDetailView(APIView):
             after_data={"code": instance.code, "status": instance.status},
         )
         return success_response(serializer.data)
+
+    def delete(self, request, resource, pk):
+        try:
+            with transaction.atomic():
+                scoped_instance = self.get_object(request, resource, pk)
+                instance = scoped_instance.__class__.objects.select_for_update().get(pk=scoped_instance.pk)
+                references = master_data_references(instance)
+                if references:
+                    return error_response(
+                        ErrorCode.STATE_CONFLICT,
+                        f"{RESOURCE_LABELS.get(resource, '档案')}存在关联数据，请停用。",
+                        data={"references": references},
+                        status=409,
+                    )
+                object_id = instance.pk
+                before = {
+                    "code": getattr(instance, "code", ""),
+                    "status": getattr(instance, "status", ""),
+                }
+                instance.delete()
+                write_operation_log(
+                    tenant=request.user.tenant,
+                    user=request.user,
+                    module="masterdata",
+                    action="delete",
+                    object_type=resource,
+                    object_id=object_id,
+                    before_data=before,
+                )
+        except (ProtectedError, RestrictedError):
+            return error_response(
+                ErrorCode.STATE_CONFLICT,
+                f"{RESOURCE_LABELS.get(resource, '档案')}存在关联数据，请停用。",
+                status=409,
+            )
+        return success_response({"deleted": True, "id": object_id}, message="删除成功")
 
 
 class MasterDataStatusView(APIView):
