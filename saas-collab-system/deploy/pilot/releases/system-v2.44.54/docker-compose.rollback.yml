@@ -1,0 +1,9 @@
+services:
+  backend:
+    image: saas-collab-backend:v2.44.53
+  celery:
+    image: saas-collab-backend:v2.44.53
+  celery-beat:
+    image: saas-collab-backend:v2.44.53
+  frontend:
+    image: saas-collab-frontend:v2.44.53

@@ -1,0 +1,36 @@
+{
+  "schema_version": 3,
+  "release_version": "2.44.54",
+  "parent_release": "2.44.53",
+  "source_base_commit": "37eaa4a3344be9d3a3c6897e6e4936972a429c40",
+  "candidate_commit": "cb022ea3bee8a79e45800632a898afe62d54524a",
+  "deployed_tag": "v2.44.54-deployed",
+  "source_actor": "architect",
+  "release_actor": "architect",
+  "scope": "masterdata.safe_delete",
+  "status": "candidate_verified_not_deployed",
+  "target_images": {
+    "backend": "saas-collab-backend:v2.44.54",
+    "celery": "saas-collab-backend:v2.44.54",
+    "celery_beat": "saas-collab-backend:v2.44.54",
+    "frontend": "saas-collab-frontend:v2.44.54",
+    "custody": "saas-collab-custody:v2.44.50"
+  },
+  "database_migration_required": false,
+  "database_migrations": [],
+  "menu_changed": false,
+  "router_changed": false,
+  "permission_catalog_changed": false,
+  "checks": {
+    "backend_tests": "634 passed, 3 skipped",
+    "frontend_tests": "263 passed",
+    "frontend_build": "passed",
+    "django_check": "passed",
+    "migration_drift": "No changes detected",
+    "menu_baseline": "passed"
+  },
+  "rollback": {
+    "application_release": "2.44.53",
+    "database_restore_required": false
+  }
+}
