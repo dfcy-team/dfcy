@@ -108,6 +108,10 @@ export const INFLUENCER_CONTACT_CHANNEL_LABELS = Object.freeze({
   wechat: '微信',
   telegram: 'Telegram',
   tiktok: 'TikTok 私信',
+  instagram: 'Instagram',
+  messenger: 'Facebook Messenger',
+  line: 'LINE',
+  viber: 'Viber',
   other: '其他'
 });
 
@@ -142,8 +146,8 @@ const requestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${M
 
 export function formatInfluencerError(response, fallback = '操作失败，请稍后重试。') {
   const message = response?.message || '';
+  if (/blacklist|blacklisted|黑名单/i.test(message)) return '该达人已被加入黑名单，不能执行本次操作。';
   if (response?.http_status === 409 || response?.code === 'STATE_CONFLICT' || response?.code === 'CONFLICT') {
-    if (/blacklist|黑名单/i.test(message)) return `达人在黑名单中，无法执行本次操作。${message ? ` ${message}` : ''}`;
     if (/terminal|completed|cancelled|终态/i.test(message)) return `任务已进入终态，不能再修改目标或送样。${message ? ` ${message}` : ''}`;
     return `数据已被其他操作更新（409），请刷新后重试。${message ? ` ${message}` : ''}`;
   }
@@ -182,8 +186,8 @@ export const fetchBdPerformance = (params = {}) => requestWithMockFallback(
 // Keep the acronym spelling available to callers that use the backend name.
 export const fetchBDPerformance = fetchBdPerformance;
 
-export const fetchInfluencer = (id) => requestWithMockFallback(
-  { method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/` },
+export const fetchInfluencer = (id, params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/`, params },
   () => mockDetail({ id, contacts: [], blacklist_history: [] })(),
   'influencers.detail'
 );

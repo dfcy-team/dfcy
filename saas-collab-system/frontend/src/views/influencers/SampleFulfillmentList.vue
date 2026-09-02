@@ -21,8 +21,8 @@
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺">
           <el-option v-for="store in rowStores" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
-        <el-select v-model="filters.status" clearable placeholder="全部状态">
-          <el-option v-for="(label, value) in FULFILLMENT_STATUS_LABELS" :key="value" :label="label" :value="value" />
+        <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
+          <el-option v-for="(label, value) in FULFILLMENT_FILTER_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
@@ -165,7 +165,7 @@
             <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="请输入产品 ID" />
           </el-form-item>
           <el-form-item label="状态">
-            <el-select v-model="form.status" :disabled="!editingSample" placeholder="请选择状态">
+            <el-select v-model="form.status" :disabled="!editingSample" :placeholder="editingSample ? `系统当前：${statusLabel(FULFILLMENT_STATUS_LABELS, editingSample.status)}` : '系统自动判断'">
               <el-option v-for="(label, value) in editableStatusOptions" :key="value" :label="label" :value="value" />
             </el-select>
           </el-form-item>
@@ -283,12 +283,16 @@ const draftKey = ref('');
 const filters = reactive({ search: '', status: '', store: null, deletedOnly: false });
 const form = reactive({ outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [], status: 'pending' });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '直播达人', '已完成', '已拉黑']);
+const FULFILLMENT_FILTER_STATUS_LABELS = Object.freeze(
+  Object.fromEntries(Object.entries(FULFILLMENT_STATUS_LABELS).filter(([value]) => !['live_creator', 'blacklisted'].includes(value)))
+);
 const quickTagOptions = computed(() => [...new Set([...QUICK_TAG_PRESETS, ...form.quick_tags])]);
 const editableStatusOptions = computed(() => {
-  if (!editingSample.value) return { pending: FULFILLMENT_STATUS_LABELS.pending };
+  if (!editingSample.value) return {};
   const current = editingSample.value.status || 'pending';
   return Object.fromEntries(
-    [current, ...(FULFILLMENT_STATUS_TRANSITIONS[current] || [])]
+    (FULFILLMENT_STATUS_TRANSITIONS[current] || [])
+      .filter((value) => value !== 'shipped')
       .filter((value, index, values) => values.indexOf(value) === index)
       .map((value) => [value, FULFILLMENT_STATUS_LABELS[value]])
   );
@@ -520,7 +524,7 @@ async function openEdit(row) {
     notes: row.notes || '',
     link_type: row.link_type || 'DRJL',
     quick_tags: [...(row.quick_tags || [])],
-    status: row.status || 'pending'
+    status: ''
   });
   influencerOptions.value = [{
     id: row.influencer,
@@ -592,7 +596,7 @@ async function submit() {
 async function submitEdit() {
   let confirmTerminal = false;
   const terminalStatuses = ['completed', 'cancelled', 'blacklisted'];
-  if (form.status !== editingSample.value.status && terminalStatuses.includes(form.status)) {
+  if (form.status && terminalStatuses.includes(form.status)) {
     try {
       await ElMessageBox.confirm('终态变更会停止后续履约流转，确认继续吗？', '确认终态变更', { type: 'warning' });
       confirmTerminal = true;
@@ -606,7 +610,7 @@ async function submitEdit() {
     notes: form.notes,
     link_type: form.link_type,
     quick_tags: form.quick_tags,
-    status: form.status,
+    ...(form.status ? { status: form.status } : {}),
     ...(confirmTerminal ? { confirm_terminal: true } : {}),
     items: items.value.map((item) => ({
       site_code: item.site_code,
