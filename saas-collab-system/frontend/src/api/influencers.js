@@ -262,8 +262,8 @@ export const fetchOutreachTasks = (params = {}) => requestWithMockFallback(
   'influencers.outreach.list'
 );
 
-export const fetchOutreachTaskOptions = () => requestWithMockFallback(
-  { method: 'get', url: `${API_ROOT}/outreach-task-options/` },
+export const fetchOutreachTaskOptions = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/outreach-task-options/`, params },
   () => ({ success: true, data: { stores: [], bd_users: [] } }),
   'influencers.outreach.options'
 );

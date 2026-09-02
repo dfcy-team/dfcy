@@ -427,6 +427,7 @@ const storeOptions = ref([]);
 const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
+const influencerOptionsLoaded = ref(false);
 const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
@@ -583,12 +584,15 @@ function resetFilters() {
 function applyTaskOptions(data = {}) {
   storeOptions.value = data.stores || [];
   bdOptions.value = data.bd_users || [];
-  influencerOptions.value = (data.influencers || []).filter((influencer) => influencer?.id !== undefined && influencer?.id !== null);
+  if (Array.isArray(data.influencers)) {
+    influencerOptions.value = data.influencers.filter((influencer) => influencer?.id !== undefined && influencer?.id !== null);
+    influencerOptionsLoaded.value = true;
+  }
 }
 
-async function loadTaskOptions(required = false) {
-  if (taskOptionsLoaded.value) return true;
-  const r = await fetchOutreachTaskOptions();
+async function loadTaskOptions(required = false, includeInfluencers = false) {
+  if (taskOptionsLoaded.value && (!includeInfluencers || influencerOptionsLoaded.value)) return true;
+  const r = await fetchOutreachTaskOptions({ include_influencers: includeInfluencers ? 'true' : 'false' });
   if (!r.success) {
     if (required) ElMessage.error(formatInfluencerError(r, '店铺、BD 和达人选项加载失败'));
     return false;
@@ -837,7 +841,7 @@ async function openTargets(row) {
   targetsVisible.value = true;
   deletedTargets.value = [];
   Object.assign(targetForm, { influencer: null, notes: '' });
-  await loadTaskOptions();
+  await loadTaskOptions(false, true);
   await loadTargets();
 }
 
@@ -895,7 +899,7 @@ function ensureSampleInfluencer(task, target) {
 async function openSampleCreate(task, target = null) {
   if (!task?.id || !canCreateFulfillment.value || isTerminal(task)) return;
   if (target && (!target.id || target.is_deleted)) return;
-  if (!await loadTaskOptions(true)) return;
+  if (!await loadTaskOptions(true, true)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
   sampleContext.value = {
     ...task,
