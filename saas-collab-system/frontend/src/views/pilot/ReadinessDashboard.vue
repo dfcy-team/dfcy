@@ -1,5 +1,5 @@
 <template>
-  <AppPage eyebrow="CONTROLLED PILOT" title="试点准入" subtitle="汇总代码、CI、安全、数据库、网络、恢复、回滚与容量证据。" boundary-note="准入证据仅用于决策；本页不执行部署、备份恢复、数据库或平台操作。" :capability="capability">
+  <AppPage eyebrow="PRODUCTION PILOT" title="试点准入" subtitle="汇总代码、CI、安全、数据库、网络、恢复、回滚与容量证据。" boundary-note="准入证据由服务端实时计算，go/no-go 结论仍须经过人工评审和审计。" :capability="capability">
     <AppState v-if="state !== 'ready'" :status="state" :detail="errorMessage" @action="load" />
     <template v-else>
       <section class="summary"><span>环境</span><strong>{{ data.environment_id }}</strong><span>总体状态</span><strong>{{ data.overall_status }}</strong></section>
@@ -20,8 +20,8 @@ import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import { fetchPilotReadiness } from '../../api/pilot';
 import { statusFromApiResponse } from '../../utils/uiState';
-const state = ref('loading'); const capability = ref('pending'); const errorMessage = ref(''); const data = ref({ gates: [] });
-async function load() { state.value = 'loading'; const response = await fetchPilotReadiness({ environment_id: 'controlled-pilot' }); if (!response.success) { state.value = statusFromApiResponse(response, navigator.onLine); errorMessage.value = response.message; return; } data.value = response.data; capability.value = response.data.api_status || 'sandbox'; state.value = 'ready'; }
+const state = ref('loading'); const capability = ref('connected'); const errorMessage = ref(''); const data = ref({ gates: [] });
+async function load() { state.value = 'loading'; const response = await fetchPilotReadiness({ environment_id: 'controlled-pilot' }); if (!response.success) { state.value = statusFromApiResponse(response, typeof navigator === 'undefined' || navigator.onLine); errorMessage.value = response.message; return; } data.value = response.data; capability.value = response.data?.api_status || 'connected'; state.value = 'ready'; }
 load();
 </script>
 <style scoped>.summary{display:grid;grid-template-columns:120px 1fr 120px 1fr;gap:1px;margin-bottom:14px;border:1px solid #dbe3ec;background:#dbe3ec}.summary>*{padding:14px;background:#fff}.summary span{color:#64748b}.summary strong{color:#172033}@media(max-width:700px){.summary{grid-template-columns:110px 1fr}}</style>

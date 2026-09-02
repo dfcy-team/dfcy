@@ -3,7 +3,6 @@ import path from 'node:path';
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mockP8Action, mockP8Detail, mockP8List, mockP8Patch, mockPilotControlRoom } from '../src/mock/pilot';
 import AppState from '../src/components/AppState.vue';
 import { canAccessPath } from '../src/router/menu';
 import P8WorkflowWorkspace from '../src/views/pilot/P8WorkflowWorkspace.vue';
@@ -13,7 +12,10 @@ const pilotApi = vi.hoisted(() => ({
   fetchP8Resource: vi.fn(),
   fetchP8Resources: vi.fn(),
   patchP8Resource: vi.fn(),
-  runP8Action: vi.fn()
+  runP8Action: vi.fn(),
+  executePerformanceRun: vi.fn(),
+  fetchExecution: vi.fn(),
+  fetchExecutions: vi.fn()
 }));
 const routerContext = vi.hoisted(() => ({ route: { params: {} } }));
 const authContext = vi.hoisted(() => ({ permissions: new Set() }));
@@ -26,13 +28,13 @@ vi.mock('vue-router', () => ({ useRoute: () => routerContext.route }));
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
-const successPage = (results = [{ id: 1, code: 'VER-DEMO', environment: 'pilot', category: 'browser_e2e', status: 'draft', version: 1 }]) => ({
+const successPage = (results = [{ id: 1, code: 'VER-001', environment: 'pilot', category: 'browser_e2e', status: 'draft', version: 1 }]) => ({
   success: true,
   code: 'OK',
   message: 'success',
-  data: { count: results.length, next: null, previous: null, results, api_status: 'pending' }
+  data: { count: results.length, next: null, previous: null, results, api_status: 'connected' }
 });
-const tableRowContext = { id: 1, code: 'VER-DEMO', environment: 'pilot', category: 'browser_e2e', status: 'draft', version: 1 };
+const tableRowContext = { id: 1, code: 'VER-001', environment: 'pilot', category: 'browser_e2e', status: 'draft', version: 1 };
 const stubs = {
   AppPage: { template: '<main><slot name="action" /><slot /></main>' },
   ElButton: { template: '<button @click="$emit(\'click\', $event)"><slot /></button>' },
@@ -43,8 +45,8 @@ const stubs = {
     template: '<div><slot :row="row" /></div>',
     setup: () => ({ row: tableRowContext })
   },
-  ElDrawer: { template: '<aside><slot /></aside>' },
-  ElDialog: { template: '<section><slot /><slot name="footer" /></section>' },
+  ElDrawer: { props: ['modelValue'], template: '<aside v-if="modelValue"><slot /></aside>' },
+  ElDialog: { props: ['modelValue'], template: '<section v-if="modelValue"><slot /><slot name="footer" /></section>' },
   ElForm: { template: '<form><slot /></form>' },
   ElFormItem: { template: '<label><slot /></label>' },
   ElInput: { props: ['modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
@@ -67,12 +69,15 @@ describe('UI-P8 production pilot security readiness', () => {
     vi.clearAllMocks();
     routerContext.route.params = {};
     authContext.permissions = new Set();
-    Object.assign(tableRowContext, { id: 1, code: 'VER-DEMO', environment: 'pilot', category: 'browser_e2e', status: 'draft', version: 1 });
+    Object.assign(tableRowContext, { id: 1, code: 'VER-001', environment: 'pilot', category: 'browser_e2e', status: 'draft', version: 1 });
     pilotApi.fetchP8Resources.mockResolvedValue(successPage());
     pilotApi.fetchP8Resource.mockResolvedValue({ success: true, code: 'OK', message: 'success', data: successPage().data.results[0] });
     pilotApi.createP8Resource.mockResolvedValue({ success: true, code: 'OK', message: 'success', data: {} });
     pilotApi.patchP8Resource.mockResolvedValue({ success: true, code: 'OK', message: 'success', data: {} });
     pilotApi.runP8Action.mockResolvedValue({ success: true, code: 'OK', message: 'success', data: {} });
+    pilotApi.executePerformanceRun.mockResolvedValue({ success: true, code: 'OK', message: 'success', data: { id: 'exec-1', status: 'queued' } });
+    pilotApi.fetchExecution.mockResolvedValue({ success: true, code: 'OK', message: 'success', data: { id: 'exec-1', status: 'passed', metrics: {} } });
+    pilotApi.fetchExecutions.mockResolvedValue({ success: true, code: 'OK', message: 'success', data: { results: [] } });
   });
 
   it('registers all routes with exact view permissions and denies external users', () => {
@@ -90,25 +95,31 @@ describe('UI-P8 production pilot security readiness', () => {
     }
   });
 
-  it('uses only internal pilot endpoints and keeps real capability pending', () => {
+  it('uses only internal pilot endpoints and exposes production execution APIs', () => {
     const api = read('src/api/pilot.js');
     expect(api).toContain('/api/internal/pilot/control-room/');
     for (const resource of ['security-reviews', 'verification-runs', 'performance-runs', 'entry-decisions']) expect(api).toContain(resource);
-    expect(api).toContain("response.data.api_status = 'pending'");
+    expect(api).toContain('/performance-runs/${id}/execute/');
+    expect(api).toContain('/recovery-plans/${id}/execute/');
+    expect(api).toContain('/release-plans/${id}/execute/');
+    expect(api).toContain('/release-plans/${id}/execute-rollback/');
+    expect(api).toContain('/executions/');
+    expect(api).toContain("import { requestApi } from './request'");
+    expect(api).not.toContain('requestWithMockFallback');
+    expect(api).not.toMatch(/requestWithMockFallback|api_status\s*=\s*['\"](?:sandbox|pending|mock)/);
+    expect(api).toContain('/api/internal/pilot/topology/verify-mock/');
     expect(api).not.toMatch(/\/api\/rpa\/|\/api\/finance\/|\/admin\/|deployNow|connectPlatform/);
   });
 
-  it('keeps mock evidence stateful without external execution', () => {
-    expect(mockPilotControlRoom().data.api_status).toBe('mock');
-    expect(mockP8List('verification').data.results[0].status).toBe('draft');
-    expect(mockP8Patch('verification', 1, { version: 1, target_alias: 'demo-target' })).toMatchObject({ success: true });
-    expect(mockP8Action('verification', 1, 'submit', {}).data.status).toBe('submitted');
-    expect(mockP8Detail('verification', 999)).toMatchObject({ success: false, http_status: 404 });
+  it('does not import or substitute client-side evidence', () => {
+    const pages = ['ControlRoom.vue', 'P8WorkflowWorkspace.vue', 'PilotWorkflow.vue'].map((name) => read(`src/views/pilot/${name}`)).join('\n');
+    expect(pages).not.toMatch(/from ['\"].*mock|mock[A-Z]|fixed demo|demo[-_]/i);
+    expect(pages).toContain('fetchExecutions');
   });
 
   it('gates actions with exact plan review record and cancel permissions', () => {
     const page = read('src/views/pilot/P8WorkflowWorkspace.vue');
-    for (const suffix of ['.plan', '.review', '.record', '.cancel']) expect(page).toContain(suffix);
+    for (const suffix of ['.plan', '.review', '.record', '.execute', '.cancel']) expect(page).toContain(suffix);
     expect(page).toContain("row.status === 'draft'");
     expect(page).toContain("row.status === 'submitted'");
     expect(page).toContain("row.status === 'approved'");
@@ -124,11 +135,13 @@ describe('UI-P8 production pilot security readiness', () => {
 
   it('does not expose real platform, deployment, credential, or money controls', () => {
     const pages = [
-      'ControlRoom.vue', 'P8WorkflowWorkspace.vue', 'SecurityReviewWorkspace.vue',
+      'ControlRoom.vue', 'P8WorkflowWorkspace.vue', 'PilotWorkflow.vue', 'SecurityReviewWorkspace.vue',
       'VerificationRunWorkspace.vue', 'PerformanceRunWorkspace.vue', 'EntryDecisionWorkspace.vue'
     ].map((name) => read(`src/views/pilot/${name}`)).join('\n');
-    expect(pages).not.toMatch(/password|api[_-]?secret|cookie|session|deployNow|executeRpa|transferMoney|purchaseOrderCreate/i);
-    expect(pages).toContain('不连接真实平台');
+    expect(pages).not.toMatch(/password|api[_-]?secret|cookie|session|deployNow|executeRpa|transferMoney|purchaseOrderCreate|evaluate-mock|verify-mock/i);
+    expect(pages).toContain('执行性能验证');
+    expect(pages).toContain('执行部署');
+    expect(pages).toContain('执行恢复');
   });
 
   it('renders mounted loading and empty states from real component state', async () => {
@@ -195,7 +208,7 @@ describe('UI-P8 production pilot security readiness', () => {
   it.each([
     ['pilot.verification.plan', 'draft', '提交评审'],
     ['pilot.verification.review', 'submitted', '人工批准'],
-    ['pilot.verification.record', 'approved', '记录脱敏结果'],
+    ['pilot.verification.record', 'approved', '提交验证结果'],
     ['pilot.verification.cancel', 'draft', '取消计划']
   ])('shows the exact %s action for its valid state', async (permission, status, label) => {
     authContext.permissions = new Set([permission]);
@@ -213,11 +226,10 @@ describe('UI-P8 production pilot security readiness', () => {
     await flushPromises();
     const initialLoadCount = pilotApi.fetchP8Resources.mock.calls.length;
     await wrapper.findAll('button').find((button) => button.text() === '提交评审').trigger('click');
+    await wrapper.find('input').setValue('提交真实验证申请');
+    await wrapper.findAll('button').find((button) => button.text() === '确认提交').trigger('click');
     await flushPromises();
-    expect(pilotApi.runP8Action).toHaveBeenCalledWith('verification', 1, 'submit', {
-      version: 1,
-      reason: 'Submit controlled demo evidence for human review'
-    });
+    expect(pilotApi.runP8Action).toHaveBeenCalledWith('verification', 1, 'submit', expect.objectContaining({ version: 1, reason: '提交真实验证申请' }));
     expect(pilotApi.fetchP8Resources.mock.calls.length).toBeGreaterThan(initialLoadCount);
     expect(wrapper.find('.app-state--loading').exists()).toBe(false);
   });
@@ -250,10 +262,10 @@ describe('UI-P8 production pilot security readiness', () => {
     authContext.permissions = new Set(['pilot.verification.view']);
     const wrapper = mountWorkspace();
     await flushPromises();
-    expect(wrapper.text()).not.toContain('创建演示草稿');
+    expect(wrapper.text()).not.toContain('创建性能运行');
     expect(wrapper.text()).not.toContain('提交评审');
     expect(wrapper.text()).not.toContain('人工批准');
-    expect(wrapper.text()).not.toContain('记录脱敏结果');
+    expect(wrapper.text()).not.toContain('提交验证结果');
     expect(wrapper.text()).not.toContain('取消计划');
   });
 });

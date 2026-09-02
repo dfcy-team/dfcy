@@ -68,7 +68,9 @@ class FinanceScopeSerializer(UIP8StrictSerializer):
 
 class ThresholdSerializer(UIP8StrictSerializer):
     p95_ms_max = serializers.FloatField(min_value=0.001, max_value=3600000)
-    error_rate_max = serializers.FloatField(min_value=0, max_value=1)
+    # Runner and persisted PerformanceRun values use percentage points: 0 is
+    # zero errors, 0.25 is a quarter percent, and 100 is the upper boundary.
+    error_rate_max = serializers.FloatField(min_value=0, max_value=100)
     cpu_percent_max = serializers.FloatField(min_value=0, max_value=100)
     memory_percent_max = serializers.FloatField(min_value=0, max_value=100)
 
@@ -117,6 +119,7 @@ class VerificationDraftSerializer(CommonDraftFields):
 
 class PerformanceDraftSerializer(CommonDraftFields):
     scenario = serializers.CharField(min_length=1, max_length=200, trim_whitespace=True)
+    target_alias = serializers.RegexField(r"^[a-z][a-z0-9-]{1,63}$")
     workload_profile = serializers.ChoiceField(choices=("demo", "synthetic"))
     max_rps = serializers.IntegerField(min_value=1, max_value=500)
     concurrency = serializers.IntegerField(min_value=1, max_value=100)
@@ -210,7 +213,7 @@ class PerformanceResultSerializer(UIP8StrictSerializer):
     result_mode = serializers.ChoiceField(choices=("measured", "manual_required"))
     p50_ms = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0, max_value=3600000, allow_null=True)
     p95_ms = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=0, max_value=3600000, allow_null=True)
-    error_rate = serializers.DecimalField(max_digits=8, decimal_places=6, min_value=0, max_value=1, allow_null=True)
+    error_rate = serializers.DecimalField(max_digits=9, decimal_places=6, min_value=0, max_value=100, allow_null=True)
     cpu_percent = serializers.DecimalField(max_digits=7, decimal_places=3, min_value=0, max_value=100, allow_null=True)
     memory_percent = serializers.DecimalField(max_digits=7, decimal_places=3, min_value=0, max_value=100, allow_null=True)
     result_summary = serializers.CharField(min_length=1, max_length=1000)
@@ -279,7 +282,7 @@ class PerformanceRunSerializer(AuditRefMixin, serializers.ModelSerializer):
         model = PerformanceRun
         object_type = "performance_run"
         fields = (
-            "id", "code", "scenario", "environment", "workload_profile", "max_rps", "concurrency",
+            "id", "code", "scenario", "target_alias", "environment", "workload_profile", "max_rps", "concurrency",
             "duration_seconds", "thresholds", "evidence_refs", "status", "p50_ms", "p95_ms", "error_rate",
             "cpu_percent", "memory_percent", "result_summary", "creator_id", "reviewer_id",
             "recorder_id", "version", "audit_ref", "created_at", "updated_at",
@@ -326,7 +329,7 @@ class PerformanceRunSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PerformanceRun
-        fields = ("id", "code", "scenario", "environment", "workload_profile", "status", "max_rps", "concurrency", "version", "created_at", "updated_at")
+        fields = ("id", "code", "scenario", "target_alias", "environment", "workload_profile", "status", "max_rps", "concurrency", "version", "created_at", "updated_at")
 
 
 class EntryDecisionSummarySerializer(serializers.ModelSerializer):

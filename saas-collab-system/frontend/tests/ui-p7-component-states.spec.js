@@ -5,8 +5,9 @@ import AppState from '../src/components/AppState.vue';
 import GovernanceCatalog from '../src/views/governance/GovernanceCatalog.vue';
 
 const governanceApi = vi.hoisted(() => ({
-  checkApiContractMock: vi.fn(),
-  evaluateAssistantMock: vi.fn(),
+  checkApiContract: vi.fn(),
+  createAssistantEvaluation: vi.fn(),
+  fetchAssistantEvaluation: vi.fn(),
   fetchApiContract: vi.fn(),
   fetchApiContracts: vi.fn(),
   fetchAssistant: vi.fn(),
@@ -53,11 +54,11 @@ const catalogStubs = {
   ElAlert: { props: ['title'], template: '<div class="alert-stub">{{ title }}</div>' }
 };
 
-const successPage = (results = [{ id: 1, name: 'Readiness', status: 'sandbox' }]) => ({
+const successPage = (results = [{ id: 1, name: 'Readiness', status: 'active' }]) => ({
   success: true,
   code: 'OK',
   message: 'success',
-  data: { count: results.length, next: null, previous: null, results, api_status: 'sandbox' }
+  data: { count: results.length, next: null, previous: null, results, api_status: 'connected' }
 });
 
 function mountCatalog() {
@@ -157,7 +158,7 @@ describe('UI-P7 mounted component state matrix', () => {
     const wrapper = mountCatalog();
     await flushPromises();
     expect(wrapper.text()).not.toContain('合同检查');
-    expect(governanceApi.checkApiContractMock).not.toHaveBeenCalled();
+    expect(governanceApi.checkApiContract).not.toHaveBeenCalled();
   });
 
   it('shows a visible 404 state when a direct governance detail does not exist', async () => {

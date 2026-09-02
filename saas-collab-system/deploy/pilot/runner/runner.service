@@ -1,0 +1,41 @@
+[Unit]
+Description=SaaS collaboration controlled pilot runner
+Documentation=/opt/saas-collab/pilot-runner/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=saas-runner
+Group=saas-runner
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/saas-collab/pilot-runner/app.py --config /etc/saas-collab/runner/config.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# The runner has no Docker socket and no ambient Linux capabilities.  It can
+# invoke only the three root-owned bridge names through the narrow sudoers
+# entries installed by install-runner.sh; the bridges then call the existing
+# production-control entrypoints with owner-prepared arguments.
+NoNewPrivileges=false
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=false
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/saas-collab/runner /opt/saas-collab/pilot-runner /opt/saas-collab/release-control /usr/local/sbin/saas-collab-stage-approved-candidate /usr/local/sbin/saas-collab-pilot-runner-preflight /usr/local/sbin/saas-collab-pilot-runner-deploy /usr/local/sbin/saas-collab-pilot-runner-recovery /usr/local/sbin/saas-collab-pilot-runner-rollback /usr/local/lib/saas-collab/pilot-runner-action-common.sh
+InaccessiblePaths=/var/run/docker.sock /run/docker.sock
+ReadWritePaths=/var/lib/saas-collab/pilot-runner
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

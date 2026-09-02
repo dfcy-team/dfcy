@@ -112,11 +112,15 @@ export const permissionNames = Object.freeze({
   'pilot.recovery.plan': '规划恢复演练',
   'pilot.recovery.review': '审核恢复计划',
   'pilot.recovery.record': '记录恢复证据',
+  'pilot.recovery.execute': '执行恢复作业',
   'pilot.release.view': '查看发布计划',
   'pilot.release.plan': '规划试点发布',
   'pilot.release.review': '审核试点发布',
   'pilot.release.record': '记录发布证据',
   'pilot.release.rollback': '审核并记录回滚',
+  'pilot.release.execute': '执行生产部署',
+  'pilot.release.rollback.execute': '执行生产回滚',
+  'pilot.performance.execute': '执行性能验证',
   'pilot.capacity.view': '查看试点容量',
   'pilot.control.view': '查看试点控制台',
   'pilot.security_review.view': '查看试点安全评审',
@@ -141,7 +145,7 @@ const actionNames = {
   view: '查看', manage: '管理', create: '创建', update: '更新', calculate: '计算', evaluate: '评估',
   review: '审核', confirm: '确认', submit: '提交', withdraw: '撤回', export: '导出', import: '导入',
   download: '下载', run: '运行', plan: '规划', record: '记录', verify: '验证', cancel: '取消',
-  rollback: '回滚', rotate: '轮换', freeze: '冻结', handle: '处理', dry_run: '执行演练'
+  rollback: '回滚', execute: '执行', rotate: '轮换', freeze: '冻结', handle: '处理', dry_run: '执行演练'
 };
 const resourceNames = {
   research: '商品调研', master: '商品主数据', orders: '采购订单', approvals: '审批流程', exceptions: '流程异常',

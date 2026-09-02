@@ -42,6 +42,72 @@ LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "
 LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
 LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
 
+# Production execution dependencies.  Credentials are deliberately kept out
+# of Django models and logs.  The file form is the preferred transport; the
+# environment value remains a compatibility fallback for existing installs.
+OPENAI_API_KEY_FILE = os.getenv("OPENAI_API_KEY_FILE", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_API_BASE_URL = os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini").strip()
+OPENAI_CONNECT_TIMEOUT = max(1.0, min(float(os.getenv("OPENAI_CONNECT_TIMEOUT", "5")), 30.0))
+OPENAI_READ_TIMEOUT = max(1.0, min(float(os.getenv("OPENAI_READ_TIMEOUT", "30")), 120.0))
+OPENAI_MAX_RETRIES = max(0, min(int(os.getenv("OPENAI_MAX_RETRIES", "2")), 3))
+OPENAI_RETRY_BACKOFF = max(0.0, min(float(os.getenv("OPENAI_RETRY_BACKOFF", "0.5")), 8.0))
+OPENAI_MAX_INPUT_CHARS = max(256, min(int(os.getenv("OPENAI_MAX_INPUT_CHARS", "12000")), 50000))
+OPENAI_MAX_OUTPUT_TOKENS = max(16, min(int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "1200")), 4000))
+OPENAI_MAX_RESPONSE_BYTES = max(4096, min(int(os.getenv("OPENAI_MAX_RESPONSE_BYTES", "1048576")), 10485760))
+OPENAI_ALLOW_INSECURE_FOR_TESTS = env_bool("OPENAI_ALLOW_INSECURE_FOR_TESTS", False)
+# Periodic compensation closes the small post-commit/publish gap and makes a
+# worker crash after claiming a job observable. These values are deliberately
+# bounded so a deployment cannot silently leave work unobserved for days.
+GOVERNANCE_EVALUATION_DISPATCH_STALE_SECONDS = max(
+    30, min(int(os.getenv("GOVERNANCE_EVALUATION_DISPATCH_STALE_SECONDS", "60")), 3600)
+)
+GOVERNANCE_EVALUATION_STALE_SECONDS = max(
+    300, min(int(os.getenv("GOVERNANCE_EVALUATION_STALE_SECONDS", "600")), 86400)
+)
+GOVERNANCE_EVALUATION_DATA_CLASSES = tuple(
+    env_list("GOVERNANCE_EVALUATION_DATA_CLASSES", "public_demo")
+)
+
+# The runner URL, host allow-list and bearer token are deployment settings, not
+# request fields.  In production the runner client accepts HTTPS only. Tests
+# may opt into an HTTP endpoint explicitly through the test-only override.
+PILOT_RUNNER_URL = os.getenv(
+    "PILOT_RUNNER_URL",
+    os.getenv("PILOT_EXECUTION_RUNNER_URL", ""),
+).strip().rstrip("/")
+PILOT_RUNNER_ALLOWED_HOSTS = env_list(
+    "PILOT_RUNNER_ALLOWED_HOSTS",
+    os.getenv("PILOT_EXECUTION_RUNNER_ALLOWED_HOSTS", ""),
+)
+PILOT_RUNNER_TOKEN_FILE = os.getenv(
+    "PILOT_RUNNER_TOKEN_FILE",
+    os.getenv("PILOT_EXECUTION_RUNNER_TOKEN_FILE", ""),
+).strip()
+PILOT_RUNNER_TOKEN = os.getenv(
+    "PILOT_RUNNER_TOKEN",
+    os.getenv("PILOT_EXECUTION_RUNNER_TOKEN", ""),
+).strip()
+PILOT_RUNNER_CA_FILE = os.getenv(
+    "PILOT_RUNNER_CA_FILE",
+    os.getenv("PILOT_EXECUTION_RUNNER_CA_FILE", ""),
+).strip()
+PILOT_RUNNER_CONNECT_TIMEOUT = max(1.0, min(float(os.getenv("PILOT_RUNNER_CONNECT_TIMEOUT", "5")), 30.0))
+PILOT_RUNNER_READ_TIMEOUT = max(1.0, min(float(os.getenv("PILOT_RUNNER_READ_TIMEOUT", "30")), 120.0))
+PILOT_RUNNER_MAX_RETRIES = max(0, min(int(os.getenv("PILOT_RUNNER_MAX_RETRIES", "2")), 3))
+PILOT_RUNNER_RETRY_BACKOFF = max(0.0, min(float(os.getenv("PILOT_RUNNER_RETRY_BACKOFF", "0.5")), 8.0))
+PILOT_RUNNER_MAX_POLLS = max(0, min(int(os.getenv("PILOT_RUNNER_MAX_POLLS", "30")), 120))
+PILOT_RUNNER_POLL_INTERVAL = max(0.0, min(float(os.getenv("PILOT_RUNNER_POLL_INTERVAL", "1")), 10.0))
+PILOT_RUNNER_POLL_RETRY_DELAY = max(1.0, min(float(os.getenv("PILOT_RUNNER_POLL_RETRY_DELAY", "5")), 60.0))
+PILOT_RUNNER_EXECUTION_DEADLINE_SECONDS = max(60, min(int(os.getenv("PILOT_RUNNER_EXECUTION_DEADLINE_SECONDS", "3600")), 86400))
+PILOT_RUNNER_MAX_TASK_RETRIES = max(1, min(int(os.getenv("PILOT_RUNNER_MAX_TASK_RETRIES", "720")), 2000))
+PILOT_RUNNER_MAX_RESPONSE_BYTES = max(4096, min(int(os.getenv("PILOT_RUNNER_MAX_RESPONSE_BYTES", "1048576")), 10485760))
+PILOT_RUNNER_ALLOW_INSECURE_FOR_TESTS = env_bool("PILOT_RUNNER_ALLOW_INSECURE_FOR_TESTS", False)
+PILOT_EXECUTION_DISPATCH_STALE_SECONDS = max(
+    30, min(int(os.getenv("PILOT_EXECUTION_DISPATCH_STALE_SECONDS", "120")), 3600)
+)
+
 # File custody is a local synthetic/test aid only.  A production process must
 # explicitly use an independent HTTP custody service; the safe default is to
 # refuse all secret operations.
@@ -251,6 +317,21 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
         "schedule": 60.0,
         "args": (20,),
+    },
+    "dispatch-stale-governance-evaluations": {
+        "task": "governance.dispatch_stale_evaluations",
+        "schedule": 60.0,
+        "args": (50,),
+    },
+    "reconcile-stale-governance-evaluations": {
+        "task": "governance.reconcile_stale_evaluations",
+        "schedule": 60.0,
+        "args": (50,),
+    },
+    "dispatch-stale-pilot-executions": {
+        "task": "pilot.dispatch_stale_executions",
+        "schedule": 60.0,
+        "args": (50,),
     },
 }
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))

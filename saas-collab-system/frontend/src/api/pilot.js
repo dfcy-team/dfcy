@@ -1,41 +1,72 @@
-import { requestWithMockFallback, withApiStatus } from './request';
-import { mockCapacityObservations, mockCapacitySummary, mockCreateRecoveryPlan, mockCreateReleasePlan, mockP8Action, mockP8Create, mockP8Detail, mockP8List, mockP8Patch, mockPilotControlRoom, mockReadiness, mockRecoveryAction, mockRecoveryDrills, mockRecoveryPlan, mockRecoveryPlans, mockRecoveryResult, mockReleaseAction, mockReleasePlan, mockReleasePlans, mockTopology, mockTopologyVerify } from '../mock/pilot';
+import { requestApi } from './request';
 
-const sandbox = async (request) => {
-  const response = withApiStatus(await request, 'sandbox');
-  if (response?.success && response.data?.api_status === 'connected') response.data.api_status = 'sandbox';
-  return response;
-};
-const idempotency = () => `ui-p7-pilot-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const action = (url, data, mockHandler, moduleName) => sandbox(requestWithMockFallback({ method: 'post', url, data, headers: { 'Idempotency-Key': idempotency() } }, mockHandler, moduleName));
+const idempotency = (prefix = 'ui-pilot') => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const write = (url, data, prefix = 'ui-pilot-write') => requestApi({
+  method: 'post',
+  url,
+  data,
+  headers: { 'Idempotency-Key': idempotency(prefix) }
+});
 
-export const fetchPilotReadiness = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/readiness/', params }, mockReadiness, 'pilot.readiness'));
-export const fetchPilotTopology = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/topology/', params }, mockTopology, 'pilot.topology'));
-export const verifyPilotTopologyMock = (payload) => action('/api/internal/pilot/topology/verify-mock/', payload, mockTopologyVerify, 'pilot.topology.verify');
-export const fetchCapacitySummary = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/capacity/summary/', params }, mockCapacitySummary, 'pilot.capacity.summary'));
-export const fetchCapacityObservations = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/capacity/observations/', params }, () => mockCapacityObservations(params), 'pilot.capacity.observations'));
-export const fetchRecoveryPlans = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/recovery-plans/', params }, mockRecoveryPlans, 'pilot.recovery'));
-export const fetchRecoveryPlan = (id) => sandbox(requestWithMockFallback({ method: 'get', url: `/api/internal/pilot/recovery-plans/${id}/` }, mockRecoveryPlan, 'pilot.recovery.detail'));
-export const createRecoveryPlan = (payload) => action('/api/internal/pilot/recovery-plans/', payload, mockCreateRecoveryPlan, 'pilot.recovery.create');
-export const runRecoveryAction = (id, actionName, payload) => action(`/api/internal/pilot/recovery-plans/${id}/${actionName}/`, payload, () => mockRecoveryAction(id, actionName, payload), `pilot.recovery.${actionName}`);
-export const fetchRecoveryDrills = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/recovery-drills/', params }, () => mockRecoveryDrills(params), 'pilot.recovery.drills'));
-export const recordRecoveryResult = (id, payload) => action(`/api/internal/pilot/recovery-drills/${id}/record-result/`, payload, () => mockRecoveryResult(id, payload), 'pilot.recovery.result');
-export const fetchReleasePlans = (params = {}) => sandbox(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/release-plans/', params }, mockReleasePlans, 'pilot.release'));
-export const fetchReleasePlan = (id) => sandbox(requestWithMockFallback({ method: 'get', url: `/api/internal/pilot/release-plans/${id}/` }, mockReleasePlan, 'pilot.release.detail'));
-export const createReleasePlan = (payload) => action('/api/internal/pilot/release-plans/', payload, mockCreateReleasePlan, 'pilot.release.create');
-export const runReleaseAction = (id, actionName, payload) => action(`/api/internal/pilot/release-plans/${id}/${actionName}/`, payload, () => mockReleaseAction(id, actionName, payload), `pilot.release.${actionName}`);
+export const fetchPilotReadiness = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/readiness/', params });
+export const fetchPilotTopology = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/topology/', params });
+export const verifyPilotTopology = (payload) => write('/api/internal/pilot/topology/verify-mock/', payload, 'ui-pilot-topology-verify');
+export const fetchCapacitySummary = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/capacity/summary/', params });
+export const fetchCapacityObservations = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/capacity/observations/', params });
+
+export const fetchRecoveryPlans = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/recovery-plans/', params });
+export const fetchRecoveryPlan = (id) => requestApi({ method: 'get', url: `/api/internal/pilot/recovery-plans/${id}/` });
+export const createRecoveryPlan = (payload) => write('/api/internal/pilot/recovery-plans/', payload, 'ui-pilot-recovery-create');
+export const runRecoveryAction = (id, actionName, payload) => write(`/api/internal/pilot/recovery-plans/${id}/${actionName}/`, payload, `ui-pilot-recovery-${actionName}`);
+export const executeRecoveryPlan = (id, payload) => write(`/api/internal/pilot/recovery-plans/${id}/execute/`, payload, 'ui-pilot-recovery-execute');
+export const fetchRecoveryDrills = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/recovery-drills/', params });
+export const recordRecoveryResult = (id, payload) => write(`/api/internal/pilot/recovery-drills/${id}/record-result/`, payload, 'ui-pilot-recovery-result');
+
+export const fetchReleasePlans = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/release-plans/', params });
+export const fetchReleasePlan = (id) => requestApi({ method: 'get', url: `/api/internal/pilot/release-plans/${id}/` });
+export const createReleasePlan = (payload) => write('/api/internal/pilot/release-plans/', payload, 'ui-pilot-release-create');
+export const runReleaseAction = (id, actionName, payload) => write(`/api/internal/pilot/release-plans/${id}/${actionName}/`, payload, `ui-pilot-release-${actionName}`);
+export const executeReleasePlan = (id, payload) => write(`/api/internal/pilot/release-plans/${id}/execute/`, payload, 'ui-pilot-release-execute');
+export const executeReleaseRollback = (id, payload) => write(`/api/internal/pilot/release-plans/${id}/execute-rollback/`, payload, 'ui-pilot-release-rollback');
 
 const p8Paths = { security: 'security-reviews', verification: 'verification-runs', performance: 'performance-runs', entry: 'entry-decisions' };
-const p8Pending = async (promise) => {
-  const response = await promise;
-  if (response?.success && response.data?.api_status === 'connected') response.data.api_status = 'pending';
-  return response;
-};
-const p8Action = (kind, id, actionName, payload) => p8Pending(requestWithMockFallback({ method: 'post', url: `/api/internal/pilot/${p8Paths[kind]}/${id}/${actionName}/`, data: payload, headers: { 'Idempotency-Key': `ui-p8-${Date.now()}-${Math.random().toString(16).slice(2)}` } }, () => mockP8Action(kind, id, actionName, payload), `pilot.${kind}.${actionName}`));
 
-export const fetchPilotControlRoom = (params) => p8Pending(requestWithMockFallback({ method: 'get', url: '/api/internal/pilot/control-room/', params }, mockPilotControlRoom, 'pilot.control'));
-export const fetchP8Resources = (kind, params = {}) => p8Pending(requestWithMockFallback({ method: 'get', url: `/api/internal/pilot/${p8Paths[kind]}/`, params }, () => mockP8List(kind), `pilot.${kind}`));
-export const fetchP8Resource = (kind, id) => p8Pending(requestWithMockFallback({ method: 'get', url: `/api/internal/pilot/${p8Paths[kind]}/${id}/` }, () => mockP8Detail(kind, id), `pilot.${kind}.detail`));
-export const createP8Resource = (kind, payload) => p8Pending(requestWithMockFallback({ method: 'post', url: `/api/internal/pilot/${p8Paths[kind]}/`, data: payload, headers: { 'Idempotency-Key': `ui-p8-create-${Date.now()}-${Math.random().toString(16).slice(2)}` } }, () => mockP8Create(kind, payload), `pilot.${kind}.create`));
-export const patchP8Resource = (kind, id, payload) => p8Pending(requestWithMockFallback({ method: 'patch', url: `/api/internal/pilot/${p8Paths[kind]}/${id}/`, data: payload }, () => mockP8Patch(kind, id, payload), `pilot.${kind}.patch`));
-export const runP8Action = p8Action;
+export const fetchPilotControlRoom = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/control-room/', params });
+export const fetchExecutions = (params = {}) => requestApi({ method: 'get', url: '/api/internal/pilot/executions/', params });
+export const fetchExecution = (id) => requestApi({ method: 'get', url: `/api/internal/pilot/executions/${id}/` });
+
+export const fetchP8Resources = (kind, params = {}) => requestApi({
+  method: 'get',
+  url: `/api/internal/pilot/${p8Paths[kind]}/`,
+  params
+});
+
+export const fetchP8Resource = (kind, id) => requestApi({
+  method: 'get',
+  url: `/api/internal/pilot/${p8Paths[kind]}/${id}/`
+});
+
+export const createP8Resource = (kind, payload) => write(
+  `/api/internal/pilot/${p8Paths[kind]}/`,
+  payload,
+  `ui-p8-${kind}-create`
+);
+
+export const patchP8Resource = (kind, id, payload) => requestApi({
+  method: 'patch',
+  url: `/api/internal/pilot/${p8Paths[kind]}/${id}/`,
+  data: payload,
+  headers: { 'Idempotency-Key': idempotency(`ui-p8-${kind}-patch`) }
+});
+
+export const runP8Action = (kind, id, actionName, payload) => write(
+  `/api/internal/pilot/${p8Paths[kind]}/${id}/${actionName}/`,
+  payload,
+  `ui-p8-${kind}-${actionName}`
+);
+
+export const executePerformanceRun = (id, payload) => write(
+  `/api/internal/pilot/performance-runs/${id}/execute/`,
+  payload,
+  'ui-pilot-performance-execute'
+);

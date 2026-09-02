@@ -1,6 +1,6 @@
 # 开发 A 受控自助发布（架构员启用文件）
 
-本目录实现“开发 A 可以自助发布，但不能直接操作虚拟机”的生产发布控制面：GitHub Actions 在 CI 中构建并推送后端、前端镜像，目标 VM 只拉取带 `sha256` 摘要的镜像；发布通过受限 SSH 强制命令进入，服务器脚本再用仅限指定命令的 `sudo` 规则执行部署。
+本目录实现“开发 A 可以自助发布，但不能直接操作虚拟机”的生产发布控制面：GitHub Actions 在 CI 中构建并推送后端、前端镜像，目标 VM 只拉取带 `sha256` 摘要的镜像；发布通过受限 SSH 强制命令进入，服务器脚本再用仅限指定命令的 `sudo` 规则执行部署。安装后控制树始终为 root-owned，forced-command 账户通过安装器写入的 `config/use-sudo` 标记进入该窄 sudo 边界。
 
 这不是生产凭据或现成上线授权。当前仓库的 `AGENTS.md` 要求生产发布由架构员审查和启用；本文件提供的自助发布仅在系统负责人明确批准、完成下列安装和验收后启用。
 
@@ -9,7 +9,12 @@
 - GitHub workflow：`.github/workflows/developer-a-production-release.yml`。
 - VM 固定入口：`/opt/saas-collab/release-control/unified/bin/developer-a-ci-dispatch`。
 - 允许的远程操作只有 `deploy`、`rollback` 和 `check`，入口拒绝 shell 元字符、路径跳转和任意命令。
-- `dfcy01` 不加入 Docker 用户组，不授予通用 root shell；sudo 只允许调用 root-owned 的部署、回滚和运行时基线检查脚本。
+- V2.44.59 runner 只能通过 root-owned、无参数 bridge 调用本控制面；bridge
+  仅消费 owner/CI 原子发布的候选 manifest，不接受 API 传入镜像、SHA、actor、reason
+  或 registry token。runner deploy 请求的 `expected_release_sha` 与
+  `release_plan_ref` 只做服务端等值绑定，防止已批准 ReleasePlan 误发布另一个
+  候选；恢复入口只按 current ledger 重启/核验已登记服务，不启动迁移。
+- `dfcy01`（或 live env 中的 `PRODUCTION_DEPLOY_USER`）不加入 Docker 用户组，不授予通用 root shell；sudo 只允许调用 root-owned 的部署、回滚和运行时基线检查脚本。runtime preflight 会对该组成员关系 fail-closed；架构员必须先移除 broad sudo/docker 组权限，不能由安装脚本自动修改现场账号。
 - 生产环境不配置 Required reviewers。取消人工审批不等于取消自动门禁；环境仍需保留 `production` 变量/密钥和审计记录。
 - 目标 VM 位于内网时，GitHub-hosted runner 不能直连它。发布 job 必须使用能够访问该内网的 self-hosted runner，并在 Production 环境设置 `PRODUCTION_RUNNER_LABEL`；也可以先使用 `dry_run` 或 `check` 做本地门禁。
 
@@ -23,6 +28,9 @@
 4. 运行时只允许 `ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:...`、`ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:...` 和 owner 批准的官方 Redis digest。
 5. VM 的 root-owned 基线账本、Compose 文件链和生产环境文件完整；普通发布之间至少间隔 600 秒。
 6. 预迁移备份 hook 成功，专用 `migrate` service 成功，容器健康检查和 Django `check --deploy` 成功。
+   `PRODUCTION_REQUIRE_BACKUP=true`、`PRODUCTION_BACKUP_COMMAND` 必须在 root-owned
+   `0400/0600` live env 中显式配置；backup command 必须为 root-owned、非符号链接的
+   绝对可执行文件。控制树、baseline 和 live env 不得由 `dfcy01` 或 runner 用户写入。
 7. 发布人、SHA、镜像摘要、迁移摘要、结果和时间写入 JSON Lines 审计账本；不会写入 SSH 私钥、GHCR token、数据库密码或 `.env` 内容。
 
 紧急回滚通过单独的 `rollback --emergency` 路径执行，不受 10 分钟普通发布限频限制，但仍需要强制命令、环境锁、镜像摘要校验、健康检查和审计。回滚只切换已登记的应用镜像，不自动逆向数据库迁移；不可逆迁移必须按备份恢复/向前修复方案由架构员处理。
@@ -55,6 +63,7 @@ restrict,command="/opt/saas-collab/release-control/unified/bin/developer-a-ci-di
 至少需要调整：
 
 - `PRODUCTION_COMPOSE_PROJECT_DIR`、`PRODUCTION_COMPOSE_FILES`、TLS 路径和真实数据库地址；
+- `PRODUCTION_DEPLOY_USER` 应与 `--deploy-user` 一致，并且不能属于 `docker` 组；
 - `PRODUCTION_RUNTIME_ENV_FILE` 对应的 live env 路径（脚本会以 `config/env.path` 的路径为准）；
 - `PRODUCTION_REQUIRE_BACKUP=true` 和 root-owned、不可符号链接的 `PRODUCTION_BACKUP_COMMAND`；
 - `PRODUCTION_REQUIRED_SERVICES`、`PRODUCTION_MIGRATION_SERVICE` 与既有 Compose service 名称。

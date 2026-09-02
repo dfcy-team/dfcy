@@ -382,13 +382,16 @@ class PerformanceRun(UIP8WorkflowModel):
         CANCELLED = "cancelled", "Cancelled"
 
     PROTECTED_WORKFLOW_FIELDS = {
-        "tenant_id", "environment_id", "code", "scenario", "workload_profile", "max_rps",
+        "tenant_id", "environment_id", "code", "scenario", "target_alias", "workload_profile", "max_rps",
         "concurrency", "duration_seconds", "thresholds", "evidence_refs", "status", "p50_ms",
         "p95_ms", "error_rate", "cpu_percent", "memory_percent", "result_summary", "creator_id",
         "owner_id", "reviewer_id", "recorder_id", "review_reason", "reviewed_at", "version",
         "idempotency_key_hash",
     }
     scenario = models.CharField(max_length=200)
+    # Legacy UI-P8 rows may predate target binding; new production drafts are
+    # required to provide a registered alias by the serializer/service.
+    target_alias = models.SlugField(max_length=64, null=True, blank=True)
     workload_profile = models.CharField(max_length=20)
     max_rps = models.PositiveIntegerField()
     concurrency = models.PositiveIntegerField()
@@ -397,7 +400,9 @@ class PerformanceRun(UIP8WorkflowModel):
     evidence_refs = models.JSONField(default=list)
     p50_ms = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
     p95_ms = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
-    error_rate = models.DecimalField(max_digits=8, decimal_places=6, null=True, blank=True)
+    # Percentage points (0..100); nine digits are required for the inclusive
+    # 100.000000 upper boundary with six decimal places.
+    error_rate = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     cpu_percent = models.DecimalField(max_digits=7, decimal_places=3, null=True, blank=True)
     memory_percent = models.DecimalField(max_digits=7, decimal_places=3, null=True, blank=True)
     result_summary = models.CharField(max_length=1000, blank=True)
@@ -447,6 +452,115 @@ class EntryDecision(UIP8WorkflowModel):
             models.UniqueConstraint(fields=["tenant", "code"], name="uniq_p8_entry_code"),
             models.UniqueConstraint(fields=["tenant", "idempotency_key_hash"], name="uniq_p8_entry_idem"),
         ]
+
+
+class PilotExecutionQuerySet(models.QuerySet):
+    """Execution records are immutable from public ORM mutation paths."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Pilot executions must be changed through the execution service.")
+
+    def delete(self):
+        raise ValidationError("Pilot executions cannot be deleted.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Pilot executions must be changed through the execution service.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Pilot executions must be created through the execution service.")
+
+
+class PilotExecution(models.Model):
+    """Durable controlled-runner job for pilot performance and release flows."""
+
+    class ExecutionType(models.TextChoices):
+        PERFORMANCE = "performance", "Performance"
+        DEPLOY = "deploy", "Deploy"
+        RECOVERY = "recovery", "Recovery"
+        ROLLBACK = "rollback", "Rollback"
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        MANUAL_REQUIRED = "manual_required", "Manual required"
+
+    objects = PilotExecutionQuerySet.as_manager()
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="pilot_executions")
+    execution_type = models.CharField(max_length=20, choices=ExecutionType.choices)
+    performance_run = models.ForeignKey(
+        "PerformanceRun",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="executions",
+    )
+    recovery_plan = models.ForeignKey(
+        "RecoveryPlan",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="executions",
+    )
+    recovery_drill = models.ForeignKey(
+        "RecoveryDrill",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="executions",
+    )
+    release_plan = models.ForeignKey(
+        "ReleasePlan",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="executions",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="pilot_executions_requested",
+    )
+    request_version = models.PositiveIntegerField()
+    request_fingerprint = models.CharField(max_length=64)
+    idempotency_key_hash = models.CharField(max_length=64)
+    request_id = models.CharField(max_length=120)
+    request_payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    attempt = models.PositiveSmallIntegerField(default=0)
+    runner_job_id = models.CharField(max_length=160, blank=True)
+    runner_reference = models.CharField(max_length=240, blank=True)
+    result_metrics = models.JSONField(default=dict, blank=True)
+    evidence_refs = models.JSONField(default=list, blank=True)
+    result_summary = models.CharField(max_length=1000, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    error_message = models.CharField(max_length=1000, blank=True)
+    celery_task_id = models.CharField(max_length=255, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    runner_deadline_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "idempotency_key_hash"], name="uniq_pilot_execution_idempotency"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "execution_type", "status"], name="idx_pilot_execution_state"),
+            models.Index(fields=["tenant", "request_id"], name="idx_pilot_execution_request"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and not getattr(self, "_execution_service_write", False):
+            raise ValidationError("Pilot executions must be changed through the execution service.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Pilot executions cannot be deleted.")
 
 
 class PilotAuditEventQuerySet(models.QuerySet):
