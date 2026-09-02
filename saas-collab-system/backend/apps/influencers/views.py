@@ -238,10 +238,10 @@ class InfluencerCollectionView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        queryset = Influencer.objects.filter(tenant=request.user.tenant).select_related("profile").prefetch_related(
-            Prefetch("restrictions", to_attr="_restriction_rows"),
-            Prefetch("restrict_events", queryset=InfluencerRestrictEvent.objects.order_by("-occurred_at", "-id"), to_attr="_restriction_events"),
-            "contacts",
+        # Collection rows do not need contacts or audit history. Loading those
+        # relations for every page made the 24k-profile library exceed the UI timeout.
+        queryset = Influencer.objects.filter(tenant=request.user.tenant).select_related(
+            "profile"
         ).annotate(_is_blacklisted=Exists(blacklist_subquery))
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
@@ -273,12 +273,21 @@ class InfluencerCollectionView(APIView):
             "updated_at", "-updated_at", "follower_count", "-follower_count", "name", "-name",
             "profile__display_name", "-profile__display_name", "profile__level", "-profile__level",
             "profile__tier", "-profile__tier", "profile__market", "-profile__market",
+            "profile__average_video_views", "-profile__average_video_views",
+            "profile__historical_gmv", "-profile__historical_gmv",
         }
         if ordering not in allowed_ordering:
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
         page, page_size = _pagination(request)
-        return success_response(paginated_data(request, queryset, InfluencerPublicSerializer, page=page, page_size=page_size))
+        return success_response(paginated_data(
+            request,
+            queryset,
+            InfluencerPublicSerializer,
+            page=page,
+            page_size=page_size,
+            serializer_context={"request": request, "include_relations": False},
+        ))
 
     @transaction.atomic
     def post(self, request):
@@ -304,16 +313,23 @@ class InfluencerDetailView(APIView):
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
-    def get_object(self, request, pk):
-        return get_object_or_404(
-            Influencer.objects.select_related("profile").prefetch_related("contacts", "restrict_events__actor"),
-            pk=pk,
-            tenant=request.user.tenant,
-        )
+    def get_object(self, request, pk, *, include_relations=True):
+        queryset = Influencer.objects.select_related("profile")
+        if include_relations:
+            queryset = queryset.prefetch_related("contacts", "restrict_events__actor")
+        return get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
         require_all_scope(request.user, self.read_permission_code)
-        return success_response(InfluencerPublicSerializer(self.get_object(request, pk)).data)
+        include_relations = _query_bool(
+            request.query_params.get("include_relations", "true"),
+            field="include_relations",
+        )
+        instance = self.get_object(request, pk, include_relations=include_relations)
+        return success_response(InfluencerPublicSerializer(
+            instance,
+            context={"request": request, "include_relations": include_relations},
+        ).data)
 
     @transaction.atomic
     def patch(self, request, pk):
@@ -451,7 +467,7 @@ class InfluencerBlacklistHistoryView(APIView):
     def get(self, request, pk):
         require_all_scope(request.user, self.read_permission_code)
         influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
-        rows = influencer.restrict_events.filter(tenant=request.user.tenant).select_related("actor").order_by("-occurred_at", "-id")
+        rows = influencer.restrict_events.filter(tenant=request.user.tenant).select_related("actor").order_by("-occurred_at", "-id")[:100]
         return success_response(InfluencerRestrictEventSerializer(rows, many=True).data)
 
 

@@ -29,7 +29,9 @@ def error_response(code, message, data=None, status=400):
     )
 
 
-def paginated_data(request, queryset, serializer_class, *, page, page_size):
+def paginated_data(
+    request, queryset, serializer_class, *, page, page_size, serializer_context=None
+):
     """Return the Phase 3 collection envelope payload without legacy wrappers."""
     paginator = Paginator(queryset, page_size)
     if page > paginator.num_pages:
@@ -48,5 +50,9 @@ def paginated_data(request, queryset, serializer_class, *, page, page_size):
         "count": paginator.count,
         "next": page_url(page_obj.next_page_number()) if page_obj.has_next() else None,
         "previous": page_url(page_obj.previous_page_number()) if page_obj.has_previous() else None,
-        "results": serializer_class(page_obj.object_list, many=True).data,
+        "results": serializer_class(
+            page_obj.object_list,
+            many=True,
+            context=serializer_context or {},
+        ).data,
     }

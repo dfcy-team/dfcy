@@ -231,7 +231,7 @@
               v-if="!row.is_deleted"
               link
               type="primary"
-              :disabled="!canCreateFulfillment || isTerminal(activeTask)"
+              :disabled="!canCreateFulfillment || isCancelled(activeTask)"
               @click="openSampleFulfillment(row)"
             >创建送样</el-button>
             <el-button
@@ -327,9 +327,9 @@
               <div><span>任务完成时间</span><b>{{ formatTaskTime(detailTask.finalized_at) }}</b></div>
             </div>
             <div class="detail-validation">
-              <b>送样完成校验</b>
-              <span>{{ detailTask.sample_fulfillment_completed_count || 0 }} / {{ detailTask.target_count || 0 }}</span>
-              <el-tag :type="detailTask.completion_validation?.target_reached ? 'success' : 'info'">{{ detailTask.completion_validation?.target_reached ? '已达到目标' : '未达到目标' }}</el-tag>
+              <b>送样记录进度</b>
+              <span>{{ fulfillmentCount(detailTask) }} / {{ detailTask.target_count || 0 }}</span>
+              <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
             <div class="status-summary"><span v-for="(count, status) in (detailTask.sample_status_summary?.status_counts || detailTask.sample_fulfillment_status_summary || {})" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
             <div class="detail-note"><span>任务履约反馈</span><p>{{ displayValue(detailTask.notes) }}</p></div>
@@ -342,7 +342,7 @@
                 <el-tag>{{ detailSamples.length }}</el-tag>
                 <el-button
                   type="primary"
-                  :disabled="!canCreateFulfillment || isTerminal(detailTask)"
+                  :disabled="!canCreateFulfillment || isCancelled(detailTask)"
                   @click="createSampleFromDetail"
                 >创建送样</el-button>
               </div>
@@ -512,9 +512,11 @@ const visibleStoreOptions = computed(() => {
 });
 
 const isTerminal = (row) => ['completed', 'cancelled'].includes(row?.status);
+const isCancelled = (row) => row?.status === 'cancelled';
 const isTargetTerminal = (row) => ['success', 'rejected', 'no_response', 'blocked'].includes(row?.outreach_result);
 const sampleProgressCount = (row) => fulfillmentCount(row);
 const progress = (row) => row.target_count ? Math.min(100, Math.round(sampleProgressCount(row) * 100 / row.target_count)) : 0;
+const sampleRecordTargetReached = (row) => Number(row?.target_count || 0) > 0 && fulfillmentCount(row) >= Number(row.target_count);
 const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
@@ -897,7 +899,7 @@ function ensureSampleInfluencer(task, target) {
 }
 
 async function openSampleCreate(task, target = null) {
-  if (!task?.id || !canCreateFulfillment.value || isTerminal(task)) return;
+  if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
   if (target && (!target.id || target.is_deleted)) return;
   if (!await loadTaskOptions(true, true)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));

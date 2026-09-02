@@ -40,8 +40,6 @@ REQUIRED_FIELDS = (
     "currency",
     "fully_returned",
     "order_status",
-    "actual_paid_commission",
-    "estimated_paid_commission",
 )
 FIELD_ALIASES = {
     "data_time": ("data_time", "order_time", "订单日期", "订单时间", "下单时间"),
@@ -174,8 +172,12 @@ def _parse_row(row, mapping, source):
         "order_status": required_text["order_status"],
         "creator_username": creator_username,
         "creator_username_normalized": normalize_account(creator_username),
-        "actual_paid_commission": parse_decimal(actual_raw, field="actual_paid_commission"),
-        "estimated_paid_commission": parse_decimal(estimated_raw, field="estimated_paid_commission"),
+        "actual_paid_commission": (
+            parse_decimal(actual_raw, field="actual_paid_commission") if actual_raw else None
+        ),
+        "estimated_paid_commission": (
+            parse_decimal(estimated_raw, field="estimated_paid_commission") if estimated_raw else None
+        ),
         "source_updated_at": source_updated_at,
     }
     values["source_row_key"] = affiliate_order_source_row_key(
@@ -327,6 +329,7 @@ class Command(BaseCommand):
                     self._store_map[normalize_account(value)] = row["id"]
 
         counts = {"created": 0, "updated": 0, "noop": 0, "conflict": 0, "rejected": 0}
+        rejection_reasons = {}
         token = None
         last_cursor = ""
         last_data_time = None
@@ -343,8 +346,10 @@ class Command(BaseCommand):
                 for row in reader:
                     try:
                         batch.append(_parse_row(row, mapping, source))
-                    except (TypeError, ValueError, OverflowError):
+                    except (TypeError, ValueError, OverflowError) as exc:
                         counts["rejected"] += 1
+                        reason = str(exc).split(":", 1)[0] or "invalid_row"
+                        rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
                     if len(batch) >= batch_size:
                         self._process_batch(tenant, batch, counts)
                         last_cursor = batch[-1]["source_row_key"]
@@ -399,7 +404,11 @@ class Command(BaseCommand):
             raise CommandError("Affiliate import failed; no row content was logged.") from exc
         self.stdout.write(
             "created={created} updated={updated} noop={noop} conflict={conflict} rejected={rejected} "
-            "attribution_refresh={refresh}".format(**counts, refresh=refresh_enqueue_status["value"])
+            "attribution_refresh={refresh} rejection_reasons={reasons}".format(
+                **counts,
+                refresh=refresh_enqueue_status["value"],
+                reasons=",".join(f"{key}:{value}" for key, value in sorted(rejection_reasons.items())) or "none",
+            )
         )
 
     def _process_batch(self, tenant, batch, counts):

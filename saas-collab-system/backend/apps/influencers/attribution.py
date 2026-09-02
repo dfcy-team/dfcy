@@ -543,6 +543,7 @@ def _owner_bucket():
         "item_quantity": 0,
         "gmv_cny": Decimal("0"),
         "commission_cny": Decimal("0"),
+        "missing_commission_count": 0,
         "order_ids": set(),
         "missing_exchange_rates": set(),
     }
@@ -569,6 +570,7 @@ def _serialize_metrics(bucket, currency):
         "quantity": bucket["item_quantity"],
         "gmv": _format_money(gmv),
         "commission": _format_money(commission),
+        "missing_commission_count": bucket["missing_commission_count"],
         "roi": format(roi.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP), "f") if roi is not None else None,
     }
 
@@ -726,8 +728,14 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
             owner_ids.add(row["owner_id"])
             continue
         bucket["gmv_cny"] += converted
-        actual = _money(row["order_snapshot__actual_paid_commission"])
-        commission = actual if actual != 0 else _money(row["order_snapshot__estimated_paid_commission"])
+        actual_raw = row["order_snapshot__actual_paid_commission"]
+        estimated_raw = row["order_snapshot__estimated_paid_commission"]
+        if actual_raw is None and estimated_raw is None:
+            bucket["missing_commission_count"] += 1
+            owner_ids.add(row["owner_id"])
+            continue
+        actual = _money(actual_raw)
+        commission = actual if actual_raw is not None and actual != 0 else _money(estimated_raw)
         commission_converted, commission_details = rate_resolver.convert(
             commission,
             source_currency,
@@ -768,6 +776,7 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         total_bucket["item_quantity"] += bucket["item_quantity"]
         total_bucket["gmv_cny"] += bucket["gmv_cny"]
         total_bucket["commission_cny"] += bucket["commission_cny"]
+        total_bucket["missing_commission_count"] += bucket["missing_commission_count"]
         total_bucket["order_ids"].update(bucket["order_ids"])
         total_bucket["missing_exchange_rates"].update(bucket["missing_exchange_rates"])
 

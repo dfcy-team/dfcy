@@ -20,6 +20,10 @@ from apps.audit.models import OperationLog
 from apps.influencers import models as influencer_models
 from apps.influencers import services as influencer_services
 from apps.influencers import views as influencer_views
+from apps.influencers.management.commands.import_affiliate_orders_csv import (
+    _column_map as affiliate_column_map,
+    _parse_row as parse_affiliate_row,
+)
 from apps.influencers.models import (
     Influencer,
     InfluencerProfile,
@@ -46,6 +50,31 @@ from apps.influencers.services import (
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
+
+
+def test_affiliate_import_preserves_missing_commissions_as_null():
+    row = {
+        "data_time": "2026-09-01",
+        "shop_abbr": "TK1PH",
+        "site": "PH",
+        "order_id": "ORDER-1",
+        "product_id": "PRODUCT-1",
+        "sku_id": "SKU-1",
+        "creator_username": "creator.account",
+        "payment_amount": "10.0000",
+        "quantity": "1",
+        "currency": "PHP",
+        "fully_returned": "否",
+        "order_status": "completed",
+        "actual_paid_commission": "",
+        "estimated_paid_commission": "2.5000",
+    }
+    mapping = affiliate_column_map(list(row))
+
+    parsed = parse_affiliate_row(row, mapping, "test")
+
+    assert parsed["actual_paid_commission"] is None
+    assert parsed["estimated_paid_commission"] == Decimal("2.5000")
 
 
 pytestmark = pytest.mark.django_db
@@ -228,6 +257,86 @@ def test_influencer_api_exposes_handle_but_not_identity_helpers():
     assert payload["handle"] == "mhaine_94"
     assert "canonical_handle" not in payload
     assert "canonical_handle_digest" not in payload
+
+
+def test_influencer_detail_compact_mode_omits_duplicate_relation_payloads():
+    _, user, _, influencer = _records("compact-influencer-detail")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.view")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get(
+        f"/api/internal/influencers/{influencer.pk}/?include_relations=false"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["id"] == influencer.pk
+    assert "profile" in payload
+    assert "contacts" not in payload
+    assert "blacklist_history" not in payload
+
+
+def test_influencer_collection_uses_compact_rows():
+    _, user, _, influencer = _records("compact-influencer-list")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.view")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/?page=1&page_size=20")
+
+    assert response.status_code == 200
+    row = next(item for item in response.json()["data"]["results"] if item["id"] == influencer.pk)
+    assert "profile" in row
+    assert "contacts" not in row
+    assert "blacklist_history" not in row
+
+
+@pytest.mark.parametrize("ordering", [
+    "profile__average_video_views",
+    "-profile__average_video_views",
+    "profile__historical_gmv",
+    "-profile__historical_gmv",
+])
+def test_influencer_collection_supports_performance_ordering(ordering):
+    _, user, _, _ = _records(f"performance-ordering-{ordering.startswith('-')}-{ordering[-3:]}")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.view")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/", {"ordering": ordering})
+
+    assert response.status_code == 200
+
+
+def test_influencer_contacts_support_multiple_platforms():
+    _, user, _, influencer = _records("multiple-contact-platforms")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.view")
+    _grant_all_scope(role, "influencers.manage")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/contacts/",
+        {
+            "contacts": [
+                {"channel": "whatsapp", "value": "+63000000001", "is_primary": True},
+                {"channel": "instagram", "value": "creator.account", "label": "备用"},
+            ]
+        },
+        format="json",
+        HTTP_IF_MATCH=influencer.updated_at.isoformat(),
+    )
+
+    assert response.status_code == 200, response.data
+    assert [item["channel"] for item in response.data["data"]] == ["whatsapp", "instagram"]
+    fetched = client.get(f"/api/internal/influencers/{influencer.pk}/contacts/")
+    assert fetched.status_code == 200, fetched.data
+    assert {item["channel"] for item in fetched.data["data"]} == {"whatsapp", "instagram"}
 
 
 def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling():
@@ -579,7 +688,7 @@ def test_duplicate_handle_targets_share_capacity_progress_and_terminal_completio
         )
 
 
-def test_duplicate_handle_samples_count_once_and_cannot_auto_complete_task():
+def test_each_sample_record_counts_toward_task_completion_even_for_duplicate_handles():
     tenant, user, store, first = _records("logical-sample-identity")
     first.handle = "sample.creator"
     first.save(update_fields=["handle"])
@@ -628,10 +737,75 @@ def test_duplicate_handle_samples_count_once_and_cannot_auto_complete_task():
 
     task.refresh_from_db()
     payload = OutreachTaskSerializer(task).data
-    assert task.status == OutreachTask.Status.PENDING
-    assert payload["sample_fulfillment_count"] == 1
-    assert payload["sample_fulfillment_completed_count"] == 1
-    assert payload["completion_validation"]["target_reached"] is False
+    assert task.status == OutreachTask.Status.COMPLETED
+    assert payload["sample_fulfillment_count"] == 2
+    assert payload["sample_fulfillment_completed_count"] == 2
+    assert payload["completion_validation"]["target_reached"] is True
+
+
+def test_pending_sample_record_auto_completes_task_when_target_is_reached():
+    tenant, user, store, influencer = _records("pending-sample-auto-complete")
+    task = _task(user, store, influencer, target_count=1)
+
+    fulfillment, created = create_sample_fulfillment(
+        user=user,
+        request_key="pending-sample-auto-complete-key",
+        validated_data={"outreach_task": task, "influencer": influencer},
+        item_payloads=[],
+    )
+
+    task.refresh_from_db()
+    assert created is True
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert task.status == OutreachTask.Status.COMPLETED
+    assert task.finalized_at is not None
+
+
+def test_sample_order_number_auto_ships_and_returns_current_database_state():
+    _, user, store, influencer = _records("sample-order-auto-ship")
+    task = _task(user, store, influencer, target_count=2)
+
+    fulfillment, created = create_sample_fulfillment(
+        user=user,
+        request_key="sample-order-auto-ship-key",
+        validated_data={
+            "outreach_task": task,
+            "influencer": influencer,
+            "sample_order_no": "ORDER-1001",
+        },
+        item_payloads=[],
+    )
+
+    assert created is True
+    assert fulfillment.status == SampleFulfillment.Status.SHIPPED
+    assert fulfillment.shipped_at is not None
+    assert fulfillment.version == 2
+
+
+def test_completed_task_accepts_additional_samples_but_cancelled_task_does_not():
+    tenant, user, store, influencer = _records("completed-task-extra-sample")
+    task = _task(user, store, influencer, target_count=1)
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), status=OutreachTask.Status.COMPLETED)
+    task.refresh_from_db()
+
+    fulfillment, created = create_sample_fulfillment(
+        user=user,
+        request_key="completed-task-extra-sample-key",
+        validated_data={"outreach_task": task, "influencer": influencer},
+        item_payloads=[],
+    )
+    assert created is True
+    assert fulfillment.outreach_task_id == task.pk
+
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), status=OutreachTask.Status.CANCELLED)
+    task.refresh_from_db()
+    with pytest.raises(ValidationError, match="cannot change targets or samples"):
+        create_sample_fulfillment(
+            user=user,
+            request_key="cancelled-task-extra-sample-key",
+            validated_data={"outreach_task": task, "influencer": influencer},
+            item_payloads=[],
+        )
 
 
 def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_target():
@@ -1400,7 +1574,7 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
 def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch):
     tenant, user, store, influencer = _records("blacklist-rollback")
     task = _task(user, store, influencer)
-    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=1)
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=2)
     task.refresh_from_db()
     fulfillment, _ = create_sample_fulfillment(
         user=user,
