@@ -57,7 +57,7 @@ backend_container=$("${COMPOSE[@]}" ps -q "$backend_service" 2>/dev/null || true
 [[ -n "$backend_container" ]] || die 'the backend container is not available.'
 docker exec "$backend_container" python manage.py check --deploy >/dev/null 2>&1 || die 'Django deployment checks failed.'
 docker exec "$backend_container" python -c \
-  'import urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/api/internal/health/",headers={"Host":"localhost"}); raise SystemExit(0 if urllib.request.urlopen(r,timeout=8).status == 200 else 1)' \
+  'import urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/api/internal/health/",headers={"Host":"localhost","X-Forwarded-Proto":"https"}); raise SystemExit(0 if urllib.request.urlopen(r,timeout=8).status == 200 else 1)' \
   >/dev/null 2>&1 || die 'backend health endpoint failed.'
 
 health_url=${PRODUCTION_HEALTH_URL:-}

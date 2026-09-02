@@ -15,6 +15,20 @@ def _install_script() -> str:
     ).read_text(encoding="utf-8")
 
 
+def _production_workflow() -> str:
+    repo_root = Path(__file__).resolve().parents[3]
+    return (repo_root / ".github" / "workflows" / "developer-a-production-release.yml").read_text(
+        encoding="utf-8"
+    )
+
+
+def _health_script() -> str:
+    system_root = Path(__file__).resolve().parents[2]
+    return (
+        system_root / "deploy" / "production-control" / "bin" / "production-health-check"
+    ).read_text(encoding="utf-8")
+
+
 def test_cli_digests_are_exported_before_compose_initialization():
     script = _deploy_script()
     validation = script.index(
@@ -61,3 +75,16 @@ def test_baseline_tracks_control_environment_and_its_compose_override():
 
     assert control_env < control_hash < live_compose
     assert live_compose < control_compose < select_override < compose_hash
+
+
+def test_production_release_builds_the_pilot_frontend_image():
+    workflow = _production_workflow()
+
+    assert "file: saas-collab-system/deploy/pilot/application/Dockerfile.frontend" in workflow
+    assert "file: saas-collab-system/deploy/sandbox/application/Dockerfile.frontend" not in workflow
+
+
+def test_internal_health_probe_marks_the_request_as_https():
+    script = _health_script()
+
+    assert '"X-Forwarded-Proto":"https"' in script
