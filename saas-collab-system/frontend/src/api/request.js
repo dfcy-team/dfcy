@@ -6,15 +6,12 @@ import {
   getRefreshToken,
   updateAccessToken
 } from '../utils/authSession';
+import { apiBaseUrl } from './baseUrl';
 
-// Keep local development/tests convenient while making an unset production
-// build use the real API. A production build may still opt into Mock
-// explicitly with VITE_USE_MOCK=true for controlled demos.
-export const useMock = import.meta.env.VITE_USE_MOCK === 'true'
-  || (!import.meta.env.PROD && import.meta.env.VITE_USE_MOCK !== 'false');
+export const useMock = import.meta.env.VITE_USE_MOCK !== 'false';
 
 const request = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '',
+  baseURL: apiBaseUrl,
   timeout: 10000
 });
 
@@ -71,7 +68,7 @@ request.interceptors.response.use(
     if (error?.response?.status === 401 && original && !original._authRetried && !isAuthenticationRequest && refresh) {
       original._authRetried = true;
       refreshPromise ||= axios
-        .post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/internal/auth/refresh/`, { refresh })
+        .post(`${apiBaseUrl}/api/internal/auth/refresh/`, { refresh })
         .then((response) => response.data?.access || response.data?.data?.access)
         .finally(() => {
           refreshPromise = null;
@@ -132,9 +129,51 @@ export function formatApiError(response) {
   return `${response?.code || 'API_ERROR'}: ${labels[status] || response?.message || '请求失败'}`;
 }
 
+// Downloads are resolved through the same API origin as normal requests.  Do
+// not allow an absolute or protocol-relative URL to receive the current
+// user's bearer token.
+export function isTrustedApiFilePath(value) {
+  if (typeof value !== 'string') return false;
+  const candidate = value.trim();
+  if (!candidate.startsWith('/api/')) return false;
+  try {
+    const parsed = new URL(candidate, 'https://local-api.invalid');
+    return parsed.origin === 'https://local-api.invalid' && parsed.pathname.startsWith('/api/');
+  } catch (_error) {
+    return false;
+  }
+}
+
 export async function requestApi(config) {
   try {
     return withApiStatus(await request(config), 'connected');
+  } catch (error) {
+    return normalizeApiError(error);
+  }
+}
+
+export async function downloadApiFile(url, filename) {
+  if (!isTrustedApiFilePath(url)) {
+    return {
+      success: false,
+      code: 'INVALID_DOWNLOAD_PATH',
+      message: '下载地址必须是受信的 /api/ 相对路径。',
+      data: null
+    };
+  }
+  try {
+    const access = getAccessToken();
+    const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, {
+      responseType: 'blob',
+      headers: access ? { Authorization: `Bearer ${access}` } : {}
+    });
+    const objectUrl = URL.createObjectURL(response.data);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+    return { success: true, code: 'OK', message: '文件下载已开始。', data: null };
   } catch (error) {
     return normalizeApiError(error);
   }

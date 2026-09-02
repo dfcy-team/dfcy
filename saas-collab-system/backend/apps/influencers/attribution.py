@@ -24,6 +24,7 @@ from .models import (
     OutreachTask,
     SampleFulfillment,
     SUPPORTED_CURRENCY_CHOICES,
+    normalize_tiktok_username,
 )
 
 
@@ -51,12 +52,13 @@ def normalize_account(value):
     return " ".join(str(value or "").strip().split()).casefold()
 
 
+def normalize_creator_handle(value):
+    return normalize_tiktok_username(value)
+
+
 def influencer_account(influencer):
-    """Use the existing account-like handle, then stable code, then name for legacy rows."""
-    for value in (getattr(influencer, "handle", ""), getattr(influencer, "code", ""), getattr(influencer, "name", "")):
-        if str(value or "").strip():
-            return str(value).strip()
-    return ""
+    """Return only the normalized TikTok handle used as the attribution identity."""
+    return normalize_creator_handle(getattr(influencer, "handle", ""))
 
 
 def rule_version_for(attribution):
@@ -324,7 +326,7 @@ def _candidate_sort_key(snapshot):
 
 def _sample_group_key(sample, *, product_required):
     key = (
-        normalize_account(sample.creator_username),
+        normalize_creator_handle(sample.creator_username),
         normalize_account(sample.shop_abbr),
     )
     if product_required:
@@ -335,7 +337,10 @@ def _sample_group_key(sample, *, product_required):
 def _group_sample_candidates(samples, *, product_required):
     grouped = defaultdict(list)
     for sample in samples:
-        grouped[_sample_group_key(sample, product_required=product_required)].append(sample)
+        key = _sample_group_key(sample, product_required=product_required)
+        if not key[0]:
+            continue
+        grouped[key].append(sample)
     for key, candidates in grouped.items():
         # Ascending time enables O(log n) lookup; the last equal-time row is
         # the highest fulfillment id, matching sampled_at DESC, fulfillment_id DESC.
@@ -345,8 +350,13 @@ def _group_sample_candidates(samples, *, product_required):
 
 
 def _eligible_candidate(candidates, order, *, product_required):
+    creator_handle = normalize_creator_handle(
+        order.creator_username_normalized or order.creator_username
+    )
+    if not creator_handle:
+        return None
     key = (
-        normalize_account(order.creator_username_normalized or order.creator_username),
+        creator_handle,
         normalize_account(order.shop_abbr),
     )
     if product_required:

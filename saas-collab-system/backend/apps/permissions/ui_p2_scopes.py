@@ -9,6 +9,7 @@ MASTER_DATA_SCOPE_KEYS = {
     "platforms": "platform_ids",
     "stores": "store_ids",
     "sites": "site_ids",
+    "platform-sites": "platform_site_ids",
     "warehouses": "warehouse_ids",
     "suppliers": "supplier_ids",
 }

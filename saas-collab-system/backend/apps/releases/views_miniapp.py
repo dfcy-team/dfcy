@@ -1,5 +1,4 @@
 from django.db.models import Count
-from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
@@ -16,7 +15,7 @@ def _visible_contracts(user):
         user,
         "release.contract.view",
         ReleaseContract.objects.select_related("created_by")
-        .prefetch_related("gate_results", "approvals"),
+        .prefetch_related("gate_results", "approvals", "audit_events"),
     )
 
 
@@ -44,7 +43,7 @@ class MiniAppReleaseContractDetailView(APIView):
     permission_classes = [IsAuthenticated, IsMiniAppToken, IsReleaseViewer]
 
     def get(self, request, pk):
-        contract = get_object_or_404(_visible_contracts(request.user), pk=pk)
+        contract = _visible_contracts(request.user).get(pk=pk)
         return success_response(
             {
                 "read_only": True,

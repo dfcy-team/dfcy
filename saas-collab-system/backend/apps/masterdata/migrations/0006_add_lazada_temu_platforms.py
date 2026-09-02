@@ -28,7 +28,7 @@ def seed_lazada_temu(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [("masterdata", "0002_alter_suppliermaster_status")]
+    dependencies = [("masterdata", "0005_seed_country_sites")]
 
     operations = [
         migrations.AlterField(

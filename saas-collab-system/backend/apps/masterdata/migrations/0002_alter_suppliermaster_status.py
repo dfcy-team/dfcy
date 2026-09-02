@@ -13,6 +13,14 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='suppliermaster',
             name='status',
-            field=models.CharField(choices=[('active', 'Active'), ('trial', 'Trial cooperation'), ('inactive', 'Inactive')], default='active', max_length=20),
+            field=models.CharField(
+                choices=[
+                    ('active', 'Active'),
+                    ('trial', 'Trial cooperation'),
+                    ('inactive', 'Inactive'),
+                ],
+                default='active',
+                max_length=20,
+            ),
         ),
     ]

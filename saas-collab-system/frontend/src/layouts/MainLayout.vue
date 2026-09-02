@@ -1,11 +1,13 @@
 <template>
   <el-container class="app-shell">
     <el-aside width="248px" class="app-sidebar desktop-sidebar">
-      <div class="brand">
-        <strong>SaaS 协同系统</strong>
-        <span>{{ environmentLabel }}</span>
+      <div class="navigation-surface">
+        <div class="brand">
+          <strong>SaaS 协同系统</strong>
+          <span>{{ environmentLabel }}</span>
+        </div>
+        <AppMenu :items="visibleMenuItems" />
       </div>
-      <AppMenu :items="visibleMenuItems" />
     </el-aside>
 
     <el-container class="app-workspace">
@@ -35,12 +37,20 @@
       </el-main>
     </el-container>
 
-    <el-drawer v-model="mobileMenuOpen" direction="ltr" size="288px" :with-header="false">
-      <div class="brand">
-        <strong>SaaS 协同系统</strong>
-        <span>{{ environmentLabel }}</span>
+    <el-drawer
+      v-model="mobileMenuOpen"
+      class="navigation-drawer"
+      direction="ltr"
+      size="288px"
+      :with-header="false"
+    >
+      <div class="navigation-surface">
+        <div class="brand">
+          <strong>SaaS 协同系统</strong>
+          <span>{{ environmentLabel }}</span>
+        </div>
+        <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
       </div>
-      <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
     </el-drawer>
   </el-container>
 </template>
@@ -109,8 +119,14 @@ const AppMenu = defineComponent({
 .app-workspace { min-width: 0; }
 
 .app-sidebar {
-  border-right: 1px solid #0f2438;
-  background: #173550;
+  border-right: 1px solid #263449;
+  background: #101827;
+}
+
+.navigation-surface {
+  min-height: 100%;
+  color: #cbd5e1;
+  background: #101827;
 }
 
 .brand {
@@ -119,28 +135,98 @@ const AppMenu = defineComponent({
   justify-content: center;
   height: 64px;
   padding: 0 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-  background: #173550;
+  border-bottom: 1px solid #263449;
+  background: #0b1220;
 }
 
-.brand strong { color: #fff; font-size: 16px; }
-.brand span { margin-top: 3px; color: #a9bfd2; font-size: 11px; }
-.menu {
-  --el-menu-bg-color: #173550;
-  --el-menu-text-color: #dce8f2;
-  --el-menu-hover-bg-color: #234866;
-  --el-menu-active-color: #fff;
+.brand strong { color: #f8fafc; font-size: 16px; }
+.brand span { margin-top: 3px; color: #94a3b8; font-size: 11px; }
+
+:global(.navigation-drawer) {
+  --el-drawer-bg-color: #101827;
+  background: #101827;
+}
+
+:global(.navigation-drawer .el-drawer__body) {
+  padding: 0;
+  background: #101827;
+}
+
+:deep(.navigation-surface .menu) {
+  --el-menu-active-color: #ffffff;
+  --el-menu-bg-color: #101827;
+  --el-menu-border-color: transparent;
+  --el-menu-hover-bg-color: #1e293b;
+  --el-menu-hover-text-color: #f8fafc;
+  --el-menu-item-height: 46px;
+  --el-menu-sub-item-height: 42px;
   border-right: 0;
-  background: #173550;
+  background: #101827;
 }
 
-.menu :deep(.el-menu-item),
-.menu :deep(.el-sub-menu__title) { color: #dce8f2; }
-.menu :deep(.el-menu-item:hover),
-.menu :deep(.el-sub-menu__title:hover) { background: #234866; color: #fff; }
-.menu :deep(.el-menu-item.is-active) { background: #2f6f9f; color: #fff; font-weight: 600; }
-.menu :deep(.el-sub-menu .el-menu) { background: #122c43; }
-.menu :deep(.el-sub-menu__icon-arrow) { color: #a9bfd2; }
+:deep(.navigation-surface .menu .el-menu-item),
+:deep(.navigation-surface .menu .el-sub-menu__title) {
+  color: #cbd5e1;
+}
+
+:deep(.navigation-surface .menu .el-menu-item:hover),
+:deep(.navigation-surface .menu .el-menu-item:focus),
+:deep(.navigation-surface .menu .el-sub-menu__title:hover),
+:deep(.navigation-surface .menu .el-sub-menu__title:focus) {
+  color: #f8fafc;
+  background: #1e293b;
+}
+
+:deep(.navigation-surface .menu .el-menu-item.is-active),
+:deep(.navigation-surface .menu .el-menu-item.is-active:hover),
+:deep(.navigation-surface .menu .el-menu-item.is-active:focus) {
+  color: #ffffff;
+  font-weight: 600;
+  background: #1d4ed8;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu.is-opened > .el-sub-menu__title),
+:deep(.navigation-surface .menu .el-sub-menu.is-active > .el-sub-menu__title) {
+  color: #f8fafc;
+  background: #172235;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu .el-menu) {
+  background: #0b1220;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu .el-menu-item) {
+  color: #b7c5d6;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu .el-menu-item:hover),
+:deep(.navigation-surface .menu .el-sub-menu .el-menu-item:focus) {
+  color: #f8fafc;
+  background: #1e293b;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu .el-menu-item.is-active),
+:deep(.navigation-surface .menu .el-sub-menu .el-menu-item.is-active:hover),
+:deep(.navigation-surface .menu .el-sub-menu .el-menu-item.is-active:focus) {
+  color: #ffffff;
+  background: #1e40af;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu__icon-arrow) {
+  color: #94a3b8;
+}
+
+:deep(.navigation-surface .menu .el-sub-menu__title:hover .el-sub-menu__icon-arrow),
+:deep(.navigation-surface .menu .el-sub-menu.is-opened > .el-sub-menu__title .el-sub-menu__icon-arrow),
+:deep(.navigation-surface .menu .el-sub-menu.is-active > .el-sub-menu__title .el-sub-menu__icon-arrow) {
+  color: #f8fafc;
+}
+
+:deep(.navigation-surface .menu .el-menu-item:focus-visible),
+:deep(.navigation-surface .menu .el-sub-menu__title:focus-visible) {
+  outline: 2px solid #60a5fa;
+  outline-offset: -2px;
+}
 
 .app-header {
   display: flex;
@@ -188,23 +274,4 @@ const AppMenu = defineComponent({
   .header-user__identity { width: 76px; min-width: 0; }
   .header-user .el-button { min-width: 36px; padding: 4px; }
 }
-</style>
-
-<style>
-.mobile-sidebar-drawer .el-drawer__body { padding: 0; background: #173550; }
-.mobile-sidebar-drawer .brand { border-bottom-color: rgba(255, 255, 255, 0.14); background: #173550; }
-.mobile-sidebar-drawer .menu {
-  --el-menu-bg-color: #173550;
-  --el-menu-text-color: #dce8f2;
-  --el-menu-hover-bg-color: #234866;
-  --el-menu-active-color: #fff;
-  border-right: 0;
-  background: #173550;
-}
-.mobile-sidebar-drawer .el-menu-item,
-.mobile-sidebar-drawer .el-sub-menu__title { color: #dce8f2; }
-.mobile-sidebar-drawer .el-menu-item:hover,
-.mobile-sidebar-drawer .el-sub-menu__title:hover { background: #234866; color: #fff; }
-.mobile-sidebar-drawer .el-menu-item.is-active { background: #2f6f9f; color: #fff; font-weight: 600; }
-.mobile-sidebar-drawer .el-sub-menu .el-menu { background: #122c43; }
 </style>

@@ -64,6 +64,12 @@ export const mockProductSkuList = () => successResponse({
   items: [skuItem]
 });
 
+export const mockProductDetailList = () => successResponse({
+  status: 'mock',
+  module: 'products.details',
+  items: [],
+});
+
 export const mockProductStatusList = () => successResponse({
   status: 'mock',
   module: 'products.status',

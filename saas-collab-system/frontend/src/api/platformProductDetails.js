@@ -3,11 +3,7 @@ import { requestApi, requestWithMockFallback } from './request';
 const mock = (data = {}) => ({ success: true, code: 'OK', message: 'mock', data });
 export const PLATFORM_PRODUCT_DETAIL_PAGE_SIZE = 20;
 export const fetchPlatformProductDetails = ({ page = 1, page_size = PLATFORM_PRODUCT_DETAIL_PAGE_SIZE, ...params } = {}) => requestWithMockFallback(
-  {
-    method: 'get',
-    url: '/api/internal/listings/product-details/',
-    params: { ...params, page, page_size },
-  },
+  { method: 'get', url: '/api/internal/listings/product-details/', params: { ...params, page, page_size } },
   () => mock({ results: [], count: 0, next: null, previous: null }),
   'listings.product_detail.view'
 );

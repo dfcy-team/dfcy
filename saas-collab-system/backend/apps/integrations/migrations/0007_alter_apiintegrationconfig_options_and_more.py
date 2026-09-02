@@ -231,4 +231,3 @@ class Migration(migrations.Migration):
             constraint=models.UniqueConstraint(fields=('tenant', 'platform', 'store'), name='uniq_market_store_tenant_link'),
         ),
     ]
-

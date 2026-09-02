@@ -81,6 +81,7 @@
           empty-text="暂无商品明细数据"
           class="detail-table"
           :row-class-name="productRowClassName"
+          :row-style="productRowStyle"
           @selection-change="selectedRows = $event"
         >
           <el-table-column type="index" label="序号" width="70" :index="(page - 1) * pageSize + 1" />
@@ -88,7 +89,7 @@
           <el-table-column prop="legacy_spu_code" label="旧 SPU 编码" min-width="125" show-overflow-tooltip />
           <el-table-column prop="legacy_sku_code" label="旧 SKU 编码" min-width="150" show-overflow-tooltip />
           <el-table-column prop="spu_code" label="新 SPU 编码" min-width="125" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.spu_code || '-' }}</template>
+            <template #default="{ row }"><SpuCodeDisplay :code="row.spu_code" /></template>
           </el-table-column>
           <el-table-column prop="sku_code" label="新 SKU 编码" min-width="190" show-overflow-tooltip>
             <template #default="{ row }">{{ row.sku_code || '-' }}</template>
@@ -195,7 +196,7 @@
       <el-descriptions v-if="selectedRow" :column="2" border>
         <el-descriptions-item label="旧 SPU 编码">{{ selectedRow.legacy_spu_code || '-' }}</el-descriptions-item>
         <el-descriptions-item label="旧 SKU 编码">{{ selectedRow.legacy_sku_code || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="新 SPU 编码">{{ selectedRow.spu_code || '待生成' }}</el-descriptions-item>
+        <el-descriptions-item label="新 SPU 编码"><SpuCodeDisplay :code="selectedRow.spu_code" placeholder="待生成" /></el-descriptions-item>
         <el-descriptions-item label="新 SKU 编码">{{ selectedRow.sku_code || '待生成' }}</el-descriptions-item>
         <el-descriptions-item label="SKU商品名称">{{ selectedRow.sku_product_name || '待生成' }}</el-descriptions-item>
         <el-descriptions-item label="SPU商品名称">{{ selectedRow.spu_product_name || '-' }}</el-descriptions-item>
@@ -432,7 +433,8 @@ import {
 } from '../../api/products';
 import { collectionRows, collectionTotal } from '../../utils/businessResponse';
 import { apiBaseUrl } from '../../api/baseUrl';
-import { buildCategoryTree, categoryRowClass } from '../../utils/productCategoryPresentation';
+import { buildCategoryTree, categoryRowClass, categoryRowStyle } from '../../utils/productCategoryPresentation';
+import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
@@ -496,6 +498,7 @@ const imageBatchProgress = ref('');
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
+const productRowStyle = ({ row }) => categoryRowStyle(row, categories.value);
 const activeColors = computed(() => colors.value.filter((item) => item?.is_active !== false));
 const leaves = computed(() => categories.value.filter((item) => item.is_active !== false && [2, 3].includes(Number(item.level))));
 const selectedCategory = computed(() => categories.value.find((item) => String(item.id) === String(form.category_node)));
@@ -965,6 +968,7 @@ onMounted(() => { loadDictionaries(); load(); });
 .detail-table :deep(.product-category-tone-2 > td) { background-color: #f0fdf4 !important; }
 .detail-table :deep(.product-category-tone-3 > td) { background-color: #fff1f2 !important; }
 .detail-table :deep(.product-category-tone-4 > td) { background-color: #f0fdfa !important; }
+.detail-table :deep(.product-category-custom > td) { background-color: var(--product-category-row-background) !important; }
 .pager { color: #64748b; font-size: 13px; margin-top: 12px; }
 .import-progress { margin: 28px 0 12px; }
 .import-status { color: #334155; text-align: center; margin: 0; }

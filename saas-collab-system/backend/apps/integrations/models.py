@@ -508,6 +508,70 @@ class MarketplaceStoreAuthorization(models.Model):
         return f"{self.tenant_id}:{self.platform}:{self.store_id}:{self.status}"
 
 
+class ConnectionCapability(models.Model):
+    class CapabilityCode(models.TextChoices):
+        PRODUCT = "PRODUCT", "Product"
+        CATEGORY = "CATEGORY", "Category"
+        LISTING = "LISTING", "Listing"
+        PRICE = "PRICE", "Price"
+        ORDER = "ORDER", "Order"
+        INVENTORY = "INVENTORY", "Inventory"
+        FULFILLMENT = "FULFILLMENT", "Fulfillment"
+        WAREHOUSE = "WAREHOUSE", "Warehouse"
+        RETURN_REFUND = "RETURN_REFUND", "Return and refund"
+        SETTLEMENT = "SETTLEMENT", "Settlement"
+        PAYMENT = "PAYMENT", "Payment"
+        ADVERTISING = "ADVERTISING", "Advertising"
+        AFFILIATE = "AFFILIATE", "Affiliate"
+        REVIEW = "REVIEW", "Review"
+        REPORT = "REPORT", "Report"
+        WEBHOOK = "WEBHOOK", "Webhook"
+
+    class SyncMode(models.TextChoices):
+        SCHEDULED = "scheduled", "Scheduled"
+        REALTIME = "realtime", "Realtime"
+        WEBHOOK = "webhook", "Webhook"
+        MANUAL = "manual", "Manual"
+
+    class Status(models.TextChoices):
+        DISABLED = "disabled", "Disabled"
+        CONFIGURED = "configured", "Configured"
+        ACTIVE = "active", "Active"
+        ERROR = "error", "Error"
+
+    authorization = models.ForeignKey(
+        MarketplaceStoreAuthorization, on_delete=models.PROTECT, related_name="connection_capabilities"
+    )
+    capability_code = models.CharField(max_length=30, choices=CapabilityCode.choices)
+    read_enabled = models.BooleanField(default=False)
+    write_enabled = models.BooleanField(default=False)
+    sync_mode = models.CharField(max_length=20, choices=SyncMode.choices, default=SyncMode.MANUAL)
+    sync_cursor = models.CharField(max_length=500, blank=True, default="")
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    last_failure_at = models.DateTimeField(null=True, blank=True)
+    source_priority = models.PositiveSmallIntegerField(default=100)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DISABLED)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["authorization_id", "source_priority", "capability_code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["authorization", "capability_code"], name="uniq_connection_capability"
+            )
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.write_enabled:
+            errors["write_enabled"] = "Live write capabilities are disabled in this phase."
+        if self.status == self.Status.ACTIVE and self.authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE:
+            errors["status"] = "Capability cannot be active unless the authorization is active."
+        if errors:
+            raise ValidationError(errors)
+
+
 class OAuthStateSessionQuerySet(models.QuerySet):
     def update(self, **kwargs):
         if not _oauth_state_service_write.get():
@@ -1053,6 +1117,67 @@ class SyncRun(models.Model):
 
     def __str__(self):
         return f"{self.run_id}:{self.status}"
+
+
+class SyncAlertIncident(models.Model):
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        ACKNOWLEDGED = "acknowledged", "Acknowledged"
+        RESOLVED = "resolved", "Resolved"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_alert_incidents")
+    sync_job = models.OneToOneField(SyncJob, on_delete=models.CASCADE, related_name="alert_incident")
+    notification = models.ForeignKey(
+        "audit.NotificationMessage", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="sync_alert_incidents",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="assigned_sync_alert_incidents",
+    )
+    acknowledged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="acknowledged_sync_alert_incidents",
+    )
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="resolved_sync_alert_incidents",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    occurrence_count = models.PositiveIntegerField(default=1)
+    last_sync_run = models.ForeignKey(
+        SyncRun, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="latest_for_alert_incidents",
+    )
+    last_error_code = models.CharField(max_length=80, blank=True)
+    masked_message = models.TextField(blank=True)
+    resolution_note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-id"]
+        indexes = [models.Index(fields=["tenant", "status"], name="idx_sync_incident_status")]
+
+    def clean(self):
+        errors = {}
+        if self.sync_job_id and self.sync_job.tenant_id != self.tenant_id:
+            errors["sync_job"] = "Incident and sync job tenant must match."
+        if self.assignee_id and self.assignee.tenant_id != self.tenant_id:
+            errors["assignee"] = "Incident assignee must belong to the same tenant."
+        if self.acknowledged_by_id and self.acknowledged_by.tenant_id != self.tenant_id:
+            errors["acknowledged_by"] = "Acknowledging user must belong to the same tenant."
+        if self.resolved_by_id and self.resolved_by.tenant_id != self.tenant_id:
+            errors["resolved_by"] = "Resolving user must belong to the same tenant."
+        if self.last_sync_run_id and (
+            self.last_sync_run.tenant_id != self.tenant_id
+            or self.last_sync_run.sync_job_id != self.sync_job_id
+        ):
+            errors["last_sync_run"] = "Incident run must belong to the same tenant and sync job."
+        if errors:
+            raise ValidationError(errors)
 
 
 class SyncCheckpoint(models.Model):

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 
-from .capability import require_live_mode
+from .capability import approved_custody_configured, require_live_mode
 from .custody import get_custody_backend
 from .net_guard import PlatformHttpClient
 from .oauth_errors import (
@@ -627,25 +627,89 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         return [shop]
 
 
+def integration_config_oauth_blockers(platform, integration_config):
+    """Return non-sensitive reasons that keep a marketplace OAuth config closed."""
+    if integration_config is None:
+        return ["config_missing"]
+    platform = str(platform or "").lower()
+    values = dict(getattr(integration_config, "platform_config", {}) or {})
+    expected_contract = {"lazada": "open-platform-v1", "shopee": "v2", "tiktok": "202407"}.get(platform, "")
+    callback_url = str(getattr(integration_config, "callback_url", "") or "").strip()
+    environment = str(getattr(integration_config, "environment", ""))
+    status = str(getattr(integration_config, "status", ""))
+    credential_status = str(getattr(integration_config, "credential_status", ""))
+    expected_callback = {
+        "lazada": getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
+        "shopee": getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
+        "tiktok": getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
+    }.get(platform, "")
+    contract_enabled = {
+        "lazada": getattr(settings, "LIVE_LAZADA_CONTRACT_APPROVED", False),
+        "shopee": getattr(settings, "LIVE_SHOPEE_CONTRACT_APPROVED", False),
+        "tiktok": getattr(settings, "LIVE_TIKTOK_CONTRACT_APPROVED", False),
+    }.get(platform, False)
+    allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
+    blockers = []
+    if str(getattr(integration_config, "platform", "")).lower() != platform:
+        blockers.append("platform_mismatch")
+    if environment not in {"pilot", "production"}:
+        blockers.append("environment_not_live")
+    if getattr(settings, "PLATFORM_NETWORK_MODE", "") != "approved-live-test":
+        blockers.append("platform_network_mode_disabled")
+    if not getattr(settings, "LIVE_PLATFORM_SECURITY_APPROVED", False):
+        blockers.append("platform_security_not_approved")
+    if not approved_custody_configured():
+        blockers.append("credential_custody_not_approved")
+    if not getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []):
+        blockers.append("outbound_host_allowlist_missing")
+    if not contract_enabled:
+        blockers.append("platform_contract_not_enabled")
+    if not bool(getattr(integration_config, "network_enabled", False)):
+        blockers.append("network_not_approved")
+    if bool(getattr(integration_config, "sync_write_enabled", False)):
+        blockers.append("write_sync_enabled")
+    if status not in {"configured", "verified", "active"}:
+        blockers.append("config_not_approved")
+    if credential_status != "configured":
+        blockers.append("credential_not_configured")
+    if not bool(getattr(integration_config, "credential_id", "")):
+        blockers.append("credential_reference_missing")
+    if expected_contract and str(getattr(integration_config, "contract_version", "")) != expected_contract:
+        blockers.append("contract_not_approved")
+    if not callback_url:
+        blockers.append("callback_missing")
+    elif not allowlist:
+        blockers.append("callback_allowlist_missing")
+    elif expected_callback and callback_url != expected_callback:
+        blockers.append("callback_mismatch")
+    elif allowlist and callback_url not in allowlist:
+        blockers.append("callback_not_allowlisted")
+    public_app_id = values.get("partner_id") if platform == "shopee" else values.get("app_key")
+    if not str(public_app_id or "").strip():
+        blockers.append("public_app_id_missing")
+    return blockers
+
+
 def _integration_config_overrides(platform, integration_config):
     if integration_config is None:
         return {}
     if str(getattr(integration_config, "platform", "")).lower() != platform:
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Integration configuration platform mismatch.")
     values = dict(getattr(integration_config, "platform_config", {}) or {})
-    expected_contract = {"lazada": "open-platform-v1", "shopee": "v2", "tiktok": "202407"}.get(platform, "")
-    status = str(getattr(integration_config, "status", ""))
-    credential_status = str(getattr(integration_config, "credential_status", ""))
-    ready = (
-        str(getattr(integration_config, "environment", "")) == "pilot"
-        and bool(getattr(integration_config, "network_enabled", False))
-        and not bool(getattr(integration_config, "sync_read_enabled", False))
-        and not bool(getattr(integration_config, "sync_write_enabled", False))
-        and status in {"configured", "verified"}
-        and credential_status == "configured"
-        and bool(getattr(integration_config, "credential_id", ""))
-        and str(getattr(integration_config, "contract_version", "")) == expected_contract
-    )
+    if platform == "shopee":
+        ready = not integration_config_oauth_blockers(platform, integration_config)
+    else:
+        expected_contract = {"lazada": "open-platform-v1", "tiktok": "202407"}.get(platform, "")
+        ready = (
+            str(getattr(integration_config, "environment", "")) == "pilot"
+            and bool(getattr(integration_config, "network_enabled", False))
+            and not bool(getattr(integration_config, "sync_read_enabled", False))
+            and not bool(getattr(integration_config, "sync_write_enabled", False))
+            and str(getattr(integration_config, "status", "")) in {"configured", "verified"}
+            and str(getattr(integration_config, "credential_status", "")) == "configured"
+            and bool(getattr(integration_config, "credential_id", ""))
+            and str(getattr(integration_config, "contract_version", "")) == expected_contract
+        )
     common = {
         "app_secret_reference": str(getattr(integration_config, "credential_id", "") or ""),
         "redirect_uri": str(getattr(integration_config, "callback_url", "") or ""),
@@ -717,4 +781,3 @@ def build_live_provider(platform, integration_config=None, secret_resolver=None,
         config.update(_integration_config_overrides(platform, integration_config))
         return TikTokLiveOAuthProvider(config, secret_resolver=secret_resolver)
     raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Unsupported live marketplace platform.")
-

@@ -392,4 +392,3 @@ def retry_store_authorization(record, *, actor):
     )
     _audit(result, actor, "retry")
     return result
-

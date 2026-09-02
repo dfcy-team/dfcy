@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import SyncJob
+from .sync_alerts import upsert_sync_failure_alert
 
 
 def calculate_next_run_at(sync_job, reference=None):
@@ -84,9 +85,14 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
         try:
             enqueue(job.id, idempotency_key)
             dispatched += 1
-        except Exception:
+        except Exception as exc:
             SyncJob.objects.filter(pk=job.id, status__in=(SyncJob.Status.IDLE, SyncJob.Status.FAILED)).update(
                 next_run_at=due_at
+            )
+            upsert_sync_failure_alert(
+                job,
+                error_code="SCHEDULER_ENQUEUE_FAILED",
+                message=str(exc),
             )
             failed += 1
     return {"initialized": initialized, "dispatched": dispatched, "failed": failed}

@@ -133,4 +133,3 @@ def expire_oauth_states(before=None):
             status=OAuthStateSession.Status.PENDING,
             expires_at__lte=moment,
         ).update(status=OAuthStateSession.Status.EXPIRED)
-

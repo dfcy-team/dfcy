@@ -366,15 +366,15 @@ ListingTaskStep = ListingTaskStepLog
 ListingTaskError = ListingTaskErrorLog
 ListingPublicationTask = ListingTask
 
-# Naming aliases make the state machine easy to consume from clients that use
-# queue-oriented terminology while keeping the persisted values stable.
-ListingTask.Status.QUEUED = ListingTask.Status.PENDING
-ListingTask.Status.SUCCESS = ListingTask.Status.SUCCEEDED
-ListingPublicationJob.Status.QUEUED = ListingPublicationJob.Status.PENDING
-
 
 class PlatformProductDetail(models.Model):
-    """Tenant-scoped product/variant snapshot reported by a platform store."""
+    """A tenant-scoped product/variant snapshot reported by a platform store.
+
+    This is deliberately a local catalogue record: no platform credentials or
+    authorization material is accepted or persisted.  ``platform_variant_id``
+    is the idempotency key within a tenant/platform/store and an internal SKU
+    may therefore be linked to any number of store variants.
+    """
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_product_details")
     platform = models.ForeignKey(PlatformMaster, on_delete=models.PROTECT, related_name="product_details")
@@ -449,7 +449,7 @@ class PlatformProductDetail(models.Model):
                     (self.platform.name or "").casefold(),
                     (self.platform.platform_type or "").casefold(),
                 }
-                if (self.site.platform or "").casefold() not in platform_values:
+                if self.site.platform and self.site.platform.casefold() not in platform_values:
                     errors["site"] = "站点所属平台与平台商品不一致。"
         if self.internal_sku_id and self.internal_sku.tenant_id != self.tenant_id:
             errors["internal_sku"] = "内部 SKU 必须属于当前租户。"

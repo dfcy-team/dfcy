@@ -234,4 +234,3 @@ def revoke_marketplace_authorization(record, *, actor):
         raise_oauth_error(OAUTH_CALLBACK_REJECTED, "Provider revoke did not confirm revocation.")
     revoked = transition_store_authorization(record, target_status=MarketplaceStoreAuthorization.Status.REVOKED, actor=actor)
     return revoked, False
-

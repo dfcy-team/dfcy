@@ -21,14 +21,17 @@ def test_api_integration_config_can_be_created_without_real_secrets():
         platform=PlatformChoices.BIGSELLER,
         shop_code="shop-001",
         api_base_url="https://api.example.test",
+        credential_ref="synthetic-legacy-credential",
+        credential_key_version="reference-v1",
     )
 
     assert config.id is not None
     assert config.status == APIIntegrationConfig.Status.ACTIVE
     assert config.environment == APIIntegrationConfig.Environment.MOCK
     assert config.credential_status == APIIntegrationConfig.CredentialStatus.PLACEHOLDER
-    assert "api_key_encrypted" not in {field.name for field in config._meta.fields}
-    assert "api_secret_encrypted" not in {field.name for field in config._meta.fields}
+    assert config.credential_ref == "synthetic-legacy-credential"
+    assert not hasattr(config, "api_key_encrypted")
+    assert not hasattr(config, "api_secret_encrypted")
 
 
 @pytest.mark.django_db
@@ -46,8 +49,9 @@ def test_api_credentials_keep_custody_metadata_without_plaintext_secret():
     )
 
     assert config.credential_ref.startswith("vault://example/")
-    assert config.credential_key_version == "v1"
     assert "orders:read" in config.least_privilege_scope
+    assert not hasattr(config, "api_key_encrypted")
+    assert not hasattr(config, "api_secret_encrypted")
 
 
 def test_integration_security_helpers_mask_sensitive_values():

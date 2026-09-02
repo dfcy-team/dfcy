@@ -125,7 +125,9 @@ class SalesReturnSerializer(serializers.ModelSerializer):
 class SalesOrderSerializer(serializers.ModelSerializer):
     platform = serializers.CharField(source="platform.platform_type")
     store = serializers.SerializerMethodField()
+    source_alias = serializers.CharField(source="authorization.account_alias", read_only=True)
     item_count = serializers.IntegerField(read_only=True)
+    line_count = serializers.IntegerField(read_only=True)
     refund_summary = serializers.SerializerMethodField()
 
     class Meta:
@@ -135,6 +137,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             "external_order_id",
             "platform",
             "store",
+            "source_alias",
             "raw_status",
             "normalized_status",
             "created_at_utc",
@@ -142,6 +145,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             "currency",
             "order_total_amount",
             "item_count",
+            "line_count",
             "refund_summary",
         )
 
@@ -179,7 +183,12 @@ class SalesOrderDetailSerializer(SalesOrderSerializer):
 
 class InventorySnapshotSerializer(serializers.ModelSerializer):
     warehouse_id = serializers.IntegerField()
+    warehouse_code = serializers.CharField(source="warehouse.code", read_only=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
     internal_sku = serializers.SerializerMethodField()
+    product_name = serializers.SerializerMethodField()
+    risk = serializers.SerializerMethodField()
+    risk_label = serializers.SerializerMethodField()
 
     class Meta:
         model = InventorySnapshot
@@ -187,7 +196,10 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
             "id",
             "site_code",
             "warehouse_id",
+            "warehouse_code",
+            "warehouse_name",
             "internal_sku",
+            "product_name",
             "source_sku",
             "platform_product_id",
             "platform_variant_id",
@@ -199,10 +211,27 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
             "pending_putaway_qty",
             "defective_qty",
             "snapshot_at_utc",
+            "risk",
+            "risk_label",
         )
 
     def get_internal_sku(self, obj):
         return obj.internal_sku.sku_code if obj.internal_sku_id else None
+
+    def get_product_name(self, obj):
+        return obj.internal_sku.spu.product_name if obj.internal_sku_id else ""
+
+    def get_risk(self, obj):
+        if obj.available_qty <= 0:
+            return "out"
+        if obj.reserved_qty > obj.available_qty:
+            return "locked"
+        if obj.available_qty <= 5:
+            return "low"
+        return "healthy"
+
+    def get_risk_label(self, obj):
+        return {"out": "缺货", "low": "低库存", "locked": "锁定偏高", "healthy": "正常"}[self.get_risk(obj)]
 
 
 class DataQualityIssueSerializer(serializers.ModelSerializer):
@@ -231,31 +260,54 @@ class DataQualityIssueSerializer(serializers.ModelSerializer):
 class SyncSourceSerializer(serializers.ModelSerializer):
     platform = serializers.CharField(source="integration_config.platform")
     region = serializers.SerializerMethodField()
-    store_id = serializers.CharField(source="integration_config.account_alias")
-    run_status = serializers.CharField(source="status")
+    store_id = serializers.SerializerMethodField()
+    resource = serializers.CharField(source="resource_type")
+    run_status = serializers.SerializerMethodField()
     last_success_at = serializers.SerializerMethodField()
     last_run_at = serializers.DateTimeField()
+    fetched_count = serializers.SerializerMethodField()
     sync_cursor = serializers.SerializerMethodField()
     error_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = SyncJob
-        fields = ("id", "platform", "region", "store_id", "run_status", "last_success_at", "last_run_at", "sync_cursor", "error_summary")
+        fields = (
+            "id", "platform", "region", "store_id", "resource", "run_status",
+            "last_success_at", "last_run_at", "fetched_count", "sync_cursor", "error_summary",
+        )
+
+    def _alias_parts(self, obj):
+        alias = obj.integration_config.account_alias or ""
+        parts = alias.split(":")
+        return parts[-2:] if alias.startswith("sqlite-import:") and len(parts) >= 2 else []
 
     def get_region(self, obj):
-        return ""
+        parts = self._alias_parts(obj)
+        return parts[0] if parts else ""
+
+    def get_store_id(self, obj):
+        parts = self._alias_parts(obj)
+        return ":".join(parts) if parts else obj.integration_config.account_alias
+
+    def get_run_status(self, obj):
+        run = obj.runs.order_by("-started_at", "-id").first()
+        return run.status if run else obj.status
 
     def get_last_success_at(self, obj):
         run = obj.runs.filter(status=SyncRun.Status.SUCCESS).order_by("-finished_at").first()
         return run.finished_at if run else None
+
+    def get_fetched_count(self, obj):
+        run = obj.runs.order_by("-started_at", "-id").first()
+        return run.fetched_count if run else 0
 
     def get_sync_cursor(self, obj):
         cursor = obj.cursors.order_by("cursor_key").first()
         return cursor.cursor_value if cursor else ""
 
     def get_error_summary(self, obj):
-        run = obj.runs.exclude(error_code="").order_by("-started_at").first()
-        return run.error_code if run else ""
+        run = obj.runs.order_by("-started_at", "-id").first()
+        return run.error_code if run and run.status == SyncRun.Status.FAILED else ""
 
 
 class SalesExportRequestSerializer(serializers.ModelSerializer):
@@ -268,4 +320,7 @@ class SalesExportRequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ReportExportRequest
-        fields = ("id", "export_type", "filters", "data_scope", "created_by", "status", "record_count", "created_at", "completed_at")
+        fields = (
+            "id", "export_type", "filters", "data_scope", "file_format", "file_sha256", "expires_at",
+            "created_by", "status", "record_count", "created_at", "completed_at",
+        )

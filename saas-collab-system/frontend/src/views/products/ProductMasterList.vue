@@ -46,7 +46,7 @@
           <strong>分类目录</strong>
           <el-button link @click="selectCategory(null)">全部</el-button>
         </div>
-        <el-input v-model="categorySearch" clearable placeholder="搜索分类" />
+        <el-input v-model="categoryFilter" clearable placeholder="搜索分类" />
         <el-tree
           ref="categoryTreeRef"
           :data="categoryTree"
@@ -100,28 +100,54 @@
           border
           class="product-master-table"
           :row-class-name="productRowClassName"
+          :row-style="productRowStyle"
           empty-text="当前范围暂无商品主数据"
           @selection-change="selectedMasterRows = $event"
         >
           <el-table-column type="index" label="序号" width="70" :index="(page - 1) * pageSize + 1" />
           <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
-          <el-table-column prop="spu_code" label="SPU" min-width="150" />
+          <el-table-column prop="spu_code" label="SPU" min-width="150">
+            <template #default="{ row }">
+              <SpuCodeDisplay :code="row.spu_code" />
+            </template>
+          </el-table-column>
           <el-table-column label="SKU" min-width="220">
             <template #default="{ row }">
-              <button
+              <el-popover
                 v-if="skuCodes(row).length"
-                type="button"
-                class="sku-summary"
-                aria-haspopup="dialog"
-                :aria-label="`查看 ${skuCount(row)} 个 SKU`"
-                @click.stop="openSkuDetails(row)"
+                :visible="skuPopoverId === row.id"
+                placement="bottom-start"
+                trigger="manual"
+                :width="360"
+                popper-class="sku-popover"
+                @hide="handleSkuPopoverHide(row.id)"
               >
-                <span>{{ skuPreview(row) }}</span>
-                <span v-if="skuCodes(row).length > skuPreviewLimit" class="sku-more">
-                  +{{ skuCodes(row).length - skuPreviewLimit }}
-                </span>
-                <span class="sku-count">({{ skuCount(row) }})</span>
-              </button>
+                <template #reference>
+                  <button
+                    type="button"
+                    class="sku-summary"
+                    aria-haspopup="dialog"
+                    :aria-label="`查看 ${skuCount(row)} 个 SKU`"
+                    @click.stop="toggleSkuPopover(row)"
+                  >
+                    <span>{{ skuPreview(row) }}</span>
+                    <span v-if="skuCodes(row).length > skuPreviewLimit" class="sku-more">
+                      +{{ skuCodes(row).length - skuPreviewLimit }}
+                    </span>
+                    <span class="sku-count">({{ skuCount(row) }})</span>
+                  </button>
+                </template>
+                <div class="sku-details">
+                  <div v-if="selectedSkuTitle" class="sku-details-subtitle">{{ selectedSkuTitle }}</div>
+                  <div class="sku-details-title">共 {{ skuCodes(row).length }} 个 SKU</div>
+                  <div class="sku-details-list">
+                    <div v-for="code in skuCodes(row)" :key="code" class="sku-detail-row">
+                      <code class="sku-detail-code">{{ code }}</code>
+                      <el-button link type="primary" @click="copySku(code)">复制</el-button>
+                    </div>
+                  </div>
+                </div>
+              </el-popover>
               <span v-else class="muted">-</span>
             </template>
           </el-table-column>
@@ -162,19 +188,6 @@
             </template>
           </el-table-column>
         </el-table>
-
-        <el-dialog v-model="skuDetailOpen" title="SKU 明细" width="min(480px, 94vw)">
-          <div class="sku-details-dialog">
-            <div v-if="selectedSkuTitle" class="sku-details-subtitle">{{ selectedSkuTitle }}</div>
-            <div class="sku-details-title">共 {{ selectedSkuCodes.length }} 个 SKU</div>
-            <div class="sku-details-list">
-              <div v-for="code in selectedSkuCodes" :key="code" class="sku-detail-row">
-                <code class="sku-detail-code">{{ code }}</code>
-                <el-button link type="primary" @click="copySku(code)">复制</el-button>
-              </div>
-            </div>
-          </div>
-        </el-dialog>
 
         <footer class="pager">
           <span class="pager-summary">共 {{ total }} 条</span>
@@ -366,7 +379,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   createProductSku,
@@ -380,7 +393,8 @@ import {
 import { useAuthStore } from '../../stores/auth';
 import { apiState, collectionRows, collectionTotal, detailData, stateTagType } from '../../utils/businessResponse';
 import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
-import { buildCategoryTree, categoryRowClass } from '../../utils/productCategoryPresentation';
+import { buildCategoryTree, categoryRowClass, categoryRowStyle } from '../../utils/productCategoryPresentation';
+import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
@@ -404,6 +418,9 @@ const stateLabels = {
 };
 const stateLabel = computed(() => stateLabels[state.value] || '状态未知');
 const categorySearch = ref('');
+// Keep the established categoryFilter name as the public form contract while
+// retaining the descriptive internal alias used by the tree watcher.
+const categoryFilter = categorySearch;
 const categoryTreeRef = ref(null);
 const createOpen = ref(false);
 const saving = ref(false);
@@ -417,8 +434,7 @@ const skuSaving = ref(false);
 const skuTarget = ref(null);
 const skuForm = reactive({ color_code: '', spec_values: {} });
 const skuPreviewLimit = 2;
-const skuDetailOpen = ref(false);
-const selectedSkuCodes = ref([]);
+const skuPopoverId = ref(null);
 const selectedSkuTitle = ref('');
 const selectedMasterRows = ref([]);
 const bulkMasterVisible = ref(false);
@@ -430,6 +446,7 @@ const moveCategoryNode = ref(null);
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
+const productRowStyle = ({ row }) => categoryRowStyle(row, categories.value);
 
 const activeColors = computed(() => colors.value.filter((item) => item?.is_active !== false));
 const skuCategory = computed(() => {
@@ -503,10 +520,18 @@ function skuPreview(row) {
   return skuCodes(row).slice(0, skuPreviewLimit).join('、');
 }
 
-function openSkuDetails(row) {
-  selectedSkuCodes.value = skuCodes(row);
+function toggleSkuPopover(row) {
+  skuPopoverId.value = skuPopoverId.value === row.id ? null : row.id;
   selectedSkuTitle.value = row.spu_code || row.product_name || '';
-  skuDetailOpen.value = true;
+}
+
+function handleSkuPopoverHide(rowId) {
+  if (skuPopoverId.value === rowId) skuPopoverId.value = null;
+}
+
+function handleDocumentClick(event) {
+  if (event.target.closest('.sku-popover') || event.target.closest('.sku-summary')) return;
+  skuPopoverId.value = null;
 }
 
 async function copySku(code) {
@@ -688,6 +713,7 @@ async function saveProduct() {
   try {
     const response = await createProductSpu({
       ...createForm,
+      category_node: createForm.category_node,
       product_name: createForm.product_name.trim(),
       product_type: 'standard'
     });
@@ -779,8 +805,13 @@ async function saveSku() {
 }
 
 onMounted(async () => {
+  document.addEventListener('click', handleDocumentClick, true);
   await Promise.all([loadCategories(), loadColors()]);
   await load();
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleDocumentClick, true);
 });
 </script>
 
@@ -971,6 +1002,10 @@ onMounted(async () => {
   background-color: #f0fdfa !important;
 }
 
+.product-master-table :deep(.product-category-custom > td) {
+  background-color: var(--product-category-row-background) !important;
+}
+
 .form-control {
   width: 100%;
 }
@@ -1032,14 +1067,17 @@ onMounted(async () => {
   margin-left: auto;
 }
 
-.sku-details-dialog {
+.sku-details {
   display: grid;
-  max-height: min(55vh, 420px);
   gap: 8px;
-  overflow-x: hidden;
-  overflow-y: auto;
   white-space: normal;
   word-break: break-word;
+}
+
+:global(.sku-popover .sku-details) {
+  max-height: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .sku-details-subtitle {

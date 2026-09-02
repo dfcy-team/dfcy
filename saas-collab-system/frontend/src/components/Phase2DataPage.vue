@@ -136,6 +136,17 @@ function statusType(value) {
     retrying: 'warning',
     manual_required: 'warning',
     security_review_required: 'warning',
+    blocked: 'danger',
+    read_only_ready: 'success',
+    production_readonly_ready: 'success',
+    sandbox_configured: 'warning',
+    not_configured: 'info',
+    '只读接入就绪': 'success',
+    '暂不可接入': 'danger',
+    '生产只读就绪': 'success',
+    '生产接入关闭': 'danger',
+    '已配置测试环境': 'warning',
+    '未配置测试环境': 'info',
     production_disabled: 'danger'
   }[value] || 'info';
 }
@@ -147,7 +158,13 @@ async function loadData() {
     if (!response.success) throw new Error(response.message || '接口返回失败');
     rows.value = getRows(response.data);
     detail.value = getDetail(response.data);
-    dataStatus.value = response.data?.api_status || response.data?.status || 'mock';
+    // A successful envelope without an authoritative status is not evidence
+    // of a live backend connection; keep the UI pending until one is supplied.
+    dataStatus.value = response.data?.api_status
+      || response.data?.status
+      || response.api_status
+      || response.status
+      || 'pending';
     if (response.data?.api_status === 'fallback') message.value = response.message;
   } catch (error) {
     dataStatus.value = 'error';

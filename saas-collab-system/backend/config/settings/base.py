@@ -52,6 +52,17 @@ LIVE_CUSTODY_SERVICE_TOKEN = os.getenv(
     "LIVE_CUSTODY_SERVICE_TOKEN",
     os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN", ""),
 ).strip()
+# A token file is the preferred production transport for the sidecar bearer
+# credential. It is intentionally empty by default and is validated by the
+# custody client before it can satisfy the live capability gate.
+LIVE_CUSTODY_SERVICE_TOKEN_FILE = os.getenv(
+    "LIVE_CUSTODY_SERVICE_TOKEN_FILE",
+    os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE", ""),
+).strip()
+# Optional private CA bundle for the custody endpoint. It is consulted only
+# for the exact custody host/port, while platform traffic retains the system
+# trust store. Keep the setting as a path, never certificate contents.
+LIVE_CUSTODY_CA_FILE = os.getenv("LIVE_CUSTODY_CA_FILE", "").strip()
 CREDENTIAL_CUSTODY_PATH = os.getenv(
     "CREDENTIAL_CUSTODY_PATH",
     "/var/lib/saas-collab/credentials" if DEBUG else "",
@@ -129,12 +140,11 @@ INSTALLED_APPS = [
     "apps.listings",
     "apps.purchasing",
     "apps.packing",
+    "apps.consolidation",
+    "apps.shipping",
     "apps.suppliers",
     "apps.finance",
     "apps.reports",
-    # Sales-management facts are registered additively on top of the V2.44.37
-    # application set.  Keep the existing apps/order intact so this upgrade
-    # does not alter the baseline menu or permission modules.
     "apps.commerce",
     "apps.sales_management",
     "apps.alerts",
@@ -213,7 +223,7 @@ AUTH_USER_MODEL = "accounts.CustomUser"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.accounts.authentication.UATAwareJWTAuthentication",
     ],
     "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
     "DEFAULT_RENDERER_CLASSES": [
@@ -264,3 +274,17 @@ MINIAPP_PROVIDER_TIMEOUT_SECONDS = max(
     2,
     min(int(os.getenv("MINIAPP_PROVIDER_TIMEOUT_SECONDS", "8")), 15),
 )
+
+# Competitor analysis is an external, read-only dependency.  The empty URL is
+# intentional: without explicit deployment configuration, report access fails
+# closed rather than falling back to a local crawler or guessed endpoint.
+COMPETITOR_REPORT_BASE_URL = os.getenv(
+    "COMPETITOR_REPORT_BASE_URL",
+    os.getenv("COMPETITOR_REPORT_API_BASE_URL", ""),
+).strip().rstrip("/")
+COMPETITOR_REPORT_TIMEOUT_SECONDS = max(
+    1,
+    min(int(os.getenv("COMPETITOR_REPORT_TIMEOUT_SECONDS", "5")), 60),
+)
+COMPETITOR_REPORT_API_BASE_URL = COMPETITOR_REPORT_BASE_URL
+COMPETITOR_REPORT_API_TIMEOUT_SECONDS = COMPETITOR_REPORT_TIMEOUT_SECONDS

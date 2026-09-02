@@ -15,7 +15,7 @@ def create_tenant_administrator_roles(apps, schema_editor):
         role, _ = Role.objects.update_or_create(
             tenant=tenant,
             code=ROLE_CODE,
-            defaults={"name": "管理员", "status": "active"},
+            defaults={"name": "\u7ba1\u7406\u5458", "status": "active"},
         )
         role.permissions.set(permissions)
         DataScope.objects.filter(tenant=tenant, role=role).exclude(scope_type="all").delete()

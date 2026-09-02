@@ -7,6 +7,10 @@ requires an independently operated HTTP custody service with authentication.
 """
 
 from abc import ABC, abstractmethod
+import os
+from pathlib import Path
+import stat
+import urllib.parse
 
 from django.conf import settings
 
@@ -17,6 +21,118 @@ from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE, OAuthFlowError
 class CustodyError(OAuthFlowError):
     def __init__(self, detail=None):
         super().__init__(OAUTH_PROVIDER_UNAVAILABLE, detail or "Credential custody operation failed.")
+
+
+MAX_SERVICE_TOKEN_FILE_BYTES = 4096
+
+
+def _read_owner_secret_file(path, *, setting_name, read_only=False, max_bytes=MAX_SERVICE_TOKEN_FILE_BYTES):
+    """Read a mounted secret without following links or accepting broad modes.
+
+    The service token may be owner-readable/writable (0600) because the
+    runtime secret manager commonly creates it that way.  The sidecar Fernet
+    key is stricter and must be owner-readable only (0400).  Neither file is
+    ever written by the application.
+    """
+    raw_path = str(path or "").strip()
+    candidate = Path(raw_path).expanduser()
+    if not raw_path or not candidate.is_absolute():
+        raise CustodyError(f"{setting_name} must be an absolute file path.")
+    try:
+        link_stat = candidate.lstat()
+    except OSError:
+        raise CustodyError(f"{setting_name} is unavailable.") from None
+    if stat.S_ISLNK(link_stat.st_mode) or not stat.S_ISREG(link_stat.st_mode):
+        raise CustodyError(f"{setting_name} is unavailable.")
+    mode = stat.S_IMODE(link_stat.st_mode)
+    if os.name != "nt":
+        # Reject group/other access and execute bits.  A key is explicitly
+        # read-only; a service token may use the conventional 0600 mount.
+        if mode & 0o077 or mode & 0o111 or not mode & 0o400:
+            raise CustodyError(f"{setting_name} permissions are unsafe.")
+        if read_only and mode != 0o400:
+            raise CustodyError(f"{setting_name} permissions are unsafe.")
+        if not read_only and mode not in {0o400, 0o600}:
+            raise CustodyError(f"{setting_name} permissions are unsafe.")
+    try:
+        flags = os.O_RDONLY
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+        if no_follow:
+            flags |= no_follow
+        descriptor = os.open(str(candidate), flags)
+        try:
+            opened_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise CustodyError(f"{setting_name} is unavailable.")
+            if no_follow and (
+                opened_stat.st_dev != link_stat.st_dev or opened_stat.st_ino != link_stat.st_ino
+            ):
+                raise CustodyError(f"{setting_name} is unavailable.")
+            with os.fdopen(descriptor, "rb") as handle:
+                descriptor = None
+                data = handle.read(max_bytes + 1)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+    except CustodyError:
+        raise
+    except (OSError, UnicodeError):
+        raise CustodyError(f"{setting_name} is unavailable.") from None
+    if len(data) > max_bytes:
+        raise CustodyError(f"{setting_name} is unavailable.")
+    try:
+        value = data.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        raise CustodyError(f"{setting_name} is unavailable.") from None
+    if not value:
+        raise CustodyError(f"{setting_name} is unavailable.")
+    return value
+
+
+def read_service_token_file(path):
+    """Read the configured bearer token file, failing closed on any issue."""
+    return _read_owner_secret_file(path, setting_name="LIVE_CUSTODY_SERVICE_TOKEN_FILE")
+
+
+def resolve_service_auth_token(explicit=None):
+    """Resolve the sidecar bearer token with token-file precedence."""
+    if explicit is not None:
+        return str(explicit).strip()
+    token_file = str(
+        getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN_FILE", "")
+        or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE", "")
+        or ""
+    ).strip()
+    if token_file:
+        return read_service_token_file(token_file)
+    return str(
+        getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
+        or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
+        or ""
+    ).strip()
+
+
+def validate_custody_service_url(value):
+    """Validate the independent custody endpoint without changing TLS policy."""
+    raw_url = str(value or "").strip().rstrip("/")
+    if not raw_url:
+        raise CustodyError("LIVE_CUSTODY_SERVICE_URL is required for approved custody.")
+    try:
+        parsed = urllib.parse.urlparse(raw_url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        raise CustodyError("LIVE_CUSTODY_SERVICE_URL is invalid.") from None
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or port is not None and not 1 <= port <= 65535
+    ):
+        raise CustodyError("LIVE_CUSTODY_SERVICE_URL must be an approved HTTPS endpoint.")
+    return raw_url
 
 
 class CustodyBackend(ABC):
@@ -75,19 +191,9 @@ class HttpCustodyBackend(CustodyBackend):
     """Thin adapter to an approved custody service with atomic rotation support."""
 
     def __init__(self, base_url, client, service_auth_token=None):
-        self.base_url = str(base_url or "").strip().rstrip("/")
+        self.base_url = validate_custody_service_url(base_url)
         self._client = client
-        self._service_auth_token = str(
-            service_auth_token
-            if service_auth_token is not None
-            else (
-                getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
-                or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
-                or ""
-            )
-        ).strip()
-        if not self.base_url:
-            raise CustodyError("LIVE_CUSTODY_SERVICE_URL is required for approved custody.")
+        self._service_auth_token = resolve_service_auth_token(service_auth_token)
         if not self._service_auth_token:
             raise CustodyError("Credential custody service authentication is not configured.")
 
@@ -314,11 +420,7 @@ def get_custody_backend():
     base_url = getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "")
     if not base_url:
         raise CustodyError("LIVE_CUSTODY_SERVICE_URL is required for approved custody.")
-    service_auth_token = str(
-        getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
-        or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
-        or ""
-    ).strip()
+    service_auth_token = resolve_service_auth_token()
     if not service_auth_token:
         raise CustodyError("Credential custody service authentication is not configured.")
     from .net_guard import PlatformHttpClient
@@ -329,4 +431,3 @@ def get_custody_backend():
 def reset_custody_backend_cache():
     global _cached_backend
     _cached_backend = None
-

@@ -13,4 +13,3 @@ def seed_existing_tenants(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [("masterdata", "0004_country_information_fields")]
     operations = [migrations.RunPython(seed_existing_tenants, migrations.RunPython.noop)]
-

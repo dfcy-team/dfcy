@@ -1,8 +1,7 @@
 import axios from 'axios';
 import { getMockResponse, normalizeApiError, requestApi, useMock } from './request';
 import { mockCurrentUser, mockLogin } from '../mock/auth';
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+import { apiBaseUrl } from './baseUrl';
 
 export function normalizeLoginResponse(payload) {
   if (payload?.access && payload?.refresh) {

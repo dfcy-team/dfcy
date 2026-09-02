@@ -4,8 +4,8 @@ from rest_framework.test import APIRequestFactory
 from apps.accounts.models import CustomUser
 from apps.development.models import DevelopmentProductArchive, DevelopmentProject
 from apps.development.serializers import DevelopmentProductArchiveSerializer
-from apps.development.services import confirm_product_archive, create_product_archive, formalize_product_archive, generate_trial_product
-from apps.products.models import ProductCategory, ProductColor, ProductSPU
+from apps.development.services import confirm_product_archive, create_product_archive, formalize_product_archive
+from apps.products.models import ProductCategory, ProductResearch, ProductSPU
 from apps.tenants.models import Tenant
 
 
@@ -44,7 +44,6 @@ def _project(tenant, user, category=None, requirement=None):
 def test_archive_uses_active_leaf_category_and_can_be_created_without_stage_gates():
     tenant = Tenant.objects.create(name="Archive categories", code="archive-categories")
     user = _user(tenant)
-    ProductColor.objects.get_or_create(tenant=tenant, code="red", defaults={"name": "Red"})
     category = _category_tree(tenant)
     project = _project(tenant, user, category=category)
 
@@ -80,12 +79,10 @@ def test_archive_serializer_rejects_cross_tenant_category():
 def test_formalization_copies_category_to_draft_unlisted_product():
     tenant = Tenant.objects.create(name="Archive formalize categories", code="archive-formalize-categories")
     user = _user(tenant)
-    ProductColor.objects.create(tenant=tenant, code="red", name="Red")
     category = _category_tree(tenant)
     project = _project(tenant, user, category=category)
     archive, _ = create_product_archive(project_id=project.id, actor=user)
     confirm_product_archive(archive_id=archive.id, actor=user)
-    generate_trial_product(archive_id=archive.id, actor=user, data={"development_spu_code": "DEVCAT", "color_code": "red"})
 
     product, created = formalize_product_archive(archive_id=archive.id, actor=user)
 
@@ -97,17 +94,20 @@ def test_formalization_copies_category_to_draft_unlisted_product():
     assert product.sales_status == ProductSPU.SalesStatus.NOT_LISTED
 
 
-def test_archive_accepts_an_explicit_category_when_project_has_none():
-    tenant = Tenant.objects.create(name="Archive explicit category", code="archive-explicit-category")
+def test_archive_prefers_requirement_category_when_project_has_none():
+    tenant = Tenant.objects.create(name="Archive requirement category", code="archive-requirement-category")
     user = _user(tenant)
     category = _category_tree(tenant)
-    project = _project(tenant, user)
-
-    archive, _ = create_product_archive(
-        project_id=project.id,
-        actor=user,
-        data={"category_node": category},
+    requirement = ProductResearch.objects.create(
+        tenant=tenant,
+        research_no="REQ-CATEGORY-1",
+        product_name="Requirement category product",
+        category_node=category,
+        created_by=user,
     )
+    project = _project(tenant, user, requirement=requirement)
+
+    archive, _ = create_product_archive(project_id=project.id, actor=user)
 
     assert archive.category_node_id == category.id
     assert archive.category == category.name

@@ -64,9 +64,6 @@ IMPORT_CREATE_BATCH_SIZE = 1000
 IMPORT_UPDATE_BATCH_SIZE = 100
 IMPORT_UPDATE_WORK_CHUNK_SIZE = 500
 IMPORT_EXISTING_QUERY_CHUNK_SIZE = 2000
-# The variant-ID import can legitimately receive a large export with many
-# rows that are not present in the current tenant.  Keep the response useful
-# for a user without echoing every unmatched ID back through the API.
 UNMATCHED_SAMPLE_LIMIT = 100
 
 # The key columns are already constrained by the lookup and must not be
@@ -534,14 +531,7 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
 
 
 def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
-    """Update platform product IDs by an existing platform variant ID.
-
-    The variant ID is looked up only inside the current tenant.  It is not
-    assumed to be globally unique: if the same tenant has that variant on
-    multiple platform/store rows, the row is reported as ambiguous and is
-    left untouched.  A platform product ID is deliberately not unique and
-    may be shared by all variants belonging to one platform product.
-    """
+    """Update platform product IDs by existing tenant-scoped variant IDs."""
 
     errors = []
     rows_seen = 0
@@ -559,9 +549,6 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
                 continue
             candidates.append({"row": row_index, "sheet": sheet_name, "variant_id": variant_id, "product_id": product_id})
 
-    # Conflicting duplicate input rows are rejected as a group. Identical
-    # duplicate rows remain valid and count as unchanged after the first
-    # physical record is updated.
     by_variant = defaultdict(list)
     for item in candidates:
         by_variant[item["variant_id"]].append(item)
@@ -571,15 +558,13 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
         if len(product_ids) > 1:
             for item in group:
                 errors.append({
-                    "row": item["row"], "sheet": item["sheet"], "code": "duplicate_variant_product_id",
+                    "row": item["row"],
+                    "sheet": item["sheet"],
+                    "code": "duplicate_variant_product_id",
                     "message": "同一变体ID在文件中对应多个平台商品ID，已跳过。",
                 })
             continue
-        groups.append({
-            "variant_id": variant_id,
-            "product_id": group[0]["product_id"],
-            "rows": group,
-        })
+        groups.append({"variant_id": variant_id, "product_id": group[0]["product_id"], "rows": group})
 
     updated = 0
     unchanged = 0
@@ -589,9 +574,6 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
     unmatched_sample = []
     ambiguous = 0
     changed_items = []
-    # Read each variant chunk in one query, then write changed targets with a
-    # bounded bulk_update. This keeps a large upload from issuing one SELECT
-    # and one UPDATE per row.
     with transaction.atomic():
         for group_chunk in _chunks(groups, IMPORT_EXISTING_QUERY_CHUNK_SIZE):
             variant_ids = [group["variant_id"] for group in group_chunk]
@@ -620,7 +602,9 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
                     ambiguous += len(rows)
                     for row in rows:
                         errors.append({
-                            "row": row["row"], "sheet": row["sheet"], "code": "ambiguous_variant_id",
+                            "row": row["row"],
+                            "sheet": row["sheet"],
+                            "code": "ambiguous_variant_id",
                             "message": "当前租户内该变体ID对应多个平台/店铺记录，无法确定更新对象。",
                         })
                     continue
@@ -655,9 +639,6 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
         "unmatched_remaining": max(0, unmatched_unique_count - len(unmatched_sample)),
         "ambiguous": ambiguous,
         "errors": errors,
-        # A row is skipped exactly when it was not updated or counted as
-        # unchanged.  This keeps ambiguous/error rows from being counted a
-        # second time merely because they also appear in ``errors``.
         "skipped": max(0, rows_seen - updated - unchanged),
         "partial_success": bool((updated or unchanged) and (rows_seen - updated - unchanged)),
     }

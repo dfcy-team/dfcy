@@ -5,6 +5,17 @@ from . import views
 
 urlpatterns = [
     path("workspace/", views.integration_workspace_view, name="integration-workspace"),
+    path("readiness/", views.platform_integration_readiness, name="platform-integration-readiness"),
+    path(
+        "readiness/configs/<int:pk>/repair-contract/",
+        views.repair_readiness_contract,
+        name="platform-readiness-contract-repair",
+    ),
+    path(
+        "readiness/configs/<int:pk>/readonly-approval/",
+        views.set_readiness_readonly_approval,
+        name="platform-readiness-readonly-approval",
+    ),
     path("subject-api-access/", views.subject_api_access_detail, name="subject-api-access-detail"),
     path("platform-schemas/<str:platform>/", views.platform_config_schema, name="platform-config-schema"),
     path("configs/", views.integration_config_collection, name="integration-config-collection"),
@@ -68,6 +79,11 @@ urlpatterns = [
         views.store_authorization_detail,
         name="store-authorization-detail",
     ),
+    path(
+        "store-authorizations/<int:pk>/capabilities/",
+        views.store_authorization_capabilities,
+        name="store-authorization-capabilities",
+    ),
     path("store-mappings/", views.store_mapping_collection, name="store-mapping-collection"),
     path("store-mappings/<int:pk>/", views.store_mapping_detail, name="store-mapping-detail"),
     path("product-mappings/", views.product_mapping_collection, name="product-mapping-collection"),
@@ -82,4 +98,7 @@ urlpatterns = [
     path("sync-runs/", views.sync_run_collection, name="sync-run-collection"),
     path("sync-runs/<int:pk>/", views.sync_run_detail, name="sync-run-detail"),
     path("sync-runs/<int:pk>/retry/", views.retry_sync_run, name="sync-run-retry"),
+    path("sync-alert-incidents/", views.sync_alert_incident_collection, name="sync-alert-incident-collection"),
+    path("sync-alert-incidents/<int:pk>/action/", views.sync_alert_incident_action, name="sync-alert-incident-action"),
+    path("sync-alert-incidents/<int:pk>/retry/", views.sync_alert_incident_retry, name="sync-alert-incident-retry"),
 ]

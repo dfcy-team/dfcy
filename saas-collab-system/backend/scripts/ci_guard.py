@@ -23,10 +23,13 @@ TEXT_SUFFIXES = {
 PLACEHOLDER_MARKERS = {
     "***",
     "change-me",
+    "custody-token",
     "demo",
     "example",
     "not-a-real",
+    "not-real",
     "placeholder",
+    "sidecar-token",
     "test",
     "${",
 }
@@ -37,7 +40,7 @@ HIGH_CONFIDENCE_PATTERNS = {
     "openai-style-key": re.compile("sk" + "-[A-Za-z0-9_-]{20,}"),
 }
 ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b(?:[a-z0-9]+[_-])*(password|token|api[_-]?key|api[_-]?secret|secret[_-]?key)\b"
+    r"(?i)\b((?:[a-z0-9]+[_-])*(?:password|token|api[_-]?key|api[_-]?secret|secret[_-]?key)(?:[_-](?:file|path))?)\b"
     r"\s*[:=]\s*([\"']?)([^\"'\s,#]+)"
 )
 
@@ -78,7 +81,11 @@ def scan_file(path, relative_path):
         if path.suffix.lower() not in TEXT_SUFFIXES or path.suffix.lower() == ".md":
             continue
         for match in ASSIGNMENT_PATTERN.finditer(line):
-            quote, value = match.group(2), match.group(3)
+            key, quote, value = match.group(1), match.group(2), match.group(3)
+            if key.lower().endswith(("_file", "-file", "_path", "-path")):
+                continue
+            if path.suffix.lower() in {".yaml", ".yml"} and line.lstrip().startswith("-") and ":/" in line and "=" not in line:
+                continue
             if not quote and path.suffix.lower() in {".py", ".js", ".ts"}:
                 continue
             normalized_value = value.lower()

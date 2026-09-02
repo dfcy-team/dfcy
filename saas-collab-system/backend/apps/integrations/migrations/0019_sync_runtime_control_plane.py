@@ -66,6 +66,10 @@ def remove_runtime_schema(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # MySQL cannot execute the guarded SeparateDatabaseAndState/RunPython DDL
+    # inside Django's default migration transaction.
+    atomic = False
+
     dependencies = [
         ("integrations", "0018_add_lazada_platform_choice"),
         ("masterdata", "0008_merge_country_and_store_branches"),

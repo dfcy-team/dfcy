@@ -14,7 +14,9 @@ from .adapters import get_adapter_for_config
 from .models import SyncCheckpoint, SyncCursor, SyncJob, SyncRun, WebhookEvent
 from .raw_services import archive_raw_page, archive_webhook_payload
 from .scheduler import calculate_next_run_at
+from .capability_gate import record_sync_source_decision, require_sync_read_capability
 from .security import sanitize_payload, sanitize_text
+from .sync_alerts import resolve_sync_failure_alert, upsert_sync_failure_alert
 
 
 def calculate_backoff_seconds(retry_count, base_seconds=1, max_seconds=30):
@@ -61,6 +63,11 @@ def _recover_expired_lease(sync_job, now):
             "updated_at",
         ]
     )
+    upsert_sync_failure_alert(
+        sync_job,
+        error_code="LEASE_EXPIRED",
+        message="Sync run lease expired before completion.",
+    )
 
 
 def _renew_lease(sync_job, run, not_before=None):
@@ -87,6 +94,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
     adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
     if getattr(adapter, "execution_mode", "unsupported") not in {"mock", "live_readonly"}:
         raise ValidationError("The selected synchronization adapter is not executable.")
+    require_sync_read_capability(
+        sync_job, getattr(adapter, "execution_mode", "unsupported")
+    )
     adapter.validate_configuration(sync_job)
 
     now = timezone.now()
@@ -98,6 +108,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         )
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("Sync job is disabled.")
+
+        selected_capability = require_sync_read_capability(
+            locked_job,
+            getattr(adapter, "execution_mode", "unsupported"),
+            lock=True,
+        )
 
         if _has_expired_lease(locked_job, now):
             _recover_expired_lease(locked_job, now)
@@ -145,6 +161,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
             status=SyncRun.Status.RUNNING,
             started_at=now,
         )
+        record_sync_source_decision(locked_job, run, selected_capability)
         locked_job.refresh_from_db()
 
     sync_job = locked_job
@@ -237,6 +254,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                     ]
                 )
                 run.save()
+                resolve_sync_failure_alert(sync_job, run)
                 return run, True
         except Exception as exc:
             cursor.refresh_from_db()
@@ -304,6 +322,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                     ]
                 )
                 run.save()
+                upsert_sync_failure_alert(sync_job, sync_run=run)
             return run, True
 
 

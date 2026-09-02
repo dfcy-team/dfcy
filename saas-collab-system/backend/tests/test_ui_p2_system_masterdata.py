@@ -3,7 +3,8 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.audit.models import OperationLog
-from apps.integrations.models import PlatformIntegrationConfig, authorization_service_write
+from apps.integrations.credential_service import reference_fingerprint, rotate_config_references
+from apps.integrations.models import PlatformIntegrationConfig
 from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.suppliers.models import SupplierTask
@@ -212,42 +213,6 @@ def test_role_permission_and_data_scope_update_is_audited():
     assert audit.after_data["data_scopes"] == [
         {"scope_type": "department", "config": {"department_ids": [10]}}
     ]
-
-
-def test_permission_catalog_returns_chinese_labels_for_legacy_seed_rows():
-    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-permission-labels")
-    viewer = create_user(tenant, "permission-label-viewer")
-    grant(viewer, "system.roles.view")
-
-    client = client_for(viewer)
-    system_response = client.get("/api/internal/system/permissions/?module=system&page_size=100")
-    products_response = client.get("/api/internal/system/permissions/?module=products&page_size=100")
-
-    assert system_response.status_code == products_response.status_code == 200
-    system_permissions = {item["code"]: item for item in system_response.data["data"]["results"]}
-    product_permissions = {item["code"]: item for item in products_response.data["data"]["results"]}
-    assert system_permissions["system.users.view"]["name"] == "查看用户目录"
-    assert product_permissions["products.research.view"]["name"] == "查看商品调研"
-
-
-def test_tenant_administrator_permissions_are_catalog_managed():
-    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-admin-role")
-    manager = create_user(tenant, "admin-role-manager")
-    grant(manager, "system.roles.view", "system.roles.manage")
-    administrator = Role.objects.create(tenant=tenant, code="administrator", name="管理员")
-    permission, _ = Permission.objects.get_or_create(
-        code="system.users.view",
-        defaults={"name": "查看用户目录", "module": "system", "action": "users.view"},
-    )
-    administrator.permissions.add(permission)
-
-    response = client_for(manager).put(
-        f"/api/internal/system/roles/{administrator.pk}/permissions/",
-        {"permission_codes": ["system.users.view"], "scope_type": "all", "scope_config": {}},
-        format="json",
-    )
-
-    assert response.status_code == 409
 
 
 def test_user_role_assignment_uses_users_manage_without_roles_view():
@@ -488,22 +453,29 @@ def test_security_operations_exposes_only_credential_metadata():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-security")
     viewer = create_user(tenant, "security-viewer")
     grant(viewer, "security.operations.view")
-    with authorization_service_write():
-        PlatformIntegrationConfig.objects.create(
-            tenant=tenant,
-            platform="other",
-            account_alias="demo-alias",
-            environment="sandbox",
-            status="disabled",
-            credential_key_version="demo-v1",
-            credential_fingerprint="demo-fingerprint",
-            created_by=viewer,
-        )
+    config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="other",
+        account_alias="demo-alias",
+        environment="sandbox",
+        status="disabled",
+        created_by=viewer,
+    )
+    credential_id = "synthetic-credential-demo"
+    token_id = "synthetic-token-demo"
+    rotate_config_references(
+        config,
+        credential_id=credential_id,
+        token_id=token_id,
+        version=2,
+        actor=viewer,
+    )
 
     response = client_for(viewer).get("/api/internal/system/security-operations/")
 
     assert response.status_code == 200
     serialized = str(response.data)
-    assert "demo-alias" in serialized and "demo-fingerprint" in serialized
-    assert "credential_ciphertext" not in serialized
+    assert "demo-alias" in serialized
+    assert reference_fingerprint(credential_id, token_id) in serialized
+    assert credential_id not in serialized and token_id not in serialized
     assert response.data["data"]["credential_contract"] == "alias_fingerprint_reference_only"

@@ -155,6 +155,12 @@ class IsMarketplaceStoreAuthorizer(IntegrationActionPermission):
     permission_code = "integrations.store.authorize"
 
 
+class IsMarketplaceCapabilityManager(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        permission_code = "integrations.store.view" if request.method in SAFE_METHODS else "integrations.store.authorize"
+        return self.has_action_permission(request, permission_code)
+
+
 class IsMarketplaceStoreRevoker(IntegrationActionPermission):
     permission_code = "integrations.store.revoke"
 

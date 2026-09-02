@@ -22,14 +22,6 @@ export const fetchUsers = (params = {}) => requestWithMockFallback(
 export const createUser = (payload) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/system/users/', data: payload }, mockWrite(payload), 'system.users.create'
 );
-export const updateUserProfile = (id, payload) => requestWithMockFallback(
-  { method: 'patch', url: `/api/internal/system/users/${id}/`, data: payload },
-  mockWrite({ id, ...payload }), 'system.users.update'
-);
-export const resetUserPassword = (id, payload) => requestWithMockFallback(
-  { method: 'post', url: `/api/internal/system/users/${id}/password-reset/`, data: payload },
-  mockWrite({ id }), 'system.users.password_reset'
-);
 export const updateUserStatus = (id, isActive) => requestWithMockFallback(
   { method: 'post', url: `/api/internal/system/users/${id}/status/`, data: { is_active: isActive } },
   mockWrite({ id, is_active: isActive }), 'system.users.status'
@@ -37,6 +29,14 @@ export const updateUserStatus = (id, isActive) => requestWithMockFallback(
 export const updateUserRoles = (id, roleCodes) => requestWithMockFallback(
   { method: 'put', url: `/api/internal/system/users/${id}/roles/`, data: { role_codes: roleCodes } },
   mockWrite({ id, roles: roleCodes }), 'system.users.roles'
+);
+export const updateUserProfile = (id, payload) => requestWithMockFallback(
+  { method: 'patch', url: `/api/internal/system/users/${id}/`, data: payload },
+  mockWrite({ id, ...payload }), 'system.users.update'
+);
+export const resetUserPassword = (id, payload) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/system/users/${id}/reset-password/`, data: payload },
+  mockWrite({ id }), 'system.users.reset_password'
 );
 export const fetchAssignableRoles = (params = {}) => requestWithMockFallback(
   { method: 'get', url: '/api/internal/system/user-role-options/', params }, mockRoles, 'system.user_role_options'

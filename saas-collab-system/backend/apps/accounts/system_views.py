@@ -31,8 +31,6 @@ from .system_serializers import (
     RoleOptionSerializer,
     RolePermissionUpdateSerializer,
     UserAdminSerializer,
-    UserPasswordResetSerializer,
-    UserProfileUpdateSerializer,
     UserRoleUpdateSerializer,
 )
 
@@ -86,29 +84,6 @@ class DepartmentCollectionView(APIView):
         return success_response(DepartmentAdminSerializer(department).data, status=201)
 
 
-class DepartmentDetailView(APIView):
-    permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "system.organization.view"
-    write_permission_code = "system.organization.manage"
-
-    def delete(self, request, pk):
-        queryset = Department.objects.filter(tenant=request.user.tenant)
-        queryset = filter_departments(request.user, queryset, self.write_permission_code)
-        department = get_object_or_404(queryset, pk=pk)
-        if department.internal_profiles.exists() or department.assigned_internal_profiles.exists():
-            raise StateConflict("部门内存在人员，不能删除。")
-        if department.children.exists():
-            raise StateConflict("部门下存在下级部门，请先删除下级部门。")
-        before_data = {"name": department.name, "parent_id": department.parent_id}
-        department_id = department.pk
-        department.delete()
-        write_operation_log(
-            tenant=request.user.tenant, user=request.user, module="system", action="department_delete",
-            object_type="department", object_id=department_id, before_data=before_data,
-        )
-        return success_response({"deleted": True, "id": department_id})
-
-
 class UserCollectionView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "system.users.view"
@@ -120,9 +95,7 @@ class UserCollectionView(APIView):
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
-            queryset = queryset.filter(
-                Q(username__icontains=search) | Q(full_name__icontains=search) | Q(email__icontains=search)
-            )
+            queryset = queryset.filter(Q(username__icontains=search) | Q(email__icontains=search))
         if status in {"active", "inactive"}:
             queryset = queryset.filter(is_active=status == "active")
         page, page_size = pagination(request)
@@ -142,41 +115,6 @@ class UserCollectionView(APIView):
             object_type="user", object_id=user.pk, after_data={"username": user.username, "is_active": user.is_active},
         )
         return success_response(UserAdminSerializer(user).data, status=201)
-
-
-class UserDetailView(APIView):
-    permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "system.users.view"
-    write_permission_code = "system.users.manage"
-
-    @transaction.atomic
-    def patch(self, request, pk):
-        queryset = CustomUser.objects.filter(tenant=request.user.tenant)
-        user = get_object_or_404(filter_system_users(request.user, queryset, self.write_permission_code), pk=pk)
-        serializer = UserProfileUpdateSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        before = {
-            "full_name": user.full_name,
-            "department_ids": list(user.internal_profile.departments.values_list("id", flat=True)),
-        }
-        if "full_name" in serializer.validated_data:
-            user.full_name = serializer.validated_data["full_name"]
-            user.save(update_fields=["full_name", "updated_at"])
-        if "department_ids" in serializer.validated_data:
-            department_ids = serializer.validated_data["department_ids"]
-            profile = user.internal_profile
-            profile.departments.set(department_ids)
-            profile.department_id = department_ids[0] if department_ids else None
-            profile.save(update_fields=["department", "updated_at"])
-        write_operation_log(
-            tenant=request.user.tenant, user=request.user, module="system", action="user_profile_update",
-            object_type="user", object_id=user.pk, before_data=before,
-            after_data={
-                "full_name": user.full_name,
-                "department_ids": list(user.internal_profile.departments.values_list("id", flat=True)),
-            },
-        )
-        return success_response(UserAdminSerializer(user).data)
 
 
 class UserStatusView(APIView):
@@ -200,31 +138,6 @@ class UserStatusView(APIView):
             object_type="user", object_id=user.pk, before_data={"is_active": before}, after_data={"is_active": is_active},
         )
         return success_response(UserAdminSerializer(user).data)
-
-
-class UserPasswordResetView(APIView):
-    permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "system.users.view"
-    write_permission_code = "system.users.manage"
-
-    @transaction.atomic
-    def post(self, request, pk):
-        queryset = CustomUser.objects.filter(tenant=request.user.tenant)
-        user = get_object_or_404(filter_system_users(request.user, queryset, self.write_permission_code), pk=pk)
-        serializer = UserPasswordResetSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user.set_password(serializer.validated_data["new_password"])
-        user.save(update_fields=["password", "updated_at"])
-        write_operation_log(
-            tenant=request.user.tenant,
-            user=request.user,
-            module="system",
-            action="user_password_reset",
-            object_type="user",
-            object_id=user.pk,
-            after_data={"username": user.username, "password_reset": True},
-        )
-        return success_response({"id": user.pk, "username": user.username, "password_reset": True})
 
 
 class UserRoleView(APIView):

@@ -33,7 +33,7 @@ from apps.permissions.ui_p5_scopes import (
     filter_product_spus,
     require_create_scope,
 )
-from apps.permissions.services import get_permission_data_scopes
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 from .coding_services import SEASONS, category_path
 from .category_metadata import category_metadata
@@ -58,6 +58,7 @@ from .permissions import (
     IsProductCodeFreezer,
     IsProductColorReadOrManage,
     IsProductMasterReadOrManage,
+    IsMasterdataSettingsReadOrManage,
     IsProductResearchReadOrManage,
     IsProductStatusConfirmer,
     IsProductStatusEvaluator,
@@ -66,6 +67,7 @@ from .permissions import (
 from .serializers import (
     ProductBundleComponentSerializer,
     ProductCategorySerializer,
+    ProductCategoryBackgroundColorBulkSerializer,
     ProductColorSerializer,
     ProductAttributeSerializer,
     ProductLegacyItemSerializer,
@@ -82,6 +84,28 @@ from .status_services import confirm_recommendation, evaluate_mock_status, rejec
 
 def _serializer_context(request):
     return {"request": request}
+
+
+def _require_manage_scope(user, *permission_codes):
+    """Require an all/own create scope for the permission that granted access.
+
+    The product master workspace keeps backwards-compatible fallbacks (for
+    example, ``products.master.manage`` can administer categories and colors).
+    Checking only the most specific code after the request has already passed
+    the fallback permission class incorrectly returns 403 to those managers.
+    Keep the fallback explicit and still enforce the selected code's scope.
+    """
+    for permission_code in permission_codes:
+        if check_user_permission(user, permission_code):
+            require_create_scope(user, permission_code)
+            return
+    # Preserve the normal PermissionDenied response if the caller somehow
+    # reaches this helper without one of the route's accepted permissions.
+    require_create_scope(user, permission_codes[0])
+
+
+def _require_category_manage_scope(user):
+    return _require_manage_scope(user, "products.category.manage", "products.master.manage")
 
 
 # Product images deliberately use a narrow, tenant-scoped storage boundary.
@@ -394,7 +418,12 @@ def product_attribute_collection(request):
     if request.method == "GET":
         queryset = ProductAttribute.objects.filter(tenant=request.user.tenant)
         return success_response(ProductAttributeSerializer(queryset, many=True).data)
-    require_create_scope(request.user, "products.attribute.manage")
+    _require_manage_scope(
+        request.user,
+        "products.attribute.manage",
+        "products.specification.manage",
+        "products.master.manage",
+    )
     with transaction.atomic():
         existing = list(ProductAttribute.objects.select_for_update().filter(tenant=request.user.tenant).values_list("code", flat=True))
         next_code = next((str(number) for number in range(1, 10) if str(number) not in existing), None)
@@ -414,7 +443,7 @@ def product_attribute_detail(request, pk):
         return success_response(ProductAttributeSerializer(item).data)
     if request.method == "DELETE":
         if ProductSPU.objects.filter(tenant=request.user.tenant, season_code=item.code).exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "属性已被商品使用，不能删除。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "属性存在关联数据，请停用。", status=409)
         item.delete()
         return success_response({"deleted": True})
     serializer = ProductAttributeSerializer(item, data=request.data, partial=True, context=_serializer_context(request))
@@ -435,7 +464,7 @@ def product_category_collection(request):
         if parent_id.isdigit():
             queryset = queryset.filter(parent_id=int(parent_id))
         return success_response(ProductCategorySerializer(queryset, many=True).data)
-    require_create_scope(request.user, "products.category.manage")
+    _require_category_manage_scope(request.user)
     serializer = ProductCategorySerializer(data=request.data, context=_serializer_context(request))
     serializer.is_valid(raise_exception=True)
     item = serializer.save(tenant=request.user.tenant)
@@ -448,9 +477,9 @@ def product_category_detail(request, pk):
     item = get_object_or_404(ProductCategory, pk=pk, tenant=request.user.tenant)
     if request.method == "DELETE":
         if item.children.exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "请先删除下级分类。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "分类存在关联数据（含下级分类），请停用。", status=409)
         if item.products.exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "分类已被商品使用，不能删除。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "分类存在关联数据，请停用。", status=409)
         item.delete()
         return success_response({"deleted": True})
     if request.method == "GET":
@@ -459,6 +488,35 @@ def product_category_detail(request, pk):
     serializer.is_valid(raise_exception=True)
     item = serializer.save()
     return success_response(ProductCategorySerializer(item).data)
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsMasterdataSettingsReadOrManage])
+def product_category_background_colors(request):
+    queryset = ProductCategory.objects.filter(
+        tenant=request.user.tenant,
+        level=ProductCategory.Level.L2,
+    ).order_by("code", "id")
+    if request.method == "GET":
+        return success_response(ProductCategorySerializer(queryset, many=True).data)
+
+    serializer = ProductCategoryBackgroundColorBulkSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    items = serializer.validated_data["items"]
+    categories = {item.id: item for item in queryset.filter(id__in=[row["category_id"] for row in items])}
+    if len(categories) != len(items):
+        return error_response(
+            ErrorCode.VALIDATION_ERROR,
+            "One or more L2 product categories do not belong to the current tenant.",
+            status=400,
+        )
+
+    with transaction.atomic():
+        for row in items:
+            category = categories[row["category_id"]]
+            category.row_background_color = row["row_background_color"].upper()
+            category.save(update_fields=["row_background_color", "updated_at"])
+    return success_response(ProductCategorySerializer(queryset, many=True).data)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -488,7 +546,7 @@ def product_color_collection(request):
     if request.method == "GET":
         queryset = ProductColor.objects.filter(tenant=request.user.tenant)
         return success_response(ProductColorSerializer(queryset, many=True).data)
-    require_create_scope(request.user, "products.color.manage")
+    _require_manage_scope(request.user, "products.color.manage", "products.master.manage")
     serializer = ProductColorSerializer(data=request.data, context=_serializer_context(request))
     serializer.is_valid(raise_exception=True)
     item = serializer.save(tenant=request.user.tenant)
@@ -498,7 +556,7 @@ def product_color_collection(request):
 @api_view(["POST"])
 @permission_classes([IsProductColorReadOrManage])
 def import_standard_product_colors(request):
-    require_create_scope(request.user, "products.color.manage")
+    _require_manage_scope(request.user, "products.color.manage", "products.master.manage")
     created = updated = 0
     for code, name in STANDARD_COLORS:
         _, was_created = ProductColor.objects.update_or_create(
@@ -517,7 +575,7 @@ def product_color_detail(request, pk):
     item = get_object_or_404(ProductColor, pk=pk, tenant=request.user.tenant)
     if request.method == "DELETE":
         if ProductSKU.objects.filter(tenant=request.user.tenant, color_code=item.code).exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "颜色已被 SKU 使用，不能删除。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "颜色存在关联数据，请停用。", status=409)
         item.delete()
         return success_response({"deleted": True})
     if request.method == "GET":
@@ -605,6 +663,23 @@ def product_spu_collection(request):
     return success_response(ProductSPUSerializer(item).data, status=201)
 
 
+def _bulk_category_path(category):
+    """Resolve the hierarchy accepted by safe bulk catalog edits.
+
+    Automatic SPU/SKU coding still uses ``category_path`` and therefore
+    requires an L3 leaf.  A bulk catalog move may intentionally target an
+    active L2 node, especially for a not-yet-generated legacy item; return a
+    ``None`` L3 marker for that case while retaining the tenant/parent checks.
+    """
+    if category.level == ProductCategory.Level.L2:
+        if not category.parent_id or category.parent.level != ProductCategory.Level.L1:
+            raise DjangoValidationError("L2 category must belong to an L1 category.")
+        if category.parent.tenant_id != category.tenant_id:
+            raise DjangoValidationError("Category hierarchy must stay within one tenant.")
+        return category.parent, category, None
+    return category_path(category)
+
+
 @api_view(["POST"])
 @permission_classes([IsProductMasterReadOrManage])
 @transaction.atomic
@@ -646,8 +721,12 @@ def product_spu_bulk_update(request):
             )
             if category.level not in {ProductCategory.Level.L2, ProductCategory.Level.L3}:
                 raise ValueError
-            # category_path also verifies the complete same-tenant hierarchy.
-            category_path(category)
+            # ``category_path`` is intentionally strict for automatic SKU
+            # coding (which requires an L3 leaf).  Bulk catalog placement is
+            # also used by the legacy-detail workflow, where an active L2 is
+            # a valid owning category, so only require its parent hierarchy
+            # here.
+            _bulk_category_path(category)
         except (ProductCategory.DoesNotExist, DjangoValidationError, ValueError):
             return error_response(ErrorCode.VALIDATION_ERROR, "分类必须属于当前租户且为启用的二级或三级类目。", status=400)
 
@@ -667,7 +746,7 @@ def product_spu_bulk_update(request):
                 item.brand = fields["brand"]
                 updates.append("brand")
             if category is not None and item.category_node_id != category.id:
-                l1, l2, l3 = category_path(category)
+                l1, l2, l3 = _bulk_category_path(category)
                 item.category_node = category
                 item.category = category.name
                 item.l1_code = l1.code
@@ -855,14 +934,18 @@ def _prepare_legacy_dictionaries(item):
     category = item.category_node
     category.refresh_from_db(fields=["spec_dimensions", "updated_at"])
     dimensions = list(category.spec_dimensions or [])
+    dimensions_changed = False
     if not dimensions:
         dimensions = [{"code": "spec", "name": "规格", "values": []}]
+        dimensions_changed = True
     first = dict(dimensions[0])
     values = list(first.get("values") or [])
     if item.specification and item.specification != "0" and item.specification not in values:
         values.append(item.specification)
         first["values"] = values
         dimensions[0] = first
+        dimensions_changed = True
+    if dimensions_changed:
         category.spec_dimensions = dimensions
         category.save(update_fields=["spec_dimensions", "updated_at"])
 
@@ -912,8 +995,19 @@ def _sync_legacy_fields_to_sku(item, sku=None):
 @transaction.atomic
 def _generate_legacy_item(item, request):
     category = item.category_node
-    dimensions = category.spec_dimensions or []
-    spec_values = {dimensions[0].get("code", "spec"): item.specification} if dimensions and item.specification else {}
+    # `_prepare_legacy_dictionaries` refreshes the relation while adding the
+    # compatibility specification dimension.  Refresh here as well so this
+    # helper remains correct when called directly or when Django returns a
+    # separate relation instance from the request path.
+    category.refresh_from_db(fields=["spec_dimensions", "updated_at"])
+    # Legacy imports may stop at an active L2 category.  Treat its free-form
+    # specification as a single ``spec`` dimension so the generated SKU still
+    # has a stable, auditable code.  L3 categories retain their configured
+    # dimensions and the normal coding rules.
+    dimensions = category.spec_dimensions or [{"code": "spec"}]
+    spec_values = {
+        dimensions[0].get("code", "spec"): item.specification or "0"
+    } if dimensions else {}
     # Re-generating an already generated import row is an in-place update.
     # This preserves the stable SKU identifier even when a user edits the
     # legacy code/name/details before pressing Generate again.
@@ -942,18 +1036,39 @@ def _generate_legacy_item(item, request):
             category_node=category,
         ).first()
     if not spu:
-        spu_serializer = ProductSPUSerializer(
-            data={
-                "product_name": item.product_name,
-                "category_node": category.id,
-                "season_code": item.attribute_code or "0",
-                "legacy_spu_code": item.legacy_spu_code,
-                "product_type": "standard",
-            },
-            context=_serializer_context(request),
-        )
-        spu_serializer.is_valid(raise_exception=True)
-        spu = spu_serializer.save(tenant=request.user.tenant)
+        if category.level == ProductCategory.Level.L2:
+            # Automatic SPU coding deliberately requires an L3 leaf.  Legacy
+            # conversion is a compatibility path, so preserve L2 imports with
+            # an explicit non-coded identifier instead of rejecting the row.
+            parent = category.parent
+            if parent is None or parent.tenant_id != request.user.tenant_id:
+                raise DjangoValidationError("Legacy category hierarchy is invalid.")
+            spu = ProductSPU.objects.create(
+                tenant=request.user.tenant,
+                spu_code=f"LEGACY-{item.id}",
+                legacy_spu_code=item.legacy_spu_code,
+                product_name=item.product_name,
+                category=category.name,
+                category_node=category,
+                product_type=ProductSPU.ProductType.STANDARD,
+                season_code=item.attribute_code or "0",
+                l1_code=parent.code,
+                l2_code=category.code,
+                l3_code="",
+            )
+        else:
+            spu_serializer = ProductSPUSerializer(
+                data={
+                    "product_name": item.product_name,
+                    "category_node": category.id,
+                    "season_code": item.attribute_code or "0",
+                    "legacy_spu_code": item.legacy_spu_code,
+                    "product_type": "standard",
+                },
+                context=_serializer_context(request),
+            )
+            spu_serializer.is_valid(raise_exception=True)
+            spu = spu_serializer.save(tenant=request.user.tenant)
     sku_serializer = ProductSKUSerializer(
         data={
             "spu": spu.id,
@@ -1034,7 +1149,9 @@ def _product_detail_row_from_legacy(item):
         "attribute_code": item.attribute_code or "0",
         "color_code": item.color_code or (sku.color_code if sku is not None else ""),
         "specification": item.specification or (sku.specification if sku is not None else ""),
-        "purchase_price": item.purchase_price if item.purchase_price is not None else (sku.purchase_price if sku is not None else None),
+        "purchase_price": _detail_decimal(
+            item.purchase_price if item.purchase_price is not None else (sku.purchase_price if sku is not None else None)
+        ),
         # Physical/customs data belongs to the imported legacy row.  Do not
         # fall back to generated SKU values here: the detail bridge must keep
         # the source record auditable even if the generated SKU is edited.
@@ -1077,7 +1194,7 @@ def _product_detail_row_from_sku(sku):
         "attribute_code": spu.season_code or "0",
         "color_code": sku.color_code or "",
         "specification": sku.specification or "",
-        "purchase_price": sku.purchase_price,
+        "purchase_price": _detail_decimal(sku.purchase_price),
         "package_weight": _detail_decimal(sku.package_weight),
         "package_volume": _detail_decimal(sku.package_volume),
         "package_length_cm": _detail_decimal(sku.package_length_cm),
@@ -1316,6 +1433,15 @@ def product_detail_collection(request):
             | Q(generated_spu__product_name__icontains=search)
             | Q(generated_sku__sku_code__icontains=search)
             | Q(generated_sku__product_name__icontains=search)
+            | Q(category_node__name__icontains=search)
+            | Q(generated_spu__category_node__name__icontains=search)
+            | Q(color_code__icontains=search)
+            | Q(specification__icontains=search)
+            | Q(purchase_price__icontains=search)
+            | Q(package_weight__icontains=search)
+            | Q(package_volume__icontains=search)
+            | Q(origin_country__icontains=search)
+            | Q(hs_code__icontains=search)
         )
         legacy_queryset = legacy_queryset.filter(search_filter)
         sku_queryset = sku_queryset.filter(
@@ -1324,6 +1450,14 @@ def product_detail_collection(request):
             | Q(product_name__icontains=search)
             | Q(spu__spu_code__icontains=search)
             | Q(spu__product_name__icontains=search)
+            | Q(spu__category_node__name__icontains=search)
+            | Q(color_code__icontains=search)
+            | Q(specification__icontains=search)
+            | Q(purchase_price__icontains=search)
+            | Q(package_weight__icontains=search)
+            | Q(package_volume__icontains=search)
+            | Q(origin_country__icontains=search)
+            | Q(hs_code__icontains=search)
         )
 
     category_id = request.query_params.get("category_id", "").strip()
@@ -1495,9 +1629,9 @@ def product_detail_bulk_update(request):
             category = ProductCategory.objects.get(pk=int(category_value), tenant=tenant)
             if not category.is_active:
                 raise ValueError("Category must be active and belong to the current tenant.")
-            # Keep bulk edits aligned with single-item coding rules: only an
-            # active L2/L3 category with a valid hierarchy is usable.
-            category_path(category)
+            # Keep bulk edits tenant-scoped and allow an active L2 owner for
+            # legacy rows; automatic SKU coding remains L3-only elsewhere.
+            _bulk_category_path(category)
         except (TypeError, ValueError, ProductCategory.DoesNotExist, DjangoValidationError):
             return error_response(ErrorCode.VALIDATION_ERROR, "分类必须属于当前租户且为有效分类。", status=400)
 
@@ -1809,7 +1943,10 @@ def product_legacy_collection(request):
             "errors": errors,
             "duration_ms": round((time.monotonic() - started_at) * 1000),
         },
-        status=200,
+        # A newly accepted import is a resource-creation operation.  Keep
+        # retries/updates idempotent with the normal 200 response while
+        # exposing 201 for a first insert.
+        status=201 if created else 200,
     )
 
 
@@ -1859,11 +1996,21 @@ def product_legacy_generate(request, pk):
     item = get_object_or_404(ProductLegacyItem, pk=pk, tenant=request.user.tenant)
     category = item.category_node
     try:
-        valid_category = bool(category and category.is_active and category_path(category))
+        # Automatic coding requires an L3 leaf, but legacy data commonly has
+        # only an active L2 owner.  The compatibility generator supports both
+        # levels; `_generate_legacy_item` uses a deterministic LEGACY SPU code
+        # for L2 rows while retaining normal L3 coding for new catalog data.
+        valid_category = bool(
+            category
+            and category.tenant_id == request.user.tenant_id
+            and category.is_active
+            and category.level in {ProductCategory.Level.L2, ProductCategory.Level.L3}
+            and _bulk_category_path(category)
+        )
     except DjangoValidationError:
         valid_category = False
     if not valid_category:
-        return error_response(ErrorCode.VALIDATION_ERROR, "请选择启用的末级分类。", status=400)
+        return error_response(ErrorCode.VALIDATION_ERROR, "请选择启用的二级或末级分类。", status=400)
     if not item.color_code:
         return error_response(ErrorCode.VALIDATION_ERROR, "请选择颜色。", status=400)
     try:
@@ -1893,7 +2040,7 @@ def product_bundle_component_collection(request):
         )
         queryset = queryset.filter(bundle_sku_id__in=visible_skus.values("id"))
         return success_response(ProductBundleComponentSerializer(queryset, many=True).data)
-    require_create_scope(request.user, "products.bundle.manage")
+    _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
     serializer = ProductBundleComponentSerializer(data=request.data, context=_serializer_context(request))
     serializer.is_valid(raise_exception=True)
     item = serializer.save(tenant=request.user.tenant)

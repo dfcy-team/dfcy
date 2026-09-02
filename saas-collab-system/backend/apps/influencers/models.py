@@ -1,9 +1,12 @@
 from decimal import Decimal
+import re
+import unicodedata
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
+from django.db.models import OuterRef, Q
 from django.utils import timezone
 
 from apps.masterdata.models import StoreMaster
@@ -18,6 +21,31 @@ SUPPORTED_CURRENCY_CHOICES = (
     ("THB", "THB"),
     ("USD", "USD"),
 )
+
+
+def normalize_tiktok_username(value):
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return normalized.strip().lstrip("@").strip().lower()
+
+
+# TikTok's current UI generally documents letters, digits, periods, and
+# underscores.  Existing tenant data also contains handles with a hyphen
+# (usually imported from creator reports), so keep that legacy identity
+# addressable instead of rejecting it at the model boundary.  The value is
+# still normalized, length-limited, and tenant-scoped before it is used as an
+# identity key.
+TIKTOK_USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{1,255}$")
+
+
+def is_valid_tiktok_username(value):
+    return bool(TIKTOK_USERNAME_PATTERN.fullmatch(normalize_tiktok_username(value)))
+
+
+def influencer_identity_key(*, influencer_id, platform, handle):
+    canonical_handle = normalize_tiktok_username(handle)
+    if str(platform or "").strip().lower() == "tiktok" and canonical_handle:
+        return ("tiktok", canonical_handle)
+    return ("profile", influencer_id)
 
 
 class ProtectedInfluencerQuerySet(models.QuerySet):
@@ -46,7 +74,7 @@ class Influencer(models.Model):
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=120)
     platform = models.CharField(max_length=40)
-    handle = models.CharField(max_length=120, blank=True)
+    handle = models.CharField(max_length=255, blank=True, db_comment="TikTok用户名")
     category = models.CharField(max_length=80, blank=True)
     follower_count = models.PositiveBigIntegerField(default=0)
     contact_name = models.CharField(max_length=80, blank=True)
@@ -62,6 +90,59 @@ class Influencer(models.Model):
     class Meta:
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant")]
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        update_fields = set(update_fields) if update_fields is not None else None
+        writes_identity = update_fields is None or bool({"handle", "platform"} & update_fields)
+
+        def save_identity():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
+            if self.pk:
+                persisted = type(self).objects.filter(pk=self.pk).values(
+                    "tenant_id", "handle", "platform"
+                ).first()
+                if persisted is not None and (
+                    persisted["handle"] != self.handle or persisted["platform"] != self.platform
+                ):
+                    locked = lock_influencer_identity_change(
+                        self,
+                        platform=self.platform,
+                        handle=self.handle,
+                    )
+                    old_identity_ids = getattr(locked, "_old_identity_ids", (self.pk,))
+                    canonical_handle = normalize_tiktok_username(self.handle)
+                    if str(self.platform or "").lower() == "tiktok" and canonical_handle:
+                        models.QuerySet.update(
+                            type(self).objects.filter(
+                                tenant_id=self.tenant_id,
+                                pk__in=old_identity_ids,
+                            ).exclude(pk=self.pk),
+                            platform=self.platform,
+                            handle=canonical_handle,
+                        )
+                        models.QuerySet.update(
+                            BdSampleAttributionSnapshot.objects.filter(
+                                tenant_id=self.tenant_id,
+                                influencer_id__in=old_identity_ids,
+                            ),
+                            creator_username=canonical_handle,
+                            updated_at=timezone.now(),
+                        )
+            if str(self.platform or "").lower() == "tiktok":
+                self.handle = normalize_tiktok_username(self.handle)
+                if self.handle and not is_valid_tiktok_username(self.handle):
+                    raise ValidationError({
+                        "handle": "TikTok username may contain only letters, numbers, periods, and underscores.",
+                    })
+                if update_fields is not None:
+                    kwargs["update_fields"] = update_fields | {"handle"}
+            return super(Influencer, self).save(*args, **kwargs)
+
+        if writes_identity:
+            with transaction.atomic():
+                return save_identity()
+        return super().save(*args, **kwargs)
 
 
 class TenantValidatedQuerySet(models.QuerySet):
@@ -149,6 +230,145 @@ class InfluencerRestriction(TenantValidatedModel):
             return super().save(*args, **kwargs)
 
 
+def influencer_identity_queryset(
+    influencer,
+    *,
+    platform=None,
+    handle=None,
+    for_update=False,
+):
+    """Return the tenant-scoped identity group, always retaining the current profile."""
+    if not influencer.pk:
+        return Influencer.objects.none()
+    platform = influencer.platform if platform is None else platform
+    handle = influencer.handle if handle is None else handle
+    canonical_handle = normalize_tiktok_username(handle)
+    identity_filter = Q(pk=influencer.pk)
+    if str(platform or "").lower() == "tiktok" and canonical_handle:
+        identity_filter |= Q(
+            platform__iexact="TikTok",
+            handle__iexact=canonical_handle,
+        )
+    queryset = Influencer.objects.filter(
+        tenant_id=influencer.tenant_id,
+    ).filter(identity_filter).order_by("pk")
+    return queryset.select_for_update() if for_update else queryset
+
+
+def lock_influencer_identity_change(influencer, *, platform, handle):
+    """Lock and validate the current and prospective TikTok identity groups."""
+    Tenant.objects.select_for_update().get(pk=influencer.tenant_id)
+    persisted = Influencer.objects.filter(
+        tenant_id=influencer.tenant_id,
+        pk=influencer.pk,
+    ).values("platform", "handle").first()
+    old_identity_ids = set(
+        influencer_identity_queryset(
+            influencer,
+            platform=persisted["platform"] if persisted else influencer.platform,
+            handle=persisted["handle"] if persisted else influencer.handle,
+        ).values_list("pk", flat=True)
+    )
+    identity_ids = set(old_identity_ids)
+    canonical_handle = normalize_tiktok_username(handle)
+    if str(platform or "").lower() == "tiktok" and canonical_handle:
+        identity_ids.update(
+            Influencer.objects.filter(
+                tenant_id=influencer.tenant_id,
+                platform__iexact="TikTok",
+                handle__iexact=canonical_handle,
+            ).values_list("pk", flat=True)
+        )
+    identity_ids.add(influencer.pk)
+    locked = list(
+        Influencer.objects.select_for_update()
+        .filter(tenant_id=influencer.tenant_id, pk__in=sorted(identity_ids))
+        .order_by("pk")
+    )
+    # Re-read after acquiring row locks. Influencer writes also lock the tenant,
+    # so the identity set is stable for the remainder of this transaction.
+    final_filter = Q(pk__in=identity_ids)
+    if str(platform or "").lower() == "tiktok" and canonical_handle:
+        final_filter |= Q(
+            platform__iexact="TikTok",
+            handle__iexact=canonical_handle,
+        )
+    final_ids = set(
+        Influencer.objects.filter(
+            tenant_id=influencer.tenant_id,
+        ).filter(final_filter).values_list("pk", flat=True)
+    )
+    if final_ids != identity_ids:
+        locked = list(
+            Influencer.objects.select_for_update()
+            .filter(tenant_id=influencer.tenant_id, pk__in=sorted(final_ids))
+            .order_by("pk")
+        )
+    if InfluencerRestriction.objects.filter(
+        tenant_id=influencer.tenant_id,
+        influencer_id__in=final_ids,
+        is_blacklisted=True,
+    ).exists():
+        raise ValidationError({
+            "handle": "Blacklisted influencer identities cannot change handle or platform.",
+        })
+    selected = next(item for item in locked if item.pk == influencer.pk)
+    selected._old_identity_ids = tuple(sorted(old_identity_ids | {influencer.pk}))
+    return selected
+
+
+def influencer_has_active_restriction(
+    influencer,
+    *,
+    platform=None,
+    handle=None,
+    for_update=False,
+):
+    identity_queryset = influencer_identity_queryset(
+        influencer,
+        platform=platform,
+        handle=handle,
+        for_update=for_update,
+    )
+    identity_ids = identity_queryset.values_list("pk", flat=True)
+    if for_update:
+        identity_ids = list(identity_ids)
+    return InfluencerRestriction.objects.filter(
+        tenant_id=influencer.tenant_id,
+        influencer_id__in=identity_ids,
+        is_blacklisted=True,
+    ).exists()
+
+
+def _assert_influencer_identity_change_allowed(influencer, persisted):
+    if influencer_has_active_restriction(
+        influencer,
+        platform=persisted["platform"],
+        handle=persisted["handle"],
+        for_update=True,
+    ):
+        raise ValidationError({
+            "handle": "Blacklisted influencer identities cannot change handle or platform.",
+        })
+
+
+def active_influencer_restriction_subquery(tenant):
+    tenant_id = getattr(tenant, "pk", tenant)
+    identity_match = (
+        Q(influencer__tenant_id=tenant_id)
+        & Q(influencer__platform__iexact="TikTok")
+        & Q(influencer__platform__iexact=OuterRef("platform"))
+        & Q(influencer__handle__iexact=OuterRef("handle"))
+        & Q(influencer__handle__gt="")
+    )
+    return InfluencerRestriction.objects.filter(
+        tenant_id=tenant_id,
+        is_blacklisted=True,
+    ).filter(
+        Q(influencer_id=OuterRef("pk")) | identity_match
+    )
+
+
 class OutreachTask(StateMachineTenantModel):
     protected_state_fields = (
         "status",
@@ -224,7 +444,29 @@ class OutreachTask(StateMachineTenantModel):
     def linked_count(self):
         if not self.pk:
             return 0
-        return self.targets.filter(tenant_id=self.tenant_id, is_deleted=False).count()
+        prefetched_targets = getattr(self, "_active_targets", None)
+        if prefetched_targets is not None:
+            rows = (
+                (target.influencer_id, target.influencer.platform, target.influencer.handle)
+                for target in prefetched_targets
+            )
+        else:
+            rows = self.targets.filter(
+                tenant_id=self.tenant_id,
+                is_deleted=False,
+            ).values_list(
+                "influencer_id",
+                "influencer__platform",
+                "influencer__handle",
+            )
+        return len({
+            influencer_identity_key(
+                influencer_id=influencer_id,
+                platform=platform,
+                handle=handle,
+            )
+            for influencer_id, platform, handle in rows
+        })
 
 
 class OutreachTarget(StateMachineTenantModel):
@@ -331,16 +573,14 @@ class SampleFulfillment(StateMachineTenantModel):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
-        PROCESSING = "processing", "Processing"
         SHIPPED = "shipped", "Shipped"
         DELIVERED = "delivered", "Delivered"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
-        CREATING = "creating", "Creating"
         PUBLISHED = "published", "Published"
         LIVE_CREATOR = "live_creator", "Live creator"
         OVERDUE = "overdue", "Overdue"
-        BLANK = "blank", "Blank"
+        BLACKLISTED = "blacklisted", "Blacklisted"
 
     fulfillment_no = models.CharField(max_length=80)
     request_key = models.CharField(max_length=128)
@@ -464,6 +704,15 @@ class SampleFulfillment(StateMachineTenantModel):
                 raise ValidationError({"influencer": "Influencer must match the outreach target."})
             if target["is_deleted"] and self._state.adding:
                 raise ValidationError({"outreach_target": "Deleted outreach targets cannot receive samples."})
+
+
+# ``processing`` was part of the pre-baseline fulfillment state machine and is
+# still present in some imported workflow records.  Migration 0012 maps legacy
+# rows to the canonical lifecycle statuses and deliberately removes it from
+# the advertised choices, but retaining a non-enum compatibility constant lets
+# old service callers inspect and transition those records without changing
+# the current database schema or public choice list.
+SampleFulfillment.Status.PROCESSING = "processing"
 
 
 class SampleItem(TenantValidatedModel):
@@ -752,7 +1001,7 @@ class BdSampleAttributionSnapshot(TenantValidatedModel):
         on_delete=models.PROTECT,
         related_name="bd_sample_attribution_snapshots",
     )
-    creator_username = models.CharField(max_length=160)
+    creator_username = models.CharField(max_length=255, blank=True)
     shop_abbr = models.CharField(max_length=80)
     site = models.CharField(max_length=32)
     product_id = models.CharField(max_length=160, blank=True)

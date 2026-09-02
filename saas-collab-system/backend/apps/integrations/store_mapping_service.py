@@ -150,4 +150,3 @@ def update_store_mapping(record, *, actor, status=None, store_timezone=None, cur
         {"previous": previous, "changed": changed, "platform_store_id": record.platform_store_id},
     )
     return record
-

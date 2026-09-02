@@ -4,6 +4,7 @@ from django.db import connection
 from django.db.models import Count
 from django.utils import timezone
 
+from apps.audit.models import NotificationMessage
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
 from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_sync_jobs, filter_sync_runs
 
@@ -11,11 +12,13 @@ from .models import (
     MarketplaceStoreAuthorization,
     PlatformIntegrationConfig,
     SyncCheckpoint,
+    SyncAlertIncident,
     SyncJob,
     SyncRun,
     WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema, integration_platform_key, platform_api_type_options
+from .capability_gate import sync_source_health
 
 
 RESOURCE_DESTINATIONS = {
@@ -179,12 +182,16 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         and job.integration_config.credential_status in {"referenced", "verified"}
     )
     authorization_ready = subject["authorization_status"] in {"authorized", "active"}
+    source_health = sync_source_health(job)
+    capability_ready = source_health["state"] in {"ready", "not_required"}
     if not job.is_enabled:
         health_state = "disabled"
     elif subject["subject_type"] == "unbound" or not authorization_ready:
         health_state = "authorization"
     elif not config_ready:
         health_state = "configuration"
+    elif not capability_ready:
+        health_state = "capability"
     elif schedule_state == "running":
         health_state = "running"
     elif job.status == SyncJob.Status.FAILED or (latest_run and latest_run.status == SyncRun.Status.FAILED):
@@ -200,6 +207,12 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         blocked_reason = "主体授权当前不可用"
     elif not config_ready:
         blocked_reason = "开发者凭据尚未就绪"
+    elif source_health["state"] == "capability_missing":
+        blocked_reason = "所需只读能力尚未启用"
+    elif source_health["state"] == "source_not_selected":
+        blocked_reason = "当前任务授权不是最高优先级来源"
+    elif source_health["state"] == "unsupported":
+        blocked_reason = "资源类型没有可执行的能力映射"
     row = {
         "id": job.id,
         "platform": job.integration_config.platform,
@@ -238,6 +251,10 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "schedule_state": schedule_state,
         "health_state": health_state,
         "blocked_reason": blocked_reason,
+        "capability_state": source_health["state"],
+        "capability_code": source_health.get("capability_code", ""),
+        "source_priority": source_health.get("source_priority"),
+        "selected_authorization_id": source_health.get("selected_authorization_id"),
         "latest_run_status": latest_run.status if latest_run else "",
         "latest_run_id": latest_run.run_id if latest_run else "",
         "latest_started_at": _format_datetime(latest_run.started_at) if latest_run else None,
@@ -526,6 +543,9 @@ def integration_workspace(user, mode, params):
     page = min(max(int(params.get("page", 1)), 1), page_count)
     page_rows = filtered[(page - 1) * page_size : page * page_size]
     allowed_config_ids = [config.id for config in configs]
+    scoped_incidents = SyncAlertIncident.objects.filter(
+        tenant=user.tenant, sync_job_id__in=[job.id for job in jobs]
+    )
     summary = {
         "config_count": len(configs),
         "ready_credential_count": sum(
@@ -551,6 +571,16 @@ def integration_workspace(user, mode, params):
         "retry_waiting_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "retry_waiting"),
         "retry_exhausted_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "retry_exhausted"),
         "stale_running_job_count": sum(1 for job in jobs if job.status == SyncJob.Status.RUNNING and (not job.lock_expires_at or job.lock_expires_at <= timezone.now())),
+        "capability_blocked_job_count": sum(1 for row in job_rows.values() if row["health_state"] == "capability"),
+        "open_sync_alert_count": NotificationMessage.objects.filter(
+            tenant=user.tenant,
+            message_type__in=[f"sync_job_failure:{job.id}" for job in jobs],
+            status__in=(NotificationMessage.Status.UNREAD, NotificationMessage.Status.READ),
+        ).count(),
+        "open_sync_incident_count": scoped_incidents.filter(status=SyncAlertIncident.Status.OPEN).count(),
+        "acknowledged_sync_incident_count": scoped_incidents.filter(
+            status=SyncAlertIncident.Status.ACKNOWLEDGED
+        ).count(),
     }
     eligible_subjects = {
         (row["subject_type"], row["subject_code"])

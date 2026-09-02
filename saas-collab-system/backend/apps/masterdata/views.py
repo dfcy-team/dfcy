@@ -17,7 +17,9 @@ from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.ui_p2_scopes import filter_master_data, require_all_scope
 from apps.suppliers.models import SupplierTask
 
-from .models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
+from .models import PlatformMaster, PlatformSiteMaster, StatusChoices, StoreMaster, SupplierMaster
+from .platform_catalog import PLATFORM_CATALOG
+from .platform_site_mapping import apply_exact_mappings, mapping_preview
 from apps.accounts.models import CustomUser
 from apps.products.models import ProductCategory
 from .serializers import MODEL_BY_RESOURCE, SERIALIZER_BY_RESOURCE
@@ -37,6 +39,45 @@ def resource_contract(resource):
     if resource not in MODEL_BY_RESOURCE:
         raise NotFound("Unknown master-data resource.")
     return MODEL_BY_RESOURCE[resource], SERIALIZER_BY_RESOURCE[resource]
+
+
+def _instance_code(instance):
+    return getattr(instance, "code", None) or getattr(instance, "site_code", "")
+
+
+class PlatformCatalogView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "masterdata.view"
+
+    def get(self, request):
+        return success_response({"count": len(PLATFORM_CATALOG), "results": list(PLATFORM_CATALOG)})
+
+
+class PlatformSiteMigrationView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "masterdata.view"
+    write_permission_code = "masterdata.manage"
+
+    def get(self, request):
+        return success_response(mapping_preview(request.user.tenant))
+
+    def post(self, request):
+        require_all_scope(request.user, self.write_permission_code)
+        if not isinstance(request.data, dict) or set(request.data) != {"confirmed", "store_ids", "idempotency_key"}:
+            raise ValidationError("confirmed, store_ids and idempotency_key are required; no other fields are accepted.")
+        if request.data.get("confirmed") is not True:
+            raise ValidationError({"confirmed": "Explicit confirmation is required."})
+        store_ids = request.data.get("store_ids")
+        if not isinstance(store_ids, list) or not store_ids or any(not isinstance(value, int) or value < 1 for value in store_ids):
+            raise ValidationError({"store_ids": "A non-empty list of positive integer store IDs is required."})
+        if len(store_ids) != len(set(store_ids)):
+            raise ValidationError({"store_ids": "Store IDs must be unique."})
+        idempotency_key = str(request.data.get("idempotency_key") or "").strip()
+        if len(idempotency_key) < 8 or len(idempotency_key) > 100:
+            raise ValidationError({"idempotency_key": "Idempotency key must be 8 to 100 characters."})
+        return success_response(apply_exact_mappings(
+            tenant=request.user.tenant, user=request.user, store_ids=store_ids, idempotency_key=idempotency_key,
+        ))
 
 
 STORE_IMPORT_ALIASES = {
@@ -161,11 +202,19 @@ class MasterDataCollectionView(APIView):
         queryset = model.objects.filter(tenant=request.user.tenant)
         queryset = filter_master_data(request.user, queryset, self.read_permission_code, resource)
         if resource == "stores":
-            queryset = queryset.select_related("platform", "category", "operator", "bd", "leader")
+            queryset = queryset.select_related("platform", "platform_site", "category", "operator", "bd", "leader")
+        if resource == "warehouses":
+            queryset = queryset.select_related("service_platform")
+        if resource == "platform-sites":
+            queryset = queryset.select_related("platform")
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
-            search_filter = Q(code__icontains=search) | Q(name__icontains=search)
+            search_filter = (
+                Q(site_code__icontains=search) | Q(name__icontains=search)
+                if resource == "platform-sites"
+                else Q(code__icontains=search) | Q(name__icontains=search)
+            )
             if resource == "stores":
                 search_filter |= Q(platform_store_name__icontains=search) | Q(category__name__icontains=search)
             if resource == "sites":
@@ -202,7 +251,7 @@ class MasterDataCollectionView(APIView):
             action="create",
             object_type=resource,
             object_id=instance.pk,
-            after_data={"code": instance.code, "status": instance.status},
+            after_data={"code": _instance_code(instance), "status": instance.status},
         )
         return success_response(serializer_class(instance, context={"request": request}).data, status=201)
 
@@ -225,7 +274,7 @@ class MasterDataDetailView(APIView):
 
     def patch(self, request, resource, pk):
         instance = self.get_object(request, resource, pk)
-        before = {"code": instance.code, "status": instance.status}
+        before = {"code": _instance_code(instance), "status": instance.status}
         _, serializer_class = resource_contract(resource)
         serializer = serializer_class(
             instance, data=request.data, partial=True, context={"request": request}
@@ -240,7 +289,7 @@ class MasterDataDetailView(APIView):
             object_type=resource,
             object_id=instance.pk,
             before_data=before,
-            after_data={"code": instance.code, "status": instance.status},
+            after_data={"code": _instance_code(instance), "status": instance.status},
         )
         return success_response(serializer.data)
 
@@ -264,6 +313,10 @@ class MasterDataStatusView(APIView):
             status=StatusChoices.ACTIVE
         ).exists():
             raise StateConflict("An active store still references this platform.")
+        if status == StatusChoices.INACTIVE and isinstance(instance, PlatformSiteMaster) and instance.stores.filter(
+            status=StatusChoices.ACTIVE
+        ).exists():
+            raise StateConflict("An active store still references this platform site.")
         if status == StatusChoices.INACTIVE and isinstance(instance, SupplierMaster) and SupplierTask.objects.filter(
             tenant=request.user.tenant,
             supplier_id=instance.pk,

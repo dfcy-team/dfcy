@@ -68,11 +68,30 @@ function stableHash(value) {
   return Math.abs(hash);
 }
 
+const DEFAULT_CATEGORY_BACKGROUNDS = ['#f0f9ff', '#f5f3ff', '#f0fdf4', '#fff1f2', '#f0fdfa'];
+
+export function defaultCategoryBackgroundColor(category) {
+  if (!category) return '';
+  if (/床上用品/.test(`${category.name || ''}${category.code || ''}`)) return '#fff4e6';
+  return DEFAULT_CATEGORY_BACKGROUNDS[stableHash(category.id || category.code || category.name) % DEFAULT_CATEGORY_BACKGROUNDS.length];
+}
+
+export function categoryBackgroundColor(row, categories = []) {
+  const category = l2Category(row, categories);
+  return category?.row_background_color || defaultCategoryBackgroundColor(category);
+}
+
 /** Return an Element Plus row class for a product's second-level category. */
 export function categoryRowClass(row, categories = []) {
   const category = l2Category(row, categories);
   if (!category) return '';
+  if (category.row_background_color) return 'product-category-custom';
   if (/床上用品/.test(`${category.name || ''}${category.code || ''}`)) return 'product-category-tone-warm';
   return `product-category-tone-${stableHash(category.id || category.code || category.name) % 5}`;
 }
 
+export function categoryRowStyle(row, categories = []) {
+  const category = l2Category(row, categories);
+  if (!category?.row_background_color) return {};
+  return { '--product-category-row-background': category.row_background_color };
+}

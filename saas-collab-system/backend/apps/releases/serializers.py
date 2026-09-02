@@ -127,6 +127,8 @@ class ReleaseContractDetailSerializer(serializers.ModelSerializer):
 
 
 class MiniAppReleaseArtifactSerializer(serializers.ModelSerializer):
+    """Safe, read-only artifact projection for the mini-app channel."""
+
     class Meta:
         model = ReleaseArtifact
         fields = (
@@ -140,6 +142,8 @@ class MiniAppReleaseArtifactSerializer(serializers.ModelSerializer):
 
 
 class MiniAppReleaseGateResultSerializer(serializers.ModelSerializer):
+    """Gate evidence without internal actor/request identifiers."""
+
     class Meta:
         model = ReleaseGateResult
         fields = (
@@ -166,6 +170,8 @@ class MiniAppReleaseApprovalSerializer(serializers.ModelSerializer):
 
 
 class MiniAppReleaseContractDetailSerializer(serializers.ModelSerializer):
+    """Detail contract intentionally omits audit trail and actor identities."""
+
     artifact = MiniAppReleaseArtifactSerializer(read_only=True)
     gate_results = MiniAppReleaseGateResultSerializer(many=True, read_only=True)
     approvals = MiniAppReleaseApprovalSerializer(many=True, read_only=True)

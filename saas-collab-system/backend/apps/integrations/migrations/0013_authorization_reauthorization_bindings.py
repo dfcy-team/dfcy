@@ -47,4 +47,3 @@ class Migration(migrations.Migration):
             name="uniq_market_store_tenant_link",
         ),
     ]
-

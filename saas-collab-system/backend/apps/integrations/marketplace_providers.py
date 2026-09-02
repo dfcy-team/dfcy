@@ -240,4 +240,3 @@ def get_oauth_provider(platform):
     if provider is None:
         raise ValidationError({"platform": "Unsupported marketplace OAuth platform."})
     return provider
-

@@ -20,7 +20,13 @@ from .models import (
     ProductStatusSnapshot,
     ProductStatusTransition,
 )
-from .coding_services import SEASON_CODES, allocate_spu_code, build_sku_code, category_path
+from .coding_services import (
+    SEASON_CODES,
+    allocate_legacy_sku_code,
+    allocate_spu_code,
+    build_sku_code,
+    category_path,
+)
 from .category_metadata import category_metadata_from_spu
 
 
@@ -31,9 +37,12 @@ class ProductCategorySerializer(serializers.ModelSerializer):
         model = ProductCategory
         fields = (
             "id", "tenant_id", "parent", "level", "code", "name", "english_name",
-            "platform_category_id", "spec_dimensions", "is_active", "created_at", "updated_at",
+            "platform_category_id", "spec_dimensions", "row_background_color", "is_active", "created_at", "updated_at",
         )
-        read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
+        # Row colours are managed through the dedicated foundation-settings
+        # endpoint, so ordinary category CRUD cannot bypass its permission
+        # boundary.
+        read_only_fields = ("id", "tenant_id", "row_background_color", "created_at", "updated_at")
 
     def validate_parent(self, value):
         if value and value.tenant_id != self.context["request"].user.tenant_id:
@@ -52,9 +61,22 @@ class ProductCategorySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Specification dimension codes must be unique.")
         return value
 
+    def validate_row_background_color(self, value):
+        if value and not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+            raise serializers.ValidationError("Row background color must use #RRGGBB format.")
+        return value
+
     def validate(self, attrs):
         level = attrs.get("level", getattr(self.instance, "level", None))
         parent = attrs.get("parent", getattr(self.instance, "parent", None))
+        row_background_color = attrs.get(
+            "row_background_color",
+            getattr(self.instance, "row_background_color", ""),
+        )
+        if row_background_color and level != ProductCategory.Level.L2:
+            raise serializers.ValidationError(
+                {"row_background_color": "Row background color can only be configured on an L2 product category."}
+            )
         if self.instance:
             immutable = ("parent", "level", "code")
             changed = [field for field in immutable if field in attrs and attrs[field] != getattr(self.instance, field)]
@@ -370,6 +392,21 @@ class ProductDetailEditMixin:
         return attrs
 
 
+class ProductCategoryBackgroundColorItemSerializer(serializers.Serializer):
+    category_id = serializers.IntegerField(min_value=1)
+    row_background_color = serializers.RegexField(r"^#[0-9A-Fa-f]{6}$", allow_blank=True)
+
+
+class ProductCategoryBackgroundColorBulkSerializer(serializers.Serializer):
+    items = ProductCategoryBackgroundColorItemSerializer(many=True, allow_empty=True)
+
+    def validate_items(self, value):
+        ids = [item["category_id"] for item in value]
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError("Category IDs must be unique.")
+        return value
+
+
 class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     # Declared on the concrete serializer because DRF does not collect fields
@@ -544,6 +581,16 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
                 color_code=validated_data["color_code"],
                 spec_values=spec_values,
             )
+            legacy_sku_code = str(validated_data.get("legacy_sku_code") or "").strip()
+            if legacy_sku_code:
+                # Legacy imports may share the same colour/specification.  A
+                # deterministic suffix keeps the generated SKU unique while
+                # preserving retries and the old-code mapping.
+                sku_code = allocate_legacy_sku_code(
+                    tenant=validated_data["tenant"],
+                    base_code=sku_code,
+                    legacy_sku_code=legacy_sku_code,
+                )
             validated_data["sku_code"] = sku_code
             validated_data["specification"] = specification
             validated_data["spec_values"] = normalized

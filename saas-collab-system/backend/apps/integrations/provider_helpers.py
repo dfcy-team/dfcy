@@ -15,4 +15,3 @@ class ProviderRequestId:
             return "req-****"
         digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
         return f"req-{digest[-6:]}"
-

@@ -53,4 +53,3 @@ def raise_oauth_error(controlled_code, detail=None):
     if controlled_code not in OAUTH_ERROR_SPECS:
         controlled_code = OAUTH_CALLBACK_REJECTED
     raise OAuthFlowError(controlled_code, detail)
-

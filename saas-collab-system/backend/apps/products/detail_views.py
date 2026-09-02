@@ -7,6 +7,7 @@ from apps.common.responses import success_response
 from apps.permissions.ui_p5_scopes import filter_product_skus
 
 from .models import ProductLegacyItem, ProductSKU
+from .serializers import ProductDetailRowSerializer
 from .permissions import IsProductMasterReadOrManage
 
 
@@ -95,5 +96,5 @@ def product_detail_collection(request):
         "count": paginator.count,
         "next": _page_url(request, page_obj.next_page_number(), page_size) if page_obj.has_next() else None,
         "previous": _page_url(request, page_obj.previous_page_number(), page_size) if page_obj.has_previous() else None,
-        "results": list(page_obj.object_list),
+        "results": ProductDetailRowSerializer(page_obj.object_list, many=True).data,
     })

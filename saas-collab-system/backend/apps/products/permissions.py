@@ -81,10 +81,46 @@ class IsProductCategoryReadOrManage(ProductBusinessPermission):
     read_permission_code = "products.category.view"
     write_permission_code = "products.category.manage"
 
+    def has_permission(self, request, view):
+        # Category dictionaries are part of the product master workspace.  A
+        # tenant product-master manager may therefore administer them even
+        # when the optional category-specific permission has not been seeded.
+        user = request.user
+        codes = (
+            ("products.category.view", "products.master.view")
+            if request.method == "GET"
+            else ("products.category.manage", "products.master.manage")
+        )
+        return bool(
+            user
+            and user.is_authenticated
+            and user.user_type == CustomUser.UserType.INTERNAL
+            and any(check_user_permission(user, code) and get_permission_data_scopes(user, code) for code in codes)
+        )
+
+
+class IsMasterdataSettingsReadOrManage(ProductBusinessPermission):
+    read_permission_code = "masterdata.settings.view"
+    write_permission_code = "masterdata.settings.manage"
+
 
 class IsProductColorReadOrManage(ProductBusinessPermission):
     read_permission_code = "products.color.view"
     write_permission_code = "products.color.manage"
+
+    def has_permission(self, request, view):
+        user = request.user
+        codes = (
+            ("products.color.view", "products.master.view")
+            if request.method == "GET"
+            else ("products.color.manage", "products.master.manage")
+        )
+        return bool(
+            user
+            and user.is_authenticated
+            and user.user_type == CustomUser.UserType.INTERNAL
+            and any(check_user_permission(user, code) and get_permission_data_scopes(user, code) for code in codes)
+        )
 
 
 class IsProductAttributeReadOrManage(ProductBusinessPermission):
@@ -94,9 +130,9 @@ class IsProductAttributeReadOrManage(ProductBusinessPermission):
     def has_permission(self, request, view):
         user = request.user
         codes = (
-            ("products.attribute.view", "products.specification.view")
+            ("products.attribute.view", "products.specification.view", "products.master.view")
             if request.method == "GET"
-            else ("products.attribute.manage", "products.specification.manage")
+            else ("products.attribute.manage", "products.specification.manage", "products.master.manage")
         )
         return bool(
             user
@@ -109,6 +145,20 @@ class IsProductAttributeReadOrManage(ProductBusinessPermission):
 class IsProductBundleReadOrManage(ProductBusinessPermission):
     read_permission_code = "products.bundle.view"
     write_permission_code = "products.bundle.manage"
+
+    def has_permission(self, request, view):
+        user = request.user
+        codes = (
+            ("products.bundle.view", "products.master.view")
+            if request.method == "GET"
+            else ("products.bundle.manage", "products.master.manage")
+        )
+        return bool(
+            user
+            and user.is_authenticated
+            and user.user_type == CustomUser.UserType.INTERNAL
+            and any(check_user_permission(user, code) and get_permission_data_scopes(user, code) for code in codes)
+        )
 
 
 class IsProductCodeFreezer(ProductBusinessPermission):

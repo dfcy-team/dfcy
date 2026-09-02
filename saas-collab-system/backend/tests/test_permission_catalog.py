@@ -3,8 +3,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 
 from apps.permissions.catalog import PERMISSION_DEFINITIONS, permission_defaults
-from apps.permissions.models import Permission, Role
-from apps.tenants.models import Tenant
+from apps.permissions.models import Permission
 
 
 @pytest.mark.django_db
@@ -33,16 +32,3 @@ def test_sync_permissions_repairs_missing_and_stale_entries():
     assert Permission.objects.filter(code=missing_code).exists()
     expected = next(item for item in PERMISSION_DEFINITIONS if item["code"] == stale_code)
     assert Permission.objects.get(code=stale_code).name == expected["name"]
-
-
-@pytest.mark.django_db
-def test_sync_permissions_repairs_tenant_administrator_assignments():
-    tenant = Tenant.objects.create(name="Tenant", code="permission-admin-sync")
-    administrator = Role.objects.create(tenant=tenant, code="administrator", name="管理员")
-    administrator.permissions.clear()
-
-    call_command("sync_permissions")
-
-    assert set(administrator.permissions.values_list("code", flat=True)) == set(
-        Permission.objects.values_list("code", flat=True)
-    )

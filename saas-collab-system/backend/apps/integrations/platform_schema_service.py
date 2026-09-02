@@ -150,6 +150,7 @@ def integration_platform_key(*, platform_type="", code="", name=""):
         "shopee": "shopee",
         "tiktok": "tiktok",
         "tiktokshop": "tiktok",
+        "myjf": "jifeng_wms",
         "jifengwms": "jifeng_wms",
         "极风wms": "jifeng_wms",
     }
@@ -211,4 +212,3 @@ def validate_platform_config(platform, values):
         if field.get("required") and not str(values.get(field["key"]) or "").strip():
             raise ValidationError({"platform_config": f"{field['key']} is required."})
     return {key: str(value).strip() for key, value in values.items()}
-

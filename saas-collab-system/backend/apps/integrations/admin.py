@@ -12,6 +12,7 @@ from .models import (
     OAuthStateSession,
     PlatformIntegrationConfig,
     SyncCursor,
+    SyncAlertIncident,
     SyncJob,
     SyncRun,
     WebhookEvent,
@@ -142,6 +143,13 @@ class SyncRunAdmin(admin.ModelAdmin):
     list_display = ("tenant", "sync_job", "run_id", "status", "fetched_count", "failed_count", "retry_count")
     list_filter = ("status", "tenant")
     search_fields = ("run_id", "idempotency_key", "error_code", "tenant__code")
+
+
+@admin.register(SyncAlertIncident)
+class SyncAlertIncidentAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "sync_job", "status", "assignee", "occurrence_count", "updated_at")
+    list_filter = ("status", "tenant")
+    search_fields = ("sync_job__integration_config__account_alias", "last_error_code", "assignee__username")
 
 
 @admin.register(SyncCursor)

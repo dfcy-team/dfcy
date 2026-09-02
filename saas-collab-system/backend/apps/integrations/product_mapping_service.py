@@ -270,4 +270,3 @@ def sku_candidates_for_mapping(record):
     """Candidate SKUs are always restricted to the mapping tenant."""
 
     return ProductSKU.objects.filter(tenant_id=record.tenant_id).order_by("sku_code")
-

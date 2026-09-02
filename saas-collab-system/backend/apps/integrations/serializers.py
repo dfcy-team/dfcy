@@ -4,6 +4,7 @@ from django.conf import settings
 from rest_framework import serializers
 
 from .models import (
+    ConnectionCapability,
     IntegrationAuditLog,
     MarketplaceProductMapping,
     MarketplaceStoreAuthorization,
@@ -11,7 +12,9 @@ from .models import (
     PlatformChoices,
     PlatformIntegrationConfig,
     SyncJob,
+    SyncAlertIncident,
     SyncRun,
+    WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema, validate_platform_config
 
@@ -42,6 +45,37 @@ def _is_approved_callback_transport(callback_url, environment, platform):
         and not parsed.query
         and not parsed.fragment
     )
+
+
+def validate_marketplace_callback_url(callback_url, *, environment, platform):
+    """Validate a callback URL against transport, registration and allowlist policy."""
+
+    callback_url = serializers.URLField(max_length=500).run_validation(callback_url)
+    if not _is_approved_callback_transport(callback_url, environment, platform):
+        raise serializers.ValidationError(
+            "Callback URL must use HTTPS; controlled Pilot testing may use only the exact "
+            "http://127.0.0.1:8000 marketplace callback."
+        )
+    redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
+    expected_callback = {
+        PlatformChoices.LAZADA: getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
+        PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
+        PlatformChoices.TIKTOK: getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
+    }.get(platform, "")
+    if expected_callback and callback_url != expected_callback:
+        raise serializers.ValidationError("Callback URL does not match the platform registration.")
+    if redirect_allowlist and callback_url not in redirect_allowlist:
+        raise serializers.ValidationError("Callback URL is not in the approved allowlist.")
+    if (
+        environment
+        in {
+            PlatformIntegrationConfig.Environment.PILOT,
+            PlatformIntegrationConfig.Environment.PRODUCTION,
+        }
+        and not redirect_allowlist
+    ):
+        raise serializers.ValidationError("Live callback allowlist approval is not configured.")
+    return callback_url
 
 
 class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
@@ -148,34 +182,21 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         callback_url = attrs.get("callback_url", getattr(self.instance, "callback_url", ""))
         if platform in marketplace_platforms and not callback_url:
             raise serializers.ValidationError({"callback_url": "Platform callback URL is required."})
-        if callback_url and not _is_approved_callback_transport(callback_url, environment, platform):
-            raise serializers.ValidationError(
-                {
-                    "callback_url": (
+        if callback_url:
+            try:
+                if platform in marketplace_platforms:
+                    attrs["callback_url"] = validate_marketplace_callback_url(
+                        callback_url,
+                        environment=environment,
+                        platform=platform,
+                    )
+                elif not _is_approved_callback_transport(callback_url, environment, platform):
+                    raise serializers.ValidationError(
                         "Callback URL must use HTTPS; controlled Pilot testing may use only the exact "
                         "http://127.0.0.1:8000 marketplace callback."
                     )
-                }
-            )
-        redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
-        expected_callback = {
-            PlatformChoices.LAZADA: getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
-            PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
-            PlatformChoices.TIKTOK: getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
-        }.get(platform, "")
-        if expected_callback and callback_url != expected_callback:
-            raise serializers.ValidationError({"callback_url": "Callback URL does not match the platform registration."})
-        if callback_url and redirect_allowlist and callback_url not in redirect_allowlist:
-            raise serializers.ValidationError({"callback_url": "Callback URL is not in the approved allowlist."})
-        if (
-            platform in marketplace_platforms
-            and environment in {
-                PlatformIntegrationConfig.Environment.PILOT,
-                PlatformIntegrationConfig.Environment.PRODUCTION,
-            }
-            and not redirect_allowlist
-        ):
-            raise serializers.ValidationError({"callback_url": "Live callback allowlist approval is not configured."})
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"callback_url": exc.detail}) from exc
         connect_timeout = attrs.get(
             "connect_timeout_seconds", getattr(self.instance, "connect_timeout_seconds", 3)
         )
@@ -200,6 +221,23 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
                 {"status": "Production configs can only be disabled or pending review in phase 2."}
             )
         return attrs
+
+
+class ReadinessContractRepairSerializer(serializers.Serializer):
+    """Validate the explicit confirmation used by the readiness contract action."""
+
+    confirm = serializers.BooleanField(required=True)
+    dry_run = serializers.BooleanField(required=False, default=False)
+    expected_version = serializers.IntegerField(required=True, min_value=1)
+
+
+class ReadonlyApprovalSerializer(serializers.Serializer):
+    """Validate the small, non-secret production-readonly state transition."""
+
+    approved = serializers.BooleanField(required=True)
+    confirm = serializers.BooleanField(required=True)
+    expected_version = serializers.IntegerField(required=True, min_value=1)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=240, trim_whitespace=True)
 
 
 class RotateCredentialsSerializer(serializers.Serializer):
@@ -262,6 +300,7 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
     store_name = serializers.CharField(source="store.name", read_only=True)
     created_by_id = serializers.IntegerField(read_only=True)
     updated_by_id = serializers.IntegerField(read_only=True)
+    capabilities_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = MarketplaceStoreAuthorization
@@ -288,8 +327,49 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
             "updated_by_id",
             "created_at",
             "updated_at",
+            "capabilities_summary",
         )
         read_only_fields = fields
+
+    def get_capabilities_summary(self, obj):
+        items = list(obj.connection_capabilities.all())
+        latest_success = max((item.last_success_at for item in items if item.last_success_at), default=None)
+        return {
+            "total": len(items),
+            "active": sum(item.status == ConnectionCapability.Status.ACTIVE for item in items),
+            "read_enabled": sum(item.read_enabled for item in items),
+            "write_enabled": sum(item.write_enabled for item in items),
+            "last_success_at": latest_success,
+        }
+
+
+class ConnectionCapabilitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConnectionCapability
+        fields = (
+            "id", "authorization_id", "capability_code", "read_enabled", "write_enabled",
+            "sync_mode", "sync_cursor", "last_success_at", "last_failure_at",
+            "source_priority", "status", "created_at", "updated_at",
+        )
+        read_only_fields = fields
+
+
+class ConnectionCapabilityWriteSerializer(serializers.Serializer):
+    capability_code = serializers.ChoiceField(choices=ConnectionCapability.CapabilityCode.choices)
+    read_enabled = serializers.BooleanField(default=False)
+    write_enabled = serializers.BooleanField(default=False)
+    sync_mode = serializers.ChoiceField(
+        choices=ConnectionCapability.SyncMode.choices, default=ConnectionCapability.SyncMode.MANUAL
+    )
+    source_priority = serializers.IntegerField(min_value=1, max_value=65535, default=100)
+    status = serializers.ChoiceField(
+        choices=ConnectionCapability.Status.choices, default=ConnectionCapability.Status.DISABLED
+    )
+
+    def validate_write_enabled(self, value):
+        if value:
+            raise serializers.ValidationError("Live write capabilities are disabled in this phase.")
+        return value
 
 class MarketplaceOAuthStartSerializer(serializers.Serializer):
     """OAuth start request; raw credential fields are rejected by the view."""
@@ -478,6 +558,8 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
 class SyncJobSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     integration_config_id = serializers.IntegerField()
+    store_authorization_id = serializers.IntegerField(required=False, allow_null=True)
+    warehouse_authorization_id = serializers.IntegerField(required=False, allow_null=True)
     platform = serializers.CharField(source="integration_config.platform", read_only=True)
     config_alias = serializers.CharField(source="integration_config.account_alias", read_only=True)
     environment = serializers.CharField(source="integration_config.environment", read_only=True)
@@ -489,6 +571,8 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "integration_config_id",
+            "store_authorization_id",
+            "warehouse_authorization_id",
             "platform",
             "config_alias",
             "environment",
@@ -532,6 +616,41 @@ class SyncJobSerializer(serializers.ModelSerializer):
         if not config_id or not resource_type:
             return attrs
         config = PlatformIntegrationConfig.objects.get(id=config_id, tenant=request.user.tenant)
+        store_authorization_id = attrs.get(
+            "store_authorization_id", getattr(self.instance, "store_authorization_id", None)
+        )
+        warehouse_authorization_id = attrs.get(
+            "warehouse_authorization_id", getattr(self.instance, "warehouse_authorization_id", None)
+        )
+        if store_authorization_id and warehouse_authorization_id:
+            raise serializers.ValidationError("A sync job can bind either a store or warehouse authorization, not both.")
+        if store_authorization_id:
+            authorization = MarketplaceStoreAuthorization.objects.filter(
+                id=store_authorization_id,
+                tenant=request.user.tenant,
+                integration_config_id=config_id,
+            ).first()
+            if authorization is None:
+                raise serializers.ValidationError(
+                    {"store_authorization_id": "Store authorization must belong to the current tenant and configuration."}
+                )
+            if self.instance is None and SyncJob.objects.filter(
+                tenant=request.user.tenant,
+                store_authorization_id=store_authorization_id,
+                resource_type=resource_type,
+            ).exists():
+                raise serializers.ValidationError(
+                    {"resource_type": "This store authorization already has a sync job for the selected resource."}
+                )
+        if warehouse_authorization_id:
+            if not WarehouseAuthorization.objects.filter(
+                id=warehouse_authorization_id,
+                tenant=request.user.tenant,
+                integration_config_id=config_id,
+            ).exists():
+                raise serializers.ValidationError(
+                    {"warehouse_authorization_id": "Warehouse authorization must belong to the current tenant and configuration."}
+                )
         if config.environment not in {
             PlatformIntegrationConfig.Environment.PILOT,
             PlatformIntegrationConfig.Environment.PRODUCTION,
@@ -557,6 +676,30 @@ class SyncJobSerializer(serializers.ModelSerializer):
         if not 1 <= value <= 5:
             raise serializers.ValidationError("backoff_base_seconds must be between 1 and 5.")
         return value
+
+
+class SyncAlertIncidentSerializer(serializers.ModelSerializer):
+    sync_job_id = serializers.IntegerField(read_only=True)
+    platform = serializers.CharField(source="sync_job.integration_config.platform", read_only=True)
+    resource_type = serializers.CharField(source="sync_job.resource_type", read_only=True)
+    account_alias = serializers.CharField(source="sync_job.integration_config.account_alias", read_only=True)
+    assignee_name = serializers.CharField(source="assignee.username", read_only=True, allow_null=True)
+    acknowledged_by_name = serializers.CharField(source="acknowledged_by.username", read_only=True, allow_null=True)
+    resolved_by_name = serializers.CharField(source="resolved_by.username", read_only=True, allow_null=True)
+    last_sync_run_id = serializers.IntegerField(read_only=True)
+    last_run_id = serializers.CharField(source="last_sync_run.run_id", read_only=True, allow_null=True)
+
+    class Meta:
+        model = SyncAlertIncident
+        fields = (
+            "id", "sync_job_id", "platform", "resource_type", "account_alias",
+            "status", "assignee", "assignee_name", "acknowledged_by",
+            "acknowledged_by_name", "acknowledged_at", "resolved_by",
+            "resolved_by_name", "resolved_at", "occurrence_count",
+            "last_sync_run_id", "last_run_id", "last_error_code", "masked_message",
+            "resolution_note", "created_at", "updated_at",
+        )
+        read_only_fields = fields
 
 
 class SyncRunSerializer(serializers.ModelSerializer):

@@ -1,5 +1,4 @@
 from rest_framework.exceptions import ValidationError
-from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
@@ -93,7 +92,7 @@ class ReleaseContractDetailView(APIView):
     permission_classes = [IsAuthenticated, IsReleaseViewer]
 
     def get(self, request, pk):
-        contract = get_object_or_404(_contracts(request.user, "release.contract.view"), pk=pk)
+        contract = _contracts(request.user, "release.contract.view").get(pk=pk)
         return success_response(ReleaseContractDetailSerializer(contract).data)
 
 
@@ -101,7 +100,7 @@ class ReleaseGateRecordView(APIView):
     permission_classes = [IsAuthenticated, IsReleaseManager]
 
     def post(self, request, pk):
-        contract = get_object_or_404(_contracts(request.user, "release.contract.manage"), pk=pk)
+        contract = _contracts(request.user, "release.contract.manage").get(pk=pk)
         serializer = ReleaseGateRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         gate, replayed = record_gate_result(
@@ -120,7 +119,7 @@ class ReleaseApprovalDecisionView(APIView):
     permission_classes = [IsAuthenticated, IsReleaseApprover]
 
     def post(self, request, pk):
-        contract = get_object_or_404(_contracts(request.user, "release.contract.approve"), pk=pk)
+        contract = _contracts(request.user, "release.contract.approve").get(pk=pk)
         serializer = ReleaseApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         approval, contract, replayed = decide_release_approval(
@@ -143,7 +142,7 @@ class ReleaseBuildConfirmView(APIView):
     permission_classes = [IsAuthenticated, IsReleaseExecutor]
 
     def post(self, request, pk):
-        contract = get_object_or_404(_contracts(request.user, "release.contract.execute"), pk=pk)
+        contract = _contracts(request.user, "release.contract.execute").get(pk=pk)
         serializer = ReleaseBuildSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         artifact, contract, replayed = confirm_release_build(
@@ -177,7 +176,7 @@ class ReleaseActionView(APIView):
             if action in {"submit-review", "cancel"}
             else "release.contract.execute"
         )
-        contract = get_object_or_404(_contracts(request.user, permission_code), pk=pk)
+        contract = _contracts(request.user, permission_code).get(pk=pk)
         serializer = ReleaseActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         if action == "submit-review":

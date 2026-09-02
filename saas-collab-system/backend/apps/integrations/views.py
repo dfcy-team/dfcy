@@ -1,14 +1,17 @@
-from django.shortcuts import get_object_or_404
+import hashlib
+import json
 import uuid
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import connection, transaction
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.error_codes import ErrorCode
-from apps.common.exceptions import DataScopeDenied, StateConflict, get_scoped_object_or_404
+from apps.common.exceptions import DataScopeDenied, IdempotencyConflict, StateConflict, get_scoped_object_or_404
 from apps.common.responses import success_response
 from apps.common.query import pagination_query, positive_int
 from apps.common.responses import paginated_data
@@ -29,6 +32,7 @@ from apps.permissions.api_permissions import (
     IsIntegrationLiveReadonlyRunner,
     IsIntegrationViewer,
     IsMarketplaceCredentialRotator,
+    IsMarketplaceCapabilityManager,
     IsMarketplaceStoreAuthorizer,
     IsMarketplaceStoreMappingManager,
     IsMarketplaceStoreRevoker,
@@ -50,6 +54,7 @@ from .credential_service import (
     rotate_config_references,
     rotate_config_secrets,
 )
+from .capability_advice import capability_suggestions
 from .custody import CustodyError, get_custody_backend
 from .marketplace_oauth_service import (
     complete_marketplace_oauth_callback,
@@ -58,6 +63,7 @@ from .marketplace_oauth_service import (
     start_marketplace_oauth,
 )
 from .models import (
+    ConnectionCapability,
     IntegrationAuditLog,
     MarketplaceProductMapping,
     MarketplaceStoreAuthorization,
@@ -65,10 +71,16 @@ from .models import (
     PlatformChoices,
     PlatformIntegrationConfig,
     SyncJob,
+    SyncAlertIncident,
     SyncRun,
     WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema
+from .readiness_service import (
+    BLOCKER_LABELS,
+    build_config_readiness,
+    build_platform_readiness,
+)
 from .product_mapping_service import (
     confirm_product_mapping,
     create_product_mapping,
@@ -76,6 +88,8 @@ from .product_mapping_service import (
     suggest_product_mapping,
 )
 from .serializers import (
+    ConnectionCapabilitySerializer,
+    ConnectionCapabilityWriteSerializer,
     CredentialClearSerializer,
     CredentialRotateWriteSerializer,
     IntegrationAuditLogSerializer,
@@ -86,11 +100,15 @@ from .serializers import (
     PlatformIntegrationConfigSerializer,
     ProductMappingCreateSerializer,
     ProductMappingUpdateSerializer,
+    ReadinessContractRepairSerializer,
+    ReadonlyApprovalSerializer,
     RotateCredentialsSerializer,
     StoreMappingCreateSerializer,
     StoreMappingUpdateSerializer,
     SyncJobSerializer,
+    SyncAlertIncidentSerializer,
     SyncRunSerializer,
+    validate_marketplace_callback_url,
 )
 from .store_mapping_service import create_store_mapping, update_store_mapping
 from .adapters import MockPlatformAdapter, get_adapter_for_config
@@ -99,6 +117,7 @@ from .scheduler import calculate_next_run_at
 from .tasks import run_readonly_sync_job
 from .workspace_service import integration_workspace
 from .subject_access_service import subject_api_access
+from .sync_alerts import acknowledge_incident, add_incident_note, assign_incident, resolve_incident
 
 
 def health_response(service):
@@ -201,6 +220,258 @@ def _get_config_for_user(request, pk, permission_code):
     return get_scoped_object_or_404(queryset, pk=pk)
 
 
+def _readiness_digest(payload):
+    """Create a stable digest without retaining request secrets."""
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _readiness_operation_identity(request, action, config, payload):
+    """Return operation and payload digests used for idempotent page actions."""
+    payload_digest = _readiness_digest(payload)
+    header_key = str(request.headers.get("Idempotency-Key") or "").strip()
+    if header_key and not 8 <= len(header_key) <= 120:
+        raise ValidationError({"Idempotency-Key": "Idempotency-Key must contain 8 to 120 characters."})
+    if header_key:
+        operation_digest = _readiness_digest({"source": "header", "key": header_key})
+    else:
+        # The UI does not need to manufacture a header: the explicit action
+        # payload, including expected_version, is itself a deterministic key.
+        operation_digest = _readiness_digest(
+            {"source": "payload", "action": action, "config_id": config.id, "payload": payload}
+        )
+    return operation_digest, payload_digest
+
+
+def _find_readiness_operation(config, action, operation_digest, payload_digest):
+    """Find a previous page action while detecting reused keys with new data."""
+    queryset = IntegrationAuditLog.objects.filter(
+        tenant=config.tenant,
+        integration_config=config,
+        action=action,
+    ).order_by("-id")
+    for audit in queryset:
+        detail = audit.masked_detail if isinstance(audit.masked_detail, dict) else {}
+        if detail.get("idempotency_key_hash") != operation_digest:
+            continue
+        if detail.get("payload_digest") != payload_digest:
+            raise IdempotencyConflict("The idempotency key was already used for a different readiness action.")
+        return audit
+    return None
+
+
+def _readiness_action_response(config, *, operation, replay=False, target_contract=None, dry_run=False, changed=False):
+    """Build the common response for a readiness mutation or dry-run."""
+    row = build_config_readiness(config)
+    data = {
+        "config": row,
+        "config_version": config.config_version,
+        "idempotent_replay": bool(replay),
+        "operation": operation,
+        "dry_run": bool(dry_run),
+        "changed": bool(changed),
+    }
+    if target_contract is not None:
+        data["target_contract_version"] = target_contract
+    return data
+
+
+def _require_shopee_readiness_config(config):
+    if str(config.platform or "").lower() != PlatformChoices.SHOPEE:
+        raise ValidationError({"platform": "当前页面动作仅适用于 Shopee 接入配置。"})
+    try:
+        return get_platform_schema(
+            PlatformChoices.SHOPEE,
+            environment=config.environment,
+        )["contract_versions"][0]
+    except Exception as exc:
+        raise ValidationError({"contract_version": "无法读取 Shopee 当前批准的合同版本。"}) from exc
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigDetailUser])
+def repair_readiness_contract(request, pk):
+    """Dry-run or repair one tenant-scoped Shopee contract version."""
+    config = _get_config_for_user(request, pk, "integrations.config.update")
+    serializer = ReadinessContractRepairSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    payload = dict(serializer.validated_data)
+    dry_run = bool(payload["dry_run"])
+    if not dry_run and payload["confirm"] is not True:
+        raise ValidationError({"confirm": "应用合同版本修复必须显式确认。"})
+    target_contract = _require_shopee_readiness_config(config)
+    action = "repair_platform_contract"
+    operation_digest, payload_digest = _readiness_operation_identity(request, action, config, payload)
+
+    with transaction.atomic():
+        locked = PlatformIntegrationConfig.objects.select_for_update().get(
+            pk=config.pk,
+            tenant=request.user.tenant,
+        )
+        existing = _find_readiness_operation(locked, action, operation_digest, payload_digest)
+        if existing is not None:
+            return success_response(
+                _readiness_action_response(
+                    locked,
+                    operation=action,
+                    replay=True,
+                    target_contract=target_contract,
+                    dry_run=bool((existing.masked_detail or {}).get("dry_run")),
+                    changed=bool((existing.masked_detail or {}).get("changed")),
+                ),
+                message="合同版本修复操作已幂等完成。",
+            )
+        if not dry_run and payload["expected_version"] != locked.config_version:
+            raise StateConflict("配置版本已变化，请刷新准备度后再修复合同版本。")
+        before_version = locked.config_version
+        before_contract = locked.contract_version
+        changed = locked.contract_version != target_contract
+        if not dry_run and changed:
+            locked.contract_version = target_contract
+            locked.config_version += 1
+            locked.save(update_fields=["contract_version", "config_version", "updated_at"])
+        _write_audit_log(
+            locked,
+            request.user,
+            action,
+            detail={
+                "operation": "repair_contract",
+                "dry_run": dry_run,
+                "changed": changed,
+                "contract_version_before": before_contract,
+                "target_contract_version": target_contract,
+                "config_version_before": before_version,
+                "config_version_after": locked.config_version,
+                "idempotency_key_hash": operation_digest,
+                "payload_digest": payload_digest,
+            },
+        )
+        # For a dry-run the current version is still the version the caller
+        # supplied; expose whether an apply would be safe without changing it.
+        response_data = _readiness_action_response(
+            locked,
+            operation=action,
+            target_contract=target_contract,
+            dry_run=dry_run,
+            changed=changed,
+        )
+        response_data["can_apply"] = bool(
+            dry_run and payload["expected_version"] == locked.config_version and changed
+        ) if dry_run else False
+    return success_response(
+        response_data,
+        message="合同版本预览完成。" if dry_run else ("合同版本已修复。" if changed else "合同版本已是最新版本。"),
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationConfigVerifier])
+def set_readiness_readonly_approval(request, pk):
+    """Approve or revoke only the tenant config's production-readonly flags."""
+    config = _get_config_for_user(request, pk, "integrations.config.verify")
+    serializer = ReadonlyApprovalSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    payload = dict(serializer.validated_data)
+    if payload["confirm"] is not True:
+        raise ValidationError({"confirm": "生产只读审批操作必须显式确认。"})
+    reason = str(payload.get("reason") or "").strip()
+    if len(reason) < 5:
+        raise ValidationError({"reason": "请填写至少 5 个字符的审批或撤销原因。"})
+    payload["reason"] = reason
+    target_contract = _require_shopee_readiness_config(config)
+    action = "approve_platform_readonly" if payload["approved"] else "revoke_platform_readonly"
+    operation_digest, payload_digest = _readiness_operation_identity(request, action, config, payload)
+
+    with transaction.atomic():
+        locked = PlatformIntegrationConfig.objects.select_for_update().get(
+            pk=config.pk,
+            tenant=request.user.tenant,
+        )
+        existing = _find_readiness_operation(locked, action, operation_digest, payload_digest)
+        if existing is not None:
+            return success_response(
+                _readiness_action_response(
+                    locked,
+                    operation=action,
+                    replay=True,
+                    target_contract=target_contract,
+                    changed=bool((existing.masked_detail or {}).get("changed")),
+                ),
+                message="生产只读审批操作已幂等完成。",
+            )
+        if payload["expected_version"] != locked.config_version:
+            raise StateConflict("配置版本已变化，请刷新准备度后再执行生产只读审批。")
+        before = {
+            "network_enabled": bool(locked.network_enabled),
+            "sync_read_enabled": bool(locked.sync_read_enabled),
+            "sync_write_enabled": bool(locked.sync_write_enabled),
+        }
+        if payload["approved"]:
+            row = build_config_readiness(locked)
+            # network_not_approved is the single state this action is meant to
+            # enable.  All other provider/global blockers must already pass.
+            blockers = [
+                code
+                for code in row["blocker_codes"]
+                if code not in {"network_not_approved", "readonly_not_approved"}
+            ]
+            if blockers:
+                raise ValidationError(
+                    {
+                        "detail": "当前配置尚未满足生产只读审批条件。",
+                        "blocker_codes": blockers,
+                        "blocker_summary": "；".join(BLOCKER_LABELS.get(code, code) for code in blockers),
+                    }
+                )
+            changed = not (locked.network_enabled and locked.sync_read_enabled)
+            if changed:
+                locked.network_enabled = True
+                locked.sync_read_enabled = True
+                # This action intentionally does not write sync_write_enabled.
+                locked.config_version += 1
+                locked.save(update_fields=["network_enabled", "sync_read_enabled", "config_version", "updated_at"])
+        else:
+            changed = bool(locked.network_enabled or locked.sync_read_enabled)
+            if changed:
+                locked.network_enabled = False
+                locked.sync_read_enabled = False
+                locked.config_version += 1
+                locked.save(update_fields=["network_enabled", "sync_read_enabled", "config_version", "updated_at"])
+        _write_audit_log(
+            locked,
+            request.user,
+            action,
+            detail={
+                "operation": "approve_readonly" if payload["approved"] else "revoke_readonly",
+                "approved": bool(payload["approved"]),
+                "changed": changed,
+                "reason_recorded": True,
+                "config_version_before": payload["expected_version"],
+                "config_version_after": locked.config_version,
+                "before": before,
+                "after": {
+                    "network_enabled": bool(locked.network_enabled),
+                    "sync_read_enabled": bool(locked.sync_read_enabled),
+                    "sync_write_enabled": bool(locked.sync_write_enabled),
+                },
+                "idempotency_key_hash": operation_digest,
+                "payload_digest": payload_digest,
+            },
+        )
+        response_data = _readiness_action_response(
+            locked,
+            operation=action,
+            target_contract=target_contract,
+            changed=changed,
+        )
+    return success_response(
+        response_data,
+        message=("生产只读审批已完成。" if payload["approved"] else "生产只读审批已撤销。")
+        if changed
+        else ("生产只读审批已处于目标状态。" if payload["approved"] else "生产只读审批本来就是撤销状态。"),
+    )
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsIntegrationConfigCollectionUser])
 def integration_config_collection(request):
@@ -248,6 +519,18 @@ def integration_config_collection(request):
         },
     )
     return success_response(PlatformIntegrationConfigSerializer(config).data, status=201)
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationViewer])
+def platform_integration_readiness(request):
+    """Return the effective, tenant-scoped read-only platform readiness."""
+    queryset = filter_integration_configs(
+        request.user,
+        PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+        "integrations.view",
+    )
+    return success_response(build_platform_readiness(list(queryset)))
 
 
 @api_view(["POST"])
@@ -307,7 +590,11 @@ def create_handoff_integration_config(request):
             environment=environment,
             status=PlatformIntegrationConfig.Status.PENDING_REVIEW,
             regions=regions,
-            contract_version="open-platform-v1" if platform == PlatformChoices.LAZADA else "shopapi-local-v1",
+            contract_version=(
+                get_platform_schema(platform, environment=environment)["contract_versions"][0]
+                if platform in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+                else "shopapi-local-v1"
+            ),
             platform_config={"api_type": api_type},
             created_by=request.user,
         )
@@ -433,13 +720,21 @@ def _credential_update_parts(config, values):
         if values.get("app_secret"):
             secret_values["app_secret"] = values["app_secret"]
     elif config.platform == PlatformChoices.SHOPEE:
-        unsupported = set(values) - {"partner_id", "partner_key"}
+        unsupported = set(values) - {"partner_id", "partner_key", "redirect_uri"}
         if unsupported:
             raise ValidationError("Shopee 凭据字段与当前配置不匹配。")
         partner_id = str(values.get("partner_id") or platform_config.get("partner_id") or identity).strip()
+        redirect_uri = str(values.get("redirect_uri") or config.callback_url or "").strip()
         if not partner_id.isdigit() or int(partner_id) <= 0:
             raise ValidationError({"credentials": {"partner_id": "Partner ID 必须是正整数。"}})
+        if not redirect_uri:
+            raise ValidationError({"credentials": {"redirect_uri": "Shopee 授权回调地址不能为空。"}})
         platform_config["partner_id"] = partner_id
+        callback_url = validate_marketplace_callback_url(
+            redirect_uri,
+            environment=config.environment,
+            platform=config.platform,
+        )
         if values.get("partner_key"):
             secret_values["partner_key"] = values["partner_key"]
     elif config.platform == PlatformChoices.TIKTOK and api_type == "advertising":
@@ -567,7 +862,7 @@ def store_authorization_collection(request):
     allowed_query = {"page", "page_size", "platform", "status", "store_id"}
     if set(request.query_params) - allowed_query:
         raise ValidationError("Unknown store authorization query parameter.")
-    queryset = MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store")
+    queryset = MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store").prefetch_related("connection_capabilities")
     if request.query_params.get("platform"):
         platform = request.query_params["platform"]
         if platform not in {"lazada", "shopee", "tiktok"}:
@@ -598,11 +893,58 @@ def store_authorization_collection(request):
 def store_authorization_detail(request, pk):
     queryset = filter_store_authorizations(
         request.user,
-        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store"),
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store").prefetch_related("connection_capabilities"),
         "integrations.store.view",
     )
     authorization = get_scoped_object_or_404(queryset, pk=pk)
     return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsMarketplaceCapabilityManager])
+def store_authorization_capabilities(request, pk):
+    permission_code = "integrations.store.view" if request.method == "GET" else "integrations.store.authorize"
+    authorization = get_scoped_object_or_404(
+        filter_store_authorizations(
+            request.user,
+            MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant),
+            permission_code,
+        ),
+        pk=pk,
+    )
+    if request.method == "PUT":
+        if not isinstance(request.data, dict) or set(request.data) != {"capabilities"} or not isinstance(request.data.get("capabilities"), list):
+            raise ValidationError({"capabilities": "A capabilities list is required and no other fields are accepted."})
+        rows = request.data["capabilities"]
+        allowed_fields = {"capability_code", "read_enabled", "write_enabled", "sync_mode", "source_priority", "status"}
+        if any(set(row) - allowed_fields for row in rows if isinstance(row, dict)):
+            raise ValidationError({"capabilities": "Unsupported capability field."})
+        serializer = ConnectionCapabilityWriteSerializer(data=rows, many=True)
+        serializer.is_valid(raise_exception=True)
+        codes = [row["capability_code"] for row in serializer.validated_data]
+        if len(codes) != len(set(codes)):
+            raise ValidationError({"capabilities": "Capability codes must be unique within a request."})
+        if authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE and any(
+            row["status"] == ConnectionCapability.Status.ACTIVE for row in serializer.validated_data
+        ):
+            raise ValidationError({"capabilities": "A revoked, expired, pending or failed authorization cannot activate capabilities."})
+        with transaction.atomic():
+            for row in serializer.validated_data:
+                item, _ = ConnectionCapability.objects.get_or_create(
+                    authorization=authorization,
+                    capability_code=row["capability_code"],
+                )
+                for field in ("read_enabled", "write_enabled", "sync_mode", "source_priority", "status"):
+                    setattr(item, field, row[field])
+                item.full_clean()
+                item.save()
+    queryset = ConnectionCapability.objects.filter(authorization=authorization)
+    return success_response({
+        "authorization_id": authorization.id,
+        "available_codes": list(ConnectionCapability.CapabilityCode.values),
+        "suggestions": capability_suggestions(authorization),
+        "results": ConnectionCapabilitySerializer(queryset, many=True).data,
+    })
 
 
 @api_view(["POST"])
@@ -1351,6 +1693,154 @@ def sync_run_detail(request, pk):
     )
     sync_run = get_scoped_object_or_404(queryset, pk=pk)
     return success_response(SyncRunSerializer(sync_run).data)
+
+
+def _incident_queryset(request, permission_code):
+    visible_job_ids = filter_sync_jobs(
+        request.user,
+        SyncJob.objects.filter(tenant=request.user.tenant),
+        permission_code,
+    ).values_list("id", flat=True)
+    return SyncAlertIncident.objects.filter(
+        tenant=request.user.tenant,
+        sync_job_id__in=visible_job_ids,
+    ).select_related(
+        "sync_job", "sync_job__integration_config", "assignee", "acknowledged_by",
+        "resolved_by", "last_sync_run", "notification",
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationViewer])
+def sync_alert_incident_collection(request):
+    if set(request.query_params) - {"status"}:
+        raise ValidationError("Unknown sync incident query parameter.")
+    queryset = _incident_queryset(request, "integrations.view")
+    status_value = str(request.query_params.get("status") or "").strip()
+    if status_value:
+        if status_value not in SyncAlertIncident.Status.values:
+            raise ValidationError({"status": "Unsupported incident status."})
+        queryset = queryset.filter(status=status_value)
+    return success_response(SyncAlertIncidentSerializer(queryset, many=True).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationManager])
+def sync_alert_incident_action(request, pk):
+    if not isinstance(request.data, dict) or not request.data.get("action"):
+        raise ValidationError({"action": "Incident action is required."})
+    allowed_fields = {"action", "assignee_id", "note"}
+    if set(request.data) - allowed_fields:
+        raise ValidationError("Unsupported incident action field.")
+    action = str(request.data["action"]).strip().lower()
+    with transaction.atomic():
+        incident = get_scoped_object_or_404(
+            _incident_queryset(request, "integrations.manage").select_for_update(), pk=pk
+        )
+        note = request.data.get("note", "")
+        if action == "acknowledge":
+            incident = acknowledge_incident(incident, request.user, note)
+        elif action == "assign":
+            assignee_id = positive_int(request.data.get("assignee_id"), default=None, maximum=2147483647)
+            if assignee_id is None:
+                raise ValidationError({"assignee_id": "An assignee is required."})
+            assignee = get_object_or_404(
+                get_user_model().objects.filter(tenant=request.user.tenant, is_active=True), pk=assignee_id
+            )
+            incident = assign_incident(incident, request.user, assignee, note)
+        elif action == "note":
+            incident = add_incident_note(incident, request.user, note)
+        elif action == "resolve":
+            incident = resolve_incident(incident, request.user, note)
+        else:
+            raise ValidationError({"action": "Supported actions are acknowledge, assign, note and resolve."})
+    return success_response(SyncAlertIncidentSerializer(incident).data)
+
+
+def _retry_preview(incident):
+    source_run = incident.last_sync_run
+    job = incident.sync_job
+    execution_mode = (source_run.masked_log or {}).get("execution_mode", "simulation") if source_run else ""
+    reason = ""
+    if incident.status == SyncAlertIncident.Status.RESOLVED:
+        reason = "事件已解决。"
+    elif source_run is None or source_run.status != SyncRun.Status.FAILED:
+        reason = "事件没有可重试的失败运行。"
+    elif job.integration_config.environment not in {
+        PlatformIntegrationConfig.Environment.MOCK, PlatformIntegrationConfig.Environment.SANDBOX,
+    }:
+        reason = "人工重试仅允许 Mock 或沙箱环境。"
+    elif execution_mode == "live_readonly":
+        reason = "live_readonly 运行不能通过事件工作台重试。"
+    elif not job.is_enabled or job.status == SyncJob.Status.DISABLED:
+        reason = "同步任务已禁用。"
+    elif job.status == SyncJob.Status.RUNNING:
+        reason = "同步任务已有运行中的实例。"
+    return {
+        "incident_id": incident.id,
+        "sync_job_id": job.id,
+        "source_sync_run_id": source_run.id if source_run else None,
+        "source_run_id": source_run.run_id if source_run else "",
+        "environment": job.integration_config.environment,
+        "execution_mode": "simulation",
+        "external_api_called": False,
+        "allowed": not reason,
+        "blocked_reason": reason,
+        "requires_confirmation": True,
+    }
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsIntegrationRunner])
+def sync_alert_incident_retry(request, pk):
+    incident = get_scoped_object_or_404(_incident_queryset(request, "integrations.run"), pk=pk)
+    preview = _retry_preview(incident)
+    if request.method == "GET":
+        return success_response(preview)
+    if not isinstance(request.data, dict) or set(request.data) != {"confirmed", "idempotency_key"}:
+        raise ValidationError("confirmed and idempotency_key are required; no other fields are accepted.")
+    if request.data.get("confirmed") is not True:
+        raise ValidationError({"confirmed": "Explicit confirmation is required."})
+    idempotency_key = str(request.data.get("idempotency_key") or "").strip()
+    if not 8 <= len(idempotency_key) <= 100:
+        raise ValidationError({"idempotency_key": "Idempotency key must be 8 to 100 characters."})
+    scoped_idempotency_key = f"incident:{incident.id}:{idempotency_key}"
+    existing = SyncRun.objects.filter(
+        tenant=incident.tenant,
+        sync_job=incident.sync_job,
+        idempotency_key=scoped_idempotency_key,
+    ).first()
+    if existing:
+        return success_response({
+            "created": False, "incident_id": incident.id,
+            "run": SyncRunSerializer(existing).data,
+        })
+    if not preview["allowed"]:
+        raise ValidationError(preview["blocked_reason"])
+    source_run = incident.last_sync_run
+    run, created = run_sync_job(
+        incident.sync_job,
+        adapter=MockPlatformAdapter(),
+        idempotency_key=scoped_idempotency_key,
+    )
+    if created:
+        run.masked_log = {
+            **(run.masked_log or {}), "execution_mode": "simulation",
+            "manual_retry_of": source_run.run_id, "external_api_called": False,
+            "confirmed_by": request.user.id,
+        }
+        run.save(update_fields=["masked_log"])
+        _write_audit_log(
+            incident.sync_job.integration_config, request.user, "retry_sync_incident",
+            detail={
+                "incident_id": incident.id, "source_run_id": source_run.run_id,
+                "retry_run_id": run.run_id, "external_api_called": False,
+            },
+        )
+    return success_response({
+        "created": created, "incident_id": incident.id,
+        "run": SyncRunSerializer(run).data,
+    }, status=201 if created else 200)
 
 
 @api_view(["POST"])

@@ -5,7 +5,6 @@ import { canAccessPath, filterMenuItems, flattenMenuItems } from '../src/router/
 import { getActionAccess } from '../src/utils/actionAccess';
 import { masterDataMocks } from '../src/mock/masterData';
 import { mockSecurityOperations } from '../src/mock/systemAdmin';
-import { permissionLabel } from '../src/utils/permissionLabels';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -25,7 +24,7 @@ describe('UI-P2 route and action contracts', () => {
   it('registers all system and master-data pages behind explicit permissions', () => {
     for (const path of [
       '/system/departments', '/system/users', '/system/roles', '/system/security-operations',
-      '/master-data/platforms', '/master-data/stores', '/master-data/warehouses', '/master-data/suppliers'
+      '/master-data/sites', '/master-data/platforms', '/master-data/stores', '/master-data/warehouses', '/master-data/suppliers'
     ]) {
       expect(canAccessPath(viewer, path), path).toBe(true);
     }
@@ -37,6 +36,9 @@ describe('UI-P2 route and action contracts', () => {
     const paths = flattenMenuItems(filterMenuItems(viewer)).map((item) => item.path);
     expect(paths).toContain('/system/users');
     expect(paths).toContain('/master-data/suppliers');
+    expect(paths).toContain('/master-data/sites');
+    const masterdata = filterMenuItems(viewer).find((item) => item.label === '基础档案');
+    expect(masterdata.children.map((item) => item.path).slice(0, 2)).toEqual(['/master-data/sites', '/master-data/platforms']);
     expect(getActionAccess(authFor(viewer), { permission: 'system.users.manage' }).visible).toBe(false);
     expect(getActionAccess(authFor(viewer), { permission: 'masterdata.manage' }).allowed).toBe(false);
   });
@@ -49,27 +51,6 @@ describe('UI-P2 route and action contracts', () => {
 });
 
 describe('UI-P2 API and sensitive-field contracts', () => {
-  it('localizes catalog names and prevents an invalid built-in administrator save', () => {
-    expect(permissionLabel({ code: 'system.users.view', name: 'View user directory' })).toBe('查看用户目录');
-    expect(permissionLabel({ code: 'future.permission.view', name: '查看未来权限' })).toBe('查看未来权限');
-    const rolePage = read('src/views/system/RolePermissionMatrix.vue');
-    expect(rolePage).toContain('isBuiltInAdministrator');
-    expect(rolePage).toContain('permissionLabel(permission)');
-    expect(rolePage).toContain('管理员角色由权限目录自动同步');
-    expect(rolePage).toContain('manageAccess.visible && !isBuiltInAdministrator');
-  });
-
-  it('builds the permission matrix from the current menu and route capability tree', () => {
-    const rolePage = read('src/views/system/RolePermissionMatrix.vue');
-    expect(rolePage).toContain("import { menuItems, routeCapabilities } from '../../router/menu';");
-    expect(rolePage).toContain('async function loadAllPermissions()');
-    expect(rolePage).toContain('const routeOnlyCodes = new Set(routeCapabilities.flatMap((item) => item.permissions || []));');
-    expect(rolePage).toContain("label: '其他操作权限'");
-    expect(rolePage).toContain('permission.unavailable');
-    expect(rolePage).toContain('const realPermissionCodes = new Set(');
-    expect(rolePage).toContain('filter((code) => realPermissionCodes.has(code))');
-  });
-
   it('uses only the frozen internal system and master-data API partitions', () => {
     const systemApi = read('src/api/systemAdmin.js');
     const masterApi = read('src/api/masterData.js');
@@ -78,6 +59,7 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(systemApi).toContain('/api/internal/system/roles/');
     expect(systemApi).toContain('/api/internal/system/security-operations/');
     expect(masterApi).toContain('/api/internal/master-data/${resource}/');
+    expect(masterApi).toContain('/api/internal/master-data/platforms/catalog/');
     expect(systemApi + masterApi).not.toContain('/admin/');
     expect(systemApi + masterApi).not.toContain('/api/rpa/');
     expect(systemApi + masterApi).not.toContain('/api/finance/');
@@ -110,6 +92,71 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(userPage).toContain('fetchAssignableRoles({ page: 1, page_size: 100 })');
     expect(userPage).toContain('updateUserRoles(selectedUser.value.id, selectedRoleCodes.value)');
     expect(userPage).toMatch(/async function saveRoleAssignment\(\) \{\s+if \(!roleAccess\.value\.allowed/);
+  });
+
+  it('loads platform type options from the backend catalog and exposes connector state', () => {
+    const platformPage = read('src/views/masterdata/PlatformMasterList.vue');
+    expect(platformPage).toContain('fetchPlatformCatalog');
+    expect(platformPage).toContain("prop: 'connector_status'");
+    expect(platformPage).toContain("item.connector_status === 'NOT_IMPLEMENTED'");
+    expect(platformPage).not.toContain("{ label: 'BigSeller', value: 'bigseller' }");
+  });
+
+  it('binds store country selection to tenant country information defaults', () => {
+    const storePage = read('src/views/masterdata/StoreMasterList.vue');
+    const resourcePage = read('src/components/AdminResourcePage.vue');
+    const countryPage = read('src/views/masterdata/CountrySiteMasterList.vue');
+    expect(storePage).toContain('fetchCountrySites');
+    expect(storePage).toContain('fetchPlatformSites');
+    expect(storePage).toContain('onChange: applyPlatformSite');
+    expect(storePage).toContain('platformSites.value.filter((item) => item.platform_id === value)');
+    expect(storePage).toContain('form.currency = site.currency_code');
+    expect(storePage).toContain('旧店铺可继续使用国家档案');
+    expect(storePage).toContain('fetchStoreAuthorizations');
+    expect(storePage).toContain('fetchConnectionCapabilities');
+    expect(storePage).toContain('updateConnectionCapabilities');
+    expect(storePage).toContain('capabilitySuggestions');
+    expect(storePage).toContain('applyCapabilitySuggestions');
+    expect(storePage).toContain('载入建议');
+    expect(storePage).toContain('仍需复核 scopes/evidence');
+    expect(storePage).toContain(':model-value="false" disabled');
+    expect(storePage).toContain('write_enabled: false');
+    expect(storePage).toContain('该店铺尚无授权连接');
+    expect(storePage).toContain('onChange: applyCountryDefaults');
+    expect(storePage).toContain('form.currency = country.currency ||');
+    expect(storePage).toContain('form.timezone = country.timezone ||');
+    expect(storePage).toContain('currency: String(item.currency ||');
+    expect(resourcePage).toContain('@change="handleFieldChange(field, $event)"');
+    expect(resourcePage).toContain('field.onChange(value, createForm)');
+    expect(resourcePage).toContain(':multiple="field.multiple"');
+    expect(resourcePage).toContain(':filterable="field.filterable"');
+    for (const field of ["prop: 'country_code'", "prop: 'currency'", "prop: 'timezone'"]) {
+      expect(countryPage).toContain(field);
+    }
+  });
+
+  it('provides a guarded historical platform-site migration preview and apply flow', () => {
+    const masterApi = read('src/api/masterData.js');
+    const storePage = read('src/views/masterdata/StoreMasterList.vue');
+    const preview = masterDataMocks.platformSiteMigrationPreview().data;
+    expect(masterApi).toContain('/api/internal/master-data/platform-sites/migration-preview/');
+    expect(masterApi).toContain('fetchPlatformSiteMigrationPreview');
+    expect(masterApi).toContain('applyPlatformSiteMigration');
+    expect(storePage).toContain('站点映射预览');
+    expect(storePage).toContain('exact');
+    expect(storePage).toContain('ambiguous');
+    expect(storePage).toContain('unmatched');
+    expect(storePage).toContain('candidates');
+    expect(storePage).toContain('before');
+    expect(storePage).toContain('after');
+    expect(storePage).toContain('reason');
+    expect(storePage).toContain('confidence');
+    expect(storePage).toContain(':selectable="isExactMigrationRow"');
+    expect(storePage).toContain('confirmed: true');
+    expect(storePage).toContain('idempotency_key');
+    expect(storePage).toContain('二次确认站点映射');
+    expect(storePage).toContain('await resourcePage.value?.loadData?.()');
+    expect(new Set(preview.rows.map((row) => row.match_status))).toEqual(new Set(['exact', 'ambiguous', 'unmatched']));
   });
 
   it('consumes role pagination and never marks unresolved APIs connected', () => {

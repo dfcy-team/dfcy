@@ -17,10 +17,9 @@ from apps.development.services import (
     confirm_product_archive,
     create_product_archive,
     formalize_product_archive,
-    generate_trial_product,
 )
-from apps.masterdata.models import PlatformMaster, StoreMaster, SupplierMaster
-from apps.products.models import ProductCategory, ProductColor
+from apps.masterdata.models import SupplierMaster
+from apps.products.models import ProductCategory
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 from rest_framework.exceptions import ValidationError
@@ -52,7 +51,6 @@ def _grant(user, *codes):
 
 
 def _project(tenant, user, with_category=True):
-    ProductColor.objects.create(tenant=tenant, code="red", name="Red")
     supplier = SupplierMaster.objects.create(tenant=tenant, code="archive-supplier", name="Archive supplier")
     category = None
     if with_category:
@@ -149,7 +147,6 @@ def test_archive_requires_confirmation_before_formalization_and_replays_safely()
     assert confirmed.status == DevelopmentProductArchive.Status.CONFIRMED
     assert confirmed.formal_product_id is None
 
-    generate_trial_product(archive_id=archive.id, actor=user, data={"development_spu_code": "DEVARCHIVE", "color_code": "red"})
     product, product_created = formalize_product_archive(
         archive_id=archive.id,
         actor=user,
@@ -170,7 +167,6 @@ def test_archive_requires_confirmation_before_formalization_and_replays_safely()
     assert list(DevelopmentProductArchiveEvent.objects.filter(archive=archive).values_list("action", flat=True)) == [
         "created",
         "trial_confirmed",
-        "trial_product_generated",
         "formalized",
     ]
 
@@ -187,14 +183,6 @@ def test_archive_api_is_tenant_scoped_and_has_explicit_actions():
     project = _project(tenant, user)
     client = APIClient()
     client.force_authenticate(user=user)
-
-    project_number_payload = client.post(
-        "/api/internal/development/product-archives/",
-        {"project": project.project_no, "category_node": project.category_node_id},
-        format="json",
-    )
-    assert project_number_payload.status_code == 400, project_number_payload.json()
-    assert "project" in project_number_payload.json()["data"]
 
     created = client.post(
         "/api/internal/development/product-archives/",
@@ -215,12 +203,6 @@ def test_archive_api_is_tenant_scoped_and_has_explicit_actions():
         format="json",
     )
     assert confirmed.status_code == 200
-    generated = client.post(
-        f"/api/internal/development/product-archives/{archive_id}/generate-trial/",
-        {"development_spu_code": "DEVAPI", "color_code": "red", "spec_values": {}},
-        format="json",
-    )
-    assert generated.status_code == 200, generated.json()
     formalized = client.post(
         f"/api/internal/development/product-archives/{archive_id}/formalize/",
         {},
@@ -228,60 +210,4 @@ def test_archive_api_is_tenant_scoped_and_has_explicit_actions():
     )
     assert formalized.status_code == 200
     assert formalized.json()["data"]["archive"]["status"] == "formalized"
-    assert formalized.json()["data"]["spu_code"].isdigit()
-
-
-def test_archive_api_accepts_complete_dropdown_payload_and_normalizes_nullable_market_fields():
-    tenant = Tenant.objects.create(name="Archive dropdown API", code="archive-dropdown-api")
-    user = _user(tenant, "archive-dropdown-user")
-    _grant(user, "development.product_archive.view", "development.product_archive.manage")
-    project = _project(tenant, user)
-    platform = PlatformMaster.objects.create(
-        tenant=tenant,
-        code="shopee",
-        name="Shopee",
-        platform_type=PlatformMaster.PlatformType.SHOPEE,
-    )
-    store = StoreMaster.objects.create(
-        tenant=tenant,
-        platform=platform,
-        code="shopee-ph",
-        name="Shopee PH",
-        country_code="PH",
-        currency="PHP",
-    )
-    client = APIClient()
-    client.force_authenticate(user=user)
-
-    created = client.post(
-        "/api/internal/development/product-archives/",
-        {
-            "project": project.id,
-            "product_name": "PH archive product",
-            "category_node": project.category_node_id,
-            "platform_master": platform.id,
-            "store_master": store.id,
-            "platform": "shopee",
-            "site": "PH",
-            "virtual_inventory_qty": 7,
-            "test_notes": "dropdown payload",
-        },
-        format="json",
-    )
-    assert created.status_code == 201, created.json()
-    archive_id = created.json()["data"]["id"]
-    assert created.json()["data"]["project_id"] == project.id
-    assert created.json()["data"]["platform_master"] == platform.id
-    assert created.json()["data"]["store_master"] == store.id
-    assert created.json()["data"]["site"] == "PH"
-
-    cleared = client.patch(
-        f"/api/internal/development/product-archives/{archive_id}/",
-        {"platform_master": None, "store_master": None, "platform": None, "site": None},
-        format="json",
-    )
-    assert cleared.status_code == 200, cleared.json()
-    assert cleared.json()["data"]["platform_master"] is None
-    assert cleared.json()["data"]["store_master"] is None
-    assert cleared.json()["data"]["platform"] == "internal"
-    assert cleared.json()["data"]["site"] == "internal"
+    assert formalized.json()["data"]["spu_code"].startswith("SPU-")

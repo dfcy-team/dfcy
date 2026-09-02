@@ -11,9 +11,11 @@ from apps.audit.services import write_operation_log
 from apps.common.exceptions import ScopedResourceNotFound, StateConflict
 
 from .models import (
+    SupplyFulfillmentEvent,
     SupplyProductionProgress,
     SupplyPurchaseOrder,
     SupplyPurchaseOrderEvent,
+    _converge_completed_order_line_fulfillment_projections,
     _supply_action_write_context,
 )
 from .supply_serializers import (
@@ -194,6 +196,18 @@ def perform_supply_order_action(
                 "version",
                 "updated_at",
             ]
+        )
+
+    # The legacy order stores one aggregate completion counter.  The explicit
+    # completion action is the controlled boundary at which a partial/manual
+    # line projection may converge to full quantities.  The helper refuses to
+    # overwrite any line with packing history/occupancy and emits one
+    # deterministic append-only production event per line.
+    if action == SupplyPurchaseOrderEvent.Action.COMPLETE_PRODUCTION:
+        _converge_completed_order_line_fulfillment_projections(
+            order,
+            actor=actor,
+            idempotency_key=idempotency_key,
         )
 
     actor_type = (

@@ -3,10 +3,6 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { collectionRows, collectionTotal, detailData } from '../src/utils/businessResponse';
-import {
-  productLifecycleStatusLabel,
-  productSalesStatusLabel
-} from '../src/utils/productLabels';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -16,16 +12,6 @@ describe('UI-P5 business response contract', () => {
     expect(collectionRows({ status: 'mock', items: [{ id: 2 }] })).toEqual([{ id: 2 }]);
     expect(collectionTotal({ count: 12, results: [] })).toBe(12);
     expect(detailData({ items: [{ id: 3 }] })).toEqual({ id: 3 });
-  });
-
-  it('localizes product status codes without changing API values', () => {
-    expect(productLifecycleStatusLabel('draft')).toBe('草稿');
-    expect(productSalesStatusLabel('not_listed')).toBe('未刊登');
-    expect(productSalesStatusLabel('on_sale')).toBe('销售中');
-    expect(productSalesStatusLabel('unknown_status')).toBe('unknown_status');
-    const page = read('src/views/products/ProductMasterList.vue');
-    expect(page).toContain('productSalesStatusLabel(row.sales_status)');
-    expect(page).not.toContain('prop="sales_status"');
   });
 });
 

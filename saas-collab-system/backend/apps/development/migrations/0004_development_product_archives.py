@@ -13,15 +13,8 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AddField(
-            model_name="developmentproject",
-            name="category_node",
-            field=models.ForeignKey(
-                blank=True,
-                null=True,
-                on_delete=django.db.models.deletion.PROTECT,
-                related_name="development_projects",
-                to="products.productcategory",
-            ),
+            model_name="developmentproject", name="category_node",
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="development_projects", to="products.productcategory"),
         ),
         migrations.CreateModel(
             name="DevelopmentProductArchive",

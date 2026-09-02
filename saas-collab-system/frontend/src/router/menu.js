@@ -15,18 +15,20 @@ export const menuItems = [
     ]
   },
   {
-    label: '全球刊登',
-    permissions: ['listings.profile.view','listings.template.view','listings.workbench.view','listings.mapping.view','listings.task.view'],
+    label: '供应链协同',
+    internal: true,
+    permissions: ['supply.consolidation.view', 'supply.shipment.view'],
     children: [
-      { path: '/listings/workbench', label: '全球刊登工作台', permissions: ['listings.workbench.view'] },
-      { path: '/listings/tasks', label: '刊登任务', permissions: ['listings.task.view'] },
-      { path: '/listings/online-products', label: '在线商品', permissions: ['listings.profile.view'] },
-      { path: '/listings/category-mappings', label: '平台类目映射', permissions: ['listings.mapping.view'] },
-      { path: '/listings/attribute-mappings', label: '商品属性映射', permissions: ['listings.mapping.view'] },
-      { path: '/listings/logs', label: '刊登日志', permissions: ['listings.task.view'] },
-      { path: '/listings/exceptions', label: '刊登异常', permissions: ['listings.task.view'] },
-      { path: '/listings/sites', label: '刊登资料', permissions: ['listings.profile.view'] },
-      { path: '/listings/templates', label: '刊登模板', permissions: ['listings.template.view'] }
+      { path: '/supply-chain/consolidations', label: '集货管理', permissions: ['supply.consolidation.view'] },
+      { path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] }
+    ]
+  },
+  {
+    label: '\u591a\u5e73\u53f0\u520a\u767b',
+    permissions: ['listings.profile.view','listings.template.view'],
+    children: [
+      { path: '/listings/sites', label: '\u520a\u767b\u8d44\u6599', permissions: ['listings.profile.view'] },
+      { path: '/listings/templates', label: '\u520a\u767b\u6a21\u677f', permissions: ['listings.template.view'] }
     ]
   },
   {
@@ -41,12 +43,12 @@ export const menuItems = [
   {
     label: '经营决策',
     children: [
-      { path: '/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
-      { path: '/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] },
-      { path: '/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
-      { path: '/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
-      { path: '/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
-      { path: '/alerts/business', label: '经营预警', permissions: ['alerts.view'] }
+      { path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
+      { path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] },
+      { path: '/decision/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
+      { path: '/decision/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
+      { path: '/decision/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
+      { path: '/decision/alerts/business', label: '经营预警', permissions: ['alerts.view'] }
     ]
   },
   {
@@ -103,9 +105,12 @@ export const menuItems = [
     internal: true,
     children: [
       { path: '/products/research', label: '新品市调', permissions: ['products.research.view'] },
+      { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
+      { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view'] },
+      { path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view'] },
       { path: '/purchasing/orders', label: '采购订单', permissions: ['purchasing.orders.view'] },
-      { path: '/supply-chain/purchase-orders', label: '供应链采购协同', permissions: ['supply.purchase_order.view'] },
       { path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] },
+      { path: '/listings/sites', label: '多国家刊登', internal: true },
       { path: '/pricing/prices', label: '价格中心', internal: true }
     ]
   },
@@ -126,6 +131,7 @@ export const menuItems = [
     label: 'API数据接入',
     permissions: ['integrations.view'],
     children: [
+      { path: '/integrations/platform-drill', label: '平台操作演练', permissions: ['integrations.view'] },
       { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.view'] },
       { path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
       { path: '/integrations/sync-runs', label: '运行记录', permissions: ['integrations.view'] }
@@ -154,7 +160,16 @@ export const menuItems = [
   },
   {
     label: '基础档案',
-    permissions: ['masterdata.view', 'products.master.view', 'products.category.view', 'products.attribute.view', 'products.color.view', 'products.specification.view', 'products.bundle.view'],
+    permissions: [
+      'masterdata.view',
+      'products.master.view',
+      'products.category.view',
+      'products.attribute.view',
+      'products.color.view',
+      'products.specification.view',
+      'products.bundle.view',
+      'masterdata.settings.view'
+    ],
     children: [
       { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
       { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view'] },
@@ -168,7 +183,8 @@ export const menuItems = [
       { path: '/master-data/sites', label: '国家信息', permissions: ['masterdata.view'] },
       { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
       { path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
-      { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] }
+      { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] },
+      { path: '/master-data/settings', label: '基础档案设置', permissions: ['masterdata.settings.view'] }
     ]
   },
   {
@@ -181,7 +197,6 @@ export const menuItems = [
       { path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
       { path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
       { path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
-      { path: '/releases/contracts', label: '发布合同', permissions: ['release.contract.view'] },
       { path: '/audit/operations', label: '日志审计', internal: true }
     ]
   },
@@ -220,6 +235,12 @@ export const routeCapabilities = [
   { path: '/analytics/overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/decision/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },
+  { path: '/decision/inventory/replenishment', permissions: ['replenishment.view'], userTypes: ['internal'] },
+  { path: '/decision/lifecycle/reviews', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
+  { path: '/decision/lifecycle/history', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
+  { path: '/decision/lifecycle/clearance-requests', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
+  { path: '/decision/alerts/business', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/inventory/replenishment', permissions: ['replenishment.view'], userTypes: ['internal'] },
   { path: '/lifecycle/reviews', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
@@ -245,6 +266,7 @@ export const routeCapabilities = [
   { path: '/products/details', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/products/platform-details', permissions: ['listings.product_detail.view'], userTypes: ['internal'] },
   { path: '/products/categories', permissions: ['products.category.view'], userTypes: ['internal'] },
+  { path: '/master-data/settings', permissions: ['masterdata.settings.view'], userTypes: ['internal'] },
   { path: '/products/colors', permissions: ['products.color.view'], userTypes: ['internal'] },
   { path: '/products/attributes', permissions: ['products.attribute.view'], userTypes: ['internal'] },
   { path: '/products/specifications', permissions: ['products.specification.view'], userTypes: ['internal'] },
@@ -254,7 +276,8 @@ export const routeCapabilities = [
   { path: '/products/status-transitions', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/purchasing/orders', permissions: ['purchasing.orders.view'], userTypes: ['internal'] },
-  { path: '/supply-chain/purchase-orders', permissions: ['supply.purchase_order.view'], userTypes: ['internal'] },
+  { path: '/supply-chain/consolidations', permissions: ['supply.consolidation.view'], userTypes: ['internal'] },
+  { path: '/supply-chain/shipments', permissions: ['supply.shipment.view'], userTypes: ['internal'] },
   { path: '/suppliers/my-performance', userTypes: ['external'] },
   { path: '/suppliers/performance', permissions: ['suppliers.performance.view'], userTypes: ['internal'] },
   { path: '/suppliers/tasks', userTypes: ['external'] },
@@ -278,6 +301,7 @@ export const routeCapabilities = [
   { path: '/rpa/account-locks', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/rpa/page-signatures', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/integrations/configs', permissions: ['integrations.view'], userTypes: ['internal'] },
+  { path: '/integrations/platform-drill', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-jobs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-runs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/api-sync', permissions: ['integrations.view'], userTypes: ['internal'] },
@@ -300,10 +324,10 @@ export const routeCapabilities = [
   { path: '/system/roles', permissions: ['system.roles.view'], userTypes: ['internal'] },
   { path: '/system/security-operations', permissions: ['security.operations.view'], userTypes: ['internal'] },
   { path: '/master-data/platforms', permissions: ['masterdata.view'], userTypes: ['internal'] },
-  { path: '/master-data/sites', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/stores', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
+  { path: '/master-data/sites', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/influencers', permissions: ['influencers.view'], userTypes: ['internal'] },
   { path: '/influencers/outreach-tasks', permissions: ['influencers.outreach.view'], userTypes: ['internal'] },
   { path: '/influencers/sample-fulfillments', permissions: ['influencers.fulfillment.view'], userTypes: ['internal'] },
@@ -313,8 +337,9 @@ export const routeCapabilities = [
     allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
     userTypes: ['internal']
   },
-  { path: '/audit/operations', userTypes: ['internal'] },
+  { path: '/supply-chain/purchase-orders', permissions: ['supply.purchase_order.view'], userTypes: ['internal'] },
   { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
+  { path: '/audit/operations', userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
   { path: '/governance/assistants', permissions: ['governance.assistants.view'], userTypes: ['internal'] },
   { path: '/pilot/readiness', permissions: ['pilot.readiness.view'], userTypes: ['internal'] },
@@ -365,7 +390,18 @@ export function canAccessMenuItem(user, item) {
 export function filterMenuItems(user, items = menuItems) {
   return items.flatMap((item) => {
     if (item.children) {
-      const children = filterMenuItems(user, item.children);
+      let children = filterMenuItems(user, item.children);
+      // The master-data-only role keeps the long-standing site-first order in
+      // its filtered workspace. Full product roles retain the canonical
+      // foundation order, which starts with product dictionaries.
+      if (item.label === '基础档案' && !user?.is_superuser && !(user?.permissions || []).some((code) => code.startsWith('products.'))) {
+        const order = ['/master-data/sites', '/master-data/platforms'];
+        children = [...children].sort((left, right) => {
+          const leftIndex = order.indexOf(left.path);
+          const rightIndex = order.indexOf(right.path);
+          return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex);
+        });
+      }
       return children.length && canAccessMenuItem(user, item) ? [{ ...item, children }] : [];
     }
     return canAccessMenuItem(user, item) ? [item] : [];

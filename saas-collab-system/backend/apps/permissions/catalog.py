@@ -1,5 +1,26 @@
 PERMISSION_DEFINITIONS = (
     {
+        "code": "listings.product_detail.view",
+        "name": "查看平台商品明细数据",
+        "module": "listings",
+        "action": "product_detail.view",
+        "description": "查看当前租户的平台、站点、店铺商品变种明细。",
+    },
+    {
+        "code": "listings.product_detail.manage",
+        "name": "维护平台商品明细数据",
+        "module": "listings",
+        "action": "product_detail.manage",
+        "description": "新增或编辑平台商品明细及内部 SKU 关联。",
+    },
+    {
+        "code": "listings.product_detail.import",
+        "name": "导入平台商品明细数据",
+        "module": "listings",
+        "action": "product_detail.import",
+        "description": "导入 CSV/XLSX 平台商品明细并按行返回错误，支持 dry-run。",
+    },
+    {
         "code": "development.product_archive.view",
         "name": "查看开发产品档案",
         "module": "development",
@@ -596,6 +617,20 @@ PERMISSION_DEFINITIONS = (
         "description": "Create, update, activate, and deactivate tenant master data.",
     },
     {
+        "code": "masterdata.settings.view",
+        "name": "查看基础档案设置",
+        "module": "masterdata",
+        "action": "settings.view",
+        "description": "查看当前租户的基础档案选项设置。",
+    },
+    {
+        "code": "masterdata.settings.manage",
+        "name": "维护基础档案设置",
+        "module": "masterdata",
+        "action": "settings.manage",
+        "description": "维护当前租户的基础档案选项设置。",
+    },
+    {
         "code": "influencers.view",
         "name": "View influencers",
         "module": "influencers",
@@ -879,6 +914,8 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "system.roles.manage": "管理角色与权限",
     "masterdata.view": "查看基础档案",
     "masterdata.manage": "管理基础档案",
+    "masterdata.settings.view": "查看基础档案设置",
+    "masterdata.settings.manage": "维护基础档案设置",
     "influencers.view": "查看达人目录",
     "influencers.manage": "管理达人目录",
     "influencers.outreach.view": "查看达人触达任务",

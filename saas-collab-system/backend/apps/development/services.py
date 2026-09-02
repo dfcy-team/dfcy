@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db import IntegrityError
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -15,19 +16,24 @@ from rest_framework.exceptions import ValidationError
 from apps.audit.models import NotificationMessage
 from apps.common.exceptions import ScopedResourceNotFound, StateConflict
 from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster, SupplierStatusChoices
-from apps.products.coding_services import allocate_spu_code, build_sku_code, category_path
+from apps.products.coding_services import build_sku_code, category_path
 from apps.products.models import ProductCategory, ProductColor, ProductResearch, ProductSKU, ProductSPU
 
 from .models import (
     DevelopmentCostEstimate,
     DevelopmentPerformanceReview,
-    DevelopmentProductArchive,
-    DevelopmentProductArchiveEvent,
     DevelopmentProject,
     DevelopmentProjectStage,
+    DevelopmentProductArchive,
+    DevelopmentProductArchiveEvent,
     DevelopmentRequirementChangeLog,
+    DevelopmentRequirementCompetitorLink,
     DevelopmentSample,
     ProductSalesSnapshot,
+)
+from .competitor_client import (
+    CompetitorReportClient,
+    report_datetime,
 )
 
 
@@ -76,67 +82,87 @@ def _next_code(model, tenant, field, prefix):
     return f"{base}{sequence:03d}"
 
 
-def _resolve_archive_category(*, tenant, project, explicit=None, fallback=None):
-    category = explicit or getattr(project, "category_node", None) or fallback
+def _validate_archive_category(*, tenant, category):
+    """Return a tenant-owned active L3 category or raise a validation error."""
+
+    if category is None:
+        raise ValidationError({"category_node": "An active L3 product category is required."})
     category_id = getattr(category, "pk", category)
-    category = ProductCategory.objects.select_related("parent__parent").filter(pk=category_id).first()
+    category = (
+        ProductCategory.objects.select_related("parent__parent")
+        .filter(pk=category_id)
+        .first()
+    )
     if category is None or category.tenant_id != tenant.id:
         raise ValidationError({"category_node": "Category does not belong to the current tenant."})
-    if not category.is_active or category.level != ProductCategory.Level.L3:
-        raise ValidationError({"category_node": "An active L3 product category is required."})
+    if not category.is_active:
+        raise ValidationError({"category_node": "An active product category is required."})
+    if category.level != ProductCategory.Level.L3:
+        raise ValidationError({"category_node": "Development products must use an active L3 leaf category."})
     try:
         category_path(category)
     except Exception as exc:
+        # category_path raises Django's ValidationError.  Keep the service
+        # boundary in DRF's validation vocabulary for both API and callers.
         raise ValidationError({"category_node": str(exc)}) from exc
     return category
 
 
-def _resolve_archive_market(*, tenant, data, existing=None):
-    """Resolve structured platform/store records and synchronized snapshots.
+def _resolve_archive_category(*, tenant, project, explicit=None, fallback=None):
+    """Resolve explicit > project > requirement category in that order."""
 
-    The archive predates master-data references, so plain ``platform``/``site``
-    strings remain valid for legacy/internal trials.  Once a structured record
-    is supplied, it is always checked against the current tenant and active
-    status, and the snapshots are derived from the selected records.
+    category = explicit
+    if category is None:
+        category = getattr(project, "category_node", None)
+    if category is None and getattr(project, "requirement_id", None):
+        category = getattr(getattr(project, "requirement", None), "category_node", None)
+    if category is None:
+        category = fallback
+    return _validate_archive_category(tenant=tenant, category=category)
+
+
+def _resolve_archive_market(*, tenant, data, existing=None):
+    """Resolve tenant-owned platform/store references and their snapshots.
+
+    Archive rows retain the historical text snapshots for compatibility, while
+    structured references are validated whenever supplied.  This keeps the
+    product-development trial boundary useful for legacy callers and prevents
+    a cross-tenant or inactive master-data row from being persisted.
     """
+
     data = data or {}
     platform = data.get("platform_master", data.get("platform_id", getattr(existing, "platform_master", None)))
     store = data.get("store_master", data.get("store_id", getattr(existing, "store_master", None)))
 
     if platform is not None and not isinstance(platform, PlatformMaster):
-        platform_id = platform
-        platform = PlatformMaster.objects.filter(pk=platform_id).first()
+        platform = PlatformMaster.objects.filter(pk=platform).first()
         if platform is None:
             raise ValidationError({"platform_master": "Platform is outside the current tenant or does not exist."})
     if store is not None and not isinstance(store, StoreMaster):
-        store_id = store
-        store = StoreMaster.objects.select_related("platform").filter(pk=store_id).first()
+        store = StoreMaster.objects.select_related("platform").filter(pk=store).first()
         if store is None:
             raise ValidationError({"store_master": "Store is outside the current tenant or does not exist."})
-    if platform is not None:
-        if platform.tenant_id != tenant.id or platform.status != StatusChoices.ACTIVE:
-            raise ValidationError({"platform_master": "Platform must be active and belong to the current tenant."})
+    if platform is not None and (platform.tenant_id != tenant.id or platform.status != StatusChoices.ACTIVE):
+        raise ValidationError({"platform_master": "Platform must be active and belong to the current tenant."})
     if store is not None:
         if store.tenant_id != tenant.id or store.status != StatusChoices.ACTIVE:
             raise ValidationError({"store_master": "Store must be active and belong to the current tenant."})
         if platform is None:
             platform = store.platform
-            if platform.tenant_id != tenant.id or platform.status != StatusChoices.ACTIVE:
-                raise ValidationError({"platform_master": "Platform must be active and belong to the current tenant."})
+        if platform.tenant_id != tenant.id or platform.status != StatusChoices.ACTIVE:
+            raise ValidationError({"platform_master": "Platform must be active and belong to the current tenant."})
         if store.platform_id != platform.id:
             raise ValidationError({"store_master": "Store must belong to the selected platform."})
 
-    raw_platform = data.get("platform", getattr(existing, "platform", "internal"))
-    raw_site = data.get("site", getattr(existing, "site", "internal"))
-    snapshot_platform = str(raw_platform or "internal").strip() or "internal"
-    snapshot_site = str(raw_site or "internal").strip() or "internal"
+    snapshot_platform = str(data.get("platform", getattr(existing, "platform", "internal")) or "internal").strip() or "internal"
+    snapshot_site = str(data.get("site", getattr(existing, "site", "internal")) or "internal").strip() or "internal"
     if platform is not None:
-        if snapshot_platform.lower() not in {"internal", str(platform.code).strip().lower()}:
+        if snapshot_platform.casefold() not in {"internal", str(platform.code).strip().casefold()}:
             raise ValidationError({"platform": "Platform snapshot must match the selected platform."})
         snapshot_platform = str(platform.code).strip()
     if store is not None:
         country = str(store.country_code or "").strip().upper()
-        if snapshot_site.lower() not in {"internal", country.lower()}:
+        if snapshot_site.casefold() not in {"internal", country.casefold()}:
             raise ValidationError({"site": "Site must match the selected store country."})
         snapshot_site = country
     return platform, store, snapshot_platform, snapshot_site
@@ -146,20 +172,20 @@ _DEV_CODE_RE = re.compile(r"^[A-Z0-9]+$")
 
 
 def _normalize_development_code(value, *, field="development_spu_code"):
-    """Normalize and validate a developer-controlled code segment."""
     normalized = unicodedata.normalize("NFKC", str(value or "")).strip().upper()
     if not normalized:
         raise ValidationError({field: "A development SPU code is required."})
-    if not re.search(r"[A-Z]", normalized) or any(char.isspace() for char in normalized) or not _DEV_CODE_RE.fullmatch(normalized):
+    if (
+        not re.search(r"[A-Z]", normalized)
+        or any(char.isspace() for char in normalized)
+        or not _DEV_CODE_RE.fullmatch(normalized)
+    ):
         raise ValidationError({field: "Use A-Z/0-9 with at least one letter; separators and whitespace are not allowed."})
     return normalized
 
 
 def _normalize_development_segment(value, *, field):
     normalized = unicodedata.normalize("NFKC", str(value or "")).strip().upper()
-    # Keep the segment deterministic while ensuring the SKU remains exactly
-    # three hyphen-delimited logical parts even when a source value contains a
-    # separator (for example ``10-12cm``).
     normalized = re.sub(r"[^A-Z0-9]+", "X", normalized).strip("X")
     if not normalized or not _DEV_CODE_RE.fullmatch(normalized):
         raise ValidationError({field: "The development SKU segment is empty after normalization."})
@@ -167,7 +193,6 @@ def _normalize_development_segment(value, *, field):
 
 
 def _development_spec_code(*, category, spec_values):
-    """Return a separator-safe, deterministic third development-SKU segment."""
     if not spec_values:
         return "STD", {}
     if not isinstance(spec_values, dict):
@@ -236,7 +261,13 @@ def finalize_product(*, project_id, actor):
         spu_code=_next_code(ProductSPU, project.tenant, "spu_code", "SPU"),
         product_name=project.product_name,
         category=project.category,
+        category_node=project.category_node,
+        development_source=project.development_source,
+        development_project=project,
     )
+    if project.category_node_id:
+        product.category = project.category_node.name
+        product.save(update_fields=["category", "updated_at"])
     now = timezone.now()
     DevelopmentProjectStage.objects.filter(
         project=project,
@@ -274,6 +305,8 @@ def finalize_product(*, project_id, actor):
 
 
 def _record_product_archive_event(*, archive, actor, action, from_status="", to_status="", metadata=None):
+    """Write an immutable lifecycle audit event inside the caller's transaction."""
+
     return DevelopmentProductArchiveEvent.objects.create(
         archive=archive,
         tenant=archive.tenant,
@@ -287,10 +320,17 @@ def _record_product_archive_event(*, archive, actor, action, from_status="", to_
 
 @transaction.atomic
 def create_product_archive(*, project_id, actor, data=None):
+    """Create a virtual trial archive for a development project.
+
+    The project row is locked before checking the one-to-one archive relation,
+    making retries deterministic even when two operators click "create" at
+    the same time.  No ``ProductSPU`` is created in this operation.
+    """
+
     data = data or {}
     project = (
         DevelopmentProject.objects.select_for_update()
-        .select_related("tenant", "category_node")
+        .select_related("tenant")
         .filter(pk=project_id, tenant=actor.tenant)
         .first()
     )
@@ -298,34 +338,56 @@ def create_product_archive(*, project_id, actor, data=None):
         raise ScopedResourceNotFound("Development project is not available in the current tenant.")
     if project.status == DevelopmentProject.Status.CANCELLED:
         raise StateConflict("A cancelled development project cannot create a product archive.")
+
     category = _resolve_archive_category(
         tenant=project.tenant,
         project=project,
         explicit=data.get("category_node"),
+        fallback=None,
     )
-    platform, store, snapshot_platform, snapshot_site = _resolve_archive_market(
+    platform_master, store_master, snapshot_platform, snapshot_site = _resolve_archive_market(
         tenant=project.tenant,
         data=data,
     )
-    existing = DevelopmentProductArchive.objects.select_for_update().filter(project=project).first()
+
+    existing = (
+        DevelopmentProductArchive.objects.select_for_update()
+        .select_related("project", "formal_product")
+        .filter(project=project)
+        .first()
+    )
     if existing is not None:
-        comparisons = {field: data.get(field) for field in ("product_name",)}
-        if existing.category_node_id != category.pk or any(
-            value is not None and str(value) != str(getattr(existing, field))
+        # A retry with identical business inputs is a safe no-op.  Explicitly
+        # reject a contradictory retry so an archive cannot silently drift.
+        comparisons = {
+            "product_name": data.get("product_name"),
+            "category": data.get("category"),
+            "platform": data.get("platform"),
+            "site": data.get("site"),
+        }
+        conflicts = {
+            field: value
             for field, value in comparisons.items()
-        ):
+            if value is not None and str(value) != str(getattr(existing, field))
+        }
+        if existing.category_node_id != category.pk:
+            conflicts["category_node"] = category.pk
+        if platform_master is not None and existing.platform_master_id not in (None, platform_master.pk):
+            conflicts["platform_master"] = platform_master.pk
+        if store_master is not None and existing.store_master_id not in (None, store_master.pk):
+            conflicts["store_master"] = store_master.pk
+        if data.get("platform") is not None and existing.platform.casefold() != snapshot_platform.casefold():
+            conflicts["platform"] = snapshot_platform
+        if data.get("site") is not None and existing.site.casefold() != snapshot_site.casefold():
+            conflicts["site"] = snapshot_site
+        if "virtual_inventory_qty" in data and int(data["virtual_inventory_qty"]) != existing.virtual_inventory_qty:
+            conflicts["virtual_inventory_qty"] = data["virtual_inventory_qty"]
+        if conflicts:
             raise StateConflict("A product archive already exists for this project with different values.")
-        if platform is not None and existing.platform_master_id not in (None, platform.pk):
-            raise StateConflict("A product archive already exists with a different platform master.")
-        if store is not None and existing.store_master_id not in (None, store.pk):
-            raise StateConflict("A product archive already exists with a different store master.")
-        if data.get("platform") is not None and str(existing.platform).lower() != snapshot_platform.lower():
-            raise StateConflict("A product archive already exists with a different platform snapshot.")
-        if data.get("site") is not None and str(existing.site).lower() != snapshot_site.lower():
-            raise StateConflict("A product archive already exists with a different site snapshot.")
         return existing, False
+
     target_sites = project.target_sites if isinstance(project.target_sites, list) else []
-    if data.get("site") is None and store is None and target_sites:
+    if data.get("site") is None and store_master is None and target_sites:
         snapshot_site = str(target_sites[0] or "internal").strip() or "internal"
     archive_no = _next_code(DevelopmentProductArchive, project.tenant, "archive_no", "DPA")
     archive = DevelopmentProductArchive.objects.create(
@@ -335,8 +397,8 @@ def create_product_archive(*, project_id, actor, data=None):
         product_name=str(data.get("product_name") or project.product_name).strip(),
         category=category.name,
         category_node=category,
-        platform_master=platform,
-        store_master=store,
+        platform_master=platform_master,
+        store_master=store_master,
         platform=snapshot_platform,
         site=snapshot_site,
         virtual_inventory_sku=str(data.get("virtual_inventory_sku") or f"VT-{archive_no}").strip(),
@@ -351,11 +413,13 @@ def create_product_archive(*, project_id, actor, data=None):
         action="created",
         to_status=archive.status,
         metadata={
-            "platform": snapshot_platform,
-            "site": snapshot_site,
-            "platform_master_id": platform.pk if platform else None,
-            "store_master_id": store.pk if store else None,
+            "inventory_mode": archive.inventory_mode,
+            "platform": archive.platform,
+            "site": archive.site,
+            "platform_master_id": platform_master.pk if platform_master else None,
+            "store_master_id": store_master.pk if store_master else None,
             "virtual_inventory_sku": archive.virtual_inventory_sku,
+            "virtual_inventory_qty": archive.virtual_inventory_qty,
         },
     )
     return archive, True
@@ -365,7 +429,6 @@ def create_product_archive(*, project_id, actor, data=None):
 def update_product_archive(*, archive_id, actor, data):
     archive = (
         DevelopmentProductArchive.objects.select_for_update()
-        .select_related("project", "platform_master", "store_master")
         .filter(pk=archive_id, tenant=actor.tenant)
         .first()
     )
@@ -379,7 +442,7 @@ def update_product_archive(*, archive_id, actor, data):
         explicit=data.get("category_node"),
         fallback=archive.category_node,
     )
-    platform, store, snapshot_platform, snapshot_site = _resolve_archive_market(
+    platform_master, store_master, snapshot_platform, snapshot_site = _resolve_archive_market(
         tenant=archive.tenant,
         data=data,
         existing=archive,
@@ -388,33 +451,31 @@ def update_product_archive(*, archive_id, actor, data):
     for field in ("product_name", "virtual_inventory_qty", "test_notes"):
         if field not in data:
             continue
-        value = max(int(data[field] or 0), 0) if field == "virtual_inventory_qty" else data[field]
-        value = value.strip() if isinstance(value, str) else value
+        value = data[field]
+        if field == "virtual_inventory_qty":
+            value = max(int(value or 0), 0)
+        elif isinstance(value, str):
+            value = value.strip()
         if value != getattr(archive, field):
             setattr(archive, field, value)
             changed[field] = value
-    if archive.platform_master_id != getattr(platform, "pk", None):
-        archive.platform_master = platform
-        changed["platform_master"] = getattr(platform, "pk", None)
-    if archive.store_master_id != getattr(store, "pk", None):
-        archive.store_master = store
-        changed["store_master"] = getattr(store, "pk", None)
-    if "platform" in data and archive.platform != snapshot_platform:
+    if archive.platform_master_id != getattr(platform_master, "pk", None):
+        archive.platform_master = platform_master
+        changed["platform_master"] = getattr(platform_master, "pk", None)
+    if archive.store_master_id != getattr(store_master, "pk", None):
+        archive.store_master = store_master
+        changed["store_master"] = getattr(store_master, "pk", None)
+    if ("platform" in data or platform_master is not None) and archive.platform != snapshot_platform:
         archive.platform = snapshot_platform
         changed["platform"] = snapshot_platform
-    elif platform is not None and archive.platform != snapshot_platform:
-        archive.platform = snapshot_platform
-        changed["platform"] = snapshot_platform
-    if "site" in data and archive.site != snapshot_site:
-        archive.site = snapshot_site
-        changed["site"] = snapshot_site
-    elif store is not None and archive.site != snapshot_site:
+    if ("site" in data or store_master is not None) and archive.site != snapshot_site:
         archive.site = snapshot_site
         changed["site"] = snapshot_site
     if archive.category_node_id != category.pk or archive.category != category.name:
         archive.category_node = category
         archive.category = category.name
-        changed.update({"category_node": category.pk, "category": category.name})
+        changed["category_node"] = category.pk
+        changed["category"] = category.name
     if changed:
         archive.updated_by = actor
         archive.save(update_fields=[*changed.keys(), "updated_by", "updated_at"])
@@ -431,12 +492,8 @@ def update_product_archive(*, archive_id, actor, data):
 
 @transaction.atomic
 def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
-    """Create (or replay) the draft/not-listed SPU/SKU used for platform tests.
+    """Create or replay the draft/not-listed SPU/SKU used for platform tests."""
 
-    A row-level archive lock makes retries safe.  The generated development
-    identifiers are persisted on the archive and remain separate from the
-    official product identifiers created during formalization.
-    """
     data = data or {}
     archive = (
         DevelopmentProductArchive.objects.select_for_update()
@@ -446,7 +503,10 @@ def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
     )
     if archive is None:
         raise ScopedResourceNotFound("Product archive is not available in the current tenant.")
-    if archive.status not in {DevelopmentProductArchive.Status.TRIAL, DevelopmentProductArchive.Status.CONFIRMED}:
+    if archive.status not in {
+        DevelopmentProductArchive.Status.TRIAL,
+        DevelopmentProductArchive.Status.CONFIRMED,
+    }:
         if archive.status == DevelopmentProductArchive.Status.FORMALIZED and archive.formal_product_id:
             return archive, False
         raise StateConflict("Only a trial or confirmed archive can generate a trial product.")
@@ -456,14 +516,20 @@ def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
         project=archive.project,
         explicit=archive.category_node,
     )
-    development_spu_code = _normalize_development_code(data.get("development_spu_code"), field="development_spu_code")
-    season_code = str(data.get("season_code") or getattr(archive, "season_code", "0") or "0").strip()
+    development_spu_code = _normalize_development_code(
+        data.get("development_spu_code"),
+        field="development_spu_code",
+    )
+    season_code = str(data.get("season_code") or archive.season_code or "0").strip()
     if not re.fullmatch(r"[0-9]", season_code):
         raise ValidationError({"season_code": "Attribute code must be one digit."})
-    # A complete existing pair is the idempotent replay path.  Reject a caller
-    # that tries to alter color/specification after the SKU was generated.
+
     if archive.trial_product_id and archive.trial_sku_id:
-        if archive.trial_product.tenant_id != archive.tenant_id or archive.trial_sku.tenant_id != archive.tenant_id or archive.trial_sku.spu_id != archive.trial_product_id:
+        if (
+            archive.trial_product.tenant_id != archive.tenant_id
+            or archive.trial_sku.tenant_id != archive.tenant_id
+            or archive.trial_sku.spu_id != archive.trial_product_id
+        ):
             raise StateConflict("The stored trial product references are outside the archive tenant.")
         if archive.trial_product.spu_code != development_spu_code:
             raise StateConflict("The trial development SPU code cannot change after generation.")
@@ -474,6 +540,7 @@ def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
         if requested_specs is not None and requested_specs != (archive.trial_sku.spec_values or {}):
             raise StateConflict("The trial SKU specifications cannot change after generation.")
         return archive, False
+
     if archive.trial_product_id and not archive.trial_sku_id:
         trial_spu = archive.trial_product
         if trial_spu.tenant_id != archive.tenant_id:
@@ -481,13 +548,18 @@ def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
         if trial_spu.spu_code != development_spu_code:
             raise StateConflict("The trial development SPU code cannot change after generation.")
     else:
-        if DevelopmentProductArchive.objects.filter(
-            tenant=archive.tenant,
-            development_spu_code=development_spu_code,
-        ).exclude(pk=archive.pk).exists() or ProductSPU.objects.filter(
-            tenant=archive.tenant,
-            spu_code=development_spu_code,
-        ).exists():
+        if (
+            DevelopmentProductArchive.objects.filter(
+                tenant=archive.tenant,
+                development_spu_code=development_spu_code,
+            )
+            .exclude(pk=archive.pk)
+            .exists()
+            or ProductSPU.objects.filter(
+                tenant=archive.tenant,
+                spu_code=development_spu_code,
+            ).exists()
+        ):
             raise ValidationError({"development_spu_code": "This development SPU code is already used in the current tenant."})
         trial_spu = ProductSPU.objects.create(
             tenant=archive.tenant,
@@ -505,25 +577,32 @@ def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
 
     color_code = str(data.get("color_code") or "").strip()
     if not color_code:
-        # Keep the one-click operation useful for tenants with a single active
-        # color, while still requiring an explicit choice when ambiguous.
-        active_colors = list(ProductColor.objects.filter(tenant=archive.tenant, is_active=True).order_by("code")[:2])
+        active_colors = list(
+            ProductColor.objects.filter(tenant=archive.tenant, is_active=True).order_by("code")[:2]
+        )
         if len(active_colors) == 1:
             color_code = active_colors[0].code
         else:
             raise ValidationError({"color_code": "An active tenant color is required to generate a trial SKU."})
-    color = ProductColor.objects.filter(tenant=archive.tenant, code=color_code, is_active=True).first()
+    color = ProductColor.objects.filter(
+        tenant=archive.tenant,
+        code=color_code,
+        is_active=True,
+    ).first()
     if color is None:
         raise ValidationError({"color_code": "Select an active color from the current tenant dictionary."})
-    spec_values = data.get("spec_values", {})
-    if spec_values is None:
-        spec_values = {}
-    specification, normalized = _development_spec_code(category=category, spec_values=spec_values)
-    color_segment = _normalize_development_segment(color.code, field="color_code")
-    sku_code = f"{development_spu_code}-{color_segment}-{specification}"
+    spec_values = data.get("spec_values", {}) or {}
+    specification, normalized = _development_spec_code(
+        category=category,
+        spec_values=spec_values,
+    )
+    sku_code = f"{development_spu_code}-{_normalize_development_segment(color.code, field='color_code')}-{specification}"
     if sku_code.count("-") != 2 or len(sku_code) > 80:
         raise ValidationError({"development_spu_code": "The generated development SKU must be three segments and at most 80 characters."})
-    if ProductSKU.objects.filter(tenant=archive.tenant, sku_code=sku_code).exclude(pk=archive.trial_sku_id).exists():
+    if ProductSKU.objects.filter(
+        tenant=archive.tenant,
+        sku_code=sku_code,
+    ).exclude(pk=archive.trial_sku_id).exists():
         raise ValidationError({"development_spu_code": "This development SKU code is already used in the current tenant."})
     trial_sku = ProductSKU.objects.create(
         tenant=archive.tenant,
@@ -540,10 +619,21 @@ def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
     archive.trial_sku = trial_sku
     archive.category_node = category
     archive.category = category.name
-    archive.updated_by = actor
     archive.development_spu_code = development_spu_code
     archive.season_code = season_code
-    archive.save(update_fields=["development_spu_code", "season_code", "trial_product", "trial_sku", "category_node", "category", "updated_by", "updated_at"])
+    archive.updated_by = actor
+    archive.save(
+        update_fields=[
+            "development_spu_code",
+            "season_code",
+            "trial_product",
+            "trial_sku",
+            "category_node",
+            "category",
+            "updated_by",
+            "updated_at",
+        ]
+    )
     _record_product_archive_event(
         archive=archive,
         actor=actor,
@@ -565,14 +655,26 @@ def generate_trial_product(*, archive_id, actor, data=None, idempotency_key=""):
 
 @transaction.atomic
 def confirm_product_archive(*, archive_id, actor, test_result="pass", test_notes=None, idempotency_key=""):
-    archive = DevelopmentProductArchive.objects.select_for_update().filter(pk=archive_id, tenant=actor.tenant).first()
+    """Confirm a completed virtual test without creating a formal product."""
+
+    archive = (
+        DevelopmentProductArchive.objects.select_for_update()
+        .select_related("project", "formal_product", "formal_sku", "trial_product", "trial_sku")
+        .filter(pk=archive_id, tenant=actor.tenant)
+        .first()
+    )
     if archive is None:
         raise ScopedResourceNotFound("Product archive is not available in the current tenant.")
-    if archive.status in {DevelopmentProductArchive.Status.CONFIRMED, DevelopmentProductArchive.Status.FORMALIZED}:
+    if archive.status in {
+        DevelopmentProductArchive.Status.CONFIRMED,
+        DevelopmentProductArchive.Status.FORMALIZED,
+    }:
         return archive, False
     if archive.status != DevelopmentProductArchive.Status.TRIAL:
         raise StateConflict("Only a virtual trial archive can be confirmed.")
-    result = str(test_result or "pass").strip().lower()
+
+    result = str(test_result or DevelopmentProductArchive.TestResult.PASS).strip().lower()
+    result = {"passed": "pass", "success": "pass"}.get(result, result)
     if result != DevelopmentProductArchive.TestResult.PASS:
         raise StateConflict("Only a passed virtual test can be confirmed.")
     previous_status = archive.status
@@ -583,23 +685,40 @@ def confirm_product_archive(*, archive_id, actor, test_result="pass", test_notes
     archive.trial_confirmed_by = actor
     archive.trial_confirmed_at = timezone.now()
     archive.updated_by = actor
-    archive.save(update_fields=["test_result", "test_notes", "status", "trial_confirmed_by", "trial_confirmed_at", "updated_by", "updated_at"])
+    archive.save(
+        update_fields=[
+            "test_result",
+            "test_notes",
+            "status",
+            "trial_confirmed_by",
+            "trial_confirmed_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
     _record_product_archive_event(
         archive=archive,
         actor=actor,
         action="trial_confirmed",
         from_status=previous_status,
         to_status=archive.status,
-        metadata={"idempotency_key": idempotency_key or ""},
+        metadata={"test_result": result, "idempotency_key": idempotency_key or ""},
     )
     return archive, True
 
 
 @transaction.atomic
 def formalize_product_archive(*, archive_id, actor, idempotency_key=""):
+    """Convert a confirmed trial archive into an internal ProductSPU.
+
+    This action never calls listing/publication integrations.  It only creates
+    or links the tenant's internal product master and records the operator and
+    resulting code in the archive audit trail.
+    """
+
     archive = (
         DevelopmentProductArchive.objects.select_for_update()
-        .select_related("project", "formal_product", "formal_sku", "trial_product", "trial_sku")
+        .select_related("project", "formal_product")
         .filter(pk=archive_id, tenant=actor.tenant)
         .first()
     )
@@ -609,44 +728,62 @@ def formalize_product_archive(*, archive_id, actor, idempotency_key=""):
         return archive.formal_product, False
     if archive.status != DevelopmentProductArchive.Status.CONFIRMED:
         raise StateConflict("A product archive must be trial-confirmed before formalization.")
-    if not archive.trial_product_id or not archive.trial_sku_id:
-        raise StateConflict("Generate and retain a development trial SPU/SKU before formalization.")
-    if archive.trial_product.tenant_id != archive.tenant_id or archive.trial_sku.tenant_id != archive.tenant_id or archive.trial_sku.spu_id != archive.trial_product_id:
+
+    if archive.trial_product_id and (
+        archive.trial_product.tenant_id != archive.tenant_id
+        or (archive.trial_sku_id and (
+            archive.trial_sku.tenant_id != archive.tenant_id
+            or archive.trial_sku.spu_id != archive.trial_product_id
+        ))
+    ):
         raise StateConflict("The development trial product references are outside the archive tenant.")
-    project = DevelopmentProject.objects.select_for_update().select_related("finalized_product", "category_node").get(pk=archive.project_id)
-    category = _resolve_archive_category(tenant=archive.tenant, project=project, explicit=archive.category_node)
-    if project.finalized_product_id and project.finalized_product_id != archive.trial_product_id:
-        raise StateConflict("The development project already points to a different formal product.")
-    # Trial products intentionally remain in the development namespace.  A
-    # confirmed archive always receives a new official SPU.
-    product = None
+    project = DevelopmentProject.objects.select_for_update().select_related("finalized_product").get(pk=archive.project_id)
+    category = _resolve_archive_category(
+        tenant=archive.tenant,
+        project=project,
+        explicit=archive.category_node,
+        fallback=None,
+    )
+    product = project.finalized_product
     created = False
-    if product is None:
-        season_code = str(archive.season_code or "0").strip() or "0"
-        try:
-            spu_code, segments = allocate_spu_code(
-                tenant=archive.tenant,
-                category=category,
-                season_code=season_code,
-            )
-        except DjangoValidationError as exc:
-            raise ValidationError({"season_code": exc.messages}) from exc
+    if product is not None:
+        if product.tenant_id != archive.tenant_id:
+            raise StateConflict("The linked formal product belongs to another tenant.")
+        if product.development_project_id not in (None, project.id):
+            raise StateConflict("The linked formal product belongs to another development project.")
+        if DevelopmentProductArchive.objects.filter(formal_product=product).exclude(pk=archive.pk).exists():
+            raise StateConflict("The formal product is already linked to another development archive.")
+        if product.development_project_id is None:
+            product.development_project = project
+            product.development_source = project.development_source
+        # Formalization is the boundary at which the structured category is
+        # copied to the product master.  Keep the product internal/draft; this
+        # action never publishes or lists it.
+        product.category_node = category
+        product.category = category.name
+        product.save(
+            update_fields=[
+                "development_project",
+                "development_source",
+                "category_node",
+                "category",
+                "updated_at",
+            ]
+        )
+    else:
         product = ProductSPU.objects.create(
             tenant=archive.tenant,
-            spu_code=spu_code,
+            spu_code=_next_code(ProductSPU, archive.tenant, "spu_code", "SPU"),
             product_name=archive.product_name,
             category=category.name,
             category_node=category,
-            l1_code=segments[0],
-            l2_code=segments[1],
-            l3_code=segments[2],
-            season_code=season_code,
+            development_source=project.development_source,
+            development_project=project,
             lifecycle_status=ProductSPU.LifecycleStatus.DRAFT,
             sales_status=ProductSPU.SalesStatus.NOT_LISTED,
         )
         created = True
-    elif product.tenant_id != archive.tenant_id:
-        raise StateConflict("The linked formal product belongs to another tenant.")
+
     formal_sku = archive.formal_sku
     if archive.trial_sku_id:
         try:
@@ -655,9 +792,17 @@ def formalize_product_archive(*, archive_id, actor, idempotency_key=""):
                 color_code=archive.trial_sku.color_code,
                 spec_values=archive.trial_sku.spec_values or {},
             )
-        except DjangoValidationError as exc:
-            raise ValidationError({"spec_values": exc.messages}) from exc
-        formal_sku = ProductSKU.objects.filter(tenant=archive.tenant, sku_code=sku_code).first()
+        except DjangoValidationError:
+            # Categories without configured dimensions can still be formalized
+            # after a legacy trial SKU was generated.  Preserve the trial
+            # colour/specification while keeping the official SPU namespace.
+            specification = archive.trial_sku.specification or "STD"
+            sku_code = f"{product.spu_code}-{_normalize_development_segment(archive.trial_sku.color_code, field='color_code')}-{_normalize_development_segment(specification, field='spec_values')}"
+            normalized = archive.trial_sku.spec_values or {}
+        formal_sku = ProductSKU.objects.filter(
+            tenant=archive.tenant,
+            sku_code=sku_code,
+        ).first()
         if formal_sku is None:
             formal_sku = ProductSKU.objects.create(
                 tenant=archive.tenant,
@@ -672,10 +817,26 @@ def formalize_product_archive(*, archive_id, actor, idempotency_key=""):
             )
         elif formal_sku.spu_id != product.id:
             raise StateConflict("The generated formal SKU belongs to another product.")
+
     now = timezone.now()
-    project.stage = DevelopmentProject.Stage.FINALIZED
+    if project.stage != DevelopmentProject.Stage.FINALIZED:
+        DevelopmentProjectStage.objects.filter(
+            project=project,
+            stage=project.stage,
+            completed_at__isnull=True,
+        ).update(completed_at=now)
+        DevelopmentProjectStage.objects.create(
+            project=project,
+            stage=DevelopmentProject.Stage.FINALIZED,
+            entered_at=now,
+            approved_by=actor,
+            approval_notes="Virtual trial confirmed and internal product archive formalized.",
+            deliverables={"product_id": product.id, "spu_code": product.spu_code, "archive_id": archive.id},
+        )
+        project.stage = DevelopmentProject.Stage.FINALIZED
     project.finalized_product = product
     project.save(update_fields=["stage", "finalized_product", "updated_at"])
+
     previous_status = archive.status
     archive.formal_product = product
     archive.formal_sku = formal_sku
@@ -685,7 +846,19 @@ def formalize_product_archive(*, archive_id, actor, idempotency_key=""):
     archive.formalized_by = actor
     archive.formalized_at = now
     archive.updated_by = actor
-    archive.save(update_fields=["formal_product", "formal_sku", "category_node", "category", "status", "formalized_by", "formalized_at", "updated_by", "updated_at"])
+    archive.save(
+        update_fields=[
+            "formal_product",
+            "formal_sku",
+            "category_node",
+            "category",
+            "status",
+            "formalized_by",
+            "formalized_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
     _record_product_archive_event(
         archive=archive,
         actor=actor,
@@ -702,7 +875,32 @@ def formalize_product_archive(*, archive_id, actor, idempotency_key=""):
             "idempotency_key": idempotency_key or "",
         },
     )
+    NotificationMessage.objects.create(
+        tenant=archive.tenant,
+        user=project.assigned_to,
+        title=f"开发产品档案已转正：{archive.product_name}",
+        message=f"开发项目 {project.project_no} 已生成内部商品档案：{product.spu_code}。",
+        message_type="development_product_archive_formalized",
+    )
+    if project.requirement_id:
+        DevelopmentRequirementChangeLog.objects.create(
+            requirement=project.requirement,
+            changed_by=actor,
+            change_type="product_archive_formalized",
+            field_name="approval_status",
+            old_value=project.requirement.approval_status,
+            new_value="finalized",
+        )
     return product, created
+
+
+# Public domain-oriented aliases used by integrations and service tests.  The
+# shorter names remain the canonical implementation above.
+create_development_product_archive = create_product_archive
+confirm_development_product_archive = confirm_product_archive
+formalize_development_product_archive = formalize_product_archive
+complete_product_archive = confirm_product_archive
+promote_product_archive = formalize_product_archive
 
 
 @transaction.atomic
@@ -824,3 +1022,107 @@ def review_reminder_candidates(*, tenant, as_of=None):
             if elapsed >= days and not DevelopmentPerformanceReview.objects.filter(project=project, review_period=period).exists():
                 candidates.append({"project_id": project.id, "product_id": project.finalized_product_id, "review_period": period, "due_date": project.actual_launch_date + timedelta(days=days)})
     return candidates
+
+
+def get_competitor_report_client():
+    """Build the configured read-only competitor client.
+
+    Keeping construction in the service layer makes the API views easy to
+    test and leaves the provider URL/timeout under Django settings control.
+    ``CompetitorReportClient`` fails closed when the URL is blank.
+    """
+
+    return CompetitorReportClient()
+
+
+@transaction.atomic
+def create_competitor_link(*, requirement, actor, report_id, selection, client=None):
+    """Associate one completed external report and capture the decision.
+
+    ``report_id`` comes from the URL, while all report metadata is fetched
+    from the provider.  The request may only contribute human selections and
+    rationale; metadata in the request is intentionally ignored by the
+    serializer and can never overwrite the provider response.
+    """
+
+    if requirement.tenant_id != actor.tenant_id:
+        raise ScopedResourceNotFound("Product requirement is not available in the current tenant.")
+    client = client or get_competitor_report_client()
+    report = client.get_report(report_id, tenant=actor.tenant)
+    if report["status"] != "completed":
+        raise StateConflict("Only completed competitor reports can be linked.")
+
+    # The operator may choose and order conclusions, but cannot inject text
+    # and present it as an upstream insight.  This also keeps the audit
+    # snapshot traceable to the report that was fetched server-side.
+    selection_fields = {
+        "selected_strengths": "strengths",
+        "selected_pain_points": "pain_points",
+        "selected_recommendations": "recommendations",
+    }
+    invalid_selections = {}
+    for selection_field, report_field in selection_fields.items():
+        selected = list(selection.get(selection_field, []))
+        allowed = set(report["insights"].get(report_field, []))
+        unknown = [item for item in selected if item not in allowed]
+        if unknown:
+            invalid_selections[selection_field] = {
+                "unknown": unknown,
+                "allowed": sorted(allowed),
+            }
+    if invalid_selections:
+        raise ValidationError({"selections": invalid_selections})
+
+    if DevelopmentRequirementCompetitorLink.objects.filter(
+        tenant=actor.tenant,
+        requirement=requirement,
+        external_report_id=report["report_id"],
+    ).exists():
+        raise StateConflict("This competitor report is already linked to the requirement.")
+
+    now = timezone.now()
+    snapshot = {
+        "schema_version": 1,
+        "captured_at": now.isoformat(),
+        "source": "competitor_analysis_report",
+        "report": client.snapshot_payload(report),
+        "operator_decision": {
+            "selected_strengths": list(selection.get("selected_strengths", [])),
+            "selected_pain_points": list(selection.get("selected_pain_points", [])),
+            "selected_recommendations": list(selection.get("selected_recommendations", [])),
+            "evidence_ids": list(selection.get("evidence_ids", [])),
+            "operator_conclusion": selection.get("operator_conclusion", ""),
+            "excluded_items": list(selection.get("excluded_items", [])),
+        },
+    }
+    try:
+        return DevelopmentRequirementCompetitorLink.objects.create(
+            tenant=actor.tenant,
+            requirement=requirement,
+            external_report_id=report["report_id"],
+            task_id=report["task_id"],
+            platform=report["platform"],
+            site=report["site"],
+            product_id=report["product_id"],
+            product_title=report["product_title"],
+            relation_type=selection.get(
+                "relation_type",
+                DevelopmentRequirementCompetitorLink.RelationType.REFERENCE,
+            ),
+            is_primary=selection.get("is_primary", False),
+            reason=selection.get("reason", ""),
+            report_completed_at=report_datetime(report["completed_at"]),
+            data_updated_at=report_datetime(report["data_updated_at"]),
+            decision_snapshot=snapshot,
+            created_by=actor,
+        )
+    except IntegrityError as exc:
+        # The unique constraint is the final race-safe duplicate guard.
+        raise StateConflict("This competitor report is already linked to the requirement.") from exc
+
+
+def list_competitor_links(*, requirement, tenant):
+    return DevelopmentRequirementCompetitorLink.objects.filter(
+        tenant=tenant,
+        requirement=requirement,
+    ).select_related("created_by")
