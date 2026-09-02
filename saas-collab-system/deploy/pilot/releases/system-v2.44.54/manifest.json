@@ -8,7 +8,8 @@
   "source_actor": "architect",
   "release_actor": "architect",
   "scope": "masterdata.safe_delete",
-  "status": "candidate_verified_not_deployed",
+  "status": "deployed_pending_owner_verification",
+  "deployed_at_utc": "2026-09-02T01:51:38Z",
   "target_images": {
     "backend": "saas-collab-backend:v2.44.54",
     "celery": "saas-collab-backend:v2.44.54",
@@ -27,7 +28,15 @@
     "frontend_build": "passed",
     "django_check": "passed",
     "migration_drift": "No changes detected",
-    "menu_baseline": "passed"
+    "menu_baseline": "passed",
+    "vm_precheck": "passed",
+    "vm_predeploy_backend_tests": "137 passed",
+    "vm_runtime_revision": "cb022ea3bee8a79e45800632a898afe62d54524a",
+    "vm_pages": "passed",
+    "vm_auth_boundary": "401",
+    "vm_log_scan": "passed",
+    "custody_and_redis": "unchanged",
+    "release_ledgers": "registered"
   },
   "rollback": {
     "application_release": "2.44.53",

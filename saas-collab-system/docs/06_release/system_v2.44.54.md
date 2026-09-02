@@ -33,4 +33,12 @@
 
 ## 发布状态
 
-发布前状态为 `candidate_verified_not_deployed`。发布到 `192.168.174.131` 后需补充运行镜像 revision、服务健康、页面状态、菜单/权限目录复核和发布账本登记结果。
+- 2026-09-02 01:51:38 UTC 已发布到 `192.168.174.131`，当前状态为 `deployed_pending_owner_verification`。
+- 后端、Celery、Celery Beat 与前端均运行 V2.44.54，镜像 revision 均为 `cb022ea3bee8a79e45800632a898afe62d54524a`。
+- 虚拟机内发布前专项回归 `137 passed`，Django system check 与迁移漂移检查通过。
+- 首页、达人模块、商品三类页面、五个基础档案页面及角色权限页均返回 HTTP 200；未认证基础档案 API 返回 HTTP 401。
+- 发布后日志未发现 `Traceback`、`CRITICAL` 或 `Internal Server Error`。
+- 托管侧车仍为 V2.44.50，托管侧车与 Redis 的容器 ID 均未变化。
+- 菜单、路由、导航 CSS 和权限目录未修改；本版本只增加基础档案安全删除能力。
+- `v2.44.54-deployed` 标签及两套受控 Git 镜像基线均指向本版本功能提交。
+- 统一版本台账和共享版本台账均已登记 V2.44.54，等待业务方最终验收。
