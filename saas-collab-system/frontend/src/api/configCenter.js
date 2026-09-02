@@ -6,7 +6,16 @@ export const fetchConfigDefinitions = (params = {}) =>
     { method: 'get', url: '/api/internal/config/definitions/', params },
     mockConfigDefinitions,
     'config.definitions'
-  );
+  ).then((response) => {
+    // The definition endpoint predates paginated envelopes and returns a
+    // plain list in ``data``.  Normalize it for the decision page while
+    // preserving the explicit connected/mock capability signal.
+    if (!response?.success || !Array.isArray(response.data)) return response;
+    return {
+      ...response,
+      data: { items: response.data, api_status: 'connected' }
+    };
+  });
 
 export const fetchConfigValues = (params = {}) =>
   requestWithMockFallback(

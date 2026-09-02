@@ -165,9 +165,11 @@
           <el-select
             v-if="field.type === 'select'"
             v-model="resourceForm[field.key]"
+            :multiple="field.multiple === true"
+            :collapse-tags="field.multiple === true"
+            :collapse-tags-tooltip="field.multiple === true"
             :placeholder="field.placeholder || '请选择'"
-            :multiple="field.multiple"
-            :filterable="field.filterable"
+            :filterable="field.filterable !== false"
             :clearable="field.clearable === true"
             @change="handleFieldChange(field, $event)"
           >

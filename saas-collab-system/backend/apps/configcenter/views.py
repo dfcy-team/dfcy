@@ -1,10 +1,12 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 
 from apps.common.responses import paginated_data, success_response
 from apps.common.exceptions import BusinessRuleViolation, StateConflict
-from apps.permissions.services import check_user_permission
+from apps.permissions.models import DataScope
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 from .models import ConfigChangeLog, SystemConfigDefinition, TenantConfigVersion
 from .permissions import IsConfigApprover, IsConfigManager, IsConfigRollbackManager, IsConfigViewer
@@ -23,11 +25,19 @@ def _paginate(request, queryset, serializer_class, query):
     return paginated_data(request, queryset, serializer_class, page=query["page"], page_size=query["page_size"])
 
 
+def _can_manage_system_config(user):
+    permission_code = "config.system.manage"
+    return check_user_permission(user, permission_code) and any(
+        scope["scope_type"] == DataScope.ScopeType.ALL
+        for scope in get_permission_data_scopes(user, permission_code)
+    )
+
+
 @api_view(["GET"])
 @permission_classes([IsConfigViewer])
 def definition_list(request):
     queryset = SystemConfigDefinition.objects.all()
-    if not check_user_permission(request.user, "config.system.manage"):
+    if not _can_manage_system_config(request.user):
         queryset = queryset.filter(scope_type=SystemConfigDefinition.ScopeType.TENANT)
     return success_response(SystemConfigDefinitionSerializer(queryset, many=True).data)
 
@@ -65,6 +75,8 @@ def config_values(request):
     for field in ("config_key", "status"):
         if query.get(field):
             queryset = queryset.filter(**{field: query[field]})
+    if query.get("scope"):
+        queryset = queryset.filter(scope_key="system" if query["scope"] == SystemConfigDefinition.ScopeType.SYSTEM else f"tenant:{request.user.tenant_id}")
     return success_response(_paginate(request, queryset, TenantConfigVersionSerializer, query))
 
 
@@ -100,8 +112,16 @@ def change_log_list(request):
     serializer.is_valid(raise_exception=True)
     query = serializer.validated_data
     queryset = ConfigChangeLog.objects.filter(tenant=request.user.tenant)
-    if check_user_permission(request.user, "config.system.manage"):
+    if _can_manage_system_config(request.user):
         queryset = ConfigChangeLog.objects.filter(tenant=request.user.tenant) | ConfigChangeLog.objects.filter(scope_key="system")
     if query.get("config_key"):
         queryset = queryset.filter(config_key=query["config_key"])
+    if query.get("scope"):
+        queryset = queryset.filter(scope_key="system" if query["scope"] == SystemConfigDefinition.ScopeType.SYSTEM else f"tenant:{request.user.tenant_id}")
+    version_id = TenantConfigVersion.objects.filter(
+        config_key=OuterRef("config_key"),
+        scope_key=OuterRef("scope_key"),
+        version=OuterRef("to_version"),
+    ).order_by().values("id")[:1]
+    queryset = queryset.annotate(resolved_version_id=Subquery(version_id))
     return success_response(_paginate(request, queryset, ConfigChangeLogSerializer, query))

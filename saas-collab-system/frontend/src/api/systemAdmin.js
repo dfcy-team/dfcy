@@ -2,6 +2,7 @@ import { requestWithMockFallback } from './request';
 import {
   mockDepartments,
   mockPermissions,
+  mockRoleScopeOptions,
   mockRoles,
   mockSecurityOperations,
   mockUsers
@@ -14,6 +15,14 @@ const mockWrite = (data) => () => ({ success: true, code: 'OK', message: 'Mockæ“
 
 export const createDepartment = (payload) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/system/departments/', data: payload }, mockWrite(payload), 'system.departments.create'
+);
+export const updateDepartment = (id, payload) => requestWithMockFallback(
+  { method: 'patch', url: `/api/internal/system/departments/${id}/`, data: payload },
+  mockWrite({ id, ...payload }), 'system.departments.update'
+);
+export const deleteDepartment = (id) => requestWithMockFallback(
+  { method: 'delete', url: `/api/internal/system/departments/${id}/` },
+  mockWrite({ id, deleted: true }), 'system.departments.delete'
 );
 
 export const fetchUsers = (params = {}) => requestWithMockFallback(
@@ -47,6 +56,23 @@ export const fetchRoles = (params = {}) => requestWithMockFallback(
 );
 export const createRole = (payload) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/system/roles/', data: payload }, mockWrite(payload), 'system.roles.create'
+);
+export const fetchRoleScopeOptions = () => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/system/role-scope-options/' },
+  mockRoleScopeOptions,
+  'system.role_scope_options'
+);
+export const updateRole = (id, payload) => requestWithMockFallback(
+  { method: 'patch', url: `/api/internal/system/roles/${id}/`, data: payload },
+  mockWrite({ id, ...payload }), 'system.roles.update'
+);
+export const updateRoleStatus = (id, status) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/system/roles/${id}/status/`, data: { status } },
+  mockWrite({ id, status }), 'system.roles.status'
+);
+export const deleteRole = (id) => requestWithMockFallback(
+  { method: 'delete', url: `/api/internal/system/roles/${id}/` },
+  mockWrite({ id, deleted: true }), 'system.roles.delete'
 );
 export const updateRolePermissions = (id, payload) => requestWithMockFallback(
   { method: 'put', url: `/api/internal/system/roles/${id}/permissions/`, data: payload },

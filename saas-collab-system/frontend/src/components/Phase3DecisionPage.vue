@@ -2,9 +2,12 @@
   <section class="decision-page" :aria-busy="loading">
     <header class="decision-header">
       <div><p>{{ eyebrow }}</p><h1>{{ title }}</h1><span>{{ subtitle }}</span></div>
-      <el-tag effect="plain" :type="apiStatus === 'connected' ? 'success' : apiStatus === 'fallback' ? 'warning' : 'info'">
-        {{ statusLabel }}
-      </el-tag>
+      <div class="decision-header-actions">
+        <el-tag effect="plain" :type="apiStatus === 'connected' ? 'success' : apiStatus === 'fallback' ? 'warning' : 'info'">
+          {{ statusLabel }}
+        </el-tag>
+        <slot name="action" />
+      </div>
     </header>
 
     <el-alert :title="boundaryNote" type="warning" show-icon :closable="false" />
@@ -39,17 +42,18 @@
         </el-table-column>
         <el-table-column v-if="visibleRowActions.length" label="操作" :width="Math.max(150, visibleRowActions.length * 92)" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-for="action in visibleRowActions"
-              :key="action.label"
-              link
-              :type="action.type || 'primary'"
-              :disabled="actionAccess(action).disabled"
-              :title="actionAccess(action).reason"
-              @click="handleAction(action, row)"
-            >
-              {{ action.label }}
-            </el-button>
+            <template v-for="action in visibleRowActions" :key="action.label">
+              <el-button
+                v-if="!action.when || action.when(row)"
+                link
+                :type="action.type || 'primary'"
+                :disabled="actionAccess(action).disabled"
+                :title="actionAccess(action).reason"
+                @click="handleAction(action, row)"
+              >
+                {{ action.label }}
+              </el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -154,11 +158,13 @@ async function loadData() {
 
 initializeFilters();
 onMounted(loadData);
+defineExpose({ loadData });
 </script>
 
 <style scoped>
 .decision-page { display: grid; gap: 16px; }
 .decision-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.decision-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .decision-header p { margin: 0 0 6px; color: #64748b; font-size: 12px; font-weight: 700; text-transform: uppercase; }
 .decision-header h1 { margin: 0; color: #172033; font-size: 24px; letter-spacing: 0; }
 .decision-header span { display: block; margin-top: 7px; color: #64748b; font-size: 14px; }

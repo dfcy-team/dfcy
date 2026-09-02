@@ -28,6 +28,14 @@ class OperationLog(models.Model):
         indexes = [
             models.Index(fields=["tenant", "module", "action"], name="idx_operation_log_action"),
             models.Index(fields=["object_type", "object_id"], name="idx_operation_log_object"),
+            models.Index(
+                fields=["tenant", "-created_at", "-id"],
+                name="idx_operation_log_tenant_time",
+            ),
+            models.Index(
+                fields=["tenant", "user", "-created_at", "-id"],
+                name="audit_log_tenant_user_time",
+            ),
         ]
 
     def __str__(self):

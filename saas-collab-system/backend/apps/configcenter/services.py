@@ -6,7 +6,8 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
 from apps.common.security import sanitize_sensitive_data
-from apps.permissions.services import check_user_permission
+from apps.permissions.models import DataScope
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 from .models import ConfigChangeLog, SystemConfigDefinition, TenantConfigVersion
 
@@ -20,15 +21,24 @@ def _assert_permission(actor, code):
         or not actor.is_active
         or actor.user_type != "internal"
         or not check_user_permission(actor, code)
+        or not any(
+            scope["scope_type"] == DataScope.ScopeType.ALL
+            for scope in get_permission_data_scopes(actor, code)
+        )
     ):
-        raise PermissionDenied(f"{code} permission is required.")
+        raise PermissionDenied(f"{code} permission with all-tenant data scope is required.")
 
 
 def _assert_scope_permission(actor, definition):
-    if definition.scope_type == SystemConfigDefinition.ScopeType.SYSTEM and not check_user_permission(
-        actor, "config.system.manage"
-    ):
-        raise PermissionDenied("System configuration permission is required.")
+    if definition.scope_type != SystemConfigDefinition.ScopeType.SYSTEM:
+        return
+    system_permission = "config.system.manage"
+    has_all_scope = any(
+        scope["scope_type"] == DataScope.ScopeType.ALL
+        for scope in get_permission_data_scopes(actor, system_permission)
+    )
+    if not check_user_permission(actor, system_permission) or not has_all_scope:
+        raise PermissionDenied("System configuration permission with all-tenant data scope is required.")
 
 
 def _normalize_value(definition, value):
@@ -102,14 +112,35 @@ def _supersede_effective(versions, *, except_id=None):
         item.save(update_fields=["status", "updated_at"])
 
 
+def _latest_version(*, scope_key, config_key):
+    """Return only the newest version while the definition lock is held.
+
+    Configuration history is append-only and can grow for years. Loading and
+    locking every historical row for each write made latency and lock duration
+    grow with history size. The shared definition row is the serialization
+    point for version allocation, so the newest row is sufficient here.
+    """
+    return TenantConfigVersion.objects.select_for_update().filter(
+        scope_key=scope_key,
+        config_key=config_key,
+    ).order_by("-version", "-id").first()
+
+
+def _effective_versions(*, scope_key, config_key):
+    """Lock the small set of currently effective rows before superseding it."""
+    return list(
+        TenantConfigVersion.objects.select_for_update().filter(
+            scope_key=scope_key,
+            config_key=config_key,
+            status=TenantConfigVersion.Status.EFFECTIVE,
+        ).order_by("-version", "-id")
+    )
+
+
 def _create_version_locked(*, definition, actor, value, effective_at, action, source_version=None):
     tenant, scope_key = _scope(definition, actor)
-    versions = list(
-        TenantConfigVersion.objects.select_for_update()
-        .filter(scope_key=scope_key, config_key=definition.config_key)
-        .order_by("-version", "-id")
-    )
-    next_version = versions[0].version + 1 if versions else 1
+    latest = _latest_version(scope_key=scope_key, config_key=definition.config_key)
+    next_version = latest.version + 1 if latest else 1
     status = (
         TenantConfigVersion.Status.PENDING_APPROVAL
         if definition.requires_approval
@@ -131,12 +162,15 @@ def _create_version_locked(*, definition, actor, value, effective_at, action, so
     version._config_service_write = True
     version.save()
     if status == TenantConfigVersion.Status.EFFECTIVE:
-        _supersede_effective(versions)
+        _supersede_effective(
+            _effective_versions(scope_key=scope_key, config_key=definition.config_key),
+            except_id=version.id,
+        )
     _write_log(
         version=version,
         actor=actor,
         action=action,
-        from_version=source_version if source_version is not None else (versions[0].version if versions else None),
+        from_version=source_version if source_version is not None else (latest.version if latest else None),
         detail={
             "scope": definition.scope_type,
             "status": status,
@@ -170,18 +204,19 @@ def _assert_version_scope(actor, version):
 @transaction.atomic
 def approve_config_version(*, version, actor):
     _assert_permission(actor, "config.approve")
-    version = TenantConfigVersion.objects.select_for_update().select_related("definition", "created_by").get(pk=version.pk)
+    # Acquire the same per-definition serialization point used by creation and
+    # rollback before reading the latest version. This prevents two concurrent
+    # approvals from both treating different pending versions as current.
+    definition = SystemConfigDefinition.objects.select_for_update().get(pk=version.definition_id)
+    version = TenantConfigVersion.objects.select_for_update().select_related("created_by").get(pk=version.pk)
+    version.definition = definition
     _assert_version_scope(actor, version)
     if version.status != TenantConfigVersion.Status.PENDING_APPROVAL:
         raise ValidationError("Only pending config versions can be approved.")
     if version.created_by_id == actor.id:
         raise ValidationError("Config creator cannot approve the same version.")
-    versions = list(
-        TenantConfigVersion.objects.select_for_update()
-        .filter(scope_key=version.scope_key, config_key=version.config_key)
-        .order_by("-version", "-id")
-    )
-    if not versions or versions[0].pk != version.pk:
+    latest = _latest_version(scope_key=version.scope_key, config_key=version.config_key)
+    if latest is None or latest.pk != version.pk:
         raise ValidationError("Only the latest config version can be approved.")
     version.status = (
         TenantConfigVersion.Status.EFFECTIVE
@@ -192,7 +227,10 @@ def approve_config_version(*, version, actor):
     version._config_service_write = True
     version.save(update_fields=["status", "approved_by", "updated_at"])
     if version.status == TenantConfigVersion.Status.EFFECTIVE:
-        _supersede_effective(versions, except_id=version.id)
+        _supersede_effective(
+            _effective_versions(scope_key=version.scope_key, config_key=version.config_key),
+            except_id=version.id,
+        )
     _write_log(
         version=version,
         actor=actor,
@@ -206,7 +244,9 @@ def approve_config_version(*, version, actor):
 @transaction.atomic
 def rollback_config_version(*, target_version, actor, effective_at=None):
     _assert_permission(actor, "config.rollback")
-    target_version = TenantConfigVersion.objects.select_for_update().select_related("definition").get(pk=target_version.pk)
+    definition = SystemConfigDefinition.objects.select_for_update().get(pk=target_version.definition_id)
+    target_version = TenantConfigVersion.objects.select_for_update().get(pk=target_version.pk)
+    target_version.definition = definition
     _assert_version_scope(actor, target_version)
     return _create_version_locked(
         definition=target_version.definition,
@@ -220,6 +260,11 @@ def rollback_config_version(*, target_version, actor, effective_at=None):
 
 def filter_visible_versions(user, queryset):
     tenant_queryset = queryset.filter(tenant=user.tenant)
-    if check_user_permission(user, "config.system.manage"):
+    system_permission = "config.system.manage"
+    can_manage_system = check_user_permission(user, system_permission) and any(
+        scope["scope_type"] == DataScope.ScopeType.ALL
+        for scope in get_permission_data_scopes(user, system_permission)
+    )
+    if can_manage_system:
         return queryset.filter(tenant=user.tenant) | queryset.filter(scope_key="system")
     return tenant_queryset
