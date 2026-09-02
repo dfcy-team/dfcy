@@ -90,19 +90,30 @@ if [[ "$INITIALIZE_BASELINE" -eq 1 ]]; then
       bin/production-baseline-check \
       lib/production-common.sh \
       production-compose.yml
+    control_env="$CONTROL_ROOT/config/control.env"
+    if [[ -f "$control_env" ]]; then
+      [[ ! -L "$control_env" ]] || fail 'the control environment file is unsafe.'
+      sha256sum "$control_env"
+    fi
     baseline_env_file="$LIVE_ENV_FILE"
     if [[ -z "$baseline_env_file" && -f "$CONTROL_ROOT/config/env.path" ]]; then
       IFS= read -r baseline_env_file < "$CONTROL_ROOT/config/env.path" || true
     fi
     if [[ -n "$baseline_env_file" && -f "$baseline_env_file" ]]; then
       compose_list=$(sed -n 's/^PRODUCTION_COMPOSE_FILES=//p' "$baseline_env_file" | tail -n 1 | tr -d '\r')
-      if [[ -n "$compose_list" ]]; then
-        IFS=: read -r -a compose_files <<< "$compose_list"
-        for compose_file in "${compose_files[@]}"; do
-          [[ "$compose_file" = /* && -f "$compose_file" && ! -L "$compose_file" ]] || fail 'a configured Compose file is missing or unsafe.'
-          sha256sum "$compose_file"
-        done
+    fi
+    if [[ -f "$control_env" ]]; then
+      control_compose_list=$(sed -n 's/^PRODUCTION_COMPOSE_FILES=//p' "$control_env" | tail -n 1 | tr -d '\r')
+      if [[ -n "$control_compose_list" ]]; then
+        compose_list=$control_compose_list
       fi
+    fi
+    if [[ -n "${compose_list:-}" ]]; then
+      IFS=: read -r -a compose_files <<< "$compose_list"
+      for compose_file in "${compose_files[@]}"; do
+        [[ "$compose_file" = /* && -f "$compose_file" && ! -L "$compose_file" ]] || fail 'a configured Compose file is missing or unsafe.'
+        sha256sum "$compose_file"
+      done
     fi
   ) > "$tmp"
   chmod 600 "$tmp"

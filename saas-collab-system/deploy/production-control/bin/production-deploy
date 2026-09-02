@@ -18,6 +18,41 @@ manifest_sha=""
 actor=""
 registry_user=""
 token_stdin=0
+candidate_compose_overlay=""
+
+remove_candidate_compose_overlay() {
+  if [[ -n "${candidate_compose_overlay:-}" && -f "$candidate_compose_overlay" ]]; then
+    rm -f -- "$candidate_compose_overlay"
+  fi
+}
+
+create_candidate_compose_overlay() {
+  candidate_compose_overlay=$(mktemp "$CONTROL_ROOT/.production-deploy-compose.XXXXXX.yml")
+  chmod 600 "$candidate_compose_overlay"
+  cat > "$candidate_compose_overlay" <<'EOF'
+# The release CLI values must be the last image definitions in the Compose
+# chain. This keeps a reviewed historical overlay from pinning an old release.
+services:
+  redis:
+    image: ${PRODUCTION_REDIS_IMAGE:?PRODUCTION_REDIS_IMAGE must be an immutable digest}
+  migrate:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    command:
+      - python
+      - manage.py
+      - migrate
+      - --noinput
+  backend:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+  celery:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+  celery-beat:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+  frontend:
+    image: ${PRODUCTION_FRONTEND_IMAGE:?PRODUCTION_FRONTEND_IMAGE must be an immutable digest}
+EOF
+  COMPOSE+=( -f "$candidate_compose_overlay" )
+}
 
 while (($#)); do
   case "$1" in
@@ -40,8 +75,7 @@ require_control_identity
 require_command jq
 require_command sha256sum
 require_command date
-load_production_env
-init_compose
+require_command mktemp
 
 valid_sha40 "$release_sha" || die 'release SHA must be a full lowercase commit SHA.'
 validate_approved_images "$backend_image" "$frontend_image" "$redis_image"
@@ -50,6 +84,16 @@ valid_sha256 "$manifest_sha" || die 'release manifest digest must be a lowercase
 validate_actor "$actor"
 validate_actor "$registry_user"
 [[ "$token_stdin" -eq 1 ]] || die 'the CI registry token must be supplied through standard input.'
+
+# Export the immutable CLI values before loading the operator environment or
+# constructing Compose. load_production_env preserves these values across its
+# dotenv sources, and the dynamic overlay below is appended after all reviewed
+# historical overlays.
+export PRODUCTION_BACKEND_IMAGE="$backend_image"
+export PRODUCTION_FRONTEND_IMAGE="$frontend_image"
+export PRODUCTION_REDIS_IMAGE="$redis_image"
+load_production_env
+init_compose
 
 [[ -x "$SCRIPT_DIR/production-baseline-check" ]] || die 'runtime baseline checker is not installed.'
 "$SCRIPT_DIR/production-baseline-check" --runtime >/dev/null
@@ -78,7 +122,8 @@ cp -p -- "$current_file" "$previous_file"
 chmod 600 "$previous_file"
 
 new_docker_config
-trap remove_docker_config EXIT
+trap 'remove_candidate_compose_overlay; remove_docker_config' EXIT
+create_candidate_compose_overlay
 docker_login_from_stdin "$registry_user"
 
 # Pull exactly the digests built by CI. The target host never builds source.
@@ -153,13 +198,10 @@ on_exit() {
     fi
   fi
   remove_docker_config
+  remove_candidate_compose_overlay
   exit "$status"
 }
 trap on_exit EXIT
-
-export PRODUCTION_BACKEND_IMAGE="$backend_image"
-export PRODUCTION_FRONTEND_IMAGE="$frontend_image"
-export PRODUCTION_REDIS_IMAGE="$redis_image"
 
 deployment_started=1
 IFS=, read -r -a services_array <<< "$required_services"
