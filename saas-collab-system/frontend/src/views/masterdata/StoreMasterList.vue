@@ -98,9 +98,11 @@ const selectedStore = ref(null);
 
 const importAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.manage' }));
 const apiAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view' }));
-const platformOptions = computed(() => platformRows.value.map((row) => ({
+const platformOptions = computed(() => platformRows.value
+  .filter((row) => !String(row.platform_type || '').startsWith('warehouse_'))
+  .map((row) => ({
   label: `${row.name}（${row.code}）`, value: row.id,
-})));
+  })));
 const countryOptions = computed(() => countryRows.value.map((row) => ({
   label: `${row.name}（${row.country_code}）`, value: row.country_code,
 })));

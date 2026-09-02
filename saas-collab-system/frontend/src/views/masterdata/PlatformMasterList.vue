@@ -27,7 +27,11 @@ import { createMasterData, fetchPlatforms, updateMasterData, updateMasterDataSta
 const platformTypes = [
   { label: 'Lazada', value: 'lazada' }, { label: 'Shopee', value: 'shopee' },
   { label: 'Temu', value: 'temu' }, { label: 'TikTok', value: 'tiktok' },
-  { label: 'BigSeller', value: 'bigseller' }, { label: '其他', value: 'other' }
+  { label: 'BigSeller', value: 'bigseller' },
+  { label: '自营仓服务', value: 'warehouse_owned' },
+  { label: '三方仓服务', value: 'warehouse_third_party' },
+  { label: '平台仓服务', value: 'warehouse_platform' },
+  { label: '其他', value: 'other' }
 ];
 
 function platformLabel(value) {

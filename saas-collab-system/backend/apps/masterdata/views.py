@@ -19,7 +19,13 @@ from apps.permissions.ui_p2_scopes import filter_master_data, require_all_scope
 from apps.products.models import ProductCategory
 from apps.suppliers.models import SupplierTask
 
-from .models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
+from .models import (
+    PlatformMaster,
+    StatusChoices,
+    StoreMaster,
+    SupplierMaster,
+    WAREHOUSE_SERVICE_PLATFORM_TYPES,
+)
 from .serializers import MODEL_BY_RESOURCE, SERIALIZER_BY_RESOURCE
 
 
@@ -159,6 +165,8 @@ def import_stores(*, request, raw, filename="", dry_run=False):
                 ).first()
                 if not platform:
                     raise ValueError(f"平台不存在: {platform_value}")
+                if platform.platform_type in WAREHOUSE_SERVICE_PLATFORM_TYPES:
+                    raise ValueError("仓储服务平台只能绑定到仓库档案，不能用于店铺档案")
                 category = None
                 category_value = _import_text(row.get("category"))
                 if category_value:
@@ -234,6 +242,8 @@ class MasterDataCollectionView(APIView):
         queryset = filter_master_data(request.user, queryset, self.read_permission_code, resource)
         if resource == "stores":
             queryset = queryset.select_related("platform", "category", "operator", "bd", "leader")
+        if resource == "warehouses":
+            queryset = queryset.select_related("service_platform")
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
@@ -340,6 +350,10 @@ class MasterDataStatusView(APIView):
             status=StatusChoices.ACTIVE
         ).exists():
             raise StateConflict("An active store still references this platform.")
+        if status == StatusChoices.INACTIVE and isinstance(instance, PlatformMaster) and instance.service_warehouses.filter(
+            status=StatusChoices.ACTIVE
+        ).exists():
+            raise StateConflict("An active warehouse still references this service platform.")
         if status == StatusChoices.INACTIVE and isinstance(instance, SupplierMaster) and SupplierTask.objects.filter(
             tenant=request.user.tenant,
             supplier_id=instance.pk,

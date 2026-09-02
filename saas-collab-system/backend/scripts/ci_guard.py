@@ -78,6 +78,10 @@ def scan_file(path, relative_path):
         if path.suffix.lower() not in TEXT_SUFFIXES or path.suffix.lower() == ".md":
             continue
         for match in ASSIGNMENT_PATTERN.finditer(line):
+            if match.start() > 0 and line[match.start() - 1] in ".\\/":
+                # A read-only volume suffix such as ``service.token:ro`` is a
+                # file mount mode, not a credential assignment.
+                continue
             quote, value = match.group(2), match.group(3)
             if not quote and path.suffix.lower() in {".py", ".js", ".ts"}:
                 continue

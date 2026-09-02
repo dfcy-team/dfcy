@@ -96,7 +96,7 @@ BLACKLIST_PERMISSION_CODES = (
 )
 
 
-def _lock_request_tenant(user):
+def _lock_influencer_write_tenant(user):
     return Tenant.objects.select_for_update().get(pk=user.tenant_id)
 
 
@@ -284,7 +284,7 @@ class InfluencerCollectionView(APIView):
     @transaction.atomic
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
-        _lock_request_tenant(request.user)
+        _lock_influencer_write_tenant(request.user)
         serializer = InfluencerSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         instance = serializer.save(tenant=request.user.tenant)
@@ -319,7 +319,7 @@ class InfluencerDetailView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        _lock_request_tenant(request.user)
+        _lock_influencer_write_tenant(request.user)
         writes_identity = bool({"handle", "platform"}.intersection(request.data))
         queryset = Influencer.objects if writes_identity else Influencer.objects.select_for_update()
         instance = get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
@@ -362,7 +362,7 @@ class InfluencerStatusView(APIView):
     @transaction.atomic
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        _lock_request_tenant(request.user)
+        _lock_influencer_write_tenant(request.user)
         instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         _assert_influencer_version(request, instance)
         status = request.data.get("status")
@@ -398,7 +398,7 @@ class InfluencerContactsView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        _lock_request_tenant(request.user)
+        _lock_influencer_write_tenant(request.user)
         influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         _assert_influencer_version(request, influencer)
         payload = request.data.get("contacts", [])
@@ -510,7 +510,7 @@ class InfluencerResolveView(APIView):
     def post(self, request):
         """Resolve an exact account or create the minimal tenant profile needed for sampling."""
         require_all_scope(request.user, self.write_permission_code)
-        _lock_request_tenant(request.user)
+        _lock_influencer_write_tenant(request.user)
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )

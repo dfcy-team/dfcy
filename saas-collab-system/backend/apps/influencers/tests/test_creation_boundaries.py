@@ -375,6 +375,47 @@ def test_handle_identity_is_tenant_scoped_and_empty_handle_has_no_shared_identit
     assert foreign.tenant_id == other_tenant.id
 
 
+def test_non_identity_edit_locks_tenant_before_influencer(monkeypatch):
+    _, user, _, influencer = _records("profile-edit-lock-order")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.manage")
+    events = []
+    original_tenant_lock = influencer_views._lock_influencer_write_tenant
+    original_get_object_or_404 = influencer_views.get_object_or_404
+
+    def observe_tenant_lock(*args, **kwargs):
+        events.append("tenant")
+        return original_tenant_lock(*args, **kwargs)
+
+    def observe_influencer_lock(queryset, *args, **kwargs):
+        if getattr(queryset.query, "select_for_update", False):
+            events.append("influencer")
+        return original_get_object_or_404(queryset, *args, **kwargs)
+
+    monkeypatch.setattr(
+        influencer_views,
+        "_lock_influencer_write_tenant",
+        observe_tenant_lock,
+    )
+    monkeypatch.setattr(
+        influencer_views,
+        "get_object_or_404",
+        observe_influencer_lock,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/{influencer.pk}/",
+        {"name": "Updated profile name"},
+        format="json",
+        HTTP_IF_MATCH=influencer.updated_at.isoformat(),
+    )
+
+    assert response.status_code == 200, response.data
+    assert events[:2] == ["tenant", "influencer"]
+
+
 def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
     tenant, user, store, first = _records("identity-edit-lock-order")
     role = user.user_roles.get().role

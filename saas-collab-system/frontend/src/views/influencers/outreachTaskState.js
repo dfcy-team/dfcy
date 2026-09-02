@@ -13,7 +13,6 @@ export function sampleProgressLabel(row = {}) {
   const display = (value) => hasValue(value) ? String(value) : '—';
   return `${display(fulfillmentCount(row))}/${display(targetCount)}`;
 }
-
 export function outreachProgressLabel(detailProgress, detailTask) {
   const progressRow = detailProgress || detailTask || {};
   const completedSource = detailTask || progressRow;
