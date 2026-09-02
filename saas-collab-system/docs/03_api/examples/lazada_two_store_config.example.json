@@ -1,0 +1,57 @@
+{
+  "lazada": {
+    "apps": {
+      "Lazada应用1": {
+        "app_key": "REPLACE_WITH_APP_KEY_AT_RUNTIME",
+        "app_secret": "REPLACE_WITH_CUSTODY_INPUT_AT_RUNTIME",
+        "redirect_uri": "https://your-approved-domain.example/api/internal/integrations/store-authorizations/oauth/callback/lazada/"
+      }
+    },
+    "stores": {
+      "LAZ-PH-DEMO-01": {
+        "app_profile": "Lazada应用1",
+        "endpoint": "https://api.lazada.com.ph/rest",
+        "access_token": "REPLACE_WITH_CUSTODY_INPUT_AT_RUNTIME",
+        "refresh_token": "REPLACE_WITH_CUSTODY_INPUT_AT_RUNTIME",
+        "expires_in": 604800,
+        "refresh_expires_in": 2592000,
+        "access_token_expires_at": "2099-01-08T00:00:00Z",
+        "refresh_token_expires_at": "2099-02-01T00:00:00Z",
+        "token_updated_at": "2099-01-01T00:00:00Z",
+        "country": "PH",
+        "account": "Demo Lazada PH Store 01",
+        "account_platform": "seller_center",
+        "country_user_info": [
+          {
+            "country": "PH",
+            "user_id": "REPLACE_WITH_PLATFORM_USER_ID",
+            "seller_id": "REPLACE_WITH_PLATFORM_SELLER_ID",
+            "short_code": "REPLACE_WITH_PLATFORM_SHORT_CODE"
+          }
+        ]
+      },
+      "LAZ-PH-DEMO-02": {
+        "app_profile": "Lazada应用1",
+        "endpoint": "https://api.lazada.com.ph/rest",
+        "access_token": "REPLACE_WITH_CUSTODY_INPUT_AT_RUNTIME",
+        "refresh_token": "REPLACE_WITH_CUSTODY_INPUT_AT_RUNTIME",
+        "expires_in": 604800,
+        "refresh_expires_in": 2592000,
+        "access_token_expires_at": "2099-01-08T00:00:00Z",
+        "refresh_token_expires_at": "2099-02-01T00:00:00Z",
+        "token_updated_at": "2099-01-01T00:00:00Z",
+        "country": "PH",
+        "account": "Demo Lazada PH Store 02",
+        "account_platform": "seller_center",
+        "country_user_info": [
+          {
+            "country": "PH",
+            "user_id": "REPLACE_WITH_PLATFORM_USER_ID",
+            "seller_id": "REPLACE_WITH_PLATFORM_SELLER_ID",
+            "short_code": "REPLACE_WITH_PLATFORM_SHORT_CODE"
+          }
+        ]
+      }
+    }
+  }
+}

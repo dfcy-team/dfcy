@@ -40,6 +40,8 @@ ROLE_DEFINITIONS = {
             "listings.template.view",
             "listings.profile.view",
             "listings.profile.manage",
+            "products.research.view",
+            "products.research.manage",
         ),
     },
     "product_developer": {
@@ -87,7 +89,7 @@ def seed_roles_and_permissions(apps, schema_editor):
         )
         permission_map[code] = permission
 
-    for code in {"products.master.view", "masterdata.view"}:
+    for code in {"products.master.view", "products.research.view", "products.research.manage", "masterdata.view"}:
         permission = Permission.objects.filter(code=code).first()
         if permission:
             permission_map[code] = permission

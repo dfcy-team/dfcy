@@ -1,0 +1,234 @@
+{
+  "schema_version": "sc-f2-label-font-toolchain-lock-v1",
+  "decision": {
+    "gate": "SC-F2-LABEL-FONT-R1-P2-001",
+    "previous_status": "ACCEPTED_DEFERRED_WITH_PRE_ASSET_COMMIT_GATE",
+    "closure_decision": "CLOSE_WITH_NORMAL_GIT_AND_TOOLCHAIN_LOCK_V1",
+    "status": "CLOSED_BY_SC_F2_LABEL_FONT_3_R3_P1_002_QUICK_RECHECK",
+    "effective_after": "SC-F2-LABEL-FONT-3_R3_P1_002_QUICK_RECHECK_PASS",
+    "renderer_implementation_authorized": false
+  },
+  "authoritative_environment": {
+    "os": "linux",
+    "architecture": "amd64",
+    "python_version": "3.12.13",
+    "container_image": "python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de",
+    "network_during_verification": "none",
+    "install_mode": "pip --no-index --no-deps from hash-verified wheels"
+  },
+  "windows_verification_environment": {
+    "os": "windows",
+    "architecture": "amd64",
+    "python_version": "3.12.13",
+    "python_executable_sha256": "3c6a206b7d93cca823934a83732220dcffd413fd1036d9fb82eebb64599cf7f3",
+    "workspace_dependency_bundle_version": "26.727.11326",
+    "install_mode": "pip --no-index --no-deps from hash-verified wheels"
+  },
+  "python_artifacts": [
+    {
+      "name": "fonttools",
+      "version": "4.63.0",
+      "role": "asset derivation and bundle verification",
+      "platform": "any",
+      "filename": "fonttools-4.63.0-py3-none-any.whl",
+      "bytes": 1164562,
+      "sha256": "445af2eab030a16b9171ea8bdda7ebf7d96bda2df88ee182a464252f6e05e20d"
+    },
+    {
+      "name": "reportlab",
+      "version": "4.5.1",
+      "role": "authoritative PDF probe and future v2 renderer",
+      "platform": "any",
+      "filename": "reportlab-4.5.1-py3-none-any.whl",
+      "bytes": 1957812,
+      "sha256": "06fce8cb56c83307cfa4909cdf4e6a2ddbb44e5d6ef4d2edca896d7e9769f091"
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "role": "reportlab dependency",
+      "platform": "linux-amd64-cp312",
+      "filename": "pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "bytes": 6940830,
+      "sha256": "78cb2c6865a35ab8ff8b75fd122f6033b92a62c82801110e48ddd6c936a45d91"
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "role": "reportlab dependency",
+      "platform": "windows-amd64-cp312",
+      "filename": "pillow-12.3.0-cp312-cp312-win_amd64.whl",
+      "bytes": 7227137,
+      "sha256": "a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09"
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.4.9",
+      "role": "reportlab dependency",
+      "platform": "any",
+      "filename": "charset_normalizer-3.4.9-py3-none-any.whl",
+      "bytes": 64538,
+      "sha256": "68e5f26a1ad57ded6d1cfb85331d1c1a195314756471d97758c48498bb4dcdf5"
+    },
+    {
+      "name": "pypdf",
+      "version": "6.10.0",
+      "role": "PDF embedding and text extraction inspection",
+      "platform": "any",
+      "filename": "pypdf-6.10.0-py3-none-any.whl",
+      "bytes": 334459,
+      "sha256": "90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de"
+    }
+  ],
+  "native_audit_tools": [
+    {
+      "name": "pdftoppm",
+      "version": "26.05.0",
+      "role": "Windows architecture-host visual raster audit only",
+      "platform": "windows-amd64",
+      "workspace_dependency_bundle_version": "26.727.11326",
+      "executable_sha256": "742cbbd9a00931ad16c6618410bc40471375d639a45c61c1d86f3dcfc54b6388",
+      "production_runtime_dependency": false
+    }
+  ],
+  "controlled_scripts": [
+    {
+      "path": "backend/scripts/verify_sc_f2_font_bundle.py",
+      "sha256": "23c0ab79c4b45396343d90cf286e38820419671f5c7eb8eaa79e83749cc54427"
+    },
+    {
+      "path": "backend/scripts/probe_sc_f2_font_pdf.py",
+      "sha256": "c06eb57a591cf30e4344687f14d8885dffa4bbdcef08d9e3eee09cd3d4087fa0"
+    },
+    {
+      "path": "backend/scripts/inspect_sc_f2_probe_pdf.py",
+      "sha256": "31789c7837adbb86e39cf8cc96fd4033d06397c984d46158103bdc835784b32b"
+    },
+    {
+      "path": "backend/scripts/probe_sc_f2_font_memory.py",
+      "sha256": "4b242d1f52f7caba04c1c1b95f151e952882edb7c53087fbb0600cb7a5891b4b"
+    },
+    {
+      "path": "backend/scripts/run_sc_f2_font_ci_gate.py",
+      "sha256": "6d2ea1eb5ab1c729a05356d261b56d856cc9d7c9c431f693a6ebc16ab003f14b"
+    }
+  ],
+  "candidate": {
+    "asset_bundle_id": "sc-f2-label-font-v1-candidate-2",
+    "manifest_schema": "sc-f2-label-font-candidate-manifest-v2",
+    "manifest_bytes": 5113,
+    "manifest_sha256": "e00920a6188621eb80c551a1c380ede83b46f29b23fb6e4ef79c7efcb83dcf46",
+    "font_bytes": 21182324,
+    "package_files_bytes": 21191825,
+    "package_files_mib": 20.21,
+    "bundle_digest_schema": "sc-f2-label-font-bundle-digest-v1",
+    "bundle_digest_sha256": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2"
+  },
+  "budgets": {
+    "single_font_max_bytes": 12582912,
+    "package_files_max_bytes": 25165824,
+    "container_layer_uncompressed_max_bytes": 25165824,
+    "container_image_inspect_increment_max_bytes": 16777216,
+    "two_page_probe_pdf_max_bytes": 131072,
+    "hundred_page_probe_pdf_max_bytes": 524288,
+    "two_page_probe_max_elapsed_ms": 2000,
+    "hundred_page_probe_max_elapsed_ms": 5000,
+    "python_tracemalloc_peak_max_bytes": 16777216,
+    "standalone_probe_process_max_rss_kib": 131072,
+    "memory_probe_steady_renders": 10,
+    "memory_probe_concurrent_workers": 2,
+    "first_render_process_max_rss_kib": 131072,
+    "steady_state_rss_growth_max_kib": 16384,
+    "concurrent_worker_rss_max_kib": 131072,
+    "concurrent_aggregate_worker_rss_max_kib": 229376,
+    "concurrent_total_rss_max_kib": 245760,
+    "memory_probe_timeout_seconds": 30,
+    "verification_container_memory_limit_bytes": 268435456,
+    "budget_breach_action": "fail verification and require a new reviewed bundle/toolchain version"
+  },
+  "budget_evidence": {
+    "single_font_max_observed_bytes": 10596408,
+    "package_files_observed_bytes": 21191825,
+    "container_base_image_size_bytes": 43200635,
+    "container_candidate_image_size_bytes": 56009608,
+    "container_image_inspect_increment_bytes": 12808973,
+    "container_copy_layer_history_display": "21.2MB",
+    "two_page_probe": {
+      "pdf_bytes": 44883,
+      "pdf_sha256": "c3c6689a66411a2bf2dfc903285e7061d38b5e30c8560801cbb252618992a624",
+      "windows_elapsed_ms": 27.35,
+      "linux_elapsed_ms": 49.592,
+      "windows_linux_byte_identical": true
+    },
+    "hundred_page_probe": {
+      "pdf_bytes": 137608,
+      "pdf_sha256": "20017c2845ef5e36efa566018446d175d5e1a65ebcd12de74dfcfab747783b35",
+      "linux_elapsed_ms": 423.098,
+      "python_tracemalloc_peak_bytes": 10964943,
+      "process_max_rss_kib": 88408,
+      "container_memory_limit_bytes": 268435456
+    },
+    "ci_rehearsal": {
+      "evidence_bytes": 6754,
+      "evidence_sha256": "018b1517ac9b805b68e181e0cd03cbd85401eccf0a1a8ca09deb6ca2a1ab45f8",
+      "two_page_elapsed_ms": 46.339,
+      "hundred_page_elapsed_ms": 337.69,
+      "hundred_page_process_max_rss_kib": 88008,
+      "first_render_peak_rss_kib": 88788,
+      "steady_state_rss_growth_kib": 92,
+      "concurrent_workers": 2,
+      "concurrent_worker_rss_kib": [
+        89192,
+        89368
+      ],
+      "concurrent_aggregate_worker_rss_kib": 178560,
+      "concurrent_controller_rss_kib": 23092,
+      "concurrent_total_rss_kib": 201652,
+      "result": "PASS"
+    }
+  },
+  "cross_environment_evidence": {
+    "windows_bundle_verification": "PASS",
+    "linux_bundle_verification": "PASS",
+    "ci_bundle_verification": "PASS",
+    "ci_dependency_resolution": "PASS",
+    "ci_entry": "backend/scripts/run_sc_f2_font_ci_gate.py",
+    "ci_execution_scope": "ARCHITECTURE_HOST_CONTAINER_CI_REHEARSAL",
+    "ci_evidence": "docs/00_stage0/review/assets/scm_f2_label_font_ci_evidence_v1.json",
+    "bundle_digest_on_both": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2",
+    "bundle_digest_on_windows_linux_ci": "0f1fe3ff8595b042eac0aa505c1bbc0c423822e3261e25bc7f6423f696f43ba2",
+    "windows_linux_probe_pdf_byte_identical": true,
+    "probe_pdf_sha256_on_both": "c3c6689a66411a2bf2dfc903285e7061d38b5e30c8560801cbb252618992a624",
+    "probe_pdf_sha256_on_windows_linux_ci": "c3c6689a66411a2bf2dfc903285e7061d38b5e30c8560801cbb252618992a624"
+  },
+  "negative_gate_evidence": {
+    "unexpected_bundle_file": "REJECTED",
+    "failure_class": "Bundle file set mismatch",
+    "exit_code": 1
+  },
+  "storage": {
+    "selected": "NORMAL_GIT",
+    "target_path": "backend/apps/packing/assets/fonts/sc-f2-label-font-v1/",
+    "git_lfs": false,
+    "runtime_network_fetch": false,
+    "rationale": [
+      "each font is below 12 MiB and the reviewed package is below 24 MiB",
+      "a complete clone contains the exact offline build inputs",
+      "no Git LFS server, pointer hydration, release download, CDN, or system-font fallback is required"
+    ],
+    "commit_rule": "after R3 recheck, add only the four reviewed package files in one dedicated asset commit",
+    "binary_attributes": "backend/apps/packing/assets/fonts/.gitattributes",
+    "offline_build": "build only from a complete verified Git clone; network font retrieval is forbidden",
+    "backup": "repository mirror and normal immutable commit history retain every admitted bundle version",
+    "verification": "run verify_sc_f2_font_bundle.py before image build and at the v2 renderer health gate",
+    "drift": "any file-set, size, SHA-256, metadata, corpus, or bundle-digest mismatch fails closed",
+    "rollback": "redeploy the previous immutable application commit and its versioned font bundle; never overwrite an admitted bundle in place",
+    "upgrade": "create a new versioned bundle directory and repeat acquisition and admission review"
+  },
+  "compatibility": {
+    "v1_renderer_unchanged": true,
+    "current_backend_requirement_range_is_not_v2_authority": "reportlab>=4.2,<5.0",
+    "v2_requirement": "must resolve exactly to the artifacts in this lock before renderer implementation",
+    "r1_p2_002_status": "ACCEPTED_DEFERRED_WITH_PRE_RENDERER_CONTRACT_GATE"
+  }
+}

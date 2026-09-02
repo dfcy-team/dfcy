@@ -36,9 +36,9 @@ from apps.packing.services import (
     submit_packing_change,
 )
 from apps.products.models import ProductSKU, ProductSPU
-from apps.purchasing.models import SupplyPurchaseOrder, SupplyPurchaseOrderLine
 from apps.purchasing.models import (
-    SupplyOrderLineFulfillment,
+    SupplyPurchaseOrder,
+    SupplyPurchaseOrderLine,
     _supply_action_write_context,
 )
 from apps.tenants.models import Tenant
@@ -274,35 +274,12 @@ def test_create_batch_is_idempotent_and_rejects_payload_or_supplier_conflicts():
             actor=actor,
             idempotency_key="mixed-suppliers",
         )
-    # V2 permits the same completed order to be split across multiple active
-    # packing batches. Reserve disjoint quantities in each batch and assert
-    # that the line projection conserves the total exactly once.
-    second_batch, second_replayed = create_packing_batch(
-        order_ids=[order_a.id],
-        actor=actor,
-        idempotency_key="second-active-batch",
-    )
-    assert second_replayed is False
-    first_line = order_a.lines.get()
-    add_packing_box(
-        batch_id=batch.id,
-        actor=actor,
-        idempotency_key="first-batch-reserve",
-        expected_version=batch.version,
-        items=[{"order_line_id": first_line.id, "quantity": 6}],
-    )
-    second_batch.refresh_from_db()
-    add_packing_box(
-        batch_id=second_batch.id,
-        actor=actor,
-        idempotency_key="second-batch-reserve",
-        expected_version=second_batch.version,
-        items=[{"order_line_id": first_line.id, "quantity": 4}],
-    )
-    projection = SupplyOrderLineFulfillment.objects.get(order_line=first_line)
-    assert projection.packing_reserved_quantity == first_line.quantity
-    assert projection.packed_quantity == 0
-    assert PackingBatch.objects.filter(batch_orders__order=order_a).distinct().count() == 2
+    with pytest.raises(StateConflict):
+        create_packing_batch(
+            order_ids=[order_a.id],
+            actor=actor,
+            idempotency_key="second-active-batch",
+        )
 
 
 def test_create_requires_production_completed_and_current_tenant():
@@ -500,7 +477,7 @@ def test_replace_remove_and_cancel_release_active_order():
     assert replacement.id != batch.id
 
 
-def test_completion_allows_partial_batch_and_does_not_advance_purchase_order():
+def test_completion_requires_exact_layout_and_does_not_advance_purchase_order():
     tenant = Tenant.objects.create(name="Packing completion", code="pack-complete")
     actor = create_user(tenant, "pack-complete-user")
     supplier = create_supplier(tenant, "COMPLETE")
@@ -515,6 +492,21 @@ def test_completion_allows_partial_batch_and_does_not_advance_purchase_order():
     )
     batch.refresh_from_db()
 
+    with pytest.raises(BusinessRuleViolation):
+        complete_packing_batch(
+            batch_id=batch.id,
+            actor=actor,
+            idempotency_key="inexact-complete",
+            expected_version=batch.version,
+        )
+
+    add_packing_box(
+        batch_id=batch.id,
+        actor=actor,
+        idempotency_key="add-final-complete",
+        expected_version=batch.version,
+        items=[{"order_line_id": lines[1].id, "quantity": 5}],
+    )
     completed, event = complete_batch(batch, actor)
     order.refresh_from_db()
     replayed_batch, replayed_event, replayed = complete_packing_batch(
@@ -531,12 +523,6 @@ def test_completion_allows_partial_batch_and_does_not_advance_purchase_order():
     assert replayed_batch.id == completed.id
     assert replayed_event.id == event.id
     assert order.status == SupplyPurchaseOrder.Status.PRODUCTION_COMPLETED
-    first_projection = SupplyOrderLineFulfillment.objects.get(order_line=lines[0])
-    second_projection = SupplyOrderLineFulfillment.objects.get(order_line=lines[1])
-    assert first_projection.packed_quantity == 10
-    assert first_projection.packing_reserved_quantity == 0
-    assert second_projection.packed_quantity == 0
-    assert second_projection.packing_reserved_quantity == 0
 
     with pytest.raises(StateConflict):
         add_packing_box(

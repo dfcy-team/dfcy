@@ -120,6 +120,8 @@ class ReleaseContract(models.Model):
         ]
 
     def save(self, *args, **kwargs):
+        if self._state.adding and not getattr(self, "_release_service_write", False):
+            raise ValidationError("Release contracts must be created through the release service.")
         if self.pk and not getattr(self, "_release_service_write", False):
             previous = type(self).objects.filter(pk=self.pk).values(*self.PROTECTED_FIELDS).first()
             if previous and any(previous[field] != getattr(self, field) for field in self.PROTECTED_FIELDS):

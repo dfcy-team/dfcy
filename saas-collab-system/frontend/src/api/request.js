@@ -8,7 +8,11 @@ import {
 } from '../utils/authSession';
 import { apiBaseUrl } from './baseUrl';
 
-export const useMock = import.meta.env.VITE_USE_MOCK !== 'false';
+// Keep local development/tests convenient while making an unset production
+// build use the real API. A production build may still opt into Mock
+// explicitly with VITE_USE_MOCK=true for controlled demos.
+export const useMock = import.meta.env.VITE_USE_MOCK === 'true'
+  || (!import.meta.env.PROD && import.meta.env.VITE_USE_MOCK !== 'false');
 
 const request = axios.create({
   baseURL: apiBaseUrl,

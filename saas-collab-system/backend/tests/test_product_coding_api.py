@@ -16,7 +16,19 @@ def client_for(user):
 def manager_for(tenant, username="coding-manager"):
     user = CustomUser.objects.create_user(username=username, tenant=tenant, user_type=CustomUser.UserType.INTERNAL)
     role = Role.objects.create(tenant=tenant, code=f"{username}-role", name="Coding manager")
-    role.permissions.add(*Permission.objects.filter(code__in=["products.master.view", "products.master.manage"]))
+    role.permissions.add(
+        *Permission.objects.filter(
+            code__in=[
+                "products.master.view",
+                "products.master.manage",
+                "products.category.view",
+                "products.category.manage",
+                "products.color.view",
+                "products.color.manage",
+                "products.bundle.manage",
+            ]
+        )
+    )
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
     return user
@@ -156,3 +168,4 @@ def test_category_and_color_are_tenant_isolated():
         format="json",
     )
     assert denied.status_code == 400
+

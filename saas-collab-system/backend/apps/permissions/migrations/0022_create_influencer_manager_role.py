@@ -15,7 +15,7 @@ def create_influencer_manager_role(apps, schema_editor):
         role, _ = Role.objects.update_or_create(
             tenant=tenant,
             code="002",
-            defaults={"name": "鏉堝彞姹夌粻锛勬倞", "status": "active"},
+            defaults={"name": "达人管理", "status": "active"},
         )
         role.permissions.set(permissions)
         DataScope.objects.update_or_create(

@@ -154,11 +154,6 @@ class ProductSPU(models.Model):
         STANDARD = "standard", "Standard product"
         BUNDLE = "bundle", "Bundle product"
 
-    class DevelopmentSource(models.TextChoices):
-        OPERATION = "operation", "Operation submission"
-        INTERNAL = "internal", "Internal development"
-        SUPPLIER = "supplier", "Supplier recommendation"
-
     class LifecycleStatus(models.TextChoices):
         DRAFT = "draft", "Draft"
         ACTIVE = "active", "Active"
@@ -198,22 +193,6 @@ class ProductSPU(models.Model):
         choices=SalesStatus.choices,
         default=SalesStatus.NOT_LISTED,
     )
-    development_source = models.CharField(
-        max_length=30,
-        choices=DevelopmentSource.choices,
-        null=True,
-        blank=True,
-    )
-    development_project = models.ForeignKey(
-        "development.DevelopmentProject",
-        on_delete=models.SET_NULL,
-        related_name="finalized_spus",
-        null=True,
-        blank=True,
-    )
-    erp_product_id = models.CharField(max_length=160, null=True, blank=True)
-    platform_listing_url = models.URLField(max_length=500, null=True, blank=True)
-    first_sale_date = models.DateField(null=True, blank=True)
     is_code_frozen = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -233,7 +212,6 @@ class ProductSKU(models.Model):
     spu = models.ForeignKey(ProductSPU, on_delete=models.CASCADE, related_name="skus")
     sku_code = models.CharField(max_length=80)
     legacy_sku_code = models.CharField(max_length=160, blank=True, db_index=True)
-    product_name = models.CharField(max_length=200, blank=True, default="")
     color_code = models.CharField(max_length=40, blank=True)
     specification = models.CharField(max_length=120, blank=True)
     spec_values = models.JSONField(default=dict, blank=True)
@@ -243,8 +221,7 @@ class ProductSKU(models.Model):
     package_weight = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     package_volume = models.DecimalField(max_digits=12, decimal_places=6, null=True, blank=True)
     purchase_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
-    # Weight and volume retain their historical columns; units are documented
-    # at the API/UI boundary (g and m鲁) without converting existing values.
+    product_name = models.CharField(max_length=200, blank=True, default="")
     unit = models.CharField(max_length=30, null=True, blank=True)
     image_url = models.CharField(max_length=500, null=True, blank=True)
     package_length_cm = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
@@ -262,30 +239,16 @@ class ProductSKU(models.Model):
         ordering = ["tenant_id", "sku_code"]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "sku_code"], name="uniq_sku_code_per_tenant"),
-            models.CheckConstraint(
-                condition=(models.Q(package_weight__isnull=True) | models.Q(package_weight__gte=0)),
-                name="product_sku_package_weight_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_volume__isnull=True) | models.Q(package_volume__gte=0)),
-                name="product_sku_package_volume_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_length_cm__isnull=True) | models.Q(package_length_cm__gte=0)),
-                name="product_sku_package_length_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_width_cm__isnull=True) | models.Q(package_width_cm__gte=0)),
-                name="product_sku_package_width_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_height_cm__isnull=True) | models.Q(package_height_cm__gte=0)),
-                name="product_sku_package_height_nonnegative",
-            ),
+            models.CheckConstraint(condition=models.Q(package_weight__isnull=True) | models.Q(package_weight__gte=0), name="product_sku_package_weight_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_volume__isnull=True) | models.Q(package_volume__gte=0), name="product_sku_package_volume_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_length_cm__isnull=True) | models.Q(package_length_cm__gte=0), name="product_sku_package_length_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_width_cm__isnull=True) | models.Q(package_width_cm__gte=0), name="product_sku_package_width_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_height_cm__isnull=True) | models.Q(package_height_cm__gte=0), name="product_sku_package_height_nonnegative"),
         ]
 
     def __str__(self):
         return self.sku_code
+
 
 class ProductLegacyItem(models.Model):
     class Status(models.TextChoices):
@@ -302,8 +265,6 @@ class ProductLegacyItem(models.Model):
     color_code = models.CharField(max_length=40, blank=True)
     specification = models.CharField(max_length=120, blank=True)
     purchase_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
-    # Import staging mirrors the SKU detail fields so legacy CSV rows can be
-    # reprocessed and copied during SKU generation.
     unit = models.CharField(max_length=30, null=True, blank=True)
     image_url = models.CharField(max_length=500, null=True, blank=True)
     package_weight = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
@@ -325,27 +286,13 @@ class ProductLegacyItem(models.Model):
         ordering = ["-created_at", "id"]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "legacy_sku_code"], name="uniq_legacy_sku_per_tenant"),
-            models.CheckConstraint(
-                condition=(models.Q(package_weight__isnull=True) | models.Q(package_weight__gte=0)),
-                name="product_legacy_package_weight_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_volume__isnull=True) | models.Q(package_volume__gte=0)),
-                name="product_legacy_package_volume_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_length_cm__isnull=True) | models.Q(package_length_cm__gte=0)),
-                name="product_legacy_package_length_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_width_cm__isnull=True) | models.Q(package_width_cm__gte=0)),
-                name="product_legacy_package_width_nonnegative",
-            ),
-            models.CheckConstraint(
-                condition=(models.Q(package_height_cm__isnull=True) | models.Q(package_height_cm__gte=0)),
-                name="product_legacy_package_height_nonnegative",
-            ),
+            models.CheckConstraint(condition=models.Q(package_weight__isnull=True) | models.Q(package_weight__gte=0), name="product_legacy_package_weight_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_volume__isnull=True) | models.Q(package_volume__gte=0), name="product_legacy_package_volume_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_length_cm__isnull=True) | models.Q(package_length_cm__gte=0), name="product_legacy_package_length_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_width_cm__isnull=True) | models.Q(package_width_cm__gte=0), name="product_legacy_package_width_nonnegative"),
+            models.CheckConstraint(condition=models.Q(package_height_cm__isnull=True) | models.Q(package_height_cm__gte=0), name="product_legacy_package_height_nonnegative"),
         ]
+
 
 class ProductCodeSequence(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_code_sequences")
