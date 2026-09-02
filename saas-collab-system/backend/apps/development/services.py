@@ -14,13 +14,16 @@ from rest_framework.exceptions import ValidationError
 from apps.audit.models import NotificationMessage
 from apps.common.exceptions import ScopedResourceNotFound, StateConflict
 from apps.masterdata.models import SupplierMaster, SupplierStatusChoices
-from apps.products.models import ProductResearch, ProductSPU
+from apps.products.coding_services import category_path
+from apps.products.models import ProductCategory, ProductResearch, ProductSPU
 
 from .models import (
     DevelopmentCostEstimate,
     DevelopmentPerformanceReview,
     DevelopmentProject,
     DevelopmentProjectStage,
+    DevelopmentProductArchive,
+    DevelopmentProductArchiveEvent,
     DevelopmentRequirementChangeLog,
     DevelopmentRequirementCompetitorLink,
     DevelopmentSample,
@@ -77,6 +80,45 @@ def _next_code(model, tenant, field, prefix):
     return f"{base}{sequence:03d}"
 
 
+def _validate_archive_category(*, tenant, category):
+    """Return a tenant-owned active L3 category or raise a validation error."""
+
+    if category is None:
+        raise ValidationError({"category_node": "An active L3 product category is required."})
+    category_id = getattr(category, "pk", category)
+    category = (
+        ProductCategory.objects.select_related("parent__parent")
+        .filter(pk=category_id)
+        .first()
+    )
+    if category is None or category.tenant_id != tenant.id:
+        raise ValidationError({"category_node": "Category does not belong to the current tenant."})
+    if not category.is_active:
+        raise ValidationError({"category_node": "An active product category is required."})
+    if category.level != ProductCategory.Level.L3:
+        raise ValidationError({"category_node": "Development products must use an active L3 leaf category."})
+    try:
+        category_path(category)
+    except Exception as exc:
+        # category_path raises Django's ValidationError.  Keep the service
+        # boundary in DRF's validation vocabulary for both API and callers.
+        raise ValidationError({"category_node": str(exc)}) from exc
+    return category
+
+
+def _resolve_archive_category(*, tenant, project, explicit=None, fallback=None):
+    """Resolve explicit > project > requirement category in that order."""
+
+    category = explicit
+    if category is None:
+        category = getattr(project, "category_node", None)
+    if category is None and getattr(project, "requirement_id", None):
+        category = getattr(getattr(project, "requirement", None), "category_node", None)
+    if category is None:
+        category = fallback
+    return _validate_archive_category(tenant=tenant, category=category)
+
+
 @transaction.atomic
 def advance_project_stage(*, project_id, actor, target_stage, approval_notes="", deliverables=None):
     project = DevelopmentProject.objects.select_for_update().filter(pk=project_id, tenant=actor.tenant).first()
@@ -121,9 +163,13 @@ def finalize_product(*, project_id, actor):
         spu_code=_next_code(ProductSPU, project.tenant, "spu_code", "SPU"),
         product_name=project.product_name,
         category=project.category,
+        category_node=project.category_node,
         development_source=project.development_source,
         development_project=project,
     )
+    if project.category_node_id:
+        product.category = project.category_node.name
+        product.save(update_fields=["category", "updated_at"])
     now = timezone.now()
     DevelopmentProjectStage.objects.filter(
         project=project,
@@ -158,6 +204,366 @@ def finalize_product(*, project_id, actor):
             new_value="finalized",
         )
     return product, True
+
+
+def _record_product_archive_event(*, archive, actor, action, from_status="", to_status="", metadata=None):
+    """Write an immutable lifecycle audit event inside the caller's transaction."""
+
+    return DevelopmentProductArchiveEvent.objects.create(
+        archive=archive,
+        tenant=archive.tenant,
+        action=action,
+        from_status=from_status or "",
+        to_status=to_status or "",
+        actor=actor,
+        metadata=metadata or {},
+    )
+
+
+@transaction.atomic
+def create_product_archive(*, project_id, actor, data=None):
+    """Create a virtual trial archive for a development project.
+
+    The project row is locked before checking the one-to-one archive relation,
+    making retries deterministic even when two operators click "create" at
+    the same time.  No ``ProductSPU`` is created in this operation.
+    """
+
+    data = data or {}
+    project = (
+        DevelopmentProject.objects.select_for_update()
+        .select_related("tenant")
+        .filter(pk=project_id, tenant=actor.tenant)
+        .first()
+    )
+    if project is None:
+        raise ScopedResourceNotFound("Development project is not available in the current tenant.")
+    if project.status == DevelopmentProject.Status.CANCELLED:
+        raise StateConflict("A cancelled development project cannot create a product archive.")
+
+    category = _resolve_archive_category(
+        tenant=project.tenant,
+        project=project,
+        explicit=data.get("category_node"),
+        fallback=None,
+    )
+
+    existing = (
+        DevelopmentProductArchive.objects.select_for_update()
+        .select_related("project", "formal_product")
+        .filter(project=project)
+        .first()
+    )
+    if existing is not None:
+        # A retry with identical business inputs is a safe no-op.  Explicitly
+        # reject a contradictory retry so an archive cannot silently drift.
+        comparisons = {
+            "product_name": data.get("product_name"),
+            "category": data.get("category"),
+            "platform": data.get("platform"),
+            "site": data.get("site"),
+        }
+        conflicts = {
+            field: value
+            for field, value in comparisons.items()
+            if value is not None and str(value) != str(getattr(existing, field))
+        }
+        if existing.category_node_id != category.pk:
+            conflicts["category_node"] = category.pk
+        if "virtual_inventory_qty" in data and int(data["virtual_inventory_qty"]) != existing.virtual_inventory_qty:
+            conflicts["virtual_inventory_qty"] = data["virtual_inventory_qty"]
+        if conflicts:
+            raise StateConflict("A product archive already exists for this project with different values.")
+        return existing, False
+
+    target_sites = project.target_sites if isinstance(project.target_sites, list) else []
+    site = str(data.get("site") or (target_sites[0] if target_sites else "internal")).strip() or "internal"
+    platform = str(data.get("platform") or "internal").strip() or "internal"
+    archive_no = _next_code(DevelopmentProductArchive, project.tenant, "archive_no", "DPA")
+    archive = DevelopmentProductArchive.objects.create(
+        tenant=project.tenant,
+        project=project,
+        archive_no=archive_no,
+        product_name=str(data.get("product_name") or project.product_name).strip(),
+        category=category.name,
+        category_node=category,
+        platform=platform,
+        site=site,
+        virtual_inventory_sku=str(data.get("virtual_inventory_sku") or f"VT-{archive_no}").strip(),
+        virtual_inventory_qty=max(int(data.get("virtual_inventory_qty") or 0), 0),
+        test_notes=str(data.get("test_notes") or "").strip(),
+        created_by=actor,
+        updated_by=actor,
+    )
+    _record_product_archive_event(
+        archive=archive,
+        actor=actor,
+        action="created",
+        to_status=archive.status,
+        metadata={
+            "inventory_mode": archive.inventory_mode,
+            "platform": archive.platform,
+            "site": archive.site,
+            "virtual_inventory_sku": archive.virtual_inventory_sku,
+            "virtual_inventory_qty": archive.virtual_inventory_qty,
+        },
+    )
+    return archive, True
+
+
+@transaction.atomic
+def update_product_archive(*, archive_id, actor, data):
+    archive = (
+        DevelopmentProductArchive.objects.select_for_update()
+        .filter(pk=archive_id, tenant=actor.tenant)
+        .first()
+    )
+    if archive is None:
+        raise ScopedResourceNotFound("Product archive is not available in the current tenant.")
+    if archive.status != DevelopmentProductArchive.Status.TRIAL:
+        raise StateConflict("Only a virtual trial archive can be edited.")
+    category = _resolve_archive_category(
+        tenant=archive.tenant,
+        project=archive.project,
+        explicit=data.get("category_node"),
+        fallback=archive.category_node,
+    )
+    allowed = ("product_name", "platform", "site", "virtual_inventory_qty", "test_notes")
+    changed = {}
+    for field in allowed:
+        if field not in data:
+            continue
+        value = data[field]
+        if field == "virtual_inventory_qty":
+            value = max(int(value or 0), 0)
+        elif isinstance(value, str):
+            value = value.strip()
+        if value != getattr(archive, field):
+            setattr(archive, field, value)
+            changed[field] = value
+    if archive.category_node_id != category.pk:
+        archive.category_node = category
+        archive.category = category.name
+        changed["category_node"] = category.pk
+        changed["category"] = category.name
+    elif archive.category != category.name:
+        archive.category = category.name
+        changed["category"] = category.name
+    if changed:
+        archive.updated_by = actor
+        archive.save(update_fields=[*changed.keys(), "updated_by", "updated_at"])
+        _record_product_archive_event(
+            archive=archive,
+            actor=actor,
+            action="updated",
+            from_status=archive.status,
+            to_status=archive.status,
+            metadata={"changes": changed},
+        )
+    return archive
+
+
+@transaction.atomic
+def confirm_product_archive(*, archive_id, actor, test_result="pass", test_notes=None, idempotency_key=""):
+    """Confirm a completed virtual test without creating a formal product."""
+
+    archive = (
+        DevelopmentProductArchive.objects.select_for_update()
+        .select_related("project", "formal_product")
+        .filter(pk=archive_id, tenant=actor.tenant)
+        .first()
+    )
+    if archive is None:
+        raise ScopedResourceNotFound("Product archive is not available in the current tenant.")
+    if archive.status in {
+        DevelopmentProductArchive.Status.CONFIRMED,
+        DevelopmentProductArchive.Status.FORMALIZED,
+    }:
+        return archive, False
+    if archive.status != DevelopmentProductArchive.Status.TRIAL:
+        raise StateConflict("Only a virtual trial archive can be confirmed.")
+
+    result = str(test_result or DevelopmentProductArchive.TestResult.PASS).strip().lower()
+    result = {"passed": "pass", "success": "pass"}.get(result, result)
+    if result != DevelopmentProductArchive.TestResult.PASS:
+        raise StateConflict("Only a passed virtual test can be confirmed.")
+    previous_status = archive.status
+    archive.test_result = result
+    if test_notes is not None:
+        archive.test_notes = str(test_notes).strip()
+    archive.status = DevelopmentProductArchive.Status.CONFIRMED
+    archive.trial_confirmed_by = actor
+    archive.trial_confirmed_at = timezone.now()
+    archive.updated_by = actor
+    archive.save(
+        update_fields=[
+            "test_result",
+            "test_notes",
+            "status",
+            "trial_confirmed_by",
+            "trial_confirmed_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    _record_product_archive_event(
+        archive=archive,
+        actor=actor,
+        action="trial_confirmed",
+        from_status=previous_status,
+        to_status=archive.status,
+        metadata={"test_result": result, "idempotency_key": idempotency_key or ""},
+    )
+    return archive, True
+
+
+@transaction.atomic
+def formalize_product_archive(*, archive_id, actor, idempotency_key=""):
+    """Convert a confirmed trial archive into an internal ProductSPU.
+
+    This action never calls listing/publication integrations.  It only creates
+    or links the tenant's internal product master and records the operator and
+    resulting code in the archive audit trail.
+    """
+
+    archive = (
+        DevelopmentProductArchive.objects.select_for_update()
+        .select_related("project", "formal_product")
+        .filter(pk=archive_id, tenant=actor.tenant)
+        .first()
+    )
+    if archive is None:
+        raise ScopedResourceNotFound("Product archive is not available in the current tenant.")
+    if archive.status == DevelopmentProductArchive.Status.FORMALIZED:
+        return archive.formal_product, False
+    if archive.status != DevelopmentProductArchive.Status.CONFIRMED:
+        raise StateConflict("A product archive must be trial-confirmed before formalization.")
+
+    project = DevelopmentProject.objects.select_for_update().select_related("finalized_product").get(pk=archive.project_id)
+    category = _resolve_archive_category(
+        tenant=archive.tenant,
+        project=project,
+        explicit=archive.category_node,
+        fallback=None,
+    )
+    product = project.finalized_product
+    created = False
+    if product is not None:
+        if product.tenant_id != archive.tenant_id:
+            raise StateConflict("The linked formal product belongs to another tenant.")
+        if product.development_project_id not in (None, project.id):
+            raise StateConflict("The linked formal product belongs to another development project.")
+        if DevelopmentProductArchive.objects.filter(formal_product=product).exclude(pk=archive.pk).exists():
+            raise StateConflict("The formal product is already linked to another development archive.")
+        if product.development_project_id is None:
+            product.development_project = project
+            product.development_source = project.development_source
+        # Formalization is the boundary at which the structured category is
+        # copied to the product master.  Keep the product internal/draft; this
+        # action never publishes or lists it.
+        product.category_node = category
+        product.category = category.name
+        product.save(
+            update_fields=[
+                "development_project",
+                "development_source",
+                "category_node",
+                "category",
+                "updated_at",
+            ]
+        )
+    else:
+        product = ProductSPU.objects.create(
+            tenant=archive.tenant,
+            spu_code=_next_code(ProductSPU, archive.tenant, "spu_code", "SPU"),
+            product_name=archive.product_name,
+            category=category.name,
+            category_node=category,
+            development_source=project.development_source,
+            development_project=project,
+            lifecycle_status=ProductSPU.LifecycleStatus.DRAFT,
+            sales_status=ProductSPU.SalesStatus.NOT_LISTED,
+        )
+        created = True
+
+    now = timezone.now()
+    if project.stage != DevelopmentProject.Stage.FINALIZED:
+        DevelopmentProjectStage.objects.filter(
+            project=project,
+            stage=project.stage,
+            completed_at__isnull=True,
+        ).update(completed_at=now)
+        DevelopmentProjectStage.objects.create(
+            project=project,
+            stage=DevelopmentProject.Stage.FINALIZED,
+            entered_at=now,
+            approved_by=actor,
+            approval_notes="Virtual trial confirmed and internal product archive formalized.",
+            deliverables={"product_id": product.id, "spu_code": product.spu_code, "archive_id": archive.id},
+        )
+        project.stage = DevelopmentProject.Stage.FINALIZED
+    project.finalized_product = product
+    project.save(update_fields=["stage", "finalized_product", "updated_at"])
+
+    previous_status = archive.status
+    archive.formal_product = product
+    archive.category_node = category
+    archive.category = category.name
+    archive.status = DevelopmentProductArchive.Status.FORMALIZED
+    archive.formalized_by = actor
+    archive.formalized_at = now
+    archive.updated_by = actor
+    archive.save(
+        update_fields=[
+            "formal_product",
+            "category_node",
+            "category",
+            "status",
+            "formalized_by",
+            "formalized_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    _record_product_archive_event(
+        archive=archive,
+        actor=actor,
+        action="formalized",
+        from_status=previous_status,
+        to_status=archive.status,
+        metadata={
+            "product_id": product.id,
+            "spu_code": product.spu_code,
+            "created": created,
+            "idempotency_key": idempotency_key or "",
+        },
+    )
+    NotificationMessage.objects.create(
+        tenant=archive.tenant,
+        user=project.assigned_to,
+        title=f"开发产品档案已转正：{archive.product_name}",
+        message=f"开发项目 {project.project_no} 已生成内部商品档案：{product.spu_code}。",
+        message_type="development_product_archive_formalized",
+    )
+    if project.requirement_id:
+        DevelopmentRequirementChangeLog.objects.create(
+            requirement=project.requirement,
+            changed_by=actor,
+            change_type="product_archive_formalized",
+            field_name="approval_status",
+            old_value=project.requirement.approval_status,
+            new_value="finalized",
+        )
+    return product, created
+
+
+# Public domain-oriented aliases used by integrations and service tests.  The
+# shorter names remain the canonical implementation above.
+create_development_product_archive = create_product_archive
+confirm_development_product_archive = confirm_product_archive
+formalize_development_product_archive = formalize_product_archive
+complete_product_archive = confirm_product_archive
+promote_product_archive = formalize_product_archive
 
 
 @transaction.atomic

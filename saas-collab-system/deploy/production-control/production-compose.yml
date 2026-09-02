@@ -1,0 +1,232 @@
+# Canonical single-application production stack.
+#
+# A host that already uses a reviewed Compose overlay chain may set
+# PRODUCTION_COMPOSE_FILES in its root-owned environment file instead of using
+# this file. The release scripts always pass immutable image references through
+# the process environment; this file never builds images on the target host.
+
+services:
+  redis:
+    image: ${PRODUCTION_REDIS_IMAGE:?PRODUCTION_REDIS_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - production-redis-data:/data
+    networks:
+      - production-internal
+
+  migrate:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: python manage.py migrate --noinput
+    restart: "no"
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  backend:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: >-
+      gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-60}
+      --access-logfile - --error-logfile -
+    restart: unless-stopped
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      PLATFORM_NETWORK_MODE: approved-live-test
+      LIVE_PLATFORM_SECURITY_APPROVED: "true"
+      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com
+      LIVE_READONLY_SYNC_ENABLED: "true"
+      LIVE_OAUTH_REDIRECT_ALLOWLIST: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_CONTRACT_APPROVED: "true"
+    volumes:
+      - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
+      - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
+    ports:
+      - "127.0.0.1:${PRODUCTION_APP_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request; r=urllib.request.Request(
+          'http://127.0.0.1:8000/api/internal/health/',
+          headers={'Host':'localhost','X-Forwarded-Proto':'https'}); raise SystemExit(
+          0 if urllib.request.urlopen(r, timeout=5).status == 200 else 1)"
+      interval: 15s
+      timeout: 8s
+      retries: 12
+      start_period: 30s
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      custody-sidecar:
+        condition: service_healthy
+
+  celery:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: celery -A config worker --loglevel=info
+    restart: unless-stopped
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      PLATFORM_NETWORK_MODE: approved-live-test
+      LIVE_PLATFORM_SECURITY_APPROVED: "true"
+      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com
+      LIVE_READONLY_SYNC_ENABLED: "true"
+      LIVE_OAUTH_REDIRECT_ALLOWLIST: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_CONTRACT_APPROVED: "true"
+    volumes:
+      - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
+      - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      custody-sidecar:
+        condition: service_healthy
+
+  celery-beat:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: celery -A config beat --loglevel=info
+    restart: unless-stopped
+    environment:
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      PLATFORM_NETWORK_MODE: approved-live-test
+      LIVE_PLATFORM_SECURITY_APPROVED: "true"
+      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com
+      LIVE_READONLY_SYNC_ENABLED: "true"
+      LIVE_OAUTH_REDIRECT_ALLOWLIST: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_CONTRACT_APPROVED: "true"
+    volumes:
+      - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
+      - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
+    networks:
+      - production-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      custody-sidecar:
+        condition: service_healthy
+
+  custody-sidecar:
+    image: ${PRODUCTION_CUSTODY_IMAGE:?PRODUCTION_CUSTODY_IMAGE must be an immutable digest}
+    user: "${PRODUCTION_CUSTODY_SIDECAR_UID:-1000}:${PRODUCTION_CUSTODY_SIDECAR_GID:-1000}"
+    entrypoint: []
+    command:
+      - gunicorn
+      - apps.integrations.custody_service:application
+      - --bind
+      - 0.0.0.0:8443
+      - --workers
+      - "2"
+      - --timeout
+      - "60"
+      - --certfile
+      - /etc/custody/tls/tls.crt
+      - --keyfile
+      - /run/secrets/custody-tls.key
+      - --access-logfile
+      - "-"
+      - --error-logfile
+      - "-"
+    environment:
+      CUSTODY_SERVICE_STORAGE_PATH: /var/lib/saas-collab-custody
+      CUSTODY_SERVICE_KEY_FILE: /run/secrets/custody-master.key
+      CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      CUSTODY_SERVICE_TLS_CERT_FILE: /etc/custody/tls/tls.crt
+      CUSTODY_SERVICE_TLS_KEY_FILE: /run/secrets/custody-tls.key
+    volumes:
+      - ${PRODUCTION_CUSTODY_MASTER_KEY_PATH:?PRODUCTION_CUSTODY_MASTER_KEY_PATH is required}:/run/secrets/custody-master.key:ro
+      - ${PRODUCTION_CUSTODY_DATA_PATH:?PRODUCTION_CUSTODY_DATA_PATH is required}:/var/lib/saas-collab-custody
+      - ${PRODUCTION_CUSTODY_TLS_CERT_PATH:?PRODUCTION_CUSTODY_TLS_CERT_PATH is required}:/etc/custody/tls/tls.crt:ro
+      - ${PRODUCTION_CUSTODY_TLS_KEY_PATH:?PRODUCTION_CUSTODY_TLS_KEY_PATH is required}:/run/secrets/custody-tls.key:ro
+      - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
+      - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
+    expose:
+      - "8443"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import ssl,urllib.request;
+          c=ssl.create_default_context(cafile='/run/secrets/custody-ca.pem');
+          urllib.request.urlopen('https://custody-sidecar:8443/healthz', context=c, timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    networks:
+      - production-internal
+
+  frontend:
+    image: ${PRODUCTION_FRONTEND_IMAGE:?PRODUCTION_FRONTEND_IMAGE must be an immutable digest}
+    restart: unless-stopped
+    environment:
+      NGINX_ENVSUBST_FILTER: PILOT_HTTPS_PORT
+      PILOT_HTTPS_PORT: ${PRODUCTION_HTTPS_PORT:-8443}
+      SANDBOX_HTTPS_PORT: ${PRODUCTION_HTTPS_PORT:-8443}
+    ports:
+      - "${PRODUCTION_HTTP_PORT:-8080}:80"
+      - "${PRODUCTION_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ${PRODUCTION_TLS_CERT_PATH:?PRODUCTION_TLS_CERT_PATH is required}:/etc/nginx/tls/tls.crt:ro
+      - ${PRODUCTION_TLS_KEY_PATH:?PRODUCTION_TLS_KEY_PATH is required}:/etc/nginx/tls/tls.key:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - production-internal
+
+networks:
+  production-internal:
+    name: saas-production-network
+
+volumes:
+  production-redis-data:
+    name: saas-production-redis-data

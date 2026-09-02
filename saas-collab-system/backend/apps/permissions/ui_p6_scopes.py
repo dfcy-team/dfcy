@@ -27,7 +27,15 @@ def _validate_non_empty_string_values(values, message):
         _invalid_scope(message)
 
 
-INTEGRATION_SCOPE_KEYS = {"platforms", "integration_config_ids", "resource_types"}
+INTEGRATION_SCOPE_KEYS = {
+    "platforms",
+    "environments",
+    "regions",
+    "integration_config_ids",
+    "resource_types",
+    "store_ids",
+}
+MARKETPLACE_PLATFORMS = {"lazada", "shopee", "tiktok"}
 
 
 def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None):
@@ -142,7 +150,7 @@ def filter_integration_configs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        {"platforms", "integration_config_ids"},
+        {"platforms", "environments", "regions", "integration_config_ids"},
         allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
@@ -155,11 +163,108 @@ def filter_integration_configs(user, queryset, permission_code):
             condition &= Q(platform__in=[str(value) for value in config["platforms"]])
         if "integration_config_ids" in config:
             condition &= Q(pk__in=config["integration_config_ids"])
+        if "environments" in config:
+            condition &= Q(environment__in=config["environments"])
+        if "regions" in config:
+            allowed_regions = set(config["regions"])
+            scoped_ids = [
+                pk
+                for pk, regions in queryset.filter(condition).values_list("pk", "regions")
+                if set(regions or []).issubset(allowed_regions)
+            ]
+            allowed |= Q(pk__in=scoped_ids)
+        else:
+            allowed |= condition
+    return queryset.filter(allowed).distinct()
+
+
+def filter_store_authorizations(user, queryset, permission_code):
+    from apps.masterdata.models import StoreMaster
+
+    configs = permission_scope_configs(
+        user,
+        permission_code,
+        {"platforms", "store_ids"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    )
+    if configs is None:
+        return queryset
+    for config in configs:
+        if "platforms" in config:
+            _validate_non_empty_string_values(config["platforms"], "Store authorization scope has an invalid platform.")
+            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
+                _invalid_scope("Store authorization scope contains an unsupported platform.")
+        if "store_ids" in config:
+            _validate_positive_int_values(config["store_ids"], "Store authorization scope has an invalid store identifier.")
+            authorized_store_count = StoreMaster.objects.filter(
+                tenant=user.tenant,
+                id__in=set(config["store_ids"]),
+            ).count()
+            if authorized_store_count != len(set(config["store_ids"])):
+                raise DataScopeDenied(
+                    "Store authorization scope exceeds the current tenant.",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
+    allowed = Q(pk__in=[])
+    for config in configs:
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(platform__in=config["platforms"])
+        if "store_ids" in config:
+            condition &= Q(store_id__in=config["store_ids"])
         allowed |= condition
     return queryset.filter(allowed).distinct()
 
 
-def integration_values_allowed(user, permission_code, *, platform=None, config_id=None, resource_type=None):
+def filter_store_mappings(user, queryset, permission_code):
+    from apps.masterdata.models import StoreMaster
+
+    configs = permission_scope_configs(
+        user,
+        permission_code,
+        {"platforms", "store_ids"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    )
+    if configs is None:
+        return queryset
+    for config in configs:
+        if "platforms" in config:
+            _validate_non_empty_string_values(config["platforms"], "Store mapping scope has an invalid platform.")
+            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
+                _invalid_scope("Store mapping scope contains an unsupported platform.")
+        if "store_ids" in config:
+            _validate_positive_int_values(config["store_ids"], "Store mapping scope has an invalid store identifier.")
+            authorized_store_count = StoreMaster.objects.filter(
+                tenant=user.tenant,
+                id__in=set(config["store_ids"]),
+            ).count()
+            if authorized_store_count != len(set(config["store_ids"])):
+                raise DataScopeDenied(
+                    "Store mapping scope exceeds the current tenant.",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
+    allowed = Q(pk__in=[])
+    for config in configs:
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(platform__in=config["platforms"])
+        if "store_ids" in config:
+            condition &= Q(store_id__in=config["store_ids"])
+        allowed |= condition
+    return queryset.filter(allowed).distinct()
+
+
+def integration_values_allowed(
+    user,
+    permission_code,
+    *,
+    platform=None,
+    environment=None,
+    regions=None,
+    config_id=None,
+    resource_type=None,
+    store_id=None,
+):
     configs = permission_scope_configs(
         user,
         permission_code,
@@ -171,19 +276,53 @@ def integration_values_allowed(user, permission_code, *, platform=None, config_i
     for config in configs:
         if "platforms" in config and platform not in set(config["platforms"]):
             continue
+        if "environments" in config and environment not in set(config["environments"]):
+            continue
+        if "regions" in config and not set(regions or []).issubset(set(config["regions"])):
+            continue
         if "integration_config_ids" in config and config_id not in set(config["integration_config_ids"]):
             continue
         if "resource_types" in config and resource_type not in set(config["resource_types"]):
             continue
+        if "store_ids" in config and store_id not in set(config["store_ids"]):
+            continue
         return True
     return False
+
+
+def filter_product_mappings(user, queryset, permission_code):
+    configs = permission_scope_configs(
+        user,
+        permission_code,
+        {"platforms", "store_ids"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    )
+    if configs is None:
+        return queryset
+    for config in configs:
+        if "platforms" in config:
+            _validate_non_empty_string_values(config["platforms"], "Product mapping scope has an invalid platform.")
+            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
+                _invalid_scope("Product mapping scope contains an unsupported platform.")
+        if "store_ids" in config:
+            _validate_positive_int_values(config["store_ids"], "Product mapping scope has an invalid store identifier.")
+    allowed = Q(pk__in=[])
+    for config in configs:
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(platform__in=config["platforms"])
+        if "store_ids" in config:
+            condition &= Q(store_mapping__store_id__in=config["store_ids"])
+        allowed |= condition
+    return queryset.filter(allowed).distinct()
 
 
 def filter_sync_jobs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        INTEGRATION_SCOPE_KEYS,
+        {"platforms", "integration_config_ids", "resource_types"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
         return queryset
@@ -205,7 +344,8 @@ def filter_sync_runs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        INTEGRATION_SCOPE_KEYS,
+        {"platforms", "integration_config_ids", "resource_types"},
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
         return queryset
@@ -223,10 +363,10 @@ def filter_sync_runs(user, queryset, permission_code):
     return queryset.filter(allowed).distinct()
 
 
-def filter_finance_queryset(user, queryset, permission_code, *, platform_field="platform", currency_field="currency"):
+def _finance_scope_configs(user, permission_code):
     configs = permission_scope_configs(user, permission_code, {"platforms", "currencies"})
     if configs is None:
-        return queryset
+        return None
     for config in configs:
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Finance data scope contains an invalid platform.")
@@ -234,6 +374,24 @@ def filter_finance_queryset(user, queryset, permission_code, *, platform_field="
             _validate_non_empty_string_values(config["currencies"], "Finance data scope contains an invalid currency.")
             if any(not re.fullmatch(r"[A-Z]{3}", value) for value in config["currencies"]):
                 _invalid_scope("Finance data scope currencies must use uppercase ISO 4217 codes.")
+    return configs
+
+
+def finance_values_allowed(user, permission_code, *, platform, currency):
+    configs = _finance_scope_configs(user, permission_code)
+    if configs is None:
+        return True
+    return any(
+        ("platforms" not in config or platform in set(config["platforms"]))
+        and ("currencies" not in config or currency in set(config["currencies"]))
+        for config in configs
+    )
+
+
+def filter_finance_queryset(user, queryset, permission_code, *, platform_field="platform", currency_field="currency"):
+    configs = _finance_scope_configs(user, permission_code)
+    if configs is None:
+        return queryset
     allowed = Q(pk__in=[])
     for config in configs:
         condition = Q()
@@ -252,6 +410,7 @@ REPORT_TYPES = {
     "lifecycle",
     "business_alerts",
     "finance_summary",
+    "sales_details",
 }
 
 
@@ -259,6 +418,17 @@ def _validate_integration_configs(configs):
     for config in configs:
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Integration data scope contains an invalid platform.")
+        if "environments" in config:
+            _validate_non_empty_string_values(
+                config["environments"],
+                "Integration data scope contains an invalid environment.",
+            )
+            if not set(config["environments"]) <= {"mock", "sandbox", "pilot", "production"}:
+                _invalid_scope("Integration data scope contains an unsupported environment.")
+        if "regions" in config:
+            _validate_non_empty_string_values(config["regions"], "Integration data scope contains an invalid region.")
+            if any(not re.fullmatch(r"[A-Z]{2,8}", region) for region in config["regions"]):
+                _invalid_scope("Integration data scope regions must be uppercase platform codes.")
         if "integration_config_ids" in config:
             _validate_positive_int_values(
                 config["integration_config_ids"],
@@ -268,6 +438,11 @@ def _validate_integration_configs(configs):
             _validate_non_empty_string_values(
                 config["resource_types"],
                 "Integration data scope contains an invalid resource type.",
+            )
+        if "store_ids" in config:
+            _validate_positive_int_values(
+                config["store_ids"],
+                "Integration data scope contains an invalid store identifier.",
             )
 
 

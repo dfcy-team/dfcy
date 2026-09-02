@@ -1,12 +1,11 @@
 import json
 
 import pytest
-from django.test import override_settings
-from rest_framework.exceptions import ValidationError
+from django.core.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.integrations.credential_service import decrypt_credentials, encrypt_credentials
+from apps.integrations.credential_service import reject_raw_credential_fields
 from apps.integrations.models import IntegrationAuditLog, PlatformIntegrationConfig
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
@@ -18,7 +17,17 @@ def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
 
 def grant_integration_access(user):
     role = Role.objects.create(tenant=user.tenant, name="Tech Admin", code="tech_admin")
-    for permission_code in ("integrations.view", "integrations.manage", "integrations.rotate", "integrations.run"):
+    for permission_code in (
+        "integrations.view",
+        "integrations.manage",
+        "integrations.rotate",
+        "integrations.run",
+        "integrations.config.view",
+        "integrations.config.create",
+        "integrations.config.update",
+        "integrations.config.verify",
+        "integrations.config.disable",
+    ):
         action = permission_code.rsplit(".", 1)[-1]
         permission, _created = Permission.objects.get_or_create(
             code=permission_code,
@@ -36,11 +45,11 @@ def grant_integration_access(user):
 def grant_integration_view_only(user):
     role = Role.objects.create(tenant=user.tenant, name="Integration Viewer", code=f"integration-viewer-{user.id}")
     permission, _created = Permission.objects.get_or_create(
-        code="integrations.view",
+        code="integrations.config.view",
         defaults={
-            "name": "View integrations",
+            "name": "View API platform configurations",
             "module": "integrations",
-            "action": "view",
+            "action": "config.view",
         },
     )
     role.permissions.add(permission)
@@ -76,11 +85,6 @@ def config_payload(account_alias="demo-account", environment="mock", status="act
         "account_alias": account_alias,
         "environment": environment,
         "status": status,
-        "credential_key_version": "test-v1",
-        "credentials": {
-            "api_key": "not-a-real-secret",
-            "api_secret": "placeholder-secret",
-        },
     }
 
 
@@ -116,8 +120,9 @@ def test_integration_config_crud_uses_tenant_scope_and_standard_response():
 def test_integration_exact_permission_scope_filters_details_and_request_bodies():
     tenant = Tenant.objects.create(name="Tenant", code="integration-exact-scope")
     user = create_user(tenant, "integration-scoped")
-    grant_integration_permission(user, "integrations.view", {"platforms": ["mock"]})
-    grant_integration_permission(user, "integrations.manage", {"platforms": ["mock"]})
+    grant_integration_permission(user, "integrations.config.view", {"platforms": ["mock"]})
+    grant_integration_permission(user, "integrations.config.create", {"platforms": ["mock"]})
+    grant_integration_permission(user, "integrations.config.update", {"platforms": ["mock"]})
     visible = PlatformIntegrationConfig.objects.create(
         tenant=tenant,
         platform="mock",
@@ -151,8 +156,10 @@ def test_integration_exact_permission_scope_filters_details_and_request_bodies()
         {"platform": "other"},
         format="json",
     )
-    assert patch_denied.status_code == 403
-    assert patch_denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"
+    # Platform is immutable after creation, so this malformed cross-platform
+    # mutation is rejected before data-scope evaluation.
+    assert patch_denied.status_code == 400
+    assert patch_denied.json()["code"] == "VALIDATION_ERROR"
     visible.refresh_from_db()
     assert visible.platform == "mock"
 
@@ -169,7 +176,7 @@ def test_integration_exact_permission_scope_filters_details_and_request_bodies()
 def test_integration_scope_rejects_unknown_keys_and_invalid_values(scope_config):
     tenant = Tenant.objects.create(name="Tenant", code=f"invalid-integration-scope-{len(str(scope_config))}")
     user = create_user(tenant, f"invalid-integration-scope-{len(str(scope_config))}")
-    grant_integration_permission(user, "integrations.manage", scope_config)
+    grant_integration_permission(user, "integrations.config.create", scope_config)
 
     response = authenticated_client(user).post(
         "/api/internal/integrations/configs/",
@@ -205,8 +212,6 @@ def test_integration_view_permission_cannot_create_update_rotate_or_disable():
         account_alias="demo-view-only",
         environment=PlatformIntegrationConfig.Environment.MOCK,
         status=PlatformIntegrationConfig.Status.ACTIVE,
-        credential_key_version="test-v1",
-        credential_fingerprint="placeholder-fingerprint",
         created_by=user,
     )
     client = authenticated_client(user)
@@ -244,26 +249,28 @@ def test_credentials_never_appear_in_api_response_or_audit_log():
 
     assert response.status_code == 201
     response_text = json.dumps(response.json())
-    assert "not-a-real-secret" not in response_text
-    assert "placeholder-secret" not in response_text
     assert "credential_ciphertext" not in response_text
+    assert response.json()["data"]["credential_mask"] == {}
+
+    raw_response = authenticated_client(user).post(
+        "/api/internal/integrations/configs/",
+        {**config_payload(account_alias="raw-secret-probe"), "api_secret": "not-a-real-secret"},
+        format="json",
+    )
+    assert raw_response.status_code == 422
+    assert "not-a-real-secret" not in json.dumps(raw_response.json())
 
     audit = IntegrationAuditLog.objects.get(action="create")
     audit_text = json.dumps(audit.masked_detail)
     assert "not-a-real-secret" not in audit_text
-    assert "placeholder-secret" not in audit_text
-    assert audit.masked_detail["credential_mask"]["api_key"] == "***"
+    assert audit.masked_detail["credential_mask"] == {}
 
 
 @pytest.mark.django_db
-def test_test_provider_encrypts_decrypts_and_rotation_changes_key_version():
+def test_credential_reference_rotation_changes_reference_version_without_raw_values():
     tenant = Tenant.objects.create(name="Tenant", code="tenant")
     user = create_user(tenant, "tech-admin")
     grant_integration_access(user)
-
-    ciphertext, fingerprint = encrypt_credentials({"api_key": "not-a-real-secret"}, key_version="test-v1")
-    assert decrypt_credentials(ciphertext) == {"api_key": "not-a-real-secret"}
-    assert len(fingerprint) == 64
 
     create_response = authenticated_client(user).post(
         "/api/internal/integrations/configs/",
@@ -275,22 +282,22 @@ def test_test_provider_encrypts_decrypts_and_rotation_changes_key_version():
     rotate_response = authenticated_client(user).post(
         f"/api/internal/integrations/configs/{config_id}/rotate/",
         {
-            "credential_key_version": "test-v2",
-            "credentials": {"api_key": "demo-rotated", "api_secret": "placeholder-rotated"},
+            "credential_id": "synthetic-credential-ref",
+            "token_id": "synthetic-token-ref",
+            "credential_reference_version": 2,
         },
         format="json",
     )
 
     assert rotate_response.status_code == 200
-    assert rotate_response.json()["data"]["credential_key_version"] == "test-v2"
+    assert rotate_response.json()["data"]["credential_key_version"] == "reference-v2"
     assert "credential_ciphertext" not in rotate_response.json()["data"]
-    assert IntegrationAuditLog.objects.filter(action="rotate_credentials").exists()
+    assert IntegrationAuditLog.objects.filter(action="rotate_config_reference").exists()
 
 
-def test_unconfigured_production_provider_rejects_credential_operations():
-    with override_settings(INTEGRATION_ENCRYPTION_PROVIDER="unconfigured-production"):
-        with pytest.raises(ValidationError, match="not configured"):
-            encrypt_credentials({"api_key": "not-a-real-secret"})
+def test_raw_credential_operations_are_rejected_at_the_boundary():
+    with pytest.raises(ValidationError, match="Raw credentials are forbidden"):
+        reject_raw_credential_fields({"api_key": "not-a-real-secret"})
 
 
 @pytest.mark.django_db

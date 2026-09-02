@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.db import models
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 
@@ -8,6 +9,7 @@ from apps.products.models import ProductResearch
 from .models import (
     DevelopmentCostEstimate,
     DevelopmentProject,
+    DevelopmentProductArchive,
     DevelopmentRequirementCompetitorLink,
     ProductSalesSummary,
 )
@@ -17,16 +19,21 @@ from .permissions import (
     CanImportSales,
     CanManageCosts,
     CanManageProjects,
+    CanManageProductArchives,
+    CanConfirmProductArchives,
     CanManageCompetitorLinks,
     CanReviewRequirements,
     CanViewCompetitorReports,
     CanViewProjects,
+    CanViewProductArchives,
     CanViewSales,
 )
 from .serializers import (
     CompetitorReportSelectionSerializer,
     DevelopmentCostEstimateSerializer,
     DevelopmentProjectSerializer,
+    DevelopmentProductArchiveConfirmationSerializer,
+    DevelopmentProductArchiveSerializer,
     DevelopmentRequirementCompetitorLinkSerializer,
     ProductSalesSummarySerializer,
 )
@@ -35,11 +42,15 @@ from .services import (
     calculate_cost_summary,
     check_duplicate_requirement,
     create_competitor_link,
+    create_product_archive,
+    confirm_product_archive,
     finalize_product,
+    formalize_product_archive,
     get_competitor_report_client,
     import_sales_csv,
     list_competitor_links,
     review_reminder_candidates,
+    update_product_archive,
 )
 
 
@@ -56,7 +67,13 @@ def project_collection(request):
         from rest_framework.exceptions import PermissionDenied
         raise PermissionDenied()
     if request.method == "GET":
-        queryset = DevelopmentProject.objects.filter(tenant=request.user.tenant).select_related("assigned_to", "supplier", "finalized_product")
+        queryset = DevelopmentProject.objects.filter(tenant=request.user.tenant).select_related(
+            "assigned_to",
+            "supplier",
+            "finalized_product",
+            "category_node",
+            "requirement__category_node",
+        )
         return success_response(DevelopmentProjectSerializer(queryset, many=True).data)
     serializer = DevelopmentProjectSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)
@@ -69,6 +86,174 @@ def project_collection(request):
 def project_detail(request, pk):
     item = get_object_or_404(DevelopmentProject, pk=pk, tenant=request.user.tenant)
     return success_response(DevelopmentProjectSerializer(item).data)
+
+
+@api_view(["GET", "POST"])
+def product_archive_collection(request):
+    """List/create virtual development product archives in the workspace."""
+
+    permission = CanViewProductArchives() if request.method == "GET" else CanManageProductArchives()
+    if not permission.has_permission(request, product_archive_collection):
+        from rest_framework.exceptions import PermissionDenied
+
+        raise PermissionDenied()
+    if request.method == "GET":
+        queryset = (
+            DevelopmentProductArchive.objects.filter(tenant=request.user.tenant)
+            .select_related(
+                "project",
+                "project__category_node",
+                "project__requirement__category_node",
+                "category_node",
+                "category_node__parent__parent",
+                "formal_product",
+                "created_by",
+                "updated_by",
+            )
+            .prefetch_related("events__actor")
+        )
+        status = request.query_params.get("status", "").strip()
+        platform = request.query_params.get("platform", "").strip()
+        site = request.query_params.get("site", "").strip()
+        search = request.query_params.get("search", "").strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        if platform:
+            queryset = queryset.filter(platform=platform)
+        if site:
+            queryset = queryset.filter(site=site)
+        if search:
+            queryset = queryset.filter(
+                models.Q(archive_no__icontains=search)
+                | models.Q(product_name__icontains=search)
+                | models.Q(project__project_no__icontains=search)
+                | models.Q(virtual_inventory_sku__icontains=search)
+            )
+        return success_response(DevelopmentProductArchiveSerializer(queryset, many=True).data)
+
+    serializer = DevelopmentProductArchiveSerializer(
+        data=request.data,
+        context={"request": request},
+    )
+    serializer.is_valid(raise_exception=True)
+    project = serializer.validated_data.pop("project", None)
+    if project is None:
+        raise ValidationError({"project": "A development project is required."})
+    archive, created = create_product_archive(
+        project_id=project.id,
+        actor=request.user,
+        data=serializer.validated_data,
+    )
+    return success_response(
+        DevelopmentProductArchiveSerializer(archive).data,
+        status=201 if created else 200,
+    )
+
+
+@api_view(["GET", "PATCH"])
+def product_archive_detail(request, pk):
+    permission = CanViewProductArchives() if request.method == "GET" else CanManageProductArchives()
+    if not permission.has_permission(request, product_archive_detail):
+        from rest_framework.exceptions import PermissionDenied
+
+        raise PermissionDenied()
+    archive = get_object_or_404(
+        DevelopmentProductArchive.objects.filter(tenant=request.user.tenant)
+        .select_related(
+            "project",
+            "project__category_node",
+            "project__requirement__category_node",
+            "category_node",
+            "category_node__parent__parent",
+            "formal_product",
+            "created_by",
+            "updated_by",
+        )
+        .prefetch_related("events__actor"),
+        pk=pk,
+    )
+    if request.method == "GET":
+        return success_response(DevelopmentProductArchiveSerializer(archive).data)
+
+    serializer = DevelopmentProductArchiveSerializer(
+        archive,
+        data=request.data,
+        partial=True,
+        context={"request": request},
+    )
+    serializer.is_valid(raise_exception=True)
+    updated = update_product_archive(
+        archive_id=archive.id,
+        actor=request.user,
+        data=serializer.validated_data,
+    )
+    updated = (
+        DevelopmentProductArchive.objects.select_related(
+            "project",
+            "project__category_node",
+            "project__requirement__category_node",
+            "category_node",
+            "category_node__parent__parent",
+            "formal_product",
+            "created_by",
+            "updated_by",
+        )
+        .prefetch_related("events__actor")
+        .get(pk=updated.pk)
+    )
+    return success_response(DevelopmentProductArchiveSerializer(updated).data)
+
+
+@api_view(["POST"])
+@permission_classes([CanConfirmProductArchives])
+def product_archive_confirm(request, pk):
+    serializer = DevelopmentProductArchiveConfirmationSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    archive, changed = confirm_product_archive(
+        archive_id=pk,
+        actor=request.user,
+        test_result=serializer.validated_data.get("test_result"),
+        test_notes=serializer.validated_data.get("test_notes"),
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    )
+    return success_response(
+        {
+            "archive": DevelopmentProductArchiveSerializer(archive).data,
+            "changed": changed,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([CanConfirmProductArchives])
+def product_archive_formalize(request, pk):
+    product, created = formalize_product_archive(
+        archive_id=pk,
+        actor=request.user,
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    )
+    archive = (
+        DevelopmentProductArchive.objects.select_related(
+            "project",
+            "project__category_node",
+            "project__requirement__category_node",
+            "category_node",
+            "category_node__parent__parent",
+            "formal_product",
+            "created_by",
+            "updated_by",
+        )
+        .prefetch_related("events__actor")
+        .get(pk=pk, tenant=request.user.tenant)
+    )
+    return success_response(
+        {
+            "archive": DevelopmentProductArchiveSerializer(archive).data,
+            "product_id": product.id,
+            "spu_code": product.spu_code,
+            "created": created,
+        }
+    )
 
 
 @api_view(["POST"])

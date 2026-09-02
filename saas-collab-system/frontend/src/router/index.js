@@ -19,6 +19,7 @@ const ResearchList = () => import('../views/products/ResearchList.vue');
 const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
 const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
+const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
 const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
@@ -40,6 +41,9 @@ const SiteProfileList = () => import('../views/listings/SiteProfileList.vue');
 const SiteProfileDetail = () => import('../views/listings/SiteProfileDetail.vue');
 const ListingTemplateList = () => import('../views/listings/ListingTemplateList.vue');
 const DevelopmentWorkspace = () => import('../views/development/DevelopmentWorkspace.vue');
+const DevelopmentProductArchiveList = () => import('../views/development/DevelopmentProductArchiveList.vue');
+const CountrySiteMasterList = () => import('../views/masterdata/CountrySiteMasterList.vue');
+const PlatformProductDetailList = () => import('../views/masterdata/PlatformProductDetailList.vue');
 const PriceList = () => import('../views/pricing/PriceList.vue');
 const PriceDetail = () => import('../views/pricing/PriceDetail.vue');
 const RPATaskList = () => import('../views/rpa/RPATaskList.vue');
@@ -56,6 +60,7 @@ const APISyncTaskList = () => import('../views/integrations/APISyncTaskList.vue'
 const APISyncLogList = () => import('../views/integrations/APISyncLogList.vue');
 const IntegrationConfigList = () => import('../views/integrations/IntegrationConfigList.vue');
 const IntegrationConfigDetail = () => import('../views/integrations/IntegrationConfigDetail.vue');
+const PlatformDrillWorkbench = () => import('../views/integrations/PlatformDrillWorkbench.vue');
 const SyncJobList = () => import('../views/integrations/SyncJobList.vue');
 const SyncRunList = () => import('../views/integrations/SyncRunList.vue');
 const SyncRunDetail = () => import('../views/integrations/SyncRunDetail.vue');
@@ -143,6 +148,8 @@ const routes = [
       { path: 'products/research/:id', component: ResearchDetail },
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
+      { path: 'products/details', component: ProductDetailData },
+      { path: 'products/platform-details', component: PlatformProductDetailList },
       { path: 'products/status', component: ProductStatusList },
       { path: 'products/status-dashboard', component: ProductStatusDashboard },
       { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
@@ -167,6 +174,7 @@ const routes = [
       { path: 'development/requirements', component: DevelopmentWorkspace, props: { mode: 'requirements' } },
       { path: 'development/review', component: DevelopmentWorkspace, props: { mode: 'review' } },
       { path: 'development/projects', component: DevelopmentWorkspace, props: { mode: 'projects' } },
+      { path: 'development/projects/archives', component: DevelopmentProductArchiveList },
       { path: 'development/costs', component: DevelopmentWorkspace, props: { mode: 'costs' } },
       { path: 'development/sales', component: DevelopmentWorkspace, props: { mode: 'sales' } },
       { path: 'development/retrospectives', component: DevelopmentWorkspace, props: { mode: 'retrospectives' } },
@@ -187,6 +195,7 @@ const routes = [
       { path: 'rpa/page-signatures', component: RPAPageSignatureAlertList },
       { path: 'integrations/configs', component: IntegrationConfigList },
       { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
+      { path: 'integrations/platform-drill', component: PlatformDrillWorkbench },
       { path: 'integrations/sync-jobs', component: SyncJobList },
       { path: 'integrations/sync-runs', component: SyncRunList },
       { path: 'integrations/sync-runs/:id', component: SyncRunDetail },
@@ -215,6 +224,7 @@ const routes = [
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
+      { path: 'master-data/sites', component: CountrySiteMasterList },
       { path: 'audit/operations', component: OperationLogList }
     ]
   }

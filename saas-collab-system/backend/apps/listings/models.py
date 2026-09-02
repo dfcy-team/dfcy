@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-from apps.masterdata.models import PlatformMaster, StoreMaster
+from apps.masterdata.models import CountrySiteMaster, PlatformMaster, StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
@@ -365,3 +365,93 @@ ListingProductAttributeMapping = ListingAttributeMapping
 ListingTaskStep = ListingTaskStepLog
 ListingTaskError = ListingTaskErrorLog
 ListingPublicationTask = ListingTask
+
+
+class PlatformProductDetail(models.Model):
+    """A tenant-scoped product/variant snapshot reported by a platform store.
+
+    This is deliberately a local catalogue record: no platform credentials or
+    authorization material is accepted or persisted.  ``platform_variant_id``
+    is the idempotency key within a tenant/platform/store and an internal SKU
+    may therefore be linked to any number of store variants.
+    """
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_product_details")
+    platform = models.ForeignKey(PlatformMaster, on_delete=models.PROTECT, related_name="product_details")
+    store = models.ForeignKey(StoreMaster, on_delete=models.PROTECT, related_name="product_details")
+    site = models.ForeignKey(
+        CountrySiteMaster,
+        on_delete=models.PROTECT,
+        related_name="platform_product_details",
+        null=True,
+        blank=True,
+    )
+    platform_product_id = models.CharField(max_length=160, blank=True, default="")
+    platform_variant_id = models.CharField(max_length=160)
+    platform_sku = models.CharField(max_length=160, blank=True, default="")
+    source_old_sku_code = models.CharField(max_length=160, blank=True, default="")
+    internal_sku = models.ForeignKey(
+        ProductSKU,
+        on_delete=models.PROTECT,
+        related_name="platform_product_details",
+        null=True,
+        blank=True,
+    )
+    title = models.CharField(max_length=300, blank=True, default="")
+    variant = models.CharField(max_length=300, blank=True, default="")
+    category_l1 = models.CharField(max_length=200, blank=True, default="")
+    category_l2 = models.CharField(max_length=200, blank=True, default="")
+    category_l3 = models.CharField(max_length=200, blank=True, default="")
+    sku_prefix = models.CharField(max_length=120, blank=True, default="")
+    shop_abbr = models.CharField(max_length=120, blank=True, default="")
+    sales_status = models.CharField(max_length=80, blank=True, default="")
+    owner = models.CharField(max_length=120, blank=True, default="")
+    leader = models.CharField(max_length=120, blank=True, default="")
+    platform_created_at = models.DateTimeField(null=True, blank=True)
+    platform_updated_at = models.DateTimeField(null=True, blank=True)
+    source = models.CharField(max_length=40, blank=True, default="manual")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "platform_id", "store_id", "platform_product_id", "platform_variant_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "platform", "store", "platform_variant_id"],
+                name="uniq_platform_product_variant",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "platform", "store"], name="idx_platform_product_store"),
+            models.Index(fields=["tenant", "internal_sku"], name="idx_platform_product_sku"),
+            models.Index(fields=["tenant", "sales_status"], name="idx_platform_product_status"),
+        ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        if self.platform_id and self.platform.tenant_id != self.tenant_id:
+            errors["platform"] = "平台必须属于当前租户。"
+        if self.store_id:
+            if self.store.tenant_id != self.tenant_id:
+                errors["store"] = "店铺必须属于当前租户。"
+            elif self.platform_id and self.store.platform_id != self.platform_id:
+                errors["store"] = "店铺所属平台与平台商品不一致。"
+        if self.site_id:
+            if self.site.tenant_id != self.tenant_id:
+                errors["site"] = "站点必须属于当前租户。"
+            elif self.store_id:
+                if (self.site.country_code or "").casefold() != (self.store.country_code or "").casefold():
+                    errors["site"] = "站点国家与店铺国家不一致。"
+                platform_values = {
+                    (self.platform.code or "").casefold(),
+                    (self.platform.name or "").casefold(),
+                    (self.platform.platform_type or "").casefold(),
+                }
+                if self.site.platform and self.site.platform.casefold() not in platform_values:
+                    errors["site"] = "站点所属平台与平台商品不一致。"
+        if self.internal_sku_id and self.internal_sku.tenant_id != self.tenant_id:
+            errors["internal_sku"] = "内部 SKU 必须属于当前租户。"
+        if errors:
+            raise ValidationError(errors)

@@ -29,6 +29,7 @@ from .views import (
     status_recommendation_detail,
     status_transition_collection,
 )
+from .detail_views import product_detail_collection
 
 
 urlpatterns = [
@@ -40,6 +41,7 @@ urlpatterns = [
     path("categories/<int:pk>/attributes/", product_category_attributes, name="product-category-attributes"),
     path("colors/", product_color_collection, name="product-color-collection"),
     path("colors/<int:pk>/", product_color_detail, name="product-color-detail"),
+    path("details/", product_detail_collection, name="product-detail-collection"),
     path("research/", product_research_collection, name="product-research-collection"),
     path("research/<int:pk>/", product_research_detail, name="product-research-detail"),
     path("spus/", product_spu_collection, name="product-spu-collection"),

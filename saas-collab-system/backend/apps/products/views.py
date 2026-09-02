@@ -2,11 +2,14 @@ import csv
 import io
 import os
 import uuid
+from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 
@@ -21,7 +24,7 @@ from apps.permissions.ui_p5_scopes import (
     require_create_scope,
 )
 
-from .coding_services import SEASONS, category_path
+from .coding_services import SEASONS, allocate_legacy_sku_code, category_path
 from .name_normalization import consensus_spu_product_name
 from .models import (
     ProductBundleComponent,
@@ -52,6 +55,7 @@ from .serializers import (
     ProductCategorySerializer,
     ProductColorSerializer,
     ProductAttributeSerializer,
+    ProductDetailRowSerializer,
     ProductLegacyItemSerializer,
     ProductResearchSerializer,
     ProductSKUSerializer,
@@ -248,6 +252,15 @@ def product_spu_collection(request):
             queryset = queryset.filter(product_name__icontains=search)
         if status:
             queryset = queryset.filter(sales_status=status)
+        category_id = request.query_params.get("category_node", "").strip()
+        if category_id.isdigit():
+            selected = get_object_or_404(ProductCategory, pk=int(category_id), tenant=request.user.tenant)
+            category_ids = [selected.id]
+            frontier = [selected.id]
+            while frontier:
+                frontier = list(ProductCategory.objects.filter(tenant=request.user.tenant, parent_id__in=frontier).values_list("id", flat=True))
+                category_ids.extend(frontier)
+            queryset = queryset.filter(category_node_id__in=category_ids)
         page, page_size = pagination_query(request)
         return success_response(paginated_data(request, queryset, ProductSPUSerializer, page=page, page_size=page_size))
 
@@ -336,6 +349,173 @@ def product_sku_detail(request, pk):
     return success_response(ProductSKUSerializer(item).data)
 
 
+def _product_detail_search_filter(queryset, search, fields):
+    """Apply one global search term to a product-detail queryset."""
+
+    if not search:
+        return queryset
+    condition = Q(pk__in=[])
+    for field in fields:
+        condition |= Q(**{f"{field}__icontains": search})
+    return queryset.filter(condition)
+
+
+def _product_detail_page_url(request, page, page_size):
+    if page is None:
+        return None
+    params = request.query_params.copy()
+    params["page"] = page
+    params["page_size"] = page_size
+    return request.build_absolute_uri(f"{request.path}?{params.urlencode()}")
+
+
+@api_view(["GET"])
+@permission_classes([IsProductMasterReadOrManage])
+def product_detail_collection(request):
+    """Return the flattened 商品明细数据 read model.
+
+    Legacy import rows that have not generated a SKU are shown alongside
+    generated SKU rows.  Generated legacy staging rows are intentionally
+    omitted because their generated SKU is already represented by the second
+    row, preventing duplicate entries in the table.
+    """
+
+    search = request.query_params.get("search", "").strip()
+    tenant = request.user.tenant
+    legacy_queryset = ProductLegacyItem.objects.filter(
+        tenant=tenant,
+    ).exclude(
+        status=ProductLegacyItem.Status.GENERATED,
+    ).select_related("category_node")
+    legacy_queryset = _product_detail_search_filter(
+        legacy_queryset,
+        "" if search.casefold() in {"待转换", "pending", "生成失败", "error"} else search,
+        (
+            "legacy_spu_code",
+            "legacy_sku_code",
+            "product_name",
+            "category_node__name",
+            "color_code",
+            "specification",
+            "purchase_price",
+            "status",
+        ),
+    )
+
+    sku_queryset = ProductSKU.objects.filter(tenant=tenant).select_related(
+        "spu",
+        "spu__category_node",
+    )
+    sku_queryset = filter_product_skus(request.user, sku_queryset, "products.master.view")
+    sku_queryset = _product_detail_search_filter(
+        sku_queryset,
+        "" if search.casefold() in {"已生成", "generated"} else search,
+        (
+            "legacy_sku_code",
+            "sku_code",
+            "product_name",
+            "spu__legacy_spu_code",
+            "spu__spu_code",
+            "spu__product_name",
+            "spu__category",
+            "spu__category_node__name",
+            "color_code",
+            "specification",
+            "purchase_price",
+        ),
+    )
+
+    status_labels = {
+        ProductLegacyItem.Status.PENDING: "待转换",
+        ProductLegacyItem.Status.GENERATED: "已生成",
+        ProductLegacyItem.Status.ERROR: "生成失败",
+    }
+    rows = []
+    for item in legacy_queryset:
+        rows.append(
+            {
+                "id": item.id,
+                "row_type": "legacy",
+                "legacy_spu_code": item.legacy_spu_code,
+                "legacy_sku_code": item.legacy_sku_code,
+                "spu_code": "",
+                "sku_code": "",
+                "product_name": item.product_name,
+                "category_node": item.category_node_id,
+                "category_name": item.category_node.name if item.category_node else "",
+                "color_code": item.color_code,
+                "specification": item.specification,
+                "purchase_price": item.purchase_price,
+                "attribute_code": item.attribute_code,
+                "status": item.status,
+                "status_name": status_labels.get(item.status, item.status),
+                "error_message": item.error_message,
+            }
+        )
+    for item in sku_queryset:
+        spu = item.spu
+        rows.append(
+            {
+                "id": item.id,
+                "row_type": "sku",
+                "legacy_spu_code": spu.legacy_spu_code,
+                "legacy_sku_code": item.legacy_sku_code,
+                "spu_code": spu.spu_code,
+                "sku_code": item.sku_code,
+                "product_name": item.product_name or spu.product_name,
+                "category_node": spu.category_node_id,
+                "category_name": spu.category_node.name if spu.category_node else spu.category,
+                "color_code": item.color_code,
+                "specification": item.specification,
+                "purchase_price": item.purchase_price,
+                "attribute_code": spu.season_code,
+                "status": ProductLegacyItem.Status.GENERATED,
+                "status_name": status_labels[ProductLegacyItem.Status.GENERATED],
+                "error_message": "",
+            }
+        )
+
+    if search:
+        needle = search.casefold()
+        rows = [
+            row
+            for row in rows
+            if any(
+                needle in str(row.get(field) or "").casefold()
+                for field in (
+                    "legacy_spu_code",
+                    "legacy_sku_code",
+                    "spu_code",
+                    "sku_code",
+                    "product_name",
+                    "category_name",
+                    "color_code",
+                    "specification",
+                    "purchase_price",
+                    "status",
+                    "status_name",
+                )
+            )
+        ]
+
+    page, page_size = pagination_query(request)
+    paginator = Paginator(rows, page_size)
+    if page > paginator.num_pages:
+        return error_response(ErrorCode.NOT_FOUND, "Requested page does not exist.", status=404)
+    page_obj = paginator.page(page)
+    payload = {
+        "count": paginator.count,
+        "next": _product_detail_page_url(request, page_obj.next_page_number(), page_size)
+        if page_obj.has_next()
+        else None,
+        "previous": _product_detail_page_url(request, page_obj.previous_page_number(), page_size)
+        if page_obj.has_previous()
+        else None,
+        "results": ProductDetailRowSerializer(page_obj.object_list, many=True).data,
+    }
+    return success_response(payload)
+
+
 @api_view(["POST", "DELETE"])
 @permission_classes([IsProductMasterReadOrManage])
 def product_sku_image(request, pk):
@@ -398,18 +578,21 @@ def product_legacy_collection(request):
         return success_response(ProductLegacyItemSerializer(queryset, many=True).data)
 
     require_create_scope(request.user, "products.master.manage")
-    csv_text = str(request.data.get("csv_text") or "").lstrip("\ufeff")
+    # ``csv_text`` is the documented API field; ``csv`` remains accepted for
+    # older clients (the original 商品明细 page used that shorter key).
+    csv_text = str(request.data.get("csv_text") or request.data.get("csv") or "").lstrip("\ufeff")
     if not csv_text.strip():
         return error_response(ErrorCode.VALIDATION_ERROR, "��ѡ���������Ʒ���ݵ� CSV �ļ���", status=400)
     reader = csv.DictReader(io.StringIO(csv_text))
     aliases = {
-        "legacy_spu_code": ("��SPU����", "old_spu_code", "legacy_spu_code"),
-        "legacy_sku_code": ("��SKU����", "old_sku_code", "legacy_sku_code"),
-        "product_name": ("��Ʒ����", "product_name"),
-        "category_code": ("�������", "category_code"),
-        "attribute_code": ("������", "attribute_code"),
-        "color_code": ("��ɫ", "��ɫ����", "color_code"),
-        "specification": ("���", "specification"),
+        "legacy_spu_code": ("旧SPU编码", "旧 SPU 编码", "��SPU����", "old_spu_code", "legacy_spu_code"),
+        "legacy_sku_code": ("旧SKU编码", "旧 SKU 编码", "��SKU����", "old_sku_code", "legacy_sku_code"),
+        "product_name": ("商品名称", "��Ʒ����", "product_name"),
+        "category_code": ("分类编码", "�������", "category_code"),
+        "attribute_code": ("属性码", "属性代码", "������", "attribute_code"),
+        "color_code": ("颜色", "颜色编码", "��ɫ", "��ɫ����", "color_code"),
+        "specification": ("规格", "���", "specification"),
+        "purchase_price": ("采购价格", "采购价", "purchase_price"),
     }
     def value(row, key):
         return next((str(row.get(name) or "").strip() for name in aliases[key] if str(row.get(name) or "").strip()), "")
@@ -421,6 +604,13 @@ def product_legacy_collection(request):
         if not old_sku or not name:
             errors.append({"line": line_no, "message": "��SKU�������Ʒ���Ʋ���Ϊ��"})
             continue
+        purchase_price = value(row, "purchase_price")
+        if purchase_price:
+            try:
+                purchase_price = Decimal(purchase_price)
+            except (InvalidOperation, ValueError):
+                errors.append({"line": line_no, "message": "采购价格必须是有效数字"})
+                continue
         category = None
         category_code = value(row, "category_code")
         if category_code:
@@ -430,6 +620,7 @@ def product_legacy_collection(request):
             defaults={"legacy_spu_code": value(row, "legacy_spu_code"), "product_name": name,
                       "category_node": category, "attribute_code": value(row, "attribute_code") or "0",
                       "color_code": value(row, "color_code"), "specification": value(row, "specification"),
+                      "purchase_price": purchase_price or None,
                       "status": ProductLegacyItem.Status.PENDING, "error_message": ""},
         )
         created += int(was_created); updated += int(not was_created)
@@ -556,6 +747,48 @@ def product_legacy_generate(request, pk):
                     )
             if item.generated_sku_id and item.generated_sku and item.generated_sku.spu_id == spu.id:
                 sku = item.generated_sku
+            elif item.legacy_sku_code:
+                # A previous attempt may have persisted the SKU before the
+                # staging-row link was written (for example after a manual
+                # repair). Reattach that SKU for the same SPU/legacy code
+                # instead of allocating a second variant.
+                sku = (
+                    ProductSKU.objects.select_for_update()
+                    .filter(
+                        tenant=request.user.tenant,
+                        spu=spu,
+                        legacy_sku_code=item.legacy_sku_code,
+                    )
+                    .first()
+                )
+                if sku is None and category.level == ProductCategory.Level.L3:
+                    sku_serializer = ProductSKUSerializer(
+                        data={
+                            "spu": spu.id,
+                            "color_code": item.color_code,
+                            "spec_values": spec_values,
+                            "legacy_sku_code": item.legacy_sku_code,
+                        },
+                        context=_serializer_context(request),
+                    )
+                    sku_serializer.is_valid(raise_exception=True)
+                    sku = sku_serializer.save(tenant=request.user.tenant)
+                elif sku is None:
+                    base_code = f"{spu.spu_code}-{item.color_code}-{item.specification or '0'}"
+                    sku = ProductSKU.objects.create(
+                        tenant=request.user.tenant,
+                        spu=spu,
+                        sku_code=allocate_legacy_sku_code(
+                            tenant=request.user.tenant,
+                            base_code=base_code,
+                            legacy_sku_code=item.legacy_sku_code,
+                        ),
+                        legacy_sku_code=item.legacy_sku_code,
+                        product_name=item.product_name,
+                        color_code=item.color_code,
+                        specification=item.specification or "",
+                        size=item.specification or "",
+                    )
             elif category.level == ProductCategory.Level.L3:
                 sku_serializer = ProductSKUSerializer(
                     data={
@@ -569,10 +802,17 @@ def product_legacy_generate(request, pk):
                 sku_serializer.is_valid(raise_exception=True)
                 sku = sku_serializer.save(tenant=request.user.tenant)
             else:
+                # ProductLegacyItem.legacy_sku_code is required, so this
+                # branch is retained only as a defensive fallback.
+                base_code = f"{spu.spu_code}-{item.color_code}-{item.specification or '0'}"
                 sku = ProductSKU.objects.create(
                     tenant=request.user.tenant,
                     spu=spu,
-                    sku_code=f"{spu.spu_code}-{item.color_code}-{item.specification or '0'}",
+                    sku_code=allocate_legacy_sku_code(
+                        tenant=request.user.tenant,
+                        base_code=base_code,
+                        legacy_sku_code=item.legacy_sku_code,
+                    ),
                     legacy_sku_code=item.legacy_sku_code,
                     product_name=item.product_name,
                     color_code=item.color_code,

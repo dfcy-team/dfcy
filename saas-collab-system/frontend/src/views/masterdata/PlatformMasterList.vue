@@ -16,19 +16,30 @@
 </template>
 
 <script setup>
+import { computed, onMounted, ref } from 'vue';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
-import { createMasterData, fetchPlatforms, updateMasterDataStatus } from '../../api/masterData';
+import { createMasterData, fetchPlatformCatalog, fetchPlatforms, updateMasterDataStatus } from '../../api/masterData';
+
+const platformTypeOptions = ref([{ label: '其他', value: 'other' }]);
 
 const columns = [
   { prop: 'code', label: '平台编码', width: 170 }, { prop: 'name', label: '平台名称', width: 200 },
-  { prop: 'platform_type', label: '平台类型' }, { prop: 'status', label: '状态', type: 'status' },
+  { prop: 'platform_type', label: '平台类型' }, { prop: 'priority_level', label: '优先级', width: 90 },
+  { prop: 'connector_status', label: '连接器状态', width: 150 }, { prop: 'status', label: '状态', type: 'status' },
   { prop: 'tenant_id', label: '租户ID' }
 ];
-const formFields = [
+const formFields = computed(() => [
   { key: 'code', label: '平台编码', required: true }, { key: 'name', label: '平台名称', required: true },
-  { key: 'platform_type', label: '平台类型', type: 'select', required: true, default: 'other', options: [
-    { label: 'BigSeller', value: 'bigseller' }, { label: 'Shopee', value: 'shopee' },
-    { label: 'TikTok', value: 'tiktok' }, { label: '其他', value: 'other' }
-  ] }
-];
+  { key: 'platform_type', label: '平台类型', type: 'select', required: true, default: 'other', options: platformTypeOptions.value }
+]);
+
+onMounted(async () => {
+  const response = await fetchPlatformCatalog();
+  const items = response?.data?.results || [];
+  if (!response?.success || !items.length) return;
+  platformTypeOptions.value = items.map((item) => ({
+    value: item.value,
+    label: `${item.label}（${item.canonical_code} / ${item.priority_level}）${item.connector_status === 'NOT_IMPLEMENTED' ? ' · 连接器未实现' : ''}`
+  }));
+});
 </script>

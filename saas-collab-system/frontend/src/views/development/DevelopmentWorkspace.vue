@@ -60,7 +60,8 @@
     <el-dialog v-model="requirementOpen" title="新建选品提报" width="760px">
       <el-form label-position="top">
         <el-form-item label="商品名称"><el-input v-model="requirement.product_name" /></el-form-item>
-        <div class="form-grid"><el-form-item label="品类"><el-input v-model="requirement.category" /></el-form-item><el-form-item label="目标站点"><el-select v-model="requirement.target_sites" multiple><el-option v-for="site in sites" :key="site" :value="site" /></el-select></el-form-item></div>
+        <el-alert v-if="masterDataError" :title="masterDataError" type="warning" :closable="false" show-icon />
+        <div class="form-grid"><el-form-item label="品类"><el-select v-model="requirement.category_node" filterable clearable placeholder="请选择分类"><el-option v-for="category in categories.filter((item) => item.is_active)" :key="category.id" :label="`L${category.level} ${category.code} ${category.name}`" :value="category.id" /></el-select></el-form-item><el-form-item label="目标站点"><el-select v-model="requirement.target_sites" multiple filterable clearable placeholder="请选择启用站点"><el-option v-for="site in sites" :key="site.id" :label="`${site.code} · ${site.name}`" :value="site.id" /></el-select></el-form-item></div>
         <el-collapse><el-collapse-item title="补充市场数据（选填）"><el-form-item label="参考链接"><el-input v-model="requirement.reference_link" /></el-form-item><el-form-item label="提报理由"><el-input v-model="requirement.reason" type="textarea" /></el-form-item></el-collapse-item></el-collapse>
       </el-form>
 
@@ -129,6 +130,9 @@ import {
   fetchRequirementCompetitorAssociations,
   importDevelopmentSales
 } from '../../api/development';
+import { fetchCountrySites } from '../../api/masterData';
+import { fetchProductCategories } from '../../api/products';
+import { collectionRows } from '../../utils/businessResponse';
 
 const props = defineProps({ mode: { type: String, default: 'projects' } });
 const mode = computed(() => props.mode);
@@ -136,10 +140,10 @@ const metas = { requirements:['选品提报','快速提报、自动去重并跟�
 const meta = computed(() => ({ title: metas[mode.value]?.[0] || '产品开发', subtitle: metas[mode.value]?.[1] || '' }));
 const rows = ref([]); const loading = ref(false); const saving = ref(false); const search = ref(''); const stageFilter = ref(''); const siteFilter = ref('');
 const drawerOpen = ref(false); const selected = ref(null); const requirementOpen = ref(false); const projectOpen = ref(false); const salesOpen = ref(false);
-const requirement = reactive({ id: null, research_no:'', product_name:'', category:'', target_sites:[], reference_link:'', reason:'', platform:'', competitor_url:'', estimated_sales:0, estimated_gross_margin:null, risk_points:[] });
+const requirement = reactive({ id: null, research_no:'', product_name:'', category:'', category_node:null, target_sites:[], target_site_ids:[], reference_link:'', reason:'', platform:'', competitor_url:'', estimated_sales:0, estimated_gross_margin:null, risk_points:[] });
 const newProject = reactive({ product_name:'', assigned_to:1, target_sites:[], planned_launch_date:'', development_source:'internal', project_no:`DEV-${Date.now()}` });
 const csvText = ref('spu_code,site,platform,snapshot_date,daily_sales_qty,daily_sales_amount_usd,ad_spend\n');
-const sites = ['ID','TH','VN','PH','MY','SG'];
+const sites = ref([]); const categories = ref([]); const masterDataError = ref('');
 const stages = [{key:'initiated',label:'立项'},{key:'design',label:'设计'},{key:'sampling',label:'打样'},{key:'review',label:'评审'},{key:'finalized',label:'定型'}];
 const competitorPickerOpen = ref(false); const competitorLoading = ref(false); const reportDetailLoading = ref(false); const competitorError = ref('');
 const competitorReports = ref([]); const competitorReportId = ref(''); const selectedCompetitorReport = ref(null); const associationSaving = ref(false); const manualConclusion = ref('');
@@ -170,7 +174,7 @@ const insightGroups = computed(() => {
 });
 function stageLabel(value){ return stages.find(s=>s.key===value)?.label || value; } function stageType(v){ return v==='finalized'?'success':v==='review'?'warning':'primary'; } function percent(v){ return v == null ? '—' : `${(Number(v)*100).toFixed(1)}%`; }
 function selectRow(row){ selected.value=row; drawerOpen.value=true; }
-async function refresh(){ loading.value=true; const res=await fetchDevelopmentProjects(); rows.value=Array.isArray(res.data)?res.data:(res.data?.results||[]); loading.value=false; }
+async function refresh(){ loading.value=true; masterDataError.value=''; const [res, categoryRes, siteRes] = await Promise.all([fetchDevelopmentProjects(), fetchProductCategories(), fetchCountrySites({ status: 'active', page_size: 100 })]); rows.value=Array.isArray(res.data)?res.data:(res.data?.results||[]); categories.value=collectionRows(categoryRes?.data); sites.value=collectionRows(siteRes?.data).filter((item) => item.status === 'active'); if (!categoryRes?.success || !siteRes?.success) masterDataError.value='基础数据加载失败，请刷新后重试'; loading.value=false; }
 async function saveProject(){ saving.value=true; const res=await createDevelopmentProject(newProject); saving.value=false; if(res.success){ ElMessage.success('项目已创建'); projectOpen.value=false; refresh(); } else ElMessage.error(res.message); }
 async function importCsv(){ const res=await importDevelopmentSales(csvText.value); if(res.success){ ElMessage.success(`导入完成：${res.data.total} 条`); salesOpen.value=false; } }
 function formatDate(value){ if(!value) return '更新时间未知'; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false }); }
@@ -236,7 +240,7 @@ async function saveCompetitorAssociation(){
 }
 async function saveRequirement(){
   const researchNo = requirement.research_no || generatedResearchNo();
-  const payload = { research_no: researchNo, product_name: requirement.product_name, platform: requirement.platform || 'multi-site', competitor_url: requirement.competitor_url || '', estimated_sales: Number(requirement.estimated_sales || 0), estimated_gross_margin: requirement.estimated_gross_margin, risk_points: [...(requirement.risk_points || []), ...(requirement.category ? [`品类：${requirement.category}`] : []), ...(requirement.reason ? [requirement.reason] : [])] };
+  const payload = { research_no: researchNo, product_name: requirement.product_name, platform: requirement.platform || 'multi-site', category_node: requirement.category_node || null, target_site_ids: [...(requirement.target_sites || [])], competitor_url: requirement.competitor_url || '', estimated_sales: Number(requirement.estimated_sales || 0), estimated_gross_margin: requirement.estimated_gross_margin, risk_points: [...(requirement.risk_points || []), ...(requirement.reason ? [requirement.reason] : [])] };
   const response = await createDevelopmentRequirement(payload);
   if (!response?.success) { ElMessage.error(response?.message || '选品需求保存失败。'); return null; }
   const item = response.data || {};

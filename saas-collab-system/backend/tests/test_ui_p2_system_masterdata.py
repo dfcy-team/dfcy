@@ -3,6 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.audit.models import OperationLog
+from apps.integrations.credential_service import reference_fingerprint, rotate_config_references
 from apps.integrations.models import PlatformIntegrationConfig
 from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
@@ -452,22 +453,29 @@ def test_security_operations_exposes_only_credential_metadata():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-security")
     viewer = create_user(tenant, "security-viewer")
     grant(viewer, "security.operations.view")
-    PlatformIntegrationConfig.objects.create(
+    config = PlatformIntegrationConfig.objects.create(
         tenant=tenant,
         platform="other",
         account_alias="demo-alias",
         environment="sandbox",
         status="disabled",
-        credential_ciphertext="not-a-real-secret-ciphertext",
-        credential_key_version="demo-v1",
-        credential_fingerprint="demo-fingerprint",
         created_by=viewer,
+    )
+    credential_id = "synthetic-credential-demo"
+    token_id = "synthetic-token-demo"
+    rotate_config_references(
+        config,
+        credential_id=credential_id,
+        token_id=token_id,
+        version=2,
+        actor=viewer,
     )
 
     response = client_for(viewer).get("/api/internal/system/security-operations/")
 
     assert response.status_code == 200
     serialized = str(response.data)
-    assert "demo-alias" in serialized and "demo-fingerprint" in serialized
-    assert "not-a-real-secret-ciphertext" not in serialized
+    assert "demo-alias" in serialized
+    assert reference_fingerprint(credential_id, token_id) in serialized
+    assert credential_id not in serialized and token_id not in serialized
     assert response.data["data"]["credential_contract"] == "alias_fingerprint_reference_only"

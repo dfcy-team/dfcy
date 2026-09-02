@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.tenants.models import Tenant
+from apps.masterdata.models import CountrySiteMaster
 
 
 class ProductCategory(models.Model):
@@ -109,6 +110,18 @@ class ProductResearch(models.Model):
     research_no = models.CharField(max_length=80)
     product_name = models.CharField(max_length=200)
     platform = models.CharField(max_length=50, blank=True)
+    category_node = models.ForeignKey(
+        ProductCategory,
+        on_delete=models.PROTECT,
+        related_name="research_items",
+        null=True,
+        blank=True,
+    )
+    target_sites = models.ManyToManyField(
+        CountrySiteMaster,
+        related_name="product_research_items",
+        blank=True,
+    )
     competitor_url = models.URLField(blank=True)
     estimated_sales = models.PositiveIntegerField(default=0)
     estimated_gross_margin = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)

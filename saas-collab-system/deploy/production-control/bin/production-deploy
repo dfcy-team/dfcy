@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/../lib/production-common.sh"
+
+usage() {
+  printf '%s\n' 'Usage: production-deploy --release-sha=SHA --backend-image=IMAGE --frontend-image=IMAGE --redis-image=IMAGE --migration-sha256=SHA --manifest-sha256=SHA --actor=NAME --registry-user=NAME --registry-token-stdin'
+}
+
+release_sha=""
+backend_image=""
+frontend_image=""
+redis_image=""
+migration_sha=""
+manifest_sha=""
+actor=""
+registry_user=""
+token_stdin=0
+
+while (($#)); do
+  case "$1" in
+    --release-sha=*) release_sha=${1#*=} ;;
+    --backend-image=*) backend_image=${1#*=} ;;
+    --frontend-image=*) frontend_image=${1#*=} ;;
+    --redis-image=*) redis_image=${1#*=} ;;
+    --migration-sha256=*) migration_sha=${1#*=} ;;
+    --manifest-sha256=*) manifest_sha=${1#*=} ;;
+    --actor=*) actor=${1#*=} ;;
+    --registry-user=*) registry_user=${1#*=} ;;
+    --registry-token-stdin) token_stdin=1 ;;
+    --help) usage; exit 0 ;;
+    *) usage >&2; die 'unknown deployment option.' ;;
+  esac
+  shift
+done
+
+require_control_identity
+require_command jq
+require_command sha256sum
+require_command date
+load_production_env
+init_compose
+
+valid_sha40 "$release_sha" || die 'release SHA must be a full lowercase commit SHA.'
+validate_approved_images "$backend_image" "$frontend_image" "$redis_image"
+valid_sha256 "$migration_sha" || die 'migration digest must be a lowercase SHA-256.'
+valid_sha256 "$manifest_sha" || die 'release manifest digest must be a lowercase SHA-256.'
+validate_actor "$actor"
+validate_actor "$registry_user"
+[[ "$token_stdin" -eq 1 ]] || die 'the CI registry token must be supplied through standard input.'
+
+[[ -x "$SCRIPT_DIR/production-baseline-check" ]] || die 'runtime baseline checker is not installed.'
+"$SCRIPT_DIR/production-baseline-check" --runtime >/dev/null
+
+ensure_control_dirs
+current_file=${PRODUCTION_CURRENT_FILE:-$CONTROL_ROOT/current.json}
+previous_file=${PRODUCTION_PREVIOUS_FILE:-$CONTROL_ROOT/previous.json}
+[[ "$current_file" = /* && "$previous_file" = /* ]] || die 'release metadata paths must be absolute.'
+[[ -f "$current_file" ]] || die 'no managed current release exists; an owner must adopt the current VM version first.'
+metadata_fields_are_valid "$current_file" || die 'the managed current release metadata is invalid.'
+
+acquire_release_lock
+
+now_epoch=$(date +%s)
+last_epoch=$(jq -er '.completed_at_epoch // .occurred_at_epoch' "$current_file" 2>/dev/null) || die 'current release metadata has no completion time.'
+[[ "$last_epoch" =~ ^[0-9]+$ ]] || die 'current release completion time is invalid.'
+if (( last_epoch > now_epoch || now_epoch - last_epoch < 600 )); then
+  die 'ordinary production releases must be at least 10 minutes apart.'
+fi
+
+release_id="$(date -u '+%Y%m%dT%H%M%SZ')-$release_sha"
+release_snapshot="$CONTROL_ROOT/releases/$release_id.before.json"
+cp -p -- "$current_file" "$release_snapshot"
+chmod 600 "$release_snapshot"
+cp -p -- "$current_file" "$previous_file"
+chmod 600 "$previous_file"
+
+new_docker_config
+trap remove_docker_config EXIT
+docker_login_from_stdin "$registry_user"
+
+# Pull exactly the digests built by CI. The target host never builds source.
+docker pull "$backend_image" >/dev/null 2>&1 || die 'backend image pull failed.'
+docker pull "$frontend_image" >/dev/null 2>&1 || die 'frontend image pull failed.'
+docker pull "$redis_image" >/dev/null 2>&1 || die 'Redis image pull failed.'
+
+[[ "$(image_revision "$backend_image")" = "$release_sha" ]] || die 'backend OCI revision does not match the release SHA.'
+[[ "$(image_revision "$frontend_image")" = "$release_sha" ]] || die 'frontend OCI revision does not match the release SHA.'
+actual_migration_sha=$(runtime_migration_sha256 "$backend_image")
+[[ "$actual_migration_sha" = "$migration_sha" ]] || die 'runtime migration digest does not match the CI manifest.'
+
+required_backup=${PRODUCTION_REQUIRE_BACKUP:-true}
+if [[ "$required_backup" = true ]]; then
+  backup_command=${PRODUCTION_BACKUP_COMMAND:-}
+  [[ -n "$backup_command" && "$backup_command" = /* && -x "$backup_command" && ! -L "$backup_command" ]] || die 'a root-owned pre-migration backup hook is required.'
+  "$backup_command" --release-sha "$release_sha" >/dev/null 2>&1 || die 'pre-migration backup failed.'
+fi
+
+migration_service=${PRODUCTION_MIGRATION_SERVICE:-migrate}
+redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
+required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
+[[ "$migration_service" =~ ^[A-Za-z0-9_.-]+$ && "$redis_service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'Compose service names are invalid.'
+
+# Validate interpolation before changing any running container.
+"${COMPOSE[@]}" config --quiet >/dev/null
+"${COMPOSE[@]}" up -d --wait --wait-timeout 180 "$redis_service" >/dev/null
+"${COMPOSE[@]}" run --rm "$migration_service" >/dev/null
+
+deployment_started=0
+rollback_attempted=0
+
+rollback_previous() {
+  local old_backend old_frontend old_redis old_sha
+  [[ -f "$previous_file" ]] || return 1
+  metadata_fields_are_valid "$previous_file" || return 1
+  old_backend=$(json_field "$previous_file" '.backend_image')
+  old_frontend=$(json_field "$previous_file" '.frontend_image')
+  old_redis=$(json_field "$previous_file" '.redis_image')
+  old_sha=$(json_field "$previous_file" '.release_sha')
+  export PRODUCTION_BACKEND_IMAGE="$old_backend"
+  export PRODUCTION_FRONTEND_IMAGE="$old_frontend"
+  export PRODUCTION_REDIS_IMAGE="$old_redis"
+  docker pull "$old_backend" >/dev/null 2>&1 || return 1
+  docker pull "$old_frontend" >/dev/null 2>&1 || return 1
+  docker pull "$old_redis" >/dev/null 2>&1 || return 1
+  "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null || return 1
+  IFS=, read -r -a services_array <<< "$required_services"
+  "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null || return 1
+  "$SCRIPT_DIR/production-health-check" --quiet >/dev/null || return 1
+  cp -p -- "$current_file" "$CONTROL_ROOT/releases/$release_id.failed.json" || return 1
+  cp -p -- "$previous_file" "$current_file" || return 1
+  chmod 600 "$CONTROL_ROOT/releases/$release_id.failed.json" "$current_file"
+  append_audit 'auto-rollback' 'success' "$old_sha" "$actor" 'health check failed; restored previous release'
+  return 0
+}
+
+on_exit() {
+  local status=$?
+  trap - EXIT
+  if (( status != 0 )); then
+    if (( deployment_started == 1 && rollback_attempted == 0 )); then
+      rollback_attempted=1
+      if rollback_previous; then
+        log_info 'failed release was automatically rolled back.'
+      else
+        append_audit 'deploy' 'failed-rollback' "$release_sha" "$actor" 'deployment failed and automatic rollback failed' || true
+        printf 'Production release blocked: automatic rollback failed; operator intervention is required.\n' >&2
+      fi
+    else
+      append_audit 'deploy' 'failed' "$release_sha" "$actor" 'deployment preflight or migration failed' || true
+    fi
+  fi
+  remove_docker_config
+  exit "$status"
+}
+trap on_exit EXIT
+
+export PRODUCTION_BACKEND_IMAGE="$backend_image"
+export PRODUCTION_FRONTEND_IMAGE="$frontend_image"
+export PRODUCTION_REDIS_IMAGE="$redis_image"
+
+deployment_started=1
+IFS=, read -r -a services_array <<< "$required_services"
+"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
+"$SCRIPT_DIR/production-health-check" --quiet >/dev/null
+
+completed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+write_json_atomic "$current_file" \
+  --argjson schema_version 1 \
+  --arg environment production \
+  --arg release_sha "$release_sha" \
+  --arg backend_image "$backend_image" \
+  --arg frontend_image "$frontend_image" \
+  --arg redis_image "$redis_image" \
+  --arg migration_sha256 "$migration_sha" \
+  --arg manifest_sha256 "$manifest_sha" \
+  --arg actor "$actor" \
+  --arg action deploy \
+  --arg completed_at "$completed_at" \
+  --argjson completed_at_epoch "$now_epoch" \
+  '{schema_version:$schema_version,environment:$environment,release_sha:$release_sha,backend_image:$backend_image,frontend_image:$frontend_image,redis_image:$redis_image,migration_sha256:$migration_sha256,manifest_sha256:$manifest_sha256,actor:$actor,action:$action,completed_at:$completed_at,completed_at_epoch:$completed_at_epoch}'
+append_audit 'deploy' 'success' "$release_sha" "$actor" 'CI digest deployment completed'
+deployment_started=0
+printf 'PRODUCTION_DEPLOY=PASS\n'

@@ -2,11 +2,12 @@ export const menuItems = [
   { path: '/', label: '工作台' },
   {
     label: '\u4ea7\u54c1\u5f00\u53d1',
-    permissions: ['development.requirement.view','development.project.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view'],
+    permissions: ['development.requirement.view','development.project.view','development.product_archive.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view'],
     children: [
       { path: '/development/requirements', label: '\u9009\u54c1\u63d0\u62a5', permissions: ['development.requirement.view'] },
       { path: '/development/review', label: '\u9700\u6c42\u5ba1\u6838', permissions: ['development.requirement.review'] },
       { path: '/development/projects', label: '\u5f00\u53d1\u9879\u76ee', permissions: ['development.project.view'] },
+      { path: '/development/projects/archives', label: '\u5f00\u53d1\u4ea7\u54c1\u6863\u6848', permissions: ['development.product_archive.view', 'development.project.view'] },
       { path: '/development/costs', label: '\u6210\u672c\u6838\u7b97', permissions: ['development.cost.view'] },
       { path: '/development/sales', label: '\u9500\u552e\u6570\u636e', permissions: ['development.sales.view'] },
       { path: '/development/retrospectives', label: '\u9009\u54c1\u590d\u76d8', permissions: ['development.review.view'] },
@@ -64,6 +65,8 @@ export const menuItems = [
     children: [
       { path: '/products/research', label: '新品市调', permissions: ['products.research.view'] },
       { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
+      { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view'] },
+      { path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view'] },
       { path: '/purchasing/orders', label: '采购订单', permissions: ['purchasing.orders.view'] },
       { path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] },
       { path: '/listings/sites', label: '多国家刊登', internal: true },
@@ -87,6 +90,7 @@ export const menuItems = [
     label: 'API数据接入',
     permissions: ['integrations.view'],
     children: [
+      { path: '/integrations/platform-drill', label: '平台操作演练', permissions: ['integrations.view'] },
       { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.view'] },
       { path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
       { path: '/integrations/sync-runs', label: '运行记录', permissions: ['integrations.view'] }
@@ -117,6 +121,7 @@ export const menuItems = [
     label: '基础档案',
     permissions: ['masterdata.view'],
     children: [
+      { path: '/master-data/sites', label: '国家信息', permissions: ['masterdata.view'] },
       { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
       { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
       { path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
@@ -163,6 +168,7 @@ export const routeCapabilities = [
   { path: '/development/requirements', permissions: ['development.requirement.view'], userTypes: ['internal'] },
   { path: '/development/review', permissions: ['development.requirement.review'], userTypes: ['internal'] },
   { path: '/development/projects', permissions: ['development.project.view'], userTypes: ['internal'] },
+  { path: '/development/projects/archives', permissions: ['development.product_archive.view', 'development.project.view'], userTypes: ['internal'] },
   { path: '/development/costs', permissions: ['development.cost.view'], userTypes: ['internal'] },
   { path: '/development/sales', permissions: ['development.sales.view'], userTypes: ['internal'] },
   { path: '/development/retrospectives', permissions: ['development.review.view'], userTypes: ['internal'] },
@@ -181,6 +187,8 @@ export const routeCapabilities = [
   { path: '/workflow/collaboration-events', permissions: ['workflow.collaboration.view'], userTypes: ['internal'] },
   { path: '/products/research', permissions: ['products.research.view'], userTypes: ['internal'] },
   { path: '/products/master', permissions: ['products.master.view'], userTypes: ['internal'] },
+  { path: '/products/details', permissions: ['products.master.view'], userTypes: ['internal'] },
+  { path: '/products/platform-details', permissions: ['listings.product_detail.view'], userTypes: ['internal'] },
   { path: '/products/status-dashboard', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status-recommendations', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status-transitions', permissions: ['products.status.view'], userTypes: ['internal'] },
@@ -204,6 +212,7 @@ export const routeCapabilities = [
   { path: '/rpa/account-locks', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/rpa/page-signatures', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/integrations/configs', permissions: ['integrations.view'], userTypes: ['internal'] },
+  { path: '/integrations/platform-drill', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-jobs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/sync-runs', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/api-sync', permissions: ['integrations.view'], userTypes: ['internal'] },
@@ -229,6 +238,7 @@ export const routeCapabilities = [
   { path: '/master-data/stores', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
+  { path: '/master-data/sites', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/audit/operations', userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
   { path: '/governance/assistants', permissions: ['governance.assistants.view'], userTypes: ['internal'] },

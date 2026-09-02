@@ -15,20 +15,24 @@ def create_sales_summary_view(apps, schema_editor):
         date_30 = "DATE_SUB(CURRENT_DATE, INTERVAL 29 DAY)"
         date_90 = "DATE_SUB(CURRENT_DATE, INTERVAL 89 DAY)"
         days_listed = "DATEDIFF(CURRENT_DATE, MIN(snapshot_date)) + 1"
+        summary_key = "CONCAT(product_id, ':', site)"
     elif vendor == "sqlite":
         date_30 = "DATE('now', '-29 day')"
         date_90 = "DATE('now', '-89 day')"
         days_listed = "CAST(JULIANDAY(DATE('now')) - JULIANDAY(MIN(snapshot_date)) + 1 AS INTEGER)"
+        summary_key = "CAST(product_id AS TEXT) || ':' || site"
     else:
         date_30 = "CURRENT_DATE - INTERVAL '29 days'"
         date_90 = "CURRENT_DATE - INTERVAL '89 days'"
         days_listed = "(CURRENT_DATE - MIN(snapshot_date)) + 1"
+        summary_key = "CAST(product_id AS TEXT) || ':' || site"
 
     schema_editor.execute(f"DROP VIEW IF EXISTS {view_name}")
     schema_editor.execute(
         f"""
         CREATE VIEW {view_name} AS
         SELECT
+            {summary_key} AS summary_key,
             product_id,
             tenant_id,
             site,
@@ -60,28 +64,19 @@ class Migration(migrations.Migration):
     dependencies = [("development", "0001_initial")]
 
     operations = [
-        # MySQL doesn't support transactional DDL. Keep this operation out of
-        # Django's implicit RunPython transaction so DROP VIEW can execute
-        # before the replacement view is created. On PostgreSQL/SQLite the
-        # migration's normal schema-editor transaction semantics are retained.
-        migrations.RunPython(
-            create_sales_summary_view,
-            drop_sales_summary_view,
-            atomic=False,
-        ),
+        migrations.RunPython(create_sales_summary_view, drop_sales_summary_view),
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.CreateModel(
                     name="ProductSalesSummary",
                     fields=[
+                        ("summary_key", models.CharField(max_length=128, primary_key=True, serialize=False)),
                         (
                             "product",
-                            models.OneToOneField(
+                            models.ForeignKey(
                                 db_column="product_id",
                                 on_delete=django.db.models.deletion.DO_NOTHING,
-                                primary_key=True,
-                                related_name="sales_summary_projection",
-                                serialize=False,
+                                related_name="sales_summary_projections",
                                 to="products.productspu",
                             ),
                         ),

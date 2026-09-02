@@ -54,6 +54,23 @@ CanImportSales = permission_class("development.sales.import")
 CanViewSales = permission_class("development.sales.view")
 CanReviewRequirements = permission_class("development.requirement.review")
 
+# Archive actions are intentionally compatible with the existing product
+# development roles.  Deployments that have not yet seeded the more granular
+# archive permissions can still use their project permissions; newly seeded
+# roles may grant the dedicated codes for least-privilege access.
+CanViewProductArchives = any_permission_class(
+    "development.product_archive.view",
+    "development.project.view",
+)
+CanManageProductArchives = any_permission_class(
+    "development.product_archive.manage",
+    "development.project.manage",
+)
+CanConfirmProductArchives = any_permission_class(
+    "development.product_archive.confirm",
+    "development.project.approve",
+)
+
 # Competitor reports are read-only upstream data.  Requirement viewers and
 # product-project viewers may inspect them; creating/removing a link requires
 # a requirement manage/review or project manage permission.

@@ -6,11 +6,12 @@ import {
   getRefreshToken,
   updateAccessToken
 } from '../utils/authSession';
+import { apiBaseUrl } from './baseUrl';
 
 export const useMock = import.meta.env.VITE_USE_MOCK !== 'false';
 
 const request = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '',
+  baseURL: apiBaseUrl,
   timeout: 10000
 });
 
@@ -67,7 +68,7 @@ request.interceptors.response.use(
     if (error?.response?.status === 401 && original && !original._authRetried && !isAuthenticationRequest && refresh) {
       original._authRetried = true;
       refreshPromise ||= axios
-        .post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/internal/auth/refresh/`, { refresh })
+        .post(`${apiBaseUrl}/api/internal/auth/refresh/`, { refresh })
         .then((response) => response.data?.access || response.data?.data?.access)
         .finally(() => {
           refreshPromise = null;

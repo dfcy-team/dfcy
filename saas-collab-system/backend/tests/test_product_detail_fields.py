@@ -71,6 +71,24 @@ def test_product_sales_status_has_chinese_display_and_api_value_is_preserved():
 
 
 @pytest.mark.django_db
+def test_spu_list_includes_all_tenant_sku_links_in_spu_payload():
+    tenant = Tenant.objects.create(name="SPU links tenant", code="spu-links")
+    user = _user(tenant, "spu-links-user")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SPU-LINKS", product_name="Linked product")
+    ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="SKU-LINK-001")
+    ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="SKU-LINK-002")
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.get("/api/internal/products/spus/", {"page": 1, "page_size": 1})
+
+    assert response.status_code == 200
+    payload = response.json()["data"]["results"][0]
+    assert payload["sku_codes"] == ["SKU-LINK-001", "SKU-LINK-002"]
+    assert payload["sku_count"] == 2
+
+
+@pytest.mark.django_db
 def test_sku_image_upload_validates_content_and_is_tenant_scoped(tmp_path):
     tenant = Tenant.objects.create(name="Image tenant", code="image")
     other_tenant = Tenant.objects.create(name="Other image tenant", code="image-other")

@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/../lib/production-common.sh"
+
+usage() {
+  printf '%s\n' 'Usage: production-rollback --emergency --reason=TEXT --actor=NAME --registry-user=NAME --registry-token-stdin'
+}
+
+emergency=0
+reason=""
+actor=""
+registry_user=""
+token_stdin=0
+
+while (($#)); do
+  case "$1" in
+    --emergency) emergency=1 ;;
+    --reason=*) reason=${1#*=} ;;
+    --actor=*) actor=${1#*=} ;;
+    --registry-user=*) registry_user=${1#*=} ;;
+    --registry-token-stdin) token_stdin=1 ;;
+    --help) usage; exit 0 ;;
+    *) usage >&2; die 'unknown rollback option.' ;;
+  esac
+  shift
+done
+
+require_control_identity
+require_command jq
+require_command date
+[[ "$emergency" -eq 1 ]] || die 'rollback requires the explicit emergency flag.'
+validate_reason "$reason"
+validate_actor "$actor"
+validate_actor "$registry_user"
+[[ "$token_stdin" -eq 1 ]] || die 'the CI registry token must be supplied through standard input.'
+load_production_env
+init_compose
+
+[[ -x "$SCRIPT_DIR/production-baseline-check" ]] || die 'runtime baseline checker is not installed.'
+"$SCRIPT_DIR/production-baseline-check" --runtime >/dev/null
+ensure_control_dirs
+
+current_file=${PRODUCTION_CURRENT_FILE:-$CONTROL_ROOT/current.json}
+previous_file=${PRODUCTION_PREVIOUS_FILE:-$CONTROL_ROOT/previous.json}
+[[ -f "$current_file" && -f "$previous_file" ]] || die 'a previous managed release is unavailable.'
+metadata_fields_are_valid "$current_file" || die 'current release metadata is invalid.'
+metadata_fields_are_valid "$previous_file" || die 'previous release metadata is invalid.'
+
+acquire_release_lock
+new_docker_config
+trap remove_docker_config EXIT
+docker_login_from_stdin "$registry_user"
+
+target_backend=$(json_field "$previous_file" '.backend_image')
+target_frontend=$(json_field "$previous_file" '.frontend_image')
+target_redis=$(json_field "$previous_file" '.redis_image')
+target_sha=$(json_field "$previous_file" '.release_sha')
+target_migration=$(json_field "$previous_file" '.migration_sha256')
+export PRODUCTION_BACKEND_IMAGE="$target_backend"
+export PRODUCTION_FRONTEND_IMAGE="$target_frontend"
+export PRODUCTION_REDIS_IMAGE="$target_redis"
+
+docker pull "$target_backend" >/dev/null 2>&1 || die 'previous backend image pull failed.'
+docker pull "$target_frontend" >/dev/null 2>&1 || die 'previous frontend image pull failed.'
+docker pull "$target_redis" >/dev/null 2>&1 || die 'previous Redis image pull failed.'
+[[ "$(image_revision "$target_backend")" = "$target_sha" ]] || die 'previous backend OCI revision does not match its release SHA.'
+[[ "$(image_revision "$target_frontend")" = "$target_sha" ]] || die 'previous frontend OCI revision does not match its release SHA.'
+
+required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
+redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
+IFS=, read -r -a services_array <<< "$required_services"
+"${COMPOSE[@]}" config --quiet >/dev/null
+"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null
+"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
+"$SCRIPT_DIR/production-health-check" --quiet >/dev/null || die 'health check failed while restoring the previous release.'
+
+failed_release="$CONTROL_ROOT/releases/$(date -u '+%Y%m%dT%H%M%SZ')-failed.json"
+cp -p -- "$current_file" "$failed_release"
+chmod 600 "$failed_release"
+cp -p -- "$previous_file" "$current_file"
+chmod 600 "$current_file"
+completed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+write_json_atomic "$current_file" \
+  --argjson schema_version 1 \
+  --arg environment production \
+  --arg release_sha "$target_sha" \
+  --arg backend_image "$target_backend" \
+  --arg frontend_image "$target_frontend" \
+  --arg redis_image "$target_redis" \
+  --arg migration_sha256 "$target_migration" \
+  --arg manifest_sha256 'owner-rollback' \
+  --arg actor "$actor" \
+  --arg action rollback \
+  --arg completed_at "$completed_at" \
+  --argjson completed_at_epoch "$(date +%s)" \
+  '{schema_version:$schema_version,environment:$environment,release_sha:$release_sha,backend_image:$backend_image,frontend_image:$frontend_image,redis_image:$redis_image,migration_sha256:$migration_sha256,manifest_sha256:$manifest_sha256,actor:$actor,action:$action,completed_at:$completed_at,completed_at_epoch:$completed_at_epoch}'
+append_audit 'rollback' 'success' "$target_sha" "$actor" "$reason"
+printf 'PRODUCTION_ROLLBACK=PASS\n'

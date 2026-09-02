@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+CONTROL_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+
+fail() {
+  printf 'Production baseline blocked: %s\n' "$*" >&2
+  exit 1
+}
+
+ci_check() {
+  local repo_root=$1 control_dir="$repo_root/saas-collab-system/deploy/production-control"
+  [[ "$repo_root" = /* && -d "$repo_root" ]] || fail 'CI repository root is invalid.'
+  [[ ! -L "$control_dir" ]] || fail 'production-control must not be a symbolic link.'
+
+  local required path
+  required=(
+    "$control_dir/README.md"
+    "$control_dir/production-compose.yml"
+    "$control_dir/env.production.example"
+    "$control_dir/lib/production-common.sh"
+    "$control_dir/bin/developer-a-ci-dispatch"
+    "$control_dir/bin/production-deploy"
+    "$control_dir/bin/production-rollback"
+    "$control_dir/bin/production-health-check"
+    "$control_dir/bin/production-backup"
+    "$control_dir/bin/production-baseline-check"
+    "$control_dir/bin/install-control.sh"
+    "$control_dir/bin/adopt-current.sh"
+    "$repo_root/.github/workflows/developer-a-production-release.yml"
+  )
+  for path in "${required[@]}"; do
+    [[ -f "$path" ]] || fail 'required baseline file is missing.'
+    [[ ! -L "$path" ]] || fail 'a baseline file must not be a symbolic link.'
+  done
+
+  # The production host may pull immutable images only. A build directive,
+  # mutable tag, host namespace, or Docker socket would make the host a build
+  # or privilege-escalation surface instead of a deployment target.
+  if grep -Eq '^[[:space:]]*build[[:space:]]*:' "$control_dir/production-compose.yml"; then
+    fail 'production Compose must not build on the target host.'
+  fi
+  if grep -Eq 'image:[[:space:]]+[^$].*:(latest|stable|production)(@|[[:space:]]|$)' "$control_dir/production-compose.yml"; then
+    fail 'mutable production image tags are forbidden.'
+  fi
+  if grep -Eiq 'privileged:[[:space:]]*true|network_mode:[[:space:]]*host|/var/run/docker\.sock|docker\.sock' "$control_dir/production-compose.yml"; then
+    fail 'host privilege or Docker socket access is forbidden.'
+  fi
+
+  # Never commit a live dotenv file or private key in the release control tree.
+  if command -v git >/dev/null 2>&1 && git -C "$repo_root" ls-files -z |
+      grep -zEq '(^|/)\.env$|(^|/)\.env\.(production|prod)(\.|$)|(^|/)(id_ecdsa|id_ed25519|id_rsa)(\.|$)'; then
+    fail 'a live environment file or private key is tracked by Git.'
+  fi
+
+  local script
+  while IFS= read -r -d '' script; do
+    bash -n "$script" || fail 'a production-control shell script has invalid Bash syntax.'
+  done < <(find "$control_dir/bin" "$control_dir/lib" -type f \( -name '*.sh' -o -path "$control_dir/bin/*" \) -print0)
+  printf 'PRODUCTION_BASELINE_CI=PASS\n'
+}
+
+runtime_check() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    [[ "$(id -un)" = "dfcy01" ]] || fail 'runtime baseline verification must run as root or dfcy01.'
+    [[ "$(stat -c '%U' "$CONTROL_ROOT" 2>/dev/null)" = "dfcy01" ]] || fail 'non-root runtime control must be owned by dfcy01.'
+  fi
+  local env_file="$CONTROL_ROOT/config/.env.production"
+  local pointer="$CONTROL_ROOT/config/env.path"
+  if [[ -f "$pointer" ]]; then
+    [[ ! -L "$pointer" ]] || fail 'runtime environment pointer is a symbolic link.'
+    IFS= read -r env_file < "$pointer" || true
+  fi
+  [[ "$env_file" = /* && -f "$env_file" && ! -L "$env_file" ]] || fail 'runtime environment file is missing.'
+  local mode
+  mode=$(stat -c '%a' "$env_file" 2>/dev/null) || fail 'cannot inspect runtime environment file.'
+  [[ "$mode" = 400 || "$mode" = 600 ]] || fail 'runtime environment file must have mode 0400 or 0600.'
+
+  local baseline="$CONTROL_ROOT/config/baseline.sha256"
+  [[ -f "$baseline" && ! -L "$baseline" ]] || fail 'runtime baseline ledger is missing.'
+  mode=$(stat -c '%a' "$baseline" 2>/dev/null) || fail 'cannot inspect runtime baseline ledger.'
+  [[ "$mode" = 400 || "$mode" = 600 ]] || fail 'runtime baseline ledger must have mode 0400 or 0600.'
+
+  (cd / && sha256sum -c "$baseline" >/dev/null) || fail 'installed production control files differ from the baseline ledger.'
+  printf 'PRODUCTION_BASELINE_RUNTIME=PASS\n'
+}
+
+mode=ci
+repo_root=""
+while (($#)); do
+  case "$1" in
+    --ci)
+      mode=ci
+      shift
+      ;;
+    --runtime)
+      mode=runtime
+      shift
+      ;;
+    --repo-root)
+      (($# >= 2)) || fail '--repo-root requires a value.'
+      repo_root=$2
+      shift 2
+      ;;
+    --help)
+      printf '%s\n' 'Usage: production-baseline-check --ci --repo-root REPO | --runtime'
+      exit 0
+      ;;
+    *)
+      fail 'unknown option.'
+      ;;
+  esac
+done
+
+if [[ "$mode" = ci ]]; then
+  [[ -n "$repo_root" ]] || repo_root="$(CDPATH= cd -- "$CONTROL_ROOT/../../../../.." && pwd)"
+  ci_check "$repo_root"
+else
+  runtime_check
+fi

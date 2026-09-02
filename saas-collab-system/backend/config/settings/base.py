@@ -28,6 +28,97 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 DEBUG = env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 
+# Marketplace access remains fail-closed until every production control is
+# explicitly configured by the operator.  These settings expose the handoff
+# capability without enabling live network traffic or embedding credentials.
+PLATFORM_NETWORK_MODE = os.getenv("PLATFORM_NETWORK_MODE", "")
+LIVE_PLATFORM_SECURITY_APPROVED = env_bool("LIVE_PLATFORM_SECURITY_APPROVED", False)
+LIVE_PLATFORM_ALLOWED_HOSTS = env_list("LIVE_PLATFORM_ALLOWED_HOSTS")
+LIVE_PLATFORM_CONNECT_TIMEOUT = float(os.getenv("LIVE_PLATFORM_CONNECT_TIMEOUT", "3"))
+LIVE_PLATFORM_READ_TIMEOUT = float(os.getenv("LIVE_PLATFORM_READ_TIMEOUT", "8"))
+LIVE_PLATFORM_MAX_RETRIES = int(os.getenv("LIVE_PLATFORM_MAX_RETRIES", "2"))
+LIVE_PLATFORM_BACKOFF_BASE = float(os.getenv("LIVE_PLATFORM_BACKOFF_BASE", "0.5"))
+LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "8"))
+LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
+LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
+
+# File custody is a local synthetic/test aid only.  A production process must
+# explicitly use an independent HTTP custody service; the safe default is to
+# refuse all secret operations.
+LIVE_CUSTODY_BACKEND = os.getenv("LIVE_CUSTODY_BACKEND", "refuse").strip().lower()
+LIVE_CUSTODY_SERVICE_URL = os.getenv("LIVE_CUSTODY_SERVICE_URL", "").strip()
+LIVE_CUSTODY_SERVICE_HOST = os.getenv("LIVE_CUSTODY_SERVICE_HOST", "").strip()
+LIVE_CUSTODY_SERVICE_TOKEN = os.getenv(
+    "LIVE_CUSTODY_SERVICE_TOKEN",
+    os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN", ""),
+).strip()
+# A token file is the preferred production transport for the sidecar bearer
+# credential. It is intentionally empty by default and is validated by the
+# custody client before it can satisfy the live capability gate.
+LIVE_CUSTODY_SERVICE_TOKEN_FILE = os.getenv(
+    "LIVE_CUSTODY_SERVICE_TOKEN_FILE",
+    os.getenv("LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE", ""),
+).strip()
+# Optional private CA bundle for the custody endpoint. It is consulted only
+# for the exact custody host/port, while platform traffic retains the system
+# trust store. Keep the setting as a path, never certificate contents.
+LIVE_CUSTODY_CA_FILE = os.getenv("LIVE_CUSTODY_CA_FILE", "").strip()
+CREDENTIAL_CUSTODY_PATH = os.getenv(
+    "CREDENTIAL_CUSTODY_PATH",
+    "/var/lib/saas-collab/credentials" if DEBUG else "",
+)
+LIVE_OAUTH_REDIRECT_ALLOWLIST = env_list("LIVE_OAUTH_REDIRECT_ALLOWLIST")
+
+LIVE_LAZADA_APP_KEY = os.getenv("LIVE_LAZADA_APP_KEY", "")
+LIVE_LAZADA_APP_SECRET_REFERENCE = os.getenv("LIVE_LAZADA_APP_SECRET_REFERENCE", "")
+LIVE_LAZADA_REDIRECT_URI = os.getenv("LIVE_LAZADA_REDIRECT_URI", "")
+LIVE_LAZADA_CONTRACT_APPROVED = env_bool("LIVE_LAZADA_CONTRACT_APPROVED", False)
+LIVE_LAZADA_AUTH_URL = os.getenv("LIVE_LAZADA_AUTH_URL", "https://auth.lazada.com/oauth/authorize")
+LIVE_LAZADA_API_HOST = os.getenv("LIVE_LAZADA_API_HOST", "https://api.lazada.com")
+LIVE_LAZADA_TOKEN_PATH = os.getenv("LIVE_LAZADA_TOKEN_PATH", "/rest/auth/token/create")
+LIVE_LAZADA_REFRESH_PATH = os.getenv("LIVE_LAZADA_REFRESH_PATH", "/rest/auth/token/refresh")
+
+LIVE_SHOPEE_PARTNER_ID = os.getenv("LIVE_SHOPEE_PARTNER_ID", "")
+LIVE_SHOPEE_APP_SECRET_REFERENCE = os.getenv("LIVE_SHOPEE_APP_SECRET_REFERENCE", "")
+LIVE_SHOPEE_REDIRECT_URI = os.getenv("LIVE_SHOPEE_REDIRECT_URI", "")
+LIVE_SHOPEE_CONTRACT_APPROVED = env_bool("LIVE_SHOPEE_CONTRACT_APPROVED", False)
+LIVE_SHOPEE_AUTH_URL = os.getenv("LIVE_SHOPEE_AUTH_URL", "https://partner.shopeemobile.com/api/v2/shop/auth_partner")
+LIVE_SHOPEE_TOKEN_PATH = os.getenv("LIVE_SHOPEE_TOKEN_PATH", "/api/v2/auth/token/get")
+LIVE_SHOPEE_REFRESH_PATH = os.getenv("LIVE_SHOPEE_REFRESH_PATH", "/api/v2/auth/access_token/get")
+LIVE_SHOPEE_REVOKE_PATH = os.getenv("LIVE_SHOPEE_REVOKE_PATH", "/api/v2/shop/cancel_auth_partner")
+LIVE_SHOPEE_SHOP_PATH = os.getenv("LIVE_SHOPEE_SHOP_PATH", "/api/v2/shop/get_shop_info")
+LIVE_SHOPEE_SIGN_SCHEME = os.getenv("LIVE_SHOPEE_SIGN_SCHEME", "v2")
+LIVE_SHOPEE_DEFAULT_REGION = os.getenv("LIVE_SHOPEE_DEFAULT_REGION", "")
+LIVE_SHOPEE_DEFAULT_HOST = os.getenv("LIVE_SHOPEE_DEFAULT_HOST", "https://partner.shopeemobile.com")
+LIVE_SHOPEE_API_HOSTS = {}
+LIVE_SHOPEE_ORDER_LIST_PATH = os.getenv("LIVE_SHOPEE_ORDER_LIST_PATH", "/api/v2/order/get_order_list")
+LIVE_SHOPEE_ORDER_DETAIL_PATH = os.getenv("LIVE_SHOPEE_ORDER_DETAIL_PATH", "/api/v2/order/get_order_detail")
+LIVE_SHOPEE_RETURN_LIST_PATH = os.getenv("LIVE_SHOPEE_RETURN_LIST_PATH", "/api/v2/returns/get_return_list")
+LIVE_SHOPEE_RETURN_DETAIL_PATH = os.getenv("LIVE_SHOPEE_RETURN_DETAIL_PATH", "/api/v2/returns/get_return_detail")
+
+LIVE_TIKTOK_APP_KEY = os.getenv("LIVE_TIKTOK_APP_KEY", "")
+LIVE_TIKTOK_APP_SECRET_REFERENCE = os.getenv("LIVE_TIKTOK_APP_SECRET_REFERENCE", "")
+LIVE_TIKTOK_REDIRECT_URI = os.getenv("LIVE_TIKTOK_REDIRECT_URI", "")
+LIVE_TIKTOK_CONTRACT_APPROVED = env_bool("LIVE_TIKTOK_CONTRACT_APPROVED", False)
+LIVE_TIKTOK_SERVICE_ID = os.getenv("LIVE_TIKTOK_SERVICE_ID", "")
+LIVE_TIKTOK_MARKET = os.getenv("LIVE_TIKTOK_MARKET", "ROW")
+LIVE_TIKTOK_DEFAULT_AUTH_URL = os.getenv("LIVE_TIKTOK_DEFAULT_AUTH_URL", "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY")
+LIVE_TIKTOK_DEFAULT_OPEN_HOST = os.getenv("LIVE_TIKTOK_DEFAULT_OPEN_HOST", "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY")
+LIVE_TIKTOK_TOKEN_HOST = os.getenv("LIVE_TIKTOK_TOKEN_HOST", "https://auth.tiktok-shops.com")
+LIVE_TIKTOK_AUTH_URLS = {}
+LIVE_TIKTOK_OPEN_API_HOSTS = {}
+LIVE_TIKTOK_TOKEN_PATH = os.getenv("LIVE_TIKTOK_TOKEN_PATH", "/api/v2/token/get")
+LIVE_TIKTOK_REFRESH_PATH = os.getenv("LIVE_TIKTOK_REFRESH_PATH", "/api/v2/token/refresh")
+LIVE_TIKTOK_REVOKE_PATH = os.getenv("LIVE_TIKTOK_REVOKE_PATH", "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY")
+LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH = os.getenv("LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH", "/authorization/202309/shops")
+LIVE_TIKTOK_METADATA_PATH = os.getenv("LIVE_TIKTOK_METADATA_PATH", "/seller/202309/permissions")
+LIVE_TIKTOK_DEFAULT_SCOPE = os.getenv("LIVE_TIKTOK_DEFAULT_SCOPE", "")
+LIVE_TIKTOK_ORDER_LIST_PATH = os.getenv("LIVE_TIKTOK_ORDER_LIST_PATH", "/order/202309/orders/search")
+LIVE_TIKTOK_ORDER_DETAIL_PATH = os.getenv("LIVE_TIKTOK_ORDER_DETAIL_PATH", "/order/202309/orders")
+LIVE_TIKTOK_RETURN_LIST_PATH = os.getenv("LIVE_TIKTOK_RETURN_LIST_PATH", "/return_refund/202602/returns/search")
+
+LIVE_JIFENG_WMS_INVENTORY_PATH = os.getenv("LIVE_JIFENG_WMS_INVENTORY_PATH", "/api/inventory/queryInventory")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -54,10 +145,13 @@ INSTALLED_APPS = [
     "apps.suppliers",
     "apps.finance",
     "apps.reports",
+    "apps.commerce",
+    "apps.sales_management",
     "apps.alerts",
     "apps.replenishment",
     "apps.configcenter",
     "apps.masterdata",
+    "apps.influencers",
     "apps.workflows",
     "apps.governance",
     "apps.pilot",
@@ -122,6 +216,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+REPORT_EXPORT_ROOT = Path(os.getenv("REPORT_EXPORT_ROOT", MEDIA_ROOT / "report_exports"))
+REPORT_EXPORT_TTL_SECONDS = max(300, min(int(os.getenv("REPORT_EXPORT_TTL_SECONDS", "86400")), 604800))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.CustomUser"
 
@@ -150,6 +246,13 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-due-readonly-sync-jobs": {
+        "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
+        "schedule": 60.0,
+        "args": (20,),
+    },
+}
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.
@@ -160,6 +263,16 @@ UI_P4_MOCK_WEBHOOK_SECRET = os.getenv("UI_P4_MOCK_WEBHOOK_SECRET", "not-a-real-u
 INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "INTEGRATION_ENCRYPTION_PROVIDER",
     "unconfigured-production",
+)
+
+# Mini Program authentication fails closed by default. The sandbox mode never
+# calls WeChat and only accepts pre-bound, hashed development identities.
+MINIAPP_AUTH_MODE = os.getenv("MINIAPP_AUTH_MODE", "disabled")
+MINIAPP_APP_ID = os.getenv("MINIAPP_APP_ID", "")
+MINIAPP_APP_SECRET = os.getenv("MINIAPP_APP_SECRET", "")
+MINIAPP_PROVIDER_TIMEOUT_SECONDS = max(
+    2,
+    min(int(os.getenv("MINIAPP_PROVIDER_TIMEOUT_SECONDS", "8")), 15),
 )
 
 # Competitor analysis is an external, read-only dependency.  The empty URL is

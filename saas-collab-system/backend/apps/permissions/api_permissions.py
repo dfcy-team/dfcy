@@ -138,7 +138,74 @@ class IsIntegrationRunner(IntegrationActionPermission):
     permission_code = "integrations.run"
 
 
+class IsIntegrationLiveReadonlyRunner(IntegrationActionPermission):
+    permission_code = "integrations.run_live_readonly"
+
+
 class IsIntegrationReadOrManage(IntegrationActionPermission):
     def has_permission(self, request, view):
         permission_code = "integrations.view" if request.method in SAFE_METHODS else "integrations.manage"
+        return self.has_action_permission(request, permission_code)
+
+class IsMarketplaceStoreViewer(IntegrationActionPermission):
+    permission_code = "integrations.store.view"
+
+
+class IsMarketplaceStoreAuthorizer(IntegrationActionPermission):
+    permission_code = "integrations.store.authorize"
+
+
+class IsMarketplaceCapabilityManager(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        permission_code = "integrations.store.view" if request.method in SAFE_METHODS else "integrations.store.authorize"
+        return self.has_action_permission(request, permission_code)
+
+
+class IsMarketplaceStoreRevoker(IntegrationActionPermission):
+    permission_code = "integrations.store.revoke"
+
+
+class IsMarketplaceStoreSyncRunner(IntegrationActionPermission):
+    permission_code = "integrations.store.sync"
+
+
+class IsMarketplaceStoreRetryRunner(IntegrationActionPermission):
+    permission_code = "integrations.store.retry"
+
+
+class IsMarketplaceCredentialRotator(IntegrationActionPermission):
+    permission_code = "integrations.credential.rotate"
+
+
+class IsIntegrationConfigCollectionUser(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        code = "integrations.config.view" if request.method in SAFE_METHODS else "integrations.config.create"
+        return self.has_action_permission(request, code)
+
+
+class IsIntegrationConfigDetailUser(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        code = "integrations.config.view" if request.method in SAFE_METHODS else "integrations.config.update"
+        return self.has_action_permission(request, code)
+
+
+class IsIntegrationConfigVerifier(IntegrationActionPermission):
+    permission_code = "integrations.config.verify"
+
+
+class IsIntegrationConfigDisabler(IntegrationActionPermission):
+    permission_code = "integrations.config.disable"
+
+
+class IsIntegrationCredentialClearer(IntegrationActionPermission):
+    permission_code = "integrations.credential.clear"
+
+
+class IsIntegrationAuditViewer(IntegrationActionPermission):
+    permission_code = "integrations.audit.view"
+
+
+class IsMarketplaceStoreMappingManager(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        permission_code = "integrations.store.view" if request.method in SAFE_METHODS else "integrations.store.authorize"
         return self.has_action_permission(request, permission_code)

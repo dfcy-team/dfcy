@@ -19,7 +19,14 @@ from .models import (
     ProductStatusSnapshot,
     ProductStatusTransition,
 )
-from .coding_services import SEASON_CODES, allocate_spu_code, build_sku_code, category_path
+from .coding_services import (
+    SEASON_CODES,
+    allocate_legacy_sku_code,
+    allocate_spu_code,
+    build_sku_code,
+    category_path,
+)
+from apps.masterdata.models import CountrySiteMaster
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -100,6 +107,8 @@ class ProductResearchSerializer(serializers.ModelSerializer):
 
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     created_by_id = serializers.IntegerField(source="created_by.id", read_only=True)
+    category_name = serializers.CharField(source="category_node.name", read_only=True, allow_null=True)
+    target_site_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductResearch
@@ -109,6 +118,10 @@ class ProductResearchSerializer(serializers.ModelSerializer):
             "research_no",
             "product_name",
             "platform",
+            "category_node",
+            "category_name",
+            "target_sites",
+            "target_site_ids",
             "competitor_url",
             "estimated_sales",
             "estimated_gross_margin",
@@ -135,6 +148,37 @@ class ProductResearchSerializer(serializers.ModelSerializer):
                     {field: "This status can only be changed through an authorized workflow action." for field in attempted}
                 )
         return attrs
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        tenant_id = getattr(getattr(request, "user", None), "tenant_id", None)
+        self.fields["category_node"].queryset = ProductCategory.objects.filter(tenant_id=tenant_id) if tenant_id else ProductCategory.objects.none()
+        self.fields["target_sites"].queryset = CountrySiteMaster.objects.filter(tenant_id=tenant_id) if tenant_id else CountrySiteMaster.objects.none()
+
+    def to_internal_value(self, data):
+        if "target_site_ids" in data and "target_sites" not in data:
+            data = data.copy()
+            data["target_sites"] = data.get("target_site_ids")
+        return super().to_internal_value(data)
+
+    def get_target_site_ids(self, obj):
+        return list(obj.target_sites.values_list("id", flat=True))
+
+    def validate_category_node(self, value):
+        if value is not None:
+            request = self.context["request"]
+            if value.tenant_id != request.user.tenant_id:
+                raise serializers.ValidationError("Category does not belong to current tenant.")
+            if not value.is_active:
+                raise serializers.ValidationError("An active product category is required.")
+        return value
+
+    def validate_target_sites(self, value):
+        request = self.context["request"]
+        if any(site.tenant_id != request.user.tenant_id or site.status != "active" for site in value):
+            raise serializers.ValidationError("Only active country sites in the current tenant may be selected.")
+        return value
 
 
 class ProductSPUSerializer(serializers.ModelSerializer):
@@ -366,6 +410,13 @@ class ProductSKUSerializer(serializers.ModelSerializer):
                 color_code=validated_data["color_code"],
                 spec_values=spec_values,
             )
+            legacy_sku_code = str(validated_data.get("legacy_sku_code") or "").strip()
+            if legacy_sku_code:
+                sku_code = allocate_legacy_sku_code(
+                    tenant=validated_data["tenant"],
+                    base_code=sku_code,
+                    legacy_sku_code=legacy_sku_code,
+                )
             validated_data["sku_code"] = sku_code
             validated_data["specification"] = specification
             validated_data["spec_values"] = normalized
@@ -386,6 +437,39 @@ class ProductLegacyItemSerializer(serializers.ModelSerializer):
                   "origin_country", "hs_code", "product_description", "status", "generated_spu_code",
                   "generated_sku_code", "error_message", "created_at", "updated_at")
         read_only_fields = ("id", "status", "generated_spu_code", "generated_sku_code", "error_message", "created_at", "updated_at")
+
+
+class ProductDetailRowSerializer(serializers.Serializer):
+    """Flat row contract consumed by the 商品明细数据 page.
+
+    The page intentionally combines pending legacy import rows and generated
+    SKU rows.  Keeping a dedicated serializer for that read model means the
+    collection endpoint can paginate the combined result without exposing
+    implementation details of either staging model.
+    """
+
+    id = serializers.IntegerField()
+    row_type = serializers.ChoiceField(choices=("legacy", "sku"))
+    legacy_spu_code = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    legacy_sku_code = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    spu_code = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    sku_code = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    product_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    category_node = serializers.IntegerField(allow_null=True, required=False)
+    category_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    color_code = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    specification = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    purchase_price = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        allow_null=True,
+        required=False,
+        coerce_to_string=True,
+    )
+    attribute_code = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    status = serializers.CharField()
+    status_name = serializers.CharField()
+    error_message = serializers.CharField(allow_blank=True, allow_null=True, required=False)
 
 
 class ProductBundleComponentSerializer(serializers.ModelSerializer):

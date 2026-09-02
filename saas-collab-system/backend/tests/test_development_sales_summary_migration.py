@@ -7,11 +7,11 @@ from django.db import migrations
 migration = import_module("apps.development.migrations.0002_product_sales_summary_view")
 
 
-def test_sales_summary_view_operation_is_non_atomic_for_mysql_ddl():
+def test_sales_summary_view_operation_matches_vm_migration_contract():
     operation = migration.Migration.operations[0]
 
     assert isinstance(operation, migrations.RunPython)
-    assert operation.atomic is False
+    assert operation.atomic is None
     assert operation.code is migration.create_sales_summary_view
     assert operation.reverse_code is migration.drop_sales_summary_view
 
@@ -53,3 +53,4 @@ def test_sales_summary_view_sql_keeps_backend_dialects(vendor, dialect_fragment)
     assert schema_editor.statements[0] == 'DROP VIEW IF EXISTS "v_product_sales_summary"'
     assert "CREATE VIEW \"v_product_sales_summary\" AS" in schema_editor.statements[1]
     assert dialect_fragment in schema_editor.statements[1]
+    assert "AS summary_key" in schema_editor.statements[1]

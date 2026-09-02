@@ -7,6 +7,7 @@
     :capability="capability"
   >
     <template #action>
+      <slot name="actions" />
       <el-button
         v-if="createHandler && createAccess.visible"
         type="primary"
@@ -53,7 +54,7 @@
     </section>
 
     <AppState
-      v-if="pageState !== 'ready'"
+      v-if="pageState !== 'ready' && pageState !== 'empty'"
       :status="pageState"
       :title="stateTitle"
       :detail="stateDetail"
@@ -61,7 +62,7 @@
     />
 
     <section v-else class="resource-table" aria-label="档案列表">
-      <el-table :data="rows" border table-layout="fixed" @row-click="openDetail">
+      <el-table :data="rows" border table-layout="fixed" empty-text="暂无符合条件的档案" @row-click="openDetail">
         <el-table-column
           v-for="column in columns"
           :key="column.prop"
@@ -75,12 +76,21 @@
               {{ statusLabel(row[column.prop]) }}
             </el-tag>
             <span v-else-if="column.type === 'list'">{{ (row[column.prop] || []).join('、') || '-' }}</span>
+            <span v-else-if="column.type === 'boolean'">{{ row[column.prop] ? '是' : '否' }}</span>
             <span v-else>{{ formatValue(row[column.prop]) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" :width="operationWidth" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="openDetail(row)">查看</el-button>
+            <el-button
+              v-if="editHandler && manageAccess.visible"
+              link
+              type="primary"
+              :disabled="manageAccess.disabled"
+              :title="manageAccess.reason"
+              @click.stop="openEdit(row)"
+            >编辑</el-button>
             <el-button
               v-if="statusHandler && manageAccess.visible"
               link
@@ -118,7 +128,7 @@
       <p class="drawer-note">字段可见性与数据范围由后端 tenant、permission 和 data_scope 最终校验。</p>
     </el-drawer>
 
-    <el-dialog v-model="createOpen" :title="`新建${entityLabel}`" width="min(560px, 94vw)" destroy-on-close>
+    <el-dialog v-model="createOpen" :title="`${editingId ? '编辑' : '新建'}${entityLabel}`" width="min(560px, 94vw)" destroy-on-close>
       <el-alert
         title="仅保存当前租户的档案信息；凭据、Token、Cookie 和 Session 不在此表单采集。"
         type="info"
@@ -127,9 +137,10 @@
       />
       <el-form label-position="top" class="create-form" @submit.prevent="submitCreate">
         <el-form-item v-for="field in formFields" :key="field.key" :label="field.label" :required="field.required">
-          <el-select v-if="field.type === 'select'" v-model="createForm[field.key]" :placeholder="field.placeholder || '请选择'">
+          <el-select v-if="field.type === 'select'" v-model="createForm[field.key]" :multiple="field.multiple" :filterable="field.filterable" :placeholder="field.placeholder || '请选择'" @change="handleFieldChange(field, $event)">
             <el-option v-for="option in field.options || []" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
+          <el-switch v-else-if="field.type === 'boolean'" v-model="createForm[field.key]" />
           <el-input
             v-else
             v-model="createForm[field.key]"
@@ -168,6 +179,7 @@ const props = defineProps({
   columns: { type: Array, default: () => [] },
   formFields: { type: Array, default: () => [] },
   createHandler: { type: Function, default: null },
+  editHandler: { type: Function, default: null },
   statusHandler: { type: Function, default: null },
   createPermission: { type: String, default: '' },
   managePermission: { type: String, default: '' },
@@ -183,6 +195,7 @@ const stateDetail = ref('');
 const capability = ref(useMock ? 'mock' : 'pending');
 const detailOpen = ref(false);
 const createOpen = ref(false);
+const editingId = ref(null);
 const selectedRow = ref({});
 const createForm = reactive({});
 const submitting = ref(false);
@@ -216,9 +229,12 @@ function formatValue(value) {
 }
 
 function unpack(response) {
-  const data = response?.data || {};
-  const results = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
-  return { data, results, count: Number.isFinite(data.count) ? data.count : results.length };
+  const data = response?.data;
+  if (Array.isArray(data)) return { data: {}, results: data, count: data.length };
+  const payload = data && typeof data === 'object' ? data : {};
+  const results = Array.isArray(payload.results) ? payload.results : (Array.isArray(payload.items) ? payload.items : []);
+  const count = Number(payload.count);
+  return { data: payload, results, count: Number.isFinite(count) ? count : results.length };
 }
 
 async function loadData() {
@@ -264,11 +280,26 @@ function openCreate() {
   }
   for (const key of Object.keys(createForm)) delete createForm[key];
   for (const field of props.formFields) createForm[field.key] = field.default ?? '';
+  editingId.value = null;
   createOpen.value = true;
 }
 
+function openEdit(row) {
+  if (!manageAccess.value.allowed || !props.editHandler) return;
+  for (const key of Object.keys(createForm)) delete createForm[key];
+  for (const field of props.formFields) createForm[field.key] = row[field.key] ?? field.default ?? '';
+  editingId.value = row.id;
+  createOpen.value = true;
+}
+
+function handleFieldChange(field, value) {
+  if (typeof field.onChange === 'function') field.onChange(value, createForm);
+}
+
 async function submitCreate() {
-  if (!createAccess.value.allowed || !props.createHandler) return;
+  const allowed = editingId.value ? manageAccess.value.allowed : createAccess.value.allowed;
+  const handler = editingId.value ? props.editHandler : props.createHandler;
+  if (!allowed || !handler) return;
   const missing = props.formFields.find((field) => field.required && !createForm[field.key]);
   if (missing) {
     ElMessage.warning(`请填写${missing.label}`);
@@ -276,10 +307,13 @@ async function submitCreate() {
   }
   submitting.value = true;
   try {
-    const response = await props.createHandler({ ...createForm });
+    const response = editingId.value
+      ? await handler(editingId.value, { ...createForm })
+      : await handler({ ...createForm });
     if (!response?.success) throw new Error(response?.message || '保存失败');
     ElMessage.success(response.message || '保存成功');
     createOpen.value = false;
+    editingId.value = null;
     await loadData();
   } catch (error) {
     ElMessage.error(error?.message || '保存失败');

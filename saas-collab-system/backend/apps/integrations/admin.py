@@ -6,8 +6,13 @@ from .models import (
     APISyncLog,
     APISyncTask,
     IntegrationAuditLog,
+    MarketplaceProductMapping,
+    MarketplaceStoreAuthorization,
+    MarketplaceStoreMapping,
+    OAuthStateSession,
     PlatformIntegrationConfig,
     SyncCursor,
+    SyncAlertIncident,
     SyncJob,
     SyncRun,
     WebhookEvent,
@@ -16,10 +21,21 @@ from .models import (
 
 @admin.register(PlatformIntegrationConfig)
 class PlatformIntegrationConfigAdmin(admin.ModelAdmin):
-    list_display = ("tenant", "platform", "account_alias", "environment", "status", "credential_key_version")
+    list_display = ("tenant", "platform", "account_alias", "environment", "status", "credential_reference_version")
     list_filter = ("platform", "environment", "status", "tenant")
     search_fields = ("account_alias", "credential_fingerprint", "tenant__name", "tenant__code")
-    exclude = ("credential_ciphertext",)
+    readonly_fields = (
+        "credential_id",
+        "token_id",
+        "credential_mask",
+        "credential_reference_version",
+        "credential_key_version",
+        "credential_fingerprint",
+        "credential_status",
+        "credential_expires_at",
+        "credential_revoked_at",
+        "credential_operation_id_hash",
+    )
 
 
 @admin.register(IntegrationAuditLog)
@@ -27,6 +43,84 @@ class IntegrationAuditLogAdmin(admin.ModelAdmin):
     list_display = ("tenant", "integration_config", "action", "actor", "result", "created_at")
     list_filter = ("action", "result", "tenant")
     search_fields = ("integration_config__account_alias", "actor__username", "tenant__code")
+    readonly_fields = tuple(field.name for field in IntegrationAuditLog._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MarketplaceStoreAuthorization)
+class MarketplaceStoreAuthorizationAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "platform", "store", "region", "status", "credential_reference_version")
+    list_filter = ("platform", "region", "status", "tenant")
+    search_fields = ("store__code", "platform_store_id", "merchant_subject_id")
+    readonly_fields = tuple(field.name for field in MarketplaceStoreAuthorization._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(OAuthStateSession)
+class OAuthStateSessionAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "platform", "store", "status", "expires_at", "consumed_at")
+    list_filter = ("platform", "status", "tenant")
+    search_fields = ("state_hash", "tenant__code")
+    readonly_fields = tuple(field.name for field in OAuthStateSession._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MarketplaceStoreMapping)
+class MarketplaceStoreMappingAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "platform", "store", "platform_store_id", "status", "mapping_source")
+    list_filter = ("platform", "status", "mapping_source", "tenant")
+    search_fields = ("platform_store_id", "store__code", "tenant__code")
+    readonly_fields = tuple(field.name for field in MarketplaceStoreMapping._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MarketplaceProductMapping)
+class MarketplaceProductMappingAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "platform", "store_mapping", "platform_variant_id", "status", "mapping_source")
+    list_filter = ("platform", "status", "mapping_source", "tenant")
+    search_fields = ("platform_product_id", "platform_variant_id", "platform_sku", "tenant__code")
+    readonly_fields = tuple(field.name for field in MarketplaceProductMapping._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(SyncJob)
@@ -49,6 +143,13 @@ class SyncRunAdmin(admin.ModelAdmin):
     list_display = ("tenant", "sync_job", "run_id", "status", "fetched_count", "failed_count", "retry_count")
     list_filter = ("status", "tenant")
     search_fields = ("run_id", "idempotency_key", "error_code", "tenant__code")
+
+
+@admin.register(SyncAlertIncident)
+class SyncAlertIncidentAdmin(admin.ModelAdmin):
+    list_display = ("tenant", "sync_job", "status", "assignee", "occurrence_count", "updated_at")
+    list_filter = ("status", "tenant")
+    search_fields = ("sync_job__integration_config__account_alias", "last_error_code", "assignee__username")
 
 
 @admin.register(SyncCursor)

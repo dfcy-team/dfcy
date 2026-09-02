@@ -1,9 +1,10 @@
+import hashlib
 import re
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import ProductCategory, ProductCodeSequence, ProductSPU
+from .models import ProductCategory, ProductCodeSequence, ProductSKU, ProductSPU
 
 
 SEASONS = (
@@ -15,6 +16,7 @@ SEASONS = (
 )
 SEASON_CODES = {item["code"] for item in SEASONS}
 SPEC_VALUE_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)?(?:cm|mm|kg|m|inch)$", re.IGNORECASE)
+SKU_CODE_MAX_LENGTH = 80
 
 
 def category_path(category):
@@ -77,3 +79,44 @@ def build_sku_code(*, spu, color_code, spec_values):
         raise ValidationError("SPU has no structured category; SKU code cannot be generated automatically.")
     specification, normalized = build_specification(spu.category_node, spec_values)
     return f"{spu.spu_code}-{color_code}-{specification}", specification, normalized
+
+
+def allocate_legacy_sku_code(*, tenant, base_code, legacy_sku_code, max_length=SKU_CODE_MAX_LENGTH):
+    """Return a unique, stable code for an imported legacy SKU.
+
+    The regular generated code remains untouched when it fits the column and
+    is not already occupied.  Legacy imports can contain multiple old SKUs
+    with the same colour/specification, however, so a colliding (or too long)
+    base receives a deterministic ``-L<sha256>`` suffix derived from the old
+    SKU.  The suffix is retried with a deterministic counter only for the
+    exceedingly unlikely case that an existing row already owns that value.
+    This keeps different legacy rows separate and makes a retry produce the
+    same candidate after the first row has been persisted.
+    """
+
+    base_code = str(base_code or "")
+    legacy_sku_code = str(legacy_sku_code or "").strip()
+    if not legacy_sku_code:
+        # This helper is only for legacy generation.  Keep direct/non-legacy
+        # SKU behaviour unchanged while still protecting the DB column when a
+        # caller explicitly opts into this helper.
+        return base_code[:max_length]
+
+    def available(candidate):
+        return not ProductSKU.objects.filter(tenant=tenant, sku_code=candidate).exists()
+
+    if len(base_code) <= max_length and available(base_code):
+        return base_code
+
+    # The first candidate is the production backfill format: it is short,
+    # deterministic, and independent of row ordering.
+    for attempt in range(1000):
+        seed = legacy_sku_code if attempt == 0 else f"{legacy_sku_code}:{attempt}"
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:10].upper()
+        suffix = f"-L{digest}"
+        prefix_length = max(0, max_length - len(suffix))
+        candidate = f"{base_code[:prefix_length]}{suffix}"
+        if available(candidate):
+            return candidate
+
+    raise ValueError("Unable to allocate a unique legacy SKU code.")

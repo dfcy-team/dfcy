@@ -17,6 +17,42 @@ export const importDevelopmentSales = (csvText) => requestApi({ url: '/api/inter
 export const fetchSalesSummary = () => useMock ? mock([]) : requestApi({ url: '/api/internal/development/sales/summary/' });
 export const checkRequirementDuplicate = (data) => requestApi({ url: '/api/internal/development/requirements/duplicate-check/', method: 'post', data });
 
+const productArchiveMock = [
+  {
+    id: 1,
+    project: 3,
+    project_id: 3,
+    project_no: 'DEV-20260802-016',
+    archive_no: 'DPA-20260815-001',
+    product_name: '多功能露营照明灯',
+    category: '户外用品',
+    platform: 'shopee',
+    site: 'TH',
+    inventory_mode: 'virtual',
+    virtual_inventory_sku: 'VT-DPA-20260815-001',
+    virtual_inventory_qty: 2,
+    test_result: 'pending',
+    test_notes: '',
+    status: 'trial',
+    is_virtual: true,
+    formal_product_id: null,
+    formal_spu_code: null,
+    events: [{ action: 'created', to_status: 'trial', created_at: '2026-08-15T08:00:00Z' }]
+  }
+];
+
+const fetchDevelopmentProductArchivesLegacy = (params = {}) => useMock
+  ? mock({ count: productArchiveMock.length, results: productArchiveMock, items: productArchiveMock, page: 1, page_size: productArchiveMock.length })
+  : requestApi({ url: '/api/internal/development/product-archives/', params });
+
+const createDevelopmentProductArchiveLegacy = (data) => requestApi({ url: '/api/internal/development/product-archives/', method: 'post', data });
+const fetchDevelopmentProductArchiveLegacy = (id) => useMock
+  ? mock(productArchiveMock.find((item) => String(item.id) === String(id)) || productArchiveMock[0])
+  : requestApi({ url: `/api/internal/development/product-archives/${id}/` });
+const updateDevelopmentProductArchiveLegacy = (id, data) => requestApi({ url: `/api/internal/development/product-archives/${id}/`, method: 'patch', data });
+const confirmDevelopmentProductArchiveLegacy = (id, data = {}) => requestApi({ url: `/api/internal/development/product-archives/${id}/confirm-trial/`, method: 'post', data });
+const formalizeDevelopmentProductArchiveLegacy = (id) => requestApi({ url: `/api/internal/development/product-archives/${id}/formalize/`, method: 'post' });
+
 export const fetchDevelopmentRequirements = (params = {}) => requestWithMockFallback(
   { method: 'get', url: '/api/internal/products/research/', params },
   () => successResponse({ api_status: 'mock', status: 'mock', items: [] }),
@@ -214,3 +250,251 @@ export const deleteRequirementCompetitorAssociation = (requirementId, associatio
 export const fetchCompetitorAnalysisReports = fetchCompetitorReports;
 export const fetchCompetitorAnalysisReportDetail = fetchCompetitorReportDetail;
 export const fetchCompetitorAnalysisEvidence = fetchCompetitorReportEvidence;
+
+/*
+ * Development product archives
+ *
+ * Archives are deliberately kept separate from the product master API.  A
+ * newly-created row is a virtual trial record; the only calls that can create
+ * a formal ProductSPU are the explicit confirm-trial and formalize actions.
+ * The mock handlers mirror that lifecycle so the development workspace stays
+ * usable when VITE_USE_MOCK is enabled, while production requests always use
+ * the canonical backend contract.
+ */
+export const PRODUCT_ARCHIVES_URL = '/api/internal/development/product-archives/';
+export const PRODUCT_ARCHIVES_ALIAS_URL = '/api/internal/development/archives/';
+
+const mockProductArchives = [
+  {
+    id: 1,
+    tenant: 'mock-tenant-001',
+    project: 1,
+    project_id: 1,
+    project_no: 'DEV-20260803-018',
+    project_stage: 'sampling',
+    project_status: 'active',
+    target_sites: ['TH', 'MY', 'SG'],
+    assigned_to_id: 1,
+    archive_no: 'DPA-20260803-001',
+    product_name: '折叠电热水壶',
+    category: '厨房小电',
+    platform: 'shopee',
+    site: 'TH',
+    inventory_mode: 'virtual',
+    virtual_inventory_sku: 'VT-DPA-20260803-001',
+    virtual_inventory_qty: 12,
+    test_result: 'pending',
+    test_notes: '',
+    status: 'trial',
+    formal_product: null,
+    formal_product_id: null,
+    formal_spu_code: null,
+    is_virtual: true,
+    virtual_inventory: { mode: 'virtual', sku: 'VT-DPA-20260803-001', quantity: 12, platform: 'shopee', site: 'TH' },
+    created_by_id: 1,
+    updated_by_id: null,
+    trial_confirmed_by_id: null,
+    trial_confirmed_at: null,
+    formalized_by_id: null,
+    formalized_at: null,
+    created_at: '2026-08-03T08:00:00Z',
+    updated_at: '2026-08-03T08:00:00Z',
+    events: [{ id: 1, action: 'created', from_status: '', to_status: 'trial', metadata: { inventory_mode: 'virtual' }, actor_id: 1, actor_name: 'Mock operator', created_at: '2026-08-03T08:00:00Z' }]
+  },
+  {
+    id: 2,
+    tenant: 'mock-tenant-001',
+    project: 3,
+    project_id: 3,
+    project_no: 'DEV-20260802-016',
+    project_stage: 'review',
+    project_status: 'active',
+    target_sites: ['TH', 'VN', 'MY'],
+    assigned_to_id: 1,
+    archive_no: 'DPA-20260802-001',
+    product_name: '多功能露营照明灯',
+    category: '户外用品',
+    platform: 'lazada',
+    site: 'MY',
+    inventory_mode: 'virtual',
+    virtual_inventory_sku: 'VT-DPA-20260802-001',
+    virtual_inventory_qty: 8,
+    test_result: 'pass',
+    test_notes: '样品续航和亮度达到目标。',
+    status: 'confirmed',
+    formal_product: null,
+    formal_product_id: null,
+    formal_spu_code: null,
+    is_virtual: true,
+    virtual_inventory: { mode: 'virtual', sku: 'VT-DPA-20260802-001', quantity: 8, platform: 'lazada', site: 'MY' },
+    created_by_id: 1,
+    updated_by_id: 1,
+    trial_confirmed_by_id: 1,
+    trial_confirmed_at: '2026-08-08T09:30:00Z',
+    formalized_by_id: null,
+    formalized_at: null,
+    created_at: '2026-08-02T08:00:00Z',
+    updated_at: '2026-08-08T09:30:00Z',
+    events: [
+      { id: 2, action: 'created', from_status: '', to_status: 'trial', metadata: { inventory_mode: 'virtual' }, actor_id: 1, actor_name: 'Mock operator', created_at: '2026-08-02T08:00:00Z' },
+      { id: 3, action: 'trial_confirmed', from_status: 'trial', to_status: 'confirmed', metadata: { test_result: 'pass' }, actor_id: 1, actor_name: 'Mock operator', created_at: '2026-08-08T09:30:00Z' }
+    ]
+  }
+];
+
+const cloneArchive = (archive) => JSON.parse(JSON.stringify(archive));
+
+const archiveCollectionMock = (params = {}) => {
+  const search = String(params.search || '').trim().toLowerCase();
+  const status = String(params.status || '').trim();
+  const platform = String(params.platform || '').trim();
+  const site = String(params.site || '').trim();
+  const items = mockProductArchives
+    .filter((item) => !status || item.status === status)
+    .filter((item) => !platform || item.platform === platform)
+    .filter((item) => !site || item.site === site)
+    .filter((item) => !search || [item.archive_no, item.product_name, item.project_no, item.virtual_inventory_sku].some((value) => String(value || '').toLowerCase().includes(search)))
+    .map(cloneArchive);
+  return successResponse(items);
+};
+
+const archiveDetailMock = (id) => {
+  const item = mockProductArchives.find((archive) => String(archive.id) === String(id));
+  return item ? successResponse(cloneArchive(item)) : successResponse({ status: 'mock', id: Number(id), missing: true });
+};
+
+const archiveCreateMock = (payload = {}) => {
+  const projectId = Number(payload.project ?? payload.project_id ?? 1);
+  const source = projects.find((project) => Number(project.id) === projectId) || projects[0];
+  const id = Math.max(0, ...mockProductArchives.map((item) => Number(item.id) || 0)) + 1;
+  const archiveNo = `DPA-MOCK-${String(id).padStart(3, '0')}`;
+  const archive = {
+    ...cloneArchive(mockProductArchives[0]),
+    id,
+    project: source.id,
+    project_id: source.id,
+    project_no: source.project_no,
+    project_stage: source.stage,
+    project_status: source.status,
+    target_sites: source.target_sites || [],
+    archive_no: archiveNo,
+    product_name: payload.product_name || source.product_name || '未命名开发产品',
+    category: payload.category || '',
+    platform: payload.platform || 'internal',
+    site: payload.site || 'internal',
+    virtual_inventory_sku: `VT-${archiveNo}`,
+    virtual_inventory_qty: Number(payload.virtual_inventory_qty || 0),
+    test_result: 'pending',
+    test_notes: payload.test_notes || '',
+    status: 'trial',
+    formal_product: null,
+    formal_product_id: null,
+    formal_spu_code: null,
+    is_virtual: true,
+    virtual_inventory: {
+      mode: 'virtual',
+      sku: `VT-${archiveNo}`,
+      quantity: Number(payload.virtual_inventory_qty || 0),
+      platform: payload.platform || 'internal',
+      site: payload.site || 'internal'
+    },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    events: []
+  };
+  archive.events = [{ id: Date.now(), action: 'created', from_status: '', to_status: 'trial', metadata: { inventory_mode: 'virtual' }, actor_id: 1, actor_name: 'Mock operator', created_at: archive.created_at }];
+  mockProductArchives.unshift(archive);
+  return successResponse(cloneArchive(archive));
+};
+
+const archiveUpdateMock = (id, payload = {}) => {
+  const archive = mockProductArchives.find((item) => String(item.id) === String(id));
+  if (!archive) return archiveDetailMock(id);
+  if (archive.status === 'trial') {
+    ['product_name', 'category', 'platform', 'site', 'virtual_inventory_qty', 'test_notes'].forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(payload, field)) archive[field] = payload[field];
+    });
+    archive.virtual_inventory = { mode: 'virtual', sku: archive.virtual_inventory_sku, quantity: Number(archive.virtual_inventory_qty || 0), platform: archive.platform, site: archive.site };
+    archive.updated_at = new Date().toISOString();
+  }
+  return successResponse(cloneArchive(archive));
+};
+
+const archiveConfirmMock = (id, payload = {}) => {
+  const archive = mockProductArchives.find((item) => String(item.id) === String(id));
+  if (!archive) return archiveDetailMock(id);
+  if (archive.status === 'trial') {
+    archive.test_result = payload.test_result || 'pass';
+    archive.test_notes = payload.test_notes || archive.test_notes || '';
+    archive.status = 'confirmed';
+    archive.trial_confirmed_by_id = 1;
+    archive.trial_confirmed_at = new Date().toISOString();
+    archive.updated_at = archive.trial_confirmed_at;
+    archive.events = [...(archive.events || []), { id: Date.now(), action: 'trial_confirmed', from_status: 'trial', to_status: 'confirmed', metadata: { test_result: archive.test_result }, actor_id: 1, actor_name: 'Mock operator', created_at: archive.trial_confirmed_at }];
+  }
+  return successResponse({ archive: cloneArchive(archive), changed: true });
+};
+
+const archiveFormalizeMock = (id) => {
+  const archive = mockProductArchives.find((item) => String(item.id) === String(id));
+  if (!archive) return archiveDetailMock(id);
+  if (archive.status === 'confirmed') {
+    archive.status = 'formalized';
+    archive.formal_product_id = archive.formal_product_id || 1000 + Number(archive.id);
+    archive.formal_product = archive.formal_product_id;
+    archive.formal_spu_code = archive.formal_spu_code || `SPU-MOCK-${String(archive.id).padStart(3, '0')}`;
+    archive.is_virtual = false;
+    archive.formalized_by_id = 1;
+    archive.formalized_at = new Date().toISOString();
+    archive.updated_at = archive.formalized_at;
+    archive.events = [...(archive.events || []), { id: Date.now(), action: 'formalized', from_status: 'confirmed', to_status: 'formalized', metadata: { spu_code: archive.formal_spu_code }, actor_id: 1, actor_name: 'Mock operator', created_at: archive.formalized_at }];
+  }
+  return successResponse({ archive: cloneArchive(archive), product_id: archive.formal_product_id, spu_code: archive.formal_spu_code, created: true });
+};
+
+export const fetchProductArchives = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: PRODUCT_ARCHIVES_URL, params },
+  () => archiveCollectionMock(params),
+  'development.product_archives'
+);
+
+export const fetchProductArchiveDetail = (id) => requestWithMockFallback(
+  { method: 'get', url: `${PRODUCT_ARCHIVES_URL}${id}/` },
+  () => archiveDetailMock(id),
+  'development.product_archives.detail'
+);
+
+export const createProductArchive = (data) => requestWithMockFallback(
+  { method: 'post', url: PRODUCT_ARCHIVES_URL, data },
+  () => archiveCreateMock(data),
+  'development.product_archives.create'
+);
+
+export const updateProductArchive = (id, data) => requestWithMockFallback(
+  { method: 'patch', url: `${PRODUCT_ARCHIVES_URL}${id}/`, data },
+  () => archiveUpdateMock(id, data),
+  'development.product_archives.update'
+);
+
+export const confirmProductArchiveTrial = (id, data = {}) => requestWithMockFallback(
+  { method: 'post', url: `${PRODUCT_ARCHIVES_URL}${id}/confirm-trial/`, data },
+  () => archiveConfirmMock(id, data),
+  'development.product_archives.confirm_trial'
+);
+
+export const formalizeProductArchive = (id, data = {}) => requestWithMockFallback(
+  { method: 'post', url: `${PRODUCT_ARCHIVES_URL}${id}/formalize/`, data },
+  () => archiveFormalizeMock(id),
+  'development.product_archives.formalize'
+);
+
+// Development-prefixed aliases make the API discoverable beside the existing
+// project functions without duplicating request implementations.
+export const fetchDevelopmentProductArchives = fetchProductArchives;
+export const fetchDevelopmentProductArchive = fetchProductArchiveDetail;
+export const fetchDevelopmentProductArchiveDetail = fetchProductArchiveDetail;
+export const createDevelopmentProductArchive = createProductArchive;
+export const updateDevelopmentProductArchive = updateProductArchive;
+export const confirmDevelopmentProductArchive = confirmProductArchiveTrial;
+export const confirmDevelopmentProductArchiveTrial = confirmProductArchiveTrial;
+export const formalizeDevelopmentProductArchive = formalizeProductArchive;

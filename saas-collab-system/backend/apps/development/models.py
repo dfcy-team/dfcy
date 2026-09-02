@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 
 from apps.masterdata.models import SupplierMaster
-from apps.products.models import ProductResearch, ProductSPU
+from apps.products.models import ProductCategory, ProductResearch, ProductSPU
 from apps.tenants.models import Tenant
 
 
@@ -32,6 +32,16 @@ class DevelopmentProject(models.Model):
     development_source = models.CharField(max_length=30, choices=Source.choices)
     product_name = models.CharField(max_length=200)
     category = models.CharField(max_length=120, blank=True)
+    # Keep the structured master-data relation beside the legacy text value.
+    # The text is retained as a historical/display snapshot, while all new
+    # archive records must resolve to an active tenant-owned leaf category.
+    category_node = models.ForeignKey(
+        ProductCategory,
+        on_delete=models.PROTECT,
+        related_name="development_projects",
+        null=True,
+        blank=True,
+    )
     target_sites = models.JSONField(default=list, blank=True)
     stage = models.CharField(max_length=20, choices=Stage.choices, default=Stage.INITIATED)
     assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="assigned_development_projects")
@@ -177,12 +187,12 @@ class ProductSalesSummary(models.Model):
     the same projection without attempting to create a physical table.
     """
 
-    product = models.OneToOneField(
+    summary_key = models.CharField(primary_key=True, max_length=128)
+    product = models.ForeignKey(
         ProductSPU,
         db_column="product_id",
         on_delete=models.DO_NOTHING,
-        primary_key=True,
-        related_name="sales_summary_projection",
+        related_name="sales_summary_projections",
     )
     site = models.CharField(max_length=40)
     first_sale_date = models.DateField()
@@ -304,3 +314,178 @@ class DevelopmentPerformanceReview(models.Model):
     class Meta:
         ordering = ["tenant_id", "-review_date"]
         constraints = [models.UniqueConstraint(fields=["project", "review_period"], name="uniq_dev_review_period")]
+
+
+class DevelopmentProductArchive(models.Model):
+    """Tenant-scoped archive for a product under development.
+
+    A development archive deliberately starts as a virtual trial record.  It
+    is not a :class:`products.ProductSPU` and cannot be published to an
+    external platform.  Only the explicit ``formalize`` action creates (or
+    links) the internal product master record.
+    """
+
+    class Status(models.TextChoices):
+        TRIAL = "trial", "Virtual trial"
+        CONFIRMED = "confirmed", "Trial confirmed"
+        FORMALIZED = "formalized", "Formal product linked"
+        CANCELLED = "cancelled", "Cancelled"
+
+    class TestResult(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PASS = "pass", "Pass"
+        FAIL = "fail", "Fail"
+        CONDITIONAL = "conditional", "Conditional"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="development_product_archives",
+    )
+    project = models.OneToOneField(
+        DevelopmentProject,
+        on_delete=models.PROTECT,
+        related_name="product_archive",
+    )
+    archive_no = models.CharField(max_length=80)
+    product_name = models.CharField(max_length=200)
+    category = models.CharField(max_length=120, blank=True)
+    category_node = models.ForeignKey(
+        ProductCategory,
+        on_delete=models.PROTECT,
+        related_name="development_product_archives",
+        null=True,
+        blank=True,
+    )
+    platform = models.CharField(max_length=50, default="internal")
+    site = models.CharField(max_length=40, default="internal")
+    inventory_mode = models.CharField(max_length=20, default="virtual", editable=False)
+    virtual_inventory_sku = models.CharField(max_length=100)
+    virtual_inventory_qty = models.PositiveIntegerField(default=0)
+    test_result = models.CharField(
+        max_length=20,
+        choices=TestResult.choices,
+        default=TestResult.PENDING,
+    )
+    test_notes = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.TRIAL)
+    formal_product = models.OneToOneField(
+        ProductSPU,
+        on_delete=models.PROTECT,
+        related_name="development_product_archive",
+        null=True,
+        blank=True,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_development_product_archives",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_development_product_archives",
+        null=True,
+        blank=True,
+    )
+    trial_confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="confirmed_development_product_archives",
+        null=True,
+        blank=True,
+    )
+    trial_confirmed_at = models.DateTimeField(null=True, blank=True)
+    formalized_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="formalized_development_product_archives",
+        null=True,
+        blank=True,
+    )
+    formalized_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "archive_no"],
+                name="uniq_dev_product_archive_no",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "status"],
+                name="idx_dev_product_archive_status",
+            ),
+            models.Index(
+                fields=["tenant", "platform", "site"],
+                name="idx_dev_product_archive_market",
+            ),
+        ]
+
+    # Compatibility aliases make the audit semantics explicit to callers that
+    # use the shorter ``confirmed``/``converted`` vocabulary.
+    @property
+    def confirmed_by(self):
+        return self.trial_confirmed_by
+
+    @property
+    def confirmed_by_id(self):
+        return self.trial_confirmed_by_id
+
+    @property
+    def confirmed_at(self):
+        return self.trial_confirmed_at
+
+    @property
+    def converted_by(self):
+        return self.formalized_by
+
+    @property
+    def converted_by_id(self):
+        return self.formalized_by_id
+
+    @property
+    def converted_at(self):
+        return self.formalized_at
+
+    @property
+    def is_virtual(self):
+        return self.status in {self.Status.TRIAL, self.Status.CONFIRMED}
+
+
+class DevelopmentProductArchiveEvent(models.Model):
+    """Immutable audit trail for archive lifecycle actions."""
+
+    archive = models.ForeignKey(
+        DevelopmentProductArchive,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="development_product_archive_events",
+    )
+    action = models.CharField(max_length=40)
+    from_status = models.CharField(max_length=20, blank=True)
+    to_status = models.CharField(max_length=20, blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="development_product_archive_events",
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["archive_id", "created_at", "id"]
+        indexes = [
+            models.Index(
+                fields=["tenant", "archive", "created_at"],
+                name="idx_dev_product_archive_event",
+            ),
+        ]
