@@ -839,6 +839,59 @@ def integration_config_audit(request, pk):
     return success_response(IntegrationAuditLogSerializer(queryset, many=True).data)
 
 
+@api_view(["GET"])
+@permission_classes([IsIntegrationAuditViewer])
+def integration_audit_collection(request):
+    """Return the tenant's redacted integration audit trail within data scope."""
+
+    allowed_query = {"page", "page_size", "config_id", "platform", "action"}
+    if set(request.query_params) - allowed_query:
+        raise ValidationError("Unknown integration audit query parameter.")
+
+    # Resolve the configuration scope first.  The audit table has its own
+    # tenant column, but using scoped configuration IDs prevents logs for
+    # configurations outside the viewer's declared integration scope from
+    # leaking through this cross-configuration collection endpoint.
+    visible_config_ids = filter_integration_configs(
+        request.user,
+        PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+        "integrations.audit.view",
+    ).values_list("id", flat=True)
+    queryset = IntegrationAuditLog.objects.filter(
+        tenant=request.user.tenant,
+        integration_config_id__in=visible_config_ids,
+    ).select_related("integration_config")
+
+    config_id = request.query_params.get("config_id")
+    if config_id not in (None, ""):
+        queryset = queryset.filter(
+            integration_config_id=positive_int(config_id, default=None, maximum=2147483647)
+        )
+
+    platform = str(request.query_params.get("platform") or "").strip().lower()
+    if platform:
+        if platform not in PlatformChoices.values:
+            raise ValidationError({"platform": "Unsupported integration platform filter."})
+        queryset = queryset.filter(integration_config__platform=platform)
+
+    action = str(request.query_params.get("action") or "").strip()
+    if len(action) > 80:
+        raise ValidationError({"action": "Action filter must not exceed 80 characters."})
+    if action:
+        queryset = queryset.filter(action=action)
+
+    page, page_size = pagination_query(request)
+    return success_response(
+        paginated_data(
+            request,
+            queryset,
+            IntegrationAuditLogSerializer,
+            page=page,
+            page_size=page_size,
+        )
+    )
+
+
 @api_view(["POST"])
 @permission_classes([IsIntegrationCredentialRotator])
 def rotate_integration_credentials(request, pk):

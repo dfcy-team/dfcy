@@ -6,6 +6,7 @@ from . import views
 urlpatterns = [
     path("workspace/", views.integration_workspace_view, name="integration-workspace"),
     path("readiness/", views.platform_integration_readiness, name="platform-integration-readiness"),
+    path("audit/", views.integration_audit_collection, name="integration-audit-collection"),
     path(
         "readiness/configs/<int:pk>/repair-contract/",
         views.repair_readiness_contract,

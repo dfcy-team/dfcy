@@ -77,6 +77,13 @@ const APISyncLogList = () => import('../views/integrations/APISyncLogList.vue');
 const IntegrationConfigList = () => import('../views/integrations/IntegrationConfigList.vue');
 const IntegrationConfigDetail = () => import('../views/integrations/IntegrationConfigDetail.vue');
 const PlatformDrillWorkbench = () => import('../views/integrations/PlatformDrillWorkbench.vue');
+const StoreAuthorizationList = () => import('../views/integrations/StoreAuthorizationList.vue');
+const IntegrationCapabilityMatrix = () => import('../views/integrations/IntegrationCapabilityMatrix.vue');
+const StoreMappingList = () => import('../views/integrations/StoreMappingList.vue');
+const ProductMappingList = () => import('../views/integrations/ProductMappingList.vue');
+const SyncIncidentList = () => import('../views/integrations/SyncIncidentList.vue');
+const IntegrationAuditList = () => import('../views/integrations/IntegrationAuditList.vue');
+const PlatformSiteList = () => import('../views/integrations/PlatformSiteList.vue');
 const SyncJobList = () => import('../views/integrations/SyncJobList.vue');
 const SyncRunList = () => import('../views/integrations/SyncRunList.vue');
 const SyncRunDetail = () => import('../views/integrations/SyncRunDetail.vue');
@@ -243,6 +250,14 @@ const routes = [
       { path: 'rpa/page-signatures', component: RPAPageSignatureAlertList },
       { path: 'integrations/configs', component: IntegrationConfigList },
       { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
+      { path: 'integrations/readiness', component: PlatformIntegrationReadiness },
+      { path: 'integrations/authorizations', component: StoreAuthorizationList },
+      { path: 'integrations/capabilities', component: IntegrationCapabilityMatrix },
+      { path: 'integrations/store-mappings', component: StoreMappingList },
+      { path: 'integrations/product-mappings', component: ProductMappingList },
+      { path: 'integrations/incidents', component: SyncIncidentList },
+      { path: 'integrations/audit', component: IntegrationAuditList },
+      { path: 'integrations/platform-sites', component: PlatformSiteList },
       { path: 'integrations/platform-drill', component: PlatformDrillWorkbench },
       { path: 'integrations/sync-jobs', component: SyncJobList },
       { path: 'integrations/sync-runs', component: SyncRunList },

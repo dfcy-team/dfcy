@@ -25,7 +25,7 @@ describe('current deployment menu baseline', () => {
     expect(governance.children.map((item) => item.label)).toEqual([
       '组织架构', '用户目录', '角色权限', '安全运维', '配置中心', '配置版本', '平台准入', '发布合同', '日志审计'
     ]);
-    expect(flattenMenuItems(menuItems)).toHaveLength(99);
+    expect(flattenMenuItems(menuItems)).toHaveLength(109);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {
