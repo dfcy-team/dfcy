@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -31,6 +31,8 @@ from .system_serializers import (
     RoleOptionSerializer,
     RolePermissionUpdateSerializer,
     UserAdminSerializer,
+    UserPasswordResetSerializer,
+    UserProfileUpdateSerializer,
     UserRoleUpdateSerializer,
 )
 
@@ -84,13 +86,74 @@ class DepartmentCollectionView(APIView):
         return success_response(DepartmentAdminSerializer(department).data, status=201)
 
 
+class DepartmentDetailView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.organization.view"
+    write_permission_code = "system.organization.manage"
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent").select_for_update()
+        department = get_object_or_404(
+            filter_departments(request.user, queryset, self.write_permission_code), pk=pk
+        )
+        serializer = DepartmentAdminSerializer(
+            department,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        if "parent_id" in serializer.validated_data:
+            parent_id = serializer.validated_data["parent_id"]
+            if parent_id is None and department.parent_id is not None:
+                require_all_scope(request.user, self.write_permission_code)
+            elif parent_id is not None:
+                require_department_create_scope(request.user, self.write_permission_code, parent_id)
+        before_data = {
+            "name": department.name,
+            "parent_id": department.parent_id,
+            "status": department.status,
+        }
+        department = serializer.save()
+        write_operation_log(
+            tenant=request.user.tenant, user=request.user, module="system", action="department_update",
+            object_type="department", object_id=department.pk, before_data=before_data,
+            after_data={"name": department.name, "parent_id": department.parent_id, "status": department.status},
+        )
+        return success_response(DepartmentAdminSerializer(department).data)
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        queryset = Department.objects.filter(tenant=request.user.tenant).select_for_update()
+        queryset = filter_departments(request.user, queryset, self.write_permission_code)
+        department = get_object_or_404(queryset, pk=pk)
+        if department.internal_profiles.exists() or department.assigned_internal_profiles.exists():
+            raise StateConflict("部门内存在人员，不能删除。")
+        if department.children.exists():
+            raise StateConflict("部门下存在下级部门，请先删除下级部门。")
+        before_data = {"name": department.name, "parent_id": department.parent_id}
+        department_id = department.pk
+        department.delete()
+        write_operation_log(
+            tenant=request.user.tenant, user=request.user, module="system", action="department_delete",
+            object_type="department", object_id=department_id, before_data=before_data,
+        )
+        return success_response({"deleted": True, "id": department_id})
+
+
 class UserCollectionView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "system.users.view"
     write_permission_code = "system.users.manage"
 
     def get(self, request):
-        queryset = CustomUser.objects.filter(tenant=request.user.tenant).prefetch_related("user_roles__role")
+        queryset = CustomUser.objects.filter(tenant=request.user.tenant).select_related(
+            "internal_profile__department",
+        ).prefetch_related(
+            "user_roles__role",
+            "internal_profile__departments",
+        )
         queryset = filter_system_users(request.user, queryset, self.read_permission_code)
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
@@ -109,7 +172,10 @@ class UserCollectionView(APIView):
             self.write_permission_code,
             serializer.validated_data.get("department_id"),
         )
-        user = serializer.save()
+        try:
+            user = serializer.save()
+        except IntegrityError as exc:
+            raise ValidationError({"username": "该用户名已存在。"}) from exc
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="system", action="user_create",
             object_type="user", object_id=user.pk, after_data={"username": user.username, "is_active": user.is_active},
@@ -117,14 +183,60 @@ class UserCollectionView(APIView):
         return success_response(UserAdminSerializer(user).data, status=201)
 
 
+class UserDetailView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.users.view"
+    write_permission_code = "system.users.manage"
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        queryset = CustomUser.objects.filter(tenant=request.user.tenant)
+        user = get_object_or_404(
+            filter_system_users(request.user, queryset, self.write_permission_code).select_for_update(),
+            pk=pk,
+        )
+        serializer = UserProfileUpdateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        if "department_ids" in serializer.validated_data and user.user_type != CustomUser.UserType.INTERNAL:
+            raise ValidationError({"department_ids": "只有内部用户可以配置部门归属。"})
+        before = {
+            "full_name": user.full_name,
+            "department_ids": list(user.internal_profile.departments.values_list("id", flat=True))
+            if hasattr(user, "internal_profile") else [],
+        }
+        if "full_name" in serializer.validated_data:
+            user.full_name = serializer.validated_data["full_name"]
+            user.save(update_fields=["full_name", "updated_at"])
+        if "department_ids" in serializer.validated_data:
+            department_ids = serializer.validated_data["department_ids"]
+            profile = user.internal_profile
+            profile.departments.set(department_ids)
+            profile.department_id = department_ids[0] if department_ids else None
+            profile.save(update_fields=["department", "updated_at"])
+        write_operation_log(
+            tenant=request.user.tenant, user=request.user, module="system", action="user_profile_update",
+            object_type="user", object_id=user.pk, before_data=before,
+            after_data={
+                "full_name": user.full_name,
+                "department_ids": list(user.internal_profile.departments.values_list("id", flat=True))
+                if hasattr(user, "internal_profile") else [],
+            },
+        )
+        return success_response(UserAdminSerializer(user).data)
+
+
 class UserStatusView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "system.users.view"
     write_permission_code = "system.users.manage"
 
+    @transaction.atomic
     def post(self, request, pk):
         queryset = CustomUser.objects.filter(tenant=request.user.tenant)
-        user = get_object_or_404(filter_system_users(request.user, queryset, self.write_permission_code), pk=pk)
+        user = get_object_or_404(
+            filter_system_users(request.user, queryset, self.write_permission_code).select_for_update(),
+            pk=pk,
+        )
         is_active = request.data.get("is_active")
         if not isinstance(is_active, bool):
             raise ValidationError({"is_active": "A boolean value is required."})
@@ -140,6 +252,34 @@ class UserStatusView(APIView):
         return success_response(UserAdminSerializer(user).data)
 
 
+class UserPasswordResetView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.users.view"
+    write_permission_code = "system.users.manage"
+
+    @transaction.atomic
+    def post(self, request, pk):
+        queryset = CustomUser.objects.filter(tenant=request.user.tenant)
+        user = get_object_or_404(
+            filter_system_users(request.user, queryset, self.write_permission_code).select_for_update(),
+            pk=pk,
+        )
+        serializer = UserPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password", "updated_at"])
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="system",
+            action="user_password_reset",
+            object_type="user",
+            object_id=user.pk,
+            after_data={"username": user.username, "password_reset": True},
+        )
+        return success_response({"id": user.pk, "username": user.username, "password_reset": True})
+
+
 class UserRoleView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "system.users.view"
@@ -148,7 +288,10 @@ class UserRoleView(APIView):
     @transaction.atomic
     def put(self, request, pk):
         queryset = CustomUser.objects.filter(tenant=request.user.tenant)
-        user = get_object_or_404(filter_system_users(request.user, queryset, self.write_permission_code), pk=pk)
+        user = get_object_or_404(
+            filter_system_users(request.user, queryset, self.write_permission_code).select_for_update(),
+            pk=pk,
+        )
         serializer = UserRoleUpdateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         role_codes = serializer.validated_data["role_codes"]
@@ -211,12 +354,49 @@ class RoleCollectionView(APIView):
         require_all_scope(request.user, self.write_permission_code)
         serializer = RoleAdminSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        role = serializer.save(tenant=request.user.tenant)
+        try:
+            role = serializer.save(tenant=request.user.tenant)
+        except IntegrityError as exc:
+            # Serializer validation closes the normal duplicate path.  Keep a
+            # concurrent create from leaking a database 500 when the unique
+            # tenant/code constraint wins the race.
+            raise ValidationError({"code": "Role code must be unique within the current tenant."}) from exc
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="system", action="role_create",
             object_type="role", object_id=role.pk, after_data={"code": role.code, "status": role.status},
         )
         return success_response(RoleAdminSerializer(role).data, status=201)
+
+
+class RoleScopeOptionsView(APIView):
+    """Return tenant-scoped options needed to configure a custom role scope.
+
+    This uses the role-management permission and all scope so administrators
+    do not need unrelated user/organization read permissions merely to define
+    a role's explicit scope.  All option querysets are tenant-filtered before
+    serialization.
+    """
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.roles.manage"
+    write_permission_code = "system.roles.manage"
+
+    def get(self, request):
+        require_all_scope(request.user, self.read_permission_code)
+        tenant = request.user.tenant
+        departments = Department.objects.filter(tenant=tenant).select_related("parent")
+        users = CustomUser.objects.filter(tenant=tenant).select_related(
+            "internal_profile__department",
+        ).prefetch_related(
+            "user_roles__role",
+            "internal_profile__departments",
+        )
+        roles = Role.objects.filter(tenant=tenant, status=Role.Status.ACTIVE)
+        return success_response({
+            "departments": DepartmentAdminSerializer(departments, many=True).data,
+            "users": UserAdminSerializer(users, many=True).data,
+            "roles": RoleOptionSerializer(roles, many=True).data,
+        })
 
 
 class RolePermissionView(APIView):
@@ -227,10 +407,14 @@ class RolePermissionView(APIView):
     @transaction.atomic
     def put(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
-        role = get_object_or_404(Role, pk=pk, tenant=request.user.tenant)
+        role = get_object_or_404(
+            Role.objects.select_for_update(),
+            pk=pk,
+            tenant=request.user.tenant,
+        )
         if role.code == TENANT_ADMIN_ROLE_CODE:
             raise StateConflict("The built-in administrator role is synchronized from the permission catalog.")
-        serializer = RolePermissionUpdateSerializer(data=request.data)
+        serializer = RolePermissionUpdateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         before = list(role.permissions.values_list("code", flat=True))
         before_scopes = list(role.data_scopes.values("scope_type", "config"))
@@ -254,6 +438,102 @@ class RolePermissionView(APIView):
                     "config": serializer.validated_data["scope_config"],
                 }],
             },
+        )
+        return success_response(RoleAdminSerializer(role).data)
+
+
+class RoleDetailView(APIView):
+    """Maintain the safe lifecycle of tenant roles.
+
+    Roles are soft-disabled through ``status``.  Hard deletion is deliberately
+    available only while no user is bound to the role and is never available
+    for the catalog-managed tenant administrator role.
+    """
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.roles.view"
+    write_permission_code = "system.roles.manage"
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        role = get_object_or_404(
+            Role.objects.select_for_update().prefetch_related("permissions", "data_scopes"),
+            tenant=request.user.tenant,
+            pk=pk,
+        )
+        if role.code == TENANT_ADMIN_ROLE_CODE:
+            raise StateConflict("The built-in administrator role is synchronized from the permission catalog.")
+        serializer = RoleAdminSerializer(
+            role,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        before_data = {"name": role.name, "code": role.code, "status": role.status}
+        try:
+            role = serializer.save()
+        except IntegrityError as exc:
+            raise ValidationError({"code": "Role code must be unique within the current tenant."}) from exc
+        write_operation_log(
+            tenant=request.user.tenant, user=request.user, module="system", action="role_update",
+            object_type="role", object_id=role.pk, before_data=before_data,
+            after_data={"name": role.name, "code": role.code, "status": role.status},
+        )
+        return success_response(RoleAdminSerializer(role).data)
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        role = get_object_or_404(
+            Role.objects.select_for_update(),
+            tenant=request.user.tenant,
+            pk=pk,
+        )
+        if role.code == TENANT_ADMIN_ROLE_CODE:
+            raise StateConflict("The built-in administrator role cannot be deleted.")
+        if role.user_roles.filter(tenant=request.user.tenant).exists():
+            raise StateConflict("角色仍绑定用户，不能删除；请先停用并解除角色绑定。")
+        before_data = {"name": role.name, "code": role.code, "status": role.status}
+        role_id = role.pk
+        role.delete()
+        write_operation_log(
+            tenant=request.user.tenant, user=request.user, module="system", action="role_delete",
+            object_type="role", object_id=role_id, before_data=before_data,
+        )
+        return success_response({"deleted": True, "id": role_id})
+
+
+class RoleStatusView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.roles.view"
+    write_permission_code = "system.roles.manage"
+
+    @transaction.atomic
+    def post(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        role = get_object_or_404(
+            Role.objects.select_for_update().prefetch_related("permissions", "data_scopes"),
+            tenant=request.user.tenant,
+            pk=pk,
+        )
+        if role.code == TENANT_ADMIN_ROLE_CODE:
+            raise StateConflict("The built-in administrator role cannot be disabled.")
+        status = request.data.get("status")
+        if status is None and isinstance(request.data.get("is_active"), bool):
+            status = Role.Status.ACTIVE if request.data["is_active"] else Role.Status.INACTIVE
+        if status not in {Role.Status.ACTIVE, Role.Status.INACTIVE}:
+            raise ValidationError({"status": "status must be active or inactive."})
+        if role.status == status:
+            raise StateConflict("Role is already in the requested status.")
+        before = role.status
+        role.status = status
+        role.save(update_fields=["status", "updated_at"])
+        write_operation_log(
+            tenant=request.user.tenant, user=request.user, module="system", action="role_status_change",
+            object_type="role", object_id=role.pk,
+            before_data={"status": before}, after_data={"status": role.status},
         )
         return success_response(RoleAdminSerializer(role).data)
 
@@ -288,6 +568,9 @@ class SecurityOperationsView(APIView):
         audit = OperationLog.objects.filter(tenant=request.user.tenant).values(
             "id", "module", "action", "object_type", "object_id", "created_at"
         )[:20]
+        accounts = CustomUser.objects.filter(tenant=request.user.tenant).values(
+            "id", "username", "full_name", "user_type", "is_active", "last_login", "updated_at"
+        )
         return success_response(
             {
                 "status": "connected",
@@ -298,6 +581,7 @@ class SecurityOperationsView(APIView):
                     "credential_references": len(credentials),
                 },
                 "credential_references": list(credentials),
+                "accounts": list(accounts),
                 "recent_audit": list(audit),
                 "credential_contract": "alias_fingerprint_reference_only",
             }

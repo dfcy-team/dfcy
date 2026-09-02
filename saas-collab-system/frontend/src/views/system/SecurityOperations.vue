@@ -13,6 +13,35 @@
       </section>
 
       <section class="security-band">
+        <header>
+          <div><h2>账号安全</h2><p>锁定或恢复租户账号；每次状态变更复用用户管理权限、数据范围和审计链。</p></div>
+          <el-tag type="warning" effect="plain">受控启停</el-tag>
+        </header>
+        <el-table :data="data.accounts" border empty-text="暂无账号">
+          <el-table-column prop="username" label="用户名" min-width="170" />
+          <el-table-column prop="full_name" label="姓名" min-width="130" />
+          <el-table-column prop="user_type" label="用户类型" min-width="110" />
+          <el-table-column prop="is_active" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.is_active ? 'success' : 'info'" effect="plain">{{ row.is_active ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                v-if="accountAccess.visible"
+                link
+                :type="row.is_active ? 'danger' : 'success'"
+                :disabled="accountAccess.disabled"
+                :title="accountAccess.reason"
+                @click="toggleAccount(row)"
+              >{{ row.is_active ? '停用账号' : '启用账号' }}</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
+
+      <section class="security-band">
         <header><div><h2>凭据引用</h2><p>仅显示别名、指纹、密钥版本和轮换时间</p></div><el-tag type="success" effect="plain">仅元数据</el-tag></header>
         <el-table :data="data.credential_references" border empty-text="暂无凭据引用">
           <el-table-column prop="platform" label="平台" min-width="120" />
@@ -43,16 +72,21 @@
 
 <script setup>
 import { computed, ref } from 'vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
-import { fetchSecurityOperations } from '../../api/systemAdmin';
+import { fetchSecurityOperations, updateUserStatus } from '../../api/systemAdmin';
 import { useMock } from '../../api/request';
+import { useAuthStore } from '../../stores/auth';
+import { getActionAccess } from '../../utils/actionAccess';
 import { statusFromApiResponse } from '../../utils/uiState';
 
 const state = ref('loading');
 const capability = ref(useMock ? 'mock' : 'pending');
 const errorMessage = ref('');
-const data = ref({ summary: {}, credential_references: [], recent_audit: [] });
+const data = ref({ summary: {}, accounts: [], credential_references: [], recent_audit: [] });
+const auth = useAuthStore();
+const accountAccess = computed(() => getActionAccess(auth, { permission: 'system.users.manage' }));
 const summaryItems = computed(() => [
   { label: '启用账号', value: data.value.summary.active_users || 0 },
   { label: '停用账号', value: data.value.summary.inactive_users || 0 },
@@ -73,6 +107,28 @@ async function load() {
   const apiStatus = response.data.api_status || response.data.status || (useMock ? 'mock' : 'pending');
   capability.value = apiStatus === 'fallback' ? 'degraded' : apiStatus;
   state.value = 'ready';
+}
+
+async function toggleAccount(row) {
+  if (!accountAccess.value.allowed) {
+    ElMessage.warning(accountAccess.value.reason);
+    return;
+  }
+  const next = !row.is_active;
+  try {
+    await ElMessageBox.confirm(
+      `确认将账号“${row.username}”设为${next ? '启用' : '停用'}？`,
+      '账号状态变更确认',
+      { type: next ? 'info' : 'warning' },
+    );
+    const response = await updateUserStatus(row.id, next);
+    if (!response?.success) throw new Error(response?.message || '账号状态变更失败');
+    ElMessage.success('账号状态已更新并记录审计');
+    await load();
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return;
+    ElMessage.error(error?.message || '账号状态变更失败');
+  }
 }
 load();
 </script>

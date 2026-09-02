@@ -42,9 +42,25 @@
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'" effect="plain">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="130">
+      <el-table-column label="操作" width="290">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed ? '配置权限' : '查看权限' }}</el-button>
+          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
+          <el-button
+            v-if="manageAccess.visible && row.code !== 'administrator'"
+            link
+            :type="row.status === 'active' ? 'warning' : 'success'"
+            :disabled="manageAccess.disabled"
+            :title="manageAccess.reason"
+            @click="toggleRoleStatus(row)"
+          >{{ row.status === 'active' ? '停用' : '启用' }}</el-button>
+          <el-button
+            v-if="manageAccess.visible && row.code !== 'administrator'"
+            link
+            type="danger"
+            :disabled="manageAccess.disabled"
+            :title="manageAccess.reason"
+            @click="confirmRoleDelete(row)"
+          >删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -66,12 +82,48 @@
       </div>
       <el-form label-position="top">
         <el-form-item label="数据范围">
-          <el-radio-group v-model="roleForm.scope_type" :disabled="!manageAccess.allowed">
+          <el-radio-group v-model="roleForm.scope_type" :disabled="!manageAccess.allowed || isBuiltInAdministrator" @change="onScopeTypeChange">
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="department">本部门</el-radio-button>
             <el-radio-button value="own">本人</el-radio-button>
             <el-radio-button value="custom">自定义</el-radio-button>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="roleForm.scope_type === 'department'" label="部门范围说明">
+          <el-alert
+            title="本部门范围按实际使用者所属部门生效，不需要手工选择部门。"
+            type="info"
+            :closable="false"
+            show-icon
+          />
+        </el-form-item>
+        <el-form-item v-if="roleForm.scope_type === 'custom'" label="自定义范围配置">
+          <div class="scope-config-fields">
+            <el-alert
+              title="至少选择一个授权维度；所有对象必须属于当前租户。"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+            <label>
+              <span>部门</span>
+              <el-select v-model="roleForm.scope_config.department_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选部门">
+                <el-option v-for="item in scopeDepartments" :key="item.id" :label="item.name" :value="item.id" />
+              </el-select>
+            </label>
+            <label>
+              <span>用户</span>
+              <el-select v-model="roleForm.scope_config.user_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选用户">
+                <el-option v-for="item in scopeUsers" :key="item.id" :label="formatUserOption(item)" :value="item.id" />
+              </el-select>
+            </label>
+            <label>
+              <span>角色</span>
+              <el-select v-model="roleForm.scope_config.role_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选角色">
+                <el-option v-for="item in scopeRoles" :key="item.id" :label="`${item.name}（${item.code}）`" :value="item.id" />
+              </el-select>
+            </label>
+          </div>
         </el-form-item>
         <el-form-item label="权限码">
           <el-checkbox-group v-model="roleForm.permission_codes" :disabled="!manageAccess.allowed" class="permission-groups">
@@ -105,10 +157,13 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
-import { createRole, fetchPermissions, fetchRoles, updateRolePermissions } from '../../api/systemAdmin';
+import {
+  createRole, deleteRole, fetchPermissions, fetchRoleScopeOptions, fetchRoles,
+  updateRolePermissions, updateRoleStatus
+} from '../../api/systemAdmin';
 import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -130,6 +185,9 @@ const saving = ref(false);
 const selectedRole = ref({});
 const roleForm = reactive({ permission_codes: [], scope_type: 'own', scope_config: {} });
 const newRole = reactive({ name: '', code: '', status: 'active' });
+const scopeDepartments = ref([]);
+const scopeUsers = ref([]);
+const scopeRoles = ref([]);
 const manageAccess = computed(() => getActionAccess(auth, { permission: 'system.roles.manage' }));
 
 const layers = [
@@ -160,6 +218,9 @@ function responseCapability(response) {
 function scopeLabel(value) {
   return { all: '全部租户内数据', department: '本部门', own: '本人数据', custom: '自定义范围' }[value] || '未配置';
 }
+function formatUserOption(item) {
+  return `${item.username || ''}${item.full_name ? `（${item.full_name}）` : ''}`;
+}
 async function load() {
   state.value = 'loading';
   const [roleResponse, permissionResponse] = await Promise.all([
@@ -187,11 +248,47 @@ function openRole(role) {
   selectedRole.value = role;
   roleForm.permission_codes = [...(role.permission_codes || [])];
   roleForm.scope_type = role.data_scopes?.[0]?.scope_type || 'own';
-  roleForm.scope_config = role.data_scopes?.[0]?.config || {};
+  roleForm.scope_config = { ...(role.data_scopes?.[0]?.config || {}) };
+  if (roleForm.scope_type === 'custom') ensureCustomScopeShape();
   drawerOpen.value = true;
+  loadScopeOptions();
+}
+
+function ensureCustomScopeShape() {
+  roleForm.scope_config = {
+    ...roleForm.scope_config,
+    department_ids: Array.isArray(roleForm.scope_config.department_ids) ? [...roleForm.scope_config.department_ids] : [],
+    user_ids: Array.isArray(roleForm.scope_config.user_ids) ? [...roleForm.scope_config.user_ids] : [],
+    role_ids: Array.isArray(roleForm.scope_config.role_ids) ? [...roleForm.scope_config.role_ids] : [],
+  };
+}
+
+function onScopeTypeChange(value) {
+  if (value === 'custom') ensureCustomScopeShape();
+  else roleForm.scope_config = {};
+}
+
+async function loadScopeOptions() {
+  const response = await fetchRoleScopeOptions();
+  if (!response?.success) return;
+  scopeDepartments.value = response.data?.departments || [];
+  scopeUsers.value = response.data?.users || [];
+  scopeRoles.value = response.data?.roles || [];
 }
 async function saveRole() {
   if (!manageAccess.value.allowed) return;
+  if (isBuiltInAdministrator.value) {
+    ElMessage.info('管理员角色由权限目录自动同步，不能手工修改。');
+    return;
+  }
+  if (roleForm.scope_type === 'custom') {
+    ensureCustomScopeShape();
+    const config = roleForm.scope_config;
+    if (!config.department_ids.length && !config.user_ids.length && !config.role_ids.length) {
+      ElMessage.warning('自定义范围至少选择一个部门、用户或角色');
+      return;
+    }
+  }
   saving.value = true;
   const response = await updateRolePermissions(selectedRole.value.id, { ...roleForm });
   saving.value = false;
@@ -199,6 +296,43 @@ async function saveRole() {
   ElMessage.success('角色权限已保存并记录审计');
   drawerOpen.value = false;
   load();
+}
+
+async function toggleRoleStatus(row) {
+  if (!manageAccess.value.allowed || row.code === 'administrator') return;
+  const next = row.status === 'active' ? 'inactive' : 'active';
+  try {
+    await ElMessageBox.confirm(
+      `确认将角色“${row.name || row.code}”设为${next === 'active' ? '启用' : '停用'}？`,
+      '角色状态变更确认',
+      { type: next === 'inactive' ? 'warning' : 'info' },
+    );
+    const response = await updateRoleStatus(row.id, next);
+    if (!response?.success) throw new Error(response?.message || '角色状态变更失败');
+    ElMessage.success('角色状态已更新并记录审计');
+    load();
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return;
+    ElMessage.error(error?.message || '角色状态变更失败');
+  }
+}
+
+async function confirmRoleDelete(row) {
+  if (!manageAccess.value.allowed || row.code === 'administrator') return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除角色“${row.name || row.code}”？仅在没有绑定用户时允许删除。`,
+      '删除角色确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    );
+    const response = await deleteRole(row.id);
+    if (!response?.success) throw new Error(response?.message || '角色删除失败');
+    ElMessage.success('角色已删除并记录审计');
+    load();
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return;
+    ElMessage.error(error?.message || '角色删除失败');
+  }
 }
 async function submitRole() {
   if (!manageAccess.value.allowed) {
@@ -241,6 +375,13 @@ load();
 .permission-group .el-checkbox { height: auto; min-height: 36px; margin-right: 0; }
 .permission-group span, .permission-group small { display: block; }
 .permission-group small { color: #64748b; font-size: 10px; }
+.permission-menu-node { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; min-height: 28px; padding-top: 4px; color: #315c78; font-size: 12px; font-weight: 600; }
+.permission-menu-node small { color: #94a3b8; font-size: 10px; font-weight: 400; }
+.permission-menu-other { color: #9a6700; }
+.permission-leaf { min-width: 0; }
+.scope-config-fields { display: grid; gap: 12px; width: 100%; }
+.scope-config-fields label { display: grid; gap: 6px; color: #475569; font-size: 12px; }
+.scope-config-fields :deep(.el-select) { width: 100%; }
 @media (max-width: 980px) { .access-layers { grid-template-columns: repeat(3, 1fr); } .access-layer:nth-child(3) { border-right: 0; } .access-layer:nth-child(-n + 3) { border-bottom: 1px solid #e5eaf0; } }
 @media (max-width: 640px) { .access-layers { grid-template-columns: repeat(2, 1fr); } .access-layer:nth-child(3) { border-right: 1px solid #e5eaf0; } .access-layer:nth-child(even) { border-right: 0; } .permission-group { grid-template-columns: 1fr; } .matrix-toolbar { grid-template-columns: 1fr auto; } .matrix-toolbar span { display: none; } }
 </style>

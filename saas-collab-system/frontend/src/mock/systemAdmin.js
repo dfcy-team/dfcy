@@ -29,6 +29,23 @@ export const mockRoles = () => successResponse(page([
   }
 ]));
 
+export const mockRoleScopeOptions = () => successResponse({
+  status: 'mock',
+  api_status: 'mock',
+  departments: [
+    { id: 1, tenant_id: 1, name: '经营中心', parent_id: null, parent_name: '', status: 'active' },
+    { id: 2, tenant_id: 1, name: '供应链组', parent_id: 1, parent_name: '经营中心', status: 'active' }
+  ],
+  users: [
+    { id: 1, username: 'demo-operator', full_name: '演示运营', user_type: 'internal', is_active: true },
+    { id: 2, username: 'demo-finance', full_name: '演示财务', user_type: 'internal', is_active: false }
+  ],
+  roles: [
+    { id: 1, name: '运营只读', code: 'operator_viewer', status: 'active' },
+    { id: 2, name: '系统管理员', code: 'system_admin', status: 'active' }
+  ]
+});
+
 export const mockPermissions = () => successResponse(page([
   { id: 1, code: 'system.users.view', name: '查看用户目录', module: 'system', action: 'users.view', description: '租户内用户只读访问' },
   { id: 2, code: 'system.users.manage', name: '管理用户目录', module: 'system', action: 'users.manage', description: '租户内用户启停和角色绑定' },
@@ -39,6 +56,10 @@ export const mockPermissions = () => successResponse(page([
 export const mockSecurityOperations = () => successResponse({
   status: 'mock',
   summary: { active_users: 12, inactive_users: 2, active_roles: 6, credential_references: 1 },
+  accounts: [
+    { id: 1, username: 'demo-operator', full_name: '演示运营', user_type: 'internal', is_active: true },
+    { id: 2, username: 'demo-disabled', full_name: '演示停用账号', user_type: 'internal', is_active: false }
+  ],
   credential_contract: 'alias_fingerprint_reference_only',
   credential_references: [
     {

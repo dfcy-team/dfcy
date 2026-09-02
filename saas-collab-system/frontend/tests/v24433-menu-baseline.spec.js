@@ -20,7 +20,12 @@ describe('current deployment menu baseline', () => {
     expect(influencers.children.map((item) => item.label)).toEqual([
       '达人档案', '建联任务', '送样履约', 'BD绩效'
     ]);
-    expect(flattenMenuItems(menuItems)).toHaveLength(98);
+
+    const governance = menuItems.find((item) => item.label === '系统治理');
+    expect(governance.children.map((item) => item.label)).toEqual([
+      '组织架构', '用户目录', '角色权限', '安全运维', '配置中心', '配置版本', '平台准入', '发布合同', '日志审计'
+    ]);
+    expect(flattenMenuItems(menuItems)).toHaveLength(99);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

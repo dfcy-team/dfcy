@@ -22,6 +22,7 @@ urlpatterns = [
     path("api/internal/rpa/", include("apps.rpa.urls_internal")),
     path("api/internal/workflow/", include("apps.workflows.urls")),
     path("api/internal/governance/", include("apps.governance.urls")),
+    path("api/internal/audit/", include("apps.audit.urls")),
     path("api/internal/pilot/", include("apps.pilot.urls")),
     path("api/internal/releases/", include("apps.releases.urls_internal")),
     path("api/internal/sales-management/", include("apps.sales_management.urls")),

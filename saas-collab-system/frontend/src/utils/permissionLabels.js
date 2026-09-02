@@ -84,6 +84,8 @@ export const permissionNames = Object.freeze({
   'influencers.fulfillment.view': '查看样品履约',
   'influencers.fulfillment.manage': '管理样品履约',
   'influencers.catalog.view': '查看达人商品价格',
+  'audit.operation_logs.view': '查看操作审计日志',
+  'audit.operation_logs.export': '导出操作审计日志',
   'security.operations.view': '查看安全运维',
   'governance.api.view': '查看 API 合同',
   'governance.api.check': '检查 API 合同',
@@ -119,7 +121,7 @@ const moduleNames = {
   products: '商品', purchasing: '采购', workflow: '流程', rpa: 'RPA', reports: '报表', config: '配置',
   replenishment: '补货', alerts: '预警', analytics: '分析', finance: '财务', integrations: '集成',
   suppliers: '供应商', system: '系统', masterdata: '基础档案', influencers: '达人', security: '安全',
-  governance: '治理', pilot: '试点', listings: '刊登'
+  governance: '治理', pilot: '试点', listings: '刊登', audit: '审计'
 };
 const actionNames = {
   view: '查看', manage: '管理', create: '创建', update: '更新', calculate: '计算', evaluate: '评估',
@@ -131,7 +133,7 @@ const resourceNames = {
   research: '商品调研', master: '商品主数据', orders: '采购订单', approvals: '审批流程', exceptions: '流程异常',
   collaboration: '协同反馈', tasks: '任务', devices: '设备', stability: '稳定性', roles: '角色与权限',
   users: '用户目录', organization: '组织架构', readiness: '试点就绪度', topology: '试点拓扑', recovery: '恢复计划',
-  release: '试点发布', capacity: '试点容量', control: '试点控制台', security_review: '试点安全评审',
+  release: '试点发布', capacity: '试点容量', control: '试点控制台', security_review: '试点安全评审', operation_logs: '操作审计日志',
   verification: '验证运行', performance: '性能运行', entry: '准入决策'
 };
 
