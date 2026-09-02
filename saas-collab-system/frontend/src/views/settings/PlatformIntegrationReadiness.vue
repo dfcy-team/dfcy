@@ -1,30 +1,28 @@
 <template>
   <Phase2DataPage
     title="平台接入准备度"
-    note="展示未来真实平台接入前的只读准备度状态；生产接入默认 disabled。"
-    risk-note="阶段2仅允许 Mock 或后端返回的只读状态，不允许启用真实生产平台。"
-    :loader="mockPlatformIntegrationReadiness"
+    note="展示当前租户各平台的真实只读接入条件与待处理项。"
+    risk-note="本页只读取实际配置状态，不会启用平台写入、修改密钥或发起授权。生产写入始终关闭。"
+    :loader="fetchPlatformIntegrationReadiness"
     :columns="columns"
-    :filters="['平台', '准备状态']"
-    :actions="['准备度复核占位', '生产启用禁用']"
+    :filters="['平台', '当前接入状态']"
   />
 </template>
 
 <script setup>
 import Phase2DataPage from '../../components/Phase2DataPage.vue';
-import { mockPlatformIntegrationReadiness } from '../../mock/platformRisk';
+import { fetchPlatformIntegrationReadiness } from '../../api/integrations';
 
 const columns = [
   { prop: 'platform', label: '平台' },
-  { prop: 'current_access_status', label: '当前接入状态', type: 'status', width: 170 },
-  { prop: 'mock_sandbox_status', label: 'Mock/Sandbox状态', type: 'status', width: 180 },
-  { prop: 'production_status', label: '生产状态', type: 'status', width: 170 },
+  { prop: 'current_access_status_label', label: '当前接入状态', type: 'status', width: 170 },
+  { prop: 'mock_sandbox_status_label', label: '测试环境状态', type: 'status', width: 180 },
+  { prop: 'production_status_label', label: '生产状态', type: 'status', width: 170 },
+  { prop: 'config_summary', label: '配置概况', width: 210 },
+  { prop: 'blocker_summary', label: '待处理项', minWidth: 360 },
   { prop: 'security_review_done', label: '安全评审' },
   { prop: 'credential_custody_done', label: '密钥托管' },
   { prop: 'network_isolation_done', label: '网络隔离' },
-  { prop: 'permission_audit_done', label: '权限审计' },
-  { prop: 'rollback_plan_done', label: '回滚方案' },
-  { prop: 'gray_release_done', label: '灰度方案' },
   { prop: 'high_risk_action_allowed', label: '高风险动作' }
 ];
 </script>

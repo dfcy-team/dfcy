@@ -28,6 +28,18 @@ export const fetchIntegrationConfigs = () =>
     'integrations.configs'
   );
 
+export const fetchPlatformIntegrationReadiness = () =>
+  requestWithMockFallback(
+    { method: 'get', url: '/api/internal/integrations/readiness/' },
+    () => ({
+      success: false,
+      code: 'READINESS_UNAVAILABLE',
+      message: '未能读取真实平台接入准备度，请检查后端服务。',
+      data: null
+    }),
+    'integrations.readiness'
+  );
+
 export const fetchIntegrationConfigDetail = (id = 1) =>
   requestWithMockFallback(
     { method: 'get', url: `/api/internal/integrations/configs/${id}/` },

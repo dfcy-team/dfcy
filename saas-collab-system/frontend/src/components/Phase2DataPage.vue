@@ -136,6 +136,17 @@ function statusType(value) {
     retrying: 'warning',
     manual_required: 'warning',
     security_review_required: 'warning',
+    blocked: 'danger',
+    read_only_ready: 'success',
+    production_readonly_ready: 'success',
+    sandbox_configured: 'warning',
+    not_configured: 'info',
+    '只读接入就绪': 'success',
+    '暂不可接入': 'danger',
+    '生产只读就绪': 'success',
+    '生产接入关闭': 'danger',
+    '已配置测试环境': 'warning',
+    '未配置测试环境': 'info',
     production_disabled: 'danger'
   }[value] || 'info';
 }

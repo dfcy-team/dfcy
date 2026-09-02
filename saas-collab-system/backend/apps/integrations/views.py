@@ -74,6 +74,7 @@ from .models import (
     WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema
+from .readiness_service import build_platform_readiness
 from .product_mapping_service import (
     confirm_product_mapping,
     create_product_mapping,
@@ -259,6 +260,18 @@ def integration_config_collection(request):
     return success_response(PlatformIntegrationConfigSerializer(config).data, status=201)
 
 
+@api_view(["GET"])
+@permission_classes([IsIntegrationViewer])
+def platform_integration_readiness(request):
+    """Return the effective, tenant-scoped read-only platform readiness."""
+    queryset = filter_integration_configs(
+        request.user,
+        PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+        "integrations.view",
+    )
+    return success_response(build_platform_readiness(list(queryset)))
+
+
 @api_view(["POST"])
 @permission_classes([IsIntegrationConfigCollectionUser])
 def create_handoff_integration_config(request):
@@ -316,7 +329,11 @@ def create_handoff_integration_config(request):
             environment=environment,
             status=PlatformIntegrationConfig.Status.PENDING_REVIEW,
             regions=regions,
-            contract_version="open-platform-v1" if platform == PlatformChoices.LAZADA else "shopapi-local-v1",
+            contract_version=(
+                get_platform_schema(platform, environment=environment)["contract_versions"][0]
+                if platform in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+                else "shopapi-local-v1"
+            ),
             platform_config={"api_type": api_type},
             created_by=request.user,
         )
