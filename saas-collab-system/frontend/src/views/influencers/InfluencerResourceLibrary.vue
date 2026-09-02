@@ -169,6 +169,7 @@ async function openEdit(row) {
     fetchInfluencerContacts(row.id)
   ]);
   if (!profileResponse?.success) return ElMessage.error(profileResponse?.message || '达人档案加载失败');
+  if (!contactsResponse?.success) return ElMessage.error(contactsResponse?.message || '联系方式加载失败，已取消编辑以保护现有数据');
   const record = profileResponse.data || row;
   const contacts = collectionRows(contactsResponse?.data || []);
   editing.value = record;
