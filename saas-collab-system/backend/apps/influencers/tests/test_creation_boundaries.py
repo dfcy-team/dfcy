@@ -16,6 +16,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.audit.models import OperationLog
 from apps.influencers import models as influencer_models
 from apps.influencers import services as influencer_services
 from apps.influencers import views as influencer_views
@@ -1427,6 +1428,8 @@ def test_blacklist_recomputes_related_tasks_inside_the_blacklist_transaction(mon
 def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch):
     tenant, user, store, influencer = _records("blacklist-rollback")
     task = _task(user, store, influencer)
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=1)
+    task.refresh_from_db()
     fulfillment, _ = create_sample_fulfillment(
         user=user,
         request_key="blacklist-rollback-sample-key",
@@ -1464,9 +1467,15 @@ def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch
     original_task_status = task.status
     original_task_version = task.version
     recompute = influencer_services.recompute_outreach_task_completion
+    recompute_mutated_task = []
 
     def fail_recompute(*args, **kwargs):
-        recompute(*args, **kwargs)
+        mutated = recompute(*args, **kwargs)
+        recompute_mutated_task.append(
+            (mutated.status, mutated.version, mutated.finalized_at is not None)
+        )
+        assert mutated.status == OutreachTask.Status.COMPLETED
+        assert mutated.version == original_task_version + 1
         raise RuntimeError("injected recompute failure")
 
     monkeypatch.setattr(influencer_services, "recompute_outreach_task_completion", fail_recompute)
@@ -1486,8 +1495,15 @@ def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch
     assert fulfillment.status == SampleFulfillment.Status.PENDING
     assert task.status == original_task_status
     assert task.version == original_task_version
+    assert recompute_mutated_task == [(OutreachTask.Status.COMPLETED, original_task_version + 1, True)]
     assert not InfluencerRestriction.objects.filter(tenant=tenant, influencer=influencer).exists()
     assert not InfluencerRestrictEvent.objects.filter(tenant=tenant, influencer=influencer).exists()
+    assert not OperationLog.objects.filter(
+        tenant=tenant,
+        action="outreach_sample_auto_complete",
+        object_type="outreach_task",
+        object_id=str(task.pk),
+    ).exists()
 
 
 def test_fulfillment_account_resolve_can_create_minimal_profile_idempotently():
