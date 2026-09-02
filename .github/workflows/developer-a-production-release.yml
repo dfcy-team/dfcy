@@ -192,7 +192,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: saas-collab-system
-          file: saas-collab-system/deploy/sandbox/application/Dockerfile.frontend
+          file: saas-collab-system/deploy/pilot/application/Dockerfile.frontend
           push: ${{ needs.validate.outputs.action == 'deploy' }}
           tags: ${{ env.IMAGE_PREFIX }}/saas-collab-frontend:${{ needs.validate.outputs.release_sha }}
           build-args: |
