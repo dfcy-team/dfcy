@@ -69,7 +69,10 @@
         </el-table-column>
         <el-table-column label="目标进度" min-width="160">
           <template #default="{ row }">
-            <el-progress v-if="hasValue(row.target_count)" :percentage="progress(row)" :format="() => progressLabel(row)" />
+            <template v-if="hasValue(row.target_count)">
+              <el-progress :percentage="progress(row)" :format="() => progressLabel(row)" />
+              <small>有效完成 {{ completedFulfillmentCount(row) }}/{{ row.target_count }}</small>
+            </template>
             <span v-else>—</span>
           </template>
         </el-table-column>
@@ -394,7 +397,7 @@ import {
 } from '../../api/influencers';
 import { applyStoreSelection } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
-import { completedFulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation } from './outreachTaskState';
+import { completedFulfillmentCount, fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampleProgressLabel } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
@@ -509,9 +512,9 @@ const visibleStoreOptions = computed(() => {
 
 const isTerminal = (row) => ['completed', 'cancelled'].includes(row?.status);
 const isTargetTerminal = (row) => ['success', 'rejected', 'no_response', 'blocked'].includes(row?.outreach_result);
-const sampleProgressCount = (row) => completedFulfillmentCount(row);
+const sampleProgressCount = (row) => fulfillmentCount(row);
 const progress = (row) => row.target_count ? Math.min(100, Math.round(sampleProgressCount(row) * 100 / row.target_count)) : 0;
-const progressLabel = (row) => `${displayValue(sampleProgressCount(row))}/${displayValue(row.target_count)}`;
+const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
   pending: ['in_progress', 'cancelled'],
