@@ -684,8 +684,8 @@ class SampleFulfillment(StateMachineTenantModel):
             raise ValidationError({"outreach_task": "Outreach task must belong to the same tenant."})
         if task["is_deleted"] and self._state.adding:
             raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive samples."})
-        if task["status"] in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED} and self._state.adding:
-            raise ValidationError({"outreach_task": "Terminal outreach tasks cannot receive samples."})
+        if task["status"] == OutreachTask.Status.CANCELLED and self._state.adding:
+            raise ValidationError({"outreach_task": "Cancelled outreach tasks cannot receive samples."})
         if self.store_id and task["store_id"] != self.store_id:
             raise ValidationError({"store": "Store must match the outreach task."})
         if self.owner_id and task["owner_id"] != self.owner_id:
@@ -873,8 +873,8 @@ class AffiliateOrderSnapshot(TenantValidatedModel):
     order_status = models.CharField(max_length=40)
     creator_username = models.CharField(max_length=160)
     creator_username_normalized = models.CharField(max_length=160, blank=True, default="", db_index=True)
-    actual_paid_commission = models.DecimalField(max_digits=20, decimal_places=4, default=0)
-    estimated_paid_commission = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    actual_paid_commission = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
+    estimated_paid_commission = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
     source_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

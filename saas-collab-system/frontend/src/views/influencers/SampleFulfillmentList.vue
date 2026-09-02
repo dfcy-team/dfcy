@@ -21,8 +21,8 @@
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺">
           <el-option v-for="store in rowStores" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
-        <el-select v-model="filters.status" clearable placeholder="全部状态">
-          <el-option v-for="(label, value) in FULFILLMENT_STATUS_LABELS" :key="value" :label="label" :value="value" />
+        <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
+          <el-option v-for="(label, value) in FULFILLMENT_FILTER_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
         <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
@@ -177,7 +177,9 @@
             <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="请输入产品 ID" />
           </el-form-item>
           <el-form-item label="状态">
-            <el-input :model-value="editingSample ? statusLabel(FULFILLMENT_STATUS_LABELS, editingSample.status) : '待发样'" readonly />
+            <el-select v-model="form.status" :disabled="!editingSample" :placeholder="editingSample ? `系统当前：${statusLabel(FULFILLMENT_STATUS_LABELS, editingSample.status)}` : '系统自动判断'">
+              <el-option v-for="(label, value) in editableStatusOptions" :key="value" :label="label" :value="value" />
+            </el-select>
           </el-form-item>
           <el-form-item label="快捷备注标签">
             <el-select v-model="form.quick_tags" multiple filterable allow-create default-first-option placeholder="输入后回车添加标签">
@@ -298,7 +300,20 @@ const statusUpdatingId = ref(null);
 const filters = reactive({ search: '', status: '', store: null, includeDeleted: false });
 const form = reactive({ outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '直播达人', '已完成', '已拉黑']);
+const FULFILLMENT_FILTER_STATUS_LABELS = Object.freeze(
+  Object.fromEntries(Object.entries(FULFILLMENT_STATUS_LABELS).filter(([value]) => !['live_creator', 'blacklisted'].includes(value)))
+);
 const quickTagOptions = computed(() => [...new Set([...QUICK_TAG_PRESETS, ...form.quick_tags])]);
+const editableStatusOptions = computed(() => {
+  if (!editingSample.value) return {};
+  const current = editingSample.value.status || 'pending';
+  return Object.fromEntries(
+    (FULFILLMENT_STATUS_TRANSITIONS[current] || [])
+      .filter((value) => value !== 'shipped')
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .map((value) => [value, FULFILLMENT_STATUS_LABELS[value]])
+  );
+});
 const selectableLinkTypes = computed(() => inheritedTask.value
   ? { DRJL: FULFILLMENT_LINK_TYPE_LABELS.DRJL }
   : Object.fromEntries(Object.entries(FULFILLMENT_LINK_TYPE_LABELS).filter(([value]) => value !== 'DRJL')));
@@ -548,7 +563,8 @@ async function openEdit(row) {
     sample_order_no: row.sample_order_no || '',
     notes: row.notes || '',
     link_type: row.link_type || 'DRJL',
-    quick_tags: [...(row.quick_tags || [])]
+    quick_tags: [...(row.quick_tags || [])],
+    status: ''
   });
   influencerOptions.value = [{
     id: row.influencer,
@@ -616,12 +632,24 @@ async function submit() {
 }
 
 async function submitEdit() {
+  let confirmTerminal = false;
+  const terminalStatuses = ['completed', 'cancelled', 'blacklisted'];
+  if (form.status && terminalStatuses.includes(form.status)) {
+    try {
+      await ElMessageBox.confirm('终态变更会停止后续履约流转，确认继续吗？', '确认终态变更', { type: 'warning' });
+      confirmTerminal = true;
+    } catch {
+      return;
+    }
+  }
   saving.value = true;
   const response = await updateSampleFulfillment(editingSample.value.id, {
     sample_order_no: form.sample_order_no,
     notes: form.notes,
     link_type: form.link_type,
     quick_tags: form.quick_tags,
+    ...(form.status ? { status: form.status } : {}),
+    ...(confirmTerminal ? { confirm_terminal: true } : {}),
     items: items.value.map((item) => ({
       site_code: item.site_code,
       requested_sku: item.requested_sku?.trim() || null,
