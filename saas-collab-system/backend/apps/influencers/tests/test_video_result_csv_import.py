@@ -58,6 +58,20 @@ def test_video_csv_import_keeps_only_latest_real_snapshot_and_replays_as_noop(tm
     assert result.orders == 2
     assert result.currency == "UNKNOWN"
 
+    refresh = StringIO()
+    call_command(
+        "refresh_influencer_video_profiles",
+        tenant_id=tenant.pk,
+        apply=True,
+        stdout=refresh,
+    )
+    profile = InfluencerProfile.objects.get(influencer=influencer)
+    assert profile.average_video_views == 25
+    assert profile.historical_gmv == 40
+    assert profile.historical_orders == 2
+    assert profile.historical_performance["historical_gmv_source"] == "video_results"
+    assert profile.historical_performance["historical_gmv_currency"] == "UNKNOWN"
+
     second = StringIO()
     call_command(
         "import_video_results_csv",
@@ -68,6 +82,49 @@ def test_video_csv_import_keeps_only_latest_real_snapshot_and_replays_as_noop(tm
     )
     assert "noop=1" in second.getvalue()
     assert VideoResult.objects.count() == 1
+
+
+def test_video_profile_refresh_does_not_sum_mixed_currencies():
+    tenant = Tenant.objects.create(name="Mixed video currency", code="mixed-video-currency")
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="mixed-currency-creator",
+        name="Mixed currency creator",
+        platform="TikTok",
+        handle="mixed.currency.creator",
+    )
+    profile = InfluencerProfile.objects.create(tenant=tenant, influencer=influencer)
+    for suffix, currency, gmv in (("USD", "USD", "10"), ("PHP", "PHP", "500")):
+        VideoResult.objects.create(
+            tenant=tenant,
+            influencer=influencer,
+            content_type=VideoResult.ContentType.VIDEO,
+            platform="TikTok",
+            external_content_id=f"MIXED-{suffix}",
+            metric_date="2026-09-01",
+            views=100,
+            orders=1,
+            gmv=gmv,
+            currency=currency,
+        )
+
+    call_command(
+        "refresh_influencer_video_profiles",
+        tenant_id=tenant.pk,
+        apply=True,
+        stdout=StringIO(),
+    )
+
+    profile.refresh_from_db()
+    assert profile.historical_gmv == 0
+    assert profile.historical_orders == 0
+    assert profile.historical_performance["video_total_gmv"] is None
+    assert profile.historical_performance["video_gmv_mixed_currency"] is True
+    assert profile.historical_performance["video_gmv_by_currency"] == {
+        "PHP": "500",
+        "USD": "10",
+    }
+    assert "historical_gmv_source" not in profile.historical_performance
 
 
 def test_video_csv_import_does_not_match_creator_nickname(tmp_path):
