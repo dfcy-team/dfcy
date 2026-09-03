@@ -316,6 +316,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('displayAmount');
     expect(page).toContain("value === null || value === undefined || value === ''");
     expect(page).toContain('FULFILLMENT_FILTER_STATUS_LABELS');
+    expect(page).toContain("new Set(['processing', 'creating', 'blank', ''])");
+    expect(page).toContain('!LEGACY_FULFILLMENT_STATUSES.has(value)');
     expect(page).toContain("!['live_creator', 'blacklisted'].includes(value)");
     expect(page).toContain('placeholder="全部状态" @change="applyFilters"');
     expect(page).toContain('MANUAL_FULFILLMENT_STATUS_LABELS');

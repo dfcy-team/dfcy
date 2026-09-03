@@ -1083,6 +1083,8 @@ class SampleFulfillmentCollectionView(APIView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
+            if status not in SampleFulfillment.Status.values:
+                raise ValidationError({"status": "Unsupported fulfillment status."})
             queryset = queryset.filter(status=status)
         outreach_task_id = request.query_params.get("outreach_task", "").strip()
         if outreach_task_id:
