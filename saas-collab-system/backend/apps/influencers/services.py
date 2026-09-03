@@ -1319,12 +1319,25 @@ def recompute_outreach_task_completion(*, user, task):
         OutreachTask.Status.IN_PROGRESS,
     }:
         return task
-    sample_count = SampleFulfillment.objects.filter(
-        tenant=user.tenant,
-        outreach_task=task,
-        is_deleted=False,
-    ).count()
-    if task.target_count <= 0 or sample_count < task.target_count:
+    completed_identities = {
+        influencer_identity_key(
+            influencer_id=influencer_id,
+            platform=platform,
+            handle=handle,
+        )
+        for influencer_id, platform, handle in SampleFulfillment.objects.filter(
+            tenant=user.tenant,
+            outreach_task=task,
+            is_deleted=False,
+            status__in=SAMPLE_COMPLETION_STATUSES,
+        ).values_list(
+            "influencer_id",
+            "influencer__platform",
+            "influencer__handle",
+        )
+    }
+    completed_count = len(completed_identities)
+    if task.target_count <= 0 or completed_count < task.target_count:
         return task
 
     now = timezone.now()
@@ -1357,7 +1370,7 @@ def recompute_outreach_task_completion(*, user, task):
             after={
                 "status": task.status,
                 "version": task.version,
-                "sample_count": sample_count,
+                "completed_count": completed_count,
                 "target_count": task.target_count,
             },
         )
@@ -1633,9 +1646,10 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
 def transition_sample_fulfillment(
     *, user, fulfillment, status, expected_version, reason="", confirm_terminal=False
 ):
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=fulfillment.pk, tenant=user.tenant, is_deleted=False
-    )
+    _lock_tenant(user)
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=fulfillment)
+    if fulfillment.is_deleted:
+        raise ValidationError({"fulfillment": "Deleted sample fulfillments cannot transition."})
     if fulfillment.version != expected_version:
         raise ValidationError(
             {"version": "Fulfillment was changed by another request."}, code="conflict"
@@ -1751,6 +1765,7 @@ def update_sample_fulfillment(
     items_mode="replace",
 ):
     """Edit sample facts and atomically rebuild any requested SKU snapshots."""
+    _lock_tenant(user)
     observed = _read_sample_fulfillment(
         user=user,
         fulfillment=fulfillment,
@@ -1881,9 +1896,10 @@ def update_sample_fulfillment(
 
 @transaction.atomic
 def soft_delete_sample_fulfillment(*, user, fulfillment, expected_version):
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=_pk(fulfillment), tenant=user.tenant, is_deleted=False
-    )
+    _lock_tenant(user)
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=fulfillment)
+    if fulfillment.is_deleted:
+        raise ValidationError({"fulfillment": "Deleted sample fulfillments cannot be deleted again."})
     if fulfillment.version != expected_version:
         raise ValidationError(
             {"version": "Fulfillment was changed by another request."},
@@ -1922,6 +1938,7 @@ def soft_delete_sample_fulfillment(*, user, fulfillment, expected_version):
 
 @transaction.atomic
 def restore_sample_fulfillment(*, user, fulfillment, expected_version):
+    _lock_tenant(user)
     observed = _read_sample_fulfillment(
         user=user,
         fulfillment=fulfillment,
@@ -2085,9 +2102,8 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
 @transaction.atomic
 def refresh_sample_fulfillment_video_status(*, user, fulfillment):
     """Promote an unfinished sample when a published video is linked."""
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=_pk(fulfillment), tenant=user.tenant
-    )
+    _lock_tenant(user)
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=fulfillment)
     if (
         fulfillment.is_deleted
         or fulfillment.status not in SAMPLE_VIDEO_RECONCILE_STATUSES

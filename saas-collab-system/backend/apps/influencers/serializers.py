@@ -14,6 +14,7 @@ from .models import (
     SampleItem,
     SkuPriceSnapshot,
     VideoResult,
+    influencer_identity_key,
     influencer_has_active_restriction,
     is_valid_tiktok_username,
     normalize_tiktok_username,
@@ -247,7 +248,16 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
         statuses = [status for _, status, _, _, _ in sample_rows]
         for status in statuses:
             counts[status] = counts.get(status, 0) + 1
-        completed = sum(status in completion_statuses for status in statuses)
+        completed_identities = {
+            influencer_identity_key(
+                influencer_id=influencer_id,
+                platform=platform,
+                handle=handle,
+            )
+            for _, status, influencer_id, platform, handle in sample_rows
+            if status in completion_statuses
+        }
+        completed = len(completed_identities)
         summary = {
             "counts": counts,
             "status_counts": counts,
@@ -279,7 +289,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     def get_completion_validation(self, obj):
         summary = self._sample_summary(obj)
         target_count = obj.target_count
-        target_reached = target_count > 0 and summary["total"] >= target_count
+        target_reached = target_count > 0 and summary["completed"] >= target_count
         return {
             "target_count": target_count,
             "completed_count": summary["completed"],

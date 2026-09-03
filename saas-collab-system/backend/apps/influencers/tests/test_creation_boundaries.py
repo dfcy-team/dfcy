@@ -689,7 +689,7 @@ def test_duplicate_handle_targets_share_capacity_progress_and_terminal_completio
         )
 
 
-def test_each_sample_record_counts_toward_task_completion_even_for_duplicate_handles():
+def test_duplicate_creator_samples_count_once_toward_task_completion():
     tenant, user, store, first = _records("logical-sample-identity")
     first.handle = "sample.creator"
     first.save(update_fields=["handle"])
@@ -738,13 +738,13 @@ def test_each_sample_record_counts_toward_task_completion_even_for_duplicate_han
 
     task.refresh_from_db()
     payload = OutreachTaskSerializer(task).data
-    assert task.status == OutreachTask.Status.COMPLETED
+    assert task.status == OutreachTask.Status.PENDING
     assert payload["sample_fulfillment_count"] == 2
-    assert payload["sample_fulfillment_completed_count"] == 2
-    assert payload["completion_validation"]["target_reached"] is True
+    assert payload["sample_fulfillment_completed_count"] == 1
+    assert payload["completion_validation"]["target_reached"] is False
 
 
-def test_pending_sample_record_auto_completes_task_when_target_is_reached():
+def test_pending_sample_record_does_not_complete_task_when_target_is_reached():
     tenant, user, store, influencer = _records("pending-sample-auto-complete")
     task = _task(user, store, influencer, target_count=1)
 
@@ -758,8 +758,8 @@ def test_pending_sample_record_auto_completes_task_when_target_is_reached():
     task.refresh_from_db()
     assert created is True
     assert fulfillment.status == SampleFulfillment.Status.PENDING
-    assert task.status == OutreachTask.Status.COMPLETED
-    assert task.finalized_at is not None
+    assert task.status == OutreachTask.Status.PENDING
+    assert task.finalized_at is None
 
 
 def test_sample_order_number_auto_ships_and_returns_current_database_state():

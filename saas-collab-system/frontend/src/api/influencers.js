@@ -411,7 +411,7 @@ export const updateSampleFulfillmentStatus = (id, status, version, reason = '') 
   {
     method: 'post',
     url: `${API_ROOT}/sample-fulfillments/${id}/status/`,
-    data: { status, ...(reason ? { reason } : {}) },
+    data: { status, confirm_terminal: true, ...(reason ? { reason } : {}) },
     ...ifMatchHeaders(version)
   },
   mockWrite({ id, status, version: Number(version || 1) + 1 }),

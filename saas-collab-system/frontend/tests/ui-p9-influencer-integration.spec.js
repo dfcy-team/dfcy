@@ -386,7 +386,7 @@ describe('influencer integration workspace contracts', () => {
     expect(requestMock.mock.calls.at(-1)[0]).toMatchObject({
       method: 'post',
       url: '/api/internal/influencers/sample-fulfillments/8/status/',
-      data: { status: 'completed' },
+      data: { status: 'completed', confirm_terminal: true },
       headers: { 'If-Match': '"2"' }
     });
   });
