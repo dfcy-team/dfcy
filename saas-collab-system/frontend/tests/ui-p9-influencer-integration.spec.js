@@ -309,12 +309,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).not.toContain('label="产品名称" required');
     expect(page).not.toContain('<b>{{ displayValue(row.product_name_snapshot) }}</b>');
     expect(page).toContain('inheritedTask.value.task_name || inheritedTask.value.external_product_id');
-    expect(page).toContain('价格未匹配');
     expect(page).toContain('statusLabel(FULFILLMENT_STATUS_LABELS');
-    for (const field of ['sales_amount', 'calculated_cost', 'pricing_status', 'price_match_status', 'cost_match_status']) expect(page).toContain(field);
-    expect(page).toContain('PRICING_STATUS_LABELS');
-    expect(page).toContain('displayAmount');
-    expect(page).toContain("value === null || value === undefined || value === ''");
+    for (const field of ['calculated_cost', 'cost_match_status']) expect(page).toContain(field);
     expect(page).toContain('FULFILLMENT_FILTER_STATUS_LABELS');
     expect(page).toContain("new Set(['processing', 'creating', 'blank', ''])");
     expect(page).toContain('!LEGACY_FULFILLMENT_STATUSES.has(value)');
@@ -335,6 +331,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('ElMessageBox.confirm');
     expect(page).toContain('confirm_terminal');
     expect(page).toContain('status: form.status');
+    expect(page).not.toContain("'直播达人'");
+    expect(page).not.toContain("'已拉黑'");
     expect(page).toContain('outreach_task');
     expect(page).toContain('influencer: form.influencer');
     expect(page).not.toContain('outreach_target: form.outreach_target');
