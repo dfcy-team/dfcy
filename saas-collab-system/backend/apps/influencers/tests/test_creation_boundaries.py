@@ -946,6 +946,23 @@ def test_sample_edit_rejects_manual_intermediate_status():
     assert fulfillment.status == SampleFulfillment.Status.PENDING
 
 
+@pytest.mark.parametrize("legacy_status", ["processing", "creating", "blank"])
+def test_sample_list_rejects_legacy_status_filters(legacy_status):
+    tenant, user, _, _ = _records(f"sample-list-legacy-{legacy_status}")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.view")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"status": legacy_status},
+    )
+
+    assert response.status_code == 400
+    assert "status" in response.data["data"]
+
+
 def test_target_creation_reads_influencer_before_identity_group_lock(monkeypatch):
     _, user, store, influencer = _records("target-lock-order")
     influencer.handle = "shared.creator"
