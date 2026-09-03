@@ -345,7 +345,10 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('FULFILLMENT_FILTER_STATUS_LABELS');
     expect(page).toContain("!['live_creator', 'blacklisted'].includes(value)");
     expect(page).toContain('placeholder="全部状态" @change="applyFilters"');
-    expect(page).toContain(".filter((value) => value !== 'shipped')");
+    expect(page).toContain('MANUAL_FULFILLMENT_STATUS_LABELS');
+    expect(page).toContain("completed: FULFILLMENT_STATUS_LABELS.completed");
+    expect(page).toContain("cancelled: FULFILLMENT_STATUS_LABELS.cancelled");
+    expect(page).not.toContain(".filter((value) => value !== 'shipped')");
     expect(page).toContain("status: ''");
     expect(page).toContain("...(form.status ? { status: form.status } : {})");
     for (const field of ['calculated_cost', 'cost_match_status', 'COST_MATCH_STATUS_LABELS', 'costMatchLabel']) expect(page).toContain(field);
@@ -353,7 +356,6 @@ describe('influencer integration workspace contracts', () => {
     expect(page).not.toContain('PRICING_STATUS_LABELS');
     expect(page).not.toContain('displayAmount');
     expect(page).toContain('fulfillment-note');
-    expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
     expect(page).not.toContain('updateSampleFulfillmentStatus');
     expect(page).toContain('ElMessageBox.confirm');
     expect(page).toContain('confirm_terminal');

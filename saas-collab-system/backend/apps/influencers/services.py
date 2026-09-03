@@ -1684,10 +1684,12 @@ def transition_sample_fulfillment(
     allowed = {
         SampleFulfillment.Status.PENDING: {
             SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.SHIPPED: {
             SampleFulfillment.Status.DELIVERED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.DELIVERED: {

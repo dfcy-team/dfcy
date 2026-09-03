@@ -546,6 +546,10 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
         choices=("replace", "append"), required=False, write_only=True
     )
     confirm_terminal = serializers.BooleanField(required=False, write_only=True)
+    status = serializers.ChoiceField(
+        choices=(SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED),
+        required=False,
+    )
 
     class Meta:
         model = SampleFulfillment
