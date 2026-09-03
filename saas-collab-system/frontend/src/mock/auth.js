@@ -46,6 +46,39 @@ export const mockAuthUser = {
     'pilot.performance.view', 'pilot.performance.plan', 'pilot.performance.review', 'pilot.performance.record', 'pilot.performance.cancel', 'pilot.performance.execute',
     'pilot.entry.view', 'pilot.entry.plan', 'pilot.entry.review'
   ],
+  menu_permission_codes: [
+    'menu.system.organization.view', 'menu.system.users.view', 'menu.system.roles.view',
+    'menu.system.security_operations.view'
+  ],
+  action_permission_codes: [
+    'mock.view',
+    'system.organization.view', 'system.organization.manage',
+    'system.users.view', 'system.users.manage',
+    'system.roles.view', 'system.roles.manage',
+    'masterdata.view', 'masterdata.manage',
+    'security.operations.view',
+    'products.research.view', 'products.research.manage',
+    'products.master.view', 'products.master.manage', 'products.master.freeze',
+    'purchasing.orders.view', 'purchasing.orders.manage',
+    'rpa.tasks.view', 'rpa.tasks.manage', 'rpa.devices.view', 'rpa.devices.dry_run', 'rpa.stability.view',
+    'workflow.approvals.view', 'workflow.approvals.submit', 'workflow.approvals.review', 'workflow.approvals.withdraw',
+    'workflow.exceptions.view', 'workflow.exceptions.manage', 'workflow.collaboration.view', 'workflow.collaboration.confirm',
+    'analytics.view', 'analytics.calculate', 'finance.view',
+    'products.lifecycle.view', 'products.lifecycle.evaluate', 'integrations.view', 'integrations.manage', 'integrations.run',
+    'integrations.store.view', 'integrations.store.authorize', 'integrations.store.revoke', 'integrations.credential.rotate',
+    'integrations.rotate', 'integrations.config.view', 'integrations.config.verify', 'integrations.config.create', 'integrations.config.update', 'integrations.config.disable',
+    'integrations.run_live_readonly', 'config.view', 'config.manage', 'config.approve', 'config.rollback', 'config.system.manage',
+    'integrations.audit.view', 'reports.view', 'reports.export', 'reports.download',
+    'governance.api.view', 'governance.api.check', 'governance.assistants.view', 'governance.assistants.evaluate',
+    'pilot.readiness.view', 'pilot.topology.view', 'pilot.topology.verify', 'pilot.recovery.view', 'pilot.recovery.plan',
+    'pilot.recovery.review', 'pilot.recovery.record', 'pilot.recovery.execute', 'pilot.release.view', 'pilot.release.plan',
+    'pilot.release.review', 'pilot.release.record', 'pilot.release.rollback', 'pilot.release.execute', 'pilot.release.rollback.execute',
+    'pilot.capacity.view', 'pilot.control.view', 'pilot.security_review.view', 'pilot.security_review.plan', 'pilot.security_review.review',
+    'pilot.verification.view', 'pilot.verification.plan', 'pilot.verification.review', 'pilot.verification.record',
+    'pilot.verification.cancel', 'pilot.performance.view', 'pilot.performance.plan', 'pilot.performance.review',
+    'pilot.performance.record', 'pilot.performance.cancel', 'pilot.performance.execute', 'pilot.entry.view', 'pilot.entry.plan', 'pilot.entry.review'
+  ],
+  field_permission_codes: [],
   data_scope: []
 };
 

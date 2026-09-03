@@ -54,6 +54,9 @@ def test_internal_user_can_login_and_access_me():
             "is_superuser": False,
             "roles": ["admin"],
             "permissions": ["accounts.view"],
+            "menu_permission_codes": [],
+            "action_permission_codes": ["accounts.view"],
+            "field_permission_codes": [],
             "data_scope": [],
         },
     }
@@ -87,6 +90,9 @@ def test_me_success_response_uses_standard_shape():
             "is_superuser": False,
             "roles": [],
             "permissions": [],
+            "menu_permission_codes": [],
+            "action_permission_codes": [],
+            "field_permission_codes": [],
             "data_scope": [],
         },
     }

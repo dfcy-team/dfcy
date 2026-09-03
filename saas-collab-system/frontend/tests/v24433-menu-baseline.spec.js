@@ -51,7 +51,9 @@ describe('current deployment menu baseline', () => {
     expect(system).toBeTruthy();
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
     expect(menuItems.some((item) => item.label === '业务协同')).toBe(false);
-    expect(flattenMenuItems(menuItems)).toHaveLength(113);
+    // V2.44.62 adds the superuser-only tenant administration entry inside
+    // system management; all other baseline entries remain unchanged.
+    expect(flattenMenuItems(menuItems)).toHaveLength(114);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {

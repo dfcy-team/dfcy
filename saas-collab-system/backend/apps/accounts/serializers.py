@@ -9,7 +9,7 @@ from .external_auth import (
     resolve_supplier_web_binding,
     stamp_supplier_web_claims,
 )
-from apps.permissions.services import get_user_data_scope
+from apps.permissions.services import get_user_data_scope, get_user_permission_categories
 
 from .models import CustomUser
 
@@ -69,6 +69,9 @@ class CurrentUserSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     roles = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
+    menu_permission_codes = serializers.SerializerMethodField()
+    action_permission_codes = serializers.SerializerMethodField()
+    field_permission_codes = serializers.SerializerMethodField()
     data_scope = serializers.SerializerMethodField()
 
     class Meta:
@@ -82,6 +85,9 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             "is_superuser",
             "roles",
             "permissions",
+            "menu_permission_codes",
+            "action_permission_codes",
+            "field_permission_codes",
             "data_scope",
         )
 
@@ -96,6 +102,9 @@ class CurrentUserSerializer(serializers.ModelSerializer):
         )
 
     def get_permissions(self, obj):
+        if obj.is_superuser:
+            categories = self._permission_categories(obj)
+            return sorted({code for values in categories.values() for code in values})
         return list(
             obj.user_roles.filter(tenant=obj.tenant, role__status="active")
             .select_related("role")
@@ -104,6 +113,25 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             .exclude(role__permissions__code__isnull=True)
             .distinct()
         )
+
+    def _permission_categories(self, obj):
+        # Avoid performing three independent role traversals for one /me
+        # response.  The serializer instance is request-scoped and safe to
+        # cache for the duration of this representation.
+        categories = getattr(obj, "_permission_categories", None)
+        if categories is None:
+            categories = get_user_permission_categories(obj)
+            setattr(obj, "_permission_categories", categories)
+        return categories
+
+    def get_menu_permission_codes(self, obj):
+        return self._permission_categories(obj)["menu"]
+
+    def get_action_permission_codes(self, obj):
+        return self._permission_categories(obj)["action"]
+
+    def get_field_permission_codes(self, obj):
+        return self._permission_categories(obj)["field"]
 
     def get_data_scope(self, obj):
         if obj.is_superuser:
