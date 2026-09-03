@@ -2,8 +2,9 @@ export const menuItems = [
   { path: '/', label: '工作台' },
   {
     label: '产品开发',
-    permissions: ['development.requirement.view','development.project.view','development.product_archive.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view'],
+    permissions: ['development.requirement.view','development.project.view','development.product_archive.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view', 'products.research.view'],
     children: [
+      { path: '/products/research', label: '新品市调', permissions: ['products.research.view'] },
       { path: '/development/requirements', label: '选品提报', permissions: ['development.requirement.view'] },
       { path: '/development/review', label: '需求审核', permissions: ['development.requirement.review'] },
       { path: '/development/projects', label: '开发项目', permissions: ['development.project.view'] },
@@ -17,10 +18,12 @@ export const menuItems = [
   {
     label: '供应链协同',
     internal: true,
-    permissions: ['supply.consolidation.view', 'supply.shipment.view'],
+    permissions: ['supply.consolidation.view', 'supply.shipment.view', 'purchasing.orders.view', 'suppliers.performance.view'],
     children: [
       { path: '/supply-chain/consolidations', label: '集货管理', permissions: ['supply.consolidation.view'] },
-      { path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] }
+      { path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] },
+      { path: '/purchasing/orders', label: '采购订单', permissions: ['purchasing.orders.view'] },
+      { path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] }
     ]
   },
   {
@@ -53,6 +56,8 @@ export const menuItems = [
   },
   {
     label: '销售管理',
+    internal: true,
+    showWhenChildAccessible: true,
     permissions: [
       'sales_management.view',
       'sales_management.orders.view',
@@ -74,7 +79,8 @@ export const menuItems = [
         path: '/sales-management/data-quality',
         label: '数据同步与质量',
         permissions: ['sales_management.data_quality.view', 'sales_management.sync.view']
-      }
+      },
+      { path: '/pricing/prices', label: '价格中心', internal: true }
     ]
   },
   {
@@ -98,20 +104,6 @@ export const menuItems = [
       { path: '/workflow/approvals', label: '审批中心', permissions: ['workflow.approvals.view'] },
       { path: '/workflow/exceptions', label: '异常中心', permissions: ['workflow.exceptions.view'] },
       { path: '/workflow/collaboration-events', label: '协同回填', permissions: ['workflow.collaboration.view'] }
-    ]
-  },
-  {
-    label: '业务协同',
-    internal: true,
-    children: [
-      { path: '/products/research', label: '新品市调', permissions: ['products.research.view'] },
-      { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
-      { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view'] },
-      { path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view'] },
-      { path: '/purchasing/orders', label: '采购订单', permissions: ['purchasing.orders.view'] },
-      { path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] },
-      { path: '/listings/sites', label: '多国家刊登', internal: true },
-      { path: '/pricing/prices', label: '价格中心', internal: true }
     ]
   },
   {
@@ -421,7 +413,9 @@ export function filterMenuItems(user, items = menuItems) {
           return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex);
         });
       }
-      return children.length && canAccessMenuItem(user, item) ? [{ ...item, children }] : [];
+      const canSeeParent = canAccessMenuItem(user, item)
+        || (item.showWhenChildAccessible && children.length > 0);
+      return children.length && canSeeParent ? [{ ...item, children }] : [];
     }
     return canAccessMenuItem(user, item) ? [item] : [];
   });
