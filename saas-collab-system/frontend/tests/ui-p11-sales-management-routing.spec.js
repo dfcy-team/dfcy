@@ -36,14 +36,18 @@ describe('sales management routing contract', () => {
     expect(read('src/router/index.js')).not.toContain("path: 'analytics/sales', component: SalesOverview");
   });
 
-  it('adds one top-level menu between经营决策 and达人管理 without changing the existing order', () => {
+  it('keeps the corrected top-level order after removing业务协同', () => {
     const labels = menuItems.map((item) => item.label);
-    expect(labels.indexOf('经营决策')).toBeGreaterThanOrEqual(0);
+    expect(labels).toEqual([
+      '工作台', '产品开发', '供应链协同', '多平台刊登', '经营分析', '经营决策', '销售管理', '达人管理',
+      '流程协同', 'RPA协同', 'API数据接入', '财务中心', '报表中心', '基础档案', '系统治理', '治理与试点'
+    ]);
+    expect(labels).not.toContain('业务协同');
     expect(labels.indexOf('销售管理')).toBe(labels.indexOf('经营决策') + 1);
     expect(labels.indexOf('达人管理')).toBe(labels.indexOf('销售管理') + 1);
     expect(labels.indexOf('流程协同')).toBe(labels.indexOf('达人管理') + 1);
     const salesMenu = menuItems.find((item) => item.label === '销售管理');
-    expect(salesMenu.children.map((item) => item.path)).toEqual(salesRoutes);
+    expect(salesMenu.children.map((item) => item.path)).toEqual([...salesRoutes, '/pricing/prices']);
     expect([...new Set(salesMenu.permissions)].sort()).toEqual([...salesPermissions].sort());
   });
 
@@ -51,8 +55,27 @@ describe('sales management routing contract', () => {
     const viewer = { user_type: 'internal', permissions: ['sales_management.orders.view'] };
     const paths = flattenMenuItems(filterMenuItems(viewer)).map((item) => item.path);
     expect(paths.filter((path) => path.startsWith('/sales-management/'))).toEqual(['/sales-management/orders']);
+    expect(paths).toContain('/pricing/prices');
     expect(canAccessPath(viewer, '/sales-management/orders')).toBe(true);
     expect(canAccessPath(viewer, '/sales-management/returns')).toBe(false);
     expect(canAccessPath({ ...viewer, user_type: 'external' }, '/sales-management/orders')).toBe(false);
+  });
+
+  it('shows each moved entry through its owning parent and keeps internal-only pricing hidden externally', () => {
+    const visibleChildren = (user, parentLabel) => {
+      const parent = filterMenuItems(user).find((item) => item.label === parentLabel);
+      return parent?.children.map((item) => item.path) || [];
+    };
+
+    expect(visibleChildren({ user_type: 'internal', permissions: ['products.research.view'] }, '产品开发'))
+      .toContain('/products/research');
+    expect(visibleChildren({ user_type: 'internal', permissions: ['purchasing.orders.view'] }, '供应链协同'))
+      .toContain('/purchasing/orders');
+    expect(visibleChildren({ user_type: 'internal', permissions: ['suppliers.performance.view'] }, '供应链协同'))
+      .toContain('/suppliers/performance');
+
+    const internalWithoutSalesPermission = { user_type: 'internal', permissions: [] };
+    expect(visibleChildren(internalWithoutSalesPermission, '销售管理')).toContain('/pricing/prices');
+    expect(visibleChildren({ user_type: 'external', permissions: [] }, '销售管理')).toEqual([]);
   });
 });
