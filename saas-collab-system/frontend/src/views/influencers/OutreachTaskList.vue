@@ -395,7 +395,7 @@ import {
   updateOutreachTarget,
   updateOutreachTask
 } from '../../api/influencers';
-import { applyStoreSelection } from './outreachProductMatch';
+import { applyProductCandidate } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
 import { completedFulfillmentCount, fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampleProgressLabel } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
@@ -658,7 +658,8 @@ function clearTaskDraft() {
 }
 
 function selectMatchedStore(storeId) {
-  matchedSkuPrefixes.value = applyStoreSelection(form, storeId, matchedCandidates.value);
+  const candidate = matchedCandidates.value.find((item) => String(item.store_id) === String(storeId));
+  matchedSkuPrefixes.value = applyProductCandidate(form, candidate);
 }
 
 async function matchProduct() {

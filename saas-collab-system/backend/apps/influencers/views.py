@@ -426,7 +426,15 @@ class InfluencerContactsView(APIView):
             (row.channel, row.value): row
             for row in influencer.contacts.filter(tenant=request.user.tenant)
         }
-        influencer.contacts.filter(tenant=request.user.tenant).update(is_active=False, is_primary=False)
+        # Contact rows use the protected tenant-owned manager.  This endpoint
+        # has already validated the complete replacement payload and holds the
+        # tenant/influencer locks, so use the explicit low-level update here
+        # instead of bypassing validation through the default manager.
+        models.QuerySet.update(
+            influencer.contacts.filter(tenant=request.user.tenant),
+            is_active=False,
+            is_primary=False,
+        )
         created = []
         for serializer in serializers:
             values = serializer.validated_data
@@ -440,6 +448,7 @@ class InfluencerContactsView(APIView):
                 row.full_clean()
                 row.save(update_fields=["label", "is_primary", "is_active", "updated_at"])
             created.append(row)
+        _advance_influencer_version(influencer)
         return success_response(InfluencerContactSerializer(created, many=True).data)
 
 

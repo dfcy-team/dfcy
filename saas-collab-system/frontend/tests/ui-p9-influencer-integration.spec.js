@@ -258,12 +258,12 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('filterable');
     expect(page).toContain('influencerOptions');
     for (const field of ['influencer_name', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
-    expect(page).toContain("path: '/influencers/sample-fulfillments'");
-    expect(page).toContain('outreach_task: String(task.id)');
+    expect(page).toContain('openSampleCreate');
+    expect(page).toContain('outreach_task: task.id');
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
     expect(page).toContain('matchOutreachProduct');
-    expect(page).toContain('商品数据未导入');
+    expect(page).toContain('商品数据未匹配');
     expect(page).toContain('已匹配店铺');
     expect(page).toContain('matchedCandidates.value.forEach');
     expect(page).toContain('matchedStoreIds.value.map');
@@ -322,7 +322,7 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain("status: ''");
     expect(page).toContain("...(form.status ? { status: form.status } : {})");
     for (const field of ['calculated_cost', 'cost_match_status', 'COST_MATCH_STATUS_LABELS', 'costMatchLabel']) expect(page).toContain(field);
-    expect(page).toContain('fulfillment-note');
+    expect(page).toContain('detail-note');
     expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
     expect(page).toContain('updateSampleFulfillmentStatus');
     expect(page).toContain('outreach_task');

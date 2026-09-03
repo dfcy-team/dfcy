@@ -218,6 +218,11 @@ def _tenant_influencer(user, influencer_id, *, for_update):
     return influencer
 
 
+def _lock_tenant(user):
+    """Serialize tenant-scoped workflow writes before locking child rows."""
+    return Tenant.objects.select_for_update().get(pk=user.tenant_id)
+
+
 def _locked_influencer(user, influencer_id):
     return _lock_influencer_identity(user=user, influencer=influencer_id)[0]
 
@@ -1307,6 +1312,7 @@ def published_video_results_queryset(fulfillment):
 @transaction.atomic
 def recompute_outreach_task_completion(*, user, task):
     """Complete an active task once its effective, non-deleted samples reach the target."""
+    _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if task.is_deleted or task.status not in {
         OutreachTask.Status.PENDING,
@@ -2064,16 +2070,12 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
             )
             if fulfillment.outreach_task_id:
                 affected_task_ids.add(fulfillment.outreach_task_id)
-        # Sample creation locks task -> influencer, while blacklist propagation
-        # locks influencer -> fulfillment. Recompute tasks only after this
-        # transaction commits so the two paths cannot form a reverse lock chain.
-        task_ids = tuple(sorted(affected_task_ids))
-        if task_ids:
-            def recompute_tasks_after_commit():
-                for task_id in task_ids:
-                    recompute_outreach_task_completion(user=user, task=task_id)
-
-            transaction.on_commit(recompute_tasks_after_commit)
+        # Keep task recomputation in this transaction so blacklist propagation
+        # and the derived task state commit or roll back together.  The tenant
+        # lock is acquired first by both this path and recompute, which keeps
+        # the child-row lock order deterministic for concurrent writers.
+        for task_id in sorted(affected_task_ids):
+            recompute_outreach_task_completion(user=user, task=task_id)
     return restriction, event
 
 

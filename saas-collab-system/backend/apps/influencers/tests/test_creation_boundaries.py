@@ -554,6 +554,7 @@ def test_identity_edit_api_locks_old_and_new_groups_in_id_order(monkeypatch):
         f"/api/internal/influencers/{selected.pk}/",
         {"handle": "changed.creator"},
         format="json",
+        HTTP_IF_MATCH=selected.updated_at.isoformat(),
     )
 
     assert response.status_code == 200, response.data
