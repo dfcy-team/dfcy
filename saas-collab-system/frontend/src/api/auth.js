@@ -1,6 +1,12 @@
 import axios from 'axios';
 import { getMockResponse, normalizeApiError, requestApi, useMock } from './request';
-import { mockCurrentUser, mockLogin } from '../mock/auth';
+import {
+  mockChangeMyPassword,
+  mockCurrentUser,
+  mockLogin,
+  mockMyProfile,
+  mockUpdateMyProfile,
+} from '../mock/auth';
 import { apiBaseUrl } from './baseUrl';
 
 export function normalizeLoginResponse(payload) {
@@ -33,4 +39,19 @@ export const login = async (data = {}) => {
 export const getCurrentUser = () => {
   if (useMock) return Promise.resolve(getMockResponse(mockCurrentUser, 'auth.me'));
   return requestApi({ method: 'get', url: '/api/internal/auth/me/' });
+};
+
+export const getMyProfile = () => {
+  if (useMock) return Promise.resolve(getMockResponse(mockMyProfile, 'auth.profile'));
+  return requestApi({ method: 'get', url: '/api/internal/auth/profile/' });
+};
+
+export const updateMyProfile = (payload) => {
+  if (useMock) return Promise.resolve(getMockResponse(() => mockUpdateMyProfile(payload), 'auth.profile.update'));
+  return requestApi({ method: 'patch', url: '/api/internal/auth/profile/', data: payload });
+};
+
+export const changeMyPassword = (payload) => {
+  if (useMock) return Promise.resolve(getMockResponse(mockChangeMyPassword, 'auth.password.change'));
+  return requestApi({ method: 'post', url: '/api/internal/auth/password/', data: payload });
 };
