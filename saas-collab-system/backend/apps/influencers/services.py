@@ -1170,6 +1170,7 @@ def soft_delete_outreach_task(*, user, task, expected_version):
 
 @transaction.atomic
 def restore_outreach_task(*, user, task, expected_version):
+    _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if not task.is_deleted:
         if task.version != expected_version:
@@ -1458,6 +1459,7 @@ def _recompute_related_task(*, user, fulfillment):
 
 @transaction.atomic
 def create_sample_fulfillment(*, user, request_key, validated_data, item_payloads):
+    _lock_tenant(user)
     if not request_key or len(request_key) > 128:
         raise ValidationError({"idempotency_key": "Idempotency-Key must be 1-128 characters."})
     data = dict(validated_data)
@@ -2185,6 +2187,7 @@ def mark_overdue_sample_fulfillments(*, actor, tenant=None, now=None, batch_size
         if overdue_ids:
             reconcile_after_lock = []
             with transaction.atomic():
+                _lock_tenant(actor)
                 locked_rows = list(
                     SampleFulfillment.objects.select_for_update()
                     .filter(
