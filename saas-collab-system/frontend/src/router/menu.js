@@ -27,11 +27,27 @@ export const menuItems = [
     ]
   },
   {
-    label: '\u591a\u5e73\u53f0\u520a\u767b',
-    permissions: ['listings.profile.view','listings.template.view'],
+    label: '库存管理',
+    internal: true,
+    permissions: ['alerts.view', 'replenishment.view'],
     children: [
-      { path: '/listings/sites', label: '\u520a\u767b\u8d44\u6599', permissions: ['listings.profile.view'] },
-      { path: '/listings/templates', label: '\u520a\u767b\u6a21\u677f', permissions: ['listings.template.view'] }
+      { path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
+      { path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] }
+    ]
+  },
+  {
+    label: '全球刊登',
+    permissions: ['listings.profile.view', 'listings.template.view', 'listings.workbench.view', 'listings.mapping.view', 'listings.task.view'],
+    children: [
+      { path: '/listings/workbench', label: '全球刊登工作台', permissions: ['listings.workbench.view'] },
+      { path: '/listings/tasks', label: '刊登任务', permissions: ['listings.task.view'] },
+      { path: '/listings/online-products', label: '在线商品', permissions: ['listings.profile.view'] },
+      { path: '/listings/category-mappings', label: '平台类目映射', permissions: ['listings.mapping.view'] },
+      { path: '/listings/attribute-mappings', label: '商品属性映射', permissions: ['listings.mapping.view'] },
+      { path: '/listings/logs', label: '刊登日志', permissions: ['listings.task.view'] },
+      { path: '/listings/exceptions', label: '刊登异常', permissions: ['listings.task.view'] },
+      { path: '/listings/sites', label: '刊登资料', permissions: ['listings.profile.view'] },
+      { path: '/listings/templates', label: '刊登模板', permissions: ['listings.template.view'] }
     ]
   },
   {
@@ -46,8 +62,6 @@ export const menuItems = [
   {
     label: '经营决策',
     children: [
-      { path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
-      { path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] },
       { path: '/decision/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
       { path: '/decision/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
       { path: '/decision/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
@@ -121,12 +135,13 @@ export const menuItems = [
   },
   {
     label: 'API数据接入',
-    permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'masterdata.view'],
+    permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'config.system.manage', 'masterdata.view'],
     children: [
       { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
       { path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
       { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
       { path: '/integrations/readiness', label: '生产准入', permissions: ['integrations.view'] },
+      { path: '/integrations/production-settings', label: '生产环境配置', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
       { path: '/integrations/authorizations', label: '店铺授权', permissions: ['integrations.store.view'] },
       { path: '/integrations/capabilities', label: '能力矩阵', permissions: ['integrations.store.view'] },
       { path: '/integrations/store-mappings', label: '店铺映射', permissions: ['integrations.store.view'] },
@@ -134,9 +149,9 @@ export const menuItems = [
       { path: '/integrations/incidents', label: '同步异常', permissions: ['integrations.view'] },
       { path: '/integrations/audit', label: '集成审计', permissions: ['integrations.audit.view'] },
       { path: '/integrations/platform-drill', label: '平台操作演练', permissions: ['integrations.view'] },
-      { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.view'] },
+      { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.config.view'] },
       { path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
-      { path: '/integrations/sync-runs', label: '运行记录', permissions: ['integrations.view'] }
+      { path: '/integrations/sync-runs', label: '同步运行记录', permissions: ['integrations.view'] }
     ]
   },
   {
@@ -190,7 +205,7 @@ export const menuItems = [
     ]
   },
   {
-    label: '系统治理',
+    label: '系统管理',
     children: [
       { path: '/system/departments', label: '组织架构', permissions: ['system.organization.view'] },
       { path: '/system/users', label: '用户目录', permissions: ['system.users.view'] },
@@ -221,6 +236,28 @@ export const menuItems = [
     ]
   }
 ];
+
+const topLevelMenuOrder = [
+  '工作台',
+  '基础档案',
+  '产品开发',
+  '供应链协同',
+  '库存管理',
+  '全球刊登',
+  '销售管理',
+  '达人管理',
+  '财务中心',
+  '经营分析',
+  '经营决策',
+  '报表中心',
+  '流程协同',
+  'RPA协同',
+  'API数据接入',
+  '系统管理',
+  '治理与试点'
+];
+
+menuItems.sort((left, right) => topLevelMenuOrder.indexOf(left.label) - topLevelMenuOrder.indexOf(right.label));
 
 // Every authenticated route must be registered here. The guard deliberately
 // denies paths without a contract so a newly added page cannot bypass RBAC.
@@ -303,8 +340,9 @@ export const routeCapabilities = [
   { path: '/rpa/stability', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/rpa/account-locks', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/rpa/page-signatures', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
-  { path: '/integrations/configs', permissions: ['integrations.view'], userTypes: ['internal'] },
+  { path: '/integrations/configs', permissions: ['integrations.config.view'], userTypes: ['internal'] },
   { path: '/integrations/readiness', permissions: ['integrations.view'], userTypes: ['internal'] },
+  { path: '/integrations/production-settings', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
   { path: '/integrations/authorizations', permissions: ['integrations.store.view'], userTypes: ['internal'] },
   { path: '/integrations/capabilities', permissions: ['integrations.store.view'], userTypes: ['internal'] },
   { path: '/integrations/store-mappings', permissions: ['integrations.store.view'], userTypes: ['internal'] },

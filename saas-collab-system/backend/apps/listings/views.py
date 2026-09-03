@@ -12,7 +12,7 @@ from apps.common.error_codes import ErrorCode
 from apps.products.models import ProductCategory, ProductLegacyItem, ProductSKU
 
 from .models import ListingProfile, ListingTemplate, PlatformProductDetail
-from .permissions import CanApproveListings, CanManageListings, CanManageTemplates, CanPublishListings, CanViewListings, CanViewTemplates, CanViewPlatformProductDetails, CanManagePlatformProductDetails, CanImportPlatformProductDetails
+from .permissions import CanApproveListings, CanManageListings, CanManageTemplates, CanPublishListingEndpoint, CanViewListings, CanViewTemplates, CanViewPlatformProductDetails, CanManagePlatformProductDetails, CanImportPlatformProductDetails
 from .serializers import (
     ListingProfileSerializer,
     ListingPublicationJobSerializer,
@@ -84,11 +84,24 @@ def profile_approve(request, pk):
 
 
 @api_view(["POST"])
-@permission_classes([CanPublishListings])
+@permission_classes([CanPublishListingEndpoint])
 def profile_publish(request, pk):
-    job, replayed = queue_listing_publication(profile_id=pk, actor=request.user, idempotency_key=request.headers.get("Idempotency-Key", ""), action=request.data.get("action", "create"))
+    execution_mode = str(request.data.get("execution_mode", "dry_run") or "dry_run").strip().lower()
+    execution_channel = str(request.data.get("execution_channel", "rpa") or "rpa").strip().lower()
+    action = str(request.data.get("action", "create") or "create").strip().lower()
+    job, replayed = queue_listing_publication(
+        profile_id=pk,
+        actor=request.user,
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+        action=action,
+        execution_mode=execution_mode,
+        execution_channel=execution_channel,
+        confirm_production=request.data.get("confirm_production") is True,
+    )
     data = ListingPublicationJobSerializer(job).data
     data["replayed"] = replayed
+    data["queue_boundary"] = "queue_only"
+    data["external_platform_call"] = False
     return success_response(data, status=200 if replayed else 201)
 
 

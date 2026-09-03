@@ -9,12 +9,23 @@
         <el-tag type="success" effect="plain">SaaS MySQL 查询正常</el-tag>
         <template v-if="mode === 'configs'">
           <el-button @click="auditVisible = !auditVisible">{{ auditVisible ? '收起变更审计' : '查看变更审计' }}</el-button>
-          <el-button class="handoff-action" @click="openCreateConfig">新建接入配置</el-button>
+          <el-button
+            class="handoff-action"
+            :loading="operating && !credentialDialog"
+            :disabled="!configCreateAccess.allowed || operating"
+            :title="configCreateAccess.allowed ? '创建新的平台接入配置' : configCreateAccess.reason"
+            @click="openCreateConfig"
+          >新建接入配置</el-button>
         </template>
         <template v-else-if="mode === 'sync-jobs'">
           <el-button @click="dueDialog = true">处理到期任务</el-button>
           <el-button @click="reconcileDialog = true">补齐缺失任务</el-button>
-          <el-button class="handoff-action" @click="openCreateJob()">新增同步任务</el-button>
+          <el-button
+            class="handoff-action"
+            :disabled="!integrationManageAccess.allowed || operating"
+            :title="integrationManageAccess.allowed ? '新增同步任务策略' : integrationManageAccess.reason"
+            @click="openCreateJob()"
+          >新增同步任务</el-button>
         </template>
         <el-button v-else :loading="loading" @click="load">刷新运行状态</el-button>
       </div>
@@ -118,7 +129,11 @@
       <header><h2>{{ contract.title }}</h2><strong>{{ number(pagination.total) }} 条</strong></header>
       <div v-if="mode === 'sync-jobs' && selectedJobs.length" class="batch-bar">
         <strong>已选择 {{ selectedJobs.length }} 个任务</strong>
-        <div><el-button size="small" @click="batchToggle(true)">批量启用</el-button><el-button size="small" @click="batchToggle(false)">批量停用</el-button><el-button size="small" @click="batchRunMock">运行模拟任务</el-button></div>
+        <div>
+          <el-button size="small" :disabled="!integrationManageAccess.allowed || operating" :title="integrationManageAccess.allowed ? '批量启用同步任务' : integrationManageAccess.reason" @click="batchToggle(true)">批量启用</el-button>
+          <el-button size="small" :disabled="!integrationManageAccess.allowed || operating" :title="integrationManageAccess.allowed ? '批量停用同步任务' : integrationManageAccess.reason" @click="batchToggle(false)">批量停用</el-button>
+          <el-button size="small" :disabled="!mockRunAccess.allowed || operating" :title="mockRunAccess.allowed ? '批量运行本地模拟任务' : mockRunAccess.reason" @click="batchRunMock">运行模拟任务</el-button>
+        </div>
       </div>
       <el-table v-loading="loading" :data="rows" max-height="610" :empty-text="contract.empty" row-key="id" @selection-change="selectedJobs = $event">
         <el-table-column v-if="mode === 'sync-jobs'" type="selection" width="46" />
@@ -136,12 +151,55 @@
           <el-table-column label="最近引用检查" min-width="165"><template #default="{ row }">{{ date(row.last_verified_at) }}</template></el-table-column>
           <el-table-column label="操作" fixed="right" min-width="390">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openCredential(row)">维护凭据</el-button>
-              <el-button link type="primary" @click="verify(row)">检查凭据</el-button>
-              <el-button link type="primary" @click="checkConsistency(row)">本地一致性检查</el-button>
-              <el-button link type="primary" @click="checkReadonly(row)">平台只读检查</el-button>
-              <el-button v-if="row.status !== 'disabled'" link type="danger" @click="disableConfig(row)">禁用</el-button>
-              <el-button v-else link type="danger" :loading="deletingConfigId === row.id" @click="deleteConfig(row)">删除</el-button>
+              <el-button
+                link
+                type="primary"
+                :disabled="!credentialRotateAccess.allowed || configActionBusy(row)"
+                :title="credentialRotateAccess.allowed ? '维护并加密保存开发者凭据' : credentialRotateAccess.reason"
+                @click="openCredential(row)"
+              >维护凭据</el-button>
+              <el-button
+                link
+                type="primary"
+                :loading="configActionLoadingFor('verify', row)"
+                :disabled="!configVerifyAccess.allowed || configActionBusy(row)"
+                :title="configVerifyAccess.allowed ? '检查凭据引用完整性' : configVerifyAccess.reason"
+                @click="verify(row)"
+              >检查凭据</el-button>
+              <el-button
+                link
+                type="primary"
+                :loading="configActionLoadingFor('consistency', row)"
+                :disabled="!configVerifyAccess.allowed || configActionBusy(row)"
+                :title="configVerifyAccess.allowed ? '检查本地授权和任务引用一致性' : configVerifyAccess.reason"
+                @click="checkConsistency(row)"
+              >本地一致性检查</el-button>
+              <el-button
+                link
+                type="primary"
+                :loading="configActionLoadingFor('readonly', row)"
+                :disabled="!configReadonlyAccess.allowed || configActionBusy(row)"
+                :title="configReadonlyAccess.allowed ? '调用一次平台只读接口检查连通性' : configReadonlyAccess.reason"
+                @click="checkReadonly(row)"
+              >平台只读检查</el-button>
+              <el-button
+                v-if="row.status !== 'disabled'"
+                link
+                type="danger"
+                :loading="configActionLoadingFor('disable', row)"
+                :disabled="!configDisableAccess.allowed || configActionBusy(row)"
+                :title="configDisableAccess.allowed ? '禁用平台接入配置及其关联任务' : configDisableAccess.reason"
+                @click="disableConfig(row)"
+              >禁用</el-button>
+              <el-button
+                v-else
+                link
+                type="danger"
+                :loading="configActionLoadingFor('delete', row)"
+                :disabled="!configDisableAccess.allowed || configActionBusy(row)"
+                :title="configDisableAccess.allowed ? '删除已停用的平台接入配置（历史记录保留）' : configDisableAccess.reason"
+                @click="deleteConfig(row)"
+              >删除</el-button>
             </template>
           </el-table-column>
         </template>
@@ -153,7 +211,7 @@
           <el-table-column label="运行策略" min-width="180"><template #default="{ row }"><strong>{{ scheduleDescription(row) }}</strong><small class="cell-sub">{{ label('execution_mode', row.execution_mode) }} · {{ row.next_run_at ? `下次 ${date(row.next_run_at)}` : label('schedule_state', row.schedule_state) }}</small></template></el-table-column>
           <el-table-column label="任务状态" min-width="150"><template #default="{ row }"><status-tag :value="row.health_state" /><small class="cell-sub">{{ row.blocked_reason || label('schedule_state', row.schedule_state) }}</small></template></el-table-column>
           <el-table-column label="最近运行" min-width="180"><template #default="{ row }"><strong>{{ row.latest_run_status ? label('status', row.latest_run_status) : '尚未运行' }}</strong><small class="cell-sub">{{ row.latest_started_at ? date(row.latest_started_at) : '等待首次执行' }}</small></template></el-table-column>
-          <el-table-column label="操作" fixed="right" min-width="180"><template #default="{ row }"><el-button link type="primary" :disabled="!rowRunAccess(row).allowed" :title="rowRunAccess(row).reason" @click="runJob(row)">{{ row.execution_mode === 'live_readonly' ? '确认并运行' : '立即运行' }}</el-button><el-button link type="primary" @click="openJobDetail(row)">详情</el-button><el-dropdown trigger="click" @command="command => handleJobCommand(command, row)"><el-button link type="primary">更多</el-button><template #dropdown><el-dropdown-menu><el-dropdown-item command="detail">查看任务详情</el-dropdown-item><el-dropdown-item command="edit">编辑同步策略</el-dropdown-item><el-dropdown-item command="clone">复制配置新建</el-dropdown-item><el-dropdown-item command="runs">查看运行记录</el-dropdown-item><el-dropdown-item command="business">查看业务数据</el-dropdown-item><el-dropdown-item command="toggle" :disabled="!row.is_enabled && Boolean(row.blocked_reason)">{{ row.is_enabled ? '停用任务' : (row.blocked_reason ? '暂不可启用' : '启用任务') }}</el-dropdown-item><el-dropdown-item v-if="!row.is_enabled && row.schedule_state !== 'running'" command="delete" divided>删除任务</el-dropdown-item></el-dropdown-menu></template></el-dropdown></template></el-table-column>
+          <el-table-column label="操作" fixed="right" min-width="180"><template #default="{ row }"><el-button link type="primary" :disabled="!rowRunAccess(row).allowed" :title="rowRunAccess(row).reason" @click="runJob(row)">{{ row.execution_mode === 'live_readonly' ? '确认并运行' : '立即运行' }}</el-button><el-button link type="primary" @click="openJobDetail(row)">详情</el-button><el-dropdown trigger="click" @command="command => handleJobCommand(command, row)"><el-button link type="primary">更多</el-button><template #dropdown><el-dropdown-menu><el-dropdown-item command="detail">查看任务详情</el-dropdown-item><el-dropdown-item command="edit" :disabled="!integrationManageAccess.allowed" :title="integrationManageAccess.allowed ? '编辑同步策略' : integrationManageAccess.reason">编辑同步策略</el-dropdown-item><el-dropdown-item command="clone" :disabled="!integrationManageAccess.allowed" :title="integrationManageAccess.allowed ? '复制配置新建同步任务' : integrationManageAccess.reason">复制配置新建</el-dropdown-item><el-dropdown-item command="runs">查看运行记录</el-dropdown-item><el-dropdown-item command="business">查看业务数据</el-dropdown-item><el-dropdown-item command="toggle" :disabled="!integrationManageAccess.allowed || (!row.is_enabled && Boolean(row.blocked_reason))" :title="integrationManageAccess.allowed ? '启用或停用同步任务' : integrationManageAccess.reason">{{ row.is_enabled ? '停用任务' : (row.blocked_reason ? '暂不可启用' : '启用任务') }}</el-dropdown-item><el-dropdown-item v-if="!row.is_enabled && row.schedule_state !== 'running'" command="delete" divided :disabled="!integrationManageAccess.allowed" :title="integrationManageAccess.allowed ? '删除停用的同步任务' : integrationManageAccess.reason">删除任务</el-dropdown-item></el-dropdown-menu></template></el-dropdown></template></el-table-column>
         </template>
 
         <template v-else>
@@ -174,7 +232,7 @@
           <el-table-column label="失败" prop="failed_count" min-width="70" />
           <el-table-column label="重试" min-width="80"><template #default="{ row }">{{ row.retry_count ? `第 ${row.retry_count} 次` : '首次' }}</template></el-table-column>
           <el-table-column label="脱敏错误" min-width="170"><template #default="{ row }">{{ row.masked_error_message || '—' }}</template></el-table-column>
-          <el-table-column label="操作" fixed="right" min-width="170"><template #default="{ row }"><el-button link type="primary" @click="openRunDetail(row)">查看详情</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'simulation'" link type="primary" :disabled="row.retry_count >= row.max_retry_count" @click="retryRun(row)">{{ row.retry_count >= row.max_retry_count ? '已达重试上限' : '重试失败任务' }}</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'live_readonly'" link type="primary" @click="returnToJob(row)">返回任务确认重跑</el-button></template></el-table-column>
+          <el-table-column label="操作" fixed="right" min-width="170"><template #default="{ row }"><el-button link type="primary" @click="openRunDetail(row)">查看详情</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'simulation'" link type="primary" :loading="retryLoadingId === row.id" :disabled="!mockRunAccess.allowed || retryLoadingId === row.id || retryLimitReached(row)" :title="retryButtonTitle(row)" @click="retryRun(row)">{{ retryLimitReached(row) ? '已达重试上限' : '重试失败任务' }}</el-button><el-button v-if="row.status === 'failed' && row.execution_mode === 'live_readonly'" link type="primary" @click="returnToJob(row)">返回任务确认重跑</el-button></template></el-table-column>
         </template>
       </el-table>
       <footer class="table-footer"><span>第 {{ pageStart }}–{{ pageEnd }} 条，共 {{ number(pagination.total) }} 条</span><el-pagination v-model:current-page="page" background layout="prev, pager, next" :page-size="pagination.page_size || 50" :total="pagination.total || 0" @current-change="load" /></footer>
@@ -202,7 +260,7 @@
         </el-form-item>
       </el-form>
       <el-alert title="平台来自平台档案；服务端仍会校验平台能力、回调地址与可用 API 类型。" type="info" :closable="false" show-icon />
-      <template #footer><el-button @click="configDialog = false">取消</el-button><el-button class="handoff-action" @click="prepareConfig">创建配置</el-button></template>
+      <template #footer><el-button @click="configDialog = false">取消</el-button><el-button class="handoff-action" :loading="operating" :disabled="!configCreateAccess.allowed || operating" :title="configCreateAccess.allowed ? '提交新的平台接入配置' : configCreateAccess.reason" @click="prepareConfig">创建配置</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="dueDialog" title="处理到期同步任务" width="min(700px, 92vw)">
@@ -264,7 +322,7 @@
         </template>
       </el-form>
       <p class="safe-note">密文由服务端安全保管；同表只记录引用、指纹和审计信息，接口不会返回明文。店铺或仓库 Token 仍在对应基础档案授权中维护。</p>
-      <template #footer><el-button @click="credentialDialog = false">取消</el-button><el-button class="handoff-action" :loading="operating" @click="saveCredential">加密保存</el-button></template>
+      <template #footer><el-button @click="credentialDialog = false">取消</el-button><el-button class="handoff-action" :loading="operating" :disabled="!credentialRotateAccess.allowed || operating" :title="credentialRotateAccess.allowed ? '确认后加密保存开发者凭据，不回显明文' : credentialRotateAccess.reason" @click="saveCredential">加密保存</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="jobDetailDialog" width="min(700px, 94vw)" class="job-detail-dialog">
@@ -411,11 +469,13 @@ const jobDetailDialog = ref(false);
 const jobEditDialog = ref(false);
 const runDetailDialog = ref(false);
 const operating = ref(false);
-const deletingConfigId = ref(null);
+const configActionLoading = ref('');
+const retryLoadingId = ref(null);
 const selectedJobs = ref([]);
 const activeConfig = ref(null);
 const activeJob = ref(null);
 const activeRun = ref(null);
+const deepLinkKey = ref('');
 const creatingJobTemplate = ref(null);
 const draft = reactive({ platform: '', status: '', environment: '', api_type: '', resource_type: '', schedule_type: '', subject: '', run_id: '', started_from: '', started_to: '' });
 const query = reactive({ ...draft, job_state: '' });
@@ -445,6 +505,12 @@ const jobForm = reactive({
 const weekdayOptions = [{ label: '一', value: 1 }, { label: '二', value: 2 }, { label: '三', value: 3 }, { label: '四', value: 4 }, { label: '五', value: 5 }, { label: '六', value: 6 }, { label: '日', value: 7 }];
 const liveRunAccess = computed(() => getActionAccess(auth, { permission: props.runPermission }));
 const mockRunAccess = computed(() => getActionAccess(auth, { permission: props.mockRunPermission }));
+const configCreateAccess = computed(() => getActionAccess(auth, { permission: 'integrations.config.create', unauthorizedBehavior: 'disable' }));
+const credentialRotateAccess = computed(() => getActionAccess(auth, { permission: 'integrations.credential.rotate', unauthorizedBehavior: 'disable' }));
+const configVerifyAccess = computed(() => getActionAccess(auth, { permission: 'integrations.config.verify', unauthorizedBehavior: 'disable' }));
+const configReadonlyAccess = computed(() => getActionAccess(auth, { permission: 'integrations.run_live_readonly', unauthorizedBehavior: 'disable' }));
+const configDisableAccess = computed(() => getActionAccess(auth, { permission: 'integrations.config.disable', unauthorizedBehavior: 'disable' }));
+const integrationManageAccess = computed(() => getActionAccess(auth, { permission: 'integrations.manage', unauthorizedBehavior: 'disable' }));
 
 const contracts = {
   configs: {
@@ -599,13 +665,61 @@ function scheduleDescription(row) {
   return `${label('schedule_type', row.schedule_type)}运行`;
 }
 function filterOptions(key) { const map = { platform: 'platforms', status: 'statuses', environment: 'environments', api_type: 'api_types', resource_type: 'resource_types', schedule_type: 'schedule_types' }; return data.value.options?.[map[key]] || []; }
-async function load() { loading.value = true; error.value = ''; try { const response = await fetchIntegrationWorkspace(props.mode, { ...query, page: page.value, page_size: 50 }); if (!response.success) throw new Error(response.message || '读取失败'); data.value = response.data; page.value = response.data.pagination?.page || 1; } catch (e) { error.value = e?.message || '读取 API 数据接入记录失败'; } finally { loading.value = false; } }
+async function load() {
+  loading.value = true;
+  error.value = '';
+  try {
+    const response = await fetchIntegrationWorkspace(props.mode, { ...query, page: page.value, page_size: 50 });
+    if (!response.success) throw new Error(response.message || '读取失败');
+    data.value = response.data;
+    page.value = response.data.pagination?.page || 1;
+    await handleDeepLink();
+  } catch (e) {
+    error.value = e?.message || '读取 API 数据接入记录失败';
+  } finally {
+    loading.value = false;
+  }
+}
 function applyFilters() { Object.assign(query, draft); page.value = 1; load(); }
 function resetFilters() { Object.keys(draft).forEach(key => { draft[key] = ''; query[key] = ''; }); query.job_state = ''; page.value = 1; load(); }
 function setJobState(value) { query.job_state = value; page.value = 1; load(); }
 function hydrateRouteFilters() { Object.keys(draft).forEach(key => { const value = route.query[key]; draft[key] = typeof value === 'string' ? value : ''; query[key] = draft[key]; }); }
+async function handleDeepLink() {
+  if (props.mode !== 'configs') return;
+  const action = String(route.query.action || '');
+  if (!['create', 'credentials', 'verify', 'readonly'].includes(action)) return;
+  const configId = String(route.query.config_id || '');
+  const requestedPlatform = String(route.query.platform || '').toLowerCase();
+  const row = rows.value.find((item) => configId && String(item.id) === configId)
+    || rows.value.find((item) => requestedPlatform && String(item.platform || '').toLowerCase() === requestedPlatform);
+  const key = `${route.fullPath}:${row?.id || 'missing'}`;
+  if (deepLinkKey.value === key) return;
+  if (action === 'create') {
+    deepLinkKey.value = key;
+    openCreateConfig();
+    return;
+  }
+  if (!row) return;
+  deepLinkKey.value = key;
+  if (action === 'credentials') openCredential(row);
+  if (action === 'verify') await verify(row);
+  if (action === 'readonly') await checkReadonly(row);
+}
 function toggleSchedulerHistory() { schedulerHistoryOpen.value = !schedulerHistoryOpen.value; }
 function operationFailed(response, fallback = '操作失败。') { ElMessage.error(response?.message || fallback); return false; }
+function actionDenied(access) { if (access.allowed) return false; ElMessage.warning(access.reason); return true; }
+function configActionKey(action, row) { return `${action}:${row?.id || ''}`; }
+function configActionBusy(row) { return Boolean(row?.id && configActionLoading.value && configActionLoading.value.endsWith(`:${row.id}`)); }
+function configActionLoadingFor(action, row) { return configActionLoading.value === configActionKey(action, row); }
+function retryLimitReached(row) {
+  const maxRetryCount = Number(row?.max_retry_count);
+  return Number.isFinite(maxRetryCount) && Number(row?.retry_count || 0) >= maxRetryCount;
+}
+function retryButtonTitle(row) {
+  if (!mockRunAccess.value.allowed) return mockRunAccess.value.reason;
+  if (retryLimitReached(row)) return '已达到该任务的最大重试次数';
+  return '仅在本地模拟模式创建重试运行';
+}
 const credentialFields = ['partner_id', 'partner_key', 'ads_app_id', 'ads_secret', 'redirect_uri', 'app_key', 'service_id', 'app_secret', 'api_base_url', 'domain', 'client_id', 'client_secret'];
 const secretCredentialFields = ['partner_key', 'ads_secret', 'app_secret', 'client_secret'];
 function clearCredentialForm() { credentialFields.forEach(key => { credentialForm[key] = ''; }); credentialForm.reason = '按运用交接计划维护开发者凭据'; }
@@ -619,7 +733,10 @@ function setConfigRegion(countryCode, selected) {
   configForm.regions = [...regions];
 }
 function openCreateConfig() {
-  const platform = referencePlatforms.value.find(option => option.enabled);
+  if (actionDenied(configCreateAccess.value) || operating.value) return;
+  const requestedPlatform = String(route.query.platform || '').toLowerCase();
+  const platform = referencePlatforms.value.find(option => option.enabled && option.value === requestedPlatform)
+    || referencePlatforms.value.find(option => option.enabled);
   Object.assign(configForm, {
     account_alias: '',
     platform: platform?.value || '',
@@ -629,7 +746,12 @@ function openCreateConfig() {
   });
   configDialog.value = true;
 }
-function openCredential(row) { activeConfig.value = row; clearCredentialForm(); credentialDialog.value = true; }
+function openCredential(row) {
+  if (actionDenied(credentialRotateAccess.value) || operating.value || configActionBusy(row)) return;
+  activeConfig.value = row;
+  clearCredentialForm();
+  credentialDialog.value = true;
+}
 function credentialPayload() {
   const platform = activeConfig.value?.platform;
   const apiType = activeConfig.value?.api_type;
@@ -645,36 +767,90 @@ function credentialPayload() {
   return Object.fromEntries(keys.filter(key => credentialForm[key] !== '').map(key => [key, credentialForm[key]]));
 }
 async function saveCredential() {
+  if (actionDenied(credentialRotateAccess.value) || operating.value || !activeConfig.value) return;
   const credentials = credentialPayload();
   if (!Object.keys(credentials).length) { ElMessage.warning('请至少填写一个需要修改的凭据字段。'); return; }
   operating.value = true;
-  const idempotencyKey = globalThis.crypto?.randomUUID?.() || `credential-${Date.now()}-${activeConfig.value.id}`;
-  const response = await rotateIntegrationSecretValues(activeConfig.value.id, { version: activeConfig.value.config_version, reason: credentialForm.reason, credentials, verify_after_save: false }, idempotencyKey);
-  secretCredentialFields.forEach(key => { credentialForm[key] = ''; });
-  operating.value = false;
-  if (!response.success) { operationFailed(response, '凭据保存失败。'); return; }
-  credentialDialog.value = false;
-  clearCredentialForm();
-  ElMessage.success('开发者凭据已由服务端安全保存，页面未保留原文。');
-  await load();
+  try {
+    await ElMessageBox.confirm(
+      '将把已填写的开发者凭据加密保存到服务端；页面不会回显或再次展示密钥原文，并会写入集成审计。是否继续？',
+      '确认加密保存凭据',
+      { type: 'warning', confirmButtonText: '确认保存', cancelButtonText: '取消' }
+    );
+    const idempotencyKey = globalThis.crypto?.randomUUID?.() || `credential-${Date.now()}-${activeConfig.value.id}`;
+    const response = await rotateIntegrationSecretValues(activeConfig.value.id, { version: activeConfig.value.config_version, reason: credentialForm.reason, credentials, verify_after_save: false }, idempotencyKey);
+    if (!response.success) { operationFailed(response, '凭据保存失败。'); return; }
+    credentialDialog.value = false;
+    clearCredentialForm();
+    ElMessage.success('开发者凭据已由服务端安全保存，页面未保留原文。');
+    await load();
+  } catch (reason) {
+    if (reason === 'cancel' || reason === 'close') return;
+    throw reason;
+  } finally {
+    secretCredentialFields.forEach(key => { credentialForm[key] = ''; });
+    operating.value = false;
+  }
 }
-async function verify(row) { const response = await checkIntegrationReference(row.id); if (!response.success) { operationFailed(response, '凭据引用检查失败。'); return; } ElMessage.success('凭据引用完整；未调用外部平台。'); await load(); }
-async function checkConsistency(row) { const response = await checkIntegrationConsistency(row.id); if (!response.success) { operationFailed(response, '本地一致性检查未通过。'); return; } ElMessage.success(`本地一致性检查通过：${number(response.data.binding_count)} 个授权绑定、${number(response.data.job_reference_count)} 个任务引用。`); await load(); }
+async function verify(row) {
+  if (actionDenied(configVerifyAccess.value) || configActionBusy(row)) return;
+  configActionLoading.value = configActionKey('verify', row);
+  try {
+    const response = await checkIntegrationReference(row.id);
+    if (!response.success) { operationFailed(response, '凭据引用检查失败。'); return; }
+    ElMessage.success('凭据引用完整；未调用外部平台。');
+    await load();
+  } finally {
+    configActionLoading.value = '';
+  }
+}
+async function checkConsistency(row) {
+  if (actionDenied(configVerifyAccess.value) || configActionBusy(row)) return;
+  configActionLoading.value = configActionKey('consistency', row);
+  try {
+    const response = await checkIntegrationConsistency(row.id);
+    if (!response.success) { operationFailed(response, '本地一致性检查未通过。'); return; }
+    ElMessage.success(`本地一致性检查通过：${number(response.data.binding_count)} 个授权绑定、${number(response.data.job_reference_count)} 个任务引用。`);
+    await load();
+  } finally {
+    configActionLoading.value = '';
+  }
+}
 async function checkReadonly(row) {
-  try { await ElMessageBox.confirm('将使用一个已授权主体调用一次平台只读接口；不会刷新或替换 Token。是否继续？', '平台只读检查', { type: 'warning' }); } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; }
-  const response = await checkIntegrationReadonlyConnection(row.id);
-  if (!response.success) { operationFailed(response, '平台只读检查失败。'); return; }
-  ElMessage.success('平台只读连通检查通过；Token 未刷新、未替换。');
-  await load();
+  if (actionDenied(configReadonlyAccess.value) || configActionBusy(row)) return;
+  configActionLoading.value = configActionKey('readonly', row);
+  try { await ElMessageBox.confirm('将使用一个已授权主体调用一次平台只读接口；不会刷新或替换 Token。是否继续？', '平台只读检查', { type: 'warning' }); } catch (reason) { configActionLoading.value = ''; if (reason === 'cancel' || reason === 'close') return; throw reason; }
+  try {
+    const response = await checkIntegrationReadonlyConnection(row.id);
+    if (!response.success) { operationFailed(response, '平台只读检查失败。'); return; }
+    ElMessage.success('平台只读连通检查通过；Token 未刷新、未替换。');
+    await load();
+  } finally {
+    configActionLoading.value = '';
+  }
 }
 async function disableConfig(row) {
-  try { await ElMessageBox.confirm(`确认禁用“${row.account_alias}”及其关联任务？`, '禁用接入配置', { type: 'warning' }); } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; }
-  const response = await disableIntegrationConfig(row.id);
-  if (!response.success) { operationFailed(response, '接入配置禁用失败。'); return; }
-  ElMessage.success('接入配置已禁用。');
-  await load();
+  if (actionDenied(configDisableAccess.value) || configActionBusy(row)) return;
+  configActionLoading.value = configActionKey('disable', row);
+  try {
+    await ElMessageBox.confirm(`确认禁用“${row.account_alias}”及其关联任务？`, '禁用接入配置', { type: 'warning' });
+  } catch (reason) {
+    configActionLoading.value = '';
+    if (reason === 'cancel' || reason === 'close') return;
+    throw reason;
+  }
+  try {
+    const response = await disableIntegrationConfig(row.id);
+    if (!response.success) { operationFailed(response, '接入配置禁用失败。'); return; }
+    ElMessage.success('接入配置已禁用。');
+    await load();
+  } finally {
+    configActionLoading.value = '';
+  }
 }
 async function deleteConfig(row) {
+  if (actionDenied(configDisableAccess.value) || configActionBusy(row)) return;
+  configActionLoading.value = configActionKey('delete', row);
   try {
     await ElMessageBox.confirm(
       `确认删除“${row.account_alias}”？删除后将从配置列表移除，历史审计和运行记录继续保留。`,
@@ -682,15 +858,18 @@ async function deleteConfig(row) {
       { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
     );
   } catch (reason) {
+    configActionLoading.value = '';
     if (reason === 'cancel' || reason === 'close') return;
     throw reason;
   }
-  deletingConfigId.value = row.id;
-  const response = await deleteIntegrationConfig(row.id);
-  deletingConfigId.value = null;
-  if (!response.success) { operationFailed(response, '接入配置删除失败。'); return; }
-  ElMessage.success('接入配置已删除，历史记录继续保留。');
-  await load();
+  try {
+    const response = await deleteIntegrationConfig(row.id);
+    if (!response.success) { operationFailed(response, '接入配置删除失败。'); return; }
+    ElMessage.success('接入配置已删除，历史记录继续保留。');
+    await load();
+  } finally {
+    configActionLoading.value = '';
+  }
 }
 function rowRunAccess(row) { return row.execution_mode === 'live_readonly' ? liveRunAccess.value : mockRunAccess.value; }
 async function runJob(row) {
@@ -707,18 +886,22 @@ async function runJob(row) {
   await load();
 }
 async function prepareConfig() {
+  if (actionDenied(configCreateAccess.value) || operating.value) return;
   if (!configForm.account_alias.trim() || !configForm.platform || !configForm.api_type || !configForm.environment || !configForm.regions.length) { ElMessage.warning('请填写配置名称，并选择平台、API 类型、环境和适用站点。'); return; }
   operating.value = true;
-  const response = await createIntegrationConfig({ account_alias: configForm.account_alias.trim(), platform: configForm.platform, api_type: configForm.api_type, environment: configForm.environment, regions: configForm.regions });
-  operating.value = false;
-  if (!response.success) { operationFailed(response, '接入配置创建失败。'); return; }
-  configDialog.value = false;
-  ElMessage.success('接入配置已创建，请继续维护开发者凭据。');
-  await load();
+  try {
+    const response = await createIntegrationConfig({ account_alias: configForm.account_alias.trim(), platform: configForm.platform, api_type: configForm.api_type, environment: configForm.environment, regions: configForm.regions });
+    if (!response.success) { operationFailed(response, '接入配置创建失败。'); return; }
+    configDialog.value = false;
+    ElMessage.success('接入配置已创建，请继续维护开发者凭据。');
+    await load();
+  } finally {
+    operating.value = false;
+  }
 }
 function openJobDetail(row) { activeJob.value = row; jobDetailDialog.value = true; }
 function openJobEditor(row) {
-  if (!row) return;
+  if (!row || actionDenied(integrationManageAccess.value) || operating.value) return;
   activeJob.value = row;
   Object.assign(jobForm, {
     schedule_type: row.schedule_type || 'manual', max_retry_count: row.max_retry_count ?? 3, execution_mode: row.execution_mode || 'simulation',
@@ -733,17 +916,21 @@ function openJobEditor(row) {
   jobEditDialog.value = true;
 }
 async function saveJob() {
+  if (actionDenied(integrationManageAccess.value) || operating.value || !activeJob.value) return;
   if (!jobForm.timezone.trim()) { ElMessage.warning('请填写执行时区。'); return; }
   if (['daily', 'weekly'].includes(jobForm.schedule_type) && !jobForm.local_time) { ElMessage.warning('请填写执行时间。'); return; }
   if (jobForm.schedule_type === 'weekly' && !jobForm.weekdays.length) { ElMessage.warning('请至少选择一个每周执行日。'); return; }
   if (jobForm.query_mode === 'range' && (!jobForm.range_start_at || !jobForm.range_end_at)) { ElMessage.warning('请填写完整的同步开始和结束时间。'); return; }
   operating.value = true;
-  const response = await updateSyncJob(activeJob.value.id, { ...jobForm });
-  operating.value = false;
-  if (!response.success) { operationFailed(response, '同步策略保存失败。'); return; }
-  jobEditDialog.value = false;
-  ElMessage.success('同步策略已更新。');
-  await load();
+  try {
+    const response = await updateSyncJob(activeJob.value.id, { ...jobForm });
+    if (!response.success) { operationFailed(response, '同步策略保存失败。'); return; }
+    jobEditDialog.value = false;
+    ElMessage.success('同步策略已更新。');
+    await load();
+  } finally {
+    operating.value = false;
+  }
 }
 function businessDestination(resourceType) {
   if (resourceType === 'refund_return') return { label: '退款退货', path: '/sales-management/returns', tables: 'refund_return / refund_return_item' };
@@ -756,41 +943,66 @@ function viewJobBusiness(row) { if (!row) return; jobDetailDialog.value = false;
 function returnToJob(row) { router.push({ path: '/integrations/sync-jobs', query: { subject: row.subject_name || '' } }); }
 async function handleJobCommand(command, row) {
   if (command === 'detail') { openJobDetail(row); return; }
+  if (['edit', 'clone', 'toggle', 'delete'].includes(command) && (actionDenied(integrationManageAccess.value) || operating.value)) return;
   if (command === 'edit') { openJobEditor(row); return; }
   if (command === 'clone') { openCreateJob(row); return; }
   if (command === 'runs') { router.push({ path: '/integrations/sync-runs', query: { subject: row.subject_name } }); return; }
   if (command === 'business') { router.push(businessPath(row.resource_type)); return; }
   if (command === 'toggle') {
-    if (row.is_enabled) { try { await ElMessageBox.confirm('确认停用该同步任务？', '停用任务', { type: 'warning' }); } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; } }
-    const response = await toggleSyncJob(row.id, !row.is_enabled);
-    if (!response.success) { operationFailed(response, '任务状态切换失败。'); return; }
-    ElMessage.success(row.is_enabled ? '同步任务已停用。' : '同步任务已启用。');
-    await load();
+    operating.value = true;
+    try {
+      if (row.is_enabled) {
+        try { await ElMessageBox.confirm('确认停用该同步任务？', '停用任务', { type: 'warning' }); } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; }
+      }
+      const response = await toggleSyncJob(row.id, !row.is_enabled);
+      if (!response.success) { operationFailed(response, '任务状态切换失败。'); return; }
+      ElMessage.success(row.is_enabled ? '同步任务已停用。' : '同步任务已启用。');
+      await load();
+    } finally {
+      operating.value = false;
+    }
     return;
   }
   if (command === 'delete') {
-    const preview = await previewSyncJobDelete(row.id);
-    if (!preview.success) { operationFailed(preview, '删除检查失败。'); return; }
-    if (!preview.data.can_delete) { ElMessage.warning(preview.data.blockers?.join('；') || '任务当前不能删除。'); return; }
-    try { await ElMessageBox.confirm('确认删除该任务？授权、配置和平台 Token 不受影响。', '删除同步任务', { type: 'warning' }); } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; }
-    const response = await deleteSyncJob(row.id);
-    if (!response.success) { operationFailed(response, '同步任务删除失败。'); return; }
-    ElMessage.success('同步任务已删除。');
-    await load();
+    operating.value = true;
+    try {
+      const preview = await previewSyncJobDelete(row.id);
+      if (!preview.success) { operationFailed(preview, '删除检查失败。'); return; }
+      if (!preview.data.can_delete) { ElMessage.warning(preview.data.blockers?.join('；') || '任务当前不能删除。'); return; }
+      try { await ElMessageBox.confirm('确认删除该任务？授权、配置和平台 Token 不受影响。', '删除同步任务', { type: 'warning' }); } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; }
+      const response = await deleteSyncJob(row.id);
+      if (!response.success) { operationFailed(response, '同步任务删除失败。'); return; }
+      ElMessage.success('同步任务已删除。');
+      await load();
+    } finally {
+      operating.value = false;
+    }
   }
 }
 async function batchToggle(enabled) {
-  let succeeded = 0;
-  for (const row of selectedJobs.value) { const response = await toggleSyncJob(row.id, enabled); if (response.success) succeeded += 1; }
-  ElMessage.success(`批量操作完成：成功 ${succeeded} 个，失败 ${selectedJobs.value.length - succeeded} 个。`);
-  await load();
+  if (actionDenied(integrationManageAccess.value) || operating.value) return;
+  operating.value = true;
+  try {
+    let succeeded = 0;
+    for (const row of selectedJobs.value) { const response = await toggleSyncJob(row.id, enabled); if (response.success) succeeded += 1; }
+    ElMessage.success(`批量操作完成：成功 ${succeeded} 个，失败 ${selectedJobs.value.length - succeeded} 个。`);
+    await load();
+  } finally {
+    operating.value = false;
+  }
 }
 async function batchRunMock() {
-  const candidates = selectedJobs.value.filter(row => row.execution_mode === 'simulation' && row.is_enabled && !row.blocked_reason);
-  let succeeded = 0;
-  for (const row of candidates) { const response = await runSyncJobMock(row.id); if (response.success) succeeded += 1; }
-  ElMessage.success(`模拟运行完成：成功 ${succeeded} 个；生产只读或不可运行任务已跳过。`);
-  await load();
+  if (actionDenied(mockRunAccess.value) || operating.value) return;
+  operating.value = true;
+  try {
+    const candidates = selectedJobs.value.filter(row => row.execution_mode === 'simulation' && row.is_enabled && !row.blocked_reason);
+    let succeeded = 0;
+    for (const row of candidates) { const response = await runSyncJobMock(row.id); if (response.success) succeeded += 1; }
+    ElMessage.success(`模拟运行完成：成功 ${succeeded} 个；生产只读或不可运行任务已跳过。`);
+    await load();
+  } finally {
+    operating.value = false;
+  }
 }
 async function openRunDetail(row) {
   const response = await fetchSyncRunDetail(row.id);
@@ -798,14 +1010,24 @@ async function openRunDetail(row) {
   runDetailDialog.value = true;
 }
 async function retryRun(row) {
-  try { await ElMessageBox.confirm('将创建一条新的本地模拟重试运行，原运行记录保持不变。是否继续？', '重试失败任务', { type: 'warning' }); } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; }
-  const response = await retrySyncRun(row.id);
-  if (!response.success) { operationFailed(response, '创建重试运行失败。'); return; }
-  runDetailDialog.value = false;
-  ElMessage.success('已创建新的本地模拟重试运行。');
-  await load();
+  if (row?.execution_mode !== 'simulation') { ElMessage.warning('生产只读运行请返回任务确认重跑，不可在运行记录页直接重试。'); return; }
+  if (actionDenied(mockRunAccess.value) || retryLoadingId.value === row?.id || retryLimitReached(row)) return;
+  retryLoadingId.value = row.id;
+  try {
+    await ElMessageBox.confirm('将创建一条新的本地模拟重试运行，原运行记录保持不变。不会调用生产平台。是否继续？', '重试失败任务', { type: 'warning' });
+    const response = await retrySyncRun(row.id);
+    if (!response.success) { operationFailed(response, '创建重试运行失败。'); return; }
+    runDetailDialog.value = false;
+    ElMessage.success('已创建新的本地模拟重试运行。');
+    await load();
+  } catch (reason) {
+    if (reason === 'cancel' || reason === 'close') return;
+    throw reason;
+  } finally {
+    retryLoadingId.value = null;
+  }
 }
-function openCreateJob(template = null) { creatingJobTemplate.value = template; createJobDialog.value = true; }
+function openCreateJob(template = null) { if (actionDenied(integrationManageAccess.value) || operating.value) return; creatingJobTemplate.value = template; createJobDialog.value = true; }
 function closeCreateJob() { createJobDialog.value = false; creatingJobTemplate.value = null; }
 function go(path) { closeCreateJob(); router.push(path); }
 watch(() => route.query, () => { hydrateRouteFilters(); page.value = 1; load(); });

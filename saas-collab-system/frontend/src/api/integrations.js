@@ -15,11 +15,18 @@ import {
   mockSyncAlertIncidentRetry,
   mockStoreAuthorizations,
   mockStoreAuthorizationDetail,
+  mockSubjectApiAccess,
   mockRefreshStoreAuthorization,
   mockRevokeStoreAuthorization,
   mockStartStoreAuthorizationOAuth,
   mockConnectionCapabilities
 } from '../mock/integrations';
+import {
+  mockProductionIntegrationSettings,
+  mockCreateProductionIntegrationSettingsVersion,
+  mockApproveProductionIntegrationSettingsVersion,
+  mockRollbackProductionIntegrationSettingsVersion
+} from '../mock/productionSettings';
 
 // These fixtures keep the new operational pages useful in the local mock
 // environment while preserving the production API contract.  They contain
@@ -120,6 +127,44 @@ export const fetchPlatformIntegrationReadiness = () =>
     'integrations.readiness'
   );
 
+// System-level production gates are deliberately separate from tenant
+// integration configs.  The API returns only effective/read-only metadata;
+// secrets remain in the custody service and are never sent to this client.
+export const fetchProductionIntegrationSettings = () =>
+  requestWithMockFallback(
+    { method: 'get', url: '/api/internal/integrations/production-settings/' },
+    mockProductionIntegrationSettings,
+    'integrations.production_settings'
+  );
+
+export const createProductionIntegrationSettingsVersion = (payload = {}) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/integrations/production-settings/versions/', data: payload },
+    () => mockCreateProductionIntegrationSettingsVersion(payload),
+    'integrations.production_settings.create'
+  );
+
+export const approveProductionIntegrationSettingsVersion = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/production-settings/versions/${id}/approve/` },
+    () => mockApproveProductionIntegrationSettingsVersion(id),
+    'integrations.production_settings.approve'
+  );
+
+export const rollbackProductionIntegrationSettingsVersion = (id) =>
+  requestWithMockFallback(
+    { method: 'post', url: `/api/internal/integrations/production-settings/versions/${id}/rollback/` },
+    () => mockRollbackProductionIntegrationSettingsVersion(id),
+    'integrations.production_settings.rollback'
+  );
+
+// Short aliases keep the API discoverable for settings-page adapters while
+// retaining the explicit integration-oriented names above.
+export const fetchProductionSettings = fetchProductionIntegrationSettings;
+export const createProductionSettingsVersion = createProductionIntegrationSettingsVersion;
+export const approveProductionSettingsVersion = approveProductionIntegrationSettingsVersion;
+export const rollbackProductionSettingsVersion = rollbackProductionIntegrationSettingsVersion;
+
 export const repairPlatformIntegrationContract = (id, payload) =>
   requestWithMockFallback(
     { method: 'post', url: `/api/internal/integrations/readiness/configs/${id}/repair-contract/`, data: payload },
@@ -151,7 +196,7 @@ export const fetchSubjectApiAccess = (subjectType, subjectId) =>
       url: '/api/internal/integrations/subject-api-access/',
       params: { subject_type: subjectType, subject_id: subjectId }
     },
-    () => ({ success: true, code: 'OK', message: 'mock', data: null }),
+    () => mockSubjectApiAccess(subjectType, subjectId),
     'integrations.subject_api_access'
   );
 

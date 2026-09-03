@@ -22,7 +22,7 @@ describe('Shopee production authorization guard', () => {
 
     expect(dialog).toContain('oauthBlockerText');
     expect(dialog).toContain('Shopee 授权回调地址尚未配置');
-    expect(dialog).toContain(':disabled="!selectedConfig(apiType) || !selectedConfig(apiType).oauth_ready"');
+    expect(dialog).toContain(':disabled="storeAuthorizeAccess.disabled || !selectedConfig(apiType) || !selectedConfig(apiType).oauth_ready"');
     expect(guard).toBeGreaterThan(-1);
     expect(request).toBeGreaterThan(guard);
   });

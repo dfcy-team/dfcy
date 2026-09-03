@@ -118,6 +118,7 @@ from .tasks import run_readonly_sync_job
 from .workspace_service import integration_workspace
 from .subject_access_service import subject_api_access
 from .sync_alerts import acknowledge_incident, add_incident_note, assign_incident, resolve_incident
+from .production_settings import get_runtime_setting
 
 
 def health_response(service):
@@ -276,22 +277,23 @@ def _readiness_action_response(config, *, operation, replay=False, target_contra
     return data
 
 
-def _require_shopee_readiness_config(config):
-    if str(config.platform or "").lower() != PlatformChoices.SHOPEE:
-        raise ValidationError({"platform": "当前页面动作仅适用于 Shopee 接入配置。"})
+def _require_marketplace_readiness_config(config):
+    platform = str(config.platform or "").lower()
+    if platform not in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+        raise ValidationError({"platform": "当前页面动作仅适用于 Lazada、Shopee 或 TikTok Shop 接入配置。"})
     try:
         return get_platform_schema(
-            PlatformChoices.SHOPEE,
+            platform,
             environment=config.environment,
         )["contract_versions"][0]
     except Exception as exc:
-        raise ValidationError({"contract_version": "无法读取 Shopee 当前批准的合同版本。"}) from exc
+        raise ValidationError({"contract_version": "无法读取当前平台批准的合同版本。"}) from exc
 
 
 @api_view(["POST"])
 @permission_classes([IsIntegrationConfigDetailUser])
 def repair_readiness_contract(request, pk):
-    """Dry-run or repair one tenant-scoped Shopee contract version."""
+    """Dry-run or repair one tenant-scoped marketplace contract version."""
     config = _get_config_for_user(request, pk, "integrations.config.update")
     serializer = ReadinessContractRepairSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -299,7 +301,7 @@ def repair_readiness_contract(request, pk):
     dry_run = bool(payload["dry_run"])
     if not dry_run and payload["confirm"] is not True:
         raise ValidationError({"confirm": "应用合同版本修复必须显式确认。"})
-    target_contract = _require_shopee_readiness_config(config)
+    target_contract = _require_marketplace_readiness_config(config)
     action = "repair_platform_contract"
     operation_digest, payload_digest = _readiness_operation_identity(request, action, config, payload)
 
@@ -378,7 +380,7 @@ def set_readiness_readonly_approval(request, pk):
     if len(reason) < 5:
         raise ValidationError({"reason": "请填写至少 5 个字符的审批或撤销原因。"})
     payload["reason"] = reason
-    target_contract = _require_shopee_readiness_config(config)
+    target_contract = _require_marketplace_readiness_config(config)
     action = "approve_platform_readonly" if payload["approved"] else "revoke_platform_readonly"
     operation_digest, payload_digest = _readiness_operation_identity(request, action, config, payload)
 
@@ -1474,9 +1476,9 @@ def check_integration_consistency(request, pk):
 @permission_classes([IsIntegrationLiveReadonlyRunner])
 def check_integration_readonly_connection(request, pk):
     config = _get_config_for_user(request, pk, "integrations.run_live_readonly")
-    if getattr(settings, "PLATFORM_NETWORK_MODE", "") != "approved-live-test":
+    if get_runtime_setting("network", "mode", default="") != "approved-live-test":
         raise ValidationError("系统尚未启用生产平台只读网络模式；请由运维确认网络白名单后再检查。")
-    if not getattr(settings, "LIVE_READONLY_SYNC_ENABLED", False):
+    if not get_runtime_setting("network", "readonly_sync_enabled", default=False):
         raise ValidationError("系统尚未启用生产只读同步功能。")
     if config.status not in {PlatformIntegrationConfig.Status.VERIFIED, PlatformIntegrationConfig.Status.ACTIVE}:
         raise ValidationError("请先维护并检查开发者凭据，再执行平台只读检查。")

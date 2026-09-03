@@ -18,12 +18,33 @@
   >
     <template #actions>
       <el-button type="primary" plain @click="openMigrationPreview">站点映射预览</el-button>
-      <el-button type="primary" plain @click="importOpen = true">导入店铺档案</el-button>
+      <el-button
+        v-if="masterDataManageAccess.visible"
+        type="primary"
+        plain
+        :disabled="masterDataManageAccess.disabled"
+        :title="masterDataManageAccess.reason"
+        @click="openImportDialog"
+      >导入店铺档案</el-button>
       <el-button type="primary" plain @click="downloadTemplate">下载 CSV 导入模板</el-button>
     </template>
     <template #row-actions="{ row }">
-      <el-button link type="primary" @click.stop="openApiAccess(row)">API 接入</el-button>
-      <el-button link type="primary" @click.stop="openCapabilityMatrix(row)">能力矩阵</el-button>
+      <el-button
+        v-if="integrationViewAccess.visible"
+        link
+        type="primary"
+        :disabled="integrationViewAccess.disabled"
+        :title="integrationViewAccess.reason"
+        @click.stop="openApiAccess(row)"
+      >API 接入</el-button>
+      <el-button
+        v-if="storeViewAccess.visible"
+        link
+        type="primary"
+        :disabled="storeViewAccess.disabled"
+        :title="storeViewAccess.reason"
+        @click.stop="openCapabilityMatrix(row)"
+      >能力矩阵</el-button>
     </template>
   </AdminResourcePage>
 
@@ -103,7 +124,8 @@
       <el-button
         type="primary"
         :loading="migrationApplying"
-        :disabled="!migrationManageAccess.allowed || !selectedMigrationStoreIds.length"
+        :disabled="migrationManageAccess.disabled || !selectedMigrationStoreIds.length"
+        :title="migrationManageAccess.reason"
         @click="confirmMigration"
       >应用选中的 exact 映射</el-button>
     </template>
@@ -117,7 +139,13 @@
     </el-upload>
     <template #footer>
       <el-button @click="importOpen = false">取消</el-button>
-      <el-button type="primary" :loading="importing" :disabled="!importFile" @click="submitImport">开始导入</el-button>
+      <el-button
+        type="primary"
+        :loading="importing"
+        :disabled="masterDataManageAccess.disabled || !importFile"
+        :title="masterDataManageAccess.reason"
+        @click="submitImport"
+      >开始导入</el-button>
     </template>
   </el-dialog>
 
@@ -126,17 +154,17 @@
     <el-select v-if="authorizationOptions.length > 1" v-model="selectedAuthorizationId" placeholder="选择授权连接" @change="loadCapabilities">
       <el-option v-for="item in authorizationOptions" :key="item.id" :label="`${item.platform} · ${item.status} · #${item.id}`" :value="item.id" />
     </el-select>
-    <el-alert v-if="selectedAuthorization && selectedAuthorization.status !== 'active'" title="当前授权不是 Active，只能查看或保存非激活状态；后端会拒绝激活能力。" type="warning" :closable="false" show-icon />
+    <el-alert v-if="selectedAuthorization && !capabilityEditAllowed" title="只有有效授权（active/authorized）且具备授权权限时可以保存能力矩阵；当前仅允许查看。" type="warning" :closable="false" show-icon />
     <el-alert v-if="capabilitySuggestions.length" :title="`检测到 ${capabilitySuggestions.length} 条能力建议；载入后只覆盖本地表单，仍需复核 scopes/evidence 并点击保存确认。`" type="info" :closable="false" show-icon />
     <el-table v-loading="capabilityLoading" :data="capabilityRows" border empty-text="暂无能力数据">
       <el-table-column prop="capability_code" label="能力" min-width="150" />
-      <el-table-column label="读取" width="90"><template #default="{ row }"><el-switch v-model="row.read_enabled" /></template></el-table-column>
+      <el-table-column label="读取" width="90"><template #default="{ row }"><el-switch v-model="row.read_enabled" :disabled="!capabilityEditAllowed" /></template></el-table-column>
       <el-table-column label="写入" width="90"><template #default="{ row }"><el-switch :model-value="false" disabled /></template></el-table-column>
-      <el-table-column label="同步方式" min-width="130"><template #default="{ row }"><el-select v-model="row.sync_mode"><el-option label="定时" value="scheduled"/><el-option label="实时" value="realtime"/><el-option label="Webhook" value="webhook"/><el-option label="人工" value="manual"/></el-select></template></el-table-column>
-      <el-table-column label="来源优先级" width="130"><template #default="{ row }"><el-input-number v-model="row.source_priority" :min="1" :max="65535" controls-position="right" /></template></el-table-column>
-      <el-table-column label="状态" min-width="120"><template #default="{ row }"><el-select v-model="row.status"><el-option label="禁用" value="disabled"/><el-option label="已配置" value="configured"/><el-option label="启用" value="active"/><el-option label="错误" value="error"/></el-select></template></el-table-column>
+      <el-table-column label="同步方式" min-width="130"><template #default="{ row }"><el-select v-model="row.sync_mode" :disabled="!capabilityEditAllowed"><el-option label="定时" value="scheduled"/><el-option label="实时" value="realtime"/><el-option label="Webhook" value="webhook"/><el-option label="人工" value="manual"/></el-select></template></el-table-column>
+      <el-table-column label="来源优先级" width="130"><template #default="{ row }"><el-input-number v-model="row.source_priority" :min="1" :max="65535" controls-position="right" :disabled="!capabilityEditAllowed" /></template></el-table-column>
+      <el-table-column label="状态" min-width="120"><template #default="{ row }"><el-select v-model="row.status" :disabled="!capabilityEditAllowed"><el-option label="禁用" value="disabled"/><el-option label="已配置" value="configured"/><el-option label="启用" value="active"/><el-option label="错误" value="error"/></el-select></template></el-table-column>
     </el-table>
-    <template #footer><el-button @click="capabilityOpen = false">关闭</el-button><el-button plain :disabled="!capabilitySuggestions.length || capabilityLoading" @click="applyCapabilitySuggestions">载入建议</el-button><el-button type="primary" :loading="capabilitySaving" :disabled="!selectedAuthorizationId" @click="saveCapabilities">确认保存</el-button></template>
+    <template #footer><el-button @click="capabilityOpen = false">关闭</el-button><el-button plain :disabled="!capabilitySuggestions.length || capabilityLoading || !capabilityEditAllowed" :title="capabilityEditAllowed ? '' : capabilityEditReason" @click="applyCapabilitySuggestions">载入建议</el-button><el-button type="primary" :loading="capabilitySaving" :disabled="capabilitySaveAccess.disabled || !selectedAuthorizationId || !capabilityEditAllowed" :title="capabilityEditReason || capabilitySaveAccess.reason" @click="saveCapabilities">确认保存</el-button></template>
   </el-dialog>
 
   <SubjectApiAccessDialog
@@ -190,7 +218,22 @@ const resourcePage = ref(null);
 const migrationTable = ref(null);
 const migrationOpen = ref(false); const migrationLoading = ref(false); const migrationApplying = ref(false); const migrationError = ref('');
 const migrationRows = ref([]); const migrationSummary = ref({}); const selectedMigrationRows = ref([]);
-const migrationManageAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.manage' }));
+const masterDataManageAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.manage', unauthorizedBehavior: 'disable' }));
+const integrationViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view', unauthorizedBehavior: 'disable' }));
+const storeViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.view', unauthorizedBehavior: 'disable' }));
+const storeAuthorizeAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.authorize', unauthorizedBehavior: 'disable' }));
+const capabilitySaveAccess = computed(() => storeAuthorizeAccess.value);
+const migrationManageAccess = masterDataManageAccess;
+const capabilityEditAllowed = computed(() => Boolean(
+  storeAuthorizeAccess.value.allowed
+  && ['active', 'authorized'].includes(selectedAuthorization.value?.status),
+));
+const capabilityEditReason = computed(() => {
+  if (!storeAuthorizeAccess.value.allowed) return storeAuthorizeAccess.value.reason || '当前角色无权修改连接能力';
+  if (!selectedAuthorization.value) return '尚未选择授权连接';
+  if (!['active', 'authorized'].includes(selectedAuthorization.value.status)) return '只有有效授权（active/authorized）可以保存能力矩阵';
+  return '';
+});
 
 function applyCountryDefaults(value, form) {
   const countryCode = String(value || '').trim().toUpperCase();
@@ -213,8 +256,20 @@ function applyPlatformSite(value, form) {
 }
 
 function openApiAccess(row) {
+  if (!integrationViewAccess.value.allowed) {
+    ElMessage.warning(integrationViewAccess.value.reason || '当前角色无权查看店铺 API 接入');
+    return;
+  }
   selectedStore.value = row;
   apiAccessOpen.value = true;
+}
+
+function openImportDialog() {
+  if (!masterDataManageAccess.value.allowed) {
+    ElMessage.warning(masterDataManageAccess.value.reason || '当前角色无权导入店铺档案');
+    return;
+  }
+  importOpen.value = true;
 }
 
 function downloadTemplate() {
@@ -426,21 +481,51 @@ async function loadReferenceOptions() {
 }
 
 async function openCapabilityMatrix(row) {
-  selectedStore.value = row; capabilityOpen.value = true; capabilityLoading.value = true; capabilityRows.value = [];
-  const response = await fetchStoreAuthorizations({ store_id: row.id, page: 1, page_size: 100 });
-  authorizationOptions.value = results(response); selectedAuthorizationId.value = authorizationOptions.value[0]?.id || null;
-  if (selectedAuthorizationId.value) await loadCapabilities(selectedAuthorizationId.value);
-  capabilityLoading.value = false;
+  if (!storeViewAccess.value.allowed) {
+    ElMessage.warning(storeViewAccess.value.reason || '当前角色无权查看店铺连接能力');
+    return;
+  }
+  selectedStore.value = row;
+  capabilityOpen.value = true;
+  capabilityLoading.value = true;
+  capabilityRows.value = [];
+  capabilitySuggestions.value = [];
+  authorizationOptions.value = [];
+  selectedAuthorizationId.value = null;
+  try {
+    const response = await fetchStoreAuthorizations({ store_id: row.id, page: 1, page_size: 100 });
+    if (!response?.success) throw new Error(response?.message || '授权连接加载失败');
+    authorizationOptions.value = results(response);
+    selectedAuthorizationId.value = authorizationOptions.value[0]?.id || null;
+    if (selectedAuthorizationId.value) await loadCapabilities(selectedAuthorizationId.value);
+  } catch (error) {
+    ElMessage.error(error?.message || '授权连接加载失败');
+  } finally {
+    capabilityLoading.value = false;
+  }
 }
 
 async function loadCapabilities(authorizationId) {
-  capabilityLoading.value = true; const response = await fetchConnectionCapabilities(authorizationId); capabilityLoading.value = false;
+  if (!storeViewAccess.value.allowed || !authorizationId) {
+    capabilityRows.value = [];
+    capabilitySuggestions.value = [];
+    return;
+  }
+  capabilityLoading.value = true;
   capabilitySuggestions.value = [];
-  if (!response?.success) return ElMessage.error(response?.message || '能力矩阵加载失败');
-  const existing = new Map((response.data?.results || []).map((item) => [item.capability_code, item]));
-  const codes = response.data?.available_codes || capabilityCodes;
-  capabilitySuggestions.value = Array.isArray(response.data?.suggestions) ? response.data.suggestions : [];
-  capabilityRows.value = codes.map((code) => ({ capability_code: code, read_enabled: false, write_enabled: false, sync_mode: 'manual', source_priority: 100, status: 'disabled', ...(existing.get(code) || {}), write_enabled: false }));
+  try {
+    const response = await fetchConnectionCapabilities(authorizationId);
+    if (!response?.success) throw new Error(response?.message || '能力矩阵加载失败');
+    const existing = new Map((response.data?.results || []).map((item) => [item.capability_code, item]));
+    const codes = response.data?.available_codes || capabilityCodes;
+    capabilitySuggestions.value = Array.isArray(response.data?.suggestions) ? response.data.suggestions : [];
+    capabilityRows.value = codes.map((code) => ({ capability_code: code, read_enabled: false, write_enabled: false, sync_mode: 'manual', source_priority: 100, status: 'disabled', ...(existing.get(code) || {}), write_enabled: false }));
+  } catch (error) {
+    capabilityRows.value = [];
+    ElMessage.error(error?.message || '能力矩阵加载失败');
+  } finally {
+    capabilityLoading.value = false;
+  }
 }
 
 function applyCapabilitySuggestions() {
@@ -466,25 +551,54 @@ function applyCapabilitySuggestions() {
 }
 
 async function saveCapabilities() {
+  if (!storeAuthorizeAccess.value.allowed) {
+    ElMessage.warning(storeAuthorizeAccess.value.reason || '当前角色无权保存能力矩阵');
+    return;
+  }
+  if (!selectedAuthorizationId.value) {
+    ElMessage.warning('请先选择授权连接');
+    return;
+  }
+  if (!['active', 'authorized'].includes(selectedAuthorization.value?.status)) {
+    ElMessage.warning('只有有效授权（active/authorized）可以保存能力矩阵');
+    return;
+  }
   try { await ElMessageBox.confirm('仅保存读取能力和同步配置；平台写入能力继续保持关闭。是否继续？', '确认能力配置', { type: 'warning' }); } catch { return; }
   capabilitySaving.value = true;
-  const payload = capabilityRows.value.map(({ capability_code, read_enabled, sync_mode, source_priority, status }) => ({ capability_code, read_enabled, write_enabled: false, sync_mode, source_priority, status }));
-  const response = await updateConnectionCapabilities(selectedAuthorizationId.value, payload); capabilitySaving.value = false;
-  if (!response?.success) return ElMessage.error(response?.message || '能力矩阵保存失败');
-  ElMessage.success('能力矩阵已保存，写入能力仍保持关闭。'); await loadCapabilities(selectedAuthorizationId.value);
+  try {
+    const payload = capabilityRows.value.map(({ capability_code, read_enabled, sync_mode, source_priority, status }) => ({ capability_code, read_enabled, write_enabled: false, sync_mode, source_priority, status }));
+    const response = await updateConnectionCapabilities(selectedAuthorizationId.value, payload);
+    if (!response?.success) throw new Error(response?.message || '能力矩阵保存失败');
+    ElMessage.success('能力矩阵已保存，写入能力仍保持关闭。');
+    await loadCapabilities(selectedAuthorizationId.value);
+  } catch (error) {
+    ElMessage.error(error?.message || '能力矩阵保存失败');
+  } finally {
+    capabilitySaving.value = false;
+  }
 }
 
 function onFileChange(uploadFile) { importFile.value = uploadFile?.raw || null; }
 async function submitImport() {
-  if (!importFile.value) return;
+  if (!masterDataManageAccess.value.allowed) {
+    ElMessage.warning(masterDataManageAccess.value.reason || '当前角色无权导入店铺档案');
+    return;
+  }
+  if (!importFile.value || importing.value) return;
   importing.value = true;
-  const response = await importStores(importFile.value);
-  importing.value = false;
-  if (!response?.success) return ElMessage.error(response?.message || '导入失败');
-  const result = response.data || {};
-  if (result.errors?.length) return ElMessage.error(`导入失败：${result.errors[0].message}`);
-  ElMessage.success(`导入完成：新增 ${result.created || 0} 条，更新 ${result.updated || 0} 条`);
-  importOpen.value = false; importFile.value = null;
+  try {
+    const response = await importStores(importFile.value);
+    if (!response?.success) throw new Error(response?.message || '导入失败');
+    const result = response.data || {};
+    if (result.errors?.length) throw new Error(`导入失败：${result.errors[0].message}`);
+    ElMessage.success(`导入完成：新增 ${result.created || 0} 条，更新 ${result.updated || 0} 条`);
+    importOpen.value = false; importFile.value = null;
+    await resourcePage.value?.loadData?.();
+  } catch (error) {
+    ElMessage.error(error?.message || '导入失败');
+  } finally {
+    importing.value = false;
+  }
 }
 
 onMounted(loadReferenceOptions);

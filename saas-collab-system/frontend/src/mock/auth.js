@@ -1,6 +1,7 @@
 import { successResponse } from './index';
 
 export const mockAuthUser = {
+  id: 1,
   user_id: 'mock-user-001',
   username: 'stage0_internal_user',
   user_type: 'internal',
@@ -26,10 +27,12 @@ export const mockAuthUser = {
     'analytics.view', 'analytics.calculate',
     'finance.view',
     'products.lifecycle.view', 'products.lifecycle.evaluate',
-    'integrations.view', 'integrations.manage', 'integrations.run',
+    'integrations.view', 'integrations.manage', 'integrations.run', 'integrations.audit.view',
     'integrations.store.view', 'integrations.store.authorize', 'integrations.store.revoke',
     'integrations.credential.rotate', 'integrations.rotate',
-    'integrations.config.view', 'integrations.config.verify',
+    'integrations.config.view', 'integrations.config.verify', 'integrations.config.create', 'integrations.config.update', 'integrations.config.disable',
+    'integrations.run_live_readonly',
+    'config.view', 'config.manage', 'config.approve', 'config.rollback', 'config.system.manage',
     'reports.view', 'reports.export', 'reports.download',
     'governance.api.view', 'governance.api.check',
     'governance.assistants.view', 'governance.assistants.evaluate',

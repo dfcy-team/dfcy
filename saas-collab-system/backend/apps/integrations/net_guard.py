@@ -20,6 +20,7 @@ from .oauth_errors import (
     OAUTH_RATE_LIMITED,
     OAuthFlowError,
 )
+from .production_settings import get_runtime_setting
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -35,11 +36,11 @@ class HttpResponse:
 
 
 def get_allowed_hosts():
-    hosts = {str(host).lower() for host in (getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []) or [])}
-    custody = str(getattr(settings, "LIVE_CUSTODY_SERVICE_HOST", "") or "").lower()
+    hosts = {str(host).lower() for host in (get_runtime_setting("network", "allowed_hosts", default=[]) or [])}
+    custody = str(get_runtime_setting("custody", "service_host", default="") or "").lower()
     if custody:
         hosts.add(custody)
-    custody_url = str(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "") or "").strip()
+    custody_url = str(get_runtime_setting("custody", "service_url", default="") or "").strip()
     try:
         custody_parsed = urllib.parse.urlparse(custody_url)
     except (TypeError, ValueError):
@@ -51,7 +52,7 @@ def get_allowed_hosts():
 
 def _configured_custody_endpoint():
     """Return the exact custody host/port tuple allowed for non-443 traffic."""
-    raw_url = str(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "") or "").strip()
+    raw_url = str(get_runtime_setting("custody", "service_url", default="") or "").strip()
     if not raw_url:
         return None
     try:
@@ -83,7 +84,7 @@ def _is_configured_custody_destination(parsed):
 
 def _validated_custody_ca_file():
     """Validate the optional custody CA path before handing it to SSL."""
-    raw_path = str(getattr(settings, "LIVE_CUSTODY_CA_FILE", "") or "").strip()
+    raw_path = str(get_runtime_setting("custody", "ca_file_path", default="") or "").strip()
     if not raw_path:
         return ""
     candidate = Path(raw_path).expanduser()
@@ -173,21 +174,21 @@ class PlatformHttpClient:
     def __init__(self, transport=None, max_retries=None, backoff_base=None, sleeper=None):
         self._transport = transport or _default_transport
         self.max_retries = int(
-            max_retries if max_retries is not None else getattr(settings, "LIVE_PLATFORM_MAX_RETRIES", 2)
+            max_retries if max_retries is not None else get_runtime_setting("connection", "max_retries", default=2)
         )
         if self.max_retries < 0 or self.max_retries > 5:
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Retry count is outside the approved bound.")
         self.backoff_base = _bounded_float(
-            backoff_base if backoff_base is not None else getattr(settings, "LIVE_PLATFORM_BACKOFF_BASE", 0.5),
+            backoff_base if backoff_base is not None else get_runtime_setting("connection", "backoff_base_seconds", default=0.5),
             minimum=0.0,
             maximum=5.0,
             name="retry backoff",
         )
         self.max_retry_wait = _bounded_float(
-            getattr(settings, "LIVE_PLATFORM_MAX_RETRY_WAIT", 8), minimum=0.0, maximum=30.0, name="retry wait"
+            get_runtime_setting("connection", "max_retry_wait_seconds", default=8), minimum=0.0, maximum=30.0, name="retry wait"
         )
         self.max_total_wait = _bounded_float(
-            getattr(settings, "LIVE_PLATFORM_MAX_TOTAL_WAIT", 15), minimum=0.0, maximum=60.0, name="total retry wait"
+            get_runtime_setting("connection", "max_total_wait_seconds", default=15), minimum=0.0, maximum=60.0, name="total retry wait"
         )
         self._sleep = sleeper or time.sleep
 
@@ -225,13 +226,13 @@ class PlatformHttpClient:
             request_headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
 
         connect_timeout = _bounded_float(
-            connect_timeout if connect_timeout is not None else getattr(settings, "LIVE_PLATFORM_CONNECT_TIMEOUT", 3),
+            connect_timeout if connect_timeout is not None else get_runtime_setting("connection", "connect_timeout_seconds", default=3),
             minimum=0.1,
             maximum=10.0,
             name="connect timeout",
         )
         read_timeout = _bounded_float(
-            read_timeout if read_timeout is not None else getattr(settings, "LIVE_PLATFORM_READ_TIMEOUT", 8),
+            read_timeout if read_timeout is not None else get_runtime_setting("connection", "read_timeout_seconds", default=8),
             minimum=0.1,
             maximum=30.0,
             name="read timeout",

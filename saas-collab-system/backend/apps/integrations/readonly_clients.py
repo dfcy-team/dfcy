@@ -13,6 +13,7 @@ from rest_framework.exceptions import ValidationError
 from .capability import require_live_mode
 from .custody import get_custody_backend
 from .net_guard import PlatformHttpClient
+from .production_settings import get_runtime_platform_config, get_runtime_setting
 
 
 def _required(value, name):
@@ -43,9 +44,13 @@ class ReadonlyClientBase:
         self.custody = custody or get_custody_backend()
         self.now = now or timezone.now
 
+    def _runtime_path(self, key, fallback):
+        value = (get_runtime_platform_config(str(getattr(self.config, "platform", "") or "").lower()) or {}).get(key)
+        return str(value or fallback)
+
     def preflight(self):
         require_live_mode(f"{self.config.platform} readonly synchronization")
-        if not getattr(settings, "LIVE_READONLY_SYNC_ENABLED", False):
+        if not get_runtime_setting("network", "readonly_sync_enabled", default=False):
             raise ValidationError("Production readonly synchronization feature flag is disabled.")
         if self.config.environment not in {"pilot", "production"}:
             raise ValidationError("Readonly production synchronization requires pilot or production environment.")
@@ -108,8 +113,10 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
         return payload
 
     def fetch_orders(self, cursor, scope):
+        order_list_path = self._runtime_path("order_list_path", self.ORDER_LIST_PATH)
+        order_detail_path = self._runtime_path("order_detail_path", self.ORDER_DETAIL_PATH)
         response = self._request(
-            self.ORDER_LIST_PATH,
+            order_list_path,
             {
                 "time_range_field": "update_time",
                 "time_from": scope["time_from"],
@@ -120,19 +127,19 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             },
         )
         envelope = _as_dict(response.get("response"))
-        raw_responses = [{"endpoint": self.ORDER_LIST_PATH, "payload": response}]
+        raw_responses = [{"endpoint": order_list_path, "payload": response}]
         summaries = _as_list(envelope.get("order_list"))
         order_ids = [str(item.get("order_sn")) for item in summaries if isinstance(item, dict) and item.get("order_sn")]
         details = []
         for start in range(0, len(order_ids), 50):
             detail = self._request(
-                self.ORDER_DETAIL_PATH,
+                order_detail_path,
                 {
                     "order_sn_list": ",".join(order_ids[start : start + 50]),
                     "response_optional_fields": "item_list,payment_method,total_amount,shipping_carrier,package_list",
                 },
             )
-            raw_responses.append({"endpoint": self.ORDER_DETAIL_PATH, "payload": detail})
+            raw_responses.append({"endpoint": order_detail_path, "payload": detail})
             details.extend(_as_list(_as_dict(detail.get("response")).get("order_list")))
         return {
             "records": details or summaries,
@@ -141,9 +148,11 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
         }
 
     def fetch_returns(self, cursor, scope):
+        return_list_path = self._runtime_path("return_list_path", self.RETURN_LIST_PATH)
+        return_detail_path = self._runtime_path("return_detail_path", self.RETURN_DETAIL_PATH)
         page_no = int(cursor or 1)
         response = self._request(
-            self.RETURN_LIST_PATH,
+            return_list_path,
             {
                 "create_time_from": scope["time_from"],
                 "create_time_to": scope["time_to"],
@@ -152,7 +161,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             },
         )
         envelope = _as_dict(response.get("response"))
-        raw_responses = [{"endpoint": self.RETURN_LIST_PATH, "payload": response}]
+        raw_responses = [{"endpoint": return_list_path, "payload": response}]
         summaries = _as_list(envelope.get("return")) or _as_list(envelope.get("return_list"))
         details = []
         for item in summaries:
@@ -161,8 +170,8 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             return_id = item.get("return_sn") or item.get("return_id")
             if not return_id:
                 continue
-            detail = self._request(self.RETURN_DETAIL_PATH, {"return_sn": return_id})
-            raw_responses.append({"endpoint": self.RETURN_DETAIL_PATH, "payload": detail})
+            detail = self._request(return_detail_path, {"return_sn": return_id})
+            raw_responses.append({"endpoint": return_detail_path, "payload": detail})
             detail_record = _as_dict(detail.get("response"))
             details.append({**item, **detail_record})
         has_more = bool(envelope.get("more") or envelope.get("has_more"))
@@ -211,28 +220,30 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         return payload
 
     def fetch_orders(self, cursor, scope):
+        order_list_path = self._runtime_path("order_list_path", self.ORDER_LIST_PATH)
+        order_detail_path = self._runtime_path("order_detail_path", self.ORDER_DETAIL_PATH)
         query = {
             "shop_cipher": self.authorization.shop_cipher,
             "page_size": scope["page_size"],
             **({"page_token": cursor} if cursor else {}),
         }
         payload = self._request(
-            self.ORDER_LIST_PATH,
+            order_list_path,
             query=query,
             body={"create_time_ge": scope["time_from"], "create_time_lt": scope["time_to"]},
             method="POST",
         )
         data = _as_dict(payload.get("data"))
-        raw_responses = [{"endpoint": self.ORDER_LIST_PATH, "payload": payload}]
+        raw_responses = [{"endpoint": order_list_path, "payload": payload}]
         summaries = _as_list(data.get("orders"))
         order_ids = [str(item.get("id")) for item in summaries if isinstance(item, dict) and item.get("id")]
         details = []
         for start in range(0, len(order_ids), 50):
             detail = self._request(
-                self.ORDER_DETAIL_PATH,
+                order_detail_path,
                 query={"shop_cipher": self.authorization.shop_cipher, "ids": ",".join(order_ids[start : start + 50])},
             )
-            raw_responses.append({"endpoint": self.ORDER_DETAIL_PATH, "payload": detail})
+            raw_responses.append({"endpoint": order_detail_path, "payload": detail})
             details.extend(_as_list(_as_dict(detail.get("data")).get("orders")))
         return {
             "records": details or summaries,
@@ -241,13 +252,14 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         }
 
     def fetch_returns(self, cursor, scope):
+        return_list_path = self._runtime_path("return_list_path", self.RETURN_LIST_PATH)
         query = {
             "shop_cipher": self.authorization.shop_cipher,
             "page_size": min(50, scope["page_size"]),
             **({"page_token": cursor} if cursor else {}),
         }
         payload = self._request(
-            self.RETURN_LIST_PATH,
+            return_list_path,
             query=query,
             body={"create_time_ge": scope["time_from"], "create_time_lt": scope["time_to"]},
             method="POST",
@@ -257,7 +269,7 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         return {
             "records": records,
             "next_cursor": str(data.get("next_page_token") or ""),
-            "raw_responses": [{"endpoint": self.RETURN_LIST_PATH, "payload": payload}],
+            "raw_responses": [{"endpoint": return_list_path, "payload": payload}],
         }
 
 
