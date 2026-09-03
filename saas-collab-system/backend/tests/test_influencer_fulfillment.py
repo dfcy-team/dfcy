@@ -483,7 +483,7 @@ def test_non_all_scope_is_denied_even_with_permission():
     assert client.get("/api/internal/influencers/outreach-tasks/").status_code == 403
 
 
-def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
+def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
     tenant = Tenant.objects.create(name="Tenant", code="sample-idempotent")
     user, client = user_with_permissions(tenant, "sample-manager", "influencers.fulfillment.manage")
     store, influencer, task = base_records(tenant, user, "idem")
@@ -512,9 +512,16 @@ def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
     assert first.status_code == 201
     assert second.status_code == 200
     assert first.data["data"]["id"] == second.data["data"]["id"]
-    assert "unit_price" not in first.data["data"]["items"][0]
-    assert "currency" not in first.data["data"]["items"][0]
-    assert "price_match_status" not in first.data["data"]["items"][0]
+    for field in (
+        "unit_price",
+        "currency",
+        "sales_amount",
+        "price_match_status",
+        "price_source",
+        "price_snapshot_at",
+    ):
+        assert field not in first.data["data"]
+        assert field not in first.data["data"]["items"][0]
     assert SampleFulfillment.objects.count() == 1
 
     conflicting_payload = {**payload, "fulfillment_no": "SAMPLE-OTHER"}
@@ -773,46 +780,162 @@ def test_blacklisted_influencer_cannot_receive_sample():
     assert SampleFulfillment.objects.filter(fulfillment_no="SAMPLE-BLOCKED").exists() is False
 
 
-def test_sample_price_match_is_scoped_to_store_and_site():
-    tenant = Tenant.objects.create(name="Tenant", code="sample-site-price")
-    user, client = user_with_permissions(tenant, "site-price-manager", "influencers.fulfillment.manage")
-    store, influencer, task = base_records(tenant, user, "site-price")
-    for site, price in (("PH", "10.0000"), ("TH", "20.0000")):
-        listing = StoreProductListing.objects.create(
-            tenant=tenant,
-            store=store,
-            external_product_id=f"ITEM-{site}",
-            product_name=f"Product {site}",
-            site_code=site,
-            source="db-daren",
-        )
-        SkuPriceSnapshot.objects.create(
-            tenant=tenant,
-            listing=listing,
-            external_sku="SAME-SKU",
-            effective_price=price,
-            currency="PHP" if site == "PH" else "THB",
-            source="db-daren",
-        )
+def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fields(monkeypatch):
+    tenant = Tenant.objects.create(name="Tenant", code="sample-cost-only")
+    user, client = user_with_permissions(
+        tenant,
+        "cost-only-manager",
+        "influencers.fulfillment.view",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "cost-only")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SAMPLE-COST-SPU", product_name="Sample product")
+    first_sku = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=spu,
+        sku_code="SAMPLE-COST-A",
+        purchase_price="4.0000",
+    )
+    second_sku = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=spu,
+        sku_code="SAMPLE-COST-B",
+        purchase_price="3.0000",
+    )
+    listing = StoreProductListing.objects.create(
+        tenant=tenant,
+        store=store,
+        external_product_id="SAMPLE-COST-PRODUCT",
+        product_name="Sample cost product",
+        site_code="PH",
+        source="test",
+    )
+    SkuPriceSnapshot.objects.create(
+        tenant=tenant,
+        listing=listing,
+        external_sku=first_sku.sku_code,
+        effective_price="99.0000",
+        currency="PHP",
+        source="test",
+    )
+    SkuPriceSnapshot.objects.create(
+        tenant=tenant,
+        listing=listing,
+        external_sku=second_sku.sku_code,
+        effective_price="77.0000",
+        currency="PHP",
+        source="test",
+    )
+    price_fields = (
+        "unit_price",
+        "currency",
+        "sales_amount",
+        "price_match_status",
+        "price_source",
+        "price_snapshot_at",
+    )
 
-    response = client.post(
+    def fail_price_lookup(*args, **kwargs):
+        raise AssertionError("sample fulfillment must not query sales price snapshots")
+
+    monkeypatch.setattr(SkuPriceSnapshot.objects, "get_queryset", fail_price_lookup)
+
+    created = client.post(
         "/api/internal/influencers/sample-fulfillments/",
         {
-            "fulfillment_no": "SAMPLE-SITE",
+            "fulfillment_no": "SAMPLE-COST-ONLY",
             "outreach_task": task.pk,
             "influencer": influencer.pk,
             "store": store.pk,
             "owner": user.pk,
-            "items": [{"site_code": "PH", "requested_sku": "SAME-SKU", "quantity": 1}],
+            "items": [
+                {
+                    "site_code": "PH",
+                    "external_product_id": "SAMPLE-COST-PRODUCT",
+                    "requested_sku": first_sku.sku_code,
+                    "quantity": 2,
+                }
+            ],
         },
         format="json",
-        HTTP_IDEMPOTENCY_KEY="sample-site-key",
+        HTTP_IDEMPOTENCY_KEY="sample-cost-only-key",
     )
 
-    assert response.status_code == 201
-    assert "unit_price" not in response.data["data"]["items"][0]
-    assert "currency" not in response.data["data"]["items"][0]
-    assert "price_match_status" not in response.data["data"]["items"][0]
+    assert created.status_code == 201
+    assert created.data["data"]["calculated_cost"] == "8.0000"
+    for field in price_fields:
+        assert field not in created.data["data"]
+        assert field not in created.data["data"]["items"][0]
+
+    fulfillment = SampleFulfillment.objects.get(fulfillment_no="SAMPLE-COST-ONLY")
+    created_item = fulfillment.items.get()
+    assert created_item.unit_price is None
+    assert created_item.currency == ""
+    assert created_item.sales_amount is None
+    assert created_item.price_match_status == "not_imported"
+    assert created_item.price_source == ""
+    assert created_item.price_snapshot_at is None
+    assert created_item.unit_cost == Decimal("4.0000")
+    assert created_item.cost_amount == Decimal("8.0000")
+    assert fulfillment.sales_amount is None
+    assert fulfillment.calculated_cost == Decimal("8.0000")
+    attribution = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
+    assert attribution.cost_amount == Decimal("8.0000")
+    assert attribution.currency == "CNY"
+    assert attribution.pricing_status == "pending"
+
+    historical_priced_at = timezone.now()
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        sales_amount=Decimal("123.0000"),
+        pricing_status="full",
+        priced_at=historical_priced_at,
+    )
+    fulfillment.refresh_from_db()
+    assert fulfillment.sales_amount == Decimal("123.0000")
+    assert fulfillment.pricing_status == "full"
+    assert fulfillment.priced_at == historical_priced_at
+
+    edited = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {
+            "items": [
+                {
+                    "site_code": "PH",
+                    "external_product_id": "SAMPLE-COST-PRODUCT",
+                    "requested_sku": second_sku.sku_code,
+                    "quantity": 3,
+                }
+            ]
+        },
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+
+    assert edited.status_code == 200
+    assert edited.data["data"]["calculated_cost"] == "9.0000"
+    for field in price_fields:
+        assert field not in edited.data["data"]
+        assert field not in edited.data["data"]["items"][0]
+
+    fulfillment.refresh_from_db()
+    edited_item = fulfillment.items.get()
+    assert edited_item.unit_price is None
+    assert edited_item.currency == ""
+    assert edited_item.sales_amount is None
+    assert edited_item.price_match_status == "not_imported"
+    assert edited_item.price_source == ""
+    assert edited_item.price_snapshot_at is None
+    assert edited_item.unit_cost == Decimal("3.0000")
+    assert edited_item.cost_amount == Decimal("9.0000")
+    assert fulfillment.sales_amount is None
+    assert fulfillment.pricing_status == "pending"
+    assert fulfillment.priced_at is None
+    assert fulfillment.calculated_cost == Decimal("9.0000")
+    attribution.refresh_from_db()
+    assert attribution.cost_amount == Decimal("9.0000")
+    assert attribution.currency == "CNY"
+    assert attribution.pricing_status == "pending"
 
 
 def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():
@@ -1765,7 +1888,7 @@ def test_bd_performance_export_and_zero_gmv_diagnostic_are_authorized_and_safe()
     assert "orders_not_imported" in diagnostic.data["data"]["reason_codes"]
 
 
-def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_repricing_contract():
+def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_cost_refresh_contract():
     tenant = Tenant.objects.create(name="Sample lifecycle tenant", code="sample-lifecycle")
     user, client = user_with_permissions(
         tenant,

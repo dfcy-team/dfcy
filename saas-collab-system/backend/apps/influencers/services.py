@@ -20,6 +20,7 @@ from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
 from .models import (
+    BdSampleAttributionSnapshot,
     FulfillmentStatusEvent,
     Influencer,
     InfluencerRestrictEvent,
@@ -28,7 +29,6 @@ from .models import (
     OutreachTask,
     SampleFulfillment,
     SampleItem,
-    SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
     influencer_identity_key,
@@ -494,8 +494,8 @@ def _sample_item_payload(item):
     }
 
 
-def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
-    """Replace item snapshots and aggregate price/cost facts in the same transaction."""
+def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
+    """Replace item purchase-cost facts and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
     SampleItem.objects.filter(
         tenant=user.tenant,
@@ -503,11 +503,7 @@ def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
     ).delete()
 
     sku_quantity = 0
-    sales_total = Decimal("0")
     cost_total = Decimal("0")
-    all_prices_matched = True
-    all_costs_matched = True
-    any_price_matched = False
     any_cost_matched = False
     snapshot_time = timezone.now()
     for raw_payload in item_payloads:
@@ -516,7 +512,7 @@ def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
             product_id=fulfillment.external_product_id,
             product_name=fulfillment.product_name_snapshot,
         )
-        # Computed snapshot fields must never be accepted from a client or reused verbatim.
+        # Computed fields must never be accepted from a client or reused verbatim.
         for field_name in (
             "id",
             "normalized_sku",
@@ -538,64 +534,49 @@ def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
             "updated_at",
         ):
             payload.pop(field_name, None)
-        snapshot = _price_for_item(user.tenant, fulfillment.store_id, payload)
         normalized_sku, cost_sku, cost_status = _purchase_cost_for_payload(user.tenant, payload)
         quantity = payload.get("quantity", 1)
-        unit_price = snapshot.effective_price if snapshot else None
         unit_cost = cost_sku.purchase_price if cost_sku else None
-        sales_amount = unit_price * quantity if unit_price is not None else None
         cost_amount = unit_cost * quantity if unit_cost is not None else None
         item = SampleItem(
             tenant=user.tenant,
             fulfillment=fulfillment,
-            unit_price=unit_price,
             unit_cost=unit_cost,
-            currency=snapshot.currency if snapshot else "",
-            price_match_status="matched" if snapshot else "not_imported",
             normalized_sku=normalized_sku,
             matched_sku_code=cost_sku.sku_code if cost_sku else "",
             matched_legacy_sku_code=cost_sku.legacy_sku_code if cost_sku else "",
-            sales_amount=sales_amount,
             cost_amount=cost_amount,
             cost_match_status=cost_status,
-            price_source=snapshot.source if snapshot else "",
             cost_source="products_productsku" if cost_sku else "",
-            price_snapshot_at=snapshot_time if snapshot else None,
             cost_snapshot_at=snapshot_time if cost_sku else None,
             **payload,
         )
         _save(item)
         sku_quantity += quantity
-        if sales_amount is None:
-            all_prices_matched = False
-        else:
-            sales_total += sales_amount
-            any_price_matched = True
-        if cost_amount is None:
-            all_costs_matched = False
-        else:
+        if cost_amount is not None:
             cost_total += cost_amount
             any_cost_matched = True
 
-    has_items = sku_quantity > 0
-    if not has_items:
-        pricing_status = "pending"
-    elif all_prices_matched and all_costs_matched:
-        pricing_status = "full"
-    elif any_price_matched or any_cost_matched:
-        pricing_status = "partial"
-    else:
-        pricing_status = "not_found"
     QuerySet.update(
         SampleFulfillment.objects.filter(pk=fulfillment.pk, tenant=user.tenant),
         sku_quantity=sku_quantity,
-        sales_amount=sales_total if any_price_matched else None,
         calculated_cost=cost_total if any_cost_matched else None,
-        pricing_status=pricing_status,
-        priced_at=snapshot_time if has_items else None,
+        sales_amount=None,
+        pricing_status="pending",
+        priced_at=None,
         updated_at=snapshot_time,
     )
     fulfillment.refresh_from_db()
+    QuerySet.update(
+        BdSampleAttributionSnapshot.objects.filter(
+            tenant=user.tenant,
+            fulfillment=fulfillment,
+        ),
+        cost_amount=fulfillment.calculated_cost,
+        currency="CNY",
+        pricing_status="pending",
+        updated_at=snapshot_time,
+    )
     return fulfillment
 
 
@@ -608,24 +589,6 @@ def _inherit_item_product(payload, *, product_id, product_name):
     if not str(item.get("product_name") or "").strip() and product_name:
         item["product_name"] = product_name
     return item
-
-
-def _price_for_item(tenant, store_id, payload):
-    sku = str(payload.get("requested_sku") or "").strip()
-    product_id = str(payload.get("external_product_id") or "").strip()
-    site_code = str(payload.get("site_code") or "").strip()
-    if not sku:
-        return None
-    queryset = SkuPriceSnapshot.objects.select_related("listing").filter(
-        tenant=tenant,
-        listing__tenant=tenant,
-        listing__store_id=store_id,
-        listing__site_code=site_code,
-        external_sku__iexact=sku,
-    )
-    if product_id:
-        queryset = queryset.filter(listing__external_product_id=product_id)
-    return queryset.order_by("-source_updated_at", "-imported_at", "-id").first()
 
 
 def _normalize_sku(value):
@@ -1556,6 +1519,8 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
         }
     )
     fulfillment_data.pop("items", None)
+    for field_name in ("sku_quantity", "sales_amount", "calculated_cost", "pricing_status", "priced_at"):
+        fulfillment_data.pop(field_name, None)
     fulfillment_data.pop("product_name_snapshot", None)
     fulfillment_data["product_name_snapshot"] = product_name
     fulfillment_data.pop("request_key", None)
@@ -1587,7 +1552,7 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             ) from exc
         raise
 
-    fulfillment = _recalculate_sample_pricing(
+    fulfillment = _recalculate_sample_costs(
         user=user,
         fulfillment=fulfillment,
         item_payloads=item_payloads,
@@ -1766,7 +1731,7 @@ def update_sample_fulfillment(
     append_item_payloads=None,
     items_mode="replace",
 ):
-    """Edit sample facts and atomically rebuild any requested SKU snapshots."""
+    """Edit sample facts and atomically rebuild any requested SKU costs."""
     _lock_tenant(user)
     observed = _read_sample_fulfillment(
         user=user,
@@ -1868,7 +1833,7 @@ def update_sample_fulfillment(
                 fulfillment.items.order_by("id").all()
             )
             payloads = [_sample_item_payload(item) for item in existing_payloads] + payloads
-        fulfillment = _recalculate_sample_pricing(
+        fulfillment = _recalculate_sample_costs(
             user=user,
             fulfillment=fulfillment,
             item_payloads=payloads,

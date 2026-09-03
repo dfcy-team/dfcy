@@ -285,9 +285,9 @@ def create_sample_attribution_snapshot(
 ):
     """Create the immutable-at-creation owner/sample fact in the caller's transaction."""
     first_item = fulfillment.items.order_by("id").values(
-        "site_code", "requested_sku", "currency"
+        "site_code", "requested_sku"
     ).first()
-    currency = str((first_item or {}).get("currency") or store.currency or "CNY").strip().upper()
+    currency = "CNY"
     sampled_site = str(site or (first_item or {}).get("site_code") or store.country_code or "").strip()
     account = influencer_account(influencer)
     snapshot = BdSampleAttributionSnapshot(
@@ -305,9 +305,10 @@ def create_sample_attribution_snapshot(
         sampled_at=fulfillment.sample_sent_at,
         shipped_at=fulfillment.shipped_at,
         sample_status=fulfillment.status,
+        # ProductSKU.purchase_price is maintained in RMB for creator operations.
         cost_amount=fulfillment.calculated_cost,
         currency=currency,
-        pricing_status=fulfillment.pricing_status,
+        pricing_status="pending",
         source=source,
         legacy_inferred=legacy_inferred,
     )
@@ -643,10 +644,9 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         ):
             bucket["shipped_count"] += 1
         if row["cost_amount"] is not None:
-            source_currency = str(row["currency"] or "").upper()
             converted, details = rate_resolver.convert(
                 row["cost_amount"],
-                source_currency,
+                "CNY",
                 currency,
                 _local_date(row["sampled_at"]),
             )
