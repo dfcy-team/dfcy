@@ -552,33 +552,6 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         return normalized
 
 
-class SampleItemPricingSerializer(SampleItemSerializer):
-    """Fulfillment-manage response with the approved price-match facts.
-
-    Price snapshots are operational facts needed by a fulfillment manager at
-    write time.  They remain read-only and are deliberately not added to the
-    base item serializer used by ordinary list/detail reads.
-    """
-
-    class Meta(SampleItemSerializer.Meta):
-        fields = SampleItemSerializer.Meta.fields + (
-            "unit_price",
-            "currency",
-            "price_match_status",
-        )
-        read_only_fields = SampleItemSerializer.Meta.read_only_fields + (
-            "unit_price",
-            "currency",
-            "price_match_status",
-        )
-
-
-class SampleFulfillmentPricingSerializer(SampleFulfillmentSerializer):
-    """Internal fulfillment-manage representation with pricing snapshots."""
-
-    items = SampleItemPricingSerializer(many=True, required=False)
-
-
 class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
     """Allow-list for fact edits; lifecycle metadata remains service-owned."""
 

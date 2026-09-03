@@ -905,6 +905,47 @@ def test_sample_edit_rejects_manual_intermediate_status():
     assert fulfillment.status == SampleFulfillment.Status.PENDING
 
 
+@pytest.mark.parametrize(
+    "intermediate_status",
+    [
+        SampleFulfillment.Status.PROCESSING,
+        SampleFulfillment.Status.SHIPPED,
+        SampleFulfillment.Status.DELIVERED,
+        SampleFulfillment.Status.PUBLISHED,
+    ],
+)
+def test_sample_status_endpoint_rejects_manual_intermediate_status(intermediate_status):
+    tenant, user, store, influencer = _records(
+        f"sample-status-intermediate-{intermediate_status}"
+    )
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key=f"sample-status-intermediate-{intermediate_status}-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "INTERMEDIATE-STATUS-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/status/",
+        {"status": intermediate_status},
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert response.status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+
+
 @pytest.mark.parametrize("legacy_status", ["processing", "creating", "blank"])
 def test_sample_list_rejects_legacy_status_filters(legacy_status):
     tenant, user, _, _ = _records(f"sample-list-legacy-{legacy_status}")

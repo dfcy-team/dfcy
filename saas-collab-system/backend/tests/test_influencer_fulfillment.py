@@ -512,7 +512,9 @@ def test_sample_creation_is_idempotent_and_price_miss_does_not_block():
     assert first.status_code == 201
     assert second.status_code == 200
     assert first.data["data"]["id"] == second.data["data"]["id"]
-    assert first.data["data"]["items"][0]["price_match_status"] == "not_imported"
+    assert "unit_price" not in first.data["data"]["items"][0]
+    assert "currency" not in first.data["data"]["items"][0]
+    assert "price_match_status" not in first.data["data"]["items"][0]
     assert SampleFulfillment.objects.count() == 1
 
     conflicting_payload = {**payload, "fulfillment_no": "SAMPLE-OTHER"}
@@ -808,8 +810,9 @@ def test_sample_price_match_is_scoped_to_store_and_site():
     )
 
     assert response.status_code == 201
-    assert response.data["data"]["items"][0]["unit_price"] == "10.0000"
-    assert response.data["data"]["items"][0]["currency"] == "PHP"
+    assert "unit_price" not in response.data["data"]["items"][0]
+    assert "currency" not in response.data["data"]["items"][0]
+    assert "price_match_status" not in response.data["data"]["items"][0]
 
 
 def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():

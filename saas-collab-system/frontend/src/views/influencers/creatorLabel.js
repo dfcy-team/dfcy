@@ -9,6 +9,9 @@ export function normalizedCreatorHandle(value) {
 export function creatorDisplayName(value = {}) {
   const name = value.handle
     || value.influencer_handle
+    || value.influencer_display_name
+    || value.influencer_name
+    || value.name
     || value.code
     || value.influencer_code;
   if (hasValue(name)) return String(name);

@@ -32,6 +32,7 @@ import {
 } from '../src/api/influencers';
 import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 import InfluencerResourceLibrary from '../src/views/influencers/InfluencerResourceLibrary.vue';
+import { creatorHandleFirst } from '../src/views/influencers/creatorLabel';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const tableRows = ref([]);
@@ -74,6 +75,13 @@ describe('influencer integration workspace contracts', () => {
   beforeEach(() => {
     requestMock.mockReset();
     authContext.canManage = true;
+  });
+
+  it('uses the creator display name before internal codes when the handle is missing', () => {
+    expect(creatorHandleFirst({
+      influencer_display_name: 'Mutya Catedrilla',
+      influencer_code: 'legacy-sample-123'
+    })).toBe('Mutya Catedrilla');
   });
 
   it('rechecks manage permission inside resource mutation handlers', () => {
