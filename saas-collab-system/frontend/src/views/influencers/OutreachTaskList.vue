@@ -69,7 +69,10 @@
         </el-table-column>
         <el-table-column label="目标进度" min-width="160">
           <template #default="{ row }">
-            <el-progress v-if="hasValue(row.target_count)" :percentage="progress(row)" :format="() => progressLabel(row)" />
+            <template v-if="hasValue(row.target_count)">
+              <el-progress :percentage="progress(row)" :format="() => progressLabel(row)" />
+              <small>有效完成 {{ completedFulfillmentCount(row) }}/{{ row.target_count }}</small>
+            </template>
             <span v-else>—</span>
           </template>
         </el-table-column>
@@ -228,7 +231,7 @@
               v-if="!row.is_deleted"
               link
               type="primary"
-              :disabled="!canCreateFulfillment || isTerminal(activeTask)"
+              :disabled="!canCreateFulfillment || isCancelled(activeTask)"
               @click="openSampleFulfillment(row)"
             >创建送样</el-button>
             <el-button
@@ -324,9 +327,9 @@
               <div><span>任务完成时间</span><b>{{ formatTaskTime(detailTask.finalized_at) }}</b></div>
             </div>
             <div class="detail-validation">
-              <b>送样完成校验</b>
-              <span>{{ detailTask.sample_fulfillment_completed_count || 0 }} / {{ detailTask.target_count || 0 }}</span>
-              <el-tag :type="detailTask.completion_validation?.target_reached ? 'success' : 'info'">{{ detailTask.completion_validation?.target_reached ? '已达到目标' : '未达到目标' }}</el-tag>
+              <b>送样记录进度</b>
+              <span>{{ fulfillmentCount(detailTask) }} / {{ detailTask.target_count || 0 }}</span>
+              <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
             <div class="status-summary"><span v-for="(count, status) in (detailTask.sample_status_summary?.status_counts || detailTask.sample_fulfillment_status_summary || {})" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
             <div class="detail-note"><span>任务履约反馈</span><p>{{ displayValue(detailTask.notes) }}</p></div>
@@ -339,7 +342,7 @@
                 <el-tag>{{ detailSamples.length }}</el-tag>
                 <el-button
                   type="primary"
-                  :disabled="!canCreateFulfillment || isTerminal(detailTask)"
+                  :disabled="!canCreateFulfillment || isCancelled(detailTask)"
                   @click="createSampleFromDetail"
                 >创建送样</el-button>
               </div>
@@ -394,7 +397,7 @@ import {
 } from '../../api/influencers';
 import { applyStoreSelection } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
-import { completedFulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation } from './outreachTaskState';
+import { completedFulfillmentCount, fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampleProgressLabel } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
@@ -424,6 +427,7 @@ const storeOptions = ref([]);
 const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
+const influencerOptionsLoaded = ref(false);
 const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
@@ -508,10 +512,12 @@ const visibleStoreOptions = computed(() => {
 });
 
 const isTerminal = (row) => ['completed', 'cancelled'].includes(row?.status);
+const isCancelled = (row) => row?.status === 'cancelled';
 const isTargetTerminal = (row) => ['success', 'rejected', 'no_response', 'blocked'].includes(row?.outreach_result);
-const sampleProgressCount = (row) => completedFulfillmentCount(row);
+const sampleProgressCount = (row) => fulfillmentCount(row);
 const progress = (row) => row.target_count ? Math.min(100, Math.round(sampleProgressCount(row) * 100 / row.target_count)) : 0;
-const progressLabel = (row) => `${displayValue(sampleProgressCount(row))}/${displayValue(row.target_count)}`;
+const sampleRecordTargetReached = (row) => Number(row?.target_count || 0) > 0 && fulfillmentCount(row) >= Number(row.target_count);
+const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
   pending: ['in_progress', 'cancelled'],
@@ -580,12 +586,15 @@ function resetFilters() {
 function applyTaskOptions(data = {}) {
   storeOptions.value = data.stores || [];
   bdOptions.value = data.bd_users || [];
-  influencerOptions.value = (data.influencers || []).filter((influencer) => influencer?.id !== undefined && influencer?.id !== null);
+  if (Array.isArray(data.influencers)) {
+    influencerOptions.value = data.influencers.filter((influencer) => influencer?.id !== undefined && influencer?.id !== null);
+    influencerOptionsLoaded.value = true;
+  }
 }
 
-async function loadTaskOptions(required = false) {
-  if (taskOptionsLoaded.value) return true;
-  const r = await fetchOutreachTaskOptions();
+async function loadTaskOptions(required = false, includeInfluencers = false) {
+  if (taskOptionsLoaded.value && (!includeInfluencers || influencerOptionsLoaded.value)) return true;
+  const r = await fetchOutreachTaskOptions({ include_influencers: includeInfluencers ? 'true' : 'false' });
   if (!r.success) {
     if (required) ElMessage.error(formatInfluencerError(r, '店铺、BD 和达人选项加载失败'));
     return false;
@@ -834,7 +843,7 @@ async function openTargets(row) {
   targetsVisible.value = true;
   deletedTargets.value = [];
   Object.assign(targetForm, { influencer: null, notes: '' });
-  await loadTaskOptions();
+  await loadTaskOptions(false, true);
   await loadTargets();
 }
 
@@ -890,9 +899,9 @@ function ensureSampleInfluencer(task, target) {
 }
 
 async function openSampleCreate(task, target = null) {
-  if (!task?.id || !canCreateFulfillment.value || isTerminal(task)) return;
+  if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
   if (target && (!target.id || target.is_deleted)) return;
-  if (!await loadTaskOptions(true)) return;
+  if (!await loadTaskOptions(true, true)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
   sampleContext.value = {
     ...task,

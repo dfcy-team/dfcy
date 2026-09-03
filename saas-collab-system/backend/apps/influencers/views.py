@@ -96,6 +96,10 @@ BLACKLIST_PERMISSION_CODES = (
 )
 
 
+def _lock_influencer_write_tenant(user):
+    return Tenant.objects.select_for_update().get(pk=user.tenant_id)
+
+
 def _require_resolve_read_scope(user):
     for permission_code in RESOLVE_READ_PERMISSION_CODES:
         try:
@@ -160,11 +164,6 @@ def _advance_influencer_version(influencer):
         updated_at=updated_at,
     )
     influencer.updated_at = updated_at
-
-
-def _lock_influencer_write_tenant(user):
-    """Keep every influencer write on the tenant -> influencer lock order."""
-    return Tenant.objects.select_for_update().get(pk=user.tenant_id)
 
 
 def _query_bool(value, *, field):
@@ -237,10 +236,10 @@ class InfluencerCollectionView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        queryset = Influencer.objects.filter(tenant=request.user.tenant).select_related("profile").prefetch_related(
-            Prefetch("restrictions", to_attr="_restriction_rows"),
-            Prefetch("restrict_events", queryset=InfluencerRestrictEvent.objects.order_by("-occurred_at", "-id"), to_attr="_restriction_events"),
-            "contacts",
+        # Collection rows do not need contacts or audit history. Loading those
+        # relations for every page made the 24k-profile library exceed the UI timeout.
+        queryset = Influencer.objects.filter(tenant=request.user.tenant).select_related(
+            "profile"
         ).annotate(_is_blacklisted=Exists(blacklist_subquery))
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
@@ -275,16 +274,26 @@ class InfluencerCollectionView(APIView):
             "updated_at", "-updated_at", "follower_count", "-follower_count", "name", "-name",
             "profile__display_name", "-profile__display_name", "profile__level", "-profile__level",
             "profile__tier", "-profile__tier", "profile__market", "-profile__market",
+            "profile__average_video_views", "-profile__average_video_views",
+            "profile__historical_gmv", "-profile__historical_gmv",
         }
         if ordering not in allowed_ordering:
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
         page, page_size = _pagination(request)
-        return success_response(paginated_data(request, queryset, InfluencerSerializer, page=page, page_size=page_size))
+        return success_response(paginated_data(
+            request,
+            queryset,
+            InfluencerSerializer,
+            page=page,
+            page_size=page_size,
+            serializer_context={"request": request, "include_relations": False},
+        ))
 
     @transaction.atomic
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         serializer = InfluencerSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         instance = serializer.save(tenant=request.user.tenant)
@@ -305,16 +314,23 @@ class InfluencerDetailView(APIView):
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
-    def get_object(self, request, pk):
-        return get_object_or_404(
-            Influencer.objects.select_related("profile").prefetch_related("contacts", "restrict_events__actor"),
-            pk=pk,
-            tenant=request.user.tenant,
-        )
+    def get_object(self, request, pk, *, include_relations=True):
+        queryset = Influencer.objects.select_related("profile")
+        if include_relations:
+            queryset = queryset.prefetch_related("contacts", "restrict_events__actor")
+        return get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
         require_all_scope(request.user, self.read_permission_code)
-        return success_response(InfluencerSerializer(self.get_object(request, pk)).data)
+        include_relations = _query_bool(
+            request.query_params.get("include_relations", "true"),
+            field="include_relations",
+        )
+        instance = self.get_object(request, pk, include_relations=include_relations)
+        return success_response(InfluencerSerializer(
+            instance,
+            context={"request": request, "include_relations": include_relations},
+        ).data)
 
     @transaction.atomic
     def patch(self, request, pk):
@@ -362,6 +378,7 @@ class InfluencerStatusView(APIView):
     @transaction.atomic
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         _assert_influencer_version(request, instance)
         status = request.data.get("status")
@@ -397,6 +414,7 @@ class InfluencerContactsView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         _assert_influencer_version(request, influencer)
         payload = request.data.get("contacts", [])
@@ -466,7 +484,7 @@ class InfluencerBlacklistHistoryView(APIView):
     def get(self, request, pk):
         require_all_scope(request.user, self.read_permission_code)
         influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
-        rows = influencer.restrict_events.filter(tenant=request.user.tenant).select_related("actor").order_by("-occurred_at", "-id")
+        rows = influencer.restrict_events.filter(tenant=request.user.tenant).select_related("actor").order_by("-occurred_at", "-id")[:100]
         return success_response(InfluencerRestrictEventSerializer(rows, many=True).data)
 
 
@@ -508,6 +526,7 @@ class InfluencerResolveView(APIView):
     def post(self, request):
         """Resolve an exact account or create the minimal tenant profile needed for sampling."""
         require_all_scope(request.user, self.write_permission_code)
+        _lock_influencer_write_tenant(request.user)
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )
@@ -663,6 +682,12 @@ class OutreachTaskOptionsView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
+        raw_include_influencers = request.query_params.get("include_influencers")
+        include_influencers = (
+            True
+            if raw_include_influencers is None
+            else _query_bool(raw_include_influencers, field="include_influencers")
+        )
         stores = StoreMaster.objects.filter(
             tenant=request.user.tenant,
             status=StatusChoices.ACTIVE,
@@ -676,13 +701,8 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
-        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        influencers = Influencer.objects.filter(
-            tenant=request.user.tenant,
-            status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery))
         stores = stores[:200]
-        return success_response({
+        payload = {
             "stores": [
                 {
                     "id": store.id,
@@ -697,8 +717,19 @@ class OutreachTaskOptionsView(APIView):
                 {"id": user.id, "username": user.username, "full_name": user.full_name}
                 for user in bd_users
             ],
-            "influencers": _influencer_candidates(influencers, limit=500, include_handle=True),
-        })
+        }
+        if include_influencers:
+            blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
+            influencers = Influencer.objects.filter(
+                tenant=request.user.tenant,
+                status=Influencer.Status.ACTIVE,
+            ).annotate(is_blacklisted=Exists(blacklist_subquery))
+            payload["influencers"] = _influencer_candidates(
+                influencers,
+                limit=500,
+                include_handle=True,
+            )
+        return success_response(payload)
 
 
 class SampleFulfillmentOptionsView(APIView):
@@ -1048,6 +1079,8 @@ class SampleFulfillmentCollectionView(APIView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
+            if status not in SampleFulfillment.Status.values:
+                raise ValidationError({"status": "Unsupported fulfillment status."})
             queryset = queryset.filter(status=status)
         outreach_task_id = request.query_params.get("outreach_task", "").strip()
         if outreach_task_id:

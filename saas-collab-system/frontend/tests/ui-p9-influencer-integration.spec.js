@@ -142,6 +142,7 @@ describe('influencer integration workspace contracts', () => {
   it('keeps the resource library focused and exposes BD performance as an independent workspace', () => {
     const hub = read('src/views/influencers/InfluencerList.vue');
     const library = read('src/views/influencers/InfluencerResourceLibrary.vue');
+    const api = read('src/api/influencers.js');
     const performance = read('src/views/influencers/BdPerformancePanel.vue');
     const performancePage = read('src/views/influencers/BdPerformance.vue');
 
@@ -150,9 +151,32 @@ describe('influencer integration workspace contracts', () => {
     expect(hub).not.toContain('query.tab');
     expect(hub).not.toContain('module-tabs');
     expect(hub).toContain('品牌达人等级资源库');
+    expect(library).toContain('新增联系方式');
+    expect(library).toContain('allow-create');
+    expect(api).toContain("instagram: 'Instagram'");
+    expect(api).toContain("line: 'LINE'");
     expect(library).toContain('fetchInfluencers');
     expect(library).toContain('createInfluencer');
     expect(library).toContain('暂无达人档案');
+    for (const label of ['等级 / 粉丝', '平均播放', '市场 / 赛道', '首次合作', '合作表现', '历史 GMV', '履约率']) {
+      expect(library).toContain(label);
+    }
+    for (const section of ['身份概览', '内容能力', '合作表现', '联系渠道', '黑名单历史']) {
+      expect(library).toContain(section);
+    }
+    expect(library).toContain('label="达人 ID"');
+    expect(library).toContain("profileValue(detail, 'external_influencer_id')");
+    expect(library).toContain('label="系统档案编码"');
+    expect(library).toContain("profileValue(row, 'external_influencer_id')");
+    expect(library).not.toContain('displayValue(row.code)');
+    for (const label of ['推荐与合作资源', '推荐商品', '合作店铺', '历史经营指标', '月 GMV', '客单价', '历史 ROI', '视频总播放']) {
+      expect(library).toContain(label);
+    }
+    expect(library).toContain("fetchInfluencer(row.id, { include_relations: 'false' })");
+    expect(library).toMatch(/label="平均视频播放"[^\n]+disabled/);
+    expect(library).toMatch(/label="平均直播观看"[^\n]+disabled/);
+    expect(library).not.toMatch(/function profilePayload\(\)[^\n]+average_video_views/);
+    expect(library).toContain("联系方式加载失败，已取消编辑以保护现有数据");
     expect(performancePage).toContain('<h1>BD 绩效</h1>');
     expect(performancePage).toContain('按日期范围查看达人开拓、送样投入与合作产出。');
     expect(performancePage).toContain('<BdPerformancePanel />');
@@ -235,6 +259,9 @@ describe('influencer integration workspace contracts', () => {
     expect(read('src/api/influencers.js')).toContain("'If-Match'");
     expect(page).toContain('nextTaskStatuses');
     expect(page).toContain('fetchOutreachTaskOptions');
+    expect(page).toContain("include_influencers: includeInfluencers ? 'true' : 'false'");
+    expect(page).toContain('loadTaskOptions(false, true)');
+    expect(page).toContain('loadTaskOptions(true, true)');
     expect(page).toContain('按店铺名称搜索');
     expect(page).toContain('目标人数');
     expect(page).toContain('按姓名或账号搜索');
@@ -263,7 +290,9 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('params.store = filters.store');
     expect(page).toContain('matchesDispatcher');
     expect(page).toContain("row.priority === 'normal'");
-    expect(page).toContain('sample_fulfillment_completed_count');
+    expect(page).toContain('送样记录进度');
+    expect(page).toContain('fulfillmentCount(detailTask)');
+    expect(page).not.toContain('送样完成校验');
     expect(page).toContain('status: form.status');
     expect(page).toContain('displayValue(row.notes)');
     expect(page).toContain('<style scoped>');
@@ -313,12 +342,22 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('采购成本待匹配');
     expect(page).not.toContain('价格未匹配');
     expect(page).toContain('statusLabel(FULFILLMENT_STATUS_LABELS');
+    expect(page).toContain('FULFILLMENT_FILTER_STATUS_LABELS');
+    expect(page).toContain("new Set(['processing', 'creating', 'blank', ''])");
+    expect(page).toContain('!LEGACY_FULFILLMENT_STATUSES.has(value)');
+    expect(page).toContain("!['live_creator', 'blacklisted'].includes(value)");
+    expect(page).toContain('placeholder="全部状态" @change="applyFilters"');
+    expect(page).toContain('MANUAL_FULFILLMENT_STATUS_LABELS');
+    expect(page).toContain("completed: FULFILLMENT_STATUS_LABELS.completed");
+    expect(page).toContain("cancelled: FULFILLMENT_STATUS_LABELS.cancelled");
+    expect(page).not.toContain(".filter((value) => value !== 'shipped')");
+    expect(page).toContain("status: ''");
+    expect(page).toContain("...(form.status ? { status: form.status } : {})");
     for (const field of ['calculated_cost', 'cost_match_status', 'COST_MATCH_STATUS_LABELS', 'costMatchLabel']) expect(page).toContain(field);
     for (const field of ['sales_amount', 'pricing_status', 'priced_at', 'unit_price', 'unit_cost', 'currency', 'price_match_status', 'price_source', 'price_snapshot_at']) expect(page).not.toContain(field);
     expect(page).not.toContain('PRICING_STATUS_LABELS');
     expect(page).not.toContain('displayAmount');
     expect(page).toContain('fulfillment-note');
-    expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
     expect(page).not.toContain('updateSampleFulfillmentStatus');
     expect(page).toContain('ElMessageBox.confirm');
     expect(page).toContain('confirm_terminal');
@@ -441,6 +480,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toMatch(/:disabled="!canManage \|\| isTerminal\(activeTask\) \|\| isTargetTerminal\(row\)"/);
     expect(page).toContain("['success', 'rejected', 'no_response', 'blocked']");
     expect(page).toContain('await refreshActiveTask()');
+    expect(page).toContain(':disabled="!canCreateFulfillment || isCancelled(detailTask)"');
+    expect(page).toContain('isCancelled(task)');
   });
 
   it('keeps priority values and fulfillment transitions aligned with backend contracts', () => {
@@ -519,6 +560,7 @@ describe('influencer integration workspace contracts', () => {
 
   it('turns backend blacklist, terminal, and stale-version conflicts into actionable Chinese feedback', () => {
     expect(formatInfluencerError({ http_status: 409, message: 'Blacklisted influencers cannot be linked.' })).toContain('黑名单');
+    expect(formatInfluencerError({ http_status: 400, message: 'Blacklisted influencers cannot receive samples.' })).toBe('该达人已被加入黑名单，不能执行本次操作。');
     expect(formatInfluencerError({ http_status: 409, message: 'Completed outreach tasks cannot change targets.' })).toContain('终态');
     expect(formatInfluencerError({ http_status: 409, message: 'Workflow record was changed by another request.' })).toContain('409');
   });

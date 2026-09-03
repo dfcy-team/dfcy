@@ -108,8 +108,11 @@ def _generate_sample_fulfillment_no(tenant, link_type):
     return f"{prefix}{max(numeric_suffixes, default=0) + 1:04d}"
 
 
-def _assert_task_accepts_target(task):
-    if task.status in TERMINAL_OUTREACH_TASK_STATUSES:
+def _assert_task_accepts_target(task, *, allow_completed=False):
+    blocked_statuses = {OutreachTask.Status.CANCELLED}
+    if not allow_completed:
+        blocked_statuses.add(OutreachTask.Status.COMPLETED)
+    if task.status in blocked_statuses:
         raise ValidationError(
             {"outreach_task": "Completed or cancelled outreach tasks cannot change targets or samples."},
             code="conflict",
@@ -343,7 +346,7 @@ def _lock_task_relations(
     task = _tenant_task(user, task_id, for_update=False)
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive samples."})
-    _assert_task_accepts_target(task)
+    _assert_task_accepts_target(task, allow_completed=True)
 
     influencer = None
     if target_id is not None:
@@ -380,7 +383,7 @@ def _lock_task_relations(
     task = _locked_task(user, task.pk)
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive samples."})
-    _assert_task_accepts_target(task)
+    _assert_task_accepts_target(task, allow_completed=True)
 
     if target is not None:
         target = _locked_target(user, target.pk)
@@ -1335,7 +1338,7 @@ def published_video_results_queryset(fulfillment):
 
 @transaction.atomic
 def recompute_outreach_task_completion(*, user, task):
-    """Complete an active task once its effective, non-deleted samples reach the target."""
+    """Complete an active task once its non-deleted sample records reach the target."""
     _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if task.is_deleted or task.status not in {
@@ -1343,25 +1346,12 @@ def recompute_outreach_task_completion(*, user, task):
         OutreachTask.Status.IN_PROGRESS,
     }:
         return task
-    completed_identities = {
-        influencer_identity_key(
-            influencer_id=influencer_id,
-            platform=platform,
-            handle=handle,
-        )
-        for influencer_id, platform, handle in SampleFulfillment.objects.filter(
-            tenant=user.tenant,
-            outreach_task=task,
-            is_deleted=False,
-            status__in=SAMPLE_COMPLETION_STATUSES,
-        ).values_list(
-            "influencer_id",
-            "influencer__platform",
-            "influencer__handle",
-        )
-    }
-    completed_count = len(completed_identities)
-    if task.target_count <= 0 or completed_count < task.target_count:
+    sample_count = SampleFulfillment.objects.filter(
+        tenant=user.tenant,
+        outreach_task=task,
+        is_deleted=False,
+    ).count()
+    if task.target_count <= 0 or sample_count < task.target_count:
         return task
 
     now = timezone.now()
@@ -1394,7 +1384,7 @@ def recompute_outreach_task_completion(*, user, task):
             after={
                 "status": task.status,
                 "version": task.version,
-                "completed_sample_count": completed_count,
+                "sample_count": sample_count,
                 "target_count": task.target_count,
             },
         )
@@ -1643,6 +1633,7 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             version=before_version + 1,
             updated_at=timezone.now(),
         )
+        fulfillment.refresh_from_db()
         FulfillmentStatusEvent.objects.create(
             tenant=user.tenant,
             fulfillment=fulfillment,
@@ -1693,10 +1684,12 @@ def transition_sample_fulfillment(
     allowed = {
         SampleFulfillment.Status.PENDING: {
             SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.SHIPPED: {
             SampleFulfillment.Status.DELIVERED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.DELIVERED: {

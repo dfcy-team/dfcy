@@ -14,7 +14,6 @@ from .models import (
     SampleItem,
     SkuPriceSnapshot,
     VideoResult,
-    influencer_identity_key,
     influencer_has_active_restriction,
     is_valid_tiktok_username,
     normalize_tiktok_username,
@@ -68,6 +67,13 @@ class InfluencerSerializer(serializers.ModelSerializer):
     profile = InfluencerProfileSerializer(required=False)
     contacts = InfluencerContactSerializer(many=True, read_only=True)
     blacklist_history = InfluencerRestrictEventSerializer(source="restrict_events", many=True, read_only=True)
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if not self.context.get("include_relations", True):
+            fields.pop("contacts", None)
+            fields.pop("blacklist_history", None)
+        return fields
 
     class Meta:
         model = Influencer
@@ -222,23 +228,14 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.LIVE_CREATOR,
         }
-        identity_statuses = {}
-        for _, status, influencer_id, platform, handle in sample_rows:
-            key = influencer_identity_key(
-                influencer_id=influencer_id,
-                platform=platform,
-                handle=handle,
-            )
-            current = identity_statuses.get(key)
-            if current is None or (current not in completion_statuses and status in completion_statuses):
-                identity_statuses[key] = status
-        for status in identity_statuses.values():
+        statuses = [status for _, status, _, _, _ in sample_rows]
+        for status in statuses:
             counts[status] = counts.get(status, 0) + 1
-        completed = sum(status in completion_statuses for status in identity_statuses.values())
+        completed = sum(status in completion_statuses for status in statuses)
         summary = {
             "counts": counts,
             "status_counts": counts,
-            "total": len(identity_statuses),
+            "total": len(statuses),
             "completed": completed,
             "video_match_count": matched_videos,
         }
@@ -266,10 +263,11 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     def get_completion_validation(self, obj):
         summary = self._sample_summary(obj)
         target_count = obj.target_count
-        target_reached = target_count > 0 and summary["completed"] >= target_count
+        target_reached = target_count > 0 and summary["total"] >= target_count
         return {
             "target_count": target_count,
             "completed_count": summary["completed"],
+            "sample_count": summary["total"],
             "target_positive": target_count > 0,
             "target_reached": target_reached,
             "task_completed": obj.status == OutreachTask.Status.COMPLETED,
@@ -548,6 +546,10 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
         choices=("replace", "append"), required=False, write_only=True
     )
     confirm_terminal = serializers.BooleanField(required=False, write_only=True)
+    status = serializers.ChoiceField(
+        choices=(SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED),
+        required=False,
+    )
 
     class Meta:
         model = SampleFulfillment
