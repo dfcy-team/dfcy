@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings
@@ -67,6 +69,8 @@ class SupplierWebTokenRefreshSerializer(TokenRefreshSerializer):
 
 class CurrentUserSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    full_name = serializers.CharField(read_only=True)
+    phone = serializers.CharField(read_only=True)
     roles = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
     menu_permission_codes = serializers.SerializerMethodField()
@@ -80,6 +84,8 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             "user_id",
             "username",
             "email",
+            "full_name",
+            "phone",
             "user_type",
             "tenant_id",
             "is_superuser",
@@ -137,3 +143,38 @@ class CurrentUserSerializer(serializers.ModelSerializer):
         if obj.is_superuser:
             return [{"scope_type": "all", "config": {"all": True}, "role_id": None}]
         return get_user_data_scope(obj)
+
+
+class CurrentUserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ("username", "full_name", "email", "phone")
+        read_only_fields = ("username",)
+
+
+class CurrentUserPasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=12,
+        max_length=128,
+        trim_whitespace=False,
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        min_length=12,
+        max_length=128,
+        trim_whitespace=False,
+    )
+
+    def validate(self, attrs):
+        user = self.context.get("user") or self.context["request"].user
+        if not user.check_password(attrs["current_password"]):
+            raise serializers.ValidationError({"current_password": "当前密码不正确。"})
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({"confirm_password": "两次输入的密码不一致。"})
+        try:
+            validate_password(attrs["new_password"], user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)}) from exc
+        return attrs

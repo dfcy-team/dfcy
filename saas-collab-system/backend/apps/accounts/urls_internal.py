@@ -1,5 +1,12 @@
 from django.urls import path
-from .views import InternalLoginView, InternalTokenRefreshView, current_user, internal_health
+from .views import (
+    CurrentUserPasswordChangeView,
+    CurrentUserProfileView,
+    InternalLoginView,
+    InternalTokenRefreshView,
+    current_user,
+    internal_health,
+)
 from .system_views import (
     DepartmentCollectionView,
     DepartmentDetailView,
@@ -26,6 +33,8 @@ urlpatterns = [
     path("auth/login/", InternalLoginView.as_view(), name="internal-auth-login"),
     path("auth/refresh/", InternalTokenRefreshView.as_view(), name="internal-auth-refresh"),
     path("auth/me/", current_user, name="internal-auth-me"),
+    path("auth/profile/", CurrentUserProfileView.as_view(), name="internal-auth-profile"),
+    path("auth/password/", CurrentUserPasswordChangeView.as_view(), name="internal-auth-password"),
     path("system/tenants/", TenantCollectionView.as_view(), name="system-tenant-collection"),
     path("system/tenants/<int:pk>/", TenantDetailView.as_view(), name="system-tenant-detail"),
     path("system/departments/", DepartmentCollectionView.as_view(), name="system-department-collection"),

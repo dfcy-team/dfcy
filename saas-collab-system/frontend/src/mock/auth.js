@@ -4,6 +4,9 @@ export const mockAuthUser = {
   id: 1,
   user_id: 'mock-user-001',
   username: 'stage0_internal_user',
+  full_name: '演示用户',
+  email: 'demo@example.com',
+  phone: '13800000000',
   user_type: 'internal',
   tenant_id: 'mock-tenant-001',
   is_superuser: false,
@@ -89,3 +92,24 @@ export const mockLogin = () => successResponse({
 });
 
 export const mockCurrentUser = () => successResponse(mockAuthUser);
+
+const mockProfileState = {
+  username: mockAuthUser.username,
+  full_name: mockAuthUser.full_name,
+  email: mockAuthUser.email,
+  phone: mockAuthUser.phone,
+};
+
+export const mockMyProfile = () => successResponse({ ...mockProfileState });
+
+export const mockUpdateMyProfile = (payload = {}) => {
+  Object.assign(mockProfileState, {
+    full_name: payload.full_name ?? mockProfileState.full_name,
+    email: payload.email ?? mockProfileState.email,
+    phone: payload.phone ?? mockProfileState.phone,
+  });
+  Object.assign(mockAuthUser, mockProfileState);
+  return successResponse({ ...mockProfileState });
+};
+
+export const mockChangeMyPassword = () => successResponse({ password_changed: true });

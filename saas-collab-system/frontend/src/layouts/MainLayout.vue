@@ -23,9 +23,10 @@
 
         <div class="header-user">
           <div class="header-user__identity">
-            <strong :title="auth.currentUser?.username">{{ auth.currentUser?.username }}</strong>
+            <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
             <span>{{ roleLabel }}</span>
           </div>
+          <el-button class="user-settings-button" text @click="userSettingsOpen = true">个人设置</el-button>
           <el-button text @click="handleLogout">退出登录</el-button>
         </div>
       </el-header>
@@ -49,13 +50,20 @@
         <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
       </div>
     </el-drawer>
+
+    <UserSettingsDrawer
+      v-model="userSettingsOpen"
+      :current-user="auth.currentUser"
+      @profile-updated="handleProfileUpdated"
+      @password-changed="handlePasswordChanged"
+    />
   </el-container>
 </template>
 
 <script setup>
 import { computed, defineComponent, h, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMenu, ElMenuItem, ElSubMenu } from 'element-plus';
+import { ElMenu, ElMenuItem, ElMessage, ElSubMenu } from 'element-plus';
 import 'element-plus/theme-chalk/el-container.css';
 import 'element-plus/theme-chalk/el-aside.css';
 import 'element-plus/theme-chalk/el-header.css';
@@ -68,11 +76,13 @@ import 'element-plus/theme-chalk/el-breadcrumb.css';
 import 'element-plus/theme-chalk/el-button.css';
 import { useAuthStore } from '../stores/auth';
 import { filterMenuItems, findMenuLabel } from '../router/menu';
+import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const mobileMenuOpen = ref(false);
+const userSettingsOpen = ref(false);
 
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
 const currentLabel = computed(() => findMenuLabel(route.path, visibleMenuItems.value));
@@ -83,6 +93,17 @@ const roleLabel = computed(() => {
 
 function handleLogout() {
   auth.logout();
+  router.replace('/login');
+}
+
+function handleProfileUpdated(profile) {
+  auth.setCurrentUser({ ...auth.currentUser, ...profile });
+}
+
+function handlePasswordChanged() {
+  userSettingsOpen.value = false;
+  auth.logout();
+  ElMessage.success('密码已修改，请使用新密码重新登录。');
   router.replace('/login');
 }
 
@@ -264,6 +285,7 @@ const AppMenu = defineComponent({
   .header-user__identity span { display: none; }
   .header-user { gap: 6px; }
   .header-user__identity { width: 76px; min-width: 0; }
+  .user-settings-button { min-width: 36px; padding: 4px; }
   .header-user .el-button { min-width: 36px; padding: 4px; }
 }
 </style>
