@@ -1664,10 +1664,12 @@ def transition_sample_fulfillment(
         },
         SampleFulfillment.Status.PROCESSING: {
             SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.SHIPPED: {
             SampleFulfillment.Status.DELIVERED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.DELIVERED: {

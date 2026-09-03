@@ -266,9 +266,6 @@ import {
   formatInfluencerError,
   FULFILLMENT_LINK_TYPE_LABELS,
   FULFILLMENT_STATUS_LABELS,
-  FULFILLMENT_STATUS_TRANSITIONS,
-  PRICE_MATCH_STATUS_LABELS,
-  PRICING_STATUS_LABELS,
   restoreSampleFulfillment,
   resolveOrCreateInfluencer,
   statusLabel,
@@ -303,16 +300,16 @@ const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '直播达�
 const FULFILLMENT_FILTER_STATUS_LABELS = Object.freeze(
   Object.fromEntries(Object.entries(FULFILLMENT_STATUS_LABELS).filter(([value]) => !['live_creator', 'blacklisted'].includes(value)))
 );
+const MANUAL_FULFILLMENT_STATUS_LABELS = Object.freeze({
+  completed: FULFILLMENT_STATUS_LABELS.completed,
+  cancelled: FULFILLMENT_STATUS_LABELS.cancelled
+});
 const quickTagOptions = computed(() => [...new Set([...QUICK_TAG_PRESETS, ...form.quick_tags])]);
 const editableStatusOptions = computed(() => {
   if (!editingSample.value) return {};
-  const current = editingSample.value.status || 'pending';
-  return Object.fromEntries(
-    (FULFILLMENT_STATUS_TRANSITIONS[current] || [])
-      .filter((value) => value !== 'shipped')
-      .filter((value, index, values) => values.indexOf(value) === index)
-      .map((value) => [value, FULFILLMENT_STATUS_LABELS[value]])
-  );
+  return ['completed', 'cancelled', 'blacklisted'].includes(editingSample.value.status)
+    ? {}
+    : MANUAL_FULFILLMENT_STATUS_LABELS;
 });
 const selectableLinkTypes = computed(() => inheritedTask.value
   ? { DRJL: FULFILLMENT_LINK_TYPE_LABELS.DRJL }

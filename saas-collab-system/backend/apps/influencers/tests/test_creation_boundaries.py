@@ -839,7 +839,7 @@ def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_
     assert "influencer" in missing_influencer.errors
 
 
-def test_sample_edit_can_transition_status_atomically():
+def test_sample_edit_can_mark_pending_record_completed_atomically():
     tenant, user, store, influencer = _records("sample-edit-status")
     role = Role.objects.get(tenant=tenant, code="bd")
     _grant_all_scope(role, "influencers.fulfillment.manage")
@@ -859,7 +859,11 @@ def test_sample_edit_can_transition_status_atomically():
 
     response = client.patch(
         f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
-        {"notes": "edited", "status": SampleFulfillment.Status.SHIPPED},
+        {
+            "notes": "edited",
+            "status": SampleFulfillment.Status.COMPLETED,
+            "confirm_terminal": True,
+        },
         format="json",
         HTTP_IF_MATCH=f'"{fulfillment.version}"',
     )
@@ -867,8 +871,38 @@ def test_sample_edit_can_transition_status_atomically():
     assert response.status_code == 200, response.data
     fulfillment.refresh_from_db()
     assert fulfillment.notes == "edited"
-    assert fulfillment.status == SampleFulfillment.Status.SHIPPED
-    assert fulfillment.sample_sent_at is not None
+    assert fulfillment.status == SampleFulfillment.Status.COMPLETED
+    assert fulfillment.finalized_at is not None
+
+
+def test_sample_edit_rejects_manual_intermediate_status():
+    tenant, user, store, influencer = _records("sample-edit-intermediate-status")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-edit-intermediate-status-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "INTERMEDIATE-STATUS-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {"status": SampleFulfillment.Status.SHIPPED},
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert response.status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
 
 
 def test_target_creation_reads_influencer_before_identity_group_lock(monkeypatch):
