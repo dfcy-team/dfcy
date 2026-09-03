@@ -1,9 +1,38 @@
 from django.urls import path
 
 from . import views
+from . import production_settings_api
 
 
 urlpatterns = [
+    path(
+        "production-settings/",
+        production_settings_api.production_settings_collection,
+        name="integration-production-settings",
+    ),
+    path(
+        "production-settings/versions/<int:pk>/",
+        production_settings_api.production_settings_version,
+        name="integration-production-settings-version",
+    ),
+    path(
+        "production-settings/versions/",
+        # Map the alias directly to the already decorated view.  Calling one
+        # @api_view wrapper from another makes DRF try to initialise a
+        # Request object twice and breaks POSTs from APIClient/browser clients.
+        production_settings_api.production_settings_collection,
+        name="integration-production-settings-versions",
+    ),
+    path(
+        "production-settings/versions/<int:pk>/approve/",
+        production_settings_api.production_settings_version,
+        name="integration-production-settings-version-approve",
+    ),
+    path(
+        "production-settings/versions/<int:pk>/rollback/",
+        production_settings_api.production_settings_version_rollback,
+        name="integration-production-settings-version-rollback",
+    ),
     path("workspace/", views.integration_workspace_view, name="integration-workspace"),
     path("readiness/", views.platform_integration_readiness, name="platform-integration-readiness"),
     path("audit/", views.integration_audit_collection, name="integration-audit-collection"),

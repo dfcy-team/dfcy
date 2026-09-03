@@ -3,7 +3,7 @@
     eyebrow="API DATA INTEGRATION"
     title="店铺映射"
     subtitle="将已授权的平台店铺绑定到当前租户店铺档案，并维护时区与结算币种。"
-    boundary-note="映射写入只接受店铺与授权 ID，由后端校验租户、平台和数据范围；平台身份字段不可由页面伪造，映射不可删除，只能停用。"
+    boundary-note="当前店铺映射能力仅支持 Shopee、TikTok Shop；Lazada 已支持授权但映射尚未开放。映射写入只接受店铺与授权 ID，由后端校验租户、平台和数据范围；平台身份字段不可由页面伪造，映射不可删除，只能停用。"
     :capability="capability"
   >
     <template #action>

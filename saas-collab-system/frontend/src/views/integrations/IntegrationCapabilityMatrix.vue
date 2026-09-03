@@ -12,6 +12,8 @@
         v-if="selectedAuthorization && canManage"
         type="primary"
         :loading="saving"
+        :disabled="!authorizationIsUsable"
+        :title="authorizationIsUsable ? '' : '只有有效授权（active/authorized）可以保存能力矩阵'"
         @click="save"
       >保存只读能力</el-button>
     </template>
@@ -65,7 +67,7 @@
         <el-table-column prop="capability_code" label="能力代码" width="170" />
         <el-table-column label="读取" width="120">
           <template #default="{ row }">
-            <el-switch v-model="row.read_enabled" :disabled="!canManage" active-text="开启" inactive-text="关闭" />
+            <el-switch v-model="row.read_enabled" :disabled="!canSave" active-text="开启" inactive-text="关闭" />
           </template>
         </el-table-column>
         <el-table-column label="写入" width="110">
@@ -76,7 +78,7 @@
         </el-table-column>
         <el-table-column label="同步方式" width="150">
           <template #default="{ row }">
-            <el-select v-model="row.sync_mode" :disabled="!canManage" size="small">
+              <el-select v-model="row.sync_mode" :disabled="!canSave" size="small">
               <el-option label="手动" value="manual" />
               <el-option label="定时" value="scheduled" />
               <el-option label="实时" value="realtime" />
@@ -86,12 +88,12 @@
         </el-table-column>
         <el-table-column label="来源优先级" width="150">
           <template #default="{ row }">
-            <el-input-number v-model="row.source_priority" :disabled="!canManage" :min="1" :max="65535" size="small" />
+            <el-input-number v-model="row.source_priority" :disabled="!canSave" :min="1" :max="65535" size="small" />
           </template>
         </el-table-column>
         <el-table-column label="状态" width="130">
           <template #default="{ row }">
-            <el-select v-model="row.status" :disabled="!canManage" size="small">
+            <el-select v-model="row.status" :disabled="!canSave" size="small">
               <el-option label="启用" value="active" />
               <el-option label="停用" value="disabled" />
               <el-option label="已配置" value="configured" />
@@ -113,7 +115,7 @@
             <template #default="{ row }">{{ row.read_enabled ? '开启' : '关闭' }}</template>
           </el-table-column>
           <el-table-column label="操作" width="120">
-            <template #default="{ row }"><el-button link type="primary" :disabled="!canManage" @click="applySuggestion(row)">载入建议</el-button></template>
+            <template #default="{ row }"><el-button link type="primary" :disabled="!canSave" @click="applySuggestion(row)">载入建议</el-button></template>
           </el-table-column>
         </el-table>
       </section>
@@ -149,13 +151,15 @@ const suggestions = ref([]);
 
 const selectedAuthorization = computed(() => authorizations.value.find((item) => String(item.id) === String(selectedAuthorizationId.value)) || null);
 const canManage = computed(() => auth.hasPermission('integrations.store.authorize'));
+const authorizationIsUsable = computed(() => ['active', 'authorized'].includes(selectedAuthorization.value?.status));
+const canSave = computed(() => canManage.value && authorizationIsUsable.value);
 
 function responseRows(response) {
   const data = response?.data;
   return Array.isArray(data) ? data : (data?.results || data?.items || []);
 }
-function authorizationLabel(value) { return ({ active: '有效', authorized: '已授权', pending: '待授权', expired: '已过期', revoked: '已撤销', failed: '失败' })[value] || value || '未知'; }
-function authorizationType(value) { return ({ active: 'success', authorized: 'success', pending: 'warning', expired: 'warning', revoked: 'info', failed: 'danger' })[value] || 'info'; }
+function authorizationLabel(value) { return ({ active: '有效', authorized: '已授权', pending: '待授权', expired: '已过期', revoked: '已撤销', failed: '失败', error: '失败' })[value] || value || '未知'; }
+function authorizationType(value) { return ({ active: 'success', authorized: 'success', pending: 'warning', expired: 'warning', revoked: 'info', failed: 'danger', error: 'danger' })[value] || 'info'; }
 
 async function loadAuthorizations() {
   loading.value = true;
@@ -227,7 +231,9 @@ function applySuggestion(suggestion) {
 }
 
 async function save() {
-  if (!selectedAuthorization.value || !canManage.value) return ElMessage.error('当前角色没有维护能力矩阵的权限。');
+  if (!selectedAuthorization.value) return ElMessage.warning('请先选择店铺授权。');
+  if (!canManage.value) return ElMessage.error('当前角色没有维护能力矩阵的权限。');
+  if (!authorizationIsUsable.value) return ElMessage.warning('当前授权未生效，只有 active/authorized 授权可以保存能力矩阵。');
   try { await ElMessageBox.confirm('确认保存当前只读能力？所有 write_enabled 将强制保持 false。', '保存能力矩阵', { type: 'warning', confirmButtonText: '确认保存' }); } catch { return; }
   saving.value = true;
   const response = await updateConnectionCapabilities(

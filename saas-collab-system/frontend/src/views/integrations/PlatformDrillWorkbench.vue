@@ -66,9 +66,9 @@
           <el-table-column prop="status" label="状态" width="105" />
           <el-table-column label="操作" width="170" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="selectAuthorization(row)">能力</el-button>
-              <el-button link :disabled="!canRefresh" @click="confirmRefresh(row)">刷新</el-button>
-              <el-button link type="danger" :disabled="!canRevoke || row.status === 'revoked'" @click="confirmRevoke(row)">撤销</el-button>
+              <el-button link type="primary" @click="selectAuthorization(row)">查看能力</el-button>
+              <el-button link :disabled="!canRefresh" @click="confirmRefresh(row)">刷新令牌</el-button>
+              <el-button link type="danger" :disabled="!canRevoke || row.status === 'revoked'" @click="confirmRevoke(row)">撤销授权</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -329,11 +329,11 @@ async function copyOAuthUrl() {
 }
 
 async function confirmRefresh(row) {
-  try { await ElMessageBox.confirm('确认刷新此授权的访问令牌？TikTok Shop 会同时提交 confirmed=true。', '刷新授权', { type: 'warning' }); }
+  try { await ElMessageBox.confirm('确认刷新此授权的访问令牌？TikTok Shop 会同时提交 confirmed=true。', '刷新令牌', { type: 'warning' }); }
   catch { return; }
   const response = await refreshStoreAuthorization(row.id, { confirmed: true });
-  if (!response?.success) return ElMessage.error(response?.message || '授权刷新失败');
-  ElMessage.success('授权已刷新'); await loadContext();
+  if (!response?.success) return ElMessage.error(response?.message || '令牌刷新失败');
+  ElMessage.success('访问令牌已刷新'); await loadContext();
 }
 
 async function confirmRevoke(row) {

@@ -20,6 +20,7 @@ import urllib.parse
 from django.conf import settings
 
 from .custody import CustodyError, resolve_service_auth_token, validate_custody_service_url
+from .production_settings import get_runtime_setting
 
 CAPABILITY_MOCK = "pending/mock"
 CAPABILITY_LIVE_VALIDATION = "pending/live-validation"
@@ -30,12 +31,12 @@ LIVE_NETWORK_MODE = "approved-live-test"
 
 def live_network_mode_enabled():
     """True only when an operator explicitly opted into the approved live test network."""
-    return getattr(settings, "PLATFORM_NETWORK_MODE", "") == LIVE_NETWORK_MODE
+    return get_runtime_setting("network", "mode", default="") == LIVE_NETWORK_MODE
 
 
 def live_platform_security_approved():
     """True only when the dedicated real-platform security approval is on record."""
-    return bool(getattr(settings, "LIVE_PLATFORM_SECURITY_APPROVED", False))
+    return bool(get_runtime_setting("network", "security_approved", default=False))
 
 
 def approved_custody_configured():
@@ -46,10 +47,10 @@ def approved_custody_configured():
     platform connection.  Live mode requires an independently operated HTTP
     custody service and a non-empty service authentication token.
     """
-    backend = str(getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") or "").strip().lower()
+    backend = str(get_runtime_setting("custody", "backend", default="refuse") or "").strip().lower()
     if backend == "http":
-        service_url = str(getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "") or "").strip()
-        configured_host = str(getattr(settings, "LIVE_CUSTODY_SERVICE_HOST", "") or "").strip().lower()
+        service_url = str(get_runtime_setting("custody", "service_url", default="") or "").strip()
+        configured_host = str(get_runtime_setting("custody", "service_host", default="") or "").strip().lower()
         try:
             parsed = urllib.parse.urlparse(validate_custody_service_url(service_url))
             service_token = resolve_service_auth_token()
@@ -74,7 +75,7 @@ def live_mode_allowed():
         live_network_mode_enabled()
         and live_platform_security_approved()
         and approved_custody_configured()
-        and bool(getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []))
+        and bool(get_runtime_setting("network", "allowed_hosts", default=[]))
         and not bool(getattr(settings, "DEBUG", False))
     )
 
@@ -115,7 +116,7 @@ def require_live_mode(context="real platform connection"):
             OAUTH_PROVIDER_UNAVAILABLE,
             "Live mode requires an authenticated independent HTTP credential custody service.",
         )
-    if not getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []):
+    if not get_runtime_setting("network", "allowed_hosts", default=[]):
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Live outbound host allowlist is empty.")
     if getattr(settings, "DEBUG", False):
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Live platform interaction is forbidden with DEBUG enabled.")

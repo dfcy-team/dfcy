@@ -9,11 +9,12 @@ const root = path.resolve(import.meta.dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 describe('SC-FLOW client contract', () => {
-  it('places supply chain collaboration between product development and multi-platform listings', () => {
+  it('places supply chain collaboration before inventory management and global listings', () => {
     const labels = menuItems.map((item) => item.label);
     const developmentIndex = labels.indexOf('\u4ea7\u54c1\u5f00\u53d1');
     expect(labels[developmentIndex + 1]).toBe('供应链协同');
-    expect(labels[developmentIndex + 2]).toBe('\u591a\u5e73\u53f0\u520a\u767b');
+    expect(labels[developmentIndex + 2]).toBe('库存管理');
+    expect(labels[developmentIndex + 3]).toBe('\u5168\u7403\u520a\u767b');
   });
 
   it('registers internal routes with exact view permissions and denies supplier users', () => {

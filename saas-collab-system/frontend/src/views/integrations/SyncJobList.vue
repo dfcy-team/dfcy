@@ -3,7 +3,7 @@
     eyebrow="API DATA INTEGRATION"
     title="同步任务"
     subtitle="查看内部同步调度、任务健康和最近一次运行结果。"
-    boundary-note="任务健康来自内部 workspace 汇总；run-mock 仅写入 Mock 运行记录，disable 仅停用内部任务，不连接真实平台。"
+    boundary-note="任务健康来自内部 workspace 汇总；运行模拟任务仅写入 Mock 运行记录，停用任务仅停用内部任务，不连接真实平台。"
     :capability="capability"
   >
     <template #action>
@@ -123,7 +123,7 @@
               :title="actionAccess(actionConfigs[0]).reason"
               :loading="actionLoading === `${actionConfigs[0].label}:${row.id}`"
               @click.stop="runAction(actionConfigs[0], row)"
-            >run-mock</el-button>
+            >运行模拟任务</el-button>
             <el-button
               v-if="actionAccess(actionConfigs[1]).visible"
               link
@@ -132,7 +132,7 @@
               :title="actionAccess(actionConfigs[1]).reason"
               :loading="actionLoading === `${actionConfigs[1].label}:${row.id}`"
               @click.stop="runAction(actionConfigs[1], row)"
-            >disable</el-button>
+            >停用任务</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -177,13 +177,13 @@
               :title="actionAccess(actionConfigs[1]).reason"
               :loading="incidentActionLoading === 'assign'"
               @click="submitIncidentAction('assign')"
-            >指派</el-button>
+            >指派负责人</el-button>
             <el-button
               :disabled="!actionAccess(actionConfigs[1]).allowed"
               :title="actionAccess(actionConfigs[1]).reason"
               :loading="incidentActionLoading === 'note'"
               @click="submitIncidentAction('note')"
-            >添加备注</el-button>
+            >保存备注</el-button>
             <el-button
               v-if="selectedIncident.status !== 'resolved'"
               type="success"
@@ -191,14 +191,14 @@
               :title="actionAccess(actionConfigs[1]).reason"
               :loading="incidentActionLoading === 'resolve'"
               @click="submitIncidentAction('resolve')"
-            >解决</el-button>
+            >解决事件</el-button>
             <el-button
               v-if="actionAccess(actionConfigs[0]).visible"
               type="warning"
               :disabled="!actionAccess(actionConfigs[0]).allowed || retryLoading"
               :title="actionAccess(actionConfigs[0]).reason"
               @click="loadRetryPreview"
-            >重试预览</el-button>
+            >受控重试预览</el-button>
           </div>
 
           <el-alert
@@ -569,7 +569,7 @@ async function runAction(action, row) {
   try {
     if (action.confirmMessage) {
       await ElMessageBox.confirm(
-        `确认对同步任务“${row.id}”执行 disable？${action.confirmMessage}`,
+        `确认对同步任务“${row.id}”执行${action.label === 'disable' ? '停用任务' : '运行模拟任务'}？${action.confirmMessage}`,
         '同步任务操作确认',
         { type: 'warning' }
       );

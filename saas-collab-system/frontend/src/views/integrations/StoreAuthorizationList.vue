@@ -71,21 +71,29 @@
       </el-table-column>
       <el-table-column label="操作" fixed="right" width="230">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+          <el-button
+            link
+            type="primary"
+            :loading="detailLoading === row.id"
+            :disabled="Boolean(detailLoading && detailLoading !== row.id)"
+            @click="openDetail(row)"
+          >查看详情</el-button>
           <el-button
             v-if="canRefresh"
             link
             type="warning"
             :loading="actionKey === `refresh:${row.id}`"
+            :disabled="Boolean(actionKey && actionKey !== `refresh:${row.id}`)"
             @click="refresh(row)"
-          >刷新授权</el-button>
+          >刷新令牌</el-button>
           <el-button
             v-if="canRevoke && !['revoked', 'expired'].includes(row.status)"
             link
             type="danger"
             :loading="actionKey === `revoke:${row.id}`"
+            :disabled="Boolean(actionKey && actionKey !== `revoke:${row.id}`)"
             @click="revoke(row)"
-          >撤销</el-button>
+          >撤销授权</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -164,15 +172,16 @@
       <el-input :model-value="oauthUrl" readonly type="textarea" :rows="4" class="oauth-result" />
       <template #footer>
         <el-button @click="oauthResultOpen = false">关闭</el-button>
-        <el-button type="primary" @click="copyOAuthUrl">复制地址</el-button>
+        <el-button type="primary" :loading="copying" :disabled="!oauthUrl" @click="copyOAuthUrl">复制地址</el-button>
       </template>
     </el-dialog>
   </AppPage>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useRoute } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
@@ -184,13 +193,16 @@ import {
   startStoreAuthorizationOAuth
 } from '../../api/integrations';
 
+const route = useRoute();
 const auth = useAuthStore();
 const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
 const error = ref('');
 const rows = ref([]);
 const actionKey = ref('');
-const filters = reactive({ platform: '', status: '', store_id: '' });
+const detailLoading = ref('');
+const copying = ref(false);
+const filters = reactive({ platform: normalizePlatform(route.query.platform), status: '', store_id: '' });
 const page = ref(1);
 const pageSize = ref(20);
 const total = ref(0);
@@ -199,11 +211,16 @@ const detailOpen = ref(false);
 const oauthOpen = ref(false);
 const oauthResultOpen = ref(false);
 const oauthUrl = ref('');
-const oauthForm = reactive({ platform: 'shopee', integration_config_id: '', store_id: '', region: 'SG', redirect_uri: '', scopes: '' });
+const oauthForm = reactive({ platform: normalizePlatform(route.query.platform) || 'shopee', integration_config_id: '', store_id: '', region: 'SG', redirect_uri: '', scopes: '' });
 
 const canAuthorize = computed(() => auth.hasPermission('integrations.store.authorize'));
-const canRefresh = computed(() => auth.hasPermission('integrations.credential.rotate'));
+const canRefresh = computed(() => auth.hasPermission('integrations.store.authorize') && auth.hasPermission('integrations.credential.rotate'));
 const canRevoke = computed(() => auth.hasPermission('integrations.store.revoke'));
+
+function normalizePlatform(value) {
+  const platform = String(value || '').trim().toLowerCase();
+  return ['lazada', 'shopee', 'tiktok'].includes(platform) ? platform : '';
+}
 
 function responseRows(response) {
   const data = response?.data;
@@ -231,33 +248,49 @@ function credentialLabel(value) {
 async function load() {
   loading.value = true;
   error.value = '';
-  const response = await fetchStoreAuthorizations({ ...filters, page: page.value, page_size: pageSize.value });
-  capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded');
-  if (response?.success) {
-    rows.value = responseRows(response);
-    const data = response?.data;
-    total.value = Number(data?.count ?? data?.total ?? rows.value.length);
-  } else {
+  try {
+    const response = await fetchStoreAuthorizations({ ...filters, page: page.value, page_size: pageSize.value });
+    capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded');
+    if (response?.success) {
+      rows.value = responseRows(response);
+      const data = response?.data;
+      total.value = Number(data?.count ?? data?.total ?? rows.value.length);
+    } else {
+      rows.value = [];
+      total.value = 0;
+      error.value = response?.message || '读取店铺授权失败。';
+    }
+  } catch (requestError) {
     rows.value = [];
     total.value = 0;
-    error.value = response?.message || '读取店铺授权失败。';
+    capability.value = useMock ? 'mock' : 'degraded';
+    error.value = requestError?.message || '读取店铺授权失败。';
+  } finally {
+    loading.value = false;
   }
-  loading.value = false;
 }
 function handleSizeChange(size) { pageSize.value = size; page.value = 1; load(); }
 function applyFilters() { page.value = 1; load(); }
 function resetFilters() { Object.assign(filters, { platform: '', status: '', store_id: '' }); applyFilters(); }
 
 async function openDetail(row) {
-  const response = await fetchStoreAuthorizationDetail(row.id);
-  if (!response?.success) return ElMessage.error(response?.message || '授权详情读取失败。');
-  selected.value = response.data || row;
-  detailOpen.value = true;
+  if (detailLoading.value) return;
+  detailLoading.value = row.id;
+  try {
+    const response = await fetchStoreAuthorizationDetail(row.id);
+    if (!response?.success) return ElMessage.error(response?.message || '授权详情读取失败。');
+    selected.value = response.data || row;
+    detailOpen.value = true;
+  } catch (requestError) {
+    ElMessage.error(requestError?.message || '授权详情读取失败。');
+  } finally {
+    detailLoading.value = '';
+  }
 }
 
 function openOAuth() {
   if (!canAuthorize.value) return ElMessage.error('当前角色没有发起店铺授权的权限。');
-  Object.assign(oauthForm, { platform: 'shopee', integration_config_id: '', store_id: '', region: 'SG', redirect_uri: '', scopes: '' });
+  Object.assign(oauthForm, { platform: filters.platform || normalizePlatform(route.query.platform) || 'shopee', integration_config_id: '', store_id: '', region: 'SG', redirect_uri: '', scopes: '' });
   oauthOpen.value = true;
 }
 
@@ -274,48 +307,75 @@ async function submitOAuth() {
     await ElMessageBox.confirm('确认按当前平台、店铺、回调地址和 scopes 生成授权地址？系统不会自动打开该地址。', '确认发起授权', { type: 'warning' });
   } catch { return; }
   actionKey.value = 'oauth';
-  const response = await startStoreAuthorizationOAuth({
-    platform: oauthForm.platform,
-    integration_config_id: integrationConfigId,
-    store_id: storeId,
-    region,
-    redirect_uri: redirectUri,
-    scopes: String(oauthForm.scopes || '').split(',').map((item) => item.trim()).filter(Boolean)
-  });
-  actionKey.value = '';
-  if (!response?.success) return ElMessage.error(response?.message || '授权地址生成失败。');
-  oauthUrl.value = response.data?.auth_url || response.data?.authorization_url || '';
-  if (!oauthUrl.value) return ElMessage.error('平台未返回授权地址。');
-  oauthOpen.value = false;
-  oauthResultOpen.value = true;
+  try {
+    const response = await startStoreAuthorizationOAuth({
+      platform: oauthForm.platform,
+      integration_config_id: integrationConfigId,
+      store_id: storeId,
+      region,
+      redirect_uri: redirectUri,
+      scopes: String(oauthForm.scopes || '').split(',').map((item) => item.trim()).filter(Boolean)
+    });
+    if (!response?.success) return ElMessage.error(response?.message || '授权地址生成失败。');
+    oauthUrl.value = response.data?.auth_url || response.data?.authorization_url || '';
+    if (!oauthUrl.value) return ElMessage.error('平台未返回授权地址。');
+    oauthOpen.value = false;
+    oauthResultOpen.value = true;
+  } catch (requestError) {
+    ElMessage.error(requestError?.message || '授权地址生成失败。');
+  } finally {
+    actionKey.value = '';
+  }
 }
 
 async function refresh(row) {
-  if (!canRefresh.value) return ElMessage.error('当前角色没有刷新授权的权限。');
-  try { await ElMessageBox.confirm('确认刷新该店铺授权令牌？操作结果会记录到集成审计。', '刷新授权', { type: 'warning' }); } catch { return; }
+  if (!canRefresh.value) return ElMessage.error('当前角色没有刷新令牌的权限。');
+  try { await ElMessageBox.confirm('确认刷新该店铺授权令牌？操作结果会记录到集成审计。', '刷新令牌', { type: 'warning' }); } catch { return; }
   actionKey.value = `refresh:${row.id}`;
-  const response = await refreshStoreAuthorization(row.id, { confirmed: true });
-  actionKey.value = '';
-  if (!response?.success) return ElMessage.error(response?.message || '授权刷新失败。');
-  ElMessage.success('授权已刷新。');
-  await load();
+  try {
+    const response = await refreshStoreAuthorization(row.id, { confirmed: true });
+    if (!response?.success) return ElMessage.error(response?.message || '令牌刷新失败。');
+    ElMessage.success('令牌已刷新。');
+    await load();
+  } catch (requestError) {
+    ElMessage.error(requestError?.message || '令牌刷新失败。');
+  } finally {
+    actionKey.value = '';
+  }
 }
 
 async function revoke(row) {
   if (!canRevoke.value) return ElMessage.error('当前角色没有撤销授权的权限。');
   try { await ElMessageBox.confirm('撤销后相关同步任务将不能继续读取平台数据，确认继续？', '撤销授权', { type: 'error', confirmButtonText: '确认撤销' }); } catch { return; }
   actionKey.value = `revoke:${row.id}`;
-  const response = await revokeStoreAuthorization(row.id);
-  actionKey.value = '';
-  if (!response?.success) return ElMessage.error(response?.message || '授权撤销失败。');
-  ElMessage.success('授权已撤销。');
-  await load();
+  try {
+    const response = await revokeStoreAuthorization(row.id);
+    if (!response?.success) return ElMessage.error(response?.message || '授权撤销失败。');
+    ElMessage.success('授权已撤销。');
+    await load();
+  } catch (requestError) {
+    ElMessage.error(requestError?.message || '授权撤销失败。');
+  } finally {
+    actionKey.value = '';
+  }
 }
 
 async function copyOAuthUrl() {
+  if (!oauthUrl.value || copying.value) return;
+  copying.value = true;
   try { await navigator.clipboard.writeText(oauthUrl.value); ElMessage.success('授权地址已复制。'); }
   catch { ElMessage.warning('浏览器未允许复制，请手动选择地址。'); }
+  finally { copying.value = false; }
 }
+
+watch(() => route.query.platform, (value) => {
+  const platform = normalizePlatform(value);
+  if (platform === filters.platform) return;
+  filters.platform = platform;
+  oauthForm.platform = platform || 'shopee';
+  page.value = 1;
+  load();
+});
 
 onMounted(load);
 </script>

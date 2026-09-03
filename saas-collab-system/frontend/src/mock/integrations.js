@@ -9,16 +9,16 @@ const config = {
   regions: ['SG'],
   callback_url: 'https://sandbox.example.invalid/api/internal/integrations/store-authorizations/oauth/callback/shopee/',
   scopes: ['shop.info', 'order.read'],
-  credential_status: 'referenced',
+  api_type: 'marketplace',
   credential_status: 'referenced',
   credential_fingerprint: '***demo-fingerprint',
   credential_key_version: 'demo-v1',
-  callback_url: '',
-  scopes: [],
-  regions: [],
-  api_type: 'marketplace',
-  last_verified_at: '',
-  updated_at: '2026-07-10T00:00:00Z'
+  contract_version: 'shopapi-local-v1',
+  config_version: 1,
+  credential_reference_version: 'demo-v1',
+  reference_count: 3,
+  last_verified_at: '2026-09-01T09:00:00Z',
+  updated_at: '2026-09-01T10:00:00Z'
 };
 
 // This is the safe, non-network Shopee fixture used by the platform drill.
@@ -26,7 +26,7 @@ const config = {
 const shopeeSandboxConfig = {
   id: 2,
   platform: 'shopee',
-  account_alias: 'demo-shopee',
+  account_alias: 'demo-shopee-secondary',
   environment: 'sandbox',
   status: 'active',
   credential_status: 'referenced',
@@ -37,6 +37,9 @@ const shopeeSandboxConfig = {
   regions: ['SG', 'MY'],
   api_type: 'marketplace',
   contract_version: 'shopapi-local-v1',
+  config_version: 1,
+  credential_reference_version: 'demo-v1',
+  reference_count: 0,
   last_verified_at: '2026-09-01T09:00:00Z',
   updated_at: '2026-09-01T09:00:00Z'
 };
@@ -81,8 +84,8 @@ export const mockIntegrationConfigs = () => successResponse({
 export const mockIntegrationConfigDetail = (id = 1) => {
   const item = configFixtures.find((candidate) => String(candidate.id) === String(id)) || config;
   return successResponse({
-  status: 'mock',
-  module: 'integrations.configs.detail',
+    status: 'mock',
+    module: 'integrations.configs.detail',
     ...item
   });
 };
@@ -374,17 +377,108 @@ const workspaceJobs = [
   }
 ];
 
+// These rows mirror the backend _run_rows() projection. They are historical,
+// redacted demonstrations only: no fixture handler performs a live request.
+const workspaceRuns = [
+  {
+    id: 301,
+    run_id: 'MOCK-RUN-LIVE-READONLY-001',
+    sync_job_id: 1,
+    subject_name: '新加坡示例店铺',
+    subject_code: 'demo-store-sg',
+    region: 'SG',
+    platform: 'shopee',
+    api_type: 'marketplace',
+    resource_type: 'sales_order',
+    data_destination: '销售订单',
+    data_table: 'sales_order / sales_order_item',
+    execution_mode: 'live_readonly',
+    external_api_called: true,
+    token_refreshed: false,
+    status: 'failed',
+    started_at: '2026-09-01T09:59:00Z',
+    finished_at: '2026-09-01T10:00:00Z',
+    duration_seconds: 60,
+    fetched_count: 120,
+    created_count: 0,
+    updated_count: 0,
+    skipped_count: 119,
+    failed_count: 1,
+    retry_count: 3,
+    retry_of: '',
+    next_retry_at: null,
+    max_retry_count: 3,
+    checkpoint_version: 4,
+    checkpoint_advanced: false,
+    archive_file_count: 1,
+    error_code: 'MOCK_LIVE_READONLY_FAILED',
+    masked_error_message: '本地演练：平台只读接口返回脱敏失败；未写入业务表。',
+    masked_log: {
+      execution_mode: 'live_readonly',
+      external_api_called: true,
+      token_refreshed: false,
+      checkpoint: { version: 4, advanced: false },
+      archive_files: ['mock-live-readonly-301.txt'],
+      masked_error_message: '平台响应已脱敏并归档。'
+    }
+  },
+  {
+    id: 302,
+    run_id: 'MOCK-RUN-SIMULATION-001',
+    sync_job_id: 4,
+    subject_name: '新加坡示例店铺',
+    subject_code: 'demo-store-sg',
+    region: 'SG',
+    platform: 'shopee',
+    api_type: 'marketplace',
+    resource_type: 'settlement_bill',
+    data_destination: '结算账单',
+    data_table: 'settlement_bills',
+    execution_mode: 'simulation',
+    external_api_called: false,
+    token_refreshed: false,
+    status: 'failed',
+    started_at: '2026-09-01T08:00:00Z',
+    finished_at: '2026-09-01T08:00:05Z',
+    duration_seconds: 5,
+    fetched_count: 0,
+    created_count: 0,
+    updated_count: 0,
+    skipped_count: 0,
+    failed_count: 1,
+    retry_count: 1,
+    retry_of: '',
+    next_retry_at: null,
+    max_retry_count: 3,
+    checkpoint_version: null,
+    checkpoint_advanced: false,
+    archive_file_count: 0,
+    error_code: 'MOCK_SIMULATION_FAILED',
+    masked_error_message: '本地演练：模拟适配器返回脱敏失败；未调用外部平台。',
+    masked_log: {
+      execution_mode: 'simulation',
+      external_api_called: false,
+      token_refreshed: false,
+      stages: [
+        { code: 'adapter', label: '本地模拟适配器', status: 'failed' },
+        { code: 'run_failed', label: '运行结果', status: 'failed', reason: 'run_failed' }
+      ],
+      masked_error_message: '模拟数据校验未通过。'
+    }
+  }
+];
+
 const workspaceSummary = {
-  config_count: 2,
-  ready_credential_count: 2,
+  config_count: configFixtures.length,
+  ready_credential_count: configFixtures.length,
   store_authorization_count: 1,
   warehouse_authorization_count: 1,
   job_count: workspaceJobs.length,
   enabled_job_count: workspaceJobs.filter((job) => job.is_enabled).length,
-  run_count: 3,
-  successful_run_count: 0,
-  failed_run_count: 2,
-  running_run_count: 1,
+  run_count: workspaceRuns.length,
+  successful_run_count: workspaceRuns.filter((run) => run.status === 'success').length,
+  failed_run_count: workspaceRuns.filter((run) => run.status === 'failed').length,
+  running_run_count: workspaceRuns.filter((run) => run.status === 'running').length,
   due_job_count: 0,
   live_confirmation_job_count: 0,
   retry_waiting_job_count: 1,
@@ -397,16 +491,72 @@ const workspaceSummary = {
 };
 
 const workspaceOptions = {
-  platforms: ['jifeng_wms', 'shopee'],
-  statuses: ['disabled', 'failed', 'idle', 'running'],
-  environments: ['pilot'],
-  api_types: ['inventory', 'marketplace'],
+  platforms: ['jifeng_wms', 'lazada', 'shopee'],
+  statuses: ['active', 'configured', 'disabled', 'failed', 'idle', 'running', 'verified'],
+  environments: ['sandbox', 'pilot', 'production'],
+  api_types: ['advertising', 'inventory', 'marketplace'],
   resource_types: ['inventory_snapshot', 'refund_return', 'sales_order', 'settlement_bill'],
   schedule_types: ['daily', 'hourly', 'interval']
 };
 
+const workspaceReferenceOptions = {
+  platforms: [
+    {
+      id: 11,
+      value: 'shopee',
+      code: 'shopee',
+      name: 'Shopee',
+      label: 'Shopee（shopee）',
+      enabled: true,
+      api_types: [
+        { value: 'marketplace', label: '商城 API' },
+        { value: 'advertising', label: '广告 API' }
+      ],
+      allowed_regions: null
+    },
+    {
+      id: 12,
+      value: 'lazada',
+      code: 'lazada',
+      name: 'Lazada',
+      label: 'Lazada（lazada）',
+      enabled: true,
+      api_types: [{ value: 'marketplace', label: '商城 API' }],
+      allowed_regions: ['SG', 'MY', 'TH', 'VN', 'ID', 'PH']
+    },
+    {
+      id: 13,
+      value: 'jifeng_wms',
+      code: 'jifeng_wms',
+      name: '极风 WMS',
+      label: '极风 WMS（jifeng_wms）',
+      enabled: true,
+      api_types: [{ value: 'inventory', label: '库存 API' }],
+      allowed_regions: null
+    }
+  ],
+  countries: [
+    { value: 'CN', country_code: 'CN', code: 'CN', name: '中国大陆', label: 'CN（中国大陆）', currency: 'CNY', timezone: 'Asia/Shanghai' },
+    { value: 'SG', country_code: 'SG', code: 'SG', name: '新加坡', label: 'SG（新加坡）', currency: 'SGD', timezone: 'Asia/Singapore' },
+    { value: 'MY', country_code: 'MY', code: 'MY', name: '马来西亚', label: 'MY（马来西亚）', currency: 'MYR', timezone: 'Asia/Kuala_Lumpur' },
+    { value: 'TH', country_code: 'TH', code: 'TH', name: '泰国', label: 'TH（泰国）', currency: 'THB', timezone: 'Asia/Bangkok' },
+    { value: 'VN', country_code: 'VN', code: 'VN', name: '越南', label: 'VN（越南）', currency: 'VND', timezone: 'Asia/Ho_Chi_Minh' },
+    { value: 'ID', country_code: 'ID', code: 'ID', name: '印度尼西亚', label: 'ID（印度尼西亚）', currency: 'IDR', timezone: 'Asia/Jakarta' },
+    { value: 'PH', country_code: 'PH', code: 'PH', name: '菲律宾', label: 'PH（菲律宾）', currency: 'PHP', timezone: 'Asia/Manila' }
+  ],
+  environments: [
+    { value: 'sandbox', label: '沙箱' },
+    { value: 'pilot', label: '试运行' },
+    { value: 'production', label: '生产' }
+  ]
+};
+
 export const mockIntegrationWorkspace = (mode = 'sync-jobs') => {
-  const results = mode === 'sync-jobs' ? workspaceJobs : [];
+  const results = mode === 'configs'
+    ? configFixtures
+    : mode === 'sync-runs'
+      ? workspaceRuns
+      : workspaceJobs;
   return successResponse({
     mode,
     source_status: 'mock',
@@ -415,8 +565,8 @@ export const mockIntegrationWorkspace = (mode = 'sync-jobs') => {
     scheduler: { configured: true, heartbeat_state: 'scheduled', execution_policy: 'readonly_automatic' },
     scheduler_history: [],
     options: workspaceOptions,
-    reference_options: { platforms: [], countries: [], environments: [{ value: 'pilot', label: '试运行' }] },
-    regions: [],
+    reference_options: workspaceReferenceOptions,
+    regions: workspaceReferenceOptions.countries,
     previews: {
       due: { due_count: workspaceSummary.due_job_count, automatic_count: 0, confirmation_count: 0, batch_limit: 20 },
       reconcile: { eligible_subject_count: 2, total_required: 3, existing_count: 3, missing_count: 0 },
@@ -620,14 +770,88 @@ const mockAuthorizationRows = [{
   id: 201,
   integration_config_id: 1,
   store_id: 1,
+  store_code: 'demo-store-sg',
   store_name: '新加坡示例店铺',
   platform: 'shopee',
   region: 'SG',
   status: 'active',
   platform_store_id: 'masked-external-store-001',
   token_expires_at: '2026-09-30T00:00:00Z',
+  refreshed_at: '2026-09-01T10:00:00Z',
   updated_at: '2026-09-01T10:00:00Z'
 }];
+
+const subjectApiConfig = (item) => ({
+  id: item.id,
+  platform: item.platform,
+  api_type: item.api_type,
+  account_alias: item.account_alias,
+  environment: item.environment,
+  status: item.status,
+  regions: [...(item.regions || [])],
+  callback_url: item.callback_url,
+  scopes: [...(item.scopes || [])],
+  oauth_ready: item.status !== 'disabled',
+  oauth_blockers: []
+});
+
+const emptySubjectApiAccess = (subjectType, subjectId) => ({
+  subject_type: subjectType,
+  subject_id: subjectId,
+  subject: null,
+  api_types: [],
+  configs: [],
+  bindings: [],
+  token_policy: 'platform-default'
+});
+
+// This mirrors subject_api_access() for the one store available in the local
+// master-data mock. All identifiers are synthetic or masked metadata.
+export const mockSubjectApiAccess = (subjectType = 'store', subjectId = 1) => {
+  const isDemoStore = subjectType === 'store'
+    && (subjectId === undefined || subjectId === null || String(subjectId) === '1' || String(subjectId) === 'demo-store-sg');
+  if (!isDemoStore) {
+    return {
+      success: false,
+      code: 'MOCK_NOT_FOUND',
+      message: '模拟数据未提供该业务主体的 API 接入样例',
+      data: emptySubjectApiAccess(subjectType, subjectId)
+    };
+  }
+
+  const subjectBindings = mockAuthorizationRows
+    .filter((row) => row.store_id === 1)
+    .map((row) => ({
+      id: row.id,
+      api_type: 'marketplace',
+      status: row.status,
+      integration_config_id: row.integration_config_id,
+      account_alias: configFixtures.find((item) => item.id === row.integration_config_id)?.account_alias || 'demo-shopee',
+      platform_store_id: row.platform_store_id,
+      authorized_at: '2026-09-01T09:00:00Z',
+      last_verified_at: row.refreshed_at || null,
+      last_run_at: '2026-09-01T10:00:00Z',
+      last_error_code: row.status === 'active' ? '' : 'MOCK_AUTHORIZATION_REVOKED'
+    }));
+
+  return successResponse({
+    subject_type: 'store',
+    subject: {
+      id: 1,
+      code: 'demo-store-sg',
+      name: '新加坡示例店铺',
+      country_code: 'SG',
+      platform: 'shopee',
+      platform_name: 'Shopee'
+    },
+    api_types: ['marketplace', 'advertising'],
+    configs: configFixtures
+      .filter((item) => item.platform === 'shopee' && (item.regions || []).includes('SG'))
+      .map(subjectApiConfig),
+    bindings: subjectBindings,
+    token_policy: 'auto-refresh'
+  });
+};
 
 export const mockStoreAuthorizations = (params = {}) => {
   const results = mockAuthorizationRows.filter((row) => (

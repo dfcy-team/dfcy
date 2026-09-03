@@ -50,8 +50,20 @@
                 <div><span>最近同步</span><strong>{{ formatDate(binding.last_run_at) }}</strong></div>
               </div>
               <div class="section-actions">
-                <el-button :loading="busy === `check-${binding.id}`" @click="checkToken(binding)">检查 Token</el-button>
-                <el-button :loading="busy === `disable-${binding.id}`" @click="disableStoreBinding(binding)">禁用此广告户</el-button>
+                <el-button
+                  v-if="readonlyCheckAccess.visible"
+                  :loading="busy === `check-${binding.id}`"
+                  :disabled="readonlyCheckAccess.disabled || !binding.integration_config_id"
+                  :title="readonlyCheckAccess.disabled ? readonlyCheckAccess.reason : '调用一次平台只读接口，不会刷新或替换 Token'"
+                  @click="checkToken(binding)"
+                >平台只读检查</el-button>
+                <el-button
+                  v-if="storeRevokeAccess.visible"
+                  :loading="busy === `disable-${binding.id}`"
+                  :disabled="storeRevokeAccess.disabled"
+                  :title="storeRevokeAccess.reason"
+                  @click="disableStoreBinding(binding)"
+                >撤销广告户授权</el-button>
               </div>
             </article>
           </div>
@@ -88,26 +100,41 @@
 
           <div class="section-actions">
             <el-button
-              v-if="subjectType === 'store' && canAuthorize(apiType)"
+              v-if="subjectType === 'store' && canAuthorize(apiType) && storeAuthorizeAccess.visible"
               :type="primaryBinding(apiType) ? 'default' : 'primary'"
               :loading="busy === `authorize-${apiType}`"
-              :disabled="!selectedConfig(apiType) || !selectedConfig(apiType).oauth_ready"
+              :disabled="storeAuthorizeAccess.disabled || !selectedConfig(apiType) || !selectedConfig(apiType).oauth_ready"
+              :title="storeAuthorizeAccess.disabled ? storeAuthorizeAccess.reason : '发起平台 OAuth 授权'"
               @click="authorizeStore(apiType)"
             >
               {{ authorizeLabel(apiType) }}
             </el-button>
             <el-button
-              v-if="primaryBinding(apiType) && !isMultipleAdvertising(apiType) && supportsReadonlyCheck()"
+              v-if="primaryBinding(apiType) && !isMultipleAdvertising(apiType) && supportsReadonlyCheck() && readonlyCheckAccess.visible"
               :loading="busy === `check-${primaryBinding(apiType).id}`"
+              :disabled="readonlyCheckAccess.disabled || !primaryBinding(apiType).integration_config_id"
+              :title="readonlyCheckAccess.disabled ? readonlyCheckAccess.reason : '调用一次平台只读接口，不会刷新或替换 Token'"
               @click="checkToken(primaryBinding(apiType))"
-            >检查 Token</el-button>
+            >平台只读检查</el-button>
             <el-button
-              v-if="subjectType === 'store' && primaryBinding(apiType) && !isMultipleAdvertising(apiType)"
+              v-if="subjectType === 'store' && primaryBinding(apiType) && !isMultipleAdvertising(apiType) && storeRevokeAccess.visible"
               :loading="busy === `disable-${primaryBinding(apiType).id}`"
+              :disabled="storeRevokeAccess.disabled"
+              :title="storeRevokeAccess.reason"
               @click="disableStoreBinding(primaryBinding(apiType))"
-            >禁用授权</el-button>
-            <el-button v-if="primaryBinding(apiType) && supportsReadonlyCheck()" @click="viewSyncJobs(apiType)">查看同步任务</el-button>
-            <el-button v-if="!configsFor(apiType).length" @click="goToConfigs(apiType)">配置 {{ apiLabels[apiType] }}</el-button>
+            >撤销授权</el-button>
+            <el-button
+              v-if="primaryBinding(apiType) && supportsReadonlyCheck() && syncViewAccess.visible"
+              :disabled="syncViewAccess.disabled"
+              :title="syncViewAccess.reason"
+              @click="viewSyncJobs(apiType)"
+            >查看同步任务</el-button>
+            <el-button
+              v-if="!configsFor(apiType).length && configViewAccess.visible"
+              :disabled="configViewAccess.disabled"
+              :title="configViewAccess.reason"
+              @click="goToConfigs(apiType)"
+            >配置 {{ apiLabels[apiType] }}</el-button>
           </div>
 
           <div v-if="subjectType === 'warehouse' && apiType === 'inventory'" class="reauthorize-panel">
@@ -116,7 +143,13 @@
               <p>一次性 Token 只通过受控凭据维护入口提交；本弹窗仅展示脱敏授权关系，不读取或回显凭据原文。</p>
             </div>
             <el-tag type="info" effect="light">受控维护</el-tag>
-            <el-button type="primary" @click="goToConfigs(apiType)">维护接入凭据</el-button>
+            <el-button
+              v-if="credentialMaintenanceAccess.visible"
+              type="primary"
+              :disabled="credentialMaintenanceAccess.disabled"
+              :title="credentialMaintenanceAccess.reason"
+              @click="goToConfigs(apiType, { requiresCredentialRotate: true })"
+            >维护接入凭据</el-button>
           </div>
         </section>
       </div>
@@ -132,6 +165,8 @@
 import { computed, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
+import { getActionAccess } from '../utils/actionAccess';
 import {
   checkIntegrationReadonlyConnection,
   completeSyntheticStoreAuthorization,
@@ -147,6 +182,7 @@ const props = defineProps({
 });
 const emit = defineEmits(['update:modelValue', 'changed']);
 const router = useRouter();
+const auth = useAuthStore();
 const loading = ref(false);
 const busy = ref('');
 const error = ref('');
@@ -158,6 +194,24 @@ const apiDescriptions = { marketplace: '销售订单与退款退货', advertisin
 const dialogVisible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value),
+});
+const subjectViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view', unauthorizedBehavior: 'disable' }));
+const storeAuthorizeAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.authorize', unauthorizedBehavior: 'disable' }));
+const storeRevokeAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.revoke', unauthorizedBehavior: 'disable' }));
+const readonlyCheckAccess = computed(() => getActionAccess(auth, { permission: 'integrations.run_live_readonly', unauthorizedBehavior: 'disable' }));
+const configViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.config.view', unauthorizedBehavior: 'disable' }));
+const credentialRotateAccess = computed(() => getActionAccess(auth, { permission: 'integrations.credential.rotate', unauthorizedBehavior: 'disable' }));
+const syncViewAccess = subjectViewAccess;
+const credentialMaintenanceAccess = computed(() => {
+  const allowed = configViewAccess.value.allowed && credentialRotateAccess.value.allowed;
+  return {
+    allowed,
+    visible: configViewAccess.value.visible && credentialRotateAccess.value.visible,
+    disabled: !allowed,
+    reason: configViewAccess.value.allowed
+      ? credentialRotateAccess.value.reason
+      : configViewAccess.value.reason,
+  };
 });
 const subtitle = computed(() => props.subjectType === 'store'
   ? '从当前店铺发起授权，回调后直接加密写入并绑定 SaaS MySQL'
@@ -253,6 +307,10 @@ function supportsReadonlyCheck() {
 
 async function load() {
   if (!props.row?.id) return;
+  if (!subjectViewAccess.value.allowed) {
+    error.value = subjectViewAccess.value.reason || '当前角色无权查看 API 接入信息';
+    return;
+  }
   loading.value = true;
   error.value = '';
   access.value = null;
@@ -271,8 +329,15 @@ async function load() {
 }
 
 async function authorizeStore(apiType) {
+  if (props.subjectType !== 'store' || !storeAuthorizeAccess.value.allowed) {
+    ElMessage.warning(storeAuthorizeAccess.value.reason || '当前角色无权发起店铺授权');
+    return;
+  }
   const config = selectedConfig(apiType);
-  if (!config) return;
+  if (!config) {
+    ElMessage.warning('请先选择可用的接入配置');
+    return;
+  }
   if (!config.oauth_ready) {
     ElMessage.warning(oauthBlockerText(config) || '当前接入配置尚未达到授权条件。');
     return;
@@ -311,40 +376,70 @@ async function authorizeStore(apiType) {
 }
 
 async function checkToken(binding) {
+  if (!readonlyCheckAccess.value.allowed) {
+    ElMessage.warning(readonlyCheckAccess.value.reason || '当前角色无权执行平台只读检查');
+    return;
+  }
+  if (!binding?.integration_config_id) {
+    ElMessage.warning('当前授权缺少接入配置，无法执行平台只读检查');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      '将调用一次平台只读接口，仅验证当前授权连接；不会刷新或替换 Token。是否继续？',
+      '确认平台只读检查',
+      { type: 'warning', confirmButtonText: '确认检查', cancelButtonText: '取消' },
+    );
+  } catch (_reason) {
+    return;
+  }
   busy.value = `check-${binding.id}`;
   try {
     const response = await checkIntegrationReadonlyConnection(binding.integration_config_id);
-    if (!response?.success) throw new Error(response?.message || 'Token 检查失败');
+    if (!response?.success) throw new Error(response?.message || '平台只读检查失败');
     ElMessage.success('只读 API 检查通过，授权凭据可用于当前同步任务。');
     await load();
   } catch (reason) {
-    ElMessage.error(reason?.message || 'Token 检查失败');
+    ElMessage.error(reason?.message || '平台只读检查失败');
   } finally {
     busy.value = '';
   }
 }
 
 async function disableStoreBinding(binding) {
+  if (props.subjectType !== 'store' || !storeRevokeAccess.value.allowed) {
+    ElMessage.warning(storeRevokeAccess.value.reason || '当前角色无权撤销店铺授权');
+    return;
+  }
+  if (!binding?.id) {
+    ElMessage.warning('当前授权记录无效，无法撤销');
+    return;
+  }
   try {
-    await ElMessageBox.confirm('禁用后关联授权将不可继续使用，确认禁用？', '禁用授权', { type: 'warning' });
+    await ElMessageBox.confirm('撤销后关联授权将不可继续使用，确认撤销？', '撤销授权', { type: 'warning', confirmButtonText: '确认撤销', cancelButtonText: '取消' });
   } catch (_reason) {
     return;
   }
   busy.value = `disable-${binding.id}`;
   try {
     const response = await revokeStoreAuthorization(binding.id);
-    if (!response?.success) throw new Error(response?.message || '禁用授权失败');
-    ElMessage.success('授权已禁用');
+    if (!response?.success) throw new Error(response?.message || '撤销授权失败');
+    ElMessage.success('授权已撤销');
     await load();
     emit('changed');
   } catch (reason) {
-    ElMessage.error(reason?.message || '禁用授权失败');
+    ElMessage.error(reason?.message || '撤销授权失败');
   } finally {
     busy.value = '';
   }
 }
 
 function viewSyncJobs(apiType) {
+  if (!syncViewAccess.value.allowed) {
+    ElMessage.warning(syncViewAccess.value.reason || '当前角色无权查看同步任务');
+    return;
+  }
+  if (!access.value?.subject?.platform) return;
   dialogVisible.value = false;
   router.push({ path: '/integrations/sync-jobs', query: {
     platform: access.value.subject.platform,
@@ -353,7 +448,13 @@ function viewSyncJobs(apiType) {
   } });
 }
 
-function goToConfigs(apiType) {
+function goToConfigs(apiType, options = {}) {
+  const actionAccess = options.requiresCredentialRotate ? credentialMaintenanceAccess.value : configViewAccess.value;
+  if (!actionAccess.allowed) {
+    ElMessage.warning(actionAccess.reason || '当前角色无权进入接入配置');
+    return;
+  }
+  if (!access.value?.subject?.platform) return;
   dialogVisible.value = false;
   router.push({ path: '/integrations/configs', query: {
     platform: access.value.subject.platform,

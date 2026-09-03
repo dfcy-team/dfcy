@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+import re
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -13,6 +14,29 @@ from .models import ConfigChangeLog, SystemConfigDefinition, TenantConfigVersion
 
 
 SENSITIVE_REFERENCE_PREFIXES = ("placeholder://", "demo://", "not-configured")
+_CHANGE_REASON_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)(password|passwd|token|access[_-]?token|refresh[_-]?token|api[_-]?(key|secret)|"
+    r"client[_-]?secret|app[_-]?secret|credential|secret)\s*[:=]"
+)
+
+
+def normalize_change_reason(reason, *, required=False, default=""):
+    """Validate an operator-facing audit reason without accepting secrets."""
+    if reason is None:
+        reason = default
+    if not isinstance(reason, str):
+        raise ValidationError("Change reason must be a string.")
+    reason = reason.strip()
+    if not reason:
+        if required:
+            raise ValidationError("Change reason is required.")
+        return ""
+    if len(reason) < 5 or len(reason) > 240:
+        raise ValidationError("Change reason must contain between 5 and 240 characters.")
+    sanitized = sanitize_sensitive_data(reason)
+    if sanitized != reason or _CHANGE_REASON_ASSIGNMENT_PATTERN.search(reason):
+        raise ValidationError("Change reason must not contain credential or token assignments.")
+    return reason
 
 
 def _assert_permission(actor, code):
@@ -42,6 +66,15 @@ def _assert_scope_permission(actor, definition):
 
 
 def _normalize_value(definition, value):
+    # The production runtime definition contains endpoint path keys such as
+    # ``token_path``.  Those names are safe metadata, not credential values,
+    # but the generic sanitizer intentionally rejects any key containing the
+    # word ``token``.  Give this one definition its stricter domain validator
+    # while preserving the generic guard for every other config key.
+    if definition.config_key == "integrations.production.runtime" and not definition.is_sensitive:
+        from apps.integrations.production_settings import validate_runtime_config
+
+        return validate_runtime_config(value)
     if definition.is_sensitive:
         if not isinstance(value, dict) or set(value) - {"reference", "masked_metadata"}:
             raise ValidationError("Sensitive configs only accept placeholder reference metadata.")
@@ -137,7 +170,9 @@ def _effective_versions(*, scope_key, config_key):
     )
 
 
-def _create_version_locked(*, definition, actor, value, effective_at, action, source_version=None):
+def _create_version_locked(
+    *, definition, actor, value, effective_at, action, source_version=None, change_reason=None, detail=None
+):
     tenant, scope_key = _scope(definition, actor)
     latest = _latest_version(scope_key=scope_key, config_key=definition.config_key)
     next_version = latest.version + 1 if latest else 1
@@ -166,23 +201,28 @@ def _create_version_locked(*, definition, actor, value, effective_at, action, so
             _effective_versions(scope_key=scope_key, config_key=definition.config_key),
             except_id=version.id,
         )
+    log_detail = {
+        "scope": definition.scope_type,
+        "status": status,
+        "requires_approval": definition.requires_approval,
+        "value_masked": definition.is_sensitive,
+    }
+    if detail:
+        log_detail.update(detail)
+    if change_reason:
+        log_detail["change_reason"] = normalize_change_reason(change_reason, required=True)
     _write_log(
         version=version,
         actor=actor,
         action=action,
         from_version=source_version if source_version is not None else (latest.version if latest else None),
-        detail={
-            "scope": definition.scope_type,
-            "status": status,
-            "requires_approval": definition.requires_approval,
-            "value_masked": definition.is_sensitive,
-        },
+        detail=log_detail,
     )
     return version
 
 
 @transaction.atomic
-def create_config_version(*, definition, actor, value, effective_at):
+def create_config_version(*, definition, actor, value, effective_at, change_reason=None, detail=None):
     _assert_permission(actor, "config.manage")
     definition = SystemConfigDefinition.objects.select_for_update().get(pk=definition.pk)
     _assert_scope_permission(actor, definition)
@@ -192,6 +232,8 @@ def create_config_version(*, definition, actor, value, effective_at):
         value=value,
         effective_at=effective_at,
         action=ConfigChangeLog.Action.CREATE_VERSION,
+        change_reason=change_reason,
+        detail=detail,
     )
 
 
@@ -202,7 +244,7 @@ def _assert_version_scope(actor, version):
 
 
 @transaction.atomic
-def approve_config_version(*, version, actor):
+def approve_config_version(*, version, actor, change_reason=None, detail=None):
     _assert_permission(actor, "config.approve")
     # Acquire the same per-definition serialization point used by creation and
     # rollback before reading the latest version. This prevents two concurrent
@@ -231,18 +273,23 @@ def approve_config_version(*, version, actor):
             _effective_versions(scope_key=version.scope_key, config_key=version.config_key),
             except_id=version.id,
         )
+    log_detail = {"status": version.status, "value_masked": version.definition.is_sensitive}
+    if detail:
+        log_detail.update(detail)
+    if change_reason:
+        log_detail["change_reason"] = normalize_change_reason(change_reason, required=True)
     _write_log(
         version=version,
         actor=actor,
         action=ConfigChangeLog.Action.APPROVE,
         from_version=version.version,
-        detail={"status": version.status, "value_masked": version.definition.is_sensitive},
+        detail=log_detail,
     )
     return version
 
 
 @transaction.atomic
-def rollback_config_version(*, target_version, actor, effective_at=None):
+def rollback_config_version(*, target_version, actor, effective_at=None, change_reason=None, detail=None):
     _assert_permission(actor, "config.rollback")
     definition = SystemConfigDefinition.objects.select_for_update().get(pk=target_version.definition_id)
     target_version = TenantConfigVersion.objects.select_for_update().get(pk=target_version.pk)
@@ -255,6 +302,8 @@ def rollback_config_version(*, target_version, actor, effective_at=None):
         effective_at=effective_at or timezone.now(),
         action=ConfigChangeLog.Action.ROLLBACK,
         source_version=target_version.version,
+        change_reason=change_reason,
+        detail=detail,
     )
 
 

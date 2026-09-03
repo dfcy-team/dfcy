@@ -2,6 +2,7 @@ import json
 from itertools import product as cartesian_product
 from uuid import uuid4
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -10,6 +11,7 @@ from apps.common.exceptions import ScopedResourceNotFound, StateConflict
 from apps.rpa.models import RPATask
 from apps.products.models import ProductSKU, ProductSPU
 from apps.masterdata.models import StoreMaster
+from apps.integrations.production_settings import assert_listing_production_allowed
 
 from .models import (
     ListingAttributeMapping,
@@ -258,6 +260,19 @@ def _publication_payload(profile):
     }
 
 
+def _production_policy_detail(policy):
+    if not isinstance(policy, dict):
+        return {}
+    return {
+        "production_policy": {
+            "platform": policy.get("platform", ""),
+            "action": policy.get("action", ""),
+            "store_id": policy.get("store_id"),
+            "batch_size": policy.get("batch_size"),
+        }
+    }
+
+
 @transaction.atomic
 def queue_listing_publication(
     *,
@@ -282,6 +297,29 @@ def queue_listing_publication(
     profile = ListingProfile.objects.select_for_update().filter(pk=profile_id, tenant=actor.tenant).first()
     if profile is None:
         raise ScopedResourceNotFound("Listing profile is not available in the current tenant.")
+    # Re-check the current production policy even for an idempotency replay.
+    # A previously accepted queue must not become a bypass after an operator
+    # enables the emergency stop or revokes its platform/store/action scope.
+    production_policy = None
+    if execution_mode == ListingPublicationJob.ExecutionMode.PRODUCTION:
+        if not profile.approved_by_id:
+            raise ValidationError({"profile": "Production listing requires an approved listing profile."})
+        if profile.approved_by_id == actor.id:
+            raise ValidationError({"profile": "The listing approver cannot submit the same profile to production."})
+        platform_type = ""
+        if profile.store_id:
+            platform_type = str(getattr(profile.store.platform, "platform_type", "") or "").strip().lower()
+        try:
+            production_policy = assert_listing_production_allowed(
+                platform=platform_type,
+                action=action,
+                store_id=profile.store_id,
+                batch_size=1,
+                confirm_production=confirm_production,
+            )
+        except DjangoValidationError as exc:
+            detail = getattr(exc, "message_dict", None) or getattr(exc, "messages", None) or str(exc)
+            raise ValidationError(detail) from exc
     existing = ListingPublicationJob.objects.filter(tenant=actor.tenant, idempotency_key=idempotency_key).first()
     if existing:
         if (
@@ -307,7 +345,9 @@ def queue_listing_publication(
         confirmed_production=bool(confirm_production),
     )
     # The RPA record is an internal queue envelope only.  No platform API or
-    # browser is contacted here; an agent may execute it later.
+    # browser is contacted here; an agent may execute it later.  Any future
+    # executor must call assert_listing_production_allowed again immediately
+    # before an external call so a revocation/emergency stop takes effect.
     rpa_task = None
     if execution_channel == ListingPublicationJob.ExecutionChannel.RPA:
         rpa_task = RPATask.objects.create(
@@ -340,11 +380,28 @@ def queue_listing_publication(
         step_no=1,
         step_name="queued",
         status=ListingTaskStepLog.Status.PENDING,
-        detail={"boundary": "queue_only", "external_platform_call": False},
+        detail={
+            "boundary": "queue_only",
+            "external_platform_call": False,
+            **_production_policy_detail(production_policy),
+        },
     )
     profile.status = ListingProfile.Status.PUBLISHING
     profile.save(update_fields=["status", "updated_at"])
-    ListingChangeLog.objects.create(profile=profile, changed_by=actor, action="queue_publish", before_snapshot={"status": ListingProfile.Status.APPROVED}, after_snapshot={"status": profile.status, "job_id": job.id})
+    ListingChangeLog.objects.create(
+        profile=profile,
+        changed_by=actor,
+        action="queue_publish",
+        before_snapshot={"status": ListingProfile.Status.APPROVED},
+        after_snapshot={
+            "status": profile.status,
+            "job_id": job.id,
+            "execution_mode": execution_mode,
+            "execution_channel": execution_channel,
+            "external_platform_call": False,
+            **_production_policy_detail(production_policy),
+        },
+    )
     return job, False
 
 

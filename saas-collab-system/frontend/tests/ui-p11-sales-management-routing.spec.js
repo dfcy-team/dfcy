@@ -36,19 +36,21 @@ describe('sales management routing contract', () => {
     expect(read('src/router/index.js')).not.toContain("path: 'analytics/sales', component: SalesOverview");
   });
 
-  it('keeps the corrected top-level order after removing业务协同', () => {
+  it('keeps the approved top-level order after removing业务协同', () => {
     const labels = menuItems.map((item) => item.label);
     expect(labels).toEqual([
-      '工作台', '产品开发', '供应链协同', '多平台刊登', '经营分析', '经营决策', '销售管理', '达人管理',
-      '流程协同', 'RPA协同', 'API数据接入', '财务中心', '报表中心', '基础档案', '系统治理', '治理与试点'
+      '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '达人管理',
+      '财务中心', '经营分析', '经营决策', '报表中心', '流程协同', 'RPA协同', 'API数据接入', '系统管理', '治理与试点'
     ]);
     expect(labels).not.toContain('业务协同');
-    expect(labels.indexOf('销售管理')).toBe(labels.indexOf('经营决策') + 1);
+    expect(labels.indexOf('销售管理')).toBe(labels.indexOf('全球刊登') + 1);
     expect(labels.indexOf('达人管理')).toBe(labels.indexOf('销售管理') + 1);
-    expect(labels.indexOf('流程协同')).toBe(labels.indexOf('达人管理') + 1);
     const salesMenu = menuItems.find((item) => item.label === '销售管理');
+    expect(salesMenu.internal).toBe(true);
+    expect(salesMenu.showWhenChildAccessible).toBe(true);
     expect(salesMenu.children.map((item) => item.path)).toEqual([...salesRoutes, '/pricing/prices']);
     expect([...new Set(salesMenu.permissions)].sort()).toEqual([...salesPermissions].sort());
+    expect(salesMenu.children.at(-1)).toMatchObject({ label: '价格中心', internal: true });
   });
 
   it('filters each sales route by its exact internal permission and denies external users', () => {
@@ -59,6 +61,17 @@ describe('sales management routing contract', () => {
     expect(canAccessPath(viewer, '/sales-management/orders')).toBe(true);
     expect(canAccessPath(viewer, '/sales-management/returns')).toBe(false);
     expect(canAccessPath({ ...viewer, user_type: 'external' }, '/sales-management/orders')).toBe(false);
+  });
+
+  it('shows the internal price center without sales permission and hides it externally', () => {
+    const internalPaths = flattenMenuItems(filterMenuItems({ user_type: 'internal', permissions: [] }))
+      .map((item) => item.path);
+    expect(internalPaths).toContain('/pricing/prices');
+    expect(internalPaths).not.toContain('/sales-management/overview');
+
+    const externalPaths = flattenMenuItems(filterMenuItems({ user_type: 'external', permissions: [] }))
+      .map((item) => item.path);
+    expect(externalPaths).not.toContain('/pricing/prices');
   });
 
   it('shows each moved entry through its owning parent and keeps internal-only pricing hidden externally', () => {
