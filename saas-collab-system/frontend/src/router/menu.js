@@ -206,11 +206,28 @@ export const menuItems = [
   },
   {
     label: '系统管理',
+    internal: true,
     children: [
-      { path: '/system/departments', label: '组织架构', permissions: ['system.organization.view'] },
-      { path: '/system/users', label: '用户目录', permissions: ['system.users.view'] },
-      { path: '/system/roles', label: '角色权限', permissions: ['system.roles.view'] },
-      { path: '/system/security-operations', label: '安全运维', permissions: ['security.operations.view'] },
+      {
+        path: '/system/tenants', label: '租户管理', superuserOnly: true,
+        menuPermissions: ['menu.system.tenants.view']
+      },
+      {
+        path: '/system/departments', label: '组织架构', permissions: ['system.organization.view'],
+        menuPermissions: ['menu.system.organization.view']
+      },
+      {
+        path: '/system/users', label: '用户目录', permissions: ['system.users.view'],
+        menuPermissions: ['menu.system.users.view']
+      },
+      {
+        path: '/system/roles', label: '角色权限', permissions: ['system.roles.view'],
+        menuPermissions: ['menu.system.roles.view']
+      },
+      {
+        path: '/system/security-operations', label: '安全运维', permissions: ['security.operations.view'],
+        menuPermissions: ['menu.system.security_operations.view']
+      },
       { path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
       { path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
       { path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
@@ -368,6 +385,7 @@ export const routeCapabilities = [
   { path: '/settings/security-review', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/settings/config-center', permissions: ['config.view'], userTypes: ['internal'] },
   { path: '/settings/config-versions', permissions: ['config.view'], userTypes: ['internal'] },
+  { path: '/system/tenants', superuserOnly: true, userTypes: ['internal'] },
   { path: '/system/departments', permissions: ['system.organization.view'], userTypes: ['internal'] },
   { path: '/system/users', permissions: ['system.users.view'], userTypes: ['internal'] },
   { path: '/system/roles', permissions: ['system.roles.view'], userTypes: ['internal'] },
@@ -423,13 +441,24 @@ function canAccessCapability(user, capability) {
   if (!user || !capability) return false;
   if (capability.userTypes?.length && !capability.userTypes.includes(user.user_type)) return false;
   if (capability.internal && user.user_type !== 'internal') return false;
+  if (capability.superuserOnly) return user.user_type === 'internal' && Boolean(user.is_superuser);
   if (user.is_superuser) return true;
   if (!capability.permissions?.length) return true;
-  const permissions = new Set(user.permissions || []);
+  const isMenuContract = capability.menuPermissions?.length;
+  const categorized = isMenuContract ? user.menu_permission_codes : user.action_permission_codes;
+  // New sessions expose separate permission surfaces. Keep the legacy union
+  // as a compatibility fallback for sessions issued before V2.44.62.
+  const hasCategorizedPermissions = Array.isArray(categorized);
+  const permissions = hasCategorizedPermissions
+    ? new Set(categorized)
+    : new Set(user.permissions || []);
+  const required = isMenuContract && hasCategorizedPermissions
+    ? capability.menuPermissions
+    : capability.permissions;
   if (capability.allPermissions?.length && !capability.allPermissions.every((code) => permissions.has(code))) {
     return false;
   }
-  return capability.permissions.some((code) => permissions.has(code));
+  return required.some((code) => permissions.has(code));
 }
 
 export function canAccessMenuItem(user, item) {

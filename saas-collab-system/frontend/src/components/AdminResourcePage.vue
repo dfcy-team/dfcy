@@ -87,7 +87,7 @@
             </el-tag>
             <span v-else-if="column.type === 'list'">{{ (row[column.prop] || []).join('、') || '-' }}</span>
             <span v-else-if="column.type === 'boolean'">{{ row[column.prop] ? '是' : '否' }}</span>
-            <span v-else>{{ columnValue(column, row[column.prop]) }}</span>
+            <span v-else>{{ columnValue(column, row[column.prop], row) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" :width="operationWidth" fixed="right">
@@ -147,7 +147,7 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item v-for="column in columns" :key="column.prop" :label="column.label">
           <span v-if="column.type === 'list'">{{ (selectedRow[column.prop] || []).join('、') || '-' }}</span>
-          <span v-else>{{ columnValue(column, selectedRow[column.prop]) }}</span>
+          <span v-else>{{ columnValue(column, selectedRow[column.prop], selectedRow) }}</span>
         </el-descriptions-item>
       </el-descriptions>
       <p class="drawer-note">字段可见性与数据范围由后端 tenant、permission 和 data_scope 最终校验。</p>
@@ -171,14 +171,23 @@
             :placeholder="field.placeholder || '请选择'"
             :filterable="field.filterable !== false"
             :clearable="field.clearable === true"
+            :aria-describedby="fieldHelpText(field) ? `${field.key}-help` : undefined"
             @change="handleFieldChange(field, $event)"
           >
-            <el-option
+            <template
               v-for="option in (typeof field.options === 'function' ? field.options(resourceForm) : field.options || [])"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
+              :key="option.value || option.label"
+            >
+              <el-option-group v-if="Array.isArray(option.options)" :label="option.label">
+                <el-option
+                  v-for="child in option.options"
+                  :key="child.value"
+                  :label="child.label"
+                  :value="child.value"
+                />
+              </el-option-group>
+              <el-option v-else :label="option.label" :value="option.value" />
+            </template>
           </el-select>
           <el-input
             v-else
@@ -187,7 +196,9 @@
             :show-password="field.type === 'password'"
             :autocomplete="field.type === 'password' ? 'new-password' : 'off'"
             :placeholder="field.placeholder || `请输入${field.label}`"
+            :aria-describedby="fieldHelpText(field) ? `${field.key}-help` : undefined"
           />
+          <p v-if="fieldHelpText(field)" :id="`${field.key}-help`" class="field-help">{{ fieldHelpText(field) }}</p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -276,10 +287,16 @@ function formatValue(value) {
   return value ?? '-';
 }
 
-function columnValue(column, value) {
-  if (typeof column.format === 'function') return column.format(value);
-  const option = column.options?.find((item) => item.value === value);
+function columnValue(column, value, row = {}) {
+  if (typeof column.format === 'function') return column.format(value, row);
+  const options = typeof column.options === 'function' ? column.options(row) : column.options;
+  const option = options?.flatMap((item) => Array.isArray(item.options) ? item.options : [item]).find((item) => item.value === value);
   return option?.label || formatValue(value);
+}
+
+function fieldHelpText(field) {
+  if (typeof field.helpText === 'function') return field.helpText(resourceForm);
+  return field.helpText || field.help_text || '';
 }
 
 function unpack(response) {
@@ -460,6 +477,7 @@ loadData();
 .resource-pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 2px 0; color: #64748b; font-size: 13px; }
 .drawer-note { margin: 16px 0 0; color: #64748b; font-size: 12px; line-height: 1.6; }
 .create-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; margin-top: 16px; }
+.field-help { margin: 4px 0 12px; color: #64748b; font-size: 12px; line-height: 1.55; }
 
 @media (max-width: 760px) {
   .resource-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

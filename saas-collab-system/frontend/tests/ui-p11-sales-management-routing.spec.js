@@ -91,4 +91,15 @@ describe('sales management routing contract', () => {
     expect(visibleChildren(internalWithoutSalesPermission, '销售管理')).toContain('/pricing/prices');
     expect(visibleChildren({ user_type: 'external', permissions: [] }, '销售管理')).toEqual([]);
   });
+
+  it('keeps the role increment inside system management without changing sales ownership', () => {
+    const systemMenu = menuItems.find((item) => item.label === '系统管理');
+    expect(systemMenu?.children.map((item) => item.path)).toContain('/system/tenants');
+    expect(routeCapabilities.find((item) => item.path === '/system/tenants')).toMatchObject({
+      superuserOnly: true,
+      userTypes: ['internal']
+    });
+    expect(menuItems.find((item) => item.label === '销售管理')?.children.map((item) => item.path))
+      .toEqual([...salesRoutes, '/pricing/prices']);
+  });
 });

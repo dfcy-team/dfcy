@@ -3,8 +3,7 @@
     <el-aside width="248px" class="app-sidebar desktop-sidebar">
       <div class="navigation-surface">
         <div class="brand">
-          <strong>SaaS 协同系统</strong>
-          <span>{{ environmentLabel }}</span>
+          <strong>鼎峰创域科技</strong>
         </div>
         <AppMenu :items="visibleMenuItems" />
       </div>
@@ -23,12 +22,11 @@
         </div>
 
         <div class="header-user">
-          <el-tag :type="useMock ? 'warning' : 'success'" effect="plain">{{ environmentLabel }}</el-tag>
           <div class="header-user__identity">
             <strong :title="auth.currentUser?.username">{{ auth.currentUser?.username }}</strong>
-            <span>租户 {{ auth.currentUser?.tenant_id }} · {{ roleLabel }}</span>
+            <span>{{ roleLabel }}</span>
           </div>
-          <el-button text @click="handleLogout">退出</el-button>
+          <el-button text @click="handleLogout">退出登录</el-button>
         </div>
       </el-header>
 
@@ -46,8 +44,7 @@
     >
       <div class="navigation-surface">
         <div class="brand">
-          <strong>SaaS 协同系统</strong>
-          <span>{{ environmentLabel }}</span>
+          <strong>鼎峰创域科技</strong>
         </div>
         <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
       </div>
@@ -68,10 +65,8 @@ import 'element-plus/theme-chalk/el-menu-item.css';
 import 'element-plus/theme-chalk/el-sub-menu.css';
 import 'element-plus/theme-chalk/el-drawer.css';
 import 'element-plus/theme-chalk/el-breadcrumb.css';
-import 'element-plus/theme-chalk/el-tag.css';
 import 'element-plus/theme-chalk/el-button.css';
 import { useAuthStore } from '../stores/auth';
-import { useMock } from '../api/request';
 import { filterMenuItems, findMenuLabel } from '../router/menu';
 
 const auth = useAuthStore();
@@ -81,10 +76,9 @@ const mobileMenuOpen = ref(false);
 
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
 const currentLabel = computed(() => findMenuLabel(route.path, visibleMenuItems.value));
-const environmentLabel = computed(() => (useMock ? 'Mock' : 'Pilot API'));
 const roleLabel = computed(() => {
-  if (auth.currentUser?.is_superuser) return '超级管理员';
-  return auth.currentUser?.roles?.join(' / ') || auth.currentUser?.user_type || '用户';
+  const roles = auth.currentUser?.roles?.filter(Boolean) || [];
+  return roles.length ? roles.join(' / ') : '未分配角色';
 });
 
 function handleLogout() {
@@ -140,7 +134,6 @@ const AppMenu = defineComponent({
 }
 
 .brand strong { color: #f8fafc; font-size: 16px; }
-.brand span { margin-top: 3px; color: #94a3b8; font-size: 11px; }
 
 :global(.navigation-drawer) {
   --el-drawer-bg-color: #101827;
@@ -268,7 +261,6 @@ const AppMenu = defineComponent({
   .mobile-menu-button { display: inline-flex; }
   .app-header { padding: 0 12px; }
   .app-main { width: 100%; padding: 14px; }
-  .header-user .el-tag,
   .header-user__identity span { display: none; }
   .header-user { gap: 6px; }
   .header-user__identity { width: 76px; min-width: 0; }

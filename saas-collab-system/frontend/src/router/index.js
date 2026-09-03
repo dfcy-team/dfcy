@@ -106,6 +106,7 @@ const ConfigVersionHistory = () => import('../views/settings/ConfigVersionHistor
 const DepartmentDirectory = () => import('../views/system/DepartmentDirectory.vue');
 const UserDirectory = () => import('../views/system/UserDirectory.vue');
 const RolePermissionMatrix = () => import('../views/system/RolePermissionMatrix.vue');
+const TenantManagement = () => import('../views/system/TenantManagement.vue');
 const SecurityOperations = () => import('../views/system/SecurityOperations.vue');
 const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.vue');
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
@@ -283,6 +284,7 @@ const routes = [
       { path: 'system/departments', component: DepartmentDirectory },
       { path: 'system/users', component: UserDirectory },
       { path: 'system/roles', component: RolePermissionMatrix },
+      { path: 'system/tenants', component: TenantManagement },
       { path: 'system/security-operations', component: SecurityOperations },
       { path: 'master-data/platforms', component: PlatformMasterList },
       { path: 'master-data/stores', component: StoreMasterList },

@@ -16,6 +16,8 @@ from .system_views import (
     UserRoleOptionCollectionView,
     UserRoleView,
     UserStatusView,
+    TenantCollectionView,
+    TenantDetailView,
 )
 
 
@@ -24,6 +26,8 @@ urlpatterns = [
     path("auth/login/", InternalLoginView.as_view(), name="internal-auth-login"),
     path("auth/refresh/", InternalTokenRefreshView.as_view(), name="internal-auth-refresh"),
     path("auth/me/", current_user, name="internal-auth-me"),
+    path("system/tenants/", TenantCollectionView.as_view(), name="system-tenant-collection"),
+    path("system/tenants/<int:pk>/", TenantDetailView.as_view(), name="system-tenant-detail"),
     path("system/departments/", DepartmentCollectionView.as_view(), name="system-department-collection"),
     path("system/departments/<int:pk>/", DepartmentDetailView.as_view(), name="system-department-detail"),
     path("system/users/", UserCollectionView.as_view(), name="system-user-collection"),

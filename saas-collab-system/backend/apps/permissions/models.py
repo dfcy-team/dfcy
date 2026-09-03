@@ -28,14 +28,36 @@ class Role(models.Model):
 
 
 class Permission(models.Model):
+    class PermissionType(models.TextChoices):
+        """The authorization surface a permission controls.
+
+        ``action`` is the compatibility default for the permission catalog
+        that predates the split model.  Menu and field grants are deliberately
+        represented by the same catalog table so roles can be migrated
+        incrementally without breaking the existing ``permissions`` M2M.
+        """
+
+        MENU = "menu", "Menu"
+        ACTION = "action", "Action"
+        FIELD = "field", "Field"
+
     code = models.CharField(max_length=120, unique=True)
     name = models.CharField(max_length=100)
     module = models.CharField(max_length=80)
     action = models.CharField(max_length=80)
     description = models.TextField(blank=True)
+    permission_type = models.CharField(
+        max_length=20,
+        choices=PermissionType.choices,
+        default=PermissionType.ACTION,
+    )
+    # Route/field metadata is intentionally opaque JSON.  It is catalog data,
+    # not user-provided credentials; API consumers can use it to render a
+    # trusted menu/field directory without another authorization table.
+    metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        ordering = ["module", "action", "code"]
+        ordering = ["permission_type", "module", "action", "code"]
 
     def __str__(self):
         return self.code

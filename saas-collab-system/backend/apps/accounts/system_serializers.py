@@ -5,7 +5,8 @@ from rest_framework import serializers
 
 from apps.permissions.catalog import permission_display_name
 from apps.permissions.models import DataScope, Permission, Role, UserRole
-from apps.tenants.models import Department
+from apps.permissions.services import has_field_permission
+from apps.tenants.models import Department, Tenant
 from apps.rpa.models import RPAAgent
 from apps.masterdata.models import (
     CountrySiteMaster,
@@ -27,6 +28,26 @@ def mask_email(value):
 
 def mask_phone(value):
     return f"***{value[-4:]}" if value else ""
+
+
+class TenantAdminSerializer(serializers.ModelSerializer):
+    """Platform tenant directory representation.
+
+    Tenant names/codes/statuses are operational metadata, never credentials.
+    The serializer is used only by the internal superuser tenant workbench;
+    ordinary tenant endpoints continue to bind all data to ``request.user``.
+    """
+
+    class Meta:
+        model = Tenant
+        fields = ("id", "name", "code", "status", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate_code(self, value):
+        value = str(value or "").strip().lower()
+        if Tenant.objects.filter(code=value).exclude(pk=getattr(self.instance, "pk", None)).exists():
+            raise serializers.ValidationError("租户编码已存在。")
+        return value
 
 
 class DepartmentAdminSerializer(serializers.ModelSerializer):
@@ -171,6 +192,27 @@ class UserAdminSerializer(serializers.ModelSerializer):
             f"{item.role.name}（{item.role.code}）"
             for item in sorted(self._tenant_user_roles(obj), key=lambda item: item.role.name)
         ]
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        request = self.context.get("request")
+        # Existing roles have no field grants, so all non-sensitive columns
+        # stay visible until a field allow-list is explicitly introduced.
+        # Email/phone are always represented by their masked variants and are
+        # never rehydrated from the raw model values.
+        if request is not None:
+            field_map = {
+                "full_name": "field.system.users.full_name.view",
+                "department_name": "field.system.users.department.view",
+                "department_names": "field.system.users.department.view",
+                "roles": "field.system.users.roles.view",
+                "role_labels": "field.system.users.roles.view",
+                "is_active": "field.system.users.status.view",
+            }
+            for field, permission_code in field_map.items():
+                if not has_field_permission(request.user, permission_code):
+                    representation.pop(field, None)
+        return representation
     def validate(self, attrs):
         request = self.context["request"]
         if self.instance is None and not attrs.get("initial_password"):
@@ -258,7 +300,7 @@ class PermissionAdminSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Permission
-        fields = ("id", "code", "name", "module", "action", "description")
+        fields = ("id", "code", "name", "module", "action", "permission_type", "metadata", "description")
         read_only_fields = fields
 
     def get_name(self, obj):
@@ -268,20 +310,50 @@ class PermissionAdminSerializer(serializers.ModelSerializer):
 class RoleAdminSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     permission_codes = serializers.SerializerMethodField()
+    menu_permission_codes = serializers.SerializerMethodField()
+    action_permission_codes = serializers.SerializerMethodField()
+    field_permission_codes = serializers.SerializerMethodField()
     data_scopes = serializers.SerializerMethodField()
 
     class Meta:
         model = Role
         fields = (
-            "id", "tenant_id", "name", "code", "status", "permission_codes", "data_scopes", "created_at", "updated_at",
+            "id", "tenant_id", "name", "code", "status", "permission_codes",
+            "menu_permission_codes", "action_permission_codes", "field_permission_codes",
+            "data_scopes", "created_at", "updated_at",
         )
-        read_only_fields = ("id", "tenant_id", "permission_codes", "data_scopes", "created_at", "updated_at")
+        read_only_fields = (
+            "id", "tenant_id", "permission_codes", "menu_permission_codes",
+            "action_permission_codes", "field_permission_codes", "data_scopes",
+            "created_at", "updated_at",
+        )
 
-    def get_permission_codes(self, obj):
+    def _permissions(self, obj):
         cached = getattr(obj, "_prefetched_objects_cache", {}).get("permissions")
         if cached is not None:
-            return [permission.code for permission in sorted(cached, key=lambda item: item.code)]
-        return list(obj.permissions.order_by("code").values_list("code", flat=True))
+            return sorted(cached, key=lambda item: item.code)
+        return list(obj.permissions.order_by("code"))
+
+    def get_permission_codes(self, obj):
+        return [permission.code for permission in self._permissions(obj)]
+
+    def get_menu_permission_codes(self, obj):
+        return [
+            permission.code for permission in self._permissions(obj)
+            if permission.permission_type == Permission.PermissionType.MENU
+        ]
+
+    def get_action_permission_codes(self, obj):
+        return [
+            permission.code for permission in self._permissions(obj)
+            if permission.permission_type == Permission.PermissionType.ACTION
+        ]
+
+    def get_field_permission_codes(self, obj):
+        return [
+            permission.code for permission in self._permissions(obj)
+            if permission.permission_type == Permission.PermissionType.FIELD
+        ]
 
     def get_data_scopes(self, obj):
         cached = getattr(obj, "_prefetched_objects_cache", {}).get("data_scopes")
@@ -290,7 +362,7 @@ class RoleAdminSerializer(serializers.ModelSerializer):
         return list(obj.data_scopes.values("scope_type", "config"))
 
     def validate_code(self, value):
-        tenant = self.context["request"].user.tenant
+        tenant = self.context.get("target_tenant") or self.context["request"].user.tenant
         if Role.objects.filter(tenant=tenant, code=value).exclude(pk=getattr(self.instance, "pk", None)).exists():
             raise serializers.ValidationError("Role code must be unique within the current tenant.")
         return value
@@ -304,18 +376,53 @@ class RoleOptionSerializer(serializers.ModelSerializer):
 
 
 class RolePermissionUpdateSerializer(serializers.Serializer):
-    permission_codes = serializers.ListField(child=serializers.CharField(max_length=120), allow_empty=True)
+    # ``permission_codes`` remains the legacy union accepted by old clients.
+    # New clients send the three explicit lists below; the server normalizes
+    # both shapes to one role.permissions relation.
+    permission_codes = serializers.ListField(
+        child=serializers.CharField(max_length=120), allow_empty=True, required=False
+    )
+    menu_permission_codes = serializers.ListField(
+        child=serializers.CharField(max_length=120), allow_empty=True, required=False
+    )
+    action_permission_codes = serializers.ListField(
+        child=serializers.CharField(max_length=120), allow_empty=True, required=False
+    )
+    field_permission_codes = serializers.ListField(
+        child=serializers.CharField(max_length=120), allow_empty=True, required=False
+    )
     scope_type = serializers.ChoiceField(choices=DataScope.ScopeType.choices)
     scope_config = serializers.JSONField(required=False, default=dict)
 
-    def validate_permission_codes(self, value):
-        found = set(Permission.objects.filter(code__in=value).values_list("code", flat=True))
-        missing = sorted(set(value) - found)
+    def validate(self, attrs):
+        category_fields = (
+            "menu_permission_codes", "action_permission_codes", "field_permission_codes",
+        )
+        supplied_codes = set(attrs.get("permission_codes") or [])
+        for field in category_fields:
+            supplied_codes.update(attrs.get(field) or [])
+
+        found_permissions = {
+            permission.code: permission
+            for permission in Permission.objects.filter(code__in=supplied_codes)
+        }
+        found = set(found_permissions)
+        missing = sorted(supplied_codes - found)
         if missing:
             raise serializers.ValidationError(f"Unknown permission codes: {', '.join(missing)}")
-        return sorted(set(value))
+        for field, permission_type in (
+            ("menu_permission_codes", Permission.PermissionType.MENU),
+            ("action_permission_codes", Permission.PermissionType.ACTION),
+            ("field_permission_codes", Permission.PermissionType.FIELD),
+        ):
+            wrong_type = sorted(
+                code for code in set(attrs.get(field) or [])
+                if code in found_permissions and found_permissions[code].permission_type != permission_type
+            )
+            if wrong_type:
+                raise serializers.ValidationError({field: f"权限类型不匹配：{', '.join(wrong_type)}"})
+        attrs["permission_codes"] = sorted(supplied_codes)
 
-    def validate(self, attrs):
         """Validate scope shape and every referenced object in the actor tenant.
 
         The permission API is intentionally strict: a malformed custom scope
@@ -371,7 +478,9 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
             attrs["scope_config"] = config
             return attrs
 
-        tenant = self.context.get("request").user.tenant if self.context.get("request") else None
+        tenant = self.context.get("target_tenant")
+        if tenant is None and self.context.get("request"):
+            tenant = self.context["request"].user.tenant
         if not config:
             raise serializers.ValidationError({"scope_config": "custom 范围至少配置一个授权维度。"})
         normalized = {}
@@ -408,7 +517,7 @@ class UserRoleUpdateSerializer(serializers.Serializer):
     role_codes = serializers.ListField(child=serializers.SlugField(max_length=80), allow_empty=True)
 
     def validate_role_codes(self, value):
-        tenant = self.context["request"].user.tenant
+        tenant = self.context.get("target_tenant") or self.context["request"].user.tenant
         found = set(Role.objects.filter(tenant=tenant, code__in=value).values_list("code", flat=True))
         missing = sorted(set(value) - found)
         if missing:

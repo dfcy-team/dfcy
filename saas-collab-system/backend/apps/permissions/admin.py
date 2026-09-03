@@ -12,9 +12,9 @@ class RoleAdmin(admin.ModelAdmin):
 
 @admin.register(Permission)
 class PermissionAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "module", "action")
-    list_filter = ("module", "action")
-    search_fields = ("code", "name", "module", "action")
+    list_display = ("code", "name", "permission_type", "module", "action")
+    list_filter = ("permission_type", "module", "action")
+    search_fields = ("code", "name", "module", "action", "description")
 
 
 @admin.register(UserRole)
