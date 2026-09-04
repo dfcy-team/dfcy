@@ -13,7 +13,7 @@ describe('production login copy', () => {
     expect(page).toContain('跨境业务协同工作台');
     expect(page).toContain('请使用企业为您分配的账号登录');
     expect(page).toContain('进入工作台');
-    expect(html).toContain('<title>鼎峰创域科技</title>');
+    expect(html).toContain('<title>业务协同工作台</title>');
   });
 
   it('does not expose development or architecture terminology', () => {

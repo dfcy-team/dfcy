@@ -18,6 +18,7 @@ from .serializers import (
     SupplierWebTokenRefreshSerializer,
     UATAwareTokenRefreshSerializer,
 )
+from apps.common.module_gate import module_statuses as get_module_statuses
 
 
 def health_response(service):
@@ -58,7 +59,12 @@ class SupplierWebRefreshView(TokenRefreshView):
 @permission_classes([IsAuthenticated])
 def current_user(request):
     serializer = CurrentUserSerializer(request.user)
-    return success_response(serializer.data)
+    data = serializer.data
+    # Keep the historical /me response stable for existing consumers while
+    # allowing the web shell to opt into rollout metadata explicitly.
+    if request.query_params.get("include_modules") in {"1", "true", "yes"}:
+        data["module_statuses"] = get_module_statuses()
+    return success_response(data)
 
 
 class CurrentUserProfileView(APIView):

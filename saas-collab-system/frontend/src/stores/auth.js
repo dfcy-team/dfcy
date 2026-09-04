@@ -9,6 +9,7 @@ export const mockCurrentUser = mockAuthUser;
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     currentUser: null,
+    moduleStatuses: {},
     isAuthenticated: false,
     initialized: false,
     loading: false,
@@ -37,6 +38,12 @@ export const useAuthStore = defineStore('auth', {
     fieldPermissionSet: (state) => {
       const user = state.currentUser;
       return Array.isArray(user?.field_permission_codes) ? new Set(user.field_permission_codes) : null;
+    },
+    isModuleEnabled: (state) => (code) => {
+      const status = state.moduleStatuses?.[code];
+      // Older sessions/users do not have module status yet; preserve the
+      // legacy all-enabled behaviour until the next /auth/me response.
+      return !status || status === 'enabled' || status === 'pilot_readonly';
     }
   },
   actions: {
@@ -85,12 +92,14 @@ export const useAuthStore = defineStore('auth', {
     },
     setCurrentUser(user) {
       this.currentUser = user;
+      this.moduleStatuses = user?.module_statuses || user?.modules || {};
       this.isAuthenticated = Boolean(user);
       this.errorMessage = '';
     },
     clearAuthentication(message = '') {
       clearAuthSession();
       this.currentUser = null;
+      this.moduleStatuses = {};
       this.isAuthenticated = false;
       this.errorMessage = message;
     },

@@ -85,6 +85,29 @@ export const mockAuthUser = {
   data_scope: []
 };
 
+// Keep mock authentication aligned with the production module-gate contract.
+// The mock defaults to a safe pilot posture while still exposing the complete
+// shape returned by /api/internal/auth/me/.
+mockAuthUser.module_statuses = {
+  core: 'enabled',
+  masterdata: 'enabled',
+  product_development: 'disabled',
+  supply_chain: 'disabled',
+  inventory: 'pilot_readonly',
+  global_listing: 'disabled',
+  sales: 'pilot_readonly',
+  influencer: 'disabled',
+  finance: 'pilot_readonly',
+  analytics: 'pilot_readonly',
+  decision: 'pilot_readonly',
+  reports: 'pilot_readonly',
+  workflow: 'disabled',
+  rpa: 'disabled',
+  api_integrations: 'pilot_readonly',
+  system: 'enabled',
+  governance: 'enabled'
+};
+
 export const mockLogin = () => successResponse({
   status: 'mock',
   session: 'mock-session-only',

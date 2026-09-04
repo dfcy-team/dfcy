@@ -3,7 +3,7 @@
     <el-aside width="248px" class="app-sidebar desktop-sidebar">
       <div class="navigation-surface">
         <div class="brand">
-          <strong>鼎峰创域科技</strong>
+          <strong>业务协同工作台</strong>
         </div>
         <AppMenu :items="visibleMenuItems" />
       </div>
@@ -45,7 +45,7 @@
     >
       <div class="navigation-surface">
         <div class="brand">
-          <strong>鼎峰创域科技</strong>
+          <strong>业务协同工作台</strong>
         </div>
         <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
       </div>

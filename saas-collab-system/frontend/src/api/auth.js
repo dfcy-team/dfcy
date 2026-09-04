@@ -38,7 +38,7 @@ export const login = async (data = {}) => {
 
 export const getCurrentUser = () => {
   if (useMock) return Promise.resolve(getMockResponse(mockCurrentUser, 'auth.me'));
-  return requestApi({ method: 'get', url: '/api/internal/auth/me/' });
+  return requestApi({ method: 'get', url: '/api/internal/auth/me/', params: { include_modules: 1 } });
 };
 
 export const getMyProfile = () => {

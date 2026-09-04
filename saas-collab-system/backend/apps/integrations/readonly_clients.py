@@ -10,6 +10,8 @@ from django.conf import settings
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from apps.common.module_gate import is_module_enabled
+
 from .capability import require_live_mode
 from .custody import get_custody_backend
 from .net_guard import PlatformHttpClient
@@ -49,6 +51,8 @@ class ReadonlyClientBase:
         return str(value or fallback)
 
     def preflight(self):
+        if not is_module_enabled("api_integrations"):
+            raise ValidationError("API data integration module is disabled.")
         require_live_mode(f"{self.config.platform} readonly synchronization")
         if not get_runtime_setting("network", "readonly_sync_enabled", default=False):
             raise ValidationError("Production readonly synchronization feature flag is disabled.")

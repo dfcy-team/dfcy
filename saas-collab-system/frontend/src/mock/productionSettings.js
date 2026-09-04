@@ -5,6 +5,12 @@ import { successResponse } from './index';
 // the admin workflow executable in Mock mode while the real API is being
 // wired to the VM.
 const initialConfig = {
+  modules: {
+    core: 'enabled', masterdata: 'enabled', product_development: 'disabled', supply_chain: 'disabled',
+    inventory: 'pilot_readonly', global_listing: 'disabled', sales: 'pilot_readonly', influencer: 'disabled',
+    finance: 'pilot_readonly', analytics: 'pilot_readonly', decision: 'pilot_readonly', reports: 'pilot_readonly',
+    workflow: 'disabled', rpa: 'disabled', api_integrations: 'pilot_readonly', system: 'enabled', governance: 'enabled'
+  },
   network: {
     mode: '',
     security_approved: false,
@@ -152,6 +158,7 @@ function canonicalConfig(value = {}) {
     ...clone(initialConfig),
     ...clone(incoming),
     network: { ...clone(initialConfig.network), ...(incoming.network || {}) },
+    modules: { ...clone(initialConfig.modules), ...(incoming.modules || {}) },
     connection: { ...clone(initialConfig.connection), ...(incoming.connection || {}) },
     custody: { ...clone(initialConfig.custody), ...(incoming.custody || {}) },
     listing_write: { ...clone(initialConfig.listing_write), ...(incoming.listing_write || {}) },
