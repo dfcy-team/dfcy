@@ -34,8 +34,36 @@ INTEGRATION_SCOPE_KEYS = {
     "integration_config_ids",
     "resource_types",
     "store_ids",
+    "warehouse_ids",
 }
 MARKETPLACE_PLATFORMS = {"lazada", "shopee", "tiktok"}
+WAREHOUSE_AUTHORIZATION_RESOURCE_TYPE = "inventory_snapshot"
+
+
+def _normalized_regions(values):
+    """Normalize JSON region values for scope comparisons.
+
+    Integration configuration regions are stored as a JSON list.  Keeping the
+    comparison in one place also makes the queryset fall-back below safe for
+    database backends that return JSON values as a serialized string.
+    """
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    return {str(value).strip().upper() for value in values if str(value).strip()}
+
+
+def _regions_fit_scope(candidate_regions, allowed_regions):
+    """Return whether a config is fully contained by a region scope.
+
+    An empty config region list means the integration applies globally, which
+    is the same convention used by the existing integration-config filter.
+    A multi-region config is only visible when every region is authorized.
+    """
+    candidate = _normalized_regions(candidate_regions)
+    allowed = _normalized_regions(allowed_regions)
+    return not candidate or candidate.issubset(allowed)
 
 
 def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None):
@@ -181,14 +209,23 @@ def filter_integration_configs(user, queryset, permission_code):
 def filter_store_authorizations(user, queryset, permission_code):
     from apps.masterdata.models import StoreMaster
 
+    queryset = queryset.filter(tenant=user.tenant)
     configs = permission_scope_configs(
         user,
         permission_code,
-        {"platforms", "store_ids"},
+        {
+            "platforms",
+            "environments",
+            "regions",
+            "integration_config_ids",
+            "resource_types",
+            "store_ids",
+        },
         allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
         return queryset
+    _validate_integration_configs(configs)
     for config in configs:
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Store authorization scope has an invalid platform.")
@@ -206,14 +243,108 @@ def filter_store_authorizations(user, queryset, permission_code):
                     error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
                 )
     allowed = Q(pk__in=[])
+    region_ids = set()
     for config in configs:
+        # Store authorization is a credential/binding resource rather than a
+        # resource-specific sync record.  A resource_types restriction cannot
+        # be mapped to this object without guessing which downstream job the
+        # caller intends to inspect, so fail closed instead of broadening the
+        # result set by ignoring that dimension.
+        if "resource_types" in config:
+            continue
         condition = Q()
         if "platforms" in config:
             condition &= Q(platform__in=config["platforms"])
+        if "environments" in config:
+            condition &= Q(integration_config__environment__in=config["environments"])
+        if "integration_config_ids" in config:
+            condition &= Q(integration_config_id__in=config["integration_config_ids"])
         if "store_ids" in config:
             condition &= Q(store_id__in=config["store_ids"])
-        allowed |= condition
-    return queryset.filter(allowed).distinct()
+        if "regions" in config:
+            # Both the authorization's concrete region and its config's
+            # region allowlist are part of the candidate.  A multi-region
+            # config is only visible when it is entirely contained in the
+            # role's region scope, matching filter_integration_configs.
+            for authorization_id, authorization_region, config_regions in queryset.filter(condition).values_list(
+                "pk",
+                "region",
+                "integration_config__regions",
+            ):
+                effective_regions = _normalized_regions(authorization_region)
+                effective_regions |= _normalized_regions(config_regions)
+                if _regions_fit_scope(effective_regions, config["regions"]):
+                    region_ids.add(authorization_id)
+        else:
+            allowed |= condition
+    return queryset.filter(allowed | Q(pk__in=region_ids)).distinct()
+
+
+def filter_warehouse_authorizations(user, queryset, permission_code):
+    """Apply the warehouse authorization data scope without leaking tenants."""
+    from apps.masterdata.models import WarehouseMaster
+
+    configs = permission_scope_configs(
+        user,
+        permission_code,
+        {
+            "platforms",
+            "environments",
+            "regions",
+            "integration_config_ids",
+            "resource_types",
+            "warehouse_ids",
+        },
+        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    )
+    if configs is None:
+        return queryset
+    _validate_integration_configs(configs)
+    for config in configs:
+        if "warehouse_ids" in config:
+            _validate_positive_int_values(
+                config["warehouse_ids"],
+                "Warehouse authorization scope has an invalid warehouse identifier.",
+            )
+            warehouse_count = WarehouseMaster.objects.filter(
+                tenant=user.tenant,
+                id__in=set(config["warehouse_ids"]),
+            ).count()
+            if warehouse_count != len(set(config["warehouse_ids"])):
+                raise DataScopeDenied(
+                    "Warehouse authorization scope exceeds the current tenant.",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
+    allowed = Q(pk__in=[])
+    region_ids = set()
+    for config in configs:
+        # A warehouse authorization is exclusively an inventory snapshot
+        # resource.  A scope for another integration resource must not turn
+        # into an unconstrained authorization query.
+        if (
+            "resource_types" in config
+            and WAREHOUSE_AUTHORIZATION_RESOURCE_TYPE not in set(config["resource_types"])
+        ):
+            continue
+        condition = Q()
+        if "platforms" in config:
+            condition &= Q(integration_config__platform__in=config["platforms"])
+        if "environments" in config:
+            condition &= Q(integration_config__environment__in=config["environments"])
+        if "integration_config_ids" in config:
+            condition &= Q(integration_config_id__in=config["integration_config_ids"])
+        if "warehouse_ids" in config:
+            condition &= Q(warehouse_id__in=config["warehouse_ids"])
+        if "regions" in config:
+            for authorization_id, candidate_regions, warehouse_country in queryset.filter(condition).values_list(
+                "pk", "integration_config__regions", "warehouse__country_code"
+            ):
+                effective_regions = _normalized_regions(candidate_regions) | _normalized_regions(warehouse_country)
+                if _regions_fit_scope(effective_regions, config["regions"]):
+                    region_ids.add(authorization_id)
+        else:
+            allowed |= condition
+    return queryset.filter(allowed | Q(pk__in=region_ids)).distinct()
 
 
 def filter_store_mappings(user, queryset, permission_code):
@@ -264,6 +395,7 @@ def integration_values_allowed(
     config_id=None,
     resource_type=None,
     store_id=None,
+    warehouse_id=None,
 ):
     configs = permission_scope_configs(
         user,
@@ -278,13 +410,15 @@ def integration_values_allowed(
             continue
         if "environments" in config and environment not in set(config["environments"]):
             continue
-        if "regions" in config and not set(regions or []).issubset(set(config["regions"])):
+        if "regions" in config and not _regions_fit_scope(regions, config["regions"]):
             continue
         if "integration_config_ids" in config and config_id not in set(config["integration_config_ids"]):
             continue
         if "resource_types" in config and resource_type not in set(config["resource_types"]):
             continue
         if "store_ids" in config and store_id not in set(config["store_ids"]):
+            continue
+        if "warehouse_ids" in config and warehouse_id not in set(config["warehouse_ids"]):
             continue
         return True
     return False
@@ -321,46 +455,102 @@ def filter_sync_jobs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        {"platforms", "integration_config_ids", "resource_types"},
+        {
+            "platforms",
+            "environments",
+            "regions",
+            "integration_config_ids",
+            "resource_types",
+            "store_ids",
+            "warehouse_ids",
+        },
         allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
         return queryset
     _validate_integration_configs(configs)
     allowed = Q(pk__in=[])
+    region_ids = set()
     for config in configs:
         condition = Q()
         if "platforms" in config:
             condition &= Q(integration_config__platform__in=[str(value) for value in config["platforms"]])
+        if "environments" in config:
+            condition &= Q(integration_config__environment__in=config["environments"])
+        if "store_ids" in config:
+            condition &= Q(store_authorization__store_id__in=config["store_ids"])
+        if "warehouse_ids" in config:
+            condition &= Q(warehouse_authorization__warehouse_id__in=config["warehouse_ids"])
         if "integration_config_ids" in config:
             condition &= Q(integration_config_id__in=config["integration_config_ids"])
         if "resource_types" in config:
             condition &= Q(resource_type__in=[str(value) for value in config["resource_types"]])
-        allowed |= condition
-    return queryset.filter(allowed).distinct()
+        if "regions" in config:
+            for job_id, candidate_regions, store_region, warehouse_country in queryset.filter(condition).values_list(
+                "pk",
+                "integration_config__regions",
+                "store_authorization__region",
+                "warehouse_authorization__warehouse__country_code",
+            ):
+                effective_regions = _normalized_regions(candidate_regions)
+                effective_regions |= _normalized_regions(store_region)
+                effective_regions |= _normalized_regions(warehouse_country)
+                if _regions_fit_scope(effective_regions, config["regions"]):
+                    region_ids.add(job_id)
+        else:
+            allowed |= condition
+    return queryset.filter(allowed | Q(pk__in=region_ids)).distinct()
 
 
 def filter_sync_runs(user, queryset, permission_code):
     configs = permission_scope_configs(
         user,
         permission_code,
-        {"platforms", "integration_config_ids", "resource_types"},
+        {
+            "platforms",
+            "environments",
+            "regions",
+            "integration_config_ids",
+            "resource_types",
+            "store_ids",
+            "warehouse_ids",
+        },
         allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
     if configs is None:
         return queryset
     _validate_integration_configs(configs)
     allowed = Q(pk__in=[])
+    region_ids = set()
     for config in configs:
         condition = Q()
         if "platforms" in config:
             condition &= Q(sync_job__integration_config__platform__in=[str(value) for value in config["platforms"]])
+        if "environments" in config:
+            condition &= Q(sync_job__integration_config__environment__in=config["environments"])
+        if "store_ids" in config:
+            condition &= Q(sync_job__store_authorization__store_id__in=config["store_ids"])
+        if "warehouse_ids" in config:
+            condition &= Q(sync_job__warehouse_authorization__warehouse_id__in=config["warehouse_ids"])
         if "integration_config_ids" in config:
             condition &= Q(sync_job__integration_config_id__in=config["integration_config_ids"])
         if "resource_types" in config:
             condition &= Q(sync_job__resource_type__in=[str(value) for value in config["resource_types"]])
-        allowed |= condition
-    return queryset.filter(allowed).distinct()
+        if "regions" in config:
+            for run_id, candidate_regions, store_region, warehouse_country in queryset.filter(condition).values_list(
+                "pk",
+                "sync_job__integration_config__regions",
+                "sync_job__store_authorization__region",
+                "sync_job__warehouse_authorization__warehouse__country_code",
+            ):
+                effective_regions = _normalized_regions(candidate_regions)
+                effective_regions |= _normalized_regions(store_region)
+                effective_regions |= _normalized_regions(warehouse_country)
+                if _regions_fit_scope(effective_regions, config["regions"]):
+                    region_ids.add(run_id)
+        else:
+            allowed |= condition
+    return queryset.filter(allowed | Q(pk__in=region_ids)).distinct()
 
 
 def _finance_scope_configs(user, permission_code):
@@ -443,6 +633,11 @@ def _validate_integration_configs(configs):
             _validate_positive_int_values(
                 config["store_ids"],
                 "Integration data scope contains an invalid store identifier.",
+            )
+        if "warehouse_ids" in config:
+            _validate_positive_int_values(
+                config["warehouse_ids"],
+                "Integration data scope contains an invalid warehouse identifier.",
             )
 
 

@@ -9,6 +9,23 @@ import {
 import { apiBaseUrl } from './baseUrl';
 
 export const useMock = import.meta.env.VITE_USE_MOCK !== 'false';
+// A production-like build must opt in explicitly before a mutation can be
+// simulated.  Keeping this separate from `useMock` lets existing GET-only
+// local previews retain their historical behaviour while preventing a failed
+// POST/PUT/PATCH/DELETE from being reported as a successful write.
+export const explicitMockMode = import.meta.env.VITE_USE_MOCK === 'true';
+
+const MUTATION_METHODS = new Set(['post', 'put', 'patch', 'delete']);
+
+export function isMutationRequest(config = {}) {
+  // Some provider callbacks are intentionally exposed as GET endpoints, but
+  // still create/replace an authorization on the server.  Callers may mark
+  // those requests explicitly; keep the HTTP-method heuristic for every
+  // existing POST/PUT/PATCH/DELETE caller.
+  return config.mutation === true
+    || config.noMockFallback === true
+    || MUTATION_METHODS.has(String(config.method || 'get').toLowerCase());
+}
 
 const request = axios.create({
   baseURL: apiBaseUrl,
@@ -192,12 +209,29 @@ export function requestPendingOrMock(mockHandler, moduleName) {
 }
 
 export async function requestWithMockFallback(config, mockHandler, moduleName) {
-  if (useMock) {
+  const mutation = isMutationRequest(config);
+
+  // Only an explicit VITE_USE_MOCK=true build may short-circuit writes into
+  // fixtures.  This is the deliberate local演练 path.
+  if (explicitMockMode) {
+    return getMockResponse(mockHandler, moduleName);
+  }
+
+  // Preserve the existing implicit mock behaviour for read-only local pages;
+  // mutation requests continue to the API so a network failure is visible.
+  if (useMock && !mutation) {
     return getMockResponse(mockHandler, moduleName);
   }
 
   const response = await requestApi(config);
   if (response.success) {
+    return response;
+  }
+
+  // Never turn a failed mutation into a successful fixture response.  HTTP
+  // errors were already returned above in their normalized envelope; this
+  // branch also closes the network-error path where no http_status exists.
+  if (mutation) {
     return response;
   }
 

@@ -83,7 +83,7 @@
               </el-table>
               <div class="next-actions">
                 <el-button link :disabled="!configViewAccess.allowed" :title="configViewAccess.allowed ? '维护凭据并执行检查' : configViewAccess.reason" @click="openConfigWorkspace(row, 'credentials')">维护凭据并执行检查</el-button>
-                <el-button link :disabled="!storeViewAccess.allowed" :title="storeViewAccess.allowed ? '进入该平台店铺授权' : storeViewAccess.reason" @click="openAuthorization(row)">授权 {{ row.platform || row.platform_code }} 店铺</el-button>
+                <el-button link :disabled="!storeMasterViewAccess.allowed" :title="storeMasterViewAccess.allowed ? '进入店铺档案的 API 接入' : storeMasterViewAccess.reason" @click="openStoreApiAccess">到店铺档案授权 {{ row.platform || row.platform_code }}</el-button>
                 <el-button link :disabled="!syncViewAccess.allowed" :title="syncViewAccess.allowed ? '配置生产只读同步任务' : syncViewAccess.reason" @click="openSyncJobs(row)">配置生产只读同步任务</el-button>
               </div>
             </section>
@@ -152,7 +152,7 @@ const rows = computed(() => data.value.items || []);
 const canRepair = computed(() => auth.hasPermission('integrations.config.update'));
 const canApprove = computed(() => auth.hasPermission('integrations.config.verify'));
 const configViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.config.view', unauthorizedBehavior: 'disable' }));
-const storeViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.view', unauthorizedBehavior: 'disable' }));
+const storeMasterViewAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.view', unauthorizedBehavior: 'disable' }));
 const syncViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view', unauthorizedBehavior: 'disable' }));
 const systemConfigAccess = computed(() => {
   const missing = ['config.system.manage', 'config.view'].filter((code) => !auth.hasPermission(code));
@@ -246,9 +246,9 @@ function openConfigWorkspace(row, action = '') {
   router.push({ path: '/integrations/configs', query });
 }
 
-function openAuthorization(row) {
-  if (!storeViewAccess.value.allowed) return ElMessage.warning(storeViewAccess.value.reason);
-  router.push({ path: '/integrations/authorizations', query: { platform: row.platform_code } });
+function openStoreApiAccess() {
+  if (!storeMasterViewAccess.value.allowed) return ElMessage.warning(storeMasterViewAccess.value.reason);
+  router.push({ path: '/master-data/stores' });
 }
 
 function openSyncJobs(row) {

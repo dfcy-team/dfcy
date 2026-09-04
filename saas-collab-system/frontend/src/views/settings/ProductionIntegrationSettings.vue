@@ -176,7 +176,7 @@
 
       <fieldset class="settings-section">
         <legend>平台生产 API 配置</legend>
-        <p class="section-note">平台端点和合同审批是公开配置元数据；店铺授权仍在“店铺授权”菜单完成。全球刊登是否可生产执行由上方独立受控策略决定，API 数据同步仍只读。</p>
+        <p class="section-note">平台端点和合同审批是公开配置元数据；店铺授权统一在“店铺档案”的“API 接入”中完成。全球刊登是否可生产执行由上方独立受控策略决定，API 数据同步仍只读。</p>
         <div class="platform-grid">
           <article v-for="platform in platformKeys" :key="platform" :ref="(element) => setPlatformSectionRef(platform, element)" class="platform-card">
             <header><div><strong>{{ platformLabels[platform] }}</strong><small>{{ platformDescriptions[platform] }}</small></div><el-tag effect="plain" :type="form.platforms[platform].contract_approved ? 'success' : 'warning'">{{ form.platforms[platform].contract_approved ? '合同已批准' : '合同未批准' }}</el-tag></header>

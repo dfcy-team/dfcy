@@ -16,6 +16,11 @@ from .models import (
     SyncRun,
     WarehouseAuthorization,
 )
+from .audit_sanitizer import (
+    _AUDIT_SENSITIVE_KEYS,
+    is_sensitive_audit_key as _is_sensitive_audit_key,
+    sanitize_audit_detail as _sanitize_audit_detail,
+)
 from .platform_schema_service import get_platform_schema, validate_platform_config
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 
@@ -25,7 +30,6 @@ PILOT_LOOPBACK_CALLBACKS = {
     PlatformChoices.SHOPEE: "/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
     PlatformChoices.TIKTOK: "/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
 }
-
 
 def _is_approved_callback_transport(callback_url, environment, platform):
     try:
@@ -340,6 +344,52 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
         }
 
 
+class WarehouseAuthorizationSerializer(serializers.ModelSerializer):
+    """Expose only masked warehouse binding metadata, never custody references."""
+
+    tenant_id = serializers.IntegerField(read_only=True)
+    integration_config_id = serializers.IntegerField(read_only=True)
+    warehouse_id = serializers.IntegerField(read_only=True)
+    warehouse_code = serializers.CharField(source="warehouse.code", read_only=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    country_code = serializers.CharField(source="warehouse.country_code", read_only=True)
+    created_by_id = serializers.IntegerField(read_only=True)
+    updated_by_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = WarehouseAuthorization
+        fields = (
+            "id",
+            "tenant_id",
+            "integration_config_id",
+            "warehouse_id",
+            "warehouse_code",
+            "warehouse_name",
+            "country_code",
+            "provider",
+            "status",
+            "authorized_at",
+            "last_verified_at",
+            "revoked_at",
+            "last_error_code",
+            "created_by_id",
+            "updated_by_id",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class WarehouseAuthorizationBindSerializer(serializers.Serializer):
+    """Request contract for binding a managed config to a warehouse."""
+
+    warehouse_id = serializers.IntegerField(min_value=1)
+    integration_config_id = serializers.IntegerField(min_value=1)
+    replace = serializers.BooleanField(default=False)
+    expected_authorization_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    idempotency_key = serializers.CharField(min_length=8, max_length=120, required=False, allow_blank=True)
+
+
 class ConnectionCapabilitySerializer(serializers.ModelSerializer):
     class Meta:
         model = ConnectionCapability
@@ -534,6 +584,10 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
     integration_config_id = serializers.IntegerField(read_only=True)
     platform = serializers.CharField(source="integration_config.platform", read_only=True)
     environment = serializers.CharField(source="integration_config.environment", read_only=True)
+    masked_detail = serializers.SerializerMethodField()
+
+    def get_masked_detail(self, obj):
+        return _sanitize_audit_detail(obj.masked_detail)
 
     class Meta:
         model = IntegrationAuditLog
@@ -619,9 +673,21 @@ class SyncJobSerializer(serializers.ModelSerializer):
         warehouse_authorization_id = attrs.get(
             "warehouse_authorization_id", getattr(self.instance, "warehouse_authorization_id", None)
         )
-        if store_authorization_id and warehouse_authorization_id:
+        if store_authorization_id is not None and warehouse_authorization_id is not None:
             raise serializers.ValidationError("A sync job can bind either a store or warehouse authorization, not both.")
-        if store_authorization_id:
+        if (
+            config.environment
+            in {
+                PlatformIntegrationConfig.Environment.PILOT,
+                PlatformIntegrationConfig.Environment.PRODUCTION,
+            }
+            and store_authorization_id is None
+            and warehouse_authorization_id is None
+        ):
+            raise serializers.ValidationError(
+                "Production readonly sync jobs must bind one concrete store or warehouse authorization."
+            )
+        if store_authorization_id is not None:
             authorization = MarketplaceStoreAuthorization.objects.filter(
                 id=store_authorization_id,
                 tenant=request.user.tenant,
@@ -631,6 +697,10 @@ class SyncJobSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"store_authorization_id": "Store authorization must belong to the current tenant and configuration."}
                 )
+            if authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE:
+                raise serializers.ValidationError(
+                    {"store_authorization_id": "Only an active store authorization can create a sync job."}
+                )
             if self.instance is None and SyncJob.objects.filter(
                 tenant=request.user.tenant,
                 store_authorization_id=store_authorization_id,
@@ -639,14 +709,19 @@ class SyncJobSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"resource_type": "This store authorization already has a sync job for the selected resource."}
                 )
-        if warehouse_authorization_id:
-            if not WarehouseAuthorization.objects.filter(
+        if warehouse_authorization_id is not None:
+            warehouse_authorization = WarehouseAuthorization.objects.filter(
                 id=warehouse_authorization_id,
                 tenant=request.user.tenant,
                 integration_config_id=config_id,
-            ).exists():
+            ).first()
+            if warehouse_authorization is None:
                 raise serializers.ValidationError(
                     {"warehouse_authorization_id": "Warehouse authorization must belong to the current tenant and configuration."}
+                )
+            if warehouse_authorization.status != WarehouseAuthorization.Status.ACTIVE:
+                raise serializers.ValidationError(
+                    {"warehouse_authorization_id": "Only an active warehouse authorization can create a sync job."}
                 )
         if config.environment not in {
             PlatformIntegrationConfig.Environment.PILOT,

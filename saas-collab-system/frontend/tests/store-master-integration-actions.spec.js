@@ -4,7 +4,13 @@ import { describe, expect, it } from 'vitest';
 import {
   mockIntegrationWorkspace,
   mockSubjectApiAccess,
+  mockStartStoreAuthorizationOAuth,
+  mockCompleteSyntheticStoreAuthorization,
+  mockCheckIntegrationReadonlyConnection,
+  mockStoreAuthorizations,
+  mockCreateSyncJob,
 } from '../src/mock/integrations';
+import { masterDataMocks } from '../src/mock/masterData';
 
 const source = readFileSync(resolve(process.cwd(), 'src/views/masterdata/StoreMasterList.vue'), 'utf8');
 const subjectAccessSource = readFileSync(resolve(process.cwd(), 'src/components/SubjectApiAccessDialog.vue'), 'utf8');
@@ -23,7 +29,7 @@ describe('店铺档案 API 接入操作闭环', () => {
     expect(source).toContain('function openCapabilityMatrix(row)');
   });
 
-  it('guards subject API dialog reads, authorization, revoke and configuration navigation', () => {
+  it('guards subject API dialog reads, authorization, refresh, revoke and configuration navigation', () => {
     for (const permission of [
       'integrations.view',
       'integrations.store.authorize',
@@ -33,15 +39,45 @@ describe('店铺档案 API 接入操作闭环', () => {
       'integrations.credential.rotate',
     ]) expect(subjectAccessSource).toContain(`permission: '${permission}'`);
     expect(subjectAccessSource).toContain('if (!subjectViewAccess.value.allowed)');
+    expect(subjectAccessSource).toContain("permission: 'integrations.store.view'");
+    expect(subjectAccessSource).toContain('storeApiViewAccess');
+    expect(subjectAccessSource).toContain('if (!storeApiViewAccess.value.allowed)');
     expect(subjectAccessSource).toContain('storeAuthorizeAccess.visible');
     expect(subjectAccessSource).toContain('storeAuthorizeAccess.disabled');
     expect(subjectAccessSource).toContain('storeRevokeAccess.visible');
+    expect(subjectAccessSource).toContain('storeRefreshAccess.visible');
     expect(subjectAccessSource).toContain('readonlyCheckAccess.visible');
     expect(subjectAccessSource).toContain('if (props.subjectType !== \'store\' || !storeAuthorizeAccess.value.allowed)');
     expect(subjectAccessSource).toContain('if (props.subjectType !== \'store\' || !storeRevokeAccess.value.allowed)');
+    expect(subjectAccessSource).toContain('if (props.subjectType !== \'store\' || !storeRefreshAccess.value.allowed)');
     expect(subjectAccessSource).toContain('if (!readonlyCheckAccess.value.allowed)');
     expect(subjectAccessSource).toContain('if (!syncViewAccess.value.allowed)');
     expect(subjectAccessSource).toContain('if (!actionAccess.allowed)');
+  });
+
+  it('sends the exact store authorization to readonly checks and never falls through to another store/config', () => {
+    expect(subjectAccessSource).toContain('{ store_authorization_id: binding.id }');
+    const passed = mockCheckIntegrationReadonlyConnection(1, { store_authorization_id: 201 });
+    expect(passed).toMatchObject({ success: true, data: { store_authorization_id: 201, sync_job_id: 1 } });
+    const wrongConfig = mockCheckIntegrationReadonlyConnection(2, { store_authorization_id: 201 });
+    expect(wrongConfig).toMatchObject({ success: false, code: 'INVALID_STORE_AUTHORIZATION' });
+  });
+
+  it('completes explicit Mock OAuth through the synthetic callback contract without credentials', () => {
+    const started = mockStartStoreAuthorizationOAuth({
+      platform: 'shopee',
+      integration_config_id: 1,
+      store_id: 1,
+      region: 'SG',
+      scopes: ['shop.info', 'order.read'],
+    });
+    expect(started).toMatchObject({
+      success: true,
+      data: { authorization_url: expect.stringContaining('sandbox.example.invalid'), simulation_callback: expect.any(Object) },
+    });
+    const completed = mockCompleteSyntheticStoreAuthorization('shopee', started.data.simulation_callback);
+    expect(completed).toMatchObject({ success: true, data: { simulation: true, external_api_called: false } });
+    expect(JSON.stringify(completed)).not.toMatch(/"(?:access_token|refresh_token|client_secret|app_secret|partner_key|credential_ciphertext|token_id)"\s*:/i);
   });
 
   it('makes external readonly checks explicit and keeps sensitive actions recoverable', () => {
@@ -50,9 +86,109 @@ describe('店铺档案 API 接入操作闭环', () => {
     expect(subjectAccessSource).toContain('确认平台只读检查');
     expect(subjectAccessSource).toContain('撤销授权');
     expect(subjectAccessSource).toContain('确认撤销');
+    expect(subjectAccessSource).toContain('确认刷新令牌');
+    expect(subjectAccessSource).toContain('refreshStoreAuthorization(binding.id, { confirmed: true })');
+    expect(subjectAccessSource).toMatch(/async function refreshStoreBinding\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
     expect(subjectAccessSource).toMatch(/async function checkToken\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
     expect(subjectAccessSource).toMatch(/async function disableStoreBinding\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
     expect(subjectAccessSource).toContain('credentialMaintenanceAccess');
+  });
+
+  it('keeps the current store reachable from readonly-check failure to a scoped sync-job create action', () => {
+    expect(subjectAccessSource).toContain("permission: 'integrations.manage'");
+    expect(subjectAccessSource).toContain('storeSyncCreateAccess.visible');
+    expect(subjectAccessSource).toContain('createStoreSyncJob(apiType, primaryBinding(apiType))');
+    expect(subjectAccessSource).toContain('store_authorization_id: binding.id');
+    expect(subjectAccessSource).toContain('确认创建同步任务');
+    expect(subjectAccessSource).toContain('不会写入平台业务数据');
+    expect(subjectAccessSource).toContain('storeSyncResourceType');
+    expect(subjectAccessSource).toContain('storeSyncResourceOptions');
+    expect(subjectAccessSource).toContain('当前平台没有已注册的只读同步资源');
+    expect(subjectAccessSource).toContain("shopee: Object.freeze(['sales_order', 'refund_return'])");
+    expect(subjectAccessSource).toContain("tiktok: Object.freeze(['sales_order', 'refund_return'])");
+    expect(subjectAccessSource).toContain('lazada: Object.freeze([])');
+    expect(subjectAccessSource).not.toContain("apiType === 'advertising' ? 'settlement_bill'");
+    const response = mockCreateSyncJob({
+      integration_config_id: 1,
+      store_authorization_id: 201,
+      resource_type: 'sales_order',
+      schedule_type: 'manual',
+    });
+    expect(response).toMatchObject({ success: true, data: { idempotent: true } });
+    expect(mockCreateSyncJob({
+      integration_config_id: 1,
+      store_authorization_id: 201,
+      resource_type: 'refund_return',
+      schedule_type: 'manual',
+    })).toMatchObject({
+      success: true,
+      data: { resource_type: 'refund_return', selected_authorization_id: 201 },
+    });
+  });
+
+  it('makes the Mock sync-job gate reject unsupported or mismatched resources', () => {
+    expect(mockCreateSyncJob({
+      integration_config_id: 1,
+      store_authorization_id: 201,
+      resource_type: 'settlement_bill',
+      schedule_type: 'manual',
+    })).toMatchObject({ success: false, code: 'UNSUPPORTED_RESOURCE' });
+    expect(mockCreateSyncJob({
+      integration_config_id: 1,
+      store_authorization_id: 201,
+      resource_type: 'inventory_snapshot',
+      schedule_type: 'manual',
+    })).toMatchObject({ success: false, code: 'UNSUPPORTED_RESOURCE' });
+    expect(mockCreateSyncJob({
+      integration_config_id: 3,
+      store_authorization_id: 201,
+      resource_type: 'sales_order',
+      schedule_type: 'manual',
+    })).toMatchObject({ success: false, code: 'INVALID_INTEGRATION_CONFIG' });
+  });
+
+  it('keeps the store master, site and subject fixtures on the same implemented Shopee identity', () => {
+    const store = masterDataMocks.stores().data.results[0];
+    const platform = masterDataMocks.platforms().data.results.find((item) => item.id === store.platform_id);
+    const site = masterDataMocks.platformSites().data.results.find((item) => item.id === store.platform_site_id);
+    const subject = mockSubjectApiAccess('store', store.id).data.subject;
+    expect(store).toMatchObject({ platform_id: 3, platform_name: 'Shopee', platform_site_id: 101 });
+    expect(platform).toMatchObject({ id: 3, code: 'shopee', platform_type: 'shopee', connector_status: 'ACTIVE' });
+    expect(site).toMatchObject({ platform_id: 3, platform_code: 'shopee', platform_type: 'shopee' });
+    expect(subject).toMatchObject({ id: store.id, platform: 'shopee', platform_name: 'Shopee' });
+  });
+
+  it('retains authorization history and exposes safe detail fields without raw credentials', () => {
+    const statuses = mockStoreAuthorizations({ store_id: 1 }).data.results.map((row) => row.status);
+    expect(statuses).toEqual(expect.arrayContaining(['active', 'pending', 'expired', 'revoked', 'error']));
+    expect(subjectAccessSource).toContain('授权历史');
+    expect(subjectAccessSource).toContain('查看详情');
+    expect(subjectAccessSource).toContain('API 授权记录详情');
+    for (const field of ['scopesLabel', 'expirationDate', 'errorLabel', 'credentialMaskLabel']) {
+      expect(subjectAccessSource).toContain(field);
+    }
+    expect(subjectAccessSource).toContain('凭据原文、Token 和密钥不会返回或回显');
+    expect(JSON.stringify(mockStoreAuthorizations({ store_id: 1 }))).not.toMatch(/"(?:access_token|refresh_token|client_secret|app_secret|partner_key|credential_ciphertext|token_id)"\s*:/i);
+  });
+
+  it('consolidates store authorization in the store master instead of a duplicate integration page', () => {
+    const routerSource = readFileSync(resolve(process.cwd(), 'src/router/index.js'), 'utf8');
+    const menuSource = readFileSync(resolve(process.cwd(), 'src/router/menu.js'), 'utf8');
+    expect(source).toContain('选择已就绪配置并发起授权');
+    expect(source).toContain('>API 接入</el-button>');
+    expect(subjectAccessSource).toContain('access.value.subject.id');
+    expect(subjectAccessSource).toContain('config.callback_url');
+    expect(subjectAccessSource).toContain('config.scopes || []');
+    expect(subjectAccessSource).toContain('!selectedConfig(apiType).oauth_ready');
+    expect(subjectAccessSource).toContain('popup = window.open');
+    expect(subjectAccessSource).toContain('navigator.clipboard');
+    expect(subjectAccessSource).toContain('浏览器阻止了新窗口');
+    expect(subjectAccessSource).toContain('授权地址未能自动复制');
+    expect(integrationsApiSource).toContain('mutation: true');
+    expect(integrationsApiSource).toContain('noMockFallback: true');
+    expect(routerSource).toContain("{ path: 'integrations/authorizations', redirect: '/master-data/stores' }");
+    expect(routerSource).not.toContain("import('../views/integrations/StoreAuthorizationList.vue')");
+    expect(menuSource).not.toContain("label: '店铺授权'");
   });
 
   it('keeps capability editing read-only unless authorization is active', () => {

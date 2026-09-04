@@ -77,7 +77,6 @@ const APISyncLogList = () => import('../views/integrations/APISyncLogList.vue');
 const IntegrationConfigDetail = () => import('../views/integrations/IntegrationConfigDetail.vue');
 const IntegrationWorkspace = () => import('../views/integrations/IntegrationWorkspace.vue');
 const PlatformDrillWorkbench = () => import('../views/integrations/PlatformDrillWorkbench.vue');
-const StoreAuthorizationList = () => import('../views/integrations/StoreAuthorizationList.vue');
 const IntegrationCapabilityMatrix = () => import('../views/integrations/IntegrationCapabilityMatrix.vue');
 const StoreMappingList = () => import('../views/integrations/StoreMappingList.vue');
 const ProductMappingList = () => import('../views/integrations/ProductMappingList.vue');
@@ -255,7 +254,7 @@ const routes = [
       { path: 'integrations/readiness', component: PlatformIntegrationReadiness },
       { path: 'integrations/production-settings', component: ProductionIntegrationSettings },
       { path: 'settings/module-controls', component: ModuleReleaseControl },
-      { path: 'integrations/authorizations', component: StoreAuthorizationList },
+      { path: 'integrations/authorizations', redirect: '/master-data/stores' },
       { path: 'integrations/capabilities', component: IntegrationCapabilityMatrix },
       { path: 'integrations/store-mappings', component: StoreMappingList },
       { path: 'integrations/product-mappings', component: ProductMappingList },

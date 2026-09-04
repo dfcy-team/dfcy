@@ -19,7 +19,12 @@ import {
   mockRefreshStoreAuthorization,
   mockRevokeStoreAuthorization,
   mockStartStoreAuthorizationOAuth,
-  mockConnectionCapabilities
+  mockCompleteSyntheticStoreAuthorization,
+  mockConnectionCapabilities,
+  mockWarehouseAuthorizations,
+  mockBindWarehouseAuthorization,
+  mockRevokeWarehouseAuthorization,
+  mockCheckIntegrationReadonlyConnection
 } from '../mock/integrations';
 import {
   mockProductionIntegrationSettings,
@@ -203,14 +208,23 @@ export const fetchSubjectApiAccess = (subjectType, subjectId) =>
 export const startStoreAuthorization = (payload) =>
   requestWithMockFallback(
     { method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/start/', data: payload },
-    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟模式不发起平台授权', data: null }),
+    () => mockStartStoreAuthorizationOAuth(payload),
     'integrations.store_authorizations.oauth_start'
   );
 
 export const completeSyntheticStoreAuthorization = (platform, params) =>
   requestWithMockFallback(
-    { method: 'get', url: `/api/internal/integrations/store-authorizations/oauth/callback/${platform}/`, params },
-    () => ({ success: false, code: 'MOCK_UNAVAILABLE', message: '模拟授权回调不可用', data: null }),
+    {
+      method: 'get',
+      // The provider callback is a GET transport but consumes the one-time
+      // OAuth state and creates/replaces an authorization.  It must never be
+      // reported as a successful Mock write when production networking fails.
+      mutation: true,
+      noMockFallback: true,
+      url: `/api/internal/integrations/store-authorizations/oauth/callback/${platform}/`,
+      params,
+    },
+    () => mockCompleteSyntheticStoreAuthorization(platform, params),
     'integrations.store_authorizations.oauth_callback'
   );
 
@@ -247,10 +261,10 @@ export const checkIntegrationConsistency = (id) =>
     'integrations.configs.consistency_check'
   );
 
-export const checkIntegrationReadonlyConnection = (id) =>
+export const checkIntegrationReadonlyConnection = (id, payload = {}) =>
   requestWithMockFallback(
-    { method: 'post', url: `/api/internal/integrations/configs/${id}/readonly-check/`, data: {} },
-    mockIntegrationConfigDetail,
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/readonly-check/`, data: payload },
+    () => mockCheckIntegrationReadonlyConnection(id, payload),
     'integrations.configs.readonly_check'
   );
 
@@ -311,6 +325,44 @@ export const fetchSyncAlertIncidents = (filters = {}) => {
     'integrations.sync_alert_incidents'
   );
 };
+
+export const fetchWarehouseAuthorizations = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/integrations/warehouse-authorizations/', params },
+  () => mockWarehouseAuthorizations(params),
+  'integrations.warehouse_authorizations'
+);
+
+export const bindWarehouseAuthorization = (payload, idempotencyKey = '') => requestWithMockFallback(
+  {
+    method: 'post',
+    url: '/api/internal/integrations/warehouse-authorizations/',
+    data: payload,
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined
+  },
+  () => mockBindWarehouseAuthorization(payload),
+  'integrations.warehouse_authorizations.bind'
+);
+
+export const rebindWarehouseAuthorization = (authorizationId, payload, idempotencyKey = '') => requestWithMockFallback(
+  {
+    method: 'post',
+    url: `/api/internal/integrations/warehouse-authorizations/${authorizationId}/rebind/`,
+    data: payload,
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined
+  },
+  () => mockBindWarehouseAuthorization({ ...payload, replace: true, expected_authorization_id: authorizationId }),
+  'integrations.warehouse_authorizations.rebind'
+);
+
+export const revokeWarehouseAuthorization = (authorizationId) => requestWithMockFallback(
+  {
+    method: 'post',
+    url: `/api/internal/integrations/warehouse-authorizations/${authorizationId}/revoke/`,
+    data: {}
+  },
+  () => mockRevokeWarehouseAuthorization(authorizationId),
+  'integrations.warehouse_authorizations.revoke'
+);
 
 export const actOnSyncAlertIncident = (id, payload) => requestWithMockFallback(
   {

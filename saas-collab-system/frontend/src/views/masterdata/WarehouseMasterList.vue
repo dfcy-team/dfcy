@@ -20,8 +20,22 @@
     :operation-width="240"
   >
     <template #row-actions="{ row }">
-      <el-button v-if="apiAccess.visible && row.api_access_available" link type="primary" @click.stop="openApiAccess(row)">API 接入</el-button>
-      <el-button v-else-if="apiAccess.visible" link type="info" @click.stop="notifyApiAccessBlocked(row)">
+      <el-button
+        v-if="apiAccess.visible && row.api_access_available"
+        link
+        type="primary"
+        :disabled="apiAccess.disabled"
+        :title="apiAccess.disabled ? apiAccess.reason : '打开当前仓库的库存 API 接入'"
+        @click.stop="openApiAccess(row)"
+      >API 接入</el-button>
+      <el-button
+        v-else-if="apiAccess.visible"
+        link
+        type="info"
+        :disabled="apiAccess.disabled"
+        :title="apiAccess.disabled ? apiAccess.reason : '当前仓库尚未达到库存 API 接入条件'"
+        @click.stop="notifyApiAccessBlocked(row)"
+      >
         API 接入（待配置）
       </el-button>
     </template>
@@ -55,7 +69,22 @@ const countryRows = ref([]);
 const platformRows = ref([]);
 const apiAccessOpen = ref(false);
 const selectedWarehouse = ref(null);
-const apiAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view' }));
+const apiAccess = computed(() => {
+  const integrationViewAccess = getActionAccess(auth, { permission: 'integrations.view' });
+  const warehouseViewAccess = getActionAccess(auth, { permission: 'integrations.warehouse.view' });
+  const allowed = integrationViewAccess.allowed && warehouseViewAccess.allowed;
+  const visible = integrationViewAccess.visible && warehouseViewAccess.visible;
+  const reason = [integrationViewAccess, warehouseViewAccess]
+    .filter((access) => !access.allowed && access.reason)
+    .map((access) => access.reason)
+    .join('；');
+  return {
+    allowed,
+    visible,
+    disabled: integrationViewAccess.disabled || warehouseViewAccess.disabled || !allowed,
+    reason: allowed ? '' : reason || '当前角色无权查看仓库 API 接入',
+  };
+});
 
 const warehouseTypes = [
   { label: '自营仓', value: 'owned' },
@@ -131,11 +160,23 @@ async function loadPlatformOptions() {
 }
 
 function openApiAccess(row) {
+  if (!apiAccess.value.allowed) {
+    ElMessage.warning(apiAccess.value.reason || '当前角色无权查看仓库 API 接入');
+    return;
+  }
+  if (!row?.api_access_available) {
+    notifyApiAccessBlocked(row);
+    return;
+  }
   selectedWarehouse.value = row;
   apiAccessOpen.value = true;
 }
 
 function notifyApiAccessBlocked(row) {
+  if (!apiAccess.value.allowed) {
+    ElMessage.warning(apiAccess.value.reason || '当前角色无权查看仓库 API 接入');
+    return;
+  }
   ElMessage.warning(row.service_platform_id
     ? '当前仓储服务平台尚未接入受支持的库存 API，请先维护平台档案。'
     : '请先绑定启用且匹配仓库类型的仓储服务平台。');
