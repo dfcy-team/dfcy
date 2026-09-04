@@ -72,14 +72,23 @@ const roleOptions = ref([]);
 const selectedRoleCodes = ref([]);
 const selectedUser = ref({});
 
-const columns = [
+const columns = computed(() => [
   { prop: 'username', label: '用户名', width: 160 },
-  { prop: 'department_name', label: '部门', width: 150 },
-  { prop: 'roles', label: '角色', type: 'list', width: 210 },
+  ...(auth.hasFieldPermission('field.system.users.full_name.view')
+    ? [{ prop: 'full_name', label: '姓名', width: 150 }]
+    : []),
+  ...(auth.hasFieldPermission('field.system.users.department.view')
+    ? [{ prop: 'department_name', label: '部门', width: 150 }]
+    : []),
+  ...(auth.hasFieldPermission('field.system.users.roles.view')
+    ? [{ prop: 'roles', label: '角色', type: 'list', width: 210 }]
+    : []),
   { prop: 'email_masked', label: '邮箱（脱敏）', width: 190 },
   { prop: 'phone_masked', label: '手机（脱敏）', width: 140 },
-  { prop: 'is_active', label: '状态', type: 'status' }
-];
+  ...(auth.hasFieldPermission('field.system.users.status.view')
+    ? [{ prop: 'is_active', label: '状态', type: 'status' }]
+    : []),
+]);
 const formFields = [
   { key: 'username', label: '用户名', required: true, placeholder: '仅使用工作账号标识' },
   { key: 'initial_password', label: '初始密码', type: 'password', required: true, placeholder: '至少12位，提交后不回显' },

@@ -20,6 +20,8 @@ from .oauth_errors import (
     OAuthFlowError,
 )
 from .provider_helpers import ProviderRequestId
+from .platform_schema_service import get_platform_schema
+from .production_settings import get_runtime_platform_config, get_runtime_setting
 
 PLACEHOLDER = "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY"
 
@@ -81,7 +83,7 @@ class LiveOAuthProviderBase:
         if not self.config.get("contract_approved"):
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, f"{self.platform} platform contract is not approved.")
         redirect_uri = _required(self.config.get("redirect_uri"), f"{self.platform}.redirect_uri")
-        allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
+        allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
         if redirect_uri not in allowlist:
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "OAuth redirect URI is not approved.")
 
@@ -633,34 +635,30 @@ def integration_config_oauth_blockers(platform, integration_config):
         return ["config_missing"]
     platform = str(platform or "").lower()
     values = dict(getattr(integration_config, "platform_config", {}) or {})
-    expected_contract = {"lazada": "open-platform-v1", "shopee": "v2", "tiktok": "202407"}.get(platform, "")
-    callback_url = str(getattr(integration_config, "callback_url", "") or "").strip()
     environment = str(getattr(integration_config, "environment", ""))
+    try:
+        expected_contract = get_platform_schema(platform, environment=environment)["contract_versions"][0]
+    except Exception:
+        expected_contract = ""
+    callback_url = str(getattr(integration_config, "callback_url", "") or "").strip()
     status = str(getattr(integration_config, "status", ""))
     credential_status = str(getattr(integration_config, "credential_status", ""))
-    expected_callback = {
-        "lazada": getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
-        "shopee": getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
-        "tiktok": getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
-    }.get(platform, "")
-    contract_enabled = {
-        "lazada": getattr(settings, "LIVE_LAZADA_CONTRACT_APPROVED", False),
-        "shopee": getattr(settings, "LIVE_SHOPEE_CONTRACT_APPROVED", False),
-        "tiktok": getattr(settings, "LIVE_TIKTOK_CONTRACT_APPROVED", False),
-    }.get(platform, False)
-    allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
+    runtime_platform = get_runtime_platform_config(platform)
+    expected_callback = str(runtime_platform.get("redirect_uri") or "")
+    contract_enabled = bool(runtime_platform.get("contract_approved", False))
+    allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
     blockers = []
     if str(getattr(integration_config, "platform", "")).lower() != platform:
         blockers.append("platform_mismatch")
     if environment not in {"pilot", "production"}:
         blockers.append("environment_not_live")
-    if getattr(settings, "PLATFORM_NETWORK_MODE", "") != "approved-live-test":
+    if get_runtime_setting("network", "mode", default="") != "approved-live-test":
         blockers.append("platform_network_mode_disabled")
-    if not getattr(settings, "LIVE_PLATFORM_SECURITY_APPROVED", False):
+    if not get_runtime_setting("network", "security_approved", default=False):
         blockers.append("platform_security_not_approved")
     if not approved_custody_configured():
         blockers.append("credential_custody_not_approved")
-    if not getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []):
+    if not get_runtime_setting("network", "allowed_hosts", default=[]):
         blockers.append("outbound_host_allowlist_missing")
     if not contract_enabled:
         blockers.append("platform_contract_not_enabled")
@@ -684,7 +682,11 @@ def integration_config_oauth_blockers(platform, integration_config):
         blockers.append("callback_mismatch")
     elif allowlist and callback_url not in allowlist:
         blockers.append("callback_not_allowlisted")
-    public_app_id = values.get("partner_id") if platform == "shopee" else values.get("app_key")
+    public_app_id = (
+        values.get("partner_id") or runtime_platform.get("app_id")
+        if platform == "shopee"
+        else values.get("app_key") or runtime_platform.get("app_id")
+    )
     if not str(public_app_id or "").strip():
         blockers.append("public_app_id_missing")
     return blockers
@@ -696,87 +698,47 @@ def _integration_config_overrides(platform, integration_config):
     if str(getattr(integration_config, "platform", "")).lower() != platform:
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Integration configuration platform mismatch.")
     values = dict(getattr(integration_config, "platform_config", {}) or {})
-    if platform == "shopee":
-        ready = not integration_config_oauth_blockers(platform, integration_config)
-    else:
-        expected_contract = {"lazada": "open-platform-v1", "tiktok": "202407"}.get(platform, "")
-        ready = (
-            str(getattr(integration_config, "environment", "")) == "pilot"
-            and bool(getattr(integration_config, "network_enabled", False))
-            and not bool(getattr(integration_config, "sync_read_enabled", False))
-            and not bool(getattr(integration_config, "sync_write_enabled", False))
-            and str(getattr(integration_config, "status", "")) in {"configured", "verified"}
-            and str(getattr(integration_config, "credential_status", "")) == "configured"
-            and bool(getattr(integration_config, "credential_id", ""))
-            and str(getattr(integration_config, "contract_version", "")) == expected_contract
-        )
+    environment = str(getattr(integration_config, "environment", ""))
+    runtime_platform = get_runtime_platform_config(platform)
+    ready = not integration_config_oauth_blockers(platform, integration_config)
     common = {
-        "app_secret_reference": str(getattr(integration_config, "credential_id", "") or ""),
-        "redirect_uri": str(getattr(integration_config, "callback_url", "") or ""),
+        "app_secret_reference": str(
+            getattr(integration_config, "credential_id", "") or getattr(settings, {
+                "lazada": "LIVE_LAZADA_APP_SECRET_REFERENCE",
+                "shopee": "LIVE_SHOPEE_APP_SECRET_REFERENCE",
+                "tiktok": "LIVE_TIKTOK_APP_SECRET_REFERENCE",
+            }.get(platform, ""), "")
+            or ""
+        ),
+        "redirect_uri": str(getattr(integration_config, "callback_url", "") or runtime_platform.get("redirect_uri") or ""),
         "integration_config_ready": ready,
     }
     if platform == "shopee":
-        common["app_id"] = str(values.get("partner_id") or "")
+        common["app_id"] = str(values.get("partner_id") or runtime_platform.get("app_id") or "")
     else:
-        common["app_id"] = str(values.get("app_key") or "")
+        common["app_id"] = str(values.get("app_key") or runtime_platform.get("app_id") or "")
         if platform == "tiktok":
-            common["service_id"] = str(values.get("service_id") or "")
+            common["service_id"] = str(values.get("service_id") or runtime_platform.get("service_id") or "")
     return common
 
 
 def build_live_provider(platform, integration_config=None, secret_resolver=None, **overrides):
     platform = str(platform or "").lower()
     if platform == "lazada":
-        config = {
-            "contract_approved": getattr(settings, "LIVE_LAZADA_CONTRACT_APPROVED", False),
-            "app_id": getattr(settings, "LIVE_LAZADA_APP_KEY", ""),
-            "app_secret_reference": getattr(settings, "LIVE_LAZADA_APP_SECRET_REFERENCE", ""),
-            "redirect_uri": getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
-            "auth_url": getattr(settings, "LIVE_LAZADA_AUTH_URL", "https://auth.lazada.com/oauth/authorize"),
-            "api_host": getattr(settings, "LIVE_LAZADA_API_HOST", "https://api.lazada.com"),
-            "token_path": getattr(settings, "LIVE_LAZADA_TOKEN_PATH", "/rest/auth/token/create"),
-            "refresh_path": getattr(settings, "LIVE_LAZADA_REFRESH_PATH", "/rest/auth/token/refresh"),
-        }
+        config = get_runtime_platform_config(platform)
+        config["app_secret_reference"] = getattr(settings, "LIVE_LAZADA_APP_SECRET_REFERENCE", "")
         config.update(overrides)
         config.update(_integration_config_overrides(platform, integration_config))
         return LazadaLiveOAuthProvider(config, secret_resolver=secret_resolver)
     if platform == "shopee":
-        config = {
-            "contract_approved": getattr(settings, "LIVE_SHOPEE_CONTRACT_APPROVED", False),
-            "app_id": getattr(settings, "LIVE_SHOPEE_PARTNER_ID", ""),
-            "app_secret_reference": getattr(settings, "LIVE_SHOPEE_APP_SECRET_REFERENCE", ""),
-            "redirect_uri": getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
-            "auth_url": getattr(settings, "LIVE_SHOPEE_AUTH_URL", PLACEHOLDER),
-            "api_host": getattr(settings, "LIVE_SHOPEE_DEFAULT_HOST", PLACEHOLDER),
-            "token_path": getattr(settings, "LIVE_SHOPEE_TOKEN_PATH", PLACEHOLDER),
-            "refresh_path": getattr(settings, "LIVE_SHOPEE_REFRESH_PATH", PLACEHOLDER),
-            "revoke_path": getattr(settings, "LIVE_SHOPEE_REVOKE_PATH", PLACEHOLDER),
-            "shop_path": getattr(settings, "LIVE_SHOPEE_SHOP_PATH", PLACEHOLDER),
-            "region": getattr(settings, "LIVE_SHOPEE_DEFAULT_REGION", ""),
-        }
+        config = get_runtime_platform_config(platform)
+        config["app_secret_reference"] = getattr(settings, "LIVE_SHOPEE_APP_SECRET_REFERENCE", "")
         config.update(overrides)
         config.update(_integration_config_overrides(platform, integration_config))
         return ShopeeLiveOAuthProvider(config, secret_resolver=secret_resolver)
     if platform == "tiktok":
-        market = str(getattr(settings, "LIVE_TIKTOK_MARKET", "ROW")).upper()
-        auth_urls = getattr(settings, "LIVE_TIKTOK_AUTH_URLS", {}) or {}
-        open_hosts = getattr(settings, "LIVE_TIKTOK_OPEN_API_HOSTS", {}) or {}
-        config = {
-            "contract_approved": getattr(settings, "LIVE_TIKTOK_CONTRACT_APPROVED", False),
-            "app_id": getattr(settings, "LIVE_TIKTOK_APP_KEY", ""),
-            "app_secret_reference": getattr(settings, "LIVE_TIKTOK_APP_SECRET_REFERENCE", ""),
-            "service_id": getattr(settings, "LIVE_TIKTOK_SERVICE_ID", ""),
-            "redirect_uri": getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
-            "market": market,
-            "auth_url": auth_urls.get(market) or getattr(settings, "LIVE_TIKTOK_DEFAULT_AUTH_URL", PLACEHOLDER),
-            "api_host": open_hosts.get(market) or getattr(settings, "LIVE_TIKTOK_DEFAULT_OPEN_HOST", PLACEHOLDER),
-            "token_host": getattr(settings, "LIVE_TIKTOK_TOKEN_HOST", "https://auth.tiktok-shops.com"),
-            "token_path": getattr(settings, "LIVE_TIKTOK_TOKEN_PATH", PLACEHOLDER),
-            "refresh_path": getattr(settings, "LIVE_TIKTOK_REFRESH_PATH", PLACEHOLDER),
-            "revoke_path": getattr(settings, "LIVE_TIKTOK_REVOKE_PATH", PLACEHOLDER),
-            "authorized_shops_path": getattr(settings, "LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH", PLACEHOLDER),
-            "metadata_path": getattr(settings, "LIVE_TIKTOK_METADATA_PATH", PLACEHOLDER),
-        }
+        config = get_runtime_platform_config(platform)
+        config["app_secret_reference"] = getattr(settings, "LIVE_TIKTOK_APP_SECRET_REFERENCE", "")
         config.update(overrides)
         config.update(_integration_config_overrides(platform, integration_config))
         return TikTokLiveOAuthProvider(config, secret_resolver=secret_resolver)

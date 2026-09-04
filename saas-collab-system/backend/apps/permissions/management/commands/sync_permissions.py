@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.permissions.catalog import PERMISSION_DEFINITIONS, permission_defaults
+from apps.permissions.catalog import ALL_PERMISSION_DEFINITIONS, permission_defaults
 from apps.permissions.models import Permission, Role
 from apps.permissions.role_catalog import TENANT_ADMIN_ROLE_CODE
 
@@ -17,7 +17,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         issues = []
-        for definition in PERMISSION_DEFINITIONS:
+        for definition in ALL_PERMISSION_DEFINITIONS:
             code = definition["code"]
             defaults = permission_defaults(definition)
             permission = Permission.objects.filter(code=code).first()
@@ -59,4 +59,4 @@ class Command(BaseCommand):
         if options["check"]:
             self.stdout.write(self.style.SUCCESS("Permission catalog is complete."))
         else:
-            self.stdout.write(self.style.SUCCESS(f"Permission catalog synchronized ({len(PERMISSION_DEFINITIONS)} codes)."))
+            self.stdout.write(self.style.SUCCESS(f"Permission catalog synchronized ({len(ALL_PERMISSION_DEFINITIONS)} codes)."))

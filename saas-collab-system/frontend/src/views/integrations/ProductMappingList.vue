@@ -3,7 +3,7 @@
     eyebrow="API DATA INTEGRATION"
     title="商品映射"
     subtitle="维护平台商品变体与本地 SKU 的受控映射，确认建议后才进入可用状态。"
-    boundary-note="商品映射不接收平台凭据，不自动触发商品写入、刊登或价格更新。建议确认和停用均需细粒度权限及人工确认。"
+    boundary-note="当前商品映射能力仅支持 Shopee、TikTok Shop；Lazada 已支持授权但映射尚未开放。商品映射不接收平台凭据，不自动触发商品写入、刊登或价格更新。建议确认和停用均需细粒度权限及人工确认。"
     :capability="capability"
   >
     <template #action>

@@ -1,21 +1,21 @@
 <template>
   <main class="login-page">
     <section class="login-context" aria-label="系统登录说明">
-      <div class="login-context__brand">SaaS 协同系统</div>
+      <div class="login-context__brand">鼎峰创域科技</div>
       <h1>跨境业务协同工作台</h1>
-      <p>统一处理商品、采购、供应商、RPA、财务和经营分析任务。</p>
+      <p>连接运营、采购、供应链、财务与管理团队，让业务协作更高效。</p>
       <dl>
-        <div><dt>环境</dt><dd>{{ environmentLabel }}</dd></div>
-        <div><dt>认证</dt><dd>内部用户 JWT</dd></div>
-        <div><dt>权限</dt><dd>以后端角色与数据范围为准</dd></div>
+        <div><dt>统一入口</dt><dd>集中处理各项日常业务</dd></div>
+        <div><dt>高效协同</dt><dd>跨团队共享进度与业务信息</dd></div>
+        <div><dt>岗位权限</dt><dd>只展示您可使用的功能和数据</dd></div>
       </dl>
     </section>
 
     <section class="login-panel">
       <div>
-        <span class="login-panel__eyebrow">INTERNAL ACCESS</span>
-        <h2>登录</h2>
-        <p>使用内部账号进入当前租户工作台。</p>
+        <span class="login-panel__eyebrow">账号登录</span>
+        <h2>欢迎回来</h2>
+        <p>请使用企业为您分配的账号登录。</p>
       </div>
 
       <el-alert
@@ -41,21 +41,20 @@
           />
         </el-form-item>
         <el-button class="login-submit" type="primary" native-type="submit" :loading="auth.loading">
-          登录系统
+          进入工作台
         </el-button>
       </el-form>
 
-      <p class="login-panel__boundary">账号、角色、权限和数据范围均由后端验证，前端不会放宽访问限制。</p>
+      <p class="login-panel__boundary">首次登录、忘记密码或账号无法使用时，请联系企业管理员。</p>
     </section>
   </main>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
-import { useMock } from '../../api/request';
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -66,7 +65,6 @@ const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 };
-const environmentLabel = computed(() => (useMock ? 'Mock 设计环境' : 'Pilot API 环境'));
 
 async function handleLogin() {
   const valid = await formRef.value?.validate().catch(() => false);

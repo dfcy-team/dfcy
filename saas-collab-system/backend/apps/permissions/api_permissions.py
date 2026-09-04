@@ -13,6 +13,19 @@ from apps.permissions.services import (
 )
 
 
+class InternalSuperuserPermission(BasePermission):
+    """Platform-only gate for cross-tenant system management endpoints."""
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.is_active
+            and request.user.user_type == CustomUser.UserType.INTERNAL
+            and request.user.is_superuser
+        )
+
+
 class DeclaredApplicationPermission(BasePermission):
     """Authorize an internal endpoint using permission codes declared by its view."""
 

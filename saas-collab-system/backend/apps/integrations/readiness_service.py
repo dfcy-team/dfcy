@@ -12,6 +12,7 @@ from django.conf import settings
 from .capability import approved_custody_configured, live_network_mode_enabled
 from .live_providers import integration_config_oauth_blockers
 from .platform_schema_service import get_platform_schema
+from .production_settings import get_runtime_setting
 
 
 MARKETPLACE_PLATFORMS = (
@@ -98,7 +99,7 @@ def _config_readiness(config):
         )
     )
     provider_blockers = list(dict.fromkeys(provider_blockers))
-    if not bool(getattr(settings, "LIVE_READONLY_SYNC_ENABLED", False)):
+    if not bool(get_runtime_setting("network", "readonly_sync_enabled", default=False)):
         provider_blockers.append("readonly_sync_feature_disabled")
     provider_blockers = list(dict.fromkeys(provider_blockers))
     readonly_approved = _readonly_state(config)
@@ -109,7 +110,7 @@ def _config_readiness(config):
 
     target_contract = _expected_contract(config)
     repair_available = bool(
-        str(getattr(config, "platform", "") or "").lower() == "shopee"
+        str(getattr(config, "platform", "") or "").lower() in {"lazada", "shopee", "tiktok"}
         and target_contract
         and str(getattr(config, "contract_version", "") or "") != target_contract
     )
@@ -119,7 +120,7 @@ def _config_readiness(config):
         if code != "network_not_approved"
     ]
     approve_available = bool(
-        str(getattr(config, "platform", "") or "").lower() == "shopee"
+        str(getattr(config, "platform", "") or "").lower() in {"lazada", "shopee", "tiktok"}
         and not readonly_approved
         and not approval_blockers
     )
@@ -184,14 +185,14 @@ def build_platform_readiness(configs):
     for config in configs:
         grouped[str(config.platform or "").lower()].append(config)
 
-    security_ready = bool(getattr(settings, "LIVE_PLATFORM_SECURITY_APPROVED", False))
+    security_ready = bool(get_runtime_setting("network", "security_approved", default=False))
     custody_ready = approved_custody_configured()
     network_ready = (
         live_network_mode_enabled()
-        and bool(getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []) or [])
+        and bool(get_runtime_setting("network", "allowed_hosts", default=[]))
         and not bool(getattr(settings, "DEBUG", False))
     )
-    readonly_sync_ready = bool(getattr(settings, "LIVE_READONLY_SYNC_ENABLED", False))
+    readonly_sync_ready = bool(get_runtime_setting("network", "readonly_sync_enabled", default=False))
     items = []
     for platform, label in MARKETPLACE_PLATFORMS:
         platform_configs = grouped.get(platform, [])

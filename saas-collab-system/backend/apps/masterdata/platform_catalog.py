@@ -20,6 +20,19 @@ P3 = (
 # selectors while preserving the existing warehouse model choices.
 WAREHOUSE_SERVICE = ("warehouse_owned", "warehouse_third_party", "warehouse_platform")
 
+# Warehouse types are business classifications rather than concrete API
+# providers.  Keep connector discovery explicit so a warehouse row cannot be
+# treated as connected merely because its business type is known.
+WAREHOUSE_CONNECTOR_UNMAPPED = "UNMAPPED"
+WAREHOUSE_CONNECTOR_REGISTRY = {
+    "jifeng_wms": {
+        "name": "极风 WMS",
+        "status": "ACTIVE",
+        "hint": "已按平台编码或名称识别为极风 WMS，支持库存 API 接入。",
+    },
+}
+WAREHOUSE_CATEGORY_HINT = "业务分类，连接器按具体服务商编码或名称识别。"
+
 LABELS = {
     "tiktok": "TikTok Shop", "temu": "Temu", "amazon": "Amazon",
     "wildberries": "Wildberries", "ozon": "Ozon", "aliexpress": "AliExpress",
@@ -63,12 +76,24 @@ def _category(value):
 
 
 def _entry(value, priority):
-    status = "ACTIVE" if value in {"shopee", "tiktok"} else "TESTING" if value == "lazada" else "NOT_IMPLEMENTED"
+    is_warehouse_category = value in WAREHOUSE_SERVICE
+    status = (
+        WAREHOUSE_CONNECTOR_UNMAPPED
+        if is_warehouse_category
+        else "ACTIVE" if value in {"shopee", "tiktok"}
+        else "TESTING" if value == "lazada"
+        else "NOT_IMPLEMENTED"
+    )
     return {
         "value": value,
         "canonical_code": CANONICAL_CODES.get(value, value.upper()),
         "label": _label(value),
         "platform_category": _category(value),
+        "is_business_category": is_warehouse_category,
+        "option_group": "仓储服务分类" if is_warehouse_category else "销售渠道/独立站" if _category(value) in {"MARKETPLACE", "SOCIAL_COMMERCE", "DTC_STORE"} else "ERP/其他",
+        "connector_key": "" if is_warehouse_category else value if status != "NOT_IMPLEMENTED" else "",
+        "connector_name": "按具体服务商识别" if is_warehouse_category else _label(value),
+        "connector_hint": WAREHOUSE_CATEGORY_HINT if is_warehouse_category else "",
         "priority_level": priority,
         "default_integration_mode": (
             "HYBRID" if value == "bigseller"
@@ -109,3 +134,58 @@ def normalize_platform_code(value):
 
 def platform_catalog_item(value):
     return PLATFORM_BY_VALUE.get(normalize_platform_code(value) or str(value or "").strip().lower())
+
+
+def _compact_identifier(value):
+    """Normalize a human/code identifier for the small local alias set."""
+    return "".join(character for character in str(value or "").strip().lower() if character.isalnum())
+
+
+def resolve_platform_connector(*, platform_type="", code="", name=""):
+    """Resolve the concrete connector represented by a platform master row."""
+    normalized_type = normalize_platform_code(platform_type) or str(platform_type or "").strip().lower()
+    item = platform_catalog_item(normalized_type)
+    if normalized_type in WAREHOUSE_SERVICE:
+        provider = ""
+        try:
+            from apps.integrations.platform_schema_service import integration_platform_key
+
+            provider = integration_platform_key(platform_type=normalized_type, code=code, name=name)
+        except (ImportError, ModuleNotFoundError):
+            provider = ""
+        if not provider and any(_compact_identifier(value) in {"myjf", "马来极风"} for value in (code, name)):
+            provider = "jifeng_wms"
+        metadata = WAREHOUSE_CONNECTOR_REGISTRY.get(provider)
+        if metadata:
+            return {
+                "connector_key": provider,
+                "connector_name": metadata["name"],
+                "connector_status": metadata["status"],
+                "connector_hint": metadata["hint"],
+            }
+        return {
+            "connector_key": "",
+            "connector_name": "待识别服务商",
+            "connector_status": WAREHOUSE_CONNECTOR_UNMAPPED,
+            "connector_hint": "这是仓储业务分类，不是单一连接器；请维护具体服务商编码和名称，匹配后才可进行对应 API 接入。",
+        }
+
+    if item:
+        status = item["connector_status"]
+        return {
+            "connector_key": item.get("connector_key", "") or (normalized_type if status != "NOT_IMPLEMENTED" else ""),
+            "connector_name": item.get("connector_name") or item.get("label", ""),
+            "connector_status": status,
+            "connector_hint": item.get("connector_hint", ""),
+        }
+    return {
+        "connector_key": "",
+        "connector_name": "待识别平台",
+        "connector_status": "UNMAPPED",
+        "connector_hint": "平台类型未在目录中匹配，请先维护受支持的平台类型。",
+    }
+
+
+def platform_connector_resolution(*, platform_type="", code="", name=""):
+    """Backward-compatible descriptive alias for record-level resolution."""
+    return resolve_platform_connector(platform_type=platform_type, code=code, name=name)

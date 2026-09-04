@@ -17,6 +17,7 @@ from .models import (
     WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema, validate_platform_config
+from .production_settings import get_runtime_platform_config, get_runtime_setting
 
 
 PILOT_LOOPBACK_CALLBACKS = {
@@ -56,12 +57,8 @@ def validate_marketplace_callback_url(callback_url, *, environment, platform):
             "Callback URL must use HTTPS; controlled Pilot testing may use only the exact "
             "http://127.0.0.1:8000 marketplace callback."
         )
-    redirect_allowlist = set(getattr(settings, "LIVE_OAUTH_REDIRECT_ALLOWLIST", []) or [])
-    expected_callback = {
-        PlatformChoices.LAZADA: getattr(settings, "LIVE_LAZADA_REDIRECT_URI", ""),
-        PlatformChoices.SHOPEE: getattr(settings, "LIVE_SHOPEE_REDIRECT_URI", ""),
-        PlatformChoices.TIKTOK: getattr(settings, "LIVE_TIKTOK_REDIRECT_URI", ""),
-    }.get(platform, "")
+    redirect_allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
+    expected_callback = (get_runtime_platform_config(str(platform or "").lower()) or {}).get("redirect_uri", "")
     if expected_callback and callback_url != expected_callback:
         raise serializers.ValidationError("Callback URL does not match the platform registration.")
     if redirect_allowlist and callback_url not in redirect_allowlist:
@@ -206,8 +203,8 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         if not 1 <= read_timeout <= 30:
             raise serializers.ValidationError({"read_timeout_seconds": "Read timeout must be 1-30 seconds."})
         if attrs.get("network_enabled") and not (
-            getattr(settings, "PLATFORM_NETWORK_MODE", "") == "approved-live-test"
-            and getattr(settings, "LIVE_PLATFORM_SECURITY_APPROVED", False)
+            get_runtime_setting("network", "mode", default="") == "approved-live-test"
+            and get_runtime_setting("network", "security_approved", default=False)
         ):
             raise serializers.ValidationError({"network_enabled": "Live network approval is not active."})
         if attrs.get("sync_read_enabled") or attrs.get("sync_write_enabled"):

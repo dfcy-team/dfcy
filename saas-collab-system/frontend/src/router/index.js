@@ -74,8 +74,8 @@ const RPAAccountLockList = () => import('../views/rpa/RPAAccountLockList.vue');
 const RPAPageSignatureAlertList = () => import('../views/rpa/RPAPageSignatureAlertList.vue');
 const APISyncTaskList = () => import('../views/integrations/APISyncTaskList.vue');
 const APISyncLogList = () => import('../views/integrations/APISyncLogList.vue');
-const IntegrationConfigList = () => import('../views/integrations/IntegrationConfigList.vue');
 const IntegrationConfigDetail = () => import('../views/integrations/IntegrationConfigDetail.vue');
+const IntegrationWorkspace = () => import('../views/integrations/IntegrationWorkspace.vue');
 const PlatformDrillWorkbench = () => import('../views/integrations/PlatformDrillWorkbench.vue');
 const StoreAuthorizationList = () => import('../views/integrations/StoreAuthorizationList.vue');
 const IntegrationCapabilityMatrix = () => import('../views/integrations/IntegrationCapabilityMatrix.vue');
@@ -85,7 +85,6 @@ const SyncIncidentList = () => import('../views/integrations/SyncIncidentList.vu
 const IntegrationAuditList = () => import('../views/integrations/IntegrationAuditList.vue');
 const PlatformSiteList = () => import('../views/integrations/PlatformSiteList.vue');
 const SyncJobList = () => import('../views/integrations/SyncJobList.vue');
-const SyncRunList = () => import('../views/integrations/SyncRunList.vue');
 const SyncRunDetail = () => import('../views/integrations/SyncRunDetail.vue');
 const OperationLogList = () => import('../views/audit/OperationLogList.vue');
 const FinanceImportList = () => import('../views/finance/FinanceImportList.vue');
@@ -100,12 +99,14 @@ const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
 const ReportExportCenter = () => import('../views/reports/ReportExportCenter.vue');
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
+const ProductionIntegrationSettings = () => import('../views/settings/ProductionIntegrationSettings.vue');
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
 const ConfigCenterList = () => import('../views/settings/ConfigCenterList.vue');
 const ConfigVersionHistory = () => import('../views/settings/ConfigVersionHistory.vue');
 const DepartmentDirectory = () => import('../views/system/DepartmentDirectory.vue');
 const UserDirectory = () => import('../views/system/UserDirectory.vue');
 const RolePermissionMatrix = () => import('../views/system/RolePermissionMatrix.vue');
+const TenantManagement = () => import('../views/system/TenantManagement.vue');
 const SecurityOperations = () => import('../views/system/SecurityOperations.vue');
 const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.vue');
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
@@ -248,9 +249,10 @@ const routes = [
       { path: 'rpa/manual-queue', component: RPAManualQueue },
       { path: 'rpa/account-locks', component: RPAAccountLockList },
       { path: 'rpa/page-signatures', component: RPAPageSignatureAlertList },
-      { path: 'integrations/configs', component: IntegrationConfigList },
+      { path: 'integrations/configs', component: IntegrationWorkspace, props: { mode: 'configs' } },
       { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
       { path: 'integrations/readiness', component: PlatformIntegrationReadiness },
+      { path: 'integrations/production-settings', component: ProductionIntegrationSettings },
       { path: 'integrations/authorizations', component: StoreAuthorizationList },
       { path: 'integrations/capabilities', component: IntegrationCapabilityMatrix },
       { path: 'integrations/store-mappings', component: StoreMappingList },
@@ -260,7 +262,7 @@ const routes = [
       { path: 'integrations/platform-sites', component: PlatformSiteList },
       { path: 'integrations/platform-drill', component: PlatformDrillWorkbench },
       { path: 'integrations/sync-jobs', component: SyncJobList },
-      { path: 'integrations/sync-runs', component: SyncRunList },
+      { path: 'integrations/sync-runs', component: IntegrationWorkspace, props: { mode: 'sync-runs', runPermission: 'integrations.run_live_readonly', mockRunPermission: 'integrations.run' } },
       { path: 'integrations/sync-runs/:id', component: SyncRunDetail },
       { path: 'integrations/api-sync', component: APISyncTaskList },
       { path: 'integrations/api-sync/logs', component: APISyncLogList },
@@ -282,6 +284,7 @@ const routes = [
       { path: 'system/departments', component: DepartmentDirectory },
       { path: 'system/users', component: UserDirectory },
       { path: 'system/roles', component: RolePermissionMatrix },
+      { path: 'system/tenants', component: TenantManagement },
       { path: 'system/security-operations', component: SecurityOperations },
       { path: 'master-data/platforms', component: PlatformMasterList },
       { path: 'master-data/stores', component: StoreMasterList },

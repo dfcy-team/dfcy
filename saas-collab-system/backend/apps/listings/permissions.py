@@ -39,6 +39,32 @@ CanManageListingProfiles = any_permission_class("listings.profile.manage", "list
 # keeping the original profile.publish code valid for existing roles.
 CanPublishListings = any_permission_class("listings.profile.publish", "listings.task.manage")
 
+
+class CanPublishListingEndpoint(BasePermission):
+    """Select the least privilege needed for the requested execution mode.
+
+    Dry-run keeps the historical profile/task publish permissions.  A
+    production request must hold the dedicated permission and cannot fall
+    back to either compatibility permission, even for older roles.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated and user.is_active and user.user_type == "internal"):
+            return False
+        payload = getattr(request, "data", None)
+        if payload is None:
+            payload = getattr(request, "POST", {})
+        execution_mode = str(payload.get("execution_mode", "dry_run") or "dry_run").strip().lower()
+        codes = ("listings.publish.production",) if execution_mode == "production" else (
+            "listings.profile.publish",
+            "listings.task.manage",
+        )
+        return any(
+            check_user_permission(user, code) and bool(get_permission_data_scopes(user, code))
+            for code in codes
+        )
+
 # Platform product-detail permissions are kept separate from listing-profile
 # permissions so the master-data page can be granted independently.  These
 # codes already exist in the deployed 2.44.38 permission catalog; this module

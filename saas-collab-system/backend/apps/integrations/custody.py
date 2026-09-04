@@ -16,6 +16,7 @@ from django.conf import settings
 
 from .file_custody import FileCredentialStore, FileCustodyError
 from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE, OAuthFlowError
+from .production_settings import get_runtime_config, get_runtime_setting
 
 
 class CustodyError(OAuthFlowError):
@@ -98,13 +99,11 @@ def resolve_service_auth_token(explicit=None):
     """Resolve the sidecar bearer token with token-file precedence."""
     if explicit is not None:
         return str(explicit).strip()
-    token_file = str(
-        getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN_FILE", "")
-        or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN_FILE", "")
-        or ""
-    ).strip()
+    token_file = str(get_runtime_setting("custody", "auth_file_path", default="") or "").strip()
     if token_file:
         return read_service_token_file(token_file)
+    # Keep the legacy environment token only as a compatibility fallback. It
+    # is never persisted or returned by the production settings API.
     return str(
         getattr(settings, "LIVE_CUSTODY_SERVICE_TOKEN", "")
         or getattr(settings, "LIVE_CUSTODY_SERVICE_AUTH_TOKEN", "")
@@ -396,13 +395,39 @@ class FileCustodyBackend(CustodyBackend):
 
 
 _cached_backend = None
+_cached_backend_signature = None
+
+
+def _backend_signature():
+    """Return a non-secret signature so effective DB versions switch safely."""
+    runtime = get_runtime_config()
+    custody = runtime.get("custody", {}) if isinstance(runtime, dict) else {}
+    token_file = str(custody.get("auth_file_path") or "")
+    token_file_state = None
+    if token_file:
+        try:
+            stat_result = Path(token_file).stat()
+            token_file_state = (stat_result.st_mtime_ns, stat_result.st_size)
+        except OSError:
+            token_file_state = ("unavailable",)
+    return (
+        custody.get("backend", "refuse"),
+        custody.get("service_url", ""),
+        custody.get("service_host", ""),
+        token_file,
+        token_file_state,
+        custody.get("ca_file_path", ""),
+        bool(getattr(settings, "DEBUG", False)),
+        str(getattr(settings, "CREDENTIAL_CUSTODY_PATH", "") or ""),
+    )
 
 
 def get_custody_backend():
-    global _cached_backend
-    if _cached_backend is not None:
+    global _cached_backend, _cached_backend_signature
+    signature = _backend_signature()
+    if _cached_backend is not None and _cached_backend_signature == signature:
         return _cached_backend
-    backend = str(getattr(settings, "LIVE_CUSTODY_BACKEND", "refuse") or "").strip().lower()
+    backend = str(signature[0] or "refuse").strip().lower()
     if backend == "file":
         if not getattr(settings, "DEBUG", False):
             raise CustodyError("File custody is available only in local synthetic/test mode.")
@@ -413,11 +438,13 @@ def get_custody_backend():
             _cached_backend = FileCustodyBackend(path)
         except FileCustodyError as exc:
             raise CustodyError(str(exc)) from None
+        _cached_backend_signature = signature
         return _cached_backend
     if backend != "http":
         _cached_backend = RefusingCustodyBackend()
+        _cached_backend_signature = signature
         return _cached_backend
-    base_url = getattr(settings, "LIVE_CUSTODY_SERVICE_URL", "")
+    base_url = signature[1]
     if not base_url:
         raise CustodyError("LIVE_CUSTODY_SERVICE_URL is required for approved custody.")
     service_auth_token = resolve_service_auth_token()
@@ -425,9 +452,11 @@ def get_custody_backend():
         raise CustodyError("Credential custody service authentication is not configured.")
     from .net_guard import PlatformHttpClient
     _cached_backend = HttpCustodyBackend(base_url, PlatformHttpClient(), service_auth_token)
+    _cached_backend_signature = signature
     return _cached_backend
 
 
 def reset_custody_backend_cache():
-    global _cached_backend
+    global _cached_backend, _cached_backend_signature
     _cached_backend = None
+    _cached_backend_signature = None

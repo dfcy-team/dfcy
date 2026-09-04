@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { flattenMenuItems, menuItems } from '../src/router/menu';
+import { filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 
 describe('current deployment menu baseline', () => {
-  it('keeps the deployed top-level structure while exposing the added supply-chain and multi-platform workspaces', () => {
+  it('keeps the approved top-level order and exposes the reorganized workspaces', () => {
     expect(menuItems.map((item) => item.label)).toEqual([
-      '工作台', '产品开发', '供应链协同', '多平台刊登', '经营分析', '经营决策', '销售管理', '达人管理',
-      '流程协同', 'RPA协同', 'API数据接入', '财务中心', '报表中心', '基础档案',
-      '系统治理', '治理与试点'
+      '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '达人管理',
+      '财务中心', '经营分析', '经营决策', '报表中心', '流程协同', 'RPA协同', 'API数据接入', '系统管理',
+      '治理与试点'
     ]);
+
+    const inventory = menuItems.find((item) => item.label === '库存管理');
+    expect(inventory).toMatchObject({ internal: true, permissions: ['alerts.view', 'replenishment.view'] });
+    expect(inventory.children.map((item) => item.label)).toEqual(['库存预警', '补货建议']);
 
     const development = menuItems.find((item) => item.label === '产品开发');
     expect(development.children.map((item) => item.label)).toEqual([
@@ -17,43 +21,73 @@ describe('current deployment menu baseline', () => {
     ]);
 
     const supplyChain = menuItems.find((item) => item.label === '供应链协同');
-    expect(supplyChain.children.map((item) => item.label)).toEqual([
-      '集货管理', '发运管理', '采购订单', '供应商绩效'
+    expect(supplyChain.children.map((item) => item.label)).toEqual(['集货管理', '发运管理', '采购订单', '供应商绩效']);
+
+    const listings = menuItems.find((item) => item.label === '全球刊登');
+    expect(listings.children.map((item) => item.label)).toEqual([
+      '全球刊登工作台', '刊登任务', '在线商品', '平台类目映射', '商品属性映射', '刊登日志', '刊登异常', '刊登资料', '刊登模板'
     ]);
 
     const sales = menuItems.find((item) => item.label === '销售管理');
+    expect(sales).toMatchObject({ internal: true, showWhenChildAccessible: true });
+    expect(sales.permissions).toEqual(expect.arrayContaining([
+      'sales_management.view', 'sales_management.orders.view', 'sales_management.returns.view',
+      'sales_management.stores.view', 'sales_management.skus.view', 'sales_management.export',
+      'sales_management.data_quality.view', 'sales_management.sync.view'
+    ]));
     expect(sales.children.at(-1)).toMatchObject({ path: '/pricing/prices', label: '价格中心', internal: true });
 
-    const influencers = menuItems.find((item) => item.label === '达人管理');
-    expect(influencers.children.map((item) => item.label)).toEqual([
-      '达人档案', '建联任务', '送样履约', 'BD绩效'
-    ]);
+    const api = menuItems.find((item) => item.label === 'API数据接入');
+    expect(api.permissions).toEqual(expect.arrayContaining([
+      'integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view',
+      'config.system.manage', 'masterdata.view'
+    ]));
+    expect(api.children.map((item) => item.path)).toEqual(expect.arrayContaining([
+      '/master-data/platforms', '/integrations/platform-sites', '/master-data/stores',
+      '/integrations/production-settings', '/integrations/configs', '/integrations/sync-runs'
+    ]));
 
-    const governance = menuItems.find((item) => item.label === '系统治理');
-    expect(governance.children.map((item) => item.label)).toEqual([
-      '组织架构', '用户目录', '角色权限', '安全运维', '配置中心', '配置版本', '平台准入', '发布合同', '日志审计'
-    ]);
-    expect(flattenMenuItems(menuItems)).toHaveLength(105);
+    const system = menuItems.find((item) => item.label === '系统管理');
+    expect(system).toBeTruthy();
+    expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
+    expect(menuItems.some((item) => item.label === '业务协同')).toBe(false);
+    // V2.44.62 adds the superuser-only tenant administration entry inside
+    // system management; all other baseline entries remain unchanged.
+    expect(flattenMenuItems(menuItems)).toHaveLength(114);
   });
 
-  it('keeps moved entries unique and removes the retired business-collaboration group', () => {
-    const uniquePaths = [
-      '/products/research',
-      '/purchasing/orders',
-      '/suppliers/performance',
-      '/pricing/prices',
-      '/products/master',
-      '/products/details',
-      '/products/platform-details',
-      '/listings/sites'
-    ];
-    const leaves = flattenMenuItems(menuItems);
-    const paths = leaves.map((item) => item.path);
-
-    expect(menuItems.some((item) => item.label === '业务协同')).toBe(false);
-    for (const path of uniquePaths) {
-      expect(paths.filter((itemPath) => itemPath === path), path).toHaveLength(1);
+  it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
+    const flatItems = flattenMenuItems(menuItems);
+    const parentFor = (route) => menuItems.find((item) => item.children?.some((child) => child.path === route))?.label;
+    const migratedParents = {
+      '/products/research': '产品开发',
+      '/purchasing/orders': '供应链协同',
+      '/suppliers/performance': '供应链协同',
+      '/pricing/prices': '销售管理'
+    };
+    for (const [route, parent] of Object.entries(migratedParents)) {
+      expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
+      expect(parentFor(route), route).toBe(parent);
     }
+    for (const route of [
+      '/listings/workbench', '/listings/tasks', '/listings/online-products', '/listings/category-mappings',
+      '/listings/attribute-mappings', '/listings/logs', '/listings/exceptions', '/listings/sites', '/listings/templates',
+      '/integrations/production-settings'
+    ]) {
+      expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
+    }
+  });
+
+  it('keeps the internal price-center entry visible without sales permissions', () => {
+    const internalPriceOnly = { user_type: 'internal', is_superuser: false, permissions: [] };
+    const internalPaths = flattenMenuItems(filterMenuItems(internalPriceOnly)).map((item) => item.path);
+    expect(internalPaths).toContain('/pricing/prices');
+    expect(internalPaths).not.toContain('/sales-management/overview');
+
+    const externalPaths = flattenMenuItems(filterMenuItems({
+      user_type: 'external', is_superuser: false, permissions: []
+    })).map((item) => item.path);
+    expect(externalPaths).not.toContain('/pricing/prices');
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

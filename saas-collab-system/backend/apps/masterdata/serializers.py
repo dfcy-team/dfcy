@@ -8,7 +8,7 @@ from .models import (
     CountrySiteMaster, PlatformMaster, PlatformSiteMaster, StatusChoices, StoreMaster,
     SupplierMaster, WarehouseMaster, WAREHOUSE_SERVICE_PLATFORM_TYPES, WAREHOUSE_TYPE_TO_PLATFORM_TYPE,
 )
-from .platform_catalog import normalize_platform_code, platform_catalog_item
+from .platform_catalog import normalize_platform_code, platform_catalog_item, resolve_platform_connector
 
 
 def mask_email(value):
@@ -41,20 +41,38 @@ class PlatformMasterSerializer(TenantOwnedSerializer):
     platform_category = serializers.SerializerMethodField()
     priority_level = serializers.SerializerMethodField()
     default_integration_mode = serializers.SerializerMethodField()
+    connector_key = serializers.SerializerMethodField()
+    connector_name = serializers.SerializerMethodField()
     connector_status = serializers.SerializerMethodField()
+    connector_hint = serializers.SerializerMethodField()
 
     class Meta:
         model = PlatformMaster
         fields = (
             "id", "tenant_id", "code", "name", "platform_type", "canonical_code",
             "platform_category", "priority_level", "default_integration_mode",
-            "connector_status", "status", "created_at", "updated_at",
+            "connector_key", "connector_name", "connector_status", "connector_hint",
+            "status", "created_at", "updated_at",
         )
         read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
 
     def _catalog_value(self, obj, key):
         item = platform_catalog_item(obj.platform_type)
         return item.get(key, "") if item else ""
+
+    def _connector_resolution(self, obj):
+        cached = getattr(obj, "_platform_connector_resolution", None)
+        if cached is None:
+            cached = resolve_platform_connector(
+                platform_type=getattr(obj, "platform_type", ""),
+                code=getattr(obj, "code", ""),
+                name=getattr(obj, "name", ""),
+            )
+            try:
+                obj._platform_connector_resolution = cached
+            except (AttributeError, TypeError):
+                pass
+        return cached
 
     def validate_platform_type(self, value):
         normalized = normalize_platform_code(value)
@@ -74,8 +92,17 @@ class PlatformMasterSerializer(TenantOwnedSerializer):
     def get_default_integration_mode(self, obj):
         return self._catalog_value(obj, "default_integration_mode")
 
+    def get_connector_key(self, obj):
+        return self._connector_resolution(obj)["connector_key"]
+
+    def get_connector_name(self, obj):
+        return self._connector_resolution(obj)["connector_name"]
+
     def get_connector_status(self, obj):
-        return self._catalog_value(obj, "connector_status")
+        return self._connector_resolution(obj)["connector_status"]
+
+    def get_connector_hint(self, obj):
+        return self._connector_resolution(obj)["connector_hint"]
 
 
 class PlatformSiteMasterSerializer(TenantOwnedSerializer):

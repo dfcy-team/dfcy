@@ -17,7 +17,27 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isInternal: (state) => state.currentUser?.user_type === 'internal',
     isSuperuser: (state) => Boolean(state.currentUser?.is_superuser),
-    permissionSet: (state) => new Set(state.currentUser?.permissions || [])
+    permissionSet: (state) => {
+      const user = state.currentUser;
+      return new Set([
+        ...(user?.permissions || []),
+        ...(user?.action_permission_codes || []),
+      ]);
+    },
+    menuPermissionSet: (state) => {
+      const user = state.currentUser;
+      return Array.isArray(user?.menu_permission_codes) ? new Set(user.menu_permission_codes) : null;
+    },
+    actionPermissionSet: (state) => {
+      const user = state.currentUser;
+      return Array.isArray(user?.action_permission_codes)
+        ? new Set(user.action_permission_codes)
+        : new Set(user?.permissions || []);
+    },
+    fieldPermissionSet: (state) => {
+      const user = state.currentUser;
+      return Array.isArray(user?.field_permission_codes) ? new Set(user.field_permission_codes) : null;
+    }
   },
   actions: {
     async initialize() {
@@ -81,6 +101,33 @@ export const useAuthStore = defineStore('auth', {
     hasPermission(...codes) {
       if (this.isSuperuser) return true;
       return codes.some((code) => this.permissionSet.has(code));
+    },
+    hasMenuPermission(...codes) {
+      if (this.isSuperuser) return true;
+      const source = this.menuPermissionSet || this.permissionSet;
+      return codes.some((code) => source.has(code));
+    },
+    hasActionPermission(...codes) {
+      if (this.isSuperuser) return true;
+      return codes.some((code) => this.actionPermissionSet.has(code));
+    },
+    hasFieldPermission(...codes) {
+      if (this.isSuperuser) return true;
+      const source = this.fieldPermissionSet;
+      if (!source) return true;
+      const granted = [...source];
+      const resourceOf = (code) => {
+        const parts = String(code || '').split('.');
+        return parts[0] === 'field' ? parts[2] || '' : '';
+      };
+      // Empty grants from a legacy role are compatible by resource: a users
+      // allow-list must not hide tenant/role columns, and a grant in one
+      // resource activates deny-by-default only for that same resource.
+      return codes.some((code) => {
+        const resource = resourceOf(code);
+        const resourceGrants = granted.filter((item) => resourceOf(item) === resource);
+        return resourceGrants.length === 0 || source.has(code);
+      });
     }
   }
 });
