@@ -100,6 +100,7 @@ const ReportExportCenter = () => import('../views/reports/ReportExportCenter.vue
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
 const ProductionIntegrationSettings = () => import('../views/settings/ProductionIntegrationSettings.vue');
+const ModuleReleaseControl = () => import('../views/settings/ModuleReleaseControl.vue');
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
 const ConfigCenterList = () => import('../views/settings/ConfigCenterList.vue');
 const ConfigVersionHistory = () => import('../views/settings/ConfigVersionHistory.vue');
@@ -253,6 +254,7 @@ const routes = [
       { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
       { path: 'integrations/readiness', component: PlatformIntegrationReadiness },
       { path: 'integrations/production-settings', component: ProductionIntegrationSettings },
+      { path: 'settings/module-controls', component: ModuleReleaseControl },
       { path: 'integrations/authorizations', component: StoreAuthorizationList },
       { path: 'integrations/capabilities', component: IntegrationCapabilityMatrix },
       { path: 'integrations/store-mappings', component: StoreMappingList },

@@ -32,9 +32,18 @@ LIVE_NETWORK_MODE = "approved-live-test"
 LISTING_WRITE_PLATFORMS = frozenset({"lazada", "shopee", "tiktok"})
 LISTING_WRITE_ACTIONS = frozenset({"create", "update", "pause"})
 LISTING_WRITE_MODES = frozenset({"disabled", "controlled"})
+MODULE_STATES = frozenset({"disabled", "mock_only", "pilot_readonly", "enabled"})
+MODULE_CODES = (
+    "core", "masterdata", "product_development", "supply_chain", "inventory",
+    "global_listing", "sales", "influencer", "finance", "analytics", "decision",
+    "reports", "workflow", "rpa", "api_integrations", "system", "governance",
+)
 
 
 SAFE_DEFAULTS = {
+    # Pre-module-switch configurations remain compatible by enabling every
+    # module until an administrator explicitly creates an approved allowlist.
+    "modules": {code: "enabled" for code in MODULE_CODES},
     "network": {
         "mode": "",
         "security_approved": False,
@@ -145,7 +154,8 @@ _ASSIGNMENT_PATTERN = re.compile(
     r"(?i)(password|passwd|access[_-]?token|refresh[_-]?token|api[_-]?secret|client[_-]?secret|app[_-]?secret)\s*[:=]"
 )
 _PLATFORM_KEYS = {"lazada", "shopee", "tiktok"}
-_TOP_LEVEL_KEYS = {"network", "connection", "custody", "listing_write", "platforms"}
+_TOP_LEVEL_KEYS = {"modules", "network", "connection", "custody", "listing_write", "platforms"}
+_MODULE_KEYS = set(MODULE_CODES)
 _NETWORK_KEYS = {
     "mode",
     "security_approved",
@@ -372,6 +382,17 @@ def validate_runtime_config(value: Any):
     _validate_mapping_keys(value, _TOP_LEVEL_KEYS, "runtime")
     result = deepcopy(value)
 
+    if "modules" in value:
+        modules = value["modules"]
+        _require_mapping(modules, "modules")
+        unknown = set(modules) - _MODULE_KEYS
+        if unknown:
+            _raise("modules", f"unsupported module code(s): {', '.join(sorted(unknown))}")
+        for code, state in modules.items():
+            if state not in MODULE_STATES:
+                _raise(f"modules.{code}", f"must be one of: {', '.join(sorted(MODULE_STATES))}")
+            result["modules"][code] = state
+
     if "network" in value:
         network = value["network"]
         _require_mapping(network, "network")
@@ -550,7 +571,18 @@ def _environment_config():
     """Build the legacy settings projection without reading any secret value."""
     auth_urls = _setting("LIVE_TIKTOK_AUTH_URLS", {}) or {}
     api_hosts = _setting("LIVE_TIKTOK_OPEN_API_HOSTS", {}) or {}
-    return {
+    configured_modules = list(_setting("ENABLED_MODULES", []) or [])
+    if not configured_modules and bool(_setting("DEBUG", False)):
+        profile = str(_setting("LOCAL_SANDBOX_MODULE", "") or "").strip().lower()
+        profile_modules = {
+            "core": {"core", "masterdata", "system", "governance"},
+            "sales-inventory-finance-reconciliation": {"core", "masterdata", "sales", "inventory", "finance", "analytics", "decision", "reports"},
+            "creator-management": {"core", "masterdata", "influencer"},
+            "procurement": {"core", "masterdata", "supply_chain"},
+            "integration": set(MODULE_CODES),
+        }
+        configured_modules = sorted(profile_modules.get(profile, set()))
+    payload = {
         "network": {
             "mode": _setting("PLATFORM_NETWORK_MODE", "") or "",
             "security_approved": bool(_setting("LIVE_PLATFORM_SECURITY_APPROVED", False)),
@@ -631,6 +663,10 @@ def _environment_config():
             },
         },
     }
+    if configured_modules:
+        enabled = {str(item).strip().lower() for item in configured_modules if str(item).strip()}
+        payload["modules"] = {code: ("enabled" if code in enabled else "disabled") for code in MODULE_CODES}
+    return payload
 
 
 def get_effective_runtime_version():
@@ -800,6 +836,12 @@ def assert_listing_production_allowed(
     :class:`~django.core.exceptions.ValidationError` so HTTP callers and
     asynchronous workers fail closed in the same way.
     """
+    # The coarse module switch is independent from the finer-grained listing
+    # policy below, so disabling 全球刊登 also blocks queue admission.
+    from apps.common.module_gate import is_module_enabled
+
+    if not is_module_enabled("global_listing"):
+        _raise("modules.global_listing", "global listing module is disabled")
     if confirm_production is not True:
         _raise("confirm_production", "production publication requires explicit confirmation")
     if config is None:

@@ -28,6 +28,13 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 DEBUG = env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 
+# Module rollout controls.  An empty ENABLED_MODULES keeps the legacy
+# all-enabled behavior; production should provide an explicit allowlist and
+# local Sandbox profiles can select a development subset through
+# LOCAL_SANDBOX_MODULE.
+ENABLED_MODULES = env_list("ENABLED_MODULES")
+LOCAL_SANDBOX_MODULE = os.getenv("LOCAL_SANDBOX_MODULE", "").strip().lower()
+
 # Marketplace access remains fail-closed until every production control is
 # explicitly configured by the operator.  These settings expose the handoff
 # capability without enabling live network traffic or embedding credentials.

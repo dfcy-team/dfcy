@@ -230,6 +230,7 @@ export const menuItems = [
       },
       { path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
       { path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
+      { path: '/settings/module-controls', label: '模块发布控制', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
       { path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
       { path: '/releases/contracts', label: '发布合同', permissions: ['release.contract.view'] },
       { path: '/audit/operations', label: '日志审计', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] }
@@ -385,6 +386,7 @@ export const routeCapabilities = [
   { path: '/settings/security-review', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/settings/config-center', permissions: ['config.view'], userTypes: ['internal'] },
   { path: '/settings/config-versions', permissions: ['config.view'], userTypes: ['internal'] },
+  { path: '/settings/module-controls', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
   { path: '/system/tenants', superuserOnly: true, userTypes: ['internal'] },
   { path: '/system/departments', permissions: ['system.organization.view'], userTypes: ['internal'] },
   { path: '/system/users', permissions: ['system.users.view'], userTypes: ['internal'] },
@@ -439,6 +441,8 @@ export function hasRouteCapability(path) {
 
 function canAccessCapability(user, capability) {
   if (!user || !capability) return false;
+  const moduleCode = capability.module_code || moduleCodeForMenuLabel(capability.label);
+  if (moduleCode && !isModuleVisible(user, moduleCode)) return false;
   if (capability.userTypes?.length && !capability.userTypes.includes(user.user_type)) return false;
   if (capability.internal && user.user_type !== 'internal') return false;
   if (capability.superuserOnly) return user.user_type === 'internal' && Boolean(user.is_superuser);
@@ -459,6 +463,79 @@ function canAccessCapability(user, capability) {
     return false;
   }
   return required.some((code) => permissions.has(code));
+}
+
+// Keep the existing menu and permission surfaces stable while allowing the
+// approved module-status payload to hide a whole business area consistently.
+const moduleByMenuLabel = {
+  '工作台': 'core',
+  '基础档案': 'masterdata',
+  '产品开发': 'product_development',
+  '供应链协同': 'supply_chain',
+  '库存管理': 'inventory',
+  '全球刊登': 'global_listing',
+  '销售管理': 'sales',
+  '达人管理': 'influencer',
+  '财务中心': 'finance',
+  '经营分析': 'analytics',
+  '经营决策': 'decision',
+  '报表中心': 'reports',
+  '流程协同': 'workflow',
+  'RPA协同': 'rpa',
+  'API数据接入': 'api_integrations',
+  '系统管理': 'system',
+  '治理与试点': 'governance'
+};
+
+function moduleCodeForMenuLabel(label) {
+  return moduleByMenuLabel[label] || '';
+}
+
+const modulePathPrefixes = [
+  ['/integrations', 'api_integrations'],
+  ['/listings', 'global_listing'],
+  ['/influencers', 'influencer'],
+  ['/sales-management', 'sales'],
+  ['/pricing', 'sales'],
+  ['/finance', 'finance'],
+  ['/analytics', 'analytics'],
+  ['/decision/inventory', 'inventory'],
+  ['/inventory', 'inventory'],
+  ['/decision/lifecycle', 'decision'],
+  ['/decision/alerts', 'decision'],
+  ['/lifecycle', 'decision'],
+  ['/alerts/business', 'decision'],
+  ['/reports', 'reports'],
+  ['/workflow', 'workflow'],
+  ['/rpa', 'rpa'],
+  ['/development', 'product_development'],
+  ['/products/research', 'product_development'],
+  ['/products', 'masterdata'],
+  ['/purchasing', 'supply_chain'],
+  ['/supply-chain', 'supply_chain'],
+  ['/suppliers/performance', 'supply_chain'],
+  ['/master-data', 'masterdata'],
+  ['/system', 'system'],
+  ['/audit', 'system'],
+  ['/releases', 'system'],
+  ['/settings/platform-readiness', 'api_integrations'],
+  ['/settings/platform-risk', 'api_integrations'],
+  ['/settings/security-review', 'api_integrations'],
+  ['/settings', 'system'],
+  ['/governance', 'governance'],
+  ['/pilot', 'governance']
+];
+
+function moduleCodeForPath(path = '') {
+  return modulePathPrefixes.find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))?.[1] || '';
+}
+
+function isModuleVisible(user, code) {
+  const statuses = user?.module_statuses || user?.modules;
+  if (!statuses || typeof statuses !== 'object' || !Object.prototype.hasOwnProperty.call(statuses, code)) {
+    return true;
+  }
+  return statuses[code] !== 'disabled';
 }
 
 export function canAccessMenuItem(user, item) {
@@ -502,5 +579,7 @@ export function flattenMenuItems(items) {
 }
 
 export function canAccessPath(user, path) {
+  const moduleCode = moduleCodeForPath(path);
+  if (moduleCode && !isModuleVisible(user, moduleCode)) return false;
   return canAccessCapability(user, findRouteCapability(path));
 }

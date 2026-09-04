@@ -12,6 +12,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied, IdempotencyConflict, StateConflict, get_scoped_object_or_404
+from apps.common.module_gate import is_module_enabled
 from apps.common.responses import success_response
 from apps.common.query import pagination_query, positive_int
 from apps.common.responses import paginated_data
@@ -1676,6 +1677,8 @@ def sync_job_detail(request, pk):
 @api_view(["POST"])
 @permission_classes([IsIntegrationManager])
 def toggle_sync_job(request, pk):
+    if not is_module_enabled("api_integrations"):
+        raise ValidationError("API data integration module is disabled.")
     job = _scoped_sync_job(request, pk)
     if job.status == SyncJob.Status.RUNNING:
         raise ValidationError("运行中的同步任务不能切换启用状态。")
@@ -1946,6 +1949,8 @@ def run_mock_sync_job(request, pk):
 @api_view(["POST"])
 @permission_classes([IsIntegrationLiveReadonlyRunner])
 def enqueue_sync_job(request, pk):
+    if not is_module_enabled("api_integrations"):
+        raise ValidationError("API data integration module is disabled.")
     sync_job = get_scoped_object_or_404(
         filter_sync_jobs(
             request.user,

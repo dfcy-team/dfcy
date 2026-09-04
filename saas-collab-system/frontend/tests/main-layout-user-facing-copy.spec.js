@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/layouts/MainLayout.vue'), 'utf8');
 
 describe('登录后布局的用户化文案', () => {
-  it('在桌面和移动侧栏显示鼎峰创域科技品牌', () => {
-    expect(source.match(/<strong>鼎峰创域科技<\/strong>/g)).toHaveLength(2);
+  it('在桌面和移动侧栏显示业务协同工作台品牌', () => {
+    expect(source.match(/<strong>业务协同工作台<\/strong>/g)).toHaveLength(2);
     for (const phrase of ['SaaS 协同系统', '厦门市鼎峰科技有限公司', '厦门市鼎峰创域科技有限公司']) {
       expect(source).not.toContain(phrase);
     }
