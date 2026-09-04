@@ -320,6 +320,11 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
+    "mark-overdue-sample-fulfillments": {
+        "task": "influencers.mark_overdue_sample_fulfillments",
+        "schedule": 86400.0,
+        "args": (),
+    },
     "dispatch-due-readonly-sync-jobs": {
         "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
         "schedule": 60.0,
