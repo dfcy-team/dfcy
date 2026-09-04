@@ -883,7 +883,6 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
     assert attribution.cost_amount == Decimal("8.0000")
     assert attribution.currency == "CNY"
     assert attribution.pricing_status == "pending"
-
     historical_priced_at = timezone.now()
     QuerySet.update(
         SampleFulfillment.objects.filter(pk=fulfillment.pk),
@@ -933,9 +932,17 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
     assert fulfillment.priced_at is None
     assert fulfillment.calculated_cost == Decimal("9.0000")
     attribution.refresh_from_db()
-    assert attribution.cost_amount == Decimal("9.0000")
+    assert attribution.cost_amount == Decimal("8.0000")
     assert attribution.currency == "CNY"
     assert attribution.pricing_status == "pending"
+    today = timezone.localdate()
+    performance = build_bd_performance(
+        tenant=tenant,
+        start_date=today,
+        end_date=today,
+        currency="CNY",
+    )
+    assert performance["totals"]["investment"] == "9.0000"
 
 
 def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():

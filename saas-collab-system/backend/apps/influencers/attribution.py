@@ -631,7 +631,7 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         sampled_at__gte=start_dt,
         sampled_at__lt=end_dt,
     ).values(
-        "owner_id", "cost_amount", "currency",
+        "owner_id", "fulfillment__calculated_cost",
         "sampled_at", "fulfillment__status", "fulfillment__shipped_at", "fulfillment__sample_order_no",
     ).order_by("id")
     for row in sample_rows.iterator(chunk_size=1000):
@@ -643,9 +643,9 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
             or str(row["fulfillment__sample_order_no"] or "").strip()
         ):
             bucket["shipped_count"] += 1
-        if row["cost_amount"] is not None:
+        if row["fulfillment__calculated_cost"] is not None:
             converted, details = rate_resolver.convert(
-                row["cost_amount"],
+                row["fulfillment__calculated_cost"],
                 "CNY",
                 currency,
                 _local_date(row["sampled_at"]),

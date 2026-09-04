@@ -1667,7 +1667,10 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
 def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch):
     tenant, user, store, influencer = _records("blacklist-rollback")
     task = _task(user, store, influencer)
-    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=2)
+    # The remaining published creator satisfies a one-creator target after the
+    # blacklisted creator is excluded, so recompute mutates before we inject
+    # the failure and verify that the entire transaction rolls back.
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=1)
     task.refresh_from_db()
     fulfillment, _ = create_sample_fulfillment(
         user=user,

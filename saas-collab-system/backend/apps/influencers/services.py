@@ -20,7 +20,6 @@ from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
 from .models import (
-    BdSampleAttributionSnapshot,
     FulfillmentStatusEvent,
     Influencer,
     InfluencerRestrictEvent,
@@ -567,16 +566,6 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         updated_at=snapshot_time,
     )
     fulfillment.refresh_from_db()
-    QuerySet.update(
-        BdSampleAttributionSnapshot.objects.filter(
-            tenant=user.tenant,
-            fulfillment=fulfillment,
-        ),
-        cost_amount=fulfillment.calculated_cost,
-        currency="CNY",
-        pricing_status="pending",
-        updated_at=snapshot_time,
-    )
     return fulfillment
 
 
