@@ -689,7 +689,7 @@ def test_duplicate_handle_targets_share_capacity_progress_and_terminal_completio
         )
 
 
-def test_each_sample_record_counts_toward_task_completion_even_for_duplicate_handles():
+def test_duplicate_creator_samples_count_once_toward_task_completion():
     tenant, user, store, first = _records("logical-sample-identity")
     first.handle = "sample.creator"
     first.save(update_fields=["handle"])
@@ -738,13 +738,13 @@ def test_each_sample_record_counts_toward_task_completion_even_for_duplicate_han
 
     task.refresh_from_db()
     payload = OutreachTaskSerializer(task).data
-    assert task.status == OutreachTask.Status.COMPLETED
+    assert task.status == OutreachTask.Status.PENDING
     assert payload["sample_fulfillment_count"] == 2
-    assert payload["sample_fulfillment_completed_count"] == 2
-    assert payload["completion_validation"]["target_reached"] is True
+    assert payload["sample_fulfillment_completed_count"] == 1
+    assert payload["completion_validation"]["target_reached"] is False
 
 
-def test_pending_sample_record_auto_completes_task_when_target_is_reached():
+def test_pending_sample_record_does_not_complete_task_when_target_is_reached():
     tenant, user, store, influencer = _records("pending-sample-auto-complete")
     task = _task(user, store, influencer, target_count=1)
 
@@ -758,8 +758,8 @@ def test_pending_sample_record_auto_completes_task_when_target_is_reached():
     task.refresh_from_db()
     assert created is True
     assert fulfillment.status == SampleFulfillment.Status.PENDING
-    assert task.status == OutreachTask.Status.COMPLETED
-    assert task.finalized_at is not None
+    assert task.status == OutreachTask.Status.PENDING
+    assert task.finalized_at is None
 
 
 def test_sample_order_number_auto_ships_and_returns_current_database_state():
@@ -839,7 +839,7 @@ def test_sample_fulfillment_without_target_keeps_influencer_and_does_not_create_
     assert "influencer" in missing_influencer.errors
 
 
-def test_sample_edit_can_transition_status_atomically():
+def test_sample_edit_can_mark_pending_record_completed_atomically():
     tenant, user, store, influencer = _records("sample-edit-status")
     role = Role.objects.get(tenant=tenant, code="bd")
     _grant_all_scope(role, "influencers.fulfillment.manage")
@@ -859,7 +859,11 @@ def test_sample_edit_can_transition_status_atomically():
 
     response = client.patch(
         f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
-        {"notes": "edited", "status": SampleFulfillment.Status.SHIPPED},
+        {
+            "notes": "edited",
+            "status": SampleFulfillment.Status.COMPLETED,
+            "confirm_terminal": True,
+        },
         format="json",
         HTTP_IF_MATCH=f'"{fulfillment.version}"',
     )
@@ -867,8 +871,96 @@ def test_sample_edit_can_transition_status_atomically():
     assert response.status_code == 200, response.data
     fulfillment.refresh_from_db()
     assert fulfillment.notes == "edited"
-    assert fulfillment.status == SampleFulfillment.Status.SHIPPED
-    assert fulfillment.sample_sent_at is not None
+    assert fulfillment.status == SampleFulfillment.Status.COMPLETED
+    assert fulfillment.finalized_at is not None
+
+
+def test_sample_edit_rejects_manual_intermediate_status():
+    tenant, user, store, influencer = _records("sample-edit-intermediate-status")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="sample-edit-intermediate-status-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "INTERMEDIATE-STATUS-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.patch(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/",
+        {"status": SampleFulfillment.Status.SHIPPED},
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert response.status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+
+
+@pytest.mark.parametrize(
+    "intermediate_status",
+    [
+        SampleFulfillment.Status.PROCESSING,
+        SampleFulfillment.Status.SHIPPED,
+        SampleFulfillment.Status.DELIVERED,
+        SampleFulfillment.Status.PUBLISHED,
+    ],
+)
+def test_sample_status_endpoint_rejects_manual_intermediate_status(intermediate_status):
+    tenant, user, store, influencer = _records(
+        f"sample-status-intermediate-{intermediate_status}"
+    )
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key=f"sample-status-intermediate-{intermediate_status}-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "INTERMEDIATE-STATUS-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        f"/api/internal/influencers/sample-fulfillments/{fulfillment.pk}/status/",
+        {"status": intermediate_status},
+        format="json",
+        HTTP_IF_MATCH=f'"{fulfillment.version}"',
+    )
+
+    assert response.status_code == 400
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == SampleFulfillment.Status.PENDING
+
+
+@pytest.mark.parametrize("legacy_status", ["processing", "creating", "blank"])
+def test_sample_list_rejects_legacy_status_filters(legacy_status):
+    tenant, user, _, _ = _records(f"sample-list-legacy-{legacy_status}")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.view")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"status": legacy_status},
+    )
+
+    assert response.status_code == 400
+    assert "status" in response.data["data"]
 
 
 def test_target_creation_reads_influencer_before_identity_group_lock(monkeypatch):
@@ -1575,7 +1667,10 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
 def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch):
     tenant, user, store, influencer = _records("blacklist-rollback")
     task = _task(user, store, influencer)
-    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=2)
+    # The remaining published creator satisfies a one-creator target after the
+    # blacklisted creator is excluded, so recompute mutates before we inject
+    # the failure and verify that the entire transaction rolls back.
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=1)
     task.refresh_from_db()
     fulfillment, _ = create_sample_fulfillment(
         user=user,

@@ -48,14 +48,14 @@ export const FULFILLMENT_LINK_TYPE_LABELS = Object.freeze({
 });
 
 export const FULFILLMENT_STATUS_TRANSITIONS = Object.freeze({
-  pending: Object.freeze(['processing', 'creating', 'blank', 'cancelled']),
-  creating: Object.freeze(['published', 'blank', 'cancelled']),
-  published: Object.freeze(['live_creator', 'overdue', 'cancelled']),
-  live_creator: Object.freeze(['overdue', 'completed', 'cancelled']),
+  pending: Object.freeze(['completed', 'cancelled']),
+  creating: Object.freeze(['completed', 'cancelled']),
+  published: Object.freeze(['completed', 'cancelled']),
+  live_creator: Object.freeze(['completed', 'cancelled']),
   overdue: Object.freeze(['completed', 'cancelled']),
-  blank: Object.freeze(['creating', 'cancelled']),
-  processing: Object.freeze(['shipped', 'cancelled']),
-  shipped: Object.freeze(['delivered', 'cancelled']),
+  blank: Object.freeze(['completed', 'cancelled']),
+  processing: Object.freeze(['completed', 'cancelled']),
+  shipped: Object.freeze(['completed', 'cancelled']),
   delivered: Object.freeze(['completed', 'cancelled']),
   completed: Object.freeze([]),
   cancelled: Object.freeze([])
@@ -411,7 +411,7 @@ export const updateSampleFulfillmentStatus = (id, status, version, reason = '') 
   {
     method: 'post',
     url: `${API_ROOT}/sample-fulfillments/${id}/status/`,
-    data: { status, ...(reason ? { reason } : {}) },
+    data: { status, confirm_terminal: true, ...(reason ? { reason } : {}) },
     ...ifMatchHeaders(version)
   },
   mockWrite({ id, status, version: Number(version || 1) + 1 }),

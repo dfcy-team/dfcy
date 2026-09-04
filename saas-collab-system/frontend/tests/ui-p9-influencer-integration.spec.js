@@ -32,6 +32,7 @@ import {
 } from '../src/api/influencers';
 import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 import InfluencerResourceLibrary from '../src/views/influencers/InfluencerResourceLibrary.vue';
+import { creatorHandleFirst } from '../src/views/influencers/creatorLabel';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const tableRows = ref([]);
@@ -74,6 +75,13 @@ describe('influencer integration workspace contracts', () => {
   beforeEach(() => {
     requestMock.mockReset();
     authContext.canManage = true;
+  });
+
+  it('uses the creator display name before internal codes when the handle is missing', () => {
+    expect(creatorHandleFirst({
+      influencer_display_name: 'Mutya Catedrilla',
+      influencer_code: 'legacy-sample-123'
+    })).toBe('Mutya Catedrilla');
   });
 
   it('rechecks manage permission inside resource mutation handlers', () => {
@@ -309,22 +317,30 @@ describe('influencer integration workspace contracts', () => {
     expect(page).not.toContain('label="产品名称" required');
     expect(page).not.toContain('<b>{{ displayValue(row.product_name_snapshot) }}</b>');
     expect(page).toContain('inheritedTask.value.task_name || inheritedTask.value.external_product_id');
-    expect(page).toContain('价格未匹配');
     expect(page).toContain('statusLabel(FULFILLMENT_STATUS_LABELS');
-    for (const field of ['sales_amount', 'calculated_cost', 'pricing_status', 'price_match_status', 'cost_match_status']) expect(page).toContain(field);
-    expect(page).toContain('PRICING_STATUS_LABELS');
-    expect(page).toContain('displayAmount');
-    expect(page).toContain("value === null || value === undefined || value === ''");
+    for (const field of ['calculated_cost', 'cost_match_status']) expect(page).toContain(field);
     expect(page).toContain('FULFILLMENT_FILTER_STATUS_LABELS');
+    expect(page).toContain("new Set(['processing', 'creating', 'blank', ''])");
+    expect(page).toContain('!LEGACY_FULFILLMENT_STATUSES.has(value)');
     expect(page).toContain("!['live_creator', 'blacklisted'].includes(value)");
     expect(page).toContain('placeholder="全部状态" @change="applyFilters"');
-    expect(page).toContain(".filter((value) => value !== 'shipped')");
+    expect(page).toContain('MANUAL_FULFILLMENT_STATUS_LABELS');
+    expect(page).toContain("completed: FULFILLMENT_STATUS_LABELS.completed");
+    expect(page).toContain("cancelled: FULFILLMENT_STATUS_LABELS.cancelled");
+    expect(page).not.toContain(".filter((value) => value !== 'shipped')");
     expect(page).toContain("status: ''");
     expect(page).toContain("...(form.status ? { status: form.status } : {})");
     for (const field of ['calculated_cost', 'cost_match_status', 'COST_MATCH_STATUS_LABELS', 'costMatchLabel']) expect(page).toContain(field);
-    expect(page).toContain('detail-note');
-    expect(page).toContain('FULFILLMENT_STATUS_TRANSITIONS');
-    expect(page).toContain('updateSampleFulfillmentStatus');
+    for (const field of ['sales_amount', 'pricing_status', 'priced_at', 'unit_price', 'unit_cost', 'currency', 'price_match_status', 'price_source', 'price_snapshot_at']) expect(page).not.toContain(field);
+    expect(page).not.toContain('PRICING_STATUS_LABELS');
+    expect(page).not.toContain('displayAmount');
+    expect(page).toContain('fulfillment-note');
+    expect(page).not.toContain('updateSampleFulfillmentStatus');
+    expect(page).toContain('ElMessageBox.confirm');
+    expect(page).toContain('confirm_terminal');
+    expect(page).toContain('status: form.status');
+    expect(page).not.toContain("'直播达人'");
+    expect(page).not.toContain("'已拉黑'");
     expect(page).toContain('outreach_task');
     expect(page).toContain('influencer: form.influencer');
     expect(page).not.toContain('outreach_target: form.outreach_target');
@@ -358,19 +374,19 @@ describe('influencer integration workspace contracts', () => {
   it('keeps priority values and fulfillment transitions aligned with backend contracts', () => {
     expect(OUTREACH_PRIORITY_LABELS).toEqual({ low: '低', normal: '普通', high: '高', urgent: '紧急' });
     expect(Object.keys(OUTREACH_PRIORITY_LABELS)).toEqual(['low', 'normal', 'high', 'urgent']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.pending).toEqual(['processing', 'creating', 'blank', 'cancelled']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.processing).toEqual(['shipped', 'cancelled']);
-    expect(FULFILLMENT_STATUS_TRANSITIONS.shipped).toEqual(['delivered', 'cancelled']);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.pending).toEqual(['completed', 'cancelled']);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.processing).toEqual(['completed', 'cancelled']);
+    expect(FULFILLMENT_STATUS_TRANSITIONS.shipped).toEqual(['completed', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.delivered).toEqual(['completed', 'cancelled']);
     expect(FULFILLMENT_STATUS_TRANSITIONS.completed).toEqual([]);
     expect(FULFILLMENT_STATUS_TRANSITIONS.cancelled).toEqual([]);
 
     requestMock.mockReturnValue({ success: true });
-    updateSampleFulfillmentStatus(8, 'processing', 2);
+    updateSampleFulfillmentStatus(8, 'completed', 2);
     expect(requestMock.mock.calls.at(-1)[0]).toMatchObject({
       method: 'post',
       url: '/api/internal/influencers/sample-fulfillments/8/status/',
-      data: { status: 'processing' },
+      data: { status: 'completed', confirm_terminal: true },
       headers: { 'If-Match': '"2"' }
     });
   });

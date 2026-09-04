@@ -55,7 +55,6 @@ from .serializers import (
     OutreachTaskSerializer,
     OutreachTaskUpdateSerializer,
     SampleFulfillmentSerializer,
-    SampleFulfillmentPricingSerializer,
     SampleFulfillmentUpdateSerializer,
     SkuPriceSnapshotSerializer,
 )
@@ -1083,6 +1082,8 @@ class SampleFulfillmentCollectionView(APIView):
             queryset = queryset.filter(is_deleted=False)
         status = request.query_params.get("status", "").strip()
         if status:
+            if status not in SampleFulfillment.Status.values:
+                raise ValidationError({"status": "Unsupported fulfillment status."})
             queryset = queryset.filter(status=status)
         outreach_task_id = request.query_params.get("outreach_task", "").strip()
         if outreach_task_id:
@@ -1139,7 +1140,7 @@ class SampleFulfillmentCollectionView(APIView):
             raise
         fulfillment = SampleFulfillment.objects.prefetch_related("items").get(pk=fulfillment.pk)
         return success_response(
-            SampleFulfillmentPricingSerializer(fulfillment).data,
+            SampleFulfillmentSerializer(fulfillment).data,
             status=201 if created else 200,
         )
 
@@ -1224,7 +1225,7 @@ class SampleFulfillmentDetailView(APIView):
                 raise Conflict(exc.detail) from exc
             raise
         fulfillment = self._get(request, pk)
-        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
     def delete(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
@@ -1239,7 +1240,7 @@ class SampleFulfillmentDetailView(APIView):
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
 
 class SampleFulfillmentRestoreView(APIView):
@@ -1278,7 +1279,7 @@ class SampleFulfillmentRestoreView(APIView):
                 to_attr="_published_video_results",
             ),
         ).get(pk=fulfillment.pk, tenant=request.user.tenant)
-        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
 
 class SampleFulfillmentStatusView(APIView):
@@ -1288,6 +1289,14 @@ class SampleFulfillmentStatusView(APIView):
 
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        requested_status = request.data.get("status", "")
+        if requested_status not in {
+            SampleFulfillment.Status.COMPLETED,
+            SampleFulfillment.Status.CANCELLED,
+        }:
+            raise ValidationError(
+                {"status": "Manual status changes only support completed or cancelled."}
+            )
         fulfillment = get_object_or_404(
             SampleFulfillment, tenant=request.user.tenant, pk=pk, is_deleted=False
         )
@@ -1298,7 +1307,7 @@ class SampleFulfillmentStatusView(APIView):
             fulfillment = transition_sample_fulfillment(
                 user=request.user,
                 fulfillment=fulfillment,
-                status=request.data.get("status", ""),
+                status=requested_status,
                 expected_version=_expected_version(request),
                 reason=request.data.get("reason", ""),
                 confirm_terminal=confirm_terminal,
@@ -1307,7 +1316,7 @@ class SampleFulfillmentStatusView(APIView):
             if exc.get_codes() == {"version": "conflict"}:
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(SampleFulfillmentPricingSerializer(fulfillment).data)
+        return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
 
 class ProductPriceLookupView(APIView):

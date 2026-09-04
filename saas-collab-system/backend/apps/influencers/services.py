@@ -28,7 +28,6 @@ from .models import (
     OutreachTask,
     SampleFulfillment,
     SampleItem,
-    SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
     influencer_identity_key,
@@ -494,8 +493,8 @@ def _sample_item_payload(item):
     }
 
 
-def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
-    """Replace item snapshots and aggregate price/cost facts in the same transaction."""
+def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
+    """Replace item purchase-cost facts and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
     SampleItem.objects.filter(
         tenant=user.tenant,
@@ -503,11 +502,7 @@ def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
     ).delete()
 
     sku_quantity = 0
-    sales_total = Decimal("0")
     cost_total = Decimal("0")
-    all_prices_matched = True
-    all_costs_matched = True
-    any_price_matched = False
     any_cost_matched = False
     snapshot_time = timezone.now()
     for raw_payload in item_payloads:
@@ -516,7 +511,7 @@ def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
             product_id=fulfillment.external_product_id,
             product_name=fulfillment.product_name_snapshot,
         )
-        # Computed snapshot fields must never be accepted from a client or reused verbatim.
+        # Computed fields must never be accepted from a client or reused verbatim.
         for field_name in (
             "id",
             "normalized_sku",
@@ -538,61 +533,36 @@ def _recalculate_sample_pricing(*, user, fulfillment, item_payloads):
             "updated_at",
         ):
             payload.pop(field_name, None)
-        snapshot = _price_for_item(user.tenant, fulfillment.store_id, payload)
         normalized_sku, cost_sku, cost_status = _purchase_cost_for_payload(user.tenant, payload)
         quantity = payload.get("quantity", 1)
-        unit_price = snapshot.effective_price if snapshot else None
         unit_cost = cost_sku.purchase_price if cost_sku else None
-        sales_amount = unit_price * quantity if unit_price is not None else None
         cost_amount = unit_cost * quantity if unit_cost is not None else None
         item = SampleItem(
             tenant=user.tenant,
             fulfillment=fulfillment,
-            unit_price=unit_price,
             unit_cost=unit_cost,
-            currency=snapshot.currency if snapshot else "",
-            price_match_status="matched" if snapshot else "not_imported",
             normalized_sku=normalized_sku,
             matched_sku_code=cost_sku.sku_code if cost_sku else "",
             matched_legacy_sku_code=cost_sku.legacy_sku_code if cost_sku else "",
-            sales_amount=sales_amount,
             cost_amount=cost_amount,
             cost_match_status=cost_status,
-            price_source=snapshot.source if snapshot else "",
             cost_source="products_productsku" if cost_sku else "",
-            price_snapshot_at=snapshot_time if snapshot else None,
             cost_snapshot_at=snapshot_time if cost_sku else None,
             **payload,
         )
         _save(item)
         sku_quantity += quantity
-        if sales_amount is None:
-            all_prices_matched = False
-        else:
-            sales_total += sales_amount
-            any_price_matched = True
-        if cost_amount is None:
-            all_costs_matched = False
-        else:
+        if cost_amount is not None:
             cost_total += cost_amount
             any_cost_matched = True
 
-    has_items = sku_quantity > 0
-    if not has_items:
-        pricing_status = "pending"
-    elif all_prices_matched and all_costs_matched:
-        pricing_status = "full"
-    elif any_price_matched or any_cost_matched:
-        pricing_status = "partial"
-    else:
-        pricing_status = "not_found"
     QuerySet.update(
         SampleFulfillment.objects.filter(pk=fulfillment.pk, tenant=user.tenant),
         sku_quantity=sku_quantity,
-        sales_amount=sales_total if any_price_matched else None,
         calculated_cost=cost_total if any_cost_matched else None,
-        pricing_status=pricing_status,
-        priced_at=snapshot_time if has_items else None,
+        sales_amount=None,
+        pricing_status="pending",
+        priced_at=None,
         updated_at=snapshot_time,
     )
     fulfillment.refresh_from_db()
@@ -608,24 +578,6 @@ def _inherit_item_product(payload, *, product_id, product_name):
     if not str(item.get("product_name") or "").strip() and product_name:
         item["product_name"] = product_name
     return item
-
-
-def _price_for_item(tenant, store_id, payload):
-    sku = str(payload.get("requested_sku") or "").strip()
-    product_id = str(payload.get("external_product_id") or "").strip()
-    site_code = str(payload.get("site_code") or "").strip()
-    if not sku:
-        return None
-    queryset = SkuPriceSnapshot.objects.select_related("listing").filter(
-        tenant=tenant,
-        listing__tenant=tenant,
-        listing__store_id=store_id,
-        listing__site_code=site_code,
-        external_sku__iexact=sku,
-    )
-    if product_id:
-        queryset = queryset.filter(listing__external_product_id=product_id)
-    return queryset.order_by("-source_updated_at", "-imported_at", "-id").first()
 
 
 def _normalize_sku(value):
@@ -1170,6 +1122,7 @@ def soft_delete_outreach_task(*, user, task, expected_version):
 
 @transaction.atomic
 def restore_outreach_task(*, user, task, expected_version):
+    _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if not task.is_deleted:
         if task.version != expected_version:
@@ -1319,12 +1272,25 @@ def recompute_outreach_task_completion(*, user, task):
         OutreachTask.Status.IN_PROGRESS,
     }:
         return task
-    sample_count = SampleFulfillment.objects.filter(
-        tenant=user.tenant,
-        outreach_task=task,
-        is_deleted=False,
-    ).count()
-    if task.target_count <= 0 or sample_count < task.target_count:
+    completed_identities = {
+        influencer_identity_key(
+            influencer_id=influencer_id,
+            platform=platform,
+            handle=handle,
+        )
+        for influencer_id, platform, handle in SampleFulfillment.objects.filter(
+            tenant=user.tenant,
+            outreach_task=task,
+            is_deleted=False,
+            status__in=SAMPLE_COMPLETION_STATUSES,
+        ).values_list(
+            "influencer_id",
+            "influencer__platform",
+            "influencer__handle",
+        )
+    }
+    completed_count = len(completed_identities)
+    if task.target_count <= 0 or completed_count < task.target_count:
         return task
 
     now = timezone.now()
@@ -1357,7 +1323,7 @@ def recompute_outreach_task_completion(*, user, task):
             after={
                 "status": task.status,
                 "version": task.version,
-                "sample_count": sample_count,
+                "completed_count": completed_count,
                 "target_count": task.target_count,
             },
         )
@@ -1445,6 +1411,7 @@ def _recompute_related_task(*, user, fulfillment):
 
 @transaction.atomic
 def create_sample_fulfillment(*, user, request_key, validated_data, item_payloads):
+    _lock_tenant(user)
     if not request_key or len(request_key) > 128:
         raise ValidationError({"idempotency_key": "Idempotency-Key must be 1-128 characters."})
     data = dict(validated_data)
@@ -1541,6 +1508,8 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
         }
     )
     fulfillment_data.pop("items", None)
+    for field_name in ("sku_quantity", "sales_amount", "calculated_cost", "pricing_status", "priced_at"):
+        fulfillment_data.pop(field_name, None)
     fulfillment_data.pop("product_name_snapshot", None)
     fulfillment_data["product_name_snapshot"] = product_name
     fulfillment_data.pop("request_key", None)
@@ -1572,7 +1541,7 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             ) from exc
         raise
 
-    fulfillment = _recalculate_sample_pricing(
+    fulfillment = _recalculate_sample_costs(
         user=user,
         fulfillment=fulfillment,
         item_payloads=item_payloads,
@@ -1633,9 +1602,10 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
 def transition_sample_fulfillment(
     *, user, fulfillment, status, expected_version, reason="", confirm_terminal=False
 ):
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=fulfillment.pk, tenant=user.tenant, is_deleted=False
-    )
+    _lock_tenant(user)
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=fulfillment)
+    if fulfillment.is_deleted:
+        raise ValidationError({"fulfillment": "Deleted sample fulfillments cannot transition."})
     if fulfillment.version != expected_version:
         raise ValidationError(
             {"version": "Fulfillment was changed by another request."}, code="conflict"
@@ -1660,14 +1630,17 @@ def transition_sample_fulfillment(
         SampleFulfillment.Status.PENDING: {
             SampleFulfillment.Status.PROCESSING,
             SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.PROCESSING: {
             SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.SHIPPED: {
             SampleFulfillment.Status.DELIVERED,
+            SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
         },
         SampleFulfillment.Status.DELIVERED: {
@@ -1747,7 +1720,8 @@ def update_sample_fulfillment(
     append_item_payloads=None,
     items_mode="replace",
 ):
-    """Edit sample facts and atomically rebuild any requested SKU snapshots."""
+    """Edit sample facts and atomically rebuild any requested SKU costs."""
+    _lock_tenant(user)
     observed = _read_sample_fulfillment(
         user=user,
         fulfillment=fulfillment,
@@ -1848,7 +1822,7 @@ def update_sample_fulfillment(
                 fulfillment.items.order_by("id").all()
             )
             payloads = [_sample_item_payload(item) for item in existing_payloads] + payloads
-        fulfillment = _recalculate_sample_pricing(
+        fulfillment = _recalculate_sample_costs(
             user=user,
             fulfillment=fulfillment,
             item_payloads=payloads,
@@ -1878,9 +1852,10 @@ def update_sample_fulfillment(
 
 @transaction.atomic
 def soft_delete_sample_fulfillment(*, user, fulfillment, expected_version):
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=_pk(fulfillment), tenant=user.tenant, is_deleted=False
-    )
+    _lock_tenant(user)
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=fulfillment)
+    if fulfillment.is_deleted:
+        raise ValidationError({"fulfillment": "Deleted sample fulfillments cannot be deleted again."})
     if fulfillment.version != expected_version:
         raise ValidationError(
             {"version": "Fulfillment was changed by another request."},
@@ -1919,6 +1894,7 @@ def soft_delete_sample_fulfillment(*, user, fulfillment, expected_version):
 
 @transaction.atomic
 def restore_sample_fulfillment(*, user, fulfillment, expected_version):
+    _lock_tenant(user)
     observed = _read_sample_fulfillment(
         user=user,
         fulfillment=fulfillment,
@@ -2082,9 +2058,8 @@ def set_influencer_blacklist(*, user, influencer, blacklisted, reason=""):
 @transaction.atomic
 def refresh_sample_fulfillment_video_status(*, user, fulfillment):
     """Promote an unfinished sample when a published video is linked."""
-    fulfillment = SampleFulfillment.objects.select_for_update().get(
-        pk=_pk(fulfillment), tenant=user.tenant
-    )
+    _lock_tenant(user)
+    fulfillment = _locked_sample_fulfillment(user=user, fulfillment=fulfillment)
     if (
         fulfillment.is_deleted
         or fulfillment.status not in SAMPLE_VIDEO_RECONCILE_STATUSES
@@ -2166,6 +2141,7 @@ def mark_overdue_sample_fulfillments(*, actor, tenant=None, now=None, batch_size
         if overdue_ids:
             reconcile_after_lock = []
             with transaction.atomic():
+                _lock_tenant(actor)
                 locked_rows = list(
                     SampleFulfillment.objects.select_for_update()
                     .filter(
