@@ -44,7 +44,26 @@ const shopeeSandboxConfig = {
   updated_at: '2026-09-01T09:00:00Z'
 };
 
-const configFixtures = [config, shopeeSandboxConfig];
+const jifengInventoryConfig = {
+  id: 3,
+  platform: 'jifeng_wms',
+  account_alias: 'demo-wms',
+  environment: 'pilot',
+  status: 'verified',
+  credential_status: 'referenced',
+  credential_fingerprint: '***demo-wms-fingerprint',
+  credential_key_version: 'demo-v1',
+  contract_version: 'jifeng-wms-local-v1',
+  config_version: 1,
+  credential_reference_version: 'demo-v1',
+  reference_count: 1,
+  last_verified_at: '2026-09-01T09:00:00Z',
+  updated_at: '2026-09-01T10:00:00Z',
+  regions: ['MY'],
+  api_type: 'inventory'
+};
+
+const configFixtures = [config, shopeeSandboxConfig, jifengInventoryConfig];
 
 const syncJob = {
   id: 1,
@@ -160,6 +179,7 @@ const workspaceJobs = [
     capability_state: 'ready',
     capability_code: 'ORDER',
     source_priority: 10,
+    integration_config_id: 1,
     selected_authorization_id: 201,
     latest_run_status: 'failed',
     latest_run_id: 'MOCK-RUN-ORDER-001',
@@ -305,9 +325,9 @@ const workspaceJobs = [
     checkpoint_watermark: '2026-09-01T09:29:00Z',
     updated_at: '2026-09-01T09:30:00Z',
     subject_type: 'warehouse',
-    subject_code: 'demo-wh-cn',
-    subject_name: '华南示例仓',
-    region: 'CN',
+    subject_code: 'MY-WMS-01',
+    subject_name: '马来极风仓',
+    region: 'MY',
     authorization_status: 'active',
     external_subject_id: ''
   },
@@ -551,12 +571,25 @@ const workspaceReferenceOptions = {
   ]
 };
 
-export const mockIntegrationWorkspace = (mode = 'sync-jobs') => {
+export const mockIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
   const results = mode === 'configs'
     ? configFixtures
     : mode === 'sync-runs'
       ? workspaceRuns
       : workspaceJobs;
+  const filteredResults = results.filter((row) => {
+    for (const key of ['platform', 'api_type', 'resource_type']) {
+      if (params[key] && String(row[key] || '').toLowerCase() !== String(params[key]).toLowerCase()) return false;
+    }
+    if (params.subject) {
+      const subject = String(params.subject).toLowerCase();
+      const haystack = ['subject_code', 'subject_name', 'external_subject_id']
+        .map((key) => String(row[key] || '').toLowerCase())
+        .join(' ');
+      if (!haystack.includes(subject)) return false;
+    }
+    return true;
+  });
   return successResponse({
     mode,
     source_status: 'mock',
@@ -572,23 +605,49 @@ export const mockIntegrationWorkspace = (mode = 'sync-jobs') => {
       reconcile: { eligible_subject_count: 2, total_required: 3, existing_count: 3, missing_count: 0 },
       creation_available: false
     },
-    pagination: { page: 1, page_size: 100, total: results.length, page_count: 1 },
-    results: results.map((row) => ({ ...row }))
+    pagination: { page: 1, page_size: 100, total: filteredResults.length, page_count: 1 },
+    results: filteredResults.map((row) => ({ ...row }))
   });
 };
 
+const mockStoreSyncResourceRegistry = Object.freeze({
+  shopee: Object.freeze(['sales_order', 'refund_return']),
+  tiktok: Object.freeze(['sales_order', 'refund_return']),
+  lazada: Object.freeze([]),
+});
+const mockWarehouseSyncResourceRegistry = Object.freeze({
+  jifeng_wms: Object.freeze(['inventory_snapshot']),
+});
+
 export const mockCreateSyncJob = (payload = {}) => {
-  const authorization = mockAuthorizationRows?.find?.((item) => String(item.id) === String(payload.store_authorization_id));
-  if (!authorization) return mockFailure('INVALID_AUTHORIZATION', '请选择当前配置的店铺授权');
-  if (workspaceJobs.some((item) => String(item.selected_authorization_id) === String(authorization.id) && item.resource_type === payload.resource_type)) {
-    return mockFailure('DUPLICATE_SYNC_JOB', '该授权和资源已经存在同步任务');
+  const isWarehouse = Boolean(payload.warehouse_authorization_id);
+  const authorization = isWarehouse
+    ? mockWarehouseAuthorizationRows?.find?.((item) => String(item.id) === String(payload.warehouse_authorization_id))
+    : mockAuthorizationRows?.find?.((item) => String(item.id) === String(payload.store_authorization_id));
+  if (!authorization) return mockFailure('INVALID_AUTHORIZATION', isWarehouse ? '请选择当前配置的仓库授权' : '请选择当前配置的店铺授权');
+  if (payload.integration_config_id && String(payload.integration_config_id) !== String(authorization.integration_config_id)) {
+    return mockFailure('INVALID_INTEGRATION_CONFIG', '接入配置与所选授权不一致');
+  }
+  if (!['active', 'authorized'].includes(authorization.status)) {
+    return mockFailure('AUTHORIZATION_NOT_ACTIVE', '所选授权不是 active/authorized，无法创建同步任务');
+  }
+  const resourceType = String(payload.resource_type || '').trim().toLowerCase();
+  const platform = String(isWarehouse ? (authorization.provider || '') : (authorization.platform || '')).trim().toLowerCase();
+  const supportedResources = (isWarehouse ? mockWarehouseSyncResourceRegistry : mockStoreSyncResourceRegistry)[platform] || [];
+  if (!supportedResources.includes(resourceType)) {
+    return mockFailure('UNSUPPORTED_RESOURCE', `${platform || '当前平台'} 未注册可创建的同步资源：${resourceType || '未指定'}`);
+  }
+  if (workspaceJobs.some((item) => String(item.selected_authorization_id) === String(authorization.id) && item.resource_type === resourceType)) {
+    return successResponse({ idempotent: true, message: '该授权和资源已经存在同步任务', sync_job: workspaceJobs.find((item) => String(item.selected_authorization_id) === String(authorization.id) && item.resource_type === resourceType) });
   }
   const row = {
     id: Math.max(...workspaceJobs.map((item) => item.id), 0) + 1,
     integration_config_id: payload.integration_config_id,
-    platform: authorization.platform,
-    account_alias: 'demo-shopee',
-    resource_type: payload.resource_type,
+    platform: isWarehouse ? 'jifeng_wms' : authorization.platform,
+    api_type: isWarehouse ? 'inventory' : 'marketplace',
+    subject_type: isWarehouse ? 'warehouse' : 'store',
+    account_alias: isWarehouse ? 'demo-wms' : 'demo-shopee',
+    resource_type: resourceType,
     schedule_type: payload.schedule_type || 'manual',
     execution_mode: 'simulation',
     status: 'disabled',
@@ -598,11 +657,12 @@ export const mockCreateSyncJob = (payload = {}) => {
     blocked_reason: '任务创建后默认停用，请复核后在任务工作台启用',
     capability_state: 'ready',
     selected_authorization_id: authorization.id,
-    subject_name: authorization.store_name,
-    region: authorization.region,
+    subject_name: authorization.store_name || authorization.warehouse_name,
+    region: authorization.region || authorization.country_code,
+    ...(isWarehouse ? { warehouse_authorization_id: authorization.id } : { store_authorization_id: authorization.id }),
   };
   workspaceJobs.push(row);
-  return successResponse({ ...row, store_authorization_id: authorization.id });
+  return successResponse(row);
 };
 
 const mockIncidentRows = [
@@ -776,9 +836,289 @@ const mockAuthorizationRows = [{
   region: 'SG',
   status: 'active',
   platform_store_id: 'masked-external-store-001',
+  scopes: ['shop.info', 'order.read'],
+  credential_mask: { access_credential_hint: '••••0001', refresh_credential_hint: '••••0001' },
+  expires_at: '2026-09-30T00:00:00Z',
   token_expires_at: '2026-09-30T00:00:00Z',
+  last_error_code: '',
+  masked_error_message: '',
+  authorized_at: '2026-09-01T09:00:00Z',
   refreshed_at: '2026-09-01T10:00:00Z',
+  revoked_at: null,
+  created_at: '2026-09-01T09:00:00Z',
   updated_at: '2026-09-01T10:00:00Z'
+}, {
+  id: 203,
+  integration_config_id: 1,
+  store_id: 1,
+  store_code: 'demo-store-sg',
+  store_name: '新加坡示例店铺',
+  platform: 'shopee',
+  region: 'SG',
+  status: 'expired',
+  platform_store_id: 'masked-external-store-old',
+  scopes: ['shop.info'],
+  credential_mask: { access_credential_hint: '••••0203', refresh_credential_hint: '••••0203' },
+  expires_at: '2026-08-01T00:00:00Z',
+  token_expires_at: '2026-08-01T00:00:00Z',
+  last_error_code: 'TOKEN_EXPIRED',
+  masked_error_message: '授权令牌已到期，请重新授权。',
+  refreshed_at: null,
+  revoked_at: null,
+  authorized_at: '2026-07-01T09:00:00Z',
+  created_at: '2026-07-01T09:00:00Z',
+  updated_at: '2026-08-01T00:00:00Z'
+}, {
+  id: 204,
+  integration_config_id: 1,
+  store_id: 1,
+  store_code: 'demo-store-sg',
+  store_name: '新加坡示例店铺',
+  platform: 'shopee',
+  region: 'SG',
+  status: 'revoked',
+  platform_store_id: 'masked-external-store-revoked',
+  scopes: ['shop.info', 'order.read'],
+  credential_mask: { access_credential_hint: '••••0204', refresh_credential_hint: '••••0204' },
+  expires_at: '2026-07-15T00:00:00Z',
+  token_expires_at: '2026-07-15T00:00:00Z',
+  last_error_code: 'AUTHORIZATION_REVOKED',
+  masked_error_message: '该授权已由平台或管理员撤销。',
+  refreshed_at: null,
+  revoked_at: '2026-07-20T03:00:00Z',
+  authorized_at: '2026-06-15T09:00:00Z',
+  created_at: '2026-06-15T09:00:00Z',
+  updated_at: '2026-07-20T03:00:00Z'
+}, {
+  id: 205,
+  integration_config_id: 1,
+  store_id: 1,
+  store_code: 'demo-store-sg',
+  store_name: '新加坡示例店铺',
+  platform: 'shopee',
+  region: 'SG',
+  status: 'error',
+  platform_store_id: 'masked-external-store-error',
+  scopes: ['shop.info', 'order.read'],
+  credential_mask: { access_credential_hint: '••••0205', refresh_credential_hint: '••••0205' },
+  expires_at: '2026-09-25T00:00:00Z',
+  token_expires_at: '2026-09-25T00:00:00Z',
+  last_error_code: 'PLATFORM_AUTH_ERROR',
+  masked_error_message: '平台授权校验失败，凭据仍以掩码展示。',
+  refreshed_at: null,
+  revoked_at: null,
+  authorized_at: '2026-08-25T09:00:00Z',
+  created_at: '2026-08-25T09:00:00Z',
+  updated_at: '2026-08-25T09:05:00Z'
+}, {
+  id: 206,
+  integration_config_id: 1,
+  store_id: 1,
+  store_code: 'demo-store-sg',
+  store_name: '新加坡示例店铺',
+  platform: 'shopee',
+  region: 'SG',
+  status: 'pending',
+  platform_store_id: 'masked-external-store-pending',
+  scopes: ['shop.info'],
+  credential_mask: { access_credential_hint: '••••0206', refresh_credential_hint: '••••0206' },
+  expires_at: null,
+  token_expires_at: null,
+  last_error_code: '',
+  masked_error_message: '等待平台授权回调完成。',
+  refreshed_at: null,
+  revoked_at: null,
+  authorized_at: null,
+  created_at: '2026-09-02T09:00:00Z',
+  updated_at: '2026-09-02T09:00:00Z'
+}];
+
+// Explicit Mock OAuth keeps the same two-step contract as production while
+// using only synthetic identifiers.  The short-lived state is retained in
+// memory so a callback cannot be replayed or attached to another store.
+const mockOAuthSessions = new Map();
+
+const mockOAuthParam = (value) => Array.isArray(value) ? value[0] : value;
+
+const mockOAuthState = (payload = {}) => {
+  const platform = String(payload.platform || 'shopee').trim().toLowerCase();
+  const storeId = String(payload.store_id || '');
+  const configId = String(payload.integration_config_id || '');
+  return `mock-oauth-state-${platform}-${storeId || 'store'}-${configId || 'config'}-${Date.now()}`;
+};
+
+export const mockStartStoreAuthorizationOAuth = (payload = {}) => {
+  const platform = String(payload.platform || 'shopee').trim().toLowerCase();
+  const state = mockOAuthState({ ...payload, platform });
+  const storeId = payload.store_id ?? '';
+  const configId = payload.integration_config_id ?? '';
+  const existing = mockAuthorizationRows.find((row) => (
+    String(row.store_id) === String(storeId)
+    && String(row.integration_config_id) === String(configId)
+    && row.platform === platform
+  ));
+  const shopId = existing?.platform_store_id || `mock-${platform}-store-${storeId || 'demo'}`;
+  const simulationCallback = {
+    state,
+    code: `synthetic-${platform}-code`,
+    shop_id: shopId,
+    sign: `mock-signature-${state}`
+  };
+  mockOAuthSessions.set(state, {
+    platform,
+    store_id: storeId,
+    integration_config_id: configId,
+    region: payload.region || '',
+    scopes: Array.isArray(payload.scopes) ? [...payload.scopes] : [],
+    shop_id: shopId,
+  });
+  const authorizationUrl = `https://sandbox.example.invalid/oauth/authorize?state=${encodeURIComponent(state)}&store_id=${encodeURIComponent(storeId)}`;
+  return successResponse({
+    platform,
+    state,
+    expires_in: 600,
+    authorization_url: authorizationUrl,
+    // Kept for the existing platform-drill adapter; new callers use the
+    // backend-compatible authorization_url field above.
+    auth_url: authorizationUrl,
+    simulation_callback: simulationCallback,
+  });
+};
+
+export const mockCompleteSyntheticStoreAuthorization = (platform, params = {}) => {
+  const normalizedPlatform = String(platform || '').trim().toLowerCase();
+  const state = String(mockOAuthParam(params.state) || '');
+  const session = mockOAuthSessions.get(state);
+  if (!session || session.platform !== normalizedPlatform) {
+    return mockFailure('MOCK_OAUTH_STATE_INVALID', '模拟授权状态无效或已完成');
+  }
+  const code = String(mockOAuthParam(params.code) || '');
+  const shopId = String(mockOAuthParam(params.shop_id) || '');
+  const signature = String(mockOAuthParam(params.sign) || '');
+  if (!code || !shopId || signature !== `mock-signature-${state}`) {
+    mockOAuthSessions.delete(state);
+    return mockFailure('MOCK_OAUTH_CALLBACK_INVALID', '模拟授权回调参数校验失败');
+  }
+
+  mockOAuthSessions.delete(state);
+  const existing = mockAuthorizationRows.find((row) => (
+    String(row.store_id) === String(session.store_id)
+    && String(row.integration_config_id) === String(session.integration_config_id)
+    && row.platform === normalizedPlatform
+  ));
+  const now = new Date().toISOString();
+  const authorization = existing || {
+    id: Math.max(...mockAuthorizationRows.map((row) => row.id), 200) + 1,
+    integration_config_id: Number(session.integration_config_id) || session.integration_config_id,
+    store_id: Number(session.store_id) || session.store_id,
+    store_code: `mock-store-${session.store_id || 'demo'}`,
+    store_name: '模拟店铺',
+    platform: normalizedPlatform,
+    region: session.region,
+    status: 'pending',
+    platform_store_id: shopId,
+    token_expires_at: null,
+    refreshed_at: null,
+    updated_at: now,
+  };
+  authorization.status = 'active';
+  authorization.platform_store_id = shopId;
+  authorization.updated_at = now;
+  if (!existing) mockAuthorizationRows.push(authorization);
+  return successResponse({
+    simulation: true,
+    external_api_called: false,
+    platform: normalizedPlatform,
+    store_authorization_id: authorization.id,
+    authorization: { ...authorization },
+  });
+};
+
+const mockWarehouseAuthorizationRows = [{
+  id: 202,
+  integration_config_id: 3,
+  warehouse_id: 1,
+  warehouse_code: 'MY-WMS-01',
+  warehouse_name: '马来极风仓',
+  country_code: 'MY',
+  provider: 'jifeng_wms',
+  status: 'active',
+  scopes: ['inventory.read'],
+  credential_mask: { credential_hint: '••••0202' },
+  token_expires_at: '2026-12-31T00:00:00Z',
+  authorized_at: '2026-09-01T09:00:00Z',
+  last_verified_at: '2026-09-01T09:30:00Z',
+  revoked_at: null,
+  last_error_code: '',
+  masked_error_message: ''
+}, {
+  id: 207,
+  integration_config_id: 3,
+  warehouse_id: 1,
+  warehouse_code: 'MY-WMS-01',
+  warehouse_name: '马来极风仓',
+  country_code: 'MY',
+  provider: 'jifeng_wms',
+  status: 'expired',
+  scopes: ['inventory.read'],
+  credential_mask: { credential_hint: '••••0207' },
+  token_expires_at: '2026-08-01T00:00:00Z',
+  authorized_at: '2026-07-01T09:00:00Z',
+  last_verified_at: '2026-07-31T09:30:00Z',
+  revoked_at: null,
+  last_error_code: 'TOKEN_EXPIRED',
+  masked_error_message: '库存 API 令牌已到期。'
+}, {
+  id: 208,
+  integration_config_id: 3,
+  warehouse_id: 1,
+  warehouse_code: 'MY-WMS-01',
+  warehouse_name: '马来极风仓',
+  country_code: 'MY',
+  provider: 'jifeng_wms',
+  status: 'revoked',
+  scopes: ['inventory.read'],
+  credential_mask: { credential_hint: '••••0208' },
+  token_expires_at: '2026-08-15T00:00:00Z',
+  authorized_at: '2026-06-15T09:00:00Z',
+  last_verified_at: '2026-08-01T09:30:00Z',
+  revoked_at: '2026-08-20T03:00:00Z',
+  last_error_code: 'AUTHORIZATION_REVOKED',
+  masked_error_message: '该库存 API 授权已解除。'
+}, {
+  id: 209,
+  integration_config_id: 3,
+  warehouse_id: 1,
+  warehouse_code: 'MY-WMS-01',
+  warehouse_name: '马来极风仓',
+  country_code: 'MY',
+  provider: 'jifeng_wms',
+  status: 'error',
+  scopes: ['inventory.read'],
+  credential_mask: { credential_hint: '••••0209' },
+  token_expires_at: '2026-10-01T00:00:00Z',
+  authorized_at: '2026-08-25T09:00:00Z',
+  last_verified_at: null,
+  revoked_at: null,
+  last_error_code: 'WMS_AUTH_ERROR',
+  masked_error_message: '极风 WMS 授权校验失败。'
+}, {
+  id: 210,
+  integration_config_id: 3,
+  warehouse_id: 1,
+  warehouse_code: 'MY-WMS-01',
+  warehouse_name: '马来极风仓',
+  country_code: 'MY',
+  provider: 'jifeng_wms',
+  status: 'pending',
+  scopes: ['inventory.read'],
+  credential_mask: { credential_hint: '••••0210' },
+  token_expires_at: null,
+  authorized_at: null,
+  last_verified_at: null,
+  revoked_at: null,
+  last_error_code: '',
+  masked_error_message: '等待库存 API 凭据维护完成。'
 }];
 
 const subjectApiConfig = (item) => ({
@@ -808,6 +1148,41 @@ const emptySubjectApiAccess = (subjectType, subjectId) => ({
 // This mirrors subject_api_access() for the one store available in the local
 // master-data mock. All identifiers are synthetic or masked metadata.
 export const mockSubjectApiAccess = (subjectType = 'store', subjectId = 1) => {
+  if (subjectType === 'warehouse') {
+    const warehouseRows = mockWarehouseAuthorizationRows.filter((row) => String(row.warehouse_id) === String(subjectId));
+    if (String(subjectId) !== '1') {
+      return {
+        success: false,
+        code: 'MOCK_NOT_FOUND',
+        message: '模拟数据未提供该仓库的 API 接入样例',
+        data: emptySubjectApiAccess(subjectType, subjectId)
+      };
+    }
+    return successResponse({
+      subject_type: 'warehouse',
+      subject: {
+        id: 1,
+        code: 'MY-WMS-01',
+        name: '马来极风仓',
+        country_code: 'MY',
+        platform: 'jifeng_wms',
+        platform_name: '马来极风',
+        service_platform_id: 2,
+        service_platform_type: 'warehouse_third_party'
+      },
+      api_types: ['inventory'],
+      configs: configFixtures.filter((item) => item.platform === 'jifeng_wms').map(subjectApiConfig),
+      bindings: warehouseRows.map((warehouse) => ({
+        ...warehouse,
+        api_type: 'inventory',
+        account_alias: 'demo-wms',
+        last_run_at: '2026-09-01T09:30:00Z',
+        has_sync_job: Boolean(warehouseInventorySyncJob(warehouse.id, warehouse.integration_config_id)),
+        sync_job_id: warehouseInventorySyncJob(warehouse.id, warehouse.integration_config_id)?.id || null,
+      })),
+      token_policy: 'auto-refresh'
+    });
+  }
   const isDemoStore = subjectType === 'store'
     && (subjectId === undefined || subjectId === null || String(subjectId) === '1' || String(subjectId) === 'demo-store-sg');
   if (!isDemoStore) {
@@ -828,10 +1203,20 @@ export const mockSubjectApiAccess = (subjectType = 'store', subjectId = 1) => {
       integration_config_id: row.integration_config_id,
       account_alias: configFixtures.find((item) => item.id === row.integration_config_id)?.account_alias || 'demo-shopee',
       platform_store_id: row.platform_store_id,
-      authorized_at: '2026-09-01T09:00:00Z',
+      scopes: [...(row.scopes || [])],
+      expires_at: row.expires_at || row.token_expires_at || null,
+      token_expires_at: row.token_expires_at || row.expires_at || null,
+      credential_mask: row.credential_mask || {},
+      authorized_at: row.authorized_at || null,
       last_verified_at: row.refreshed_at || null,
-      last_run_at: '2026-09-01T10:00:00Z',
-      last_error_code: row.status === 'active' ? '' : 'MOCK_AUTHORIZATION_REVOKED'
+      last_run_at: storeAuthorizationSyncJob(row.id, row.integration_config_id)?.last_run_at || null,
+      has_sync_job: Boolean(storeAuthorizationSyncJob(row.id, row.integration_config_id)),
+      sync_job_id: storeAuthorizationSyncJob(row.id, row.integration_config_id)?.id || null,
+      last_error_code: row.last_error_code || (row.status === 'active' ? '' : 'MOCK_AUTHORIZATION_REVOKED'),
+      masked_error_message: row.masked_error_message || '',
+      revoked_at: row.revoked_at || null,
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
     }));
 
   return successResponse({
@@ -853,6 +1238,134 @@ export const mockSubjectApiAccess = (subjectType = 'store', subjectId = 1) => {
   });
 };
 
+export const mockWarehouseAuthorizations = (params = {}) => {
+  const results = mockWarehouseAuthorizationRows.filter((row) => (
+    (!params.warehouse_id || String(row.warehouse_id) === String(params.warehouse_id))
+    && (!params.integration_config_id || String(row.integration_config_id) === String(params.integration_config_id))
+    && (!params.status || row.status === params.status)
+  ));
+  return successResponse({ count: results.length, results: results.map((row) => ({ ...row })) });
+};
+
+export const mockBindWarehouseAuthorization = (payload = {}) => {
+  const current = mockWarehouseAuthorizationRows.find((row) => (
+    String(row.warehouse_id) === String(payload.warehouse_id) && row.status === 'active'
+  ));
+  if (current && String(current.integration_config_id) === String(payload.integration_config_id)) {
+    return successResponse({ idempotent: true, operation: 'already_bound', authorization: { ...current } });
+  }
+  if (current && !payload.replace) return mockFailure('STATE_CONFLICT', '仓库已有库存 API 绑定，请明确确认后再更换绑定');
+  if (current) {
+    current.status = 'revoked';
+    current.revoked_at = new Date().toISOString();
+  }
+  const config = configFixtures.find((item) => String(item.id) === String(payload.integration_config_id));
+  if (!config || config.platform !== 'jifeng_wms') return mockFailure('INVALID_CONFIG', '请选择库存 API 配置');
+  const record = {
+    id: Math.max(...mockWarehouseAuthorizationRows.map((item) => item.id), 202) + 1,
+    integration_config_id: config.id,
+    warehouse_id: Number(payload.warehouse_id),
+    warehouse_code: 'MY-WMS-01',
+    warehouse_name: '马来极风仓',
+    country_code: 'MY',
+    provider: 'jifeng_wms',
+    status: 'active',
+    authorized_at: new Date().toISOString(),
+    last_verified_at: null,
+    revoked_at: null,
+    last_error_code: ''
+  };
+  mockWarehouseAuthorizationRows.push(record);
+  return successResponse({ idempotent: false, operation: payload.replace ? 'warehouse_rebind' : 'warehouse_authorize', authorization: { ...record } });
+};
+
+export const mockRevokeWarehouseAuthorization = (id) => {
+  const row = mockWarehouseAuthorizationRows.find((item) => String(item.id) === String(id));
+  if (!row) return mockFailure('NOT_FOUND', '仓库 API 授权不存在');
+  const idempotent = row.status === 'revoked';
+  row.status = 'revoked';
+  row.revoked_at = row.revoked_at || new Date().toISOString();
+  return successResponse({ idempotent, authorization: { ...row } });
+};
+
+const warehouseInventorySyncJob = (authorizationId, configId) => workspaceJobs.find((job) => {
+  const jobAuthorizationId = job.warehouse_authorization_id ?? job.selected_authorization_id;
+  if (String(jobAuthorizationId) !== String(authorizationId)) return false;
+  if (job.resource_type !== 'inventory_snapshot') return false;
+  if (configId && job.integration_config_id && String(job.integration_config_id) !== String(configId)) return false;
+  return true;
+});
+
+const storeAuthorizationSyncJob = (authorizationId, configId) => workspaceJobs.find((job) => {
+  const jobAuthorizationId = job.store_authorization_id ?? job.selected_authorization_id;
+  if (String(jobAuthorizationId) !== String(authorizationId)) return false;
+  if (job.subject_type !== 'store' || job.resource_type === 'inventory_snapshot') return false;
+  if (String(job.integration_config_id || '') !== String(configId)) return false;
+  return true;
+});
+
+// Unlike mockIntegrationConfigDetail(), this fixture models the readonly
+// operation contract: it validates the selected warehouse authorization and
+// its inventory snapshot task, then explicitly reports a non-network check.
+export const mockCheckIntegrationReadonlyConnection = (id, payload = {}) => {
+  const config = configFixtures.find((item) => String(item.id) === String(id));
+  if (!config) return mockFailure('CONFIG_NOT_FOUND', '接入配置不存在，无法执行只读检查');
+
+  const storeAuthorizationId = payload?.store_authorization_id;
+  if (storeAuthorizationId !== undefined && storeAuthorizationId !== null && storeAuthorizationId !== '') {
+    const authorization = mockAuthorizationRows.find((row) => (
+      String(row.id) === String(storeAuthorizationId)
+      && row.status === 'active'
+      && String(row.integration_config_id) === String(config.id)
+      && row.platform === config.platform
+    ));
+    if (!authorization) return mockFailure('INVALID_STORE_AUTHORIZATION', '当前店铺授权与接入配置不匹配或已撤销');
+    const job = storeAuthorizationSyncJob(authorization.id, config.id);
+    if (!job) return mockFailure('SYNC_JOB_REQUIRED', '请先创建当前店铺授权对应的同步任务，再执行只读检查');
+    return successResponse({
+      simulated: true,
+      external_api_called: false,
+      token_refreshed: false,
+      resource_type: job.resource_type,
+      store_authorization_id: authorization.id,
+      sync_job_id: job.id,
+      checked_at: new Date().toISOString(),
+    });
+  }
+
+  const warehouseAuthorizationId = payload?.warehouse_authorization_id;
+  if (warehouseAuthorizationId !== undefined && warehouseAuthorizationId !== null && warehouseAuthorizationId !== '') {
+    const authorization = mockWarehouseAuthorizationRows.find((row) => (
+      String(row.id) === String(warehouseAuthorizationId)
+      && row.status === 'active'
+      && String(row.integration_config_id) === String(config.id)
+    ));
+    if (!authorization) return mockFailure('INVALID_WAREHOUSE_AUTHORIZATION', '当前仓库 API 授权与接入配置不匹配或已解除');
+    const job = warehouseInventorySyncJob(authorization.id, config.id);
+    if (!job) return mockFailure('SYNC_JOB_REQUIRED', '请先创建库存同步任务，再执行只读检查');
+    return successResponse({
+      simulated: true,
+      external_api_called: false,
+      token_refreshed: false,
+      resource_type: 'inventory_snapshot',
+      warehouse_authorization_id: authorization.id,
+      sync_job_id: job.id,
+      checked_at: new Date().toISOString(),
+    });
+  }
+
+  const job = workspaceJobs.find((candidate) => candidate.platform === config.platform);
+  if (!job) return mockFailure('SYNC_JOB_REQUIRED', '当前配置没有可用于只读检查的同步任务');
+  return successResponse({
+    simulated: true,
+    external_api_called: false,
+    token_refreshed: false,
+    resource_type: job.resource_type,
+    sync_job_id: job.id,
+    checked_at: new Date().toISOString(),
+  });
+};
+
 export const mockStoreAuthorizations = (params = {}) => {
   const results = mockAuthorizationRows.filter((row) => (
     (!params.platform || row.platform === params.platform)
@@ -866,13 +1379,6 @@ export const mockStoreAuthorizationDetail = (id) => {
   const row = mockAuthorizationRows.find((item) => String(item.id) === String(id));
   return row ? successResponse({ ...row }) : mockFailure('NOT_FOUND', '店铺授权不存在');
 };
-
-export const mockStartStoreAuthorizationOAuth = (payload = {}) => successResponse({
-  state: 'mock-oauth-state',
-  platform: payload.platform || 'shopee',
-  expires_in: 600,
-  auth_url: `https://sandbox.example.invalid/oauth/authorize?state=mock-oauth-state&store_id=${encodeURIComponent(payload.store_id || '')}`
-});
 
 export const mockRefreshStoreAuthorization = (id) => {
   const row = mockAuthorizationRows.find((item) => String(item.id) === String(id));

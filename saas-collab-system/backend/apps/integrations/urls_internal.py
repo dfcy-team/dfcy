@@ -47,6 +47,26 @@ urlpatterns = [
         name="platform-readiness-readonly-approval",
     ),
     path("subject-api-access/", views.subject_api_access_detail, name="subject-api-access-detail"),
+    path(
+        "warehouse-authorizations/",
+        views.warehouse_authorization_collection,
+        name="warehouse-authorization-collection",
+    ),
+    path(
+        "warehouse-authorizations/<int:pk>/",
+        views.warehouse_authorization_detail,
+        name="warehouse-authorization-detail",
+    ),
+    path(
+        "warehouse-authorizations/<int:pk>/rebind/",
+        views.rebind_warehouse_authorization,
+        name="warehouse-authorization-rebind",
+    ),
+    path(
+        "warehouse-authorizations/<int:pk>/revoke/",
+        views.revoke_warehouse_authorization,
+        name="warehouse-authorization-revoke",
+    ),
     path("platform-schemas/<str:platform>/", views.platform_config_schema, name="platform-config-schema"),
     path("configs/", views.integration_config_collection, name="integration-config-collection"),
     path("workspace-configs/", views.create_handoff_integration_config, name="integration-workspace-config-create"),

@@ -9,6 +9,8 @@ from django.db import models
 from apps.tenants.models import Tenant
 from django.conf import settings
 
+from .audit_sanitizer import sanitize_audit_detail
+
 
 _authorization_service_write = ContextVar("authorization_service_write", default=False)
 _oauth_state_service_write = ContextVar("oauth_state_service_write", default=False)
@@ -266,6 +268,7 @@ class IntegrationAuditLog(models.Model):
     def save(self, *args, **kwargs):
         if self.pk:
             raise ValidationError("Integration audit records are append-only.")
+        self.masked_detail = sanitize_audit_detail(self.masked_detail)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -396,6 +399,12 @@ def marketplace_identity_key(platform, region, platform_store_id):
 
 def marketplace_store_binding_key(tenant_id, platform, store_id):
     normalized = f"{tenant_id}:{str(platform).lower()}:{store_id}"
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def warehouse_binding_key(tenant_id, warehouse_id):
+    """Stable unique key for the one active inventory binding per warehouse."""
+    normalized = f"warehouse:{tenant_id}:{warehouse_id}"
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 

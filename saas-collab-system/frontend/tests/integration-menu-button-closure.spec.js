@@ -32,15 +32,15 @@ describe('API 数据接入菜单与按钮闭环', () => {
     expect(page).not.toContain('disable 仅停用');
   });
 
-  it('店铺授权和全局确认框使用一致的中文操作名称', () => {
+  it('店铺档案 API 接入和全局确认框使用一致的中文操作名称', () => {
     const app = read('src/App.vue');
-    const authorizationPage = read('src/views/integrations/StoreAuthorizationList.vue');
+    const apiAccessDialog = read('src/components/SubjectApiAccessDialog.vue');
 
     expect(app).toContain('<el-config-provider :locale="zhCn">');
     expect(app).toContain("import zhCn from 'element-plus/es/locale/lang/zh-cn';");
-    expect(authorizationPage).toContain('>查看详情</el-button>');
-    expect(authorizationPage).toContain('>刷新令牌</el-button>');
-    expect(authorizationPage).toContain('>撤销授权</el-button>');
-    expect(authorizationPage).not.toContain('>刷新授权</el-button>');
+    expect(apiAccessDialog).toContain('>刷新令牌</el-button>');
+    expect(apiAccessDialog).toContain('>撤销授权</el-button>');
+    expect(apiAccessDialog).toContain('>平台只读检查</el-button>');
+    expect(apiAccessDialog).not.toContain('>刷新授权</el-button>');
   });
 });

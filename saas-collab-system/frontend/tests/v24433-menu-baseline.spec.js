@@ -53,9 +53,10 @@ describe('current deployment menu baseline', () => {
     expect(menuItems.some((item) => item.label === '业务协同')).toBe(false);
     // V2.44.62 adds the superuser-only tenant administration entry inside
     // system management; all other baseline entries remain unchanged.
-    // V2.44.65 adds the module-release control entry without removing any
-    // existing baseline menu item.
-    expect(flattenMenuItems(menuItems)).toHaveLength(115);
+    // V2.44.65 adds the module-release control entry; V2.44.66 retires the
+    // duplicate store-authorization menu entry after moving API access into
+    // the store master, leaving one fewer flattened menu item.
+    expect(flattenMenuItems(menuItems)).toHaveLength(114);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {

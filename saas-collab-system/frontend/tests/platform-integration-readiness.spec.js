@@ -25,8 +25,8 @@ describe('平台接入真实准备度契约', () => {
     expect(page).toContain('审批生产只读');
     expect(page).toContain('撤销只读审批');
     expect(page).toContain('维护凭据并执行检查');
-    expect(page).toContain('授权 {{ row.platform || row.platform_code }} 店铺');
-    expect(page).toContain("path: '/integrations/authorizations'");
+    expect(page).toContain('到店铺档案授权 {{ row.platform || row.platform_code }}');
+    expect(page).toContain("path: '/master-data/stores'");
     expect(api).toContain('/repair-contract/');
     expect(api).toContain('/readonly-approval/');
   });

@@ -75,7 +75,8 @@ describe('基础档案交接包界面契约', () => {
       expect(access).toContain(field);
     }
     expect(access).toContain('fetchSubjectApiAccess(props.subjectType, props.row.id)');
-    expect(access).toContain('checkIntegrationReadonlyConnection(binding.integration_config_id)');
+    expect(access).toContain('checkIntegrationReadonlyConnection(');
+    expect(access).toContain("{ warehouse_authorization_id: binding.id }");
     expect(access).toContain("path: '/integrations/sync-jobs'");
   });
 
