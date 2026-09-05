@@ -1,5 +1,6 @@
 <template>
   <AdminResourcePage
+    v-if="!mappingOnly"
     ref="resourcePage"
     eyebrow="MASTER DATA"
     title="店铺档案"
@@ -45,8 +46,106 @@
         :title="storeViewAccess.reason"
         @click.stop="openCapabilityMatrix(row)"
       >能力矩阵</el-button>
+      <el-button
+        v-if="storeMappingViewAccess.visible"
+        link
+        type="primary"
+        :disabled="storeMappingViewAccess.disabled"
+        :title="storeMappingViewAccess.reason"
+        @click.stop="openStoreWorkspace(row, 'mapping')"
+      >平台关联</el-button>
     </template>
   </AdminResourcePage>
+
+  <StoreMappingPanel
+    v-else-if="mappingOnly"
+    :store-id="route.query.store_id || null"
+    standalone
+    :show-api-access="false"
+  />
+
+  <el-drawer
+    v-model="storeWorkspaceOpen"
+    :title="`${selectedStore?.name || '店铺'} · 平台运营工作区`"
+    size="min(1180px, 96vw)"
+    destroy-on-close
+  >
+    <el-tabs v-if="selectedStore" v-model="workspaceTab" class="store-workspace-tabs">
+      <el-tab-pane label="基本资料" name="profile">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="店铺编码">{{ selectedStore.code || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="店铺名称">{{ selectedStore.name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="平台">{{ selectedStore.platform_name || selectedStore.platform || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="平台站点">{{ selectedStore.platform_site_name || selectedStore.country_code || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="外部店铺 ID">{{ selectedStore.external_store_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="业务模式">{{ selectedStore.business_model || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="币种/时区">{{ selectedStore.currency || '-' }} / {{ selectedStore.timezone || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="档案状态">{{ selectedStore.status || '-' }}</el-descriptions-item>
+        </el-descriptions>
+        <p class="workspace-note">基础资料由店铺档案维护；平台授权、关联状态和同步能力在其他区域处理。</p>
+      </el-tab-pane>
+
+      <el-tab-pane label="平台身份与授权" name="identity">
+        <el-alert
+          title="平台身份由授权回调产生，页面只展示脱敏信息；授权历史、刷新、撤销和重新授权沿用现有 API 接入抽屉。"
+          type="info"
+          show-icon
+          :closable="false"
+        />
+        <div class="workspace-summary-grid">
+          <div><span>平台</span><strong>{{ selectedStore.platform_name || selectedStore.platform || '-' }}</strong></div>
+          <div><span>授权身份</span><strong>{{ apiConnectionSummary.identityName || '尚未读取' }}</strong></div>
+          <div><span>平台店铺 ID</span><strong>{{ apiConnectionSummary.platformStoreId || '授权后生成' }}</strong></div>
+          <div><span>业务建联</span><strong>{{ selectedStore.is_connected ? '已登记' : '未登记' }}</strong></div>
+        </div>
+        <div class="workspace-actions">
+          <el-button type="primary" :disabled="storeApiViewAccess.disabled" :title="storeApiViewAccess.reason" @click="openApiAccess(selectedStore)">打开 API 接入</el-button>
+          <el-button plain :disabled="storeViewAccess.disabled" :title="storeViewAccess.reason" @click="openCapabilityMatrix(selectedStore)">查看连接能力</el-button>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="API连接状态" name="api-status">
+        <el-alert
+          :title="apiConnectionSummary.message"
+          :type="apiConnectionSummary.type"
+          show-icon
+          :closable="false"
+        />
+        <el-descriptions :column="1" border class="workspace-descriptions">
+          <el-descriptions-item label="API 授权状态">{{ apiConnectionSummary.statusLabel }}</el-descriptions-item>
+          <el-descriptions-item label="有效连接 / 历史授权">{{ apiConnectionSummary.activeCount }} / {{ apiConnectionSummary.historyCount }}</el-descriptions-item>
+          <el-descriptions-item label="最近验证时间">{{ formatDateTime(apiConnectionSummary.lastVerifiedAt) }}</el-descriptions-item>
+          <el-descriptions-item label="失败/异常记录">{{ apiConnectionSummary.failureCount }}</el-descriptions-item>
+          <el-descriptions-item label="平台/站点">{{ selectedStore.platform_name || selectedStore.platform || '-' }} · {{ selectedStore.platform_site_name || selectedStore.country_code || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="业务建联状态">{{ selectedStore.is_connected ? '已登记' : '未登记' }}（不等同于 API 授权）</el-descriptions-item>
+          <el-descriptions-item label="接入入口">开发者凭据保存在连接配置；店铺授权和授权历史在 API 接入抽屉维护。</el-descriptions-item>
+        </el-descriptions>
+        <div class="workspace-actions">
+          <el-button type="primary" :disabled="storeApiViewAccess.disabled || apiConnectionLoading" :title="storeApiViewAccess.reason" @click="loadApiConnectionStatus(selectedStore, true)">{{ apiConnectionLoading ? '刷新中…' : '刷新 API 授权状态' }}</el-button>
+          <el-button plain :disabled="storeApiViewAccess.disabled" :title="storeApiViewAccess.reason" @click="openApiAccess(selectedStore)">打开授权与历史</el-button>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="映射及验证历史" name="mapping">
+        <StoreMappingPanel :store="selectedStore" @open-api="openApiAccess" />
+      </el-tab-pane>
+
+      <el-tab-pane label="同步能力与异常" name="sync">
+        <el-alert
+          title="同步任务、运行记录和异常处置均通过现有 API 数据接入菜单进入，并沿用平台、店铺和权限范围。"
+          type="info"
+          show-icon
+          :closable="false"
+        />
+        <div class="workspace-actions workspace-actions--stack">
+          <el-button type="primary" :disabled="storeViewAccess.disabled" :title="storeViewAccess.reason" @click="openCapabilityMatrix(selectedStore)">维护同步能力矩阵</el-button>
+          <el-button plain :disabled="!syncViewAccess.allowed" :title="syncViewAccess.reason" @click="openStoreSyncJobs(selectedStore)">查看同步任务</el-button>
+          <el-button plain :disabled="!syncViewAccess.allowed" :title="syncViewAccess.reason" @click="openStoreSyncIncidents(selectedStore)">查看同步异常</el-button>
+        </div>
+        <p class="workspace-note">当前店铺的授权状态、能力开关、同步任务和异常记录均在目标页面中重新按权限查询。</p>
+      </el-tab-pane>
+    </el-tabs>
+  </el-drawer>
 
   <el-dialog v-model="migrationOpen" title="历史店铺 · 站点映射预览" width="min(1240px, 96vw)" :close-on-click-modal="false">
     <el-alert
@@ -171,7 +270,7 @@
     v-model="apiAccessOpen"
     subject-type="store"
     :row="selectedStore"
-    @changed="resourcePage?.loadData()"
+    @changed="handleApiAccessChanged"
   />
 </template>
 
@@ -180,15 +279,17 @@ import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
+import StoreMappingPanel from '../../components/StoreMappingPanel.vue';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
 import { fetchUsers } from '../../api/systemAdmin';
 import { fetchProductCategories } from '../../api/products';
-import { fetchConnectionCapabilities, fetchStoreAuthorizations, updateConnectionCapabilities } from '../../api/integrations';
+import { fetchConnectionCapabilities, fetchStoreAuthorizations, fetchSubjectApiAccess, updateConnectionCapabilities } from '../../api/integrations';
 import { getActionAccess } from '../../utils/actionAccess';
 import { useAuthStore } from '../../stores/auth';
+import { useRoute, useRouter } from 'vue-router';
 import {
   applyPlatformSiteMigration, createMasterData, deleteMasterData, fetchCountrySites, fetchPlatforms, fetchPlatformSiteMigrationPreview,
-  fetchPlatformSites, fetchStores, importStores,
+  fetchMasterDataDetail, fetchPlatformSites, fetchStores, importStores,
   updateMasterData, updateMasterDataStatus,
 } from '../../api/masterData';
 
@@ -214,13 +315,33 @@ const capabilityCodes = ['PRODUCT', 'CATEGORY', 'LISTING', 'PRICE', 'ORDER', 'IN
 const selectedAuthorization = computed(() => authorizationOptions.value.find((item) => item.id === selectedAuthorizationId.value));
 
 const auth = useAuthStore();
+const route = useRoute();
+const router = useRouter();
 const resourcePage = ref(null);
+const storeWorkspaceOpen = ref(false); const workspaceTab = ref('profile');
+const apiConnectionLoading = ref(false);
+const apiConnectionSummary = ref({
+  status: 'unknown',
+  statusLabel: '尚未检查',
+  type: 'info',
+  message: '打开工作区后将读取真实 API 授权状态。',
+  activeCount: 0,
+  historyCount: 0,
+  failureCount: 0,
+  lastVerifiedAt: '',
+  identityName: '',
+  platformStoreId: '',
+});
 const migrationTable = ref(null);
 const migrationOpen = ref(false); const migrationLoading = ref(false); const migrationApplying = ref(false); const migrationError = ref('');
 const migrationRows = ref([]); const migrationSummary = ref({}); const selectedMigrationRows = ref([]);
+const masterDataViewAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.view', unauthorizedBehavior: 'disable' }));
 const masterDataManageAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.manage', unauthorizedBehavior: 'disable' }));
+const storeMappingViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store_mapping.view', unauthorizedBehavior: 'disable' }));
+const mappingOnly = computed(() => !masterDataViewAccess.value.allowed && storeMappingViewAccess.value.allowed);
 const integrationViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view', unauthorizedBehavior: 'disable' }));
 const storeViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.view', unauthorizedBehavior: 'disable' }));
+const syncViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view', unauthorizedBehavior: 'disable' }));
 // `hasPermission(...codes)` is an OR operation, so combine the two
 // permissions explicitly for the store API entry point.
 const storeApiViewAccess = computed(() => {
@@ -278,6 +399,174 @@ function openApiAccess(row) {
   }
   selectedStore.value = row;
   apiAccessOpen.value = true;
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString('zh-CN', { hour12: false });
+}
+
+function emptyApiConnectionSummary(overrides = {}) {
+  return {
+    status: 'unknown',
+    statusLabel: '尚未检查',
+    type: 'info',
+    message: '打开工作区后将读取真实 API 授权状态。',
+    activeCount: 0,
+    historyCount: 0,
+    failureCount: 0,
+    lastVerifiedAt: '',
+    identityName: '',
+    platformStoreId: '',
+    ...overrides,
+  };
+}
+
+function summarizeApiConnection(response) {
+  const data = response?.data || {};
+  const bindings = Array.isArray(data.bindings) ? data.bindings : [];
+  const activeBindings = bindings.filter((item) => ['active', 'authorized'].includes(String(item.status || '').toLowerCase()));
+  const failedBindings = bindings.filter((item) => (
+    ['error', 'expired', 'revoked', 'failed', 'invalid'].includes(String(item.status || '').toLowerCase())
+    || item.last_error_code
+    || item.masked_error_message
+  ));
+  const verifiedValues = bindings
+    .flatMap((item) => [item.last_verified_at, item.refreshed_at])
+    .filter(Boolean)
+    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime());
+  const identity = activeBindings[0] || bindings[0] || {};
+  const activeCount = activeBindings.length;
+  const historyCount = bindings.length;
+  const failureCount = failedBindings.length;
+  let status = 'unauthorized';
+  let statusLabel = '未授权';
+  let type = 'warning';
+  let message = '当前没有有效 API 授权，请进入“打开授权与历史”完成授权。';
+  if (activeCount && failureCount) {
+    status = 'partial';
+    statusLabel = '部分异常';
+    type = 'warning';
+    message = `存在 ${activeCount} 个有效 API 授权，同时有 ${failureCount} 条历史异常，请检查授权历史。`;
+  } else if (activeCount) {
+    status = 'healthy';
+    statusLabel = '已授权';
+    type = 'success';
+    message = `API 授权有效（${activeCount} 个连接），可继续检查同步能力。`;
+  } else if (historyCount) {
+    status = 'error';
+    statusLabel = '授权异常';
+    type = 'error';
+    message = '没有有效 API 授权，请检查失败、过期或已撤销的授权记录。';
+  }
+  return emptyApiConnectionSummary({
+    status,
+    statusLabel,
+    type,
+    message,
+    activeCount,
+    historyCount,
+    failureCount,
+    lastVerifiedAt: verifiedValues[0] || '',
+    identityName: identity.account_alias || identity.platform_store_name || identity.store_name || '',
+    platformStoreId: identity.platform_store_id || identity.platform_store_id_masked || '',
+  });
+}
+
+async function loadApiConnectionStatus(row = selectedStore.value, force = false) {
+  if (!row?.id || !storeApiViewAccess.value.allowed) {
+    apiConnectionSummary.value = emptyApiConnectionSummary({
+      status: 'permission',
+      statusLabel: '无权查看',
+      type: 'info',
+      message: storeApiViewAccess.value.reason || '当前角色无权读取 API 授权状态。',
+    });
+    return;
+  }
+  if (apiConnectionLoading.value && !force) return;
+  apiConnectionLoading.value = true;
+  apiConnectionSummary.value = emptyApiConnectionSummary({
+    status: 'loading',
+    statusLabel: '读取中',
+    type: 'info',
+    message: '正在读取真实 API 授权状态，请稍候。',
+  });
+  try {
+    const response = await fetchSubjectApiAccess('store', row.id);
+    if (!response?.success) throw new Error(response?.message || 'API 授权状态读取失败');
+    apiConnectionSummary.value = summarizeApiConnection(response);
+  } catch (error) {
+    apiConnectionSummary.value = emptyApiConnectionSummary({
+      status: 'error',
+      statusLabel: '读取失败',
+      type: 'error',
+      message: error?.message || 'API 授权状态读取失败，请重试或打开授权历史。',
+    });
+  } finally {
+    apiConnectionLoading.value = false;
+  }
+}
+
+async function handleApiAccessChanged() {
+  await resourcePage.value?.loadData?.();
+  await loadApiConnectionStatus(selectedStore.value, true);
+}
+
+function openStoreWorkspace(row, tab = 'profile') {
+  if (!row || !masterDataViewAccess.value.allowed || !storeMappingViewAccess.value.allowed) {
+    ElMessage.warning(storeMappingViewAccess.value.reason || '当前角色无权查看店铺平台关联');
+    return;
+  }
+  selectedStore.value = row;
+  workspaceTab.value = tab;
+  storeWorkspaceOpen.value = true;
+  if (storeApiViewAccess.value.allowed) loadApiConnectionStatus(row);
+}
+
+function storePlatformCode(row) {
+  const value = row?.platform_code || row?.platform_key || row?.platform_type || row?.platform;
+  return typeof value === 'string' ? value : '';
+}
+
+function openStoreSyncJobs(row) {
+  if (!syncViewAccess.value.allowed) {
+    ElMessage.warning(syncViewAccess.value.reason || '当前角色无权查看同步任务');
+    return;
+  }
+  router.push({ path: '/integrations/sync-jobs', query: {
+    platform: storePlatformCode(row),
+    subject: row?.name || row?.code || '',
+  } });
+}
+
+function openStoreSyncIncidents(row) {
+  if (!syncViewAccess.value.allowed) {
+    ElMessage.warning(syncViewAccess.value.reason || '当前角色无权查看同步异常');
+    return;
+  }
+  router.push({ path: '/integrations/incidents', query: {
+    store_id: row?.id ? String(row.id) : '',
+    store_name: row?.name || row?.code || '',
+  } });
+}
+
+async function openRouteStoreContext() {
+  if (mappingOnly.value || !route.query.store_id) return;
+  const storeId = Number(route.query.store_id);
+  if (!Number.isInteger(storeId) || storeId < 1) return;
+  try {
+    const response = await fetchMasterDataDetail('stores', storeId);
+    if (!response?.success) return;
+    const row = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
+      ? response.data
+      : null;
+    if (!row) return;
+    if (route.query.panel === 'api') openApiAccess(row);
+    else openStoreWorkspace(row, route.query.panel === 'mapping' ? 'mapping' : 'profile');
+  } catch {
+    // The destination page remains usable even when an optional deep-link lookup fails.
+  }
 }
 
 function openImportDialog() {
@@ -617,7 +906,11 @@ async function submitImport() {
   }
 }
 
-onMounted(loadReferenceOptions);
+onMounted(async () => {
+  if (mappingOnly.value) return;
+  await loadReferenceOptions();
+  await openRouteStoreContext();
+});
 </script>
 
 <style scoped>
@@ -672,10 +965,72 @@ onMounted(loadReferenceOptions);
   color: #94a3b8;
 }
 
+.store-workspace-tabs {
+  min-height: 520px;
+}
+
+.workspace-note {
+  margin: 14px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workspace-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.workspace-summary-grid > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.workspace-summary-grid span,
+.workspace-summary-grid strong {
+  display: block;
+}
+
+.workspace-summary-grid span {
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.workspace-summary-grid strong {
+  color: #27364a;
+  overflow-wrap: anywhere;
+}
+
+.workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.workspace-actions--stack {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.workspace-descriptions {
+  margin-top: 16px;
+}
+
 @media (max-width: 760px) {
   .migration-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .workspace-summary-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

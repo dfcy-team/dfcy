@@ -828,6 +828,19 @@ class MarketplaceProductMapping(models.Model):
         on_delete=models.PROTECT,
         related_name="product_mappings",
     )
+    # PlatformProductDetail is the canonical platform variant snapshot.  The
+    # mapping row remains the controlled decision/audit record, while this
+    # optional one-to-one link prevents a second independent identity record
+    # from being created for the same platform variant.  It is nullable for
+    # legacy mappings and for platforms whose detail feed has not been
+    # imported yet.
+    platform_detail = models.OneToOneField(
+        "listings.PlatformProductDetail",
+        on_delete=models.PROTECT,
+        related_name="marketplace_mapping",
+        null=True,
+        blank=True,
+    )
     platform_product_id = models.CharField(max_length=160)
     platform_variant_id = models.CharField(max_length=160)
     platform_sku = models.CharField(max_length=160, blank=True)
@@ -891,6 +904,32 @@ class MarketplaceProductMapping(models.Model):
                 errors["store_mapping"] = "Product mapping store mapping must belong to the mapping tenant."
             if self.store_mapping.platform != self.platform:
                 errors["store_mapping"] = "Product mapping platform must match the store mapping platform."
+        if self.platform_detail_id:
+            detail = self.platform_detail
+            if detail.tenant_id != self.tenant_id:
+                errors["platform_detail"] = "Platform product detail must belong to the mapping tenant."
+            else:
+                detail_platform = {
+                    str(detail.platform.platform_type or "").strip().lower(),
+                    str(detail.platform.code or "").strip().lower(),
+                }
+                if str(self.platform or "").strip().lower() not in detail_platform:
+                    errors["platform_detail"] = "Platform product detail platform must match the mapping platform."
+                if self.store_mapping_id and self.store_mapping.store_id != detail.store_id:
+                    errors["platform_detail"] = "Platform product detail store must match the store mapping store."
+                if self.platform_variant_id and self.platform_variant_id != detail.platform_variant_id:
+                    errors["platform_variant_id"] = "Platform variant identity does not match the platform product detail."
+                if self.platform_product_id and detail.platform_product_id and self.platform_product_id != detail.platform_product_id:
+                    errors["platform_product_id"] = "Platform product identity does not match the platform product detail."
+                if self.platform_sku and detail.platform_sku and self.platform_sku != detail.platform_sku:
+                    errors["platform_sku"] = "Platform SKU does not match the platform product detail."
+                if (
+                    self.sku_id
+                    and detail.internal_sku_id
+                    and self.sku_id != detail.internal_sku_id
+                    and self.status not in {self.Status.CONFLICT, self.Status.INACTIVE}
+                ):
+                    errors["sku"] = "The mapping SKU conflicts with the platform product detail SKU."
         if self.sku_id:
             if self.sku.tenant_id != self.tenant_id:
                 errors["sku"] = "Product mapping SKU must belong to the mapping tenant."

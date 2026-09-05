@@ -509,6 +509,31 @@ PERMISSION_DEFINITIONS = (
             ("store.sync", "Synchronize marketplace stores", "Request an approved store synchronization action."),
             ("store.retry", "Retry marketplace store operations", "Retry a failed marketplace store operation."),
             (
+                "store_mapping.view",
+                "查看店铺平台关联",
+                "查看当前租户店铺与平台店铺身份的映射关系、状态和验证信息。",
+            ),
+            (
+                "store_mapping.manage",
+                "维护店铺平台关联",
+                "创建、更新或停用当前租户店铺与平台店铺身份的映射关系。",
+            ),
+            (
+                "product_mapping.view",
+                "查看商品 SKU 映射",
+                "查看当前租户平台商品变体与内部 SKU 的映射决策及状态。",
+            ),
+            (
+                "product_mapping.manage",
+                "维护商品 SKU 映射建议",
+                "创建商品映射建议、更新建议或停用平台商品映射。",
+            ),
+            (
+                "product_mapping.confirm",
+                "确认商品 SKU 映射",
+                "人工确认平台商品变体与内部 SKU 的映射，并记录确认审计。",
+            ),
+            (
                 "warehouse.view",
                 "查看仓库 API 授权",
                 "查看当前租户仓库与库存 API 接入配置的脱敏授权关系；不读取或导出凭据。",
@@ -1102,6 +1127,11 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "integrations.store.revoke": "撤销平台店铺授权",
     "integrations.store.sync": "同步平台店铺",
     "integrations.store.retry": "重试平台店铺操作",
+    "integrations.store_mapping.view": "查看店铺平台关联",
+    "integrations.store_mapping.manage": "维护店铺平台关联",
+    "integrations.product_mapping.view": "查看商品 SKU 映射",
+    "integrations.product_mapping.manage": "维护商品 SKU 映射建议",
+    "integrations.product_mapping.confirm": "确认商品 SKU 映射",
     "integrations.warehouse.view": "查看仓库 API 授权",
     "integrations.warehouse.authorize": "绑定仓库 API 配置",
     "integrations.warehouse.revoke": "解除仓库 API 绑定",

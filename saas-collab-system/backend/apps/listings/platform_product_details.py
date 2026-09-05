@@ -449,6 +449,29 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
             try:
                 platform = _resolve_platform(tenant, row.get("platform") or sheet_name.replace("商品明细", ""), platform_cache)
                 store = _resolve_store(tenant, platform, row, store_cache)
+                if actor is not None:
+                    # Imports can create a new detail row, so a queryset-only
+                    # scope check is insufficient.  Validate the canonical
+                    # platform/store pair before adding the plan; this also
+                    # prevents an out-of-scope existing row from being
+                    # treated as a create and colliding with its unique key.
+                    from apps.permissions.ui_p6_scopes import integration_values_allowed
+
+                    platform_values = {
+                        str(platform.platform_type or "").strip().lower(),
+                        str(platform.code or "").strip().lower(),
+                    }
+                    if not any(
+                        integration_values_allowed(
+                            actor,
+                            "listings.product_detail.import",
+                            platform=platform_value,
+                            store_id=store.pk,
+                        )
+                        for platform_value in platform_values
+                        if platform_value
+                    ):
+                        raise ValueError("该平台/店铺不在当前导入数据范围内。")
                 variant_id = _text(row.get("platform_variant_id"))
                 if not variant_id:
                     raise ValueError("缺少变种ID")
@@ -463,6 +486,7 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
                     "sku_prefix": _text(row.get("sku_prefix")), "shop_abbr": _text(row.get("shop_abbr")), "sales_status": _text(row.get("sales_status")),
                     "owner": _text(row.get("owner")), "leader": _text(row.get("leader")), "source": "import",
                     "platform_created_at": _parse_datetime(row.get("platform_created_at")), "platform_updated_at": _parse_datetime(row.get("platform_updated_at")),
+                    "__row": line, "__sheet": sheet_name,
                 }
                 plans.append(values)
             except (ValueError, TypeError, KeyError) as exc:
@@ -485,6 +509,17 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
         # retention during bulk updates.
         for plan_chunk in _chunks(plans, IMPORT_WRITE_CHUNK_SIZE):
             existing = _existing_for_plans(tenant, plan_chunk)
+            from apps.integrations.models import MarketplaceProductMapping
+
+            controlled_detail_ids = set(
+                MarketplaceProductMapping.objects.filter(
+                    tenant=tenant,
+                    platform_detail__tenant=tenant,
+                    platform_detail__platform_id__in={item["platform"].pk for item in plan_chunk},
+                    platform_detail__store_id__in={item["store"].pk for item in plan_chunk},
+                    platform_detail__platform_variant_id__in={item["platform_variant_id"] for item in plan_chunk},
+                ).values_list("platform_detail_id", flat=True)
+            )
             to_create = []
             update_groups = defaultdict(list)
             now = timezone.now()
@@ -492,9 +527,26 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
                 key = (values["platform"].pk, values["store"].pk, values["platform_variant_id"])
                 instance = existing.get(key)
                 if instance is None:
-                    to_create.append(PlatformProductDetail(**values))
+                    model_values = {name: value for name, value in values.items() if not name.startswith("__")}
+                    to_create.append(PlatformProductDetail(**model_values))
                     created += 1
                     continue
+
+                if instance.pk in controlled_detail_ids:
+                    blocked_fields = []
+                    for name in ("platform_product_id", "platform_sku", "source_old_sku_code", "internal_sku"):
+                        value = values[name]
+                        if not _same_import_value(instance, name, value):
+                            blocked_fields.append(name)
+                    if blocked_fields:
+                        errors.append({
+                            "row": values.get("__row"),
+                            "sheet": values.get("__sheet"),
+                            "code": "controlled_mapping_edit",
+                            "message": "该平台商品已纳入受控映射，导入不能直接修改身份或内部 SKU。",
+                            "fields": blocked_fields,
+                        })
+                        continue
 
                 changed_fields = []
                 for name in IMPORT_UPDATE_FIELDS:
@@ -530,7 +582,7 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
     }
 
 
-def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
+def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False, actor=None):
     """Update platform product IDs by existing tenant-scoped variant IDs."""
 
     errors = []
@@ -574,6 +626,7 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
     unmatched_sample = []
     ambiguous = 0
     changed_items = []
+    from apps.integrations.models import MarketplaceProductMapping
     with transaction.atomic():
         for group_chunk in _chunks(groups, IMPORT_EXISTING_QUERY_CHUNK_SIZE):
             variant_ids = [group["variant_id"] for group in group_chunk]
@@ -581,6 +634,14 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
                 tenant=tenant,
                 platform_variant_id__in=variant_ids,
             )
+            if actor is not None:
+                from apps.permissions.ui_p6_scopes import filter_platform_product_details
+
+                queryset = filter_platform_product_details(
+                    actor,
+                    queryset,
+                    "listings.product_detail.import",
+                )
             if not dry_run:
                 queryset = queryset.select_for_update()
             matches_by_variant = defaultdict(list)
@@ -609,8 +670,24 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
                         })
                     continue
                 item = matches[0]
+                # Idempotent replays of the same product ID are safe even
+                # after the row entered controlled mapping; do this check
+                # before the direct-edit guard so a production export can be
+                # retried without a false controlled_mapping_edit error.
                 if item.platform_product_id == group["product_id"]:
                     unchanged += len(rows)
+                    continue
+                if MarketplaceProductMapping.objects.filter(
+                    tenant=tenant,
+                    platform_detail_id=item.id,
+                ).exists():
+                    for row in rows:
+                        errors.append({
+                            "row": row["row"],
+                            "sheet": row["sheet"],
+                            "code": "controlled_mapping_edit",
+                            "message": "该平台商品已纳入受控映射，导入不能直接修改平台商品 ID。",
+                        })
                     continue
                 item.platform_product_id = group["product_id"]
                 item.updated_at = timezone.now()

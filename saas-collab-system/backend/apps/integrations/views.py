@@ -1,10 +1,13 @@
 import hashlib
 import json
 import uuid
+from collections import defaultdict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.paginator import Paginator
 from django.db import connection, transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -132,6 +135,14 @@ from .warehouse_authorization_service import (
     revoke_warehouse_authorization as revoke_warehouse_authorization_record,
     validate_warehouse_binding,
 )
+
+# The dedicated product-mapping permission class is introduced alongside the
+# permission catalog.  Keep this import compatible with the pre-catalog
+# checkout so migrations and legacy tests can still be run in isolation.
+try:
+    from apps.permissions.api_permissions import IsMarketplaceProductMappingManager
+except ImportError:  # pragma: no cover - removed once the permission catalog is migrated
+    IsMarketplaceProductMappingManager = IsMarketplaceStoreMappingManager
 from .sync_alerts import acknowledge_incident, add_incident_note, assign_incident, resolve_incident
 from .production_settings import get_runtime_setting
 
@@ -1323,6 +1334,386 @@ def revoke_store_authorization(request, pk):
     )
 
 
+STORE_MAPPING_VIEW_PERMISSION = "integrations.store_mapping.view"
+STORE_MAPPING_MANAGE_PERMISSION = "integrations.store_mapping.manage"
+PRODUCT_MAPPING_VIEW_PERMISSION = "integrations.product_mapping.view"
+PRODUCT_MAPPING_MANAGE_PERMISSION = "integrations.product_mapping.manage"
+PRODUCT_MAPPING_CONFIRM_PERMISSION = "integrations.product_mapping.confirm"
+
+
+def _mask_platform_store_id(value):
+    value = str(value or "")
+    if len(value) <= 4:
+        return "*" * len(value)
+    return "*" * (len(value) - 4) + value[-4:]
+
+
+def _option_page(request, queryset, serializer, *, page, page_size):
+    paginator = Paginator(queryset, page_size)
+    if paginator.num_pages and page <= paginator.num_pages:
+        page_obj = paginator.page(page)
+        rows = page_obj.object_list
+        has_next = page_obj.has_next()
+        has_previous = page_obj.has_previous()
+    else:
+        rows = []
+        has_next = False
+        has_previous = bool(paginator.num_pages and page > 1)
+
+    def page_url(target):
+        if target is None:
+            return None
+        params = request.query_params.copy()
+        params["page"] = target
+        params["page_size"] = page_size
+        return request.build_absolute_uri(f"{request.path}?{params.urlencode()}")
+
+    return {
+        "results": serializer(rows),
+        "pagination": {
+            "count": paginator.count,
+            "page": page,
+            "page_size": page_size,
+            "next": page_url(page + 1) if has_next else None,
+            "previous": page_url(page - 1) if has_previous else None,
+        },
+    }
+
+
+@api_view(["GET"])
+@permission_classes([IsMarketplaceStoreMappingManager])
+def store_mapping_options(request):
+    """Return safe, scope-filtered options for the consolidated store page."""
+
+    allowed_query = {"page", "page_size", "platform", "store_id", "search"}
+    if set(request.query_params) - allowed_query:
+        raise ValidationError("Unknown store mapping option query parameter.")
+    platform = str(request.query_params.get("platform") or "").strip().lower()
+    if platform and platform not in {"shopee", "tiktok", "lazada"}:
+        raise ValidationError("Unsupported marketplace platform filter.")
+    store_id = positive_int(request.query_params.get("store_id"), default=0) if request.query_params.get("store_id") else None
+    search = str(request.query_params.get("search") or "").strip()
+    page, page_size = pagination_query(request, default_size=20)
+
+    from apps.masterdata.models import StoreMaster
+
+    authorizations = MarketplaceStoreAuthorization.objects.filter(
+        tenant=request.user.tenant,
+    ).select_related("store", "integration_config")
+    authorizations = filter_store_authorizations(request.user, authorizations, STORE_MAPPING_VIEW_PERMISSION)
+    mappings = MarketplaceStoreMapping.objects.filter(
+        tenant=request.user.tenant,
+    ).select_related("store", "authorization")
+    mappings = filter_store_mappings(request.user, mappings, STORE_MAPPING_VIEW_PERMISSION)
+    if platform:
+        authorizations = authorizations.filter(platform=platform)
+        mappings = mappings.filter(platform=platform)
+    if store_id:
+        authorizations = authorizations.filter(store_id=store_id)
+        mappings = mappings.filter(store_id=store_id)
+    if search:
+        term = Q(store__code__icontains=search) | Q(store__name__icontains=search) | Q(platform_store_id__icontains=search)
+        authorizations = authorizations.filter(term)
+        mappings = mappings.filter(term)
+
+    # Stores are derived from authorized identities as well as existing links,
+    # so an operator can create the first mapping without masterdata access.
+    store_ids = set(authorizations.values_list("store_id", flat=True)) | set(mappings.values_list("store_id", flat=True))
+    stores = StoreMaster.objects.filter(tenant=request.user.tenant, id__in=store_ids).select_related("platform")
+    if platform:
+        stores = stores.filter(Q(platform__platform_type=platform) | Q(platform__code=platform))
+    if search:
+        stores = stores.filter(Q(code__icontains=search) | Q(name__icontains=search))
+    if store_id:
+        stores = stores.filter(pk=store_id)
+
+    store_page = _option_page(
+        request,
+        stores.order_by("code", "id"),
+        lambda rows: [
+            {
+                "id": item.id,
+                "code": item.code,
+                "name": item.name,
+                "platform": item.platform.platform_type,
+                "platform_name": item.platform.name,
+            }
+            for item in rows
+        ],
+        page=page,
+        page_size=page_size,
+    )
+    authorization_page = _option_page(
+        request,
+        authorizations.order_by("platform", "store_id", "id"),
+        lambda rows: [
+            {
+                "id": item.id,
+                "store_id": item.store_id,
+                "store_code": item.store.code,
+                "store_name": item.store.name,
+                "platform": item.platform,
+                "region": item.region,
+                "status": item.status,
+                "platform_store_id_masked": _mask_platform_store_id(item.platform_store_id),
+                "expires_at": item.expires_at,
+            }
+            for item in rows
+        ],
+        page=page,
+        page_size=page_size,
+    )
+    mapping_page = _option_page(
+        request,
+        mappings.order_by("platform", "store_id", "id"),
+        lambda rows: [
+            {
+                "id": item.id,
+                "store_id": item.store_id,
+                "store_code": item.store.code,
+                "store_name": item.store.name,
+                "platform": item.platform,
+                "platform_store_id": item.platform_store_id,
+                "region": item.region,
+                "status": item.status,
+            }
+            for item in rows
+        ],
+        page=page,
+        page_size=page_size,
+    )
+    return success_response({
+        "stores": store_page["results"],
+        "authorizations": authorization_page["results"],
+        "store_mappings": mapping_page["results"],
+        "pagination": {
+            "stores": store_page["pagination"],
+            "authorizations": authorization_page["pagination"],
+            "store_mappings": mapping_page["pagination"],
+        },
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsMarketplaceProductMappingManager])
+def product_mapping_options(request):
+    """Return canonical detail and tenant SKU options within mapping scope."""
+
+    allowed_query = {
+        "page", "page_size", "platform", "store_id", "platform_detail_id", "variant_id",
+        "mapping_status", "search",
+    }
+    if set(request.query_params) - allowed_query:
+        raise ValidationError("Unknown product mapping option query parameter.")
+    platform = str(request.query_params.get("platform") or "").strip().lower()
+    if platform and platform not in {"shopee", "tiktok", "lazada"}:
+        raise ValidationError("Unsupported marketplace platform filter.")
+    store_id = positive_int(request.query_params.get("store_id"), default=0) if request.query_params.get("store_id") else None
+    detail_id = positive_int(request.query_params.get("platform_detail_id"), default=0) if request.query_params.get("platform_detail_id") else None
+    variant_id = str(request.query_params.get("variant_id") or "").strip()
+    mapping_status = str(request.query_params.get("mapping_status") or "").strip().lower()
+    search = str(request.query_params.get("search") or "").strip()
+    page, page_size = pagination_query(request, default_size=20)
+
+    from apps.listings.models import PlatformProductDetail
+    from apps.masterdata.models import StoreMaster
+    from apps.products.models import ProductSKU
+
+    if mapping_status and mapping_status not in MarketplaceProductMapping.Status.values:
+        raise ValidationError({"mapping_status": "Unsupported product mapping status filter."})
+
+    # Product-only users receive store mappings through the same product-
+    # mapping scope; no store-mapping permission is required.  Keep inactive
+    # mappings in the visible set so historical product mappings remain
+    # discoverable, but derive the create target from a separate active set.
+    store_mapping_queryset = MarketplaceStoreMapping.objects.filter(
+        tenant=request.user.tenant,
+    ).select_related("store")
+    store_mapping_queryset = filter_store_mappings(
+        request.user,
+        store_mapping_queryset,
+        PRODUCT_MAPPING_VIEW_PERMISSION,
+    )
+    if platform:
+        store_mapping_queryset = store_mapping_queryset.filter(platform=platform)
+    if store_id:
+        store_mapping_queryset = store_mapping_queryset.filter(store_id=store_id)
+    visible_store_mappings = list(store_mapping_queryset)
+    visible_mapping_queryset = MarketplaceProductMapping.objects.filter(
+        tenant=request.user.tenant,
+    ).select_related(
+        "sku",
+        "platform_detail",
+        "platform_detail__platform",
+        "platform_detail__store",
+        "store_mapping",
+        "store_mapping__store",
+    )
+    visible_mapping_queryset = filter_product_mappings(
+        request.user,
+        visible_mapping_queryset,
+        PRODUCT_MAPPING_VIEW_PERMISSION,
+    )
+
+    # A detail can be returned when its store mapping is inactive, provided
+    # the mapping itself is visible.  Unlinked details still need a visible
+    # store/platform identity so they can be offered as a candidate.
+    scope_pairs = {
+        (item.store_id, str(item.platform).strip().lower())
+        for item in visible_store_mappings
+    }
+    detail_scope = Q(pk__in=[])
+    for scoped_store_id, scoped_platform in scope_pairs:
+        detail_scope |= Q(store_id=scoped_store_id) & (
+            Q(platform__platform_type=scoped_platform)
+            | Q(platform__code=scoped_platform)
+        )
+    detail_queryset = PlatformProductDetail.objects.filter(
+        tenant=request.user.tenant,
+    ).filter(detail_scope).select_related(
+        "platform", "store", "internal_sku"
+    )
+    if platform:
+        detail_queryset = detail_queryset.filter(
+            Q(platform__platform_type=platform) | Q(platform__code=platform)
+        )
+    if detail_id:
+        detail_queryset = detail_queryset.filter(pk=detail_id)
+    if variant_id:
+        detail_queryset = detail_queryset.filter(platform_variant_id=variant_id)
+    if mapping_status == MarketplaceProductMapping.Status.UNMAPPED:
+        visible_unmapped_detail_ids = visible_mapping_queryset.filter(
+            status=MarketplaceProductMapping.Status.UNMAPPED,
+            platform_detail_id__isnull=False,
+        ).values_list("platform_detail_id", flat=True)
+        detail_queryset = detail_queryset.filter(
+            Q(marketplace_mapping__isnull=True)
+            | Q(pk__in=visible_unmapped_detail_ids)
+        )
+    elif mapping_status:
+        visible_status_detail_ids = visible_mapping_queryset.filter(
+            status=mapping_status,
+            platform_detail_id__isnull=False,
+        ).values_list("platform_detail_id", flat=True)
+        detail_queryset = detail_queryset.filter(pk__in=visible_status_detail_ids)
+    if search:
+        detail_queryset = detail_queryset.filter(
+            Q(platform_product_id__icontains=search)
+            | Q(platform_variant_id__icontains=search)
+            | Q(platform_sku__icontains=search)
+            | Q(title__icontains=search)
+            | Q(internal_sku__sku_code__icontains=search)
+        )
+    details = detail_queryset.order_by("platform_id", "store_id", "id")
+
+    active_store_mappings_by_key = defaultdict(dict)
+    for item in visible_store_mappings:
+        if item.status != MarketplaceStoreMapping.Status.ACTIVE:
+            continue
+        platform_keys = {
+            str(item.platform or "").strip().lower(),
+            str(getattr(item.store.platform, "platform_type", "") or "").strip().lower(),
+            str(getattr(item.store.platform, "code", "") or "").strip().lower(),
+        }
+        for platform_key in filter(None, platform_keys):
+            active_store_mappings_by_key[(item.store_id, platform_key)][item.id] = item
+
+    def active_store_mapping_for_detail(item):
+        platform_keys = {
+            str(getattr(item.platform, "platform_type", "") or "").strip().lower(),
+            str(getattr(item.platform, "code", "") or "").strip().lower(),
+        }
+        matches = {}
+        for platform_key in filter(None, platform_keys):
+            matches.update(active_store_mappings_by_key.get((item.store_id, platform_key), {}))
+        # A detail with multiple active bindings is deliberately not assigned
+        # a guessed target; the UI must ask the operator to choose one.
+        return next(iter(matches.values())) if len(matches) == 1 else None
+
+    def serialize_detail_options(rows):
+        page_detail_ids = [item.id for item in rows]
+        page_mappings = {
+            mapping.platform_detail_id: mapping
+            for mapping in visible_mapping_queryset.filter(
+                platform_detail_id__in=page_detail_ids,
+            )
+        }
+        result = []
+        for item in rows:
+            mapping = page_mappings.get(item.id)
+            active_store_mapping = active_store_mapping_for_detail(item)
+            result.append({
+                "id": item.id,
+                "platform": item.platform.platform_type,
+                "platform_name": item.platform.name,
+                "store_id": item.store_id,
+                "store_code": item.store.code,
+                "store_name": item.store.name,
+                "store_mapping_id": active_store_mapping.id if active_store_mapping else None,
+                "platform_product_id": item.platform_product_id,
+                "platform_variant_id": item.platform_variant_id,
+                "platform_sku": item.platform_sku,
+                "title": item.title,
+                "internal_sku_id": item.internal_sku_id,
+                "internal_sku_code": item.internal_sku.sku_code if item.internal_sku_id and item.internal_sku else None,
+                "mapping": {
+                    "id": mapping.id,
+                    "status": mapping.status,
+                    "sku_id": mapping.sku_id,
+                    "sku_code": mapping.sku.sku_code if mapping.sku_id and mapping.sku else None,
+                    "confidence": mapping.confidence,
+                    "result_code": mapping.result_code,
+                    "manually_confirmed": mapping.manually_confirmed,
+                } if mapping is not None else None,
+            })
+        return result
+
+    def serialize_detail_option(item):
+        """Retained as a tiny compatibility helper for callers/tests."""
+        return serialize_detail_options([item])[0]
+
+    detail_page = _option_page(
+        request,
+        details,
+        serialize_detail_options,
+        page=page,
+        page_size=page_size,
+    )
+    sku_queryset = ProductSKU.objects.filter(tenant=request.user.tenant).select_related("spu")
+    if search:
+        sku_queryset = sku_queryset.filter(
+            Q(sku_code__icontains=search)
+            | Q(legacy_sku_code__icontains=search)
+            | Q(spu__spu_code__icontains=search)
+            | Q(spu__product_name__icontains=search)
+        )
+    sku_page = _option_page(
+        request,
+        sku_queryset.order_by("sku_code", "id"),
+        lambda rows: [
+            {
+                "id": item.id,
+                "sku_code": item.sku_code,
+                "legacy_sku_code": item.legacy_sku_code,
+                "product_id": item.spu_id,
+                "product_name": item.spu.product_name if item.spu_id and item.spu else "",
+            }
+            for item in rows
+        ],
+        page=page,
+        page_size=page_size,
+    )
+    return success_response({
+        "count": detail_page["pagination"]["count"],
+        "platform_details": detail_page["results"],
+        "skus": sku_page["results"],
+        "pagination": {
+            "platform_details": detail_page["pagination"],
+            "skus": sku_page["pagination"],
+        },
+    })
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsMarketplaceStoreMappingManager])
 def store_mapping_collection(request):
@@ -1343,7 +1734,7 @@ def store_mapping_collection(request):
             queryset = queryset.filter(status=status_value)
         if request.query_params.get("store_id"):
             queryset = queryset.filter(store_id=positive_int(request.query_params["store_id"], default=0))
-        queryset = filter_store_mappings(request.user, queryset, "integrations.store.view")
+        queryset = filter_store_mappings(request.user, queryset, STORE_MAPPING_VIEW_PERMISSION)
         page, page_size = pagination_query(request)
         return success_response(
             paginated_data(
@@ -1363,23 +1754,15 @@ def store_mapping_collection(request):
         filter_store_authorizations(
             request.user,
             MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant),
-            "integrations.store.authorize",
+            STORE_MAPPING_MANAGE_PERMISSION,
         ),
         pk=data["authorization_id"],
     )
-    if not integration_values_allowed(
-        request.user,
-        "integrations.store.authorize",
-        platform=authorization.platform,
-        store_id=data["store_id"],
-    ):
-        raise DataScopeDenied(
-            "Store mapping is outside the authorized data scope.",
-            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
-        )
     from apps.masterdata.models import StoreMaster
 
     store = get_object_or_404(StoreMaster, tenant=request.user.tenant, pk=data["store_id"])
+    if authorization.store_id != store.id:
+        raise ValidationError({"store_id": "授权身份与所选店铺不一致。"})
     mapping = create_store_mapping(
         tenant=request.user.tenant,
         actor=request.user,
@@ -1394,7 +1777,7 @@ def store_mapping_collection(request):
 @api_view(["GET", "PATCH"])
 @permission_classes([IsMarketplaceStoreMappingManager])
 def store_mapping_detail(request, pk):
-    permission_code = "integrations.store.view" if request.method == "GET" else "integrations.store.authorize"
+    permission_code = STORE_MAPPING_VIEW_PERMISSION if request.method == "GET" else STORE_MAPPING_MANAGE_PERMISSION
     queryset = filter_store_mappings(
         request.user,
         MarketplaceStoreMapping.objects.filter(tenant=request.user.tenant).select_related("store", "authorization"),
@@ -1409,16 +1792,6 @@ def store_mapping_detail(request, pk):
     serializer.is_valid(raise_exception=True)
     if not serializer.validated_data:
         raise ValidationError("No supported store mapping fields were provided.")
-    if not integration_values_allowed(
-        request.user,
-        "integrations.store.authorize",
-        platform=mapping.platform,
-        store_id=mapping.store_id,
-    ):
-        raise DataScopeDenied(
-            "Store mapping update is outside the authorized data scope.",
-            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
-        )
     mapping = update_store_mapping(
         mapping,
         actor=request.user,
@@ -1430,13 +1803,18 @@ def store_mapping_detail(request, pk):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsMarketplaceStoreMappingManager])
+@permission_classes([IsMarketplaceProductMappingManager])
 def product_mapping_collection(request):
     if request.method == "GET":
-        allowed_query = {"page", "page_size", "platform", "status", "store_mapping_id"}
+        allowed_query = {
+            "page", "page_size", "platform", "status", "store_mapping_id", "store_id",
+            "platform_detail_id", "platform_variant_id", "search", "unlinked",
+        }
         if set(request.query_params) - allowed_query:
             raise ValidationError("Unknown product mapping query parameter.")
-        queryset = MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related("sku")
+        queryset = MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related(
+            "sku", "platform_detail", "store_mapping", "store_mapping__store"
+        )
         if request.query_params.get("platform"):
             platform = request.query_params["platform"]
             if platform not in {"shopee", "tiktok"}:
@@ -1451,7 +1829,33 @@ def product_mapping_collection(request):
             queryset = queryset.filter(
                 store_mapping_id=positive_int(request.query_params["store_mapping_id"], default=0)
             )
-        queryset = filter_product_mappings(request.user, queryset, "integrations.store.view")
+        if request.query_params.get("store_id"):
+            queryset = queryset.filter(
+                store_mapping__store_id=positive_int(request.query_params["store_id"], default=0)
+            )
+        if request.query_params.get("platform_detail_id"):
+            queryset = queryset.filter(
+                platform_detail_id=positive_int(request.query_params["platform_detail_id"], default=0)
+            )
+        if request.query_params.get("platform_variant_id"):
+            queryset = queryset.filter(
+                platform_variant_id=str(request.query_params["platform_variant_id"]).strip()
+            )
+        if request.query_params.get("search"):
+            search = str(request.query_params["search"]).strip()
+            queryset = queryset.filter(
+                Q(platform_product_id__icontains=search)
+                | Q(platform_variant_id__icontains=search)
+                | Q(platform_sku__icontains=search)
+                | Q(sku__sku_code__icontains=search)
+                | Q(sku__legacy_sku_code__icontains=search)
+                | Q(platform_detail__platform_product_id__icontains=search)
+                | Q(platform_detail__platform_sku__icontains=search)
+                | Q(platform_detail__title__icontains=search)
+            )
+        if request.query_params.get("unlinked", "").strip().lower() in {"1", "true", "yes", "on"}:
+            queryset = queryset.filter(platform_detail_id__isnull=True)
+        queryset = filter_product_mappings(request.user, queryset, PRODUCT_MAPPING_VIEW_PERMISSION)
         page, page_size = pagination_query(request)
         return success_response(
             paginated_data(
@@ -1467,24 +1871,36 @@ def product_mapping_collection(request):
     serializer = ProductMappingCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    store_mapping = get_scoped_object_or_404(
-        filter_store_mappings(
-            request.user,
-            MarketplaceStoreMapping.objects.filter(tenant=request.user.tenant),
-            "integrations.store.authorize",
-        ),
-        pk=data["store_mapping_id"],
-    )
-    if not integration_values_allowed(
-        request.user,
-        "integrations.store.authorize",
-        platform=store_mapping.platform,
-        store_id=store_mapping.store_id,
-    ):
-        raise DataScopeDenied(
-            "Product mapping is outside the authorized data scope.",
-            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+    from apps.listings.models import PlatformProductDetail
+
+    platform_detail = None
+    if data.get("platform_detail_id"):
+        platform_detail = get_object_or_404(
+            PlatformProductDetail.objects.select_related("platform", "store"),
+            tenant=request.user.tenant,
+            pk=data["platform_detail_id"],
         )
+    store_mapping_queryset = filter_store_mappings(
+        request.user,
+        MarketplaceStoreMapping.objects.filter(
+            tenant=request.user.tenant,
+            status=MarketplaceStoreMapping.Status.ACTIVE,
+        ),
+        PRODUCT_MAPPING_MANAGE_PERMISSION,
+    )
+    if data.get("store_mapping_id"):
+        store_mapping = get_scoped_object_or_404(store_mapping_queryset, pk=data["store_mapping_id"])
+    elif platform_detail is not None:
+        platform_value = platform_detail.platform.platform_type or platform_detail.platform.code
+        matches = list(store_mapping_queryset.filter(
+            store_id=platform_detail.store_id,
+            platform=platform_value,
+        )[:2])
+        if len(matches) != 1:
+            raise ValidationError({"store_mapping_id": "该平台商品明细没有唯一可用的店铺映射。"})
+        store_mapping = matches[0]
+    else:
+        raise ValidationError({"store_mapping_id": "店铺映射不能为空。"})
     mapping = create_product_mapping(
         tenant=request.user.tenant,
         actor=request.user,
@@ -1492,17 +1908,27 @@ def product_mapping_collection(request):
         platform_product_id=data["platform_product_id"],
         platform_variant_id=data["platform_variant_id"],
         platform_sku=data["platform_sku"],
+        platform_detail=platform_detail,
     )
     return success_response(MarketplaceProductMappingSerializer(mapping).data, status=201)
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsMarketplaceStoreMappingManager])
+@permission_classes([IsMarketplaceProductMappingManager])
 def product_mapping_detail(request, pk):
-    permission_code = "integrations.store.view" if request.method == "GET" else "integrations.store.authorize"
+    raw_confirm = request.method == "PATCH" and request.data.get("manually_confirmed") is True
+    permission_code = (
+        PRODUCT_MAPPING_VIEW_PERMISSION
+        if request.method == "GET"
+        else PRODUCT_MAPPING_CONFIRM_PERMISSION
+        if raw_confirm
+        else PRODUCT_MAPPING_MANAGE_PERMISSION
+    )
     queryset = filter_product_mappings(
         request.user,
-        MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related("sku"),
+        MarketplaceProductMapping.objects.filter(tenant=request.user.tenant).select_related(
+            "sku", "platform_detail", "store_mapping", "store_mapping__store"
+        ),
         permission_code,
     )
     mapping = get_scoped_object_or_404(queryset, pk=pk)
@@ -1515,16 +1941,6 @@ def product_mapping_detail(request, pk):
     serializer = ProductMappingUpdateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    if not integration_values_allowed(
-        request.user,
-        "integrations.store.authorize",
-        platform=mapping.platform,
-        store_id=mapping.store_mapping.store_id,
-    ):
-        raise DataScopeDenied(
-            "Product mapping update is outside the authorized data scope.",
-            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
-        )
     sku = None
     if data.get("sku_id"):
         from apps.products.models import ProductSKU
@@ -1533,7 +1949,25 @@ def product_mapping_detail(request, pk):
     if data.get("status") == MarketplaceProductMapping.Status.INACTIVE:
         mapping = deactivate_product_mapping(mapping, actor=request.user)
     elif data.get("manually_confirmed"):
-        mapping = confirm_product_mapping(mapping, actor=request.user, sku=sku, manually_confirmed=True)
+        if not check_user_permission(request.user, PRODUCT_MAPPING_CONFIRM_PERMISSION):
+            raise PermissionDenied("缺少商品映射人工确认权限。")
+        scoped_confirmation = filter_product_mappings(
+            request.user,
+            MarketplaceProductMapping.objects.filter(
+                tenant=request.user.tenant,
+                pk=mapping.pk,
+            ),
+            PRODUCT_MAPPING_CONFIRM_PERMISSION,
+        )
+        mapping = get_scoped_object_or_404(scoped_confirmation, pk=mapping.pk)
+        mapping = confirm_product_mapping(
+            mapping,
+            actor=request.user,
+            sku=sku,
+            manually_confirmed=True,
+            expected_internal_sku_id=data.get("expected_internal_sku_id"),
+            replace_existing=data.get("replace_existing", False),
+        )
     else:
         if sku is None or "confidence" not in data:
             raise ValidationError("Product mapping suggestions require a SKU and a confidence score.")
@@ -2129,9 +2563,20 @@ def _incident_queryset(request, permission_code):
 @api_view(["GET"])
 @permission_classes([IsIntegrationViewer])
 def sync_alert_incident_collection(request):
-    if set(request.query_params) - {"status"}:
+    if set(request.query_params) - {"status", "store_id"}:
         raise ValidationError("Unknown sync incident query parameter.")
     queryset = _incident_queryset(request, "integrations.view")
+    if request.query_params.get("store_id"):
+        store_id = positive_int(request.query_params.get("store_id"), default=None)
+        if store_id is None:
+            raise ValidationError({"store_id": "店铺 ID 无效。"})
+        store_filter = Q(sync_job__store_authorization__store_id=store_id)
+        # Some deployments carry a denormalized SyncJob.store_id.  Keep the
+        # filter compatible with both schemas while the authorization relation
+        # remains the canonical source in this checkout.
+        if any(field.name == "store_id" for field in SyncJob._meta.fields):
+            store_filter |= Q(sync_job__store_id=store_id)
+        queryset = queryset.filter(store_filter)
     status_value = str(request.query_params.get("status") or "").strip()
     if status_value:
         if status_value not in SyncAlertIncident.Status.values:

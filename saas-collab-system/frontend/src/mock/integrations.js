@@ -756,10 +756,17 @@ const appendIncidentNote = (incident, note) => {
   return incident.resolution_note ? `${incident.resolution_note}；${value}` : value;
 };
 
-export const mockSyncAlertIncidents = (status = '') => {
-  const rows = status
-    ? mockIncidentRows.filter((item) => item.status === status)
-    : mockIncidentRows;
+export const mockSyncAlertIncidents = (filters = '') => {
+  const params = typeof filters === 'string' ? { status: filters } : (filters || {});
+  const rows = mockIncidentRows.filter((item) => {
+    if (params.status && item.status !== params.status) return false;
+    if (params.store_id) {
+      const job = workspaceJobs.find((entry) => String(entry.id) === String(item.sync_job_id));
+      const authorization = mockAuthorizationRows.find((entry) => String(entry.id) === String(job?.selected_authorization_id));
+      if (!job || String(job.store_id || authorization?.store_id) !== String(params.store_id)) return false;
+    }
+    return true;
+  });
   return successResponse(rows.map((item) => ({ ...item })));
 };
 

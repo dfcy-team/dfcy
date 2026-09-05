@@ -27,6 +27,9 @@ describe('基础档案设置前端契约', () => {
     expect(foundationMenu).toBeTruthy();
     expect(foundationMenu.permissions).toEqual([
       'masterdata.view',
+      'listings.product_detail.view',
+      'integrations.store_mapping.view',
+      'integrations.product_mapping.view',
       'products.master.view',
       'products.category.view',
       'products.attribute.view',

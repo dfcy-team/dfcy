@@ -23,6 +23,7 @@ vi.mock('axios', () => {
 
 let requestWithMockFallback;
 let completeSyntheticStoreAuthorization;
+let mappingReads;
 
 beforeAll(async () => {
   // This suite exercises production-like network failure handling even when
@@ -31,6 +32,9 @@ beforeAll(async () => {
   vi.resetModules();
   ({ requestWithMockFallback } = await import('../src/api/request'));
   ({ completeSyntheticStoreAuthorization } = await import('../src/api/integrations'));
+  const integrationApi = await import('../src/api/integrations');
+  mappingReads = [integrationApi.fetchStoreMappings, integrationApi.fetchProductMappings,
+    integrationApi.fetchStoreMappingOptions, integrationApi.fetchProductMappingOptions];
 });
 
 afterAll(() => vi.unstubAllEnvs());
@@ -80,5 +84,14 @@ describe('requestWithMockFallback mutation safety', () => {
       noMockFallback: true,
       url: '/api/internal/integrations/store-authorizations/oauth/callback/shopee/',
     }));
+  });
+
+  it('never presents rehearsal identities as real mapping choices when production reads fail', async () => {
+    for (const read of mappingReads) {
+      const response = await read({ store_id: 1 });
+      expect(response.success).toBe(false);
+      expect(response.code).toBe('HTTP_NETWORK_ERROR');
+      expect(response.data).toBeNull();
+    }
   });
 });

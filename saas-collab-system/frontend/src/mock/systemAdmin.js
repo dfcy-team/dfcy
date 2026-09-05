@@ -2,6 +2,21 @@ import { successResponse } from './index';
 
 const page = (results) => ({ status: 'mock', count: results.length, next: null, previous: null, results });
 
+const mappingPermissionCatalog = [
+  ['integrations.store_mapping.view', '查看店铺平台关联', '查看授权身份与店铺的受控关联及验证历史。'],
+  ['integrations.store_mapping.manage', '维护店铺平台关联', '创建、维护或停用店铺关联；不授予 OAuth 授权或凭据操作。'],
+  ['integrations.product_mapping.view', '查看商品 SKU 映射', '查看平台变体与内部 SKU 的映射、建议和冲突。'],
+  ['integrations.product_mapping.manage', '维护商品 SKU 映射建议', '登记映射建议或停用映射；人工确认需要独立权限。'],
+  ['integrations.product_mapping.confirm', '确认商品 SKU 映射', '人工确认平台变体与内部 SKU 的关联，并写入审计。'],
+  ['listings.product_detail.view', '查看平台商品明细数据', '在授权平台和店铺范围查看平台商品快照。'],
+  ['listings.product_detail.manage', '维护平台商品明细数据', '维护平台商品内容；受控 SKU 关联通过映射流程维护。'],
+  ['listings.product_detail.import', '导入平台商品明细数据', '按授权范围导入平台商品明细及平台商品标识。']
+].map(([code, name, description], index) => ({
+  id: 24 + index, code, name, module: code.split('.')[0], action: code.split('.').slice(1).join('.'),
+  permission_type: 'action', metadata: {}, description
+}));
+const mappingPermissionCodes = mappingPermissionCatalog.map(({ code }) => code);
+
 export const mockTenants = () => successResponse(page([
   { id: 1, name: '演示租户', code: 'demo', status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
   { id: 2, name: '沙箱租户', code: 'sandbox', status: 'active', created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' }
@@ -33,6 +48,7 @@ export const mockRoles = () => successResponse(page([
   {
     id: 2, tenant_id: 1, name: '管理员', code: 'administrator', status: 'active',
     permission_codes: [
+      ...mappingPermissionCodes,
       'system.users.view', 'system.roles.view',
       'masterdata.view', 'masterdata.manage',
       'integrations.view', 'integrations.manage', 'integrations.run_live_readonly',
@@ -46,6 +62,7 @@ export const mockRoles = () => successResponse(page([
       'menu.system.security_operations.view'
     ],
     action_permission_codes: [
+      ...mappingPermissionCodes,
       'system.users.view', 'system.roles.view', 'masterdata.view', 'masterdata.manage',
       'integrations.view', 'integrations.manage', 'integrations.run_live_readonly',
       'integrations.config.view', 'integrations.config.create', 'integrations.config.update',
@@ -79,6 +96,7 @@ export const mockRoleScopeOptions = () => successResponse({
 });
 
 export const mockPermissions = () => successResponse(page([
+  ...mappingPermissionCatalog,
   { id: 1, code: 'menu.system.users.view', name: '查看用户目录菜单', module: 'system', action: 'users.view', permission_type: 'menu', metadata: { path: '/system/users', resource: 'users' }, description: '显示用户目录入口' },
   { id: 2, code: 'menu.system.roles.view', name: '查看角色权限菜单', module: 'system', action: 'roles.view', permission_type: 'menu', metadata: { path: '/system/roles', resource: 'roles' }, description: '显示角色权限入口' },
   { id: 3, code: 'system.users.view', name: '查看用户目录', module: 'system', action: 'users.view', permission_type: 'action', metadata: {}, description: '租户内用户只读访问' },
