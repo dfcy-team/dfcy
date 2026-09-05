@@ -759,6 +759,7 @@ def create_outreach_task(*, user, validated_data):
 @transaction.atomic
 def update_outreach_task(*, user, task, validated_data, expected_version):
     """Safely edit mutable task facts without touching workflow state timestamps."""
+    _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot be updated."})
@@ -867,6 +868,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         before=before,
         after=after,
     )
+    if "target_count" in changes:
+        task = recompute_outreach_task_completion(user=user, task=task)
     return task
 
 
@@ -1264,7 +1267,7 @@ def published_video_results_queryset(fulfillment):
 
 @transaction.atomic
 def recompute_outreach_task_completion(*, user, task):
-    """Complete an active task once its effective, non-deleted samples reach the target."""
+    """Complete an active task once unique sampled creators reach the target."""
     _lock_tenant(user)
     task = _locked_task(user, _pk(task))
     if task.is_deleted or task.status not in {
@@ -1272,7 +1275,7 @@ def recompute_outreach_task_completion(*, user, task):
         OutreachTask.Status.IN_PROGRESS,
     }:
         return task
-    completed_identities = {
+    sampled_identities = {
         influencer_identity_key(
             influencer_id=influencer_id,
             platform=platform,
@@ -1282,15 +1285,14 @@ def recompute_outreach_task_completion(*, user, task):
             tenant=user.tenant,
             outreach_task=task,
             is_deleted=False,
-            status__in=SAMPLE_COMPLETION_STATUSES,
         ).values_list(
             "influencer_id",
             "influencer__platform",
             "influencer__handle",
         )
     }
-    completed_count = len(completed_identities)
-    if task.target_count <= 0 or completed_count < task.target_count:
+    sampled_count = len(sampled_identities)
+    if task.target_count <= 0 or sampled_count < task.target_count:
         return task
 
     now = timezone.now()
@@ -1323,7 +1325,7 @@ def recompute_outreach_task_completion(*, user, task):
             after={
                 "status": task.status,
                 "version": task.version,
-                "completed_count": completed_count,
+                "sampled_influencer_count": sampled_count,
                 "target_count": task.target_count,
             },
         )
@@ -1349,7 +1351,7 @@ def _assert_influencer_not_blacklisted(
         is_blacklisted=True,
     ).exists()
     if blacklisted:
-        detail = {"influencer": message or "Blacklisted influencers cannot receive samples."}
+        detail = {"influencer": message or "该达人已被加入黑名单，不能创建送样。"}
         if code:
             raise ValidationError(detail, code=code)
         raise ValidationError(detail)

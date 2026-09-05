@@ -71,7 +71,7 @@
           <template #default="{ row }">
             <template v-if="hasValue(row.target_count)">
               <el-progress :percentage="progress(row)" :format="() => progressLabel(row)" />
-              <small>有效完成 {{ completedFulfillmentCount(row) }}/{{ row.target_count }}</small>
+              <small>送样达人 {{ sampledInfluencerCount(row) }}/{{ row.target_count }}</small>
             </template>
             <span v-else>—</span>
           </template>
@@ -261,6 +261,8 @@
               :value="influencer.id"
             />
           </el-select>
+          <el-alert v-if="selectedSampleInfluencer?.is_blacklisted" class="blacklist-alert" type="error" :closable="false" title="该达人在黑名单中，不能创建送样。" />
+          <el-alert v-else-if="duplicateSampleWarning" class="blacklist-alert" type="warning" :closable="false" :title="duplicateSampleWarning" />
         </el-form-item>
         <el-form-item label="店铺">
           <el-input :model-value="displayValue(sampleContext?.store_name || sampleForm.store)" readonly />
@@ -276,7 +278,7 @@
       </el-form>
       <template #footer>
         <el-button @click="sampleVisible = false">取消</el-button>
-        <el-button type="primary" :loading="sampleSaving" @click="submitSample">创建送样</el-button>
+        <el-button type="primary" :disabled="selectedSampleInfluencer?.is_blacklisted" :loading="sampleSaving" @click="submitSample">创建送样</el-button>
       </template>
     </el-dialog>
 
@@ -328,7 +330,7 @@
             </div>
             <div class="detail-validation">
               <b>送样记录进度</b>
-              <span>{{ fulfillmentCount(detailTask) }} / {{ detailTask.target_count || 0 }}</span>
+              <span>{{ sampledInfluencerCount(detailTask) }} / {{ detailTask.target_count || 0 }}</span>
               <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
             <div class="status-summary"><span v-for="(count, status) in (detailTask.sample_status_summary?.status_counts || detailTask.sample_fulfillment_status_summary || {})" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
@@ -390,6 +392,7 @@ import {
   OUTREACH_STATUS_LABELS,
   restoreOutreachTarget,
   restoreOutreachTask,
+  sampleDuplicateWarning,
   statusLabel,
   updateOutreachStatus,
   updateOutreachTarget,
@@ -397,7 +400,7 @@ import {
 } from '../../api/influencers';
 import { applyProductCandidate } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
-import { completedFulfillmentCount, fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampleProgressLabel } from './outreachTaskState';
+import { fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
@@ -471,6 +474,8 @@ const sampleForm = reactive({
   requested_sku: '',
   quantity: 1
 });
+const selectedSampleInfluencer = computed(() => influencerOptions.value.find((item) => String(item.id) === String(sampleForm.influencer)) || null);
+const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedSampleInfluencer.value));
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
@@ -514,9 +519,9 @@ const visibleStoreOptions = computed(() => {
 const isTerminal = (row) => ['completed', 'cancelled'].includes(row?.status);
 const isCancelled = (row) => row?.status === 'cancelled';
 const isTargetTerminal = (row) => ['success', 'rejected', 'no_response', 'blocked'].includes(row?.outreach_result);
-const sampleProgressCount = (row) => fulfillmentCount(row);
+const sampleProgressCount = (row) => sampledInfluencerCount(row);
 const progress = (row) => row.target_count ? Math.min(100, Math.round(sampleProgressCount(row) * 100 / row.target_count)) : 0;
-const sampleRecordTargetReached = (row) => Number(row?.target_count || 0) > 0 && fulfillmentCount(row) >= Number(row.target_count);
+const sampleRecordTargetReached = (row) => Number(row?.target_count || 0) > 0 && sampledInfluencerCount(row) >= Number(row.target_count);
 const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
@@ -899,6 +904,29 @@ function ensureSampleInfluencer(task, target) {
   return influencerId;
 }
 
+async function refreshSampleInfluencer(id) {
+  const selected = influencerOptions.value.find((item) => String(item.id) === String(id));
+  const account = String(selected?.handle || '').trim().replace(/^@+/, '');
+  if (!account) return;
+  const response = await fetchInfluencerResolve(account);
+  if (!response.success) return;
+  const candidates = response.data?.candidates || response.data?.results || [];
+  const canonicalAccount = account.toLowerCase();
+  const resolved = candidates.find((item) => String(item.id) === String(id))
+    || candidates.find((item) => String(item.handle || '').trim().replace(/^@+/, '').toLowerCase() === canonicalAccount);
+  if (resolved) {
+    influencerOptions.value = influencerOptions.value.map((item) => (
+      String(item.id) === String(id)
+        ? {
+            ...item,
+            is_blacklisted: resolved.is_blacklisted,
+            open_sample_statuses: resolved.open_sample_statuses || []
+          }
+        : item
+    ));
+  }
+}
+
 async function openSampleCreate(task, target = null) {
   if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
   if (target && (!target.id || target.is_deleted)) return;
@@ -921,6 +949,7 @@ async function openSampleCreate(task, target = null) {
     requested_sku: '',
     quantity: 1
   });
+  await refreshSampleInfluencer(sampleForm.influencer);
   sampleRequestKey.value = newRequestKey();
   sampleVisible.value = true;
 }
@@ -939,6 +968,7 @@ async function submitSample() {
   if (!sampleForm.outreach_task || !sampleForm.influencer || !sampleForm.store) {
     return ElMessage.warning('请先选择送样达人');
   }
+  if (selectedSampleInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能创建送样');
   const siteCode = String(sampleForm.site_code || '').trim().toUpperCase();
   const quantity = Number(sampleForm.quantity);
   if (!siteCode || !Number.isInteger(quantity) || quantity < 1) {
@@ -964,6 +994,15 @@ async function submitSample() {
   const response = await createSampleFulfillment(payload, sampleRequestKey.value);
   sampleSaving.value = false;
   if (!response.success) return ElMessage.error(formatInfluencerError(response, '送样创建失败'));
+  const createdStatus = response.data?.status;
+  if (['pending', 'shipped', 'overdue'].includes(createdStatus)) {
+    influencerOptions.value = influencerOptions.value.map((item) => {
+      if (String(item.id) !== String(sampleForm.influencer)) return item;
+      const statuses = new Set(item.open_sample_statuses || []);
+      statuses.add(createdStatus);
+      return { ...item, open_sample_statuses: ['pending', 'shipped', 'overdue'].filter((status) => statuses.has(status)) };
+    });
+  }
   sampleVisible.value = false;
   sampleRequestKey.value = '';
   ElMessage.success('送样已创建');

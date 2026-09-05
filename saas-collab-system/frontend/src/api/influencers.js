@@ -149,7 +149,25 @@ const ifMatchHeaders = (version) => {
 const requestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
 export function formatInfluencerError(response, fallback = '操作失败，请稍后重试。') {
-  const message = response?.message || '';
+  const nestedMessage = (() => {
+    const visit = (value) => {
+      if (typeof value === 'string') return value.trim();
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const found = visit(item);
+          if (found) return found;
+        }
+      } else if (value && typeof value === 'object') {
+        for (const item of Object.values(value)) {
+          const found = visit(item);
+          if (found) return found;
+        }
+      }
+      return '';
+    };
+    return visit(response?.data);
+  })();
+  const message = nestedMessage || response?.message || '';
   if (/blacklist|blacklisted|黑名单/i.test(message)) return '该达人已被加入黑名单，不能执行本次操作。';
   if (response?.http_status === 409 || response?.code === 'STATE_CONFLICT' || response?.code === 'CONFLICT') {
     if (/terminal|completed|cancelled|终态/i.test(message)) return `任务已进入终态，不能再修改目标或送样。${message ? ` ${message}` : ''}`;
@@ -157,6 +175,15 @@ export function formatInfluencerError(response, fallback = '操作失败，请�
   }
   if (response?.http_status === 403) return '当前角色或数据范围无权执行此操作。';
   return message || fallback;
+}
+
+export function sampleDuplicateWarning(influencer) {
+  const labels = { pending: '待处理', shipped: '已发货', overdue: '已逾期' };
+  const statuses = Array.isArray(influencer?.open_sample_statuses)
+    ? influencer.open_sample_statuses.filter((status) => labels[status])
+    : [];
+  if (!statuses.length) return '';
+  return `该达人已有${statuses.map((status) => labels[status]).join('、')}送样记录，请确认是否重复送样；仍可继续创建。`;
 }
 
 export const fetchInfluencers = (params = {}) => requestWithMockFallback(
