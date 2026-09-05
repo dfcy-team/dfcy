@@ -2,9 +2,11 @@ import importlib
 import re
 from datetime import timedelta
 from decimal import Decimal
+from io import StringIO
 from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.management import call_command
 from django.db import connection
 from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.state import ProjectState
@@ -361,7 +363,7 @@ def test_duplicate_tiktok_handle_shares_blacklist_identity_and_blocks_sampling()
     duplicate.refresh_from_db()
     assert blocked.handle == "mhaine_94"
     assert duplicate.handle == "mhaine_94"
-    with pytest.raises(ValidationError, match="Blacklisted influencers"):
+    with pytest.raises(ValidationError, match="已被加入黑名单"):
         create_sample_fulfillment(
             user=user,
             request_key="canonical-blacklist-sample",
@@ -421,7 +423,7 @@ def test_blacklist_syncs_duplicate_restrictions_and_any_active_restriction_block
     duplicate_restriction.is_blacklisted = True
     duplicate_restriction.save()
 
-    with pytest.raises(ValidationError, match="Blacklisted influencers"):
+    with pytest.raises(ValidationError, match="已被加入黑名单"):
         create_sample_fulfillment(
             user=user,
             request_key="canonical-restriction-sync-sample",
@@ -744,7 +746,7 @@ def test_duplicate_creator_samples_count_once_toward_task_completion():
     assert payload["completion_validation"]["target_reached"] is False
 
 
-def test_pending_sample_record_does_not_complete_task_when_target_is_reached():
+def test_pending_sample_record_completes_task_when_unique_sample_target_is_reached():
     tenant, user, store, influencer = _records("pending-sample-auto-complete")
     task = _task(user, store, influencer, target_count=1)
 
@@ -758,8 +760,108 @@ def test_pending_sample_record_does_not_complete_task_when_target_is_reached():
     task.refresh_from_db()
     assert created is True
     assert fulfillment.status == SampleFulfillment.Status.PENDING
+    assert task.status == OutreachTask.Status.COMPLETED
+    assert task.finalized_at is not None
+    payload = OutreachTaskSerializer(task).data
+    assert payload["sample_fulfillment_influencer_count"] == 1
+    assert payload["completion_validation"]["sampled_influencer_count"] == 1
+    assert payload["completion_validation"]["target_reached"] is True
+
+
+def test_lowering_target_recomputes_completion_from_existing_sample_records():
+    _, user, store, influencer = _records("lower-target-sample-completion")
+    task = _task(user, store, target_count=2)
+    create_sample_fulfillment(
+        user=user,
+        request_key="lower-target-sample-completion-key",
+        validated_data={"outreach_task": task, "influencer": influencer},
+        item_payloads=[],
+    )
+    task.refresh_from_db()
     assert task.status == OutreachTask.Status.PENDING
-    assert task.finalized_at is None
+
+    updated = influencer_services.update_outreach_task(
+        user=user,
+        task=task,
+        validated_data={"target_count": 1},
+        expected_version=task.version,
+    )
+
+    assert updated.status == OutreachTask.Status.COMPLETED
+    assert updated.finalized_at is not None
+
+
+def test_reconcile_outreach_completion_command_previews_then_applies_historical_tasks():
+    tenant, user, store, influencer = _records("reconcile-sample-completion")
+    task = _task(user, store, target_count=1)
+    second_task = _task(
+        user,
+        store,
+        target_count=1,
+        task_no="SECOND-HISTORICAL-TASK",
+    )
+    SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="HISTORICAL-SAMPLE",
+        request_key="historical-sample-key",
+        request_hash="historical-sample-hash",
+        outreach_task=task,
+        influencer=influencer,
+        store=store,
+        owner=user,
+    )
+    SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="SECOND-HISTORICAL-SAMPLE",
+        request_key="second-historical-sample-key",
+        request_hash="second-historical-sample-hash",
+        outreach_task=second_task,
+        influencer=influencer,
+        store=store,
+        owner=user,
+    )
+    stdout = StringIO()
+
+    call_command(
+        "reconcile_outreach_task_completion",
+        tenant_id=tenant.id,
+        actor_id=user.id,
+        batch_size=1,
+        stdout=stdout,
+    )
+    task.refresh_from_db()
+    assert task.status == OutreachTask.Status.PENDING
+    assert "mode=dry-run" in stdout.getvalue()
+    assert "eligible=1" in stdout.getvalue()
+    assert f"eligible_task_ids={task.id}" in stdout.getvalue()
+    assert "has_more=true" in stdout.getvalue()
+
+    stdout = StringIO()
+    call_command(
+        "reconcile_outreach_task_completion",
+        tenant_id=tenant.id,
+        actor_id=user.id,
+        batch_size=1,
+        apply=True,
+        stdout=stdout,
+    )
+    task.refresh_from_db()
+    assert task.status == OutreachTask.Status.COMPLETED
+    assert "applied=1" in stdout.getvalue()
+    second_task.refresh_from_db()
+    assert second_task.status == OutreachTask.Status.PENDING
+
+    call_command(
+        "reconcile_outreach_task_completion",
+        tenant_id=tenant.id,
+        actor_id=user.id,
+        after_task_id=task.id,
+        batch_size=1,
+        apply=True,
+        stdout=StringIO(),
+    )
+    second_task.refresh_from_db()
+    assert second_task.status == OutreachTask.Status.COMPLETED
 
 
 def test_sample_order_number_auto_ships_and_returns_current_database_state():
@@ -1570,6 +1672,111 @@ def test_fulfillment_options_do_not_merge_same_handle_across_platforms():
     assert {influencer.id, instagram.id}.issubset(candidate_ids)
 
 
+def test_fulfillment_options_warn_for_open_samples_without_cross_tenant_or_deleted_leaks():
+    tenant, user, store, influencer = _records("option-open-samples")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    influencer.handle = "open.sample.creator"
+    influencer.save(update_fields=["handle"])
+    duplicate = Influencer.objects.create(
+        tenant=tenant,
+        code="option-open-samples-duplicate",
+        name="Duplicate creator",
+        handle="OPEN.SAMPLE.CREATOR",
+        platform="TikTok",
+    )
+    for index, status in enumerate((
+        SampleFulfillment.Status.PENDING,
+        SampleFulfillment.Status.SHIPPED,
+        SampleFulfillment.Status.OVERDUE,
+    )):
+        fulfillment = SampleFulfillment.objects.create(
+            tenant=tenant,
+            fulfillment_no=f"OPEN-SAMPLE-{index}",
+            request_key=f"open-sample-{index}",
+            request_hash=f"hash-{index}",
+            influencer=duplicate,
+            store=store,
+            owner=user,
+        )
+        QuerySet.update(
+            SampleFulfillment.objects.filter(pk=fulfillment.pk),
+            status=status,
+        )
+    deleted = SampleFulfillment.objects.create(
+        tenant=tenant,
+        fulfillment_no="DELETED-OPEN-SAMPLE",
+        request_key="deleted-open-sample",
+        request_hash="deleted-hash",
+        influencer=influencer,
+        store=store,
+        owner=user,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=deleted.pk),
+        is_deleted=True,
+        deleted_at=timezone.now(),
+        deleted_by=user,
+    )
+    other_tenant, other_user, other_store, other_influencer = _records("other-open-samples")
+    other_influencer.handle = influencer.handle
+    other_influencer.save(update_fields=["handle"])
+    SampleFulfillment.objects.create(
+        tenant=other_tenant,
+        fulfillment_no="OTHER-TENANT-SAMPLE",
+        request_key="other-tenant-sample",
+        request_hash="other-tenant-hash",
+        influencer=other_influencer,
+        store=other_store,
+        owner=other_user,
+        status=SampleFulfillment.Status.PENDING,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/sample-fulfillment-options/")
+
+    assert response.status_code == 200
+    candidate = next(
+        item for item in response.json()["data"]["influencers"]
+        if item["id"] == influencer.id
+    )
+    assert candidate["open_sample_statuses"] == ["pending", "shipped", "overdue"]
+
+
+def test_empty_tiktok_handles_do_not_share_open_sample_warnings():
+    tenant, user, store, first = _records("empty-handle-open-samples")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    second = Influencer.objects.create(
+        tenant=tenant,
+        code="empty-handle-open-samples-second",
+        name="Second creator",
+        platform="TikTok",
+        handle="",
+    )
+    create_sample_fulfillment(
+        user=user,
+        request_key="empty-handle-open-samples-key",
+        validated_data={
+            "influencer": first,
+            "store": store,
+            "link_type": "YYJL",
+            "external_product_id": "EMPTY-HANDLE-PRODUCT",
+        },
+        item_payloads=[],
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.get("/api/internal/influencers/sample-fulfillment-options/")
+
+    assert response.status_code == 200
+    candidates = {item["id"]: item for item in response.json()["data"]["influencers"]}
+    assert candidates[first.id]["open_sample_statuses"] == ["pending"]
+    assert candidates[second.id]["open_sample_statuses"] == []
+
+
 def test_blacklist_cascade_requires_profile_and_fulfillment_manage_permissions():
     tenant, user, store, influencer = _records("blacklist-permission")
     role = Role.objects.get(tenant=tenant, code="bd")
@@ -1667,10 +1874,10 @@ def test_blacklist_recomputes_related_tasks_inside_a_new_transaction(monkeypatch
 def test_blacklist_rolls_back_every_change_when_task_recompute_fails(monkeypatch):
     tenant, user, store, influencer = _records("blacklist-rollback")
     task = _task(user, store, influencer)
-    # The remaining published creator satisfies a one-creator target after the
-    # blacklisted creator is excluded, so recompute mutates before we inject
-    # the failure and verify that the entire transaction rolls back.
-    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=1)
+    # Keep the task active after the first sample. The second sampled creator
+    # reaches the target when blacklist processing recomputes the task, so the
+    # injected failure still verifies that every mutation rolls back.
+    QuerySet.update(OutreachTask.objects.filter(pk=task.pk), target_count=2)
     task.refresh_from_db()
     fulfillment, _ = create_sample_fulfillment(
         user=user,

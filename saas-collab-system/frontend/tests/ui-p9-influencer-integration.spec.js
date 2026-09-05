@@ -25,6 +25,7 @@ import {
   formatInfluencerError,
   OUTREACH_PRIORITY_LABELS,
   restoreOutreachTarget,
+  sampleDuplicateWarning,
   updateOutreachStatus,
   updateOutreachTarget,
   updateOutreachTask,
@@ -281,7 +282,12 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain("row.priority === 'normal'");
     expect(page).toContain('sample_fulfillment_count');
     expect(page).toContain('送样记录进度');
-    expect(page).toContain('fulfillmentCount(detailTask)');
+    expect(page).toContain('sampledInfluencerCount(detailTask)');
+    expect(page).toContain('const sampleProgressCount = (row) => sampledInfluencerCount(row)');
+    expect(page).toContain('await refreshSampleInfluencer(sampleForm.influencer)');
+    expect(page).toContain('is_blacklisted: resolved.is_blacklisted');
+    expect(page).toContain('open_sample_statuses: resolved.open_sample_statuses || []');
+    expect(page).toContain("statuses.add(createdStatus)");
     expect(page).not.toContain('送样完成校验');
     expect(page).toContain('status: form.status');
     expect(page).toContain('displayValue(row.notes)');
@@ -448,7 +454,14 @@ describe('influencer integration workspace contracts', () => {
   it('turns backend blacklist, terminal, and stale-version conflicts into actionable Chinese feedback', () => {
     expect(formatInfluencerError({ http_status: 409, message: 'Blacklisted influencers cannot be linked.' })).toContain('黑名单');
     expect(formatInfluencerError({ http_status: 400, message: 'Blacklisted influencers cannot receive samples.' })).toBe('该达人已被加入黑名单，不能执行本次操作。');
+    expect(formatInfluencerError({ http_status: 400, message: 'error message', data: { influencer: ['Blacklisted influencers cannot receive samples.'] } })).toBe('该达人已被加入黑名单，不能执行本次操作。');
     expect(formatInfluencerError({ http_status: 409, message: 'Completed outreach tasks cannot change targets.' })).toContain('终态');
     expect(formatInfluencerError({ http_status: 409, message: 'Workflow record was changed by another request.' })).toContain('409');
+  });
+
+  it('warns about open sample statuses without treating them as a blacklist block', () => {
+    expect(sampleDuplicateWarning({ open_sample_statuses: ['pending', 'shipped', 'overdue'] }))
+      .toBe('该达人已有待处理、已发货、已逾期送样记录，请确认是否重复送样；仍可继续创建。');
+    expect(sampleDuplicateWarning({ open_sample_statuses: ['completed', 'cancelled'] })).toBe('');
   });
 });

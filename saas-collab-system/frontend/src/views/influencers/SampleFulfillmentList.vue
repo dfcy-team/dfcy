@@ -142,6 +142,7 @@
               <el-option v-for="influencer in influencerOptions" :key="influencer.id" :label="influencerLabel(influencer)" :value="influencer.id" />
             </el-select>
             <el-alert v-if="selectedInfluencer?.is_blacklisted" class="blacklist-alert" type="error" :closable="false" title="该达人在黑名单中，不能保存送样。" />
+            <el-alert v-else-if="duplicateSampleWarning" class="blacklist-alert" type="warning" :closable="false" :title="duplicateSampleWarning" />
           </el-form-item>
           <el-form-item label="达人 ID">
             <el-input :model-value="displayValue(selectedInfluencer?.id)" readonly />
@@ -248,6 +249,7 @@ import {
   FULFILLMENT_STATUS_LABELS,
   restoreSampleFulfillment,
   resolveOrCreateInfluencer,
+  sampleDuplicateWarning,
   statusLabel,
   updateSampleFulfillment
 } from '../../api/influencers';
@@ -308,6 +310,7 @@ const hasValue = (value) => value !== undefined && value !== null && value !== '
 const sampleInfluencerName = (row) => creatorHandleFirst(row);
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
+const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedInfluencer.value));
 const todayLabel = (() => {
   const today = new Date();
   const pad = (value) => String(value).padStart(2, '0');

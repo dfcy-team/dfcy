@@ -4,7 +4,7 @@ from io import StringIO
 from datetime import timedelta
 
 from django.db import IntegrityError, models, transaction
-from django.db.models import Exists, Max, OuterRef, Prefetch, Q
+from django.db.models import BooleanField, Case, Exists, Max, OuterRef, Prefetch, Q, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -176,6 +176,49 @@ def _query_bool(value, *, field):
     raise ValidationError({field: "Expected true or false."})
 
 
+def _with_open_sample_statuses(queryset, *, tenant):
+    """Annotate candidate profiles without leaking or scanning other tenants."""
+    direct_samples = SampleFulfillment.objects.filter(
+        tenant=tenant,
+        is_deleted=False,
+        influencer_id=OuterRef("pk"),
+    )
+    tiktok_identity_samples = SampleFulfillment.objects.filter(
+        tenant=tenant,
+        is_deleted=False,
+        influencer__platform__iexact="TikTok",
+        influencer__handle__iexact=OuterRef("handle"),
+    )
+
+    def status_exists(status):
+        return Case(
+            When(
+                Q(platform__iexact="TikTok") & ~Q(handle=""),
+                then=Exists(tiktok_identity_samples.filter(status=status)),
+            ),
+            default=Exists(direct_samples.filter(status=status)),
+            output_field=BooleanField(),
+        )
+
+    return queryset.annotate(
+        has_pending_sample=status_exists(SampleFulfillment.Status.PENDING),
+        has_shipped_sample=status_exists(SampleFulfillment.Status.SHIPPED),
+        has_overdue_sample=status_exists(SampleFulfillment.Status.OVERDUE),
+    )
+
+
+def _open_sample_statuses(influencer):
+    return [
+        status
+        for status, attribute in (
+            (SampleFulfillment.Status.PENDING, "has_pending_sample"),
+            (SampleFulfillment.Status.SHIPPED, "has_shipped_sample"),
+            (SampleFulfillment.Status.OVERDUE, "has_overdue_sample"),
+        )
+        if bool(getattr(influencer, attribute, False))
+    ]
+
+
 def _influencer_candidates(queryset, *, limit, include_handle=False):
     rows = []
     seen = set()
@@ -197,6 +240,7 @@ def _influencer_candidates(queryset, *, limit, include_handle=False):
             "display_name": getattr(profile, "display_name", "") or influencer.name,
             "platform": influencer.platform, "status": influencer.status,
             "is_blacklisted": bool(influencer.is_blacklisted),
+            "open_sample_statuses": _open_sample_statuses(influencer),
         }
         if include_handle:
             row["handle"] = handle
@@ -503,11 +547,11 @@ class InfluencerResolveView(APIView):
         ).strip()
         query = normalize_tiktok_username(raw_query)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        queryset = Influencer.objects.filter(
+        queryset = _with_open_sample_statuses(Influencer.objects.filter(
             tenant=request.user.tenant,
             platform__iexact="TikTok",
             status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery))
+        ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant)
         if query and is_valid_tiktok_username(query):
             queryset = queryset.filter(handle__icontains=query)
         rows = _influencer_candidates(queryset, limit=50, include_handle=True)
@@ -574,6 +618,10 @@ class InfluencerResolveView(APIView):
                 )
 
         is_blacklisted = influencer_has_active_restriction(influencer)
+        resolved_influencer = _with_open_sample_statuses(
+            Influencer.objects.filter(pk=influencer.pk, tenant=request.user.tenant),
+            tenant=request.user.tenant,
+        ).get()
         payload = {
             "id": influencer.id,
             "code": influencer.code,
@@ -582,6 +630,7 @@ class InfluencerResolveView(APIView):
             "platform": influencer.platform,
             "status": influencer.status,
             "is_blacklisted": is_blacklisted,
+            "open_sample_statuses": _open_sample_statuses(resolved_influencer),
             "created": created,
         }
         return success_response(payload, status=201 if created else 200)
@@ -711,10 +760,10 @@ class OutreachTaskOptionsView(APIView):
         }
         if include_influencers:
             blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-            influencers = Influencer.objects.filter(
+            influencers = _with_open_sample_statuses(Influencer.objects.filter(
                 tenant=request.user.tenant,
                 status=Influencer.Status.ACTIVE,
-            ).annotate(is_blacklisted=Exists(blacklist_subquery))
+            ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant)
             candidates = _influencer_candidates(
                 influencers,
                 limit=500,
@@ -743,10 +792,10 @@ class SampleFulfillmentOptionsView(APIView):
         require_all_scope(request.user, self.read_permission_code)
         search = request.query_params.get("search", "").strip()
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        influencers = Influencer.objects.filter(
+        influencers = _with_open_sample_statuses(Influencer.objects.filter(
             tenant=request.user.tenant,
             status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery))
+        ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant)
         normalized_search = normalize_tiktok_username(search)
         if search:
             if is_valid_tiktok_username(normalized_search):
