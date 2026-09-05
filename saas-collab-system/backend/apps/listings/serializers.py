@@ -191,6 +191,7 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
     country_code = serializers.CharField(source="site.country_code", read_only=True, allow_null=True)
     internal_sku_code = serializers.CharField(source="internal_sku.sku_code", read_only=True, allow_null=True)
     internal_legacy_sku_code = serializers.CharField(source="internal_sku.legacy_sku_code", read_only=True, allow_null=True)
+    mapping = serializers.SerializerMethodField()
 
     class Meta:
         model = PlatformProductDetail
@@ -200,8 +201,61 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
             "internal_sku", "internal_sku_code", "internal_legacy_sku_code", "title", "variant",
             "category_l1", "category_l2", "category_l3", "sku_prefix", "shop_abbr", "sales_status",
             "owner", "leader", "platform_created_at", "platform_updated_at", "source", "created_at", "updated_at",
+            "mapping",
         )
         read_only_fields = ("tenant", "created_at", "updated_at", "source")
+
+    def get_mapping(self, obj):
+        """Expose mapping workflow state only inside its own permission scope."""
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        from apps.permissions.services import check_user_permission
+
+        if not check_user_permission(user, "integrations.product_mapping.view"):
+            return None
+        prefetched_sentinel = object()
+        prefetched = getattr(obj, "_authorized_marketplace_mapping", prefetched_sentinel)
+        if prefetched is not prefetched_sentinel:
+            # ``to_attr`` for a reverse OneToOne relation is a single model
+            # instance (or None), while older queryset code may still hand us
+            # a one-item list.  Handle both without falling back to an
+            # unscoped reverse lookup when the authorized prefetch found no
+            # visible relation.
+            if isinstance(prefetched, (list, tuple)):
+                mapping = prefetched[0] if prefetched else None
+            else:
+                mapping = prefetched
+        else:
+            try:
+                mapping = obj.marketplace_mapping
+            except Exception:  # reverse one-to-one is absent for unmapped details
+                mapping = None
+            if mapping is not None:
+                from apps.integrations.models import MarketplaceProductMapping
+                from apps.permissions.ui_p6_scopes import filter_product_mappings
+
+                authorized = filter_product_mappings(
+                    user,
+                    MarketplaceProductMapping.objects.filter(
+                        tenant=user.tenant,
+                        pk=mapping.pk,
+                    ),
+                    "integrations.product_mapping.view",
+                )
+                if not authorized.exists():
+                    return None
+        if mapping is None:
+            return None
+        return {
+            "id": mapping.id,
+            "status": mapping.status,
+            "sku_id": mapping.sku_id,
+            "sku_code": mapping.sku.sku_code if mapping.sku_id and mapping.sku else None,
+            "confidence": mapping.confidence,
+            "result_code": mapping.result_code,
+            "manually_confirmed": mapping.manually_confirmed,
+        }
 
     def validate(self, attrs):
         request = self.context.get("request")

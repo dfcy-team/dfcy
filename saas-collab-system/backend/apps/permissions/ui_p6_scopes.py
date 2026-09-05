@@ -1,6 +1,6 @@
 import re
 
-from django.db.models import Q
+from django.db.models import F, Q, Subquery
 
 from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied
@@ -348,41 +348,32 @@ def filter_warehouse_authorizations(user, queryset, permission_code):
 
 
 def filter_store_mappings(user, queryset, permission_code):
-    from apps.masterdata.models import StoreMaster
+    """Filter store mappings through their authorization scope.
 
-    configs = permission_scope_configs(
+    A store mapping is a downstream binding of a marketplace authorization;
+    its visibility must therefore inherit the authorization's complete
+    integration scope (platform, environment, region, config and store).
+    Reusing the authorization helper preserves its fail-closed handling for
+    unsupported ``resource_types`` and its AND-within/OR-across semantics.
+    """
+    from apps.integrations.models import MarketplaceStoreAuthorization
+
+    queryset = queryset.filter(tenant=user.tenant)
+    authorizations = filter_store_authorizations(
         user,
+        MarketplaceStoreAuthorization.objects.all(),
         permission_code,
-        {"platforms", "store_ids"},
-        allowed_keys=INTEGRATION_SCOPE_KEYS,
+    ).filter(
+        # Historical rows must not gain visibility merely because their
+        # authorization FK is in scope while the denormalized identity points
+        # at another tenant/store/platform.
+        tenant=user.tenant,
     )
-    if configs is None:
-        return queryset
-    for config in configs:
-        if "platforms" in config:
-            _validate_non_empty_string_values(config["platforms"], "Store mapping scope has an invalid platform.")
-            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
-                _invalid_scope("Store mapping scope contains an unsupported platform.")
-        if "store_ids" in config:
-            _validate_positive_int_values(config["store_ids"], "Store mapping scope has an invalid store identifier.")
-            authorized_store_count = StoreMaster.objects.filter(
-                tenant=user.tenant,
-                id__in=set(config["store_ids"]),
-            ).count()
-            if authorized_store_count != len(set(config["store_ids"])):
-                raise DataScopeDenied(
-                    "Store mapping scope exceeds the current tenant.",
-                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
-                )
-    allowed = Q(pk__in=[])
-    for config in configs:
-        condition = Q()
-        if "platforms" in config:
-            condition &= Q(platform__in=config["platforms"])
-        if "store_ids" in config:
-            condition &= Q(store_id__in=config["store_ids"])
-        allowed |= condition
-    return queryset.filter(allowed).distinct()
+    return queryset.filter(
+        authorization_id__in=Subquery(authorizations.values("pk")),
+        platform=F("authorization__platform"),
+        store_id=F("authorization__store_id"),
+    ).distinct()
 
 
 def integration_values_allowed(
@@ -425,30 +416,121 @@ def integration_values_allowed(
 
 
 def filter_product_mappings(user, queryset, permission_code):
-    configs = permission_scope_configs(
+    """Filter product mappings through the scoped store-mapping chain."""
+    from apps.integrations.models import MarketplaceStoreMapping
+
+    queryset = queryset.filter(tenant=user.tenant)
+    store_mappings = filter_store_mappings(
         user,
+        MarketplaceStoreMapping.objects.all(),
         permission_code,
-        {"platforms", "store_ids"},
-        allowed_keys=INTEGRATION_SCOPE_KEYS,
     )
+    return queryset.filter(
+        store_mapping_id__in=Subquery(store_mappings.values("pk")),
+        platform=F("store_mapping__platform"),
+    ).distinct()
+
+
+def _platform_product_detail_scope_configs(user, permission_code):
+    """Return validated platform/store scopes for platform product details.
+
+    Platform product detail rows carry both a platform FK and a store FK.  A
+    custom scope containing both dimensions therefore means the same row must
+    match both values; it must not become a broad platform OR store filter.
+    Empty custom scope objects and empty dimension lists deliberately produce
+    no usable config so callers fail closed with ``queryset.none()``.
+    """
+
+    scopes = get_permission_data_scopes(user, permission_code)
+    if not scopes:
+        raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
+    if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
+        return None
+
+    configs = []
+    allowed_keys = {"platforms", "store_ids"}
+    for scope in scopes:
+        if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
+            raise DataScopeDenied(
+                "The declared permission uses an unsupported data scope type.",
+                error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED,
+            )
+        raw_config = scope.get("config")
+        if raw_config is None:
+            raw_config = {}
+        if not isinstance(raw_config, dict):
+            _invalid_scope("Platform product detail scope must be an object.")
+        unknown_keys = set(raw_config) - allowed_keys
+        if unknown_keys:
+            _invalid_scope("Platform product detail scope contains unsupported keys.")
+        if not raw_config:
+            continue
+
+        normalized = {}
+        empty_dimension = False
+        if "platforms" in raw_config:
+            values = raw_config["platforms"]
+            if not isinstance(values, list):
+                _invalid_scope("Platform product detail scope platforms must be a list.")
+            if not values:
+                empty_dimension = True
+            else:
+                _validate_non_empty_string_values(
+                    values,
+                    "Platform product detail scope has an invalid platform identifier.",
+                )
+                normalized["platforms"] = [str(value).strip().lower() for value in values]
+        if "store_ids" in raw_config:
+            values = raw_config["store_ids"]
+            if not isinstance(values, list):
+                _invalid_scope("Platform product detail scope store_ids must be a list.")
+            if not values:
+                empty_dimension = True
+            else:
+                _validate_positive_int_values(
+                    values,
+                    "Platform product detail scope has an invalid store identifier.",
+                )
+                normalized["store_ids"] = values
+        if not normalized or empty_dimension:
+            continue
+        configs.append(normalized)
+    return configs
+
+
+def filter_platform_product_details(user, queryset, permission_code):
+    """Filter platform product details by tenant and aligned platform/store scope.
+
+    ``ALL`` is tenant-wide. ``CUSTOM`` scopes are ORed across role scopes and
+    ANDed within one scope. A missing or empty applicable custom scope returns
+    an empty queryset, keeping the page and detail APIs fail closed.
+    """
+
+    queryset = queryset.filter(tenant=user.tenant)
+    configs = _platform_product_detail_scope_configs(user, permission_code)
     if configs is None:
         return queryset
-    for config in configs:
-        if "platforms" in config:
-            _validate_non_empty_string_values(config["platforms"], "Product mapping scope has an invalid platform.")
-            if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
-                _invalid_scope("Product mapping scope contains an unsupported platform.")
-        if "store_ids" in config:
-            _validate_positive_int_values(config["store_ids"], "Product mapping scope has an invalid store identifier.")
+    if not configs:
+        return queryset.none()
+
     allowed = Q(pk__in=[])
     for config in configs:
         condition = Q()
         if "platforms" in config:
-            condition &= Q(platform__in=config["platforms"])
+            platforms = config["platforms"]
+            condition &= (
+                Q(platform__platform_type__in=platforms)
+                | Q(platform__code__in=platforms)
+            )
         if "store_ids" in config:
-            condition &= Q(store_mapping__store_id__in=config["store_ids"])
+            condition &= Q(store_id__in=config["store_ids"])
         allowed |= condition
     return queryset.filter(allowed).distinct()
+
+
+# Keep the longer queryset-oriented alias available to API modules that use
+# the naming convention of the other scope helpers.
+filter_platform_product_detail_queryset = filter_platform_product_details
 
 
 def filter_sync_jobs(user, queryset, permission_code):

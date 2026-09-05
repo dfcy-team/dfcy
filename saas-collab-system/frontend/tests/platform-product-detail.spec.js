@@ -74,4 +74,31 @@ describe('平台商品明细编辑与批量修改契约', () => {
     expect(page).toContain('importSummary.errors.slice(0, 5)');
     expect(page).not.toContain('JSON.stringify(importResult');
   });
+
+  it('在窄屏下让页面操作区换行，避免导入按钮被裁切', () => {
+    expect(page).toContain(':deep(.app-page__actions)');
+    expect(page).toContain('flex-wrap: wrap');
+    expect(page).toContain(':deep(.app-page__actions .el-button)');
+  });
+
+  it('只对有映射权限的角色显示状态列，并提供未归集历史入口', () => {
+    expect(page).toContain('<el-table-column v-if="canViewMapping && integrationEnabled" label="SKU 映射状态"');
+    expect(page).toContain('未归集历史');
+    expect(page).toContain('<ProductMappingPanel v-if="unlinkedHistoryVisible" standalone initial-status="unlinked" />');
+    expect(page).toContain('row.store_id || row.store');
+  });
+
+  it('受控明细编辑只提交变化字段并锁定身份与 SKU 字段', () => {
+    expect(page).toContain('const editSnapshot = ref(null);');
+    expect(page).toContain('const editControlled = computed');
+    expect(page).toContain(':disabled="editControlled"');
+    expect(page).toContain('if (editControlled.value && controlledEditFields.has(field)) continue;');
+    expect(page).toContain('value !== original[field]');
+    expect(page).toMatch(/async function saveEdit\(\)[\s\S]*?try \{[\s\S]*?finally \{\s+editSaving\.value = false;/);
+  });
+
+  it('缺少映射摘要时保持中性状态，不猜测为待映射', () => {
+    expect(page).toContain("return filters.mapping_status === 'unmapped' ? 'unmapped' : 'unknown';");
+    expect(page).toContain("unknown: '未获取映射状态'");
+  });
 });

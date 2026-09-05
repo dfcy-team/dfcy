@@ -518,6 +518,10 @@ class StoreMappingUpdateSerializer(serializers.Serializer):
 class MarketplaceProductMappingSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     store_mapping_id = serializers.IntegerField(read_only=True)
+    store_id = serializers.IntegerField(source="store_mapping.store_id", read_only=True, allow_null=True)
+    store_code = serializers.CharField(source="store_mapping.store.code", read_only=True, allow_null=True)
+    store_name = serializers.CharField(source="store_mapping.store.name", read_only=True, allow_null=True)
+    platform_detail_id = serializers.IntegerField(read_only=True, allow_null=True)
     product_id = serializers.IntegerField(read_only=True)
     sku_id = serializers.IntegerField(read_only=True)
     sku_code = serializers.CharField(source="sku.sku_code", read_only=True, default=None)
@@ -529,6 +533,10 @@ class MarketplaceProductMappingSerializer(serializers.ModelSerializer):
             "tenant_id",
             "platform",
             "store_mapping_id",
+            "store_id",
+            "store_code",
+            "store_name",
+            "platform_detail_id",
             "platform_product_id",
             "platform_variant_id",
             "platform_sku",
@@ -549,9 +557,13 @@ class MarketplaceProductMappingSerializer(serializers.ModelSerializer):
 
 
 class ProductMappingCreateSerializer(serializers.Serializer):
-    store_mapping_id = serializers.IntegerField(min_value=1)
-    platform_product_id = serializers.CharField(max_length=160)
-    platform_variant_id = serializers.CharField(max_length=160)
+    # New UI flows select a canonical platform detail and no longer make
+    # operators type internal numeric identities.  The legacy identity fields
+    # remain accepted for existing integrations and imports.
+    platform_detail_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    store_mapping_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    platform_product_id = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
+    platform_variant_id = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
     platform_sku = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
@@ -569,14 +581,38 @@ class ProductMappingCreateSerializer(serializers.Serializer):
         provided = forbidden.intersection({str(key).lower() for key in self.initial_data})
         if provided:
             raise serializers.ValidationError("Status, identity and confirmation fields are not accepted on create.")
+        if not attrs.get("platform_detail_id") and not attrs.get("store_mapping_id"):
+            raise serializers.ValidationError({"store_mapping_id": "选择平台商品明细后可省略店铺映射，否则必须提供店铺映射。"})
+        if not attrs.get("platform_detail_id") and not attrs.get("platform_variant_id"):
+            raise serializers.ValidationError({"platform_variant_id": "平台变体 ID 不能为空。"})
+        if not attrs.get("platform_detail_id") and not attrs.get("platform_product_id"):
+            raise serializers.ValidationError({"platform_product_id": "平台商品 ID 不能为空。"})
         return attrs
+
+
+class StrictBooleanField(serializers.BooleanField):
+    """Do not coerce strings/numbers across the manage/confirm boundary."""
+
+    def to_internal_value(self, data):
+        if not isinstance(data, bool):
+            self.fail("invalid", input=data)
+        return data
 
 
 class ProductMappingUpdateSerializer(serializers.Serializer):
     sku_id = serializers.IntegerField(min_value=1, required=False)
+    expected_internal_sku_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     confidence = serializers.IntegerField(min_value=0, max_value=100, required=False)
-    manually_confirmed = serializers.BooleanField(required=False, default=False)
+    manually_confirmed = StrictBooleanField(required=False, default=False)
+    replace_existing = StrictBooleanField(required=False, default=False)
     status = serializers.ChoiceField(choices=[MarketplaceProductMapping.Status.INACTIVE], required=False)
+
+    def validate(self, attrs):
+        if attrs.get("status") == MarketplaceProductMapping.Status.INACTIVE and attrs.get("manually_confirmed") is True:
+            raise serializers.ValidationError("停用和人工确认不能在同一次请求中提交。")
+        if attrs.get("replace_existing") is True and attrs.get("manually_confirmed") is not True:
+            raise serializers.ValidationError("替换已有 SKU 仅允许与人工确认同时提交。")
+        return attrs
 
 
 class IntegrationAuditLogSerializer(serializers.ModelSerializer):

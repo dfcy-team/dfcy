@@ -9,6 +9,7 @@
     <template #action><el-button :loading="loading" @click="load">刷新</el-button></template>
 
     <section class="toolbar" aria-label="同步异常筛选">
+      <el-tag v-if="route.query.store_id" effect="plain">店铺：{{ route.query.store_name || route.query.store_id }}</el-tag>
       <el-select v-model="status" clearable placeholder="全部状态" @change="applyFilters">
         <el-option label="未确认" value="open" />
         <el-option label="已确认" value="acknowledged" />
@@ -107,7 +108,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import { fetchUsers } from '../../api/systemAdmin';
@@ -116,6 +118,7 @@ import { useMock } from '../../api/request';
 import { actOnSyncAlertIncident, fetchSyncAlertIncidentRetryPreview, fetchSyncAlertIncidents, retrySyncAlertIncident } from '../../api/integrations';
 
 const auth = useAuthStore();
+const route = useRoute();
 const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
 const error = ref('');
@@ -147,7 +150,10 @@ async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const response = await fetchSyncAlertIncidents({ status: status.value });
+    const response = await fetchSyncAlertIncidents({
+      status: status.value,
+      ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
+    });
     capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded');
     if (response?.success) rows.value = responseRows(response);
     else { rows.value = []; error.value = response?.message || '读取同步异常失败。'; }
@@ -161,6 +167,7 @@ async function load() {
 }
 function applyFilters() { load(); }
 function resetFilters() { status.value = ''; applyFilters(); }
+watch(() => route.query.store_id, load);
 async function loadAssignees() {
   if (!canViewUsers.value || assigneeOptions.value.length) return;
   assigneeLoading.value = true;

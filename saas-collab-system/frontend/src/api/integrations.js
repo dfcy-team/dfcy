@@ -1,5 +1,9 @@
 import { requestWithMockFallback } from './request';
 import {
+  mockStoreMappings, mockStoreMappingDetail, mockStoreMappingOptions, mockCreateStoreMapping, mockUpdateStoreMapping,
+  mockProductMappings, mockProductMappingDetail, mockProductMappingOptions, mockCreateProductMapping, mockUpdateProductMapping
+} from '../mock/mappings';
+import {
   mockApiSyncLogs,
   mockApiSyncTasks,
   mockIntegrationConfigDetail,
@@ -33,56 +37,6 @@ import {
   mockRollbackProductionIntegrationSettingsVersion
 } from '../mock/productionSettings';
 
-// These fixtures keep the new operational pages useful in the local mock
-// environment while preserving the production API contract.  They contain
-// only identifiers and redacted metadata; no platform credential is ever
-// embedded in the frontend bundle.
-const mockStoreMappingRows = [
-  {
-    id: 301,
-    tenant_id: 'mock-tenant-001',
-    platform: 'shopee',
-    store_id: 1,
-    store_code: 'demo-store-sg',
-    store_name: '新加坡示例店铺',
-    authorization_id: 201,
-    platform_store_id: 'masked-external-store-001',
-    region: 'SG',
-    timezone: 'Asia/Singapore',
-    currency: 'SGD',
-    status: 'active',
-    mapping_source: 'oauth_callback',
-    mapped_by_id: 1,
-    mapped_at: '2026-09-01T09:00:00Z',
-    last_verified_at: '2026-09-01T09:00:00Z',
-    created_at: '2026-09-01T09:00:00Z',
-    updated_at: '2026-09-01T09:00:00Z'
-  }
-];
-
-const mockProductMappingRows = [
-  {
-    id: 401,
-    tenant_id: 'mock-tenant-001',
-    platform: 'shopee',
-    store_mapping_id: 301,
-    platform_product_id: 'masked-product-001',
-    platform_variant_id: 'masked-variant-001',
-    platform_sku: 'DEMO-SKU-001',
-    product_id: 1,
-    sku_id: 11,
-    sku_code: 'SKU-DEMO-001',
-    status: 'suggested',
-    mapping_source: 'suggested',
-    confidence: 92,
-    manually_confirmed: false,
-    result_code: 'candidate_match',
-    first_seen_at: '2026-09-01T09:10:00Z',
-    last_verified_at: null,
-    created_at: '2026-09-01T09:10:00Z',
-    updated_at: '2026-09-01T09:10:00Z'
-  }
-];
 
 const mockIntegrationAuditRows = [
   {
@@ -106,12 +60,6 @@ const mockCollectionResponse = (rows) => ({
   data: { count: rows.length, results: rows.map((row) => ({ ...row })) }
 });
 
-const mockWriteResponse = (payload, id = null) => ({
-  success: true,
-  code: 'OK',
-  message: 'Mock操作已记录',
-  data: { ...(id == null ? {} : { id }), ...payload, api_status: 'mock' }
-});
 
 export const fetchIntegrationConfigs = () =>
   requestWithMockFallback(
@@ -319,9 +267,9 @@ export const fetchSyncAlertIncidents = (filters = {}) => {
     {
       method: 'get',
       url: '/api/internal/integrations/sync-alert-incidents/',
-      params: { status: params.status || '' }
+      params: { status: params.status || '', ...(params.store_id ? { store_id: params.store_id } : {}) }
     },
-    () => mockSyncAlertIncidents(params.status || ''),
+    () => mockSyncAlertIncidents(params),
     'integrations.sync_alert_incidents'
   );
 };
@@ -548,62 +496,68 @@ export const updateConnectionCapabilities = (authorizationId, capabilities) => r
 );
 
 export const fetchStoreMappings = (params = {}) => requestWithMockFallback(
-  { method: 'get', url: '/api/internal/integrations/store-mappings/', params },
-  () => mockCollectionResponse(mockStoreMappingRows),
+  { method: 'get', url: '/api/internal/integrations/store-mappings/', params, noMockFallback: true },
+  () => mockStoreMappings(params),
   'integrations.store_mappings'
 );
 
 export const fetchStoreMappingDetail = (mappingId) => requestWithMockFallback(
-  { method: 'get', url: `/api/internal/integrations/store-mappings/${mappingId}/` },
-  () => {
-    const row = mockStoreMappingRows.find((item) => String(item.id) === String(mappingId));
-    return row ? mockWriteResponse(row, row.id) : { success: false, code: 'NOT_FOUND', message: '店铺映射不存在', data: null };
-  },
+  { method: 'get', url: `/api/internal/integrations/store-mappings/${mappingId}/`, noMockFallback: true },
+  () => mockStoreMappingDetail(mappingId),
   'integrations.store_mappings.detail'
 );
 
 export const createStoreMapping = (payload = {}) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/integrations/store-mappings/', data: payload },
-  () => mockWriteResponse(payload, Math.max(...mockStoreMappingRows.map((item) => item.id), 300) + 1),
+  () => mockCreateStoreMapping(payload),
   'integrations.store_mappings.create'
 );
 
 export const updateStoreMapping = (mappingId, payload = {}) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/integrations/store-mappings/${mappingId}/`, data: payload },
-  () => mockWriteResponse(payload, mappingId),
+  () => mockUpdateStoreMapping(mappingId, payload),
   'integrations.store_mappings.update'
 );
 
 export const fetchProductMappings = (params = {}) => requestWithMockFallback(
-  { method: 'get', url: '/api/internal/integrations/product-mappings/', params },
-  () => mockCollectionResponse(mockProductMappingRows),
+  { method: 'get', url: '/api/internal/integrations/product-mappings/', params, noMockFallback: true },
+  () => mockProductMappings(params),
   'integrations.product_mappings'
 );
 
 export const fetchProductMappingDetail = (mappingId) => requestWithMockFallback(
-  { method: 'get', url: `/api/internal/integrations/product-mappings/${mappingId}/` },
-  () => {
-    const row = mockProductMappingRows.find((item) => String(item.id) === String(mappingId));
-    return row ? mockWriteResponse(row, row.id) : { success: false, code: 'NOT_FOUND', message: '商品映射不存在', data: null };
-  },
+  { method: 'get', url: `/api/internal/integrations/product-mappings/${mappingId}/`, noMockFallback: true },
+  () => mockProductMappingDetail(mappingId),
   'integrations.product_mappings.detail'
 );
 
 export const createProductMapping = (payload = {}) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/integrations/product-mappings/', data: payload },
-  () => mockWriteResponse(payload, Math.max(...mockProductMappingRows.map((item) => item.id), 400) + 1),
+  () => mockCreateProductMapping(payload),
   'integrations.product_mappings.create'
 );
 
 export const updateProductMapping = (mappingId, payload = {}) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/integrations/product-mappings/${mappingId}/`, data: payload },
-  () => mockWriteResponse(payload, mappingId),
+  () => mockUpdateProductMapping(mappingId, payload),
   'integrations.product_mappings.update'
 );
 
 export const confirmProductMapping = (mappingId, payload = {}) => updateProductMapping(
   mappingId,
   { ...payload, manually_confirmed: true }
+);
+
+export const fetchStoreMappingOptions = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/integrations/store-mappings/options/', params, noMockFallback: true },
+  () => mockStoreMappingOptions(params),
+  'integrations.store_mapping.options'
+);
+
+export const fetchProductMappingOptions = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/integrations/product-mappings/options/', params, noMockFallback: true },
+  () => mockProductMappingOptions(params),
+  'integrations.product_mapping.options'
 );
 
 // An unmapped product may only be registered as a suggestion first. Keeping
