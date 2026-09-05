@@ -4,7 +4,7 @@
     eyebrow="MASTER DATA"
     title="店铺档案"
     subtitle="维护平台、站点、业务身份、履约方式及建联信息。"
-    boundary-note="平台站点档案不是授权连接；账号、Token 和凭据仍由独立授权中心管理。"
+    boundary-note="在店铺行内打开“API 接入”，选择已就绪配置并发起授权；开发者凭据仍统一在“连接配置”中维护。"
     entity-label="店铺"
     :loader="fetchStores"
     :columns="columns"
@@ -30,11 +30,11 @@
     </template>
     <template #row-actions="{ row }">
       <el-button
-        v-if="integrationViewAccess.visible"
+        v-if="storeApiViewAccess.visible"
         link
         type="primary"
-        :disabled="integrationViewAccess.disabled"
-        :title="integrationViewAccess.reason"
+        :disabled="storeApiViewAccess.disabled"
+        :title="storeApiViewAccess.reason"
         @click.stop="openApiAccess(row)"
       >API 接入</el-button>
       <el-button
@@ -221,6 +221,19 @@ const migrationRows = ref([]); const migrationSummary = ref({}); const selectedM
 const masterDataManageAccess = computed(() => getActionAccess(auth, { permission: 'masterdata.manage', unauthorizedBehavior: 'disable' }));
 const integrationViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.view', unauthorizedBehavior: 'disable' }));
 const storeViewAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.view', unauthorizedBehavior: 'disable' }));
+// `hasPermission(...codes)` is an OR operation, so combine the two
+// permissions explicitly for the store API entry point.
+const storeApiViewAccess = computed(() => {
+  const allowed = integrationViewAccess.value.allowed && storeViewAccess.value.allowed;
+  return {
+    allowed,
+    visible: integrationViewAccess.value.visible && storeViewAccess.value.visible,
+    disabled: !allowed,
+    reason: integrationViewAccess.value.allowed
+      ? storeViewAccess.value.reason
+      : integrationViewAccess.value.reason,
+  };
+});
 const storeAuthorizeAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.authorize', unauthorizedBehavior: 'disable' }));
 const capabilitySaveAccess = computed(() => storeAuthorizeAccess.value);
 const migrationManageAccess = masterDataManageAccess;
@@ -256,8 +269,11 @@ function applyPlatformSite(value, form) {
 }
 
 function openApiAccess(row) {
-  if (!integrationViewAccess.value.allowed) {
-    ElMessage.warning(integrationViewAccess.value.reason || '当前角色无权查看店铺 API 接入');
+  if (!integrationViewAccess.value.allowed || !storeViewAccess.value.allowed) {
+    const reason = integrationViewAccess.value.allowed
+      ? storeViewAccess.value.reason
+      : integrationViewAccess.value.reason;
+    ElMessage.warning(reason || '当前角色无权查看店铺 API 接入');
     return;
   }
   selectedStore.value = row;

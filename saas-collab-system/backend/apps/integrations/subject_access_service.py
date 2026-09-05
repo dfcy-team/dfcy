@@ -3,6 +3,8 @@ from django.db import connection
 from django.db.models import Max
 from django.shortcuts import get_object_or_404
 
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied
 from apps.masterdata.models import (
     StoreMaster,
     WarehouseMaster,
@@ -10,7 +12,12 @@ from apps.masterdata.models import (
     WAREHOUSE_TYPE_TO_PLATFORM_TYPE,
 )
 from apps.permissions.ui_p2_scopes import filter_master_data
-from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_store_authorizations
+from apps.permissions.ui_p6_scopes import (
+    filter_integration_configs,
+    filter_store_authorizations,
+    integration_values_allowed,
+)
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 from .live_providers import integration_config_oauth_blockers
 from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, WarehouseAuthorization
@@ -20,6 +27,19 @@ from .platform_schema_service import integration_platform_key
 
 VISIBLE_CONFIG_STATUSES = {"configured", "verified", "active"}
 ACTIVE_AUTHORIZATION_STATUSES = {"authorized", "active"}
+UNKNOWN_REGION_SENTINEL = "__UNKNOWN__"
+
+
+def _subject_regions(country_code):
+    """Return one concrete region for subject-scoped permission checks.
+
+    An empty integration-config region list means that the config is global,
+    but it must not turn a concrete warehouse into a global permission
+    candidate.  A missing warehouse country is also denied when a role uses a
+    regional scope instead of being treated as an unconstrained candidate.
+    """
+    value = str(country_code or "").strip().upper()
+    return [value] if value else [UNKNOWN_REGION_SENTINEL]
 
 
 def _table_columns(table_name):
@@ -95,7 +115,98 @@ def _visible_configs(user, *, platform, country_code):
     ]
 
 
+def _store_visible_configs(user, *, platform, country_code, store_id):
+    """Return marketplace configs visible through both integration scopes.
+
+    The subject endpoint is mounted behind the generic integrations viewer,
+    but its response includes store authorization metadata.  Keep the two
+    permission domains separate and require the same concrete candidate to be
+    allowed by both before exposing a config to the page.
+    """
+    queryset = PlatformIntegrationConfig.objects.filter(
+        tenant=user.tenant,
+        platform=platform,
+    )
+    configs = [config for config in queryset if config.status in VISIBLE_CONFIG_STATUSES]
+    raw = _raw_map("integrations_platformintegrationconfig", ["id", "api_type"], [item.id for item in configs])
+    country_code = str(country_code or "").upper()
+    result = []
+    for config in configs:
+        config_regions = config.regions or []
+        if config_regions and country_code not in {str(region).upper() for region in config_regions}:
+            continue
+        candidate = {
+            "platform": config.platform,
+            "environment": config.environment,
+            "regions": config_regions or [country_code],
+            "config_id": config.id,
+            "store_id": store_id,
+        }
+        if not integration_values_allowed(user, "integrations.view", **candidate):
+            continue
+        if not integration_values_allowed(user, "integrations.store.view", **candidate):
+            continue
+        result.append((config, _api_type(config, raw.get(config.id, {}))))
+    return result
+
+
+def _warehouse_visible_configs(user, *, provider, country_code, warehouse_id):
+    """Return configs allowed by both generic and warehouse API scopes.
+
+    The generic ``integrations.view`` permission controls the page itself,
+    while ``integrations.warehouse.view`` controls the inventory resource.  A
+    config is only returned when the full candidate tuple is in both scopes;
+    checking only the provider or warehouse would allow a restricted config
+    to appear in the subject dialog.
+    """
+    queryset = PlatformIntegrationConfig.objects.filter(
+        tenant=user.tenant,
+        platform=provider,
+    )
+    configs = [config for config in queryset if config.status in VISIBLE_CONFIG_STATUSES]
+    raw = _raw_map("integrations_platformintegrationconfig", ["id", "api_type"], [item.id for item in configs])
+    country_code = str(country_code or "").upper()
+    result = []
+    for config in configs:
+        config_regions = config.regions or []
+        if config_regions and country_code not in {str(region).upper() for region in config_regions}:
+            continue
+        api_type = _api_type(config, raw.get(config.id, {}))
+        generic_candidate = {
+            "platform": config.platform,
+            "environment": config.environment,
+            # Global configs inherit the concrete warehouse region for
+            # permission evaluation.  Passing [] here would make
+            # _regions_fit_scope treat the config as globally visible.
+            "regions": config_regions or _subject_regions(country_code),
+            "config_id": config.id,
+            "resource_type": SyncJob.ResourceType.INVENTORY_SNAPSHOT,
+            "warehouse_id": warehouse_id,
+        }
+        if not integration_values_allowed(user, "integrations.view", **generic_candidate):
+            continue
+        warehouse_candidate = dict(generic_candidate)
+        # A global config (no regions) still has a concrete subject region for
+        # the warehouse permission.  This prevents a MY-scoped role from
+        # seeing a global config on an SG warehouse.
+        warehouse_candidate["regions"] = config_regions or _subject_regions(country_code)
+        if not integration_values_allowed(user, "integrations.warehouse.view", **warehouse_candidate):
+            continue
+        result.append((config, api_type))
+    return result
+
+
 def _store_access(user, subject_id):
+    if not check_user_permission(user, "integrations.store.view"):
+        raise DataScopeDenied(
+            "当前角色没有查看店铺 API 授权的权限。",
+            error_code=ErrorCode.PERMISSION_DENIED,
+        )
+    if not get_permission_data_scopes(user, "integrations.store.view"):
+        raise DataScopeDenied(
+            "店铺 API 授权查看权限尚未声明数据范围。",
+            error_code=ErrorCode.DATA_SCOPE_MISSING,
+        )
     subject = get_object_or_404(
         filter_master_data(
             user,
@@ -106,7 +217,12 @@ def _store_access(user, subject_id):
         pk=subject_id,
     )
     platform = str(subject.platform.platform_type or subject.platform.code).lower()
-    configs = _visible_configs(user, platform=platform, country_code=subject.country_code)
+    configs = _store_visible_configs(
+        user,
+        platform=platform,
+        country_code=subject.country_code,
+        store_id=subject.id,
+    )
     config_map = {config.id: (config, api_type) for config, api_type in configs}
     authorizations = list(
         filter_store_authorizations(
@@ -162,7 +278,15 @@ def _warehouse_bindings(user, subject, config_map):
             integration_config_id__in=config_map,
         ).order_by("-updated_at")
     )
-    last_runs = _last_run_map("warehouse_authorization_id", [row.id for row in rows])
+    sync_jobs = {
+        (job.warehouse_authorization_id, job.integration_config_id): job
+        for job in SyncJob.objects.filter(
+            tenant_id=user.tenant_id,
+            warehouse_authorization_id__in=[row.id for row in rows],
+            integration_config_id__in=list(config_map),
+            resource_type=SyncJob.ResourceType.INVENTORY_SNAPSHOT,
+        ).order_by("id")
+    }
     return [
         {
             "id": row.id,
@@ -174,7 +298,13 @@ def _warehouse_bindings(user, subject, config_map):
             "last_error_code": row.last_error_code,
             "api_type": config_map[row.integration_config_id][1],
             "account_alias": config_map[row.integration_config_id][0].account_alias,
-            "last_run_at": last_runs.get(row.id),
+            "has_sync_job": (row.id, row.integration_config_id) in sync_jobs,
+            "sync_job_id": sync_jobs[(row.id, row.integration_config_id)].id
+            if (row.id, row.integration_config_id) in sync_jobs
+            else None,
+            "last_run_at": sync_jobs[(row.id, row.integration_config_id)].last_run_at
+            if (row.id, row.integration_config_id) in sync_jobs
+            else None,
         }
         for row in rows
     ]
@@ -207,6 +337,21 @@ def _warehouse_provider(subject):
 
 
 def _warehouse_access(user, subject_id):
+    # The generic integrations viewer protects the page, but the warehouse
+    # subject API exposes inventory authorization metadata.  Require the
+    # concrete warehouse-view action even when the tenant has no managed
+    # config yet; otherwise an integrations.view-only role could enumerate a
+    # warehouse API subject shell.
+    if not check_user_permission(user, "integrations.warehouse.view"):
+        raise DataScopeDenied(
+            "当前角色没有查看仓库 API 授权的权限。",
+            error_code=ErrorCode.PERMISSION_DENIED,
+        )
+    if not get_permission_data_scopes(user, "integrations.warehouse.view"):
+        raise DataScopeDenied(
+            "仓库 API 授权查看权限尚未声明数据范围。",
+            error_code=ErrorCode.DATA_SCOPE_MISSING,
+        )
     subject = get_object_or_404(
         filter_master_data(
             user,
@@ -217,7 +362,33 @@ def _warehouse_access(user, subject_id):
         pk=subject_id,
     )
     provider = _warehouse_provider(subject)
-    configs = _visible_configs(user, platform=provider, country_code=subject.country_code)
+    configs = _warehouse_visible_configs(
+        user,
+        provider=provider,
+        country_code=subject.country_code,
+        warehouse_id=subject.id,
+    )
+    if not configs:
+        # An empty result is valid when the tenant has no visible config yet,
+        # but the subject shell still represents a concrete inventory API
+        # resource.  Always check that resource against both data scopes;
+        # otherwise a MY/warehouse-A role could enumerate an SG/warehouse-B
+        # shell whenever all configs are disabled or hidden.
+        base_candidate = {
+            "platform": provider,
+            "regions": _subject_regions(subject.country_code),
+            "resource_type": SyncJob.ResourceType.INVENTORY_SNAPSHOT,
+            "warehouse_id": subject.id,
+        }
+        if not integration_values_allowed(user, "integrations.view", **base_candidate) or not integration_values_allowed(
+            user,
+            "integrations.warehouse.view",
+            **base_candidate,
+        ):
+            raise DataScopeDenied(
+                "仓库 API 授权超出当前角色的数据范围。",
+                error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+            )
     config_map = {config.id: (config, api_type) for config, api_type in configs}
     return {
         "subject_type": "warehouse",

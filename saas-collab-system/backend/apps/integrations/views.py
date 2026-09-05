@@ -19,6 +19,7 @@ from apps.common.responses import paginated_data
 from apps.workflows.models import CollaborationEvent
 from apps.workflows.serializers import CollaborationEventSerializer
 from apps.workflows.services import receive_mock_collaboration_event
+from apps.masterdata.models import WarehouseMaster
 from apps.permissions.api_permissions import (
     IsIntegrationAuditViewer,
     IsIntegrationConfigCollectionUser,
@@ -38,6 +39,10 @@ from apps.permissions.api_permissions import (
     IsMarketplaceStoreMappingManager,
     IsMarketplaceStoreRevoker,
     IsMarketplaceStoreViewer,
+    IsWarehouseAuthorizationAuthorizer,
+    IsWarehouseAuthorizationCollectionUser,
+    IsWarehouseAuthorizationRevoker,
+    IsWarehouseAuthorizationViewer,
 )
 from apps.permissions.ui_p6_scopes import (
     filter_integration_configs,
@@ -47,7 +52,9 @@ from apps.permissions.ui_p6_scopes import (
     filter_sync_runs,
     integration_values_allowed,
     filter_store_authorizations,
+    filter_warehouse_authorizations,
 )
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 from .credential_service import (
     clear_config_secrets,
@@ -109,6 +116,8 @@ from .serializers import (
     SyncJobSerializer,
     SyncAlertIncidentSerializer,
     SyncRunSerializer,
+    WarehouseAuthorizationBindSerializer,
+    WarehouseAuthorizationSerializer,
     validate_marketplace_callback_url,
 )
 from .store_mapping_service import create_store_mapping, update_store_mapping
@@ -118,6 +127,11 @@ from .scheduler import calculate_next_run_at
 from .tasks import run_readonly_sync_job
 from .workspace_service import integration_workspace
 from .subject_access_service import subject_api_access
+from .warehouse_authorization_service import (
+    bind_warehouse_authorization,
+    revoke_warehouse_authorization as revoke_warehouse_authorization_record,
+    validate_warehouse_binding,
+)
 from .sync_alerts import acknowledge_incident, add_incident_note, assign_incident, resolve_incident
 from .production_settings import get_runtime_setting
 
@@ -138,6 +152,189 @@ def subject_api_access_detail(request):
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     return success_response(data)
+
+
+def _warehouse_authorization_queryset(request, permission_code):
+    return filter_warehouse_authorizations(
+        request.user,
+        WarehouseAuthorization.objects.filter(tenant=request.user.tenant).select_related(
+            "warehouse", "integration_config"
+        ),
+        permission_code,
+    )
+
+
+def _warehouse_binding_request_data(request, *, current=None):
+    if not isinstance(request.data, dict):
+        raise ValidationError("仓库 API 接入请求必须是 JSON 对象。")
+    reject_raw_credential_fields(request.data)
+    allowed_fields = {
+        "warehouse_id",
+        "integration_config_id",
+        "replace",
+        "expected_authorization_id",
+        "idempotency_key",
+    }
+    unsupported = set(request.data) - allowed_fields
+    if unsupported:
+        raise ValidationError("仓库 API 接入请求包含不支持的字段。")
+    payload = dict(request.data)
+    if current is not None:
+        supplied_warehouse_id = payload.get("warehouse_id")
+        if supplied_warehouse_id is not None:
+            try:
+                supplied_warehouse_id = int(supplied_warehouse_id)
+            except (TypeError, ValueError):
+                raise ValidationError({"warehouse_id": "仓库 ID 无效。"}) from None
+            if supplied_warehouse_id != current.warehouse_id:
+                raise ValidationError("换绑操作不能更改仓库主体。")
+        payload["warehouse_id"] = current.warehouse_id
+        payload["replace"] = True
+        payload["expected_authorization_id"] = current.id
+    serializer = WarehouseAuthorizationBindSerializer(data=payload)
+    serializer.is_valid(raise_exception=True)
+    header_key = str(request.headers.get("Idempotency-Key") or "").strip()
+    body_key = str(serializer.validated_data.get("idempotency_key") or "").strip()
+    if header_key and body_key and header_key != body_key:
+        raise ValidationError("请求头与请求体中的幂等键不一致。")
+    data = dict(serializer.validated_data)
+    data["idempotency_key"] = header_key or body_key
+    return data
+
+
+def _perform_warehouse_binding(request, data):
+    warehouse = get_object_or_404(
+        WarehouseMaster.objects.filter(tenant=request.user.tenant),
+        pk=data["warehouse_id"],
+    )
+    integration_config = get_object_or_404(
+        PlatformIntegrationConfig.objects.filter(tenant=request.user.tenant),
+        pk=data["integration_config_id"],
+    )
+    if not integration_values_allowed(
+        request.user,
+        "integrations.warehouse.authorize",
+        platform=integration_config.platform,
+        environment=integration_config.environment,
+        regions=integration_config.regions or [warehouse.country_code],
+        config_id=integration_config.id,
+        resource_type=SyncJob.ResourceType.INVENTORY_SNAPSHOT,
+        warehouse_id=warehouse.id,
+    ):
+        raise DataScopeDenied(
+            "仓库 API 接入操作超出当前角色的数据范围。",
+            error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+        )
+    # Run validation before entering the transition so callers receive a
+    # precise remediation message and no empty authorization is written.
+    validate_warehouse_binding(
+        actor=request.user,
+        warehouse=warehouse,
+        integration_config=integration_config,
+    )
+    authorization, idempotent, operation = bind_warehouse_authorization(
+        actor=request.user,
+        warehouse=warehouse,
+        integration_config=integration_config,
+        replace=data.get("replace", False),
+        expected_authorization_id=data.get("expected_authorization_id"),
+        idempotency_key=data.get("idempotency_key"),
+    )
+    return success_response(
+        {
+            "idempotent": idempotent,
+            "operation": operation,
+            "authorization": WarehouseAuthorizationSerializer(authorization).data,
+        },
+        status=200 if idempotent else 201,
+    )
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsWarehouseAuthorizationCollectionUser])
+def warehouse_authorization_collection(request):
+    if request.method == "GET":
+        allowed_query = {"page", "page_size", "warehouse_id", "integration_config_id", "status", "provider"}
+        if set(request.query_params) - allowed_query:
+            raise ValidationError("仓库 API 授权查询包含不支持的参数。")
+        queryset = _warehouse_authorization_queryset(request, "integrations.warehouse.view")
+        if request.query_params.get("warehouse_id"):
+            warehouse_id = positive_int(request.query_params["warehouse_id"], default=None)
+            if warehouse_id is None:
+                raise ValidationError({"warehouse_id": "仓库 ID 无效。"})
+            queryset = queryset.filter(warehouse_id=warehouse_id)
+        if request.query_params.get("integration_config_id"):
+            config_id = positive_int(request.query_params["integration_config_id"], default=None)
+            if config_id is None:
+                raise ValidationError({"integration_config_id": "接入配置 ID 无效。"})
+            queryset = queryset.filter(integration_config_id=config_id)
+        if request.query_params.get("status"):
+            status_value = str(request.query_params["status"]).strip()
+            if status_value not in WarehouseAuthorization.Status.values:
+                raise ValidationError({"status": "仓库 API 授权状态无效。"})
+            queryset = queryset.filter(status=status_value)
+        if request.query_params.get("provider"):
+            queryset = queryset.filter(provider=str(request.query_params["provider"]).strip())
+        page, page_size = pagination_query(request)
+        return success_response(
+            paginated_data(
+                request,
+                queryset,
+                WarehouseAuthorizationSerializer,
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    data = _warehouse_binding_request_data(request)
+    return _perform_warehouse_binding(request, data)
+
+
+@api_view(["GET"])
+@permission_classes([IsWarehouseAuthorizationViewer])
+def warehouse_authorization_detail(request, pk):
+    authorization = get_scoped_object_or_404(
+        _warehouse_authorization_queryset(request, "integrations.warehouse.view"),
+        pk=pk,
+    )
+    return success_response(WarehouseAuthorizationSerializer(authorization).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsWarehouseAuthorizationAuthorizer])
+def rebind_warehouse_authorization(request, pk):
+    current = get_scoped_object_or_404(
+        _warehouse_authorization_queryset(request, "integrations.warehouse.authorize").filter(
+            status=WarehouseAuthorization.Status.ACTIVE,
+        ),
+        pk=pk,
+    )
+    data = _warehouse_binding_request_data(request, current=current)
+    return _perform_warehouse_binding(request, data)
+
+
+@api_view(["POST"])
+@permission_classes([IsWarehouseAuthorizationRevoker])
+def revoke_warehouse_authorization(request, pk):
+    if not isinstance(request.data, dict):
+        raise ValidationError("撤销仓库 API 授权请求必须是 JSON 对象。")
+    reject_raw_credential_fields(request.data)
+    if set(request.data) - {"idempotency_key"}:
+        raise ValidationError("撤销仓库 API 授权请求包含不支持的字段。")
+    authorization = get_scoped_object_or_404(
+        _warehouse_authorization_queryset(request, "integrations.warehouse.revoke"),
+        pk=pk,
+    )
+    record, idempotent = revoke_warehouse_authorization_record(
+        actor=request.user,
+        authorization=authorization,
+    )
+    return success_response(
+        {
+            "idempotent": idempotent,
+            "authorization": WarehouseAuthorizationSerializer(record).data,
+        }
+    )
 
 
 @api_view(["GET"])
@@ -1091,11 +1288,24 @@ def _get_store_authorization_for_user(request, pk, permission_code):
     return get_scoped_object_or_404(queryset, pk=pk)
 
 
+def _get_store_authorization_for_permissions(request, pk, *permission_codes):
+    """Resolve a store authorization inside the intersection of scopes."""
+    queryset = MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant)
+    for permission_code in permission_codes:
+        queryset = filter_store_authorizations(request.user, queryset, permission_code)
+    return get_scoped_object_or_404(queryset, pk=pk)
+
+
 @api_view(["POST"])
 @permission_classes([IsMarketplaceStoreAuthorizer, IsMarketplaceCredentialRotator])
 def refresh_store_authorization(request, pk):
     reject_raw_credential_fields(request.data)
-    record = _get_store_authorization_for_user(request, pk, "integrations.credential.rotate")
+    record = _get_store_authorization_for_permissions(
+        request,
+        pk,
+        "integrations.store.authorize",
+        "integrations.credential.rotate",
+    )
     if record.platform == PlatformChoices.TIKTOK and request.data.get("confirmed") is not True:
         raise ValidationError({"confirmed": "TikTok Shop token refresh requires explicit confirmation."})
     record = refresh_marketplace_authorization(record, actor=request.user)
@@ -1476,7 +1686,102 @@ def check_integration_consistency(request, pk):
 @api_view(["POST"])
 @permission_classes([IsIntegrationLiveReadonlyRunner])
 def check_integration_readonly_connection(request, pk):
+    if not isinstance(request.data, dict):
+        raise ValidationError("只读检查请求必须是 JSON 对象。")
+    if set(request.data) - {"warehouse_authorization_id", "store_authorization_id"}:
+        raise ValidationError("只读检查请求包含不支持的字段。")
+    warehouse_authorization_id = request.data.get("warehouse_authorization_id")
+    store_authorization_id = request.data.get("store_authorization_id")
+    if warehouse_authorization_id is not None and store_authorization_id is not None:
+        raise ValidationError("只读检查请求不能同时指定店铺授权和仓库授权。")
+    if warehouse_authorization_id is not None:
+        warehouse_authorization_id = positive_int(warehouse_authorization_id, default=None)
+        if warehouse_authorization_id is None:
+            raise ValidationError({"warehouse_authorization_id": "仓库授权 ID 无效。"})
+    if store_authorization_id is not None:
+        store_authorization_id = positive_int(store_authorization_id, default=None)
+        if store_authorization_id is None:
+            raise ValidationError({"store_authorization_id": "店铺授权 ID 无效。"})
+    if warehouse_authorization_id is None and store_authorization_id is None:
+        raise ValidationError("只读检查请求必须指定一个具体的店铺授权或仓库授权。")
+
     config = _get_config_for_user(request, pk, "integrations.run_live_readonly")
+    warehouse_authorization = None
+    store_authorization = None
+    if warehouse_authorization_id is not None:
+        if not check_user_permission(request.user, "integrations.warehouse.view"):
+            raise DataScopeDenied(
+                "当前角色没有查看仓库 API 授权的权限。",
+                error_code=ErrorCode.PERMISSION_DENIED,
+            )
+        if not get_permission_data_scopes(request.user, "integrations.warehouse.view"):
+            raise DataScopeDenied(
+                "仓库 API 授权查看权限尚未声明数据范围。",
+                error_code=ErrorCode.DATA_SCOPE_MISSING,
+            )
+        warehouse_queryset = WarehouseAuthorization.objects.filter(
+            tenant=request.user.tenant,
+            integration_config=config,
+            status=WarehouseAuthorization.Status.ACTIVE,
+        )
+        warehouse_authorization = get_scoped_object_or_404(
+            filter_warehouse_authorizations(
+                request.user,
+                warehouse_queryset,
+                "integrations.warehouse.view",
+            ),
+            pk=warehouse_authorization_id,
+        )
+        job_queryset = SyncJob.objects.filter(
+            tenant=request.user.tenant,
+            integration_config=config,
+            warehouse_authorization=warehouse_authorization,
+            resource_type=SyncJob.ResourceType.INVENTORY_SNAPSHOT,
+        )
+    elif store_authorization_id is not None:
+        if not check_user_permission(request.user, "integrations.store.view"):
+            raise DataScopeDenied(
+                "当前角色没有查看店铺 API 授权的权限。",
+                error_code=ErrorCode.PERMISSION_DENIED,
+            )
+        if not get_permission_data_scopes(request.user, "integrations.store.view"):
+            raise DataScopeDenied(
+                "店铺 API 授权查看权限尚未声明数据范围。",
+                error_code=ErrorCode.DATA_SCOPE_MISSING,
+            )
+        store_queryset = MarketplaceStoreAuthorization.objects.filter(
+            tenant=request.user.tenant,
+            integration_config=config,
+            status=MarketplaceStoreAuthorization.Status.ACTIVE,
+        )
+        store_authorization = get_scoped_object_or_404(
+            filter_store_authorizations(
+                request.user,
+                store_queryset,
+                "integrations.store.view",
+            ),
+            pk=store_authorization_id,
+        )
+        job_queryset = SyncJob.objects.filter(
+            tenant=request.user.tenant,
+            integration_config=config,
+            store_authorization=store_authorization,
+            resource_type__in=(
+                SyncJob.ResourceType.SALES_ORDER,
+                SyncJob.ResourceType.REFUND_RETURN,
+            ),
+        )
+    # Subject authorization is complete only after the concrete binding and
+    # its candidate job have both been narrowed by the run scope.  Runtime
+    # switches and custody/adapter access intentionally happen afterwards.
+    job_queryset = filter_sync_jobs(
+        request.user,
+        job_queryset.select_related("integration_config"),
+        "integrations.run_live_readonly",
+    )
+    job = job_queryset.first()
+    if job is None:
+        raise ValidationError("当前配置没有可用于只读检查的已授权同步任务。")
     if get_runtime_setting("network", "mode", default="") != "approved-live-test":
         raise ValidationError("系统尚未启用生产平台只读网络模式；请由运维确认网络白名单后再检查。")
     if not get_runtime_setting("network", "readonly_sync_enabled", default=False):
@@ -1487,13 +1792,6 @@ def check_integration_readonly_connection(request, pk):
         get_custody_backend().retrieve_secret(config.credential_id)
     except CustodyError:
         raise ValidationError("开发者凭据无法读取，请通过“维护凭据”重新加密保存。") from None
-    job = filter_sync_jobs(
-        request.user,
-        SyncJob.objects.filter(tenant=request.user.tenant, integration_config=config).select_related("integration_config"),
-        "integrations.run_live_readonly",
-    ).filter(resource_type__in=(SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN, SyncJob.ResourceType.INVENTORY_SNAPSHOT)).first()
-    if job is None:
-        raise ValidationError("当前配置没有可用于只读检查的已授权同步任务。")
     adapter = get_adapter_for_config(config, job.resource_type)
     try:
         adapter.validate_configuration(job)
@@ -1506,7 +1804,22 @@ def check_integration_readonly_connection(request, pk):
         raise
     config.last_verified_at = timezone.now()
     config.save(update_fields=["last_verified_at", "updated_at"])
-    _write_audit_log(config, request.user, "test_live_integration_connection", detail={"external_api_called": True, "token_refreshed": False, "resource_type": job.resource_type})
+    if warehouse_authorization is not None:
+        warehouse_authorization.last_verified_at = config.last_verified_at
+        warehouse_authorization.updated_by = request.user
+        warehouse_authorization.save(update_fields=["last_verified_at", "updated_by", "updated_at"])
+    _write_audit_log(
+        config,
+        request.user,
+        "test_live_integration_connection",
+        detail={
+            "external_api_called": True,
+            "token_refreshed": False,
+            "resource_type": job.resource_type,
+            "store_authorization_id": store_authorization.id if store_authorization else None,
+            "warehouse_authorization_id": warehouse_authorization.id if warehouse_authorization else None,
+        },
+    )
     return success_response({"connected": True, "external_api_called": True, "token_refreshed": False, "sample_count": len(page.get("records", [])) if isinstance(page, dict) else 0, "checked_at": config.last_verified_at})
 
 
@@ -1527,17 +1840,62 @@ def sync_job_collection(request):
         tenant=request.user.tenant,
         pk=serializer.validated_data["integration_config_id"],
     )
+    warehouse_authorization_id = serializer.validated_data.get("warehouse_authorization_id")
+    store_authorization_id = serializer.validated_data.get("store_authorization_id")
+    warehouse_id = None
+    warehouse_country = None
+    store_id = None
+    store_region = None
+    if warehouse_authorization_id:
+        warehouse_id, warehouse_country = WarehouseAuthorization.objects.filter(
+            tenant=request.user.tenant,
+            pk=warehouse_authorization_id,
+        ).values_list("warehouse_id", "warehouse__country_code").first() or (None, None)
+    if store_authorization_id:
+        store_id, store_region = MarketplaceStoreAuthorization.objects.filter(
+            tenant=request.user.tenant,
+            pk=store_authorization_id,
+        ).values_list("store_id", "region").first() or (None, None)
+    config_regions = [
+        str(region).strip().upper()
+        for region in (integration_config.regions or [])
+        if str(region).strip()
+    ]
+    concrete_region = warehouse_country or store_region
+    effective_regions = list(dict.fromkeys(config_regions + ([str(concrete_region).strip().upper()] if concrete_region else ["__UNKNOWN__"])))
     if not integration_values_allowed(
         request.user,
         "integrations.manage",
         platform=integration_config.platform,
+        environment=integration_config.environment,
+        # A global config is evaluated against the concrete subject region;
+        # otherwise a regional role could create an SG warehouse job from a
+        # config whose regions list is empty.
+        regions=effective_regions,
         config_id=integration_config.id,
         resource_type=serializer.validated_data["resource_type"],
+        store_id=store_id,
+        warehouse_id=warehouse_id,
     ):
         raise DataScopeDenied(
             "Sync job is outside the authorized data scope.",
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
         )
+    # Inventory jobs are intentionally idempotent per authorization/resource.
+    # The UI can safely offer “创建库存同步任务” without producing duplicate
+    # schedules when an operator retries or refreshes after a successful POST.
+    if warehouse_authorization_id:
+        existing_job = SyncJob.objects.filter(
+            tenant=request.user.tenant,
+            warehouse_authorization_id=warehouse_authorization_id,
+            resource_type=serializer.validated_data["resource_type"],
+        ).first()
+        if existing_job is not None:
+            payload = SyncJobSerializer(existing_job, context={"request": request}).data
+            return success_response(
+                {"idempotent": True, "sync_job": payload, "job": payload},
+                status=200,
+            )
     job = serializer.save(tenant=request.user.tenant)
     return success_response(SyncJobSerializer(job, context={"request": request}).data, status=201)
 

@@ -186,6 +186,30 @@ class IsMarketplaceStoreRetryRunner(IntegrationActionPermission):
     permission_code = "integrations.store.retry"
 
 
+class IsWarehouseAuthorizationCollectionUser(IntegrationActionPermission):
+    """Allow warehouse authorization reads and controlled bind writes."""
+
+    def has_permission(self, request, view):
+        permission_code = (
+            "integrations.warehouse.view"
+            if request.method in SAFE_METHODS
+            else "integrations.warehouse.authorize"
+        )
+        return self.has_action_permission(request, permission_code)
+
+
+class IsWarehouseAuthorizationViewer(IntegrationActionPermission):
+    permission_code = "integrations.warehouse.view"
+
+
+class IsWarehouseAuthorizationAuthorizer(IntegrationActionPermission):
+    permission_code = "integrations.warehouse.authorize"
+
+
+class IsWarehouseAuthorizationRevoker(IntegrationActionPermission):
+    permission_code = "integrations.warehouse.revoke"
+
+
 class IsMarketplaceCredentialRotator(IntegrationActionPermission):
     permission_code = "integrations.credential.rotate"
 

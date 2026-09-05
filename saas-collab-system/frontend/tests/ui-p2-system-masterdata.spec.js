@@ -99,7 +99,29 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(platformPage).toContain('fetchPlatformCatalog');
     expect(platformPage).toContain("prop: 'connector_status'");
     expect(platformPage).toContain("item.connector_status === 'NOT_IMPLEMENTED'");
+    expect(platformPage).toContain('connectorDisplay');
+    expect(platformPage).toContain("connector_name");
+    expect(platformPage).toContain("待识别服务商");
+    expect(platformPage).toContain("销售渠道/独立站");
+    expect(platformPage).toContain("仓储服务分类");
+    expect(platformPage).toContain("ERP/其他");
+    expect(platformPage).toContain('仓储服务分类（连接器按服务商识别）');
+    expect(platformPage).toContain('`${item.label}（业务分类）`');
+    expect(platformPage).toContain('WAREHOUSE_HELP');
     expect(platformPage).not.toContain("{ label: 'BigSeller', value: 'bigseller' }");
+  });
+
+  it('keeps warehouse categories and identified providers distinct in the mock contract', () => {
+    const catalog = masterDataMocks.platformCatalog().data.results;
+    const warehouse = catalog.find((item) => item.value === 'warehouse_third_party');
+    expect(warehouse.is_business_category).toBe(true);
+    expect(warehouse.connector_status).toBe('UNMAPPED');
+    expect(warehouse.connector_name).toContain('具体服务商');
+
+    const jifeng = masterDataMocks.platforms().data.results.find((item) => item.code === 'myjf');
+    expect(jifeng.connector_key).toBe('jifeng_wms');
+    expect(jifeng.connector_name).toBe('极风 WMS');
+    expect(jifeng.connector_status).toBe('ACTIVE');
   });
 
   it('binds store country selection to tenant country information defaults', () => {
@@ -130,6 +152,10 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(resourcePage).toContain('field.onChange(value, createForm)');
     expect(resourcePage).toContain(':multiple="field.multiple === true"');
     expect(resourcePage).toContain(':filterable="field.filterable !== false"');
+    expect(resourcePage).toContain('<el-option-group');
+    expect(resourcePage).toContain('fieldHelpText(field)');
+    expect(resourcePage).toContain(':aria-describedby="fieldHelpText(field)');
+    expect(resourcePage).toContain('column.format(value, row)');
     for (const field of ["prop: 'country_code'", "prop: 'currency'", "prop: 'timezone'"]) {
       expect(countryPage).toContain(field);
     }

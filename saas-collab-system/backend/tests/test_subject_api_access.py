@@ -13,10 +13,28 @@ from apps.integrations.models import (
 )
 from apps.integrations.platform_schema_service import integration_platform_key
 from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, WarehouseMaster
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
 pytestmark = pytest.mark.django_db
+
+
+def _grant(user, permission_codes):
+    role = Role.objects.create(
+        tenant=user.tenant,
+        code=f"subject-api-{user.username}",
+        name="Subject API access",
+        status=Role.Status.ACTIVE,
+    )
+    for code in permission_codes:
+        permission, _ = Permission.objects.get_or_create(
+            code=code,
+            defaults={"name": code, "module": "integrations", "action": code.rsplit(".", 1)[-1]},
+        )
+        role.permissions.add(permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
 def test_subject_api_access_links_store_config_authorization_and_masks_credentials():
@@ -122,6 +140,28 @@ def test_subject_api_access_rejects_unknown_subject_type():
     )
 
     assert response.status_code == 400
+
+
+def test_store_subject_api_access_requires_store_view_permission_before_returning_metadata():
+    tenant = Tenant.objects.create(name="Tenant B2", code="subject-access-store-permission")
+    user = CustomUser.objects.create_user(
+        username="subject-access-store-view-missing",
+        password="not-a-real-password",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    _grant(user, ("integrations.view", "masterdata.view"))
+
+    client = APIClient()
+    client.force_authenticate(user)
+    response = client.get(
+        "/api/internal/integrations/subject-api-access/",
+        {"subject_type": "store", "subject_id": 1},
+    )
+
+    assert response.status_code == 403
+    assert response.data["code"] == "PERMISSION_DENIED"
+    assert response.data["data"] is None
 
 
 def test_myjf_alias_resolves_to_existing_jifeng_inventory_provider():

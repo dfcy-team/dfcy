@@ -228,6 +228,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useRoute } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import { useMock } from '../../api/request';
@@ -262,6 +263,7 @@ const actionConfigs = [
 ];
 
 const auth = useAuthStore();
+const route = useRoute();
 const rows = ref([]);
 const summary = ref({});
 const state = ref('loading');
@@ -385,7 +387,12 @@ async function load() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const response = await fetchSyncJobs();
+    const response = await fetchSyncJobs({
+      platform: route.query.platform || '',
+      api_type: route.query.api_type || '',
+      resource_type: route.query.resource_type || '',
+      subject: route.query.subject || '',
+    });
     if (!response?.success) {
       state.value = statusFromApiResponse(response, typeof navigator === 'undefined' ? true : navigator.onLine);
       errorMessage.value = response?.message || '同步任务接口请求失败';

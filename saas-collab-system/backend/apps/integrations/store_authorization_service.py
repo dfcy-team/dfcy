@@ -14,6 +14,7 @@ from .models import (
     marketplace_identity_key,
     marketplace_store_binding_key,
 )
+from .audit_sanitizer import sanitize_audit_detail as _sanitize_audit_detail
 
 
 ALLOWED_TRANSITIONS = {
@@ -50,8 +51,6 @@ def _audit(record, actor, action, result=IntegrationAuditLog.Result.SUCCESS, ext
     detail = {
         "platform": record.platform,
         "store_id": str(record.store_id),
-        "credential_id": record.credential_id,
-        "token_id": record.token_id,
         "credential_mask": record.credential_mask,
         "status": record.status,
         "error_code": record.last_error_code,
@@ -65,7 +64,7 @@ def _audit(record, actor, action, result=IntegrationAuditLog.Result.SUCCESS, ext
         action=action,
         actor=actor,
         result=result,
-        masked_detail=detail,
+        masked_detail=_sanitize_audit_detail(detail),
     )
 
 

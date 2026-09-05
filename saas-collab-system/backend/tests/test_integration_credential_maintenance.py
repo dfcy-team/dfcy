@@ -99,7 +99,7 @@ def test_legacy_wms_credential_can_be_replaced_and_checked_without_external_call
             format="json",
         )
         assert readonly_check.status_code == 400
-        assert "只读网络模式" in json.dumps(readonly_check.json(), ensure_ascii=False)
+        assert "具体的店铺授权或仓库授权" in json.dumps(readonly_check.json(), ensure_ascii=False)
     finally:
         reset_custody_backend_cache()
         settings.disable()

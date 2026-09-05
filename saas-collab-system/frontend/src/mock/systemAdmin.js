@@ -35,8 +35,11 @@ export const mockRoles = () => successResponse(page([
     permission_codes: [
       'system.users.view', 'system.roles.view',
       'masterdata.view', 'masterdata.manage',
+      'integrations.view', 'integrations.manage', 'integrations.run_live_readonly',
       'integrations.config.view', 'integrations.config.create', 'integrations.config.update',
-      'integrations.config.verify', 'integrations.config.disable', 'integrations.credential.rotate'
+      'integrations.config.verify', 'integrations.config.disable', 'integrations.credential.rotate',
+      'integrations.store.view', 'integrations.store.authorize', 'integrations.store.revoke',
+      'integrations.warehouse.view', 'integrations.warehouse.authorize', 'integrations.warehouse.revoke'
     ],
     menu_permission_codes: [
       'menu.system.organization.view', 'menu.system.users.view', 'menu.system.roles.view',
@@ -44,8 +47,11 @@ export const mockRoles = () => successResponse(page([
     ],
     action_permission_codes: [
       'system.users.view', 'system.roles.view', 'masterdata.view', 'masterdata.manage',
+      'integrations.view', 'integrations.manage', 'integrations.run_live_readonly',
       'integrations.config.view', 'integrations.config.create', 'integrations.config.update',
-      'integrations.config.verify', 'integrations.config.disable', 'integrations.credential.rotate'
+      'integrations.config.verify', 'integrations.config.disable', 'integrations.credential.rotate',
+      'integrations.store.view', 'integrations.store.authorize', 'integrations.store.revoke',
+      'integrations.warehouse.view', 'integrations.warehouse.authorize', 'integrations.warehouse.revoke'
     ],
     field_permission_codes: [
       'field.system.users.full_name.view', 'field.system.users.department.view',
@@ -86,7 +92,16 @@ export const mockPermissions = () => successResponse(page([
   { id: 11, code: 'integrations.config.update', name: '更新 API/WMS 连接配置', module: 'integrations', action: 'config.update', permission_type: 'action', metadata: {}, description: '更新当前租户已授权的实际连接器非敏感配置；不改变仓储业务分类，不读取凭据，也不授予验证、停用或凭据轮换权限。' },
   { id: 12, code: 'integrations.config.verify', name: '验证 API/WMS 连接配置', module: 'integrations', action: 'config.verify', permission_type: 'action', metadata: {}, description: '对当前租户的实际连接器配置执行受控连接验证并记录结果；不授予修改配置、停用连接或轮换凭据权限。' },
   { id: 13, code: 'integrations.config.disable', name: '停用 API/WMS 连接配置', module: 'integrations', action: 'config.disable', permission_type: 'action', metadata: {}, description: '停用当前租户的实际连接器配置并阻止后续接入任务使用；不删除平台档案、不清理凭据，也不授予凭据轮换权限。' },
-  { id: 14, code: 'integrations.credential.rotate', name: '轮换 API/WMS 凭据', module: 'integrations', action: 'credential.rotate', permission_type: 'action', metadata: {}, description: '只轮换 API/WMS 连接器的受控凭据引用或密钥版本，不读取、导出原始凭据；不授予连接配置创建、更新、验证或停用权限。' }
+  { id: 14, code: 'integrations.credential.rotate', name: '轮换 API/WMS 凭据', module: 'integrations', action: 'credential.rotate', permission_type: 'action', metadata: {}, description: '只轮换 API/WMS 连接器的受控凭据引用或密钥版本，不读取、导出原始凭据；不授予连接配置创建、更新、验证或停用权限。' },
+  { id: 15, code: 'integrations.view', name: '查看集成配置', module: 'integrations', action: 'view', permission_type: 'action', metadata: {}, description: '查看集成配置及 API 接入入口；不读取或导出原始凭据。' },
+  { id: 16, code: 'integrations.manage', name: '管理集成配置', module: 'integrations', action: 'manage', permission_type: 'action', metadata: {}, description: '管理已授权的集成配置和同步任务；不授予生产写入能力。' },
+  { id: 17, code: 'integrations.run_live_readonly', name: '运行生产只读同步', module: 'integrations', action: 'run_live_readonly', permission_type: 'action', metadata: {}, description: '按审批和数据范围执行一次生产平台只读检查；不会写入平台。' },
+  { id: 18, code: 'integrations.store.view', name: '查看平台店铺授权', module: 'integrations', action: 'store.view', permission_type: 'action', metadata: {}, description: '查看当前租户店铺 API 授权的脱敏关系；不读取或导出凭据。' },
+  { id: 19, code: 'integrations.store.authorize', name: '授权平台店铺', module: 'integrations', action: 'store.authorize', permission_type: 'action', metadata: {}, description: '发起受控店铺 OAuth 授权；不回显原始令牌。' },
+  { id: 20, code: 'integrations.store.revoke', name: '撤销平台店铺授权', module: 'integrations', action: 'store.revoke', permission_type: 'action', metadata: {}, description: '撤销店铺 API 授权并记录审计；不删除连接配置。' },
+  { id: 21, code: 'integrations.warehouse.view', name: '查看仓库 API 授权', module: 'integrations', action: 'warehouse.view', permission_type: 'action', metadata: {}, description: '查看当前租户仓库与库存 API 接入配置的脱敏授权关系；不读取或导出凭据。' },
+  { id: 22, code: 'integrations.warehouse.authorize', name: '绑定仓库 API 配置', module: 'integrations', action: 'warehouse.authorize', permission_type: 'action', metadata: {}, description: '将当前租户已托管且通过校验的库存 API 配置绑定到仓库；不接收或回显原始凭据。' },
+  { id: 23, code: 'integrations.warehouse.revoke', name: '解除仓库 API 绑定', module: 'integrations', action: 'warehouse.revoke', permission_type: 'action', metadata: {}, description: '撤销当前租户仓库的库存 API 授权绑定并记录审计；不删除接入配置或凭据。' }
 ]));
 
 export const mockSecurityOperations = () => successResponse({

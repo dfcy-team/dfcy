@@ -14,7 +14,6 @@ describe('API 数据接入生产页面闭环', () => {
     ]));
     const expected = {
       '/integrations/readiness': 'integrations.view',
-      '/integrations/authorizations': 'integrations.store.view',
       '/integrations/capabilities': 'integrations.store.view',
       '/integrations/store-mappings': 'integrations.store.view',
       '/integrations/product-mappings': 'integrations.store.view',
@@ -29,13 +28,15 @@ describe('API 数据接入生产页面闭环', () => {
     }
   });
 
-  it('allows store-only and audit-only viewers to reach their pages without integrations.view', () => {
-    const storeViewer = { user_type: 'internal', permissions: ['integrations.store.view'] };
+  it('routes store authorization through store master data while preserving audit isolation', () => {
+    const storeMasterViewer = { user_type: 'internal', permissions: ['masterdata.view'] };
     const auditViewer = { user_type: 'internal', permissions: ['integrations.audit.view'] };
-    expect(canAccessPath(storeViewer, '/integrations/authorizations')).toBe(true);
-    expect(canAccessPath(storeViewer, '/integrations/audit')).toBe(false);
+    const router = read('src/router/index.js');
+    expect(canAccessPath(storeMasterViewer, '/master-data/stores')).toBe(true);
+    expect(canAccessPath(storeMasterViewer, '/integrations/audit')).toBe(false);
     expect(canAccessPath(auditViewer, '/integrations/audit')).toBe(true);
-    expect(canAccessPath(auditViewer, '/integrations/authorizations')).toBe(false);
+    expect(router).toContain("{ path: 'integrations/authorizations', redirect: '/master-data/stores' }");
+    expect(read('src/router/menu.js')).not.toContain("label: '店铺授权'");
   });
 
   it('uses the production endpoints and keeps dangerous actions explicit', () => {
@@ -44,29 +45,29 @@ describe('API 数据接入生产页面闭环', () => {
     expect(api).toContain("url: '/api/internal/integrations/product-mappings/'");
     expect(api).toContain("url: '/api/internal/integrations/audit/'");
     expect(api).toContain("url: '/api/internal/integrations/sync-alert-incidents/'");
-    expect(read('src/views/integrations/StoreAuthorizationList.vue')).toContain('不会自动打开该地址');
+    expect(read('src/components/SubjectApiAccessDialog.vue')).toContain('发起平台 OAuth 授权');
     expect(read('src/views/integrations/IntegrationCapabilityMatrix.vue')).toContain('write_enabled: false');
     expect(read('src/views/integrations/SyncIncidentList.vue')).toContain('retrySyncAlertIncident');
-    for (const file of ['StoreAuthorizationList.vue', 'IntegrationCapabilityMatrix.vue', 'StoreMappingList.vue', 'ProductMappingList.vue', 'SyncIncidentList.vue', 'IntegrationAuditList.vue']) {
+    for (const file of ['IntegrationCapabilityMatrix.vue', 'StoreMappingList.vue', 'ProductMappingList.vue', 'SyncIncidentList.vue', 'IntegrationAuditList.vue']) {
       expect(read(`src/views/integrations/${file}`)).toContain('empty-text');
     }
   });
 
   it('keeps readiness follow-up links and contract repair confirmation dynamic', () => {
     const readiness = read('src/views/settings/PlatformIntegrationReadiness.vue');
-    expect(readiness).toContain("path: '/integrations/authorizations'");
-    expect(readiness).toContain('platform: row.platform_code');
+    expect(readiness).toContain("path: '/master-data/stores'");
+    expect(readiness).toContain('到店铺档案授权 {{ row.platform || row.platform_code }}');
     expect(readiness).not.toContain('授权 Shopee 店铺');
     expect(readiness).toContain('target_contract_version');
     expect(readiness).not.toContain('修复为 v2');
   });
 
   it('guards token refresh and capability writes by the current state', () => {
-    const authorizations = read('src/views/integrations/StoreAuthorizationList.vue');
-    expect(authorizations).toContain("route.query.platform");
-    expect(authorizations).toContain('刷新令牌');
-    expect(authorizations).toContain('撤销授权');
-    expect(authorizations).toContain("auth.hasPermission('integrations.store.authorize') && auth.hasPermission('integrations.credential.rotate')");
+    const subjectAccess = read('src/components/SubjectApiAccessDialog.vue');
+    expect(subjectAccess).toContain('刷新令牌');
+    expect(subjectAccess).toContain('撤销授权');
+    expect(subjectAccess).toContain('storeAuthorizeAccess.value.allowed && credentialRotateAccess.value.allowed');
+    expect(subjectAccess).toContain('refreshStoreAuthorization(binding.id, { confirmed: true })');
 
     const capabilities = read('src/views/integrations/IntegrationCapabilityMatrix.vue');
     expect(capabilities).toContain("['active', 'authorized'].includes(selectedAuthorization.value?.status)");
@@ -83,16 +84,14 @@ describe('API 数据接入生产页面闭环', () => {
   });
 
   it('clears async action state after API failures', () => {
-    const authorizations = read('src/views/integrations/StoreAuthorizationList.vue');
-    for (const functionName of ['load', 'openDetail', 'submitOAuth', 'refresh', 'revoke']) {
-      expect(authorizations).toContain(`async function ${functionName}`);
+    const subjectAccess = read('src/components/SubjectApiAccessDialog.vue');
+    for (const functionName of ['load', 'authorizeStore', 'refreshStoreBinding', 'disableStoreBinding']) {
+      expect(subjectAccess).toContain(`async function ${functionName}`);
     }
-    expect((authorizations.match(/catch \(requestError\)/g) || []).length).toBeGreaterThanOrEqual(5);
-    expect(authorizations).toContain('finally {\n    loading.value = false;\n  }');
-    expect((authorizations.match(/finally \{\n    actionKey\.value = '';/g) || []).length).toBeGreaterThanOrEqual(3);
-    expect(authorizations).toContain("response?.message || '授权地址生成失败。'");
-    expect(authorizations).toContain("response?.message || '令牌刷新失败。'");
-    expect(authorizations).toContain("response?.message || '授权撤销失败。'");
+    expect(subjectAccess).toMatch(/async function refreshStoreBinding\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
+    expect(subjectAccess).toMatch(/async function disableStoreBinding\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
+    expect(subjectAccess).toContain("response?.message || '令牌刷新失败'");
+    expect(subjectAccess).toContain("response?.message || '撤销授权失败'");
 
     const incidents = read('src/views/integrations/SyncIncidentList.vue');
     expect(incidents).toContain('async function load');
