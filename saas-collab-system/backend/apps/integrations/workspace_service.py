@@ -179,7 +179,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
     schedule_state = _schedule_state(job, latest_run)
     config_ready = (
         job.integration_config.status != PlatformIntegrationConfig.Status.DISABLED
-        and job.integration_config.credential_status in {"referenced", "verified"}
+        and job.integration_config.credential_status in {"configured", "referenced", "verified"}
     )
     authorization_ready = subject["authorization_status"] in {"authorized", "active"}
     source_health = sync_source_health(job)
@@ -585,7 +585,9 @@ def integration_workspace(user, mode, params):
     eligible_subjects = {
         (row["subject_type"], row["subject_code"])
         for row in job_rows.values()
-        if row["subject_type"] != "unbound" and row["credential_status"] in {"referenced", "verified"}
+        if row["subject_type"] != "unbound"
+        and row["config_status"] != PlatformIntegrationConfig.Status.DISABLED
+        and row["credential_status"] in {"configured", "referenced", "verified"}
     }
     reference_options = _reference_options(user)
     return {
