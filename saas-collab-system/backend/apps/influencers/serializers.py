@@ -177,6 +177,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     sample_status_summary = serializers.SerializerMethodField()
     sample_fulfillment_status_summary = serializers.SerializerMethodField()
     sample_fulfillment_count = serializers.SerializerMethodField()
+    sample_fulfillment_influencer_count = serializers.SerializerMethodField()
     sample_fulfillment_completed_count = serializers.SerializerMethodField()
     sample_fulfillment_video_match_count = serializers.SerializerMethodField()
     video_match_count = serializers.SerializerMethodField()
@@ -257,11 +258,20 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             for _, status, influencer_id, platform, handle in sample_rows
             if status in completion_statuses
         }
+        sampled_identities = {
+            influencer_identity_key(
+                influencer_id=influencer_id,
+                platform=platform,
+                handle=handle,
+            )
+            for _, _, influencer_id, platform, handle in sample_rows
+        }
         completed = len(completed_identities)
         summary = {
             "counts": counts,
             "status_counts": counts,
             "total": len(statuses),
+            "influencer_count": len(sampled_identities),
             "completed": completed,
             "video_match_count": matched_videos,
         }
@@ -277,6 +287,9 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     def get_sample_fulfillment_count(self, obj):
         return self._sample_summary(obj)["total"]
 
+    def get_sample_fulfillment_influencer_count(self, obj):
+        return self._sample_summary(obj)["influencer_count"]
+
     def get_sample_fulfillment_completed_count(self, obj):
         return self._sample_summary(obj)["completed"]
 
@@ -289,11 +302,12 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     def get_completion_validation(self, obj):
         summary = self._sample_summary(obj)
         target_count = obj.target_count
-        target_reached = target_count > 0 and summary["completed"] >= target_count
+        target_reached = target_count > 0 and summary["influencer_count"] >= target_count
         return {
             "target_count": target_count,
             "completed_count": summary["completed"],
             "sample_count": summary["total"],
+            "sampled_influencer_count": summary["influencer_count"],
             "target_positive": target_count > 0,
             "target_reached": target_reached,
             "task_completed": obj.status == OutreachTask.Status.COMPLETED,
@@ -312,6 +326,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "owner", "owner_name", "dispatcher_name", "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
             "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
+            "sample_fulfillment_influencer_count",
             "sample_fulfillment_completed_count", "sample_fulfillment_video_match_count", "video_match_count",
             "completion_validation", "created_at", "updated_at",
         )
