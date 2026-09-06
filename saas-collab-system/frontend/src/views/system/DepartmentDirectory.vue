@@ -129,28 +129,48 @@ function deleteDepartment(node) {
   if (manageAccess.value.allowed) resourcePage.value?.confirmDelete(node);
 }
 
+function normalizeDepartmentPayload(payload = {}) {
+  const normalized = { ...payload };
+  // AdminResourcePage represents nullable select values as an empty string.
+  // The API contract uses null for a root department, so never submit "".
+  if (normalized.parent_id === '') normalized.parent_id = null;
+  return normalized;
+}
+
+function withDepartmentError(response) {
+  if (response?.success || !response?.data || typeof response.data !== 'object') return response;
+  const fieldLabels = { name: '部门名称', parent_id: '上级部门', status: '状态' };
+  const [field, detail] = Object.entries(response.data).find(([, value]) => value) || [];
+  if (!field || !detail) return response;
+  const text = Array.isArray(detail) ? detail[0] : detail;
+  const message = field === 'parent_id' && text === 'A valid integer is required.'
+    ? '上级部门请选择有效部门；根部门请留空。'
+    : `${fieldLabels[field] || field}：${text}`;
+  return { ...response, message };
+}
+
 async function handleCreate(payload) {
-  const response = await createDepartment(payload);
+  const response = await createDepartment(normalizeDepartmentPayload(payload));
   if (response?.success) await loadTree();
-  return response;
+  return withDepartmentError(response);
 }
 
 async function handleEdit(id, payload) {
-  const response = await updateDepartment(id, payload);
+  const response = await updateDepartment(id, normalizeDepartmentPayload(payload));
   if (response?.success) await loadTree();
-  return response;
+  return withDepartmentError(response);
 }
 
 async function handleStatus(row, status) {
   const response = await updateDepartment(row.id, { status });
   if (response?.success) await loadTree();
-  return response;
+  return withDepartmentError(response);
 }
 
 async function handleDelete(id) {
   const response = await deleteDepartmentRecord(id);
   if (response?.success) await loadTree();
-  return response;
+  return withDepartmentError(response);
 }
 
 onMounted(loadTree);
