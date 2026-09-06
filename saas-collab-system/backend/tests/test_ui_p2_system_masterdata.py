@@ -193,7 +193,7 @@ def test_department_uniqueness_and_cross_tenant_parent_are_enforced():
 def test_role_permission_and_data_scope_update_is_audited():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-role")
     manager = create_user(tenant, "role-manager")
-    grant(manager, "system.roles.view", "system.roles.manage")
+    grant(manager, "system.roles.view", "system.roles.manage", "masterdata.view")
     target = Role.objects.create(tenant=tenant, name="Buyer", code="buyer")
     Permission.objects.get_or_create(
         code="masterdata.view",

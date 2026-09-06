@@ -2,7 +2,11 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.permissions.catalog import ALL_PERMISSION_DEFINITIONS, permission_defaults
 from apps.permissions.models import Permission, Role
-from apps.permissions.role_catalog import TENANT_ADMIN_ROLE_CODE
+from apps.permissions.role_catalog import (
+    BUILTIN_ROLE_DESCRIPTIONS,
+    BUILTIN_ROLE_DISPLAY_NAMES,
+    TENANT_ADMIN_ROLE_CODE,
+)
 
 
 class Command(BaseCommand):
@@ -52,6 +56,25 @@ class Command(BaseCommand):
                 )
                 if not options["check"]:
                     role.permissions.set(all_permissions)
+
+        # Keep the stable built-in role codes while repairing display labels
+        # and protection metadata for tenants created before the role catalog
+        # was introduced.  Other role codes remain tenant-owned custom roles.
+        for code, name in BUILTIN_ROLE_DISPLAY_NAMES.items():
+            updates = {
+                "name": name,
+                "description": BUILTIN_ROLE_DESCRIPTIONS.get(code, ""),
+                "role_type": Role.RoleType.BUILTIN,
+                "is_protected": True,
+            }
+            for role in Role.objects.filter(code=code):
+                stale_fields = [field for field, value in updates.items() if getattr(role, field) != value]
+                if stale_fields:
+                    issues.append(f"role_metadata:{role.tenant_id}:{code}:{','.join(stale_fields)}")
+                    if not options["check"]:
+                        for field, value in updates.items():
+                            setattr(role, field, value)
+                        role.save(update_fields=list(updates) + ["updated_at"])
 
         if options["check"] and issues:
             raise CommandError("Permission catalog is incomplete or stale: " + "; ".join(issues))

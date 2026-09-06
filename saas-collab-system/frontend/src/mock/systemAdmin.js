@@ -27,16 +27,86 @@ export const mockDepartments = () => successResponse(page([
   { id: 2, tenant_id: 1, name: '供应链组', parent_id: 1, parent_name: '经营中心', status: 'active' }
 ]));
 
-export const mockUsers = () => successResponse(page([
+export const mockDepartmentTree = () => successResponse({
+  status: 'mock',
+  count: 2,
+  items: [
+    {
+      id: 1, name: '经营中心', parent_id: null, status: 'active',
+      direct_user_count: 1, descendant_user_count: 1,
+      children: [
+        { id: 2, name: '供应链组', parent_id: 1, status: 'active', direct_user_count: 1, descendant_user_count: 0, children: [] }
+      ]
+    }
+  ],
+  results: [
+    {
+      id: 1, name: '经营中心', parent_id: null, status: 'active',
+      direct_user_count: 1, descendant_user_count: 1,
+      children: [
+        { id: 2, name: '供应链组', parent_id: 1, status: 'active', direct_user_count: 1, descendant_user_count: 0, children: [] }
+      ]
+    }
+  ]
+});
+
+const mockUserRecords = [
   {
     id: 1, tenant_id: 1, username: 'demo-operator', email_masked: 'd***@example.com', phone_masked: '***1200',
-    user_type: 'internal', is_active: true, department_name: '经营中心', roles: ['operator']
+    user_type: 'internal', is_active: true, department_id: 1, department_ids: [1],
+    department_name: '经营中心', roles: ['operator']
   },
   {
     id: 2, tenant_id: 1, username: 'demo-finance', email_masked: 'f***@example.com', phone_masked: '***2600',
-    user_type: 'internal', is_active: false, department_name: '财务组', roles: ['finance_viewer']
+    user_type: 'internal', is_active: false, department_id: 2, department_ids: [2],
+    department_name: '供应链组', roles: ['finance_viewer']
+  },
+  {
+    id: 3, tenant_id: 1, username: 'demo-unassigned', email_masked: 'u***@example.com', phone_masked: '***0000',
+    user_type: 'internal', is_active: true, department_id: null, department_ids: [],
+    department_name: '', roles: []
   }
-]));
+];
+
+const mockDepartmentNames = new Map([
+  [1, '经营中心'],
+  [2, '供应链组'],
+]);
+
+export const mockUsers = (params = {}) => {
+  const users = mockUserRecords.map((user) => ({
+    ...user,
+    department_ids: [...(user.department_ids || [])],
+    roles: [...(user.roles || [])],
+  }));
+  let results = users;
+  if (String(params.unassigned).toLowerCase() === 'true') {
+    results = results.filter((user) => !user.department_id && !user.department_ids.length);
+  }
+  if (params.department_id) {
+    const departmentId = Number(params.department_id);
+    const selected = String(params.include_descendants).toLowerCase() === 'true' && departmentId === 1
+      ? new Set([1, 2])
+      : new Set([departmentId]);
+    results = results.filter((user) => user.department_ids.some((id) => selected.has(id)));
+  }
+  return successResponse(page(results));
+};
+
+export const mockUpdateUserProfile = (id, payload = {}) => {
+  const user = mockUserRecords.find((item) => item.id === Number(id));
+  if (!user) return { success: false, code: 'NOT_FOUND', message: '用户不存在' };
+  if (Object.prototype.hasOwnProperty.call(payload, 'department_id')) {
+    user.department_id = payload.department_id === null || payload.department_id === ''
+      ? null
+      : Number(payload.department_id);
+    user.department_name = mockDepartmentNames.get(user.department_id) || '';
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'department_ids')) {
+    user.department_ids = [...new Set((payload.department_ids || []).map(Number).filter(Number.isFinite))];
+  }
+  return successResponse({ ...user, department_ids: [...user.department_ids], api_status: 'mock' });
+};
 
 export const mockRoles = () => successResponse(page([
   {
@@ -46,7 +116,7 @@ export const mockRoles = () => successResponse(page([
     data_scopes: [{ scope_type: 'department', config: {} }]
   },
   {
-    id: 2, tenant_id: 1, name: '管理员', code: 'administrator', status: 'active',
+    id: 2, tenant_id: 1, name: '租户管理员', code: 'administrator', role_type: 'builtin', is_protected: true, status: 'active',
     permission_codes: [
       ...mappingPermissionCodes,
       'system.users.view', 'system.roles.view',
@@ -91,7 +161,7 @@ export const mockRoleScopeOptions = () => successResponse({
   ],
   roles: [
     { id: 1, name: '运营只读', code: 'operator_viewer', status: 'active' },
-    { id: 2, name: '管理员', code: 'administrator', status: 'active' }
+    { id: 2, name: '租户管理员', code: 'administrator', role_type: 'builtin', is_protected: true, status: 'active' }
   ]
 });
 
@@ -119,7 +189,13 @@ export const mockPermissions = () => successResponse(page([
   { id: 20, code: 'integrations.store.revoke', name: '撤销平台店铺授权', module: 'integrations', action: 'store.revoke', permission_type: 'action', metadata: {}, description: '撤销店铺 API 授权并记录审计；不删除连接配置。' },
   { id: 21, code: 'integrations.warehouse.view', name: '查看仓库 API 授权', module: 'integrations', action: 'warehouse.view', permission_type: 'action', metadata: {}, description: '查看当前租户仓库与库存 API 接入配置的脱敏授权关系；不读取或导出凭据。' },
   { id: 22, code: 'integrations.warehouse.authorize', name: '绑定仓库 API 配置', module: 'integrations', action: 'warehouse.authorize', permission_type: 'action', metadata: {}, description: '将当前租户已托管且通过校验的库存 API 配置绑定到仓库；不接收或回显原始凭据。' },
-  { id: 23, code: 'integrations.warehouse.revoke', name: '解除仓库 API 绑定', module: 'integrations', action: 'warehouse.revoke', permission_type: 'action', metadata: {}, description: '撤销当前租户仓库的库存 API 授权绑定并记录审计；不删除接入配置或凭据。' }
+  { id: 23, code: 'integrations.warehouse.revoke', name: '解除仓库 API 绑定', module: 'integrations', action: 'warehouse.revoke', permission_type: 'action', metadata: {}, description: '撤销当前租户仓库的库存 API 授权绑定并记录审计；不删除接入配置或凭据。' },
+  { id: 24, code: 'menu.system.organization.view', name: '查看组织架构菜单', module: 'system', action: 'organization.view', permission_type: 'menu', metadata: { path: '/system/departments', resource: 'organization' }, description: '显示组织架构入口' },
+  { id: 25, code: 'system.organization.view', name: '查看组织架构', module: 'system', action: 'organization.view', permission_type: 'action', metadata: {}, description: '查看当前租户可见组织节点' },
+  { id: 26, code: 'system.organization.manage', name: '管理组织架构', module: 'system', action: 'organization.manage', permission_type: 'action', metadata: {}, description: '新增、移动、启停和删除当前租户组织节点' },
+  { id: 27, code: 'system.roles.view', name: '查看角色权限', module: 'system', action: 'roles.view', permission_type: 'action', metadata: {}, description: '查看当前租户角色和权限配置' },
+  { id: 28, code: 'system.roles.manage', name: '管理角色权限', module: 'system', action: 'roles.manage', permission_type: 'action', metadata: {}, description: '配置角色权限和数据范围' },
+  { id: 29, code: 'config.system.manage', name: '管理系统级配置', module: 'config', action: 'system.manage', permission_type: 'action', metadata: {}, description: '管理系统级配置及其受控变更' }
 ]));
 
 export const mockSecurityOperations = () => successResponse({

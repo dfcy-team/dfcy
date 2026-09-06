@@ -10,7 +10,9 @@ from .views import (
 from .system_views import (
     DepartmentCollectionView,
     DepartmentDetailView,
+    DepartmentTreeView,
     PermissionCollectionView,
+    PermissionPackageCollectionView,
     RoleCollectionView,
     RoleDetailView,
     RolePermissionView,
@@ -38,6 +40,7 @@ urlpatterns = [
     path("system/tenants/", TenantCollectionView.as_view(), name="system-tenant-collection"),
     path("system/tenants/<int:pk>/", TenantDetailView.as_view(), name="system-tenant-detail"),
     path("system/departments/", DepartmentCollectionView.as_view(), name="system-department-collection"),
+    path("system/departments/tree/", DepartmentTreeView.as_view(), name="system-department-tree"),
     path("system/departments/<int:pk>/", DepartmentDetailView.as_view(), name="system-department-detail"),
     path("system/users/", UserCollectionView.as_view(), name="system-user-collection"),
     path("system/users/<int:pk>/", UserDetailView.as_view(), name="system-user-detail"),
@@ -51,5 +54,6 @@ urlpatterns = [
     path("system/roles/<int:pk>/status/", RoleStatusView.as_view(), name="system-role-status"),
     path("system/roles/<int:pk>/permissions/", RolePermissionView.as_view(), name="system-role-permissions"),
     path("system/permissions/", PermissionCollectionView.as_view(), name="system-permission-collection"),
+    path("system/permission-packages/", PermissionPackageCollectionView.as_view(), name="system-permission-package-collection"),
     path("system/security-operations/", SecurityOperationsView.as_view(), name="system-security-operations"),
 ]

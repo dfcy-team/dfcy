@@ -20,6 +20,11 @@
       </el-button>
     </template>
 
+    <div :class="{ 'resource-layout': Boolean($slots.sidebar) }">
+      <aside v-if="$slots.sidebar" class="resource-sidebar">
+        <slot name="sidebar" />
+      </aside>
+      <div class="resource-main">
     <section class="resource-summary" aria-label="数据摘要">
       <div class="summary-item">
         <span>当前结果</span>
@@ -143,6 +148,9 @@
       </footer>
     </section>
 
+      </div>
+    </div>
+
     <el-drawer v-model="detailOpen" :title="`${entityLabel}详情`" size="min(520px, 92vw)">
       <el-descriptions :column="1" border>
         <el-descriptions-item v-for="column in columns" :key="column.prop" :label="column.label">
@@ -239,7 +247,8 @@ const props = defineProps({
   searchLabel: { type: String, default: '' },
   showFilterLabels: { type: Boolean, default: false },
   showPageSize: { type: Boolean, default: false },
-  tableMaxHeight: { type: Number, default: 0 }
+  tableMaxHeight: { type: Number, default: 0 },
+  externalFilters: { type: Object, default: () => ({}) }
 });
 
 const auth = useAuthStore();
@@ -309,7 +318,7 @@ async function loadData() {
   pageState.value = 'loading';
   stateTitle.value = '';
   stateDetail.value = '';
-  const response = await props.loader({ ...filters });
+  const response = await props.loader({ ...filters, ...props.externalFilters });
   if (!response?.success) {
     pageState.value = statusFromApiResponse(response, navigator.onLine);
     stateDetail.value = response?.message || '接口请求失败';
@@ -341,13 +350,13 @@ function openDetail(row) {
   detailOpen.value = true;
 }
 
-function openCreate() {
+function openCreate(defaults = {}) {
   if (!createAccess.value.allowed) {
     ElMessage.warning(createAccess.value.reason);
     return;
   }
   editingRow.value = null;
-  fillForm();
+  fillForm(defaults);
   formOpen.value = true;
 }
 
@@ -441,7 +450,7 @@ async function confirmDelete(row) {
   }
 }
 
-defineExpose({ loadData });
+defineExpose({ loadData, openCreate, openEdit, confirmStatus, confirmDelete });
 loadData();
 </script>
 
@@ -454,6 +463,9 @@ loadData();
   background: #fff;
 }
 
+.resource-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.resource-main { min-width: 0; }
+.resource-sidebar { position: sticky; top: 12px; min-width: 0; }
 .summary-item { min-height: 74px; padding: 14px 16px; border-right: 1px solid #e5eaf0; }
 .summary-item:last-child { border-right: 0; }
 .summary-item span { display: block; color: #64748b; font-size: 12px; }
@@ -480,6 +492,8 @@ loadData();
 .field-help { margin: 4px 0 12px; color: #64748b; font-size: 12px; line-height: 1.55; }
 
 @media (max-width: 760px) {
+  .resource-layout { grid-template-columns: 1fr; }
+  .resource-sidebar { position: static; }
   .resource-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-item:nth-child(2) { border-right: 0; }
   .summary-item:nth-child(-n + 2) { border-bottom: 1px solid #e5eaf0; }
