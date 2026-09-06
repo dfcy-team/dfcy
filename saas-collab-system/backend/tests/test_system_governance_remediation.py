@@ -68,6 +68,16 @@ def test_department_update_prevents_hierarchy_cycles_and_audits_delete():
     )
     assert updated.status_code == 200
 
+    # The UI's nullable parent select historically submitted an empty string
+    # for a root department. The API accepts that legacy form as null too.
+    root_updated = api.patch(
+        f"/api/internal/system/departments/{root['id']}/",
+        {"name": "Renamed root", "parent_id": ""},
+        format="json",
+    )
+    assert root_updated.status_code == 200
+    assert root_updated.data["data"]["parent_id"] is None
+
     assert api.delete(f"/api/internal/system/departments/{child['id']}/").status_code == 200
     assert OperationLog.objects.filter(tenant=tenant, action="department_delete", object_id=str(child["id"])).exists()
 

@@ -61,6 +61,14 @@ class DepartmentAdminSerializer(serializers.ModelSerializer):
         fields = ("id", "tenant_id", "name", "parent_id", "parent_name", "status")
         read_only_fields = ("id", "tenant_id", "parent_name")
 
+    def to_internal_value(self, data):
+        # Nullable select controls may submit an empty string when a root
+        # department has no parent. Treat it as the API's canonical null.
+        if isinstance(data, dict) and isinstance(data.get("parent_id"), str) and not data["parent_id"].strip():
+            data = data.copy()
+            data["parent_id"] = None
+        return super().to_internal_value(data)
+
     def validate_parent_id(self, value):
         if value is None:
             return value

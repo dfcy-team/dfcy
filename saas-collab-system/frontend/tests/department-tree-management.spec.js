@@ -61,6 +61,14 @@ describe('步骤7 共享组织树与用户目录契约', () => {
     expect(mock).toContain('department_ids');
   });
 
+  it('组织架构编辑将根部门的空上级值规范为 null，并显示字段校验原因', () => {
+    const page = read('src/views/system/DepartmentDirectory.vue');
+    expect(page).toContain('normalizeDepartmentPayload');
+    expect(page).toContain('normalized.parent_id = null');
+    expect(page).toContain('withDepartmentError');
+    expect(page).toContain('上级部门请选择有效部门；根部门请留空。');
+  });
+
   it('角色权限矩阵公开历史组织范围兼容提示和新的业务范围配置', () => {
     const rolePage = read('src/views/system/RolePermissionMatrix.vue');
     expect(rolePage).not.toContain('value="department_tree"');
