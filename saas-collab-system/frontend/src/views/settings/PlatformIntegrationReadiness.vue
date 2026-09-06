@@ -55,6 +55,20 @@
                   @click="openConfigWorkspace(row)"
                 >打开连接配置</el-button>
               </header>
+              <div v-if="row.readonly_resource_readiness?.platform_product" class="resource-gate-note">
+                <span>平台商品只读合同：</span>
+                <el-tag :type="row.readonly_resource_readiness.platform_product.contract_approved ? 'success' : 'warning'">
+                  {{ row.readonly_resource_readiness.platform_product.contract_approved ? '已单独审批' : '未单独审批' }}
+                </el-tag>
+                <el-button
+                  v-if="!row.readonly_resource_readiness.platform_product.contract_approved"
+                  link
+                  size="small"
+                  :disabled="!systemConfigAccess.allowed"
+                  :title="systemConfigAccess.allowed ? '前往生产环境配置审批平台商品只读合同' : systemConfigAccess.reason"
+                  @click="router.push({ path: '/integrations/production-settings', query: { platform: row.platform_code, focus: 'product-contract' } })"
+                >去生产环境配置</el-button>
+              </div>
               <el-table :data="row.configs || []" size="small" empty-text="尚未创建接入配置">
                 <el-table-column label="配置名称" prop="account_alias" min-width="150" />
                 <el-table-column label="环境" min-width="90"><template #default="scope">{{ environmentLabel(scope.row.environment) }}</template></el-table-column>
@@ -181,7 +195,7 @@ const BLOCKER_LABELS = {
   credential_reference_missing: '开发者凭据引用缺失', contract_not_approved: '接口合同版本不符合当前平台要求',
   callback_missing: '授权回调地址未填写', callback_allowlist_missing: '授权回调白名单未配置',
   callback_mismatch: '授权回调地址与服务器配置不一致', callback_not_allowlisted: '授权回调地址不在白名单内',
-  public_app_id_missing: '平台应用 ID 未填写', readonly_not_approved: '生产只读能力尚未审批'
+  public_app_id_missing: '平台应用 ID 未填写', readonly_not_approved: '生产只读能力尚未审批', product_contract_not_approved: '平台商品只读接口合同尚未单独审批'
 };
 
 const BLOCKER_ACTIONS = {
@@ -205,7 +219,8 @@ const BLOCKER_ACTIONS = {
   callback_mismatch: { actionLabel: '维护回调', route: '/integrations/configs', action: 'credentials', permission: 'integrations.config.view', actionHint: '校正 OAuth 回调地址' },
   callback_not_allowlisted: { actionLabel: '去配置', route: '/integrations/production-settings', permission: ['config.system.manage', 'config.view'], actionHint: '将回调地址加入白名单' },
   public_app_id_missing: { actionLabel: '维护凭据', route: '/integrations/configs', action: 'credentials', permission: 'integrations.config.view', actionHint: '进入连接配置填写公开应用 ID' },
-  readonly_not_approved: { actionLabel: '审批只读', action: 'approve_readonly', permission: 'integrations.config.verify', actionHint: '在生产准入页审批生产只读能力' }
+  readonly_not_approved: { actionLabel: '审批只读', action: 'approve_readonly', permission: 'integrations.config.verify', actionHint: '在生产准入页审批生产只读能力' },
+  product_contract_not_approved: { actionLabel: '去配置', route: '/integrations/production-settings', permission: ['config.system.manage', 'config.view'], actionHint: '在生产环境配置中单独审批平台商品只读合同' }
 };
 
 function permissionAccess(permission) {
@@ -342,6 +357,7 @@ onMounted(load);
 
 <style scoped>
 .readiness-page { display: grid; gap: 16px; padding: 20px; }.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }.page-header h1 { margin: 0; color: #172033; font-size: 28px; }.page-header p, .table-card header p { margin: 7px 0 0; color: #607087; }.header-actions { display: flex; align-items: center; gap: 10px; }.gate-grid { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 12px; }.gate-grid article { display: flex; gap: 11px; min-height: 76px; padding: 15px; border: 1px solid #f0c9a0; border-radius: 8px; background: #fff8ed; }.gate-grid article > span { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 50%; color: #fff; background: #e6a23c; font-weight: 800; }.gate-grid article.ready { border-color: #b8e4d1; background: #f0fbf6; }.gate-grid article.ready > span { background: #22a06b; }.gate-content { min-width: 0; }.gate-grid strong, .gate-grid small { display: block; }.gate-grid small { margin-top: 6px; color: #6b778c; line-height: 1.45; }.gate-grid .el-button { margin-top: 5px; padding: 0; }.table-card { overflow: hidden; border: 1px solid #d9e2ec; border-radius: 8px; background: #fff; }.table-card > header, .config-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 15px 16px; }.table-card h2 { margin: 0; font-size: 18px; }.table-card > header > strong { color: #607087; font-size: 12px; }.config-panel { margin: 4px 24px 16px; overflow: hidden; border: 1px solid #dce5ef; border-radius: 7px; background: #fff; }.config-panel > header { background: #f7f9fc; }.config-panel > header small { display: block; margin-top: 4px; color: #718096; }.config-panel a, .next-actions a { color: #1677d2; text-decoration: none; }.callback { display: block; overflow-wrap: anywhere; color: #4b5d73; font-size: 12px; }.next-actions { display: flex; gap: 20px; padding: 12px 16px; border-top: 1px solid #e5ebf2; background: #fafcff; }.blocker-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }.blocker-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; line-height: 1.4; }.blocker-list li > span { overflow-wrap: anywhere; }.blocker-list .el-button { flex: 0 0 auto; padding: 0; }.platform-blockers { max-width: 440px; }.approval-form { margin-top: 18px; }.approval-form :deep(.el-checkbox) { height: auto; white-space: normal; }.approval-form :deep(.el-checkbox__label) { white-space: normal; line-height: 1.6; }
+.resource-gate-note { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid #e5ebf2; background: #fffaf1; color: #6b5a35; font-size: 12px; }
 @media (max-width: 1000px) { .gate-grid { grid-template-columns: 1fr 1fr; }.page-header { flex-direction: column; } }
 @media (max-width: 620px) { .gate-grid { grid-template-columns: 1fr; }.next-actions { align-items: flex-start; flex-direction: column; } }
 </style>

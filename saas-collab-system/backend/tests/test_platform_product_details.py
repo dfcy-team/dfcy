@@ -6,7 +6,12 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.listings.models import PlatformProductDetail
-from apps.listings.platform_product_details import _resolve_sku, import_platform_product_details, parse_import_rows
+from apps.listings.platform_product_details import (
+    SKUResolutionError,
+    _resolve_sku,
+    import_platform_product_details,
+    parse_import_rows,
+)
 from apps.listings.serializers import PlatformProductDetailSerializer
 from apps.listings.views import PlatformProductDetailCollectionView, PlatformProductDetailImportView
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, StoreMaster
@@ -69,17 +74,16 @@ def test_import_normalizes_sku_nfkc_format_chars_and_case_for_old_code():
     assert item.source_old_sku_code == "HY040-Pink-6KG"
 
 
-def test_import_prefers_new_sku_when_old_value_is_unknown():
+def test_import_rejects_unknown_old_sku_when_new_sku_is_also_supplied():
     tenant, platform, store, sku = fixture_data()
     raw = (
         "platform,store_code,country_code,platform_product_id,platform_variant_id,source_old_sku_code,new_sku_code\n"
         "tiktok,shop-th,TH,P-NEW,V-NEW,missing-old,new-1\u200b\n"
     ).encode("utf-8")
     result = import_platform_product_details(tenant=tenant, raw=raw, filename="items.csv")
-    assert result["valid"] == 1 and not result["errors"]
-    item = PlatformProductDetail.objects.get(tenant=tenant)
-    assert item.internal_sku_id == sku.id
-    assert item.source_old_sku_code == "missing-old"
+    assert result["valid"] == 0 and result["errors"]
+    assert result["errors"][0]["code"] == "missing_legacy_sku"
+    assert not PlatformProductDetail.objects.filter(tenant=tenant).exists()
 
 
 def test_import_rejects_ambiguous_normalized_old_sku_match():
@@ -163,6 +167,35 @@ def test_resolve_sku_legacy_cache_keys_are_case_insensitive():
         {"new_sku_code": " new-1\u200b "},
         new_skus={"NEW-1": sku},
     ).pk == sku.pk
+
+
+def test_resolve_sku_requires_new_and_legacy_codes_to_identify_same_sku():
+    tenant, platform, store, sku = fixture_data()
+    other = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=sku.spu,
+        sku_code="NEW-OTHER",
+        legacy_sku_code="OLD-OTHER",
+        purchase_price=Decimal("1"),
+    )
+    with pytest.raises(SKUResolutionError) as exc_info:
+        _resolve_sku(
+            tenant,
+            {"new_sku_code": "NEW-1", "source_old_sku_code": "OLD-OTHER"},
+        )
+    assert exc_info.value.code == "sku_code_conflict"
+    assert exc_info.value.state == "conflict"
+
+
+def test_resolve_sku_rejects_missing_side_when_both_codes_are_supplied():
+    tenant, *_ = fixture_data()
+    with pytest.raises(SKUResolutionError) as exc_info:
+        _resolve_sku(
+            tenant,
+            {"new_sku_code": "NEW-1", "source_old_sku_code": "UNKNOWN-OLD"},
+        )
+    assert exc_info.value.code == "missing_legacy_sku"
+    assert exc_info.value.state == "pending"
 
 
 def test_parse_downloadable_template_headers():

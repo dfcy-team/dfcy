@@ -22,6 +22,7 @@ from .capability_gate import sync_source_health
 
 
 RESOURCE_DESTINATIONS = {
+    "platform_product": ("平台商品档案", "listings_platformproductdetail / integrations_marketplaceproductmapping"),
     "sales_order": ("销售订单", "sales_order / sales_order_item"),
     "refund_return": ("退款退货", "refund_return / refund_return_item"),
     "inventory_snapshot": ("库存分析", "inventory_snapshot"),
@@ -113,6 +114,7 @@ def _subject(job, stores, warehouse_auth, warehouse_master):
         auth = stores[job.store_authorization_id]
         return {
             "subject_type": "store",
+            "store_id": auth.store_id,
             "subject_code": auth.store.code,
             "subject_name": auth.store.name,
             "region": auth.region,
@@ -124,6 +126,7 @@ def _subject(job, stores, warehouse_auth, warehouse_master):
     if warehouse:
         return {
             "subject_type": "warehouse",
+            "store_id": None,
             "subject_code": warehouse.code,
             "subject_name": warehouse.name,
             "region": warehouse.country_code,
@@ -132,6 +135,7 @@ def _subject(job, stores, warehouse_auth, warehouse_master):
         }
     return {
         "subject_type": "unbound",
+        "store_id": None,
         "subject_code": "",
         "subject_name": "未绑定",
         "region": "",
@@ -224,6 +228,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "resource_type": job.resource_type,
         "schedule_type": job.schedule_type,
         "execution_mode": execution_mode,
+        "product_full_sync": bool(scope.get("product_full_sync", True)),
         "status": job.status,
         "is_enabled": job.is_enabled,
         "max_retry_count": job.max_retry_count,
@@ -371,6 +376,7 @@ def _run_rows(runs, job_rows):
                 "sync_job_id": run.sync_job_id,
                 "subject_name": job.get("subject_name", "历史未绑定"),
                 "subject_code": job.get("subject_code", ""),
+                "store_id": job.get("store_id"),
                 "region": job.get("region", ""),
                 "platform": run.sync_job.integration_config.platform,
                 "api_type": job.get("api_type", "inventory" if run.sync_job.integration_config.platform == "jifeng_wms" else "marketplace"),
@@ -417,6 +423,9 @@ def _matches(row, params, mode):
         expected = str(params.get(query_key, "")).strip().lower()
         if expected and str(row.get(row_key, "")).lower() != expected:
             return False
+    store_id = str(params.get("store_id", "")).strip()
+    if store_id and str(row.get("store_id") or "") != store_id:
+        return False
     job_state = str(params.get("job_state", "")).strip().lower()
     if mode == "sync-jobs" and job_state:
         states = {

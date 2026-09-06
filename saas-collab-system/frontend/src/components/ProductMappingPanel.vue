@@ -139,6 +139,11 @@
             <el-descriptions-item label="平台商品 ID">{{ detail.platform_product_id || '-' }}</el-descriptions-item>
             <el-descriptions-item label="平台变体 ID">{{ detail.platform_variant_id || '-' }}</el-descriptions-item>
             <el-descriptions-item label="平台 SKU">{{ detail.platform_sku || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="来源 SKU">{{ detail.source_old_sku_code || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="内部旧 SKU">{{ detail.internal_legacy_sku_code || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="数据来源">{{ sourceLabel(detail.source) }}</el-descriptions-item>
+            <el-descriptions-item label="关联方式">{{ mappingRelationLabel(mapping) }}</el-descriptions-item>
+            <el-descriptions-item label="平台更新时间">{{ formatDate(detail.platform_updated_at) }}</el-descriptions-item>
             <el-descriptions-item label="当前本地 SKU">{{ mapping?.sku_code || detail.internal_sku_code || '未匹配' }}</el-descriptions-item>
           </el-descriptions>
         </section>
@@ -300,7 +305,16 @@ function mappingFrom(value) {
   if (!value || typeof value !== 'object') return null;
   if (value.mapping && typeof value.mapping === 'object') return value.mapping;
   if (value.mapping_summary && typeof value.mapping_summary === 'object') return value.mapping_summary;
-  if (value.mapping_id) return { id: value.mapping_id, status: value.mapping_status, sku_id: value.sku_id, sku_code: value.sku_code, confidence: value.confidence, result_code: value.result_code };
+  if (value.mapping_id) return {
+    id: value.mapping_id,
+    status: value.mapping_status,
+    sku_id: value.sku_id,
+    sku_code: value.sku_code,
+    confidence: value.confidence,
+    result_code: value.result_code,
+    mapping_source: value.mapping_source,
+    manually_confirmed: value.manually_confirmed,
+  };
   if (value.status && ['unmapped', 'suggested', 'mapped', 'conflict', 'inactive'].includes(value.status)) return value;
   return null;
 }
@@ -332,6 +346,24 @@ function statusLabel(value) {
 }
 function statusType(value) {
   return ({ unmapped: 'info', suggested: 'warning', mapped: 'success', conflict: 'danger', inactive: 'info' })[value] || 'info';
+}
+function sourceLabel(value) {
+  return ({ api: '平台 API 同步', api_sync: '平台 API 同步', sync: '平台 API 同步', import: '人工导入', manual: '人工维护' })[String(value || '').toLowerCase()] || value || '未标明';
+}
+function mappingRelationLabel(value) {
+  if (!value) return '待处理';
+  const source = String(value.mapping_source || '').toLowerCase();
+  if (['api_exact_match', 'api_sync_exact_match'].includes(source)
+      && value.status === 'mapped' && value.manually_confirmed === false) return '自动精确关联';
+  if (value.manually_confirmed === true) return '人工确认';
+  if (value.status === 'mapped') return '已关联';
+  if (['suggested', 'conflict'].includes(value.status)) return '待人工确认';
+  return '待处理';
+}
+function formatDate(value) {
+  if (!value) return '未提供';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
 }
 function platformCode(value) {
   return String(value?.platform_code || value?.platform || value?.platform_name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');

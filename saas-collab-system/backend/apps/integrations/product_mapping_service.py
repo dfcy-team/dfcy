@@ -1,9 +1,11 @@
 """Product/SKU mapping service for marketplace variants.
 
-Automatic discovery can only produce ``suggested`` records; ``mapped`` always
-requires explicit manual confirmation. Conflicts keep the previous mapping and
-never silently overwrite. Mapping writes never trigger order/inventory/finance
-syncs.
+Automatic discovery can only produce ``suggested`` records.  A trusted
+platform product ingest may create a deterministic 100-confidence
+``api_exact_match`` mapping when supplied new and legacy SKU codes resolve to
+the same tenant SKU; this is an auditable association, not a fuzzy
+auto-confirmation.  Conflicts keep the previous mapping and never silently
+overwrite. Mapping writes never trigger order/inventory/finance syncs.
 """
 
 import re
@@ -144,6 +146,8 @@ def create_product_mapping(
     mapping_source=MarketplaceProductMapping.MappingSource.MANUAL,
 ):
     _validate_actor_tenant(actor, tenant.id)
+    if mapping_source == MarketplaceProductMapping.MappingSource.API_EXACT_MATCH:
+        raise ValidationError("API exact-match mappings can only be created by trusted platform ingestion.")
     if store_mapping is None or store_mapping.tenant_id != tenant.id:
         raise ValidationError({"store_mapping": "Product mapping requires a tenant store mapping."})
     if store_mapping.status != MarketplaceStoreMapping.Status.ACTIVE:
@@ -202,6 +206,101 @@ def create_product_mapping(
         },
     )
     return mapping
+
+
+@transaction.atomic
+def auto_associate_product_mapping(record, *, actor, sku):
+    """Promote a deterministic platform match to an API-exact mapping.
+
+    This is intentionally separate from ``confirm_product_mapping``.  It is
+    called only by the canonical platform-product ingestion service after both
+    the new and legacy SKU values have resolved to the same tenant SKU.  It
+    never accepts a confidence below 100 and never performs fuzzy discovery.
+    Manual API routes do not expose ``mapping_source`` and continue to use the
+    explicit confirmation path.
+    """
+
+    _validate_actor_tenant(actor, record.tenant_id)
+    _validate_sku_tenant(sku, record.tenant_id)
+    if record.platform_detail_id is None:
+        raise ValidationError("API exact-match mapping requires a canonical platform product detail.")
+
+    record = MarketplaceProductMapping.objects.select_for_update().select_related(
+        "store_mapping__authorization__integration_config",
+        "platform_detail__platform",
+        "platform_detail__store",
+        "platform_detail__internal_sku",
+    ).get(pk=record.pk)
+    # Re-check the state after acquiring the row lock.  A concurrent operator
+    # confirmation/deactivation must win over a stale ingest object.
+    if record.status not in {
+        MarketplaceProductMapping.Status.UNMAPPED,
+        MarketplaceProductMapping.Status.SUGGESTED,
+    }:
+        if (
+            record.status == MarketplaceProductMapping.Status.MAPPED
+            and record.mapping_source == MarketplaceProductMapping.MappingSource.API_EXACT_MATCH
+            and record.sku_id == sku.id
+        ):
+            return record
+        raise StateConflict("Only an unresolved product mapping can receive a trusted API exact match.")
+    detail = PlatformProductDetail.objects.select_for_update().select_related("internal_sku").get(
+        pk=record.platform_detail_id
+    )
+    # Replace the select_related snapshot with the row acquired under lock so
+    # MarketplaceProductMapping.full_clean() validates the same canonical
+    # internal SKU that the association check just inspected.
+    record.platform_detail = detail
+    _validate_platform_detail_identity(
+        detail=detail,
+        tenant_id=record.tenant_id,
+        store_mapping=record.store_mapping,
+        platform_product_id=record.platform_product_id,
+        platform_variant_id=record.platform_variant_id,
+        platform_sku=record.platform_sku,
+        sku=sku,
+    )
+    if detail.internal_sku_id != sku.id:
+        raise StateConflict("Trusted API exact match requires the canonical detail SKU to match.")
+    existing = MarketplaceProductMapping.objects.select_for_update().filter(
+        store_mapping=record.store_mapping,
+        sku=sku,
+        status=MarketplaceProductMapping.Status.MAPPED,
+    ).exclude(pk=record.pk)
+    if existing.exists():
+        raise StateConflict("The internal SKU is already mapped to another platform variant in this store.")
+    previous = {
+        "status": record.status,
+        "mapping_source": record.mapping_source,
+        "sku_id": record.sku_id,
+        "manually_confirmed": record.manually_confirmed,
+    }
+    record.status = MarketplaceProductMapping.Status.MAPPED
+    record.mapping_source = MarketplaceProductMapping.MappingSource.API_EXACT_MATCH
+    record.confidence = 100
+    record.sku = sku
+    record.product = sku.spu
+    record.manually_confirmed = False
+    record.result_code = ""
+    record.updated_by = actor
+    record.last_verified_at = django_timezone.now()
+    with product_mapping_service_write():
+        record.save()
+    _product_mapping_audit(
+        record.tenant,
+        record.store_mapping.authorization.integration_config,
+        actor,
+        "product_mapping_api_exact_match",
+        IntegrationAuditLog.Result.SUCCESS,
+        {
+            "platform_variant_id": record.platform_variant_id,
+            "sku_id": sku.id,
+            "confidence": 100,
+            "previous": previous,
+            "manually_confirmed": False,
+        },
+    )
+    return record
 
 
 def suggest_product_mapping(record, *, actor, sku, confidence):

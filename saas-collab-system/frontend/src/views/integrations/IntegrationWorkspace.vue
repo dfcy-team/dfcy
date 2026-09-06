@@ -477,7 +477,10 @@ const activeJob = ref(null);
 const activeRun = ref(null);
 const deepLinkKey = ref('');
 const creatingJobTemplate = ref(null);
-const draft = reactive({ platform: '', status: '', environment: '', api_type: '', resource_type: '', schedule_type: '', subject: '', run_id: '', started_from: '', started_to: '' });
+// `store_id` is intentionally a hidden route/query context.  It lets a
+// verified store archive deep-link to one store's product sync task without
+// adding another menu or exposing an unconstrained create action.
+const draft = reactive({ platform: '', status: '', environment: '', api_type: '', resource_type: '', schedule_type: '', subject: '', store_id: '', run_id: '', started_from: '', started_to: '' });
 const query = reactive({ ...draft, job_state: '' });
 const configForm = reactive({ account_alias: '', platform: '', api_type: '', environment: '', regions: [] });
 const referencePlatforms = computed(() => data.value.reference_options?.platforms || []);
@@ -640,7 +643,7 @@ const SummaryGrid = defineComponent({ props: { items: Array }, setup(p) { return
 
 const labels = {
   platform: { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' }, api_type: { marketplace: '商城 API', advertising: '广告 API', inventory: '库存 API' },
-  environment: { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' }, resource_type: { sales_order: '销售订单', refund_return: '退款退货', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单' },
+  environment: { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' }, resource_type: { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退款退货', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单' },
   schedule_type: { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每天定时', weekly: '每周定时', cron: '定时' }, execution_mode: { simulation: '本地模拟', live_readonly: '生产只读' }, schedule_state: { disabled: '已停用', running: '运行中', manual: '手动触发', unscheduled: '尚未排期', due: '等待执行', scheduled: '已排期', retry_waiting: '退避等待', retry_exhausted: '重试暂停' },
   status: { success: '成功', failed: '失败', running: '运行中', active: '已启用', configured: '已配置', verified: '已验证', referenced: '已引用', unconfigured: '未配置', disabled: '已停用', idle: '空闲', pending_review: '待审核', healthy: '运行正常', authorization: '授权异常', configuration: '配置待处理', due: '等待执行', simulation: '本地模拟', live_readonly: '生产只读' }
 };
@@ -933,6 +936,7 @@ async function saveJob() {
   }
 }
 function businessDestination(resourceType) {
+  if (resourceType === 'platform_product') return { label: '平台商品明细数据', path: '/products/platform-details', tables: 'platform_product_details' };
   if (resourceType === 'refund_return') return { label: '退款退货', path: '/sales-management/returns', tables: 'refund_return / refund_return_item' };
   if (resourceType === 'inventory_snapshot') return { label: '库存分析', path: '/analytics/inventory', tables: 'inventory_snapshot' };
   return { label: '销售订单', path: '/sales-management/orders', tables: 'sales_order / sales_order_item' };

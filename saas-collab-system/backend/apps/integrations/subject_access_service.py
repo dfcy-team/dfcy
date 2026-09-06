@@ -292,6 +292,12 @@ def _warehouse_bindings(user, subject, config_map):
             "id": row.id,
             "integration_config_id": row.integration_config_id,
             "provider": row.provider,
+            # The provider-issued warehouse identity is binding-scoped.  It
+            # must be returned by the subject drawer so a reload/rebind keeps
+            # the value the operator entered instead of falling back to the
+            # local archive code or a shared config credential.
+            "external_warehouse_code": row.external_warehouse_code,
+            "external_warehouse_region": row.external_warehouse_region,
             "status": row.status,
             "authorized_at": row.authorized_at,
             "last_verified_at": row.last_verified_at,

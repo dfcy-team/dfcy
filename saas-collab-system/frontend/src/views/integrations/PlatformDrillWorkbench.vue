@@ -20,10 +20,10 @@
       <div class="selector-row">
         <span>演练配置</span>
         <el-select v-model="selectedConfigId" placeholder="选择平台配置" style="min-width: 320px" @change="loadContext">
-          <el-option
-            v-for="item in configs"
-            :key="item.id"
-            :label="`${item.platform} · ${item.account_alias} · ${item.environment}`"
+            <el-option
+              v-for="item in configs"
+              :key="item.id"
+              :label="`${platformLabel(item.platform)} · ${item.account_alias} · ${environmentLabel(item.environment)}`"
             :value="item.id"
           />
         </el-select>
@@ -43,10 +43,10 @@
       <el-card shadow="never">
         <template #header><div class="card-title"><span>1. 接入配置</span><el-button link type="primary" @click="goConfig">查看配置详情</el-button></div></template>
         <el-descriptions v-if="selectedConfig" :column="2" border>
-          <el-descriptions-item label="平台">{{ selectedConfig.platform }}</el-descriptions-item>
-          <el-descriptions-item label="环境"><el-tag>{{ selectedConfig.environment }}</el-tag></el-descriptions-item>
-          <el-descriptions-item label="配置状态">{{ selectedConfig.status }}</el-descriptions-item>
-          <el-descriptions-item label="凭据状态">{{ selectedConfig.credential_status || '未配置' }}</el-descriptions-item>
+          <el-descriptions-item label="平台">{{ platformLabel(selectedConfig.platform) }}</el-descriptions-item>
+          <el-descriptions-item label="环境"><el-tag>{{ environmentLabel(selectedConfig.environment) }}</el-tag></el-descriptions-item>
+          <el-descriptions-item label="配置状态">{{ statusLabel(selectedConfig.status) }}</el-descriptions-item>
+          <el-descriptions-item label="凭据状态">{{ statusLabel(selectedConfig.credential_status) }}</el-descriptions-item>
           <el-descriptions-item label="站点">{{ (selectedConfig.regions || []).join(', ') || '—' }}</el-descriptions-item>
           <el-descriptions-item label="写入能力"><el-tag type="success">关闭</el-tag></el-descriptions-item>
         </el-descriptions>
@@ -93,10 +93,10 @@
           </div>
         </template>
         <el-table :data="relatedJobs" size="small" empty-text="当前配置暂无同步任务">
-          <el-table-column prop="resource_type" label="资源" min-width="130" />
+          <el-table-column prop="resource_type" label="资源" min-width="130"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template></el-table-column>
           <el-table-column prop="subject_name" label="对象" min-width="140" />
-          <el-table-column prop="execution_mode" label="执行模式" width="120" />
-          <el-table-column prop="health_state" label="健康" width="105" />
+          <el-table-column prop="execution_mode" label="执行模式" width="120"><template #default="{ row }">{{ executionModeLabel(row.execution_mode) }}</template></el-table-column>
+          <el-table-column prop="health_state" label="健康" width="105"><template #default="{ row }">{{ statusLabel(row.health_state) }}</template></el-table-column>
           <el-table-column prop="blocked_reason" label="阻塞原因" min-width="180" show-overflow-tooltip />
         </el-table>
       </el-card>
@@ -105,8 +105,8 @@
         <template #header><div class="card-title"><span>5. 运行结果</span><el-button link type="primary" @click="goRuns">全部运行记录</el-button></div></template>
         <el-table :data="relatedRuns" size="small" empty-text="当前平台暂无运行结果">
           <el-table-column prop="run_id" label="运行 ID" min-width="170" />
-          <el-table-column prop="resource_type" label="资源" width="130" />
-          <el-table-column prop="status" label="状态" width="90" />
+          <el-table-column prop="resource_type" label="资源" width="130"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template></el-table-column>
+          <el-table-column prop="status" label="状态" width="90"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
           <el-table-column prop="masked_error_message" label="脱敏错误" min-width="180" show-overflow-tooltip />
           <el-table-column label="操作" width="75"><template #default="{ row }"><el-button link type="primary" @click="goRun(row)">详情</el-button></template></el-table-column>
         </el-table>
@@ -115,8 +115,8 @@
       <el-card shadow="never">
         <template #header><div class="card-title"><span>6. 异常处置</span><el-button link type="primary" @click="goJobs">进入事件工作台</el-button></div></template>
         <el-table :data="relatedIncidents" size="small" empty-text="当前平台没有未解决事件">
-          <el-table-column prop="resource_type" label="资源" width="130" />
-          <el-table-column prop="status" label="状态" width="110" />
+          <el-table-column prop="resource_type" label="资源" width="130"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template></el-table-column>
+          <el-table-column prop="status" label="状态" width="110"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
           <el-table-column prop="assignee_name" label="负责人" width="120" />
           <el-table-column prop="masked_message" label="脱敏信息" min-width="220" show-overflow-tooltip />
         </el-table>
@@ -230,7 +230,7 @@ const canManage = computed(() => authStore.hasPermission('integrations.manage'))
 const canRefresh = computed(() => authStore.hasPermission('integrations.store.authorize') && authStore.hasPermission('integrations.credential.rotate'));
 const canRevoke = computed(() => authStore.hasPermission('integrations.store.revoke'));
 const oauthReady = computed(() => Boolean(oauthForm.store_id && oauthForm.region && configDetail.value?.callback_url));
-const capabilityResourceMap = { ORDER: { value: 'sales_order', label: '销售订单' }, RETURN_REFUND: { value: 'refund_return', label: '退货退款' }, INVENTORY: { value: 'inventory_snapshot', label: '库存快照' } };
+const capabilityResourceMap = { PRODUCT: { value: 'platform_product', label: '平台商品' }, ORDER: { value: 'sales_order', label: '销售订单' }, RETURN_REFUND: { value: 'refund_return', label: '退货退款' }, INVENTORY: { value: 'inventory_snapshot', label: '库存快照' } };
 const creatableResources = computed(() => capabilities.value
   .filter((item) => item.read_enabled && !item.write_enabled && item.status === 'active' && capabilityResourceMap[item.capability_code])
   .map((item) => capabilityResourceMap[item.capability_code])
@@ -248,6 +248,17 @@ const activeStep = computed(() => {
   return firstIncomplete === -1 ? steps.value.length : firstIncomplete;
 });
 const blockers = computed(() => steps.value.filter((item) => item.status !== 'success').map((item) => `${item.title}：${item.description}`));
+
+const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' };
+const environmentLabels = { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' };
+const resourceLabels = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单' };
+const statusLabels = { active: '已启用', authorized: '已授权', configured: '已配置', verified: '已验证', disabled: '已停用', failed: '失败', running: '运行中', healthy: '健康', pending_review: '待审核' };
+const executionModeLabels = { simulation: '本地模拟', live_readonly: '生产只读' };
+function platformLabel(value) { return platformLabels[value] || value || '—'; }
+function environmentLabel(value) { return environmentLabels[value] || value || '—'; }
+function resourceLabel(value) { return resourceLabels[value] || value || '—'; }
+function statusLabel(value) { return statusLabels[value] || value || '—'; }
+function executionModeLabel(value) { return executionModeLabels[value] || value || '—'; }
 
 async function loadAll() {
   loading.value = true;

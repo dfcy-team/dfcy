@@ -515,7 +515,7 @@ const workspaceOptions = {
   statuses: ['active', 'configured', 'disabled', 'failed', 'idle', 'running', 'verified'],
   environments: ['sandbox', 'pilot', 'production'],
   api_types: ['advertising', 'inventory', 'marketplace'],
-  resource_types: ['inventory_snapshot', 'refund_return', 'sales_order', 'settlement_bill'],
+  resource_types: ['inventory_snapshot', 'platform_product', 'refund_return', 'sales_order', 'settlement_bill'],
   schedule_types: ['daily', 'hourly', 'interval']
 };
 
@@ -581,6 +581,13 @@ export const mockIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
     for (const key of ['platform', 'api_type', 'resource_type']) {
       if (params[key] && String(row[key] || '').toLowerCase() !== String(params[key]).toLowerCase()) return false;
     }
+    if (params.store_id) {
+      const authorizationId = row.store_authorization_id ?? row.selected_authorization_id;
+      const authorization = mockAuthorizationRows.find((entry) => String(entry.id) === String(authorizationId))
+        || mockAuthorizationRows.find((entry) => String(entry.store_code || '') === String(row.subject_code || ''));
+      const storeId = row.store_id ?? authorization?.store_id;
+      if (String(storeId || '') !== String(params.store_id)) return false;
+    }
     if (params.subject) {
       const subject = String(params.subject).toLowerCase();
       const haystack = ['subject_code', 'subject_name', 'external_subject_id']
@@ -611,8 +618,8 @@ export const mockIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
 };
 
 const mockStoreSyncResourceRegistry = Object.freeze({
-  shopee: Object.freeze(['sales_order', 'refund_return']),
-  tiktok: Object.freeze(['sales_order', 'refund_return']),
+  shopee: Object.freeze(['platform_product', 'sales_order', 'refund_return']),
+  tiktok: Object.freeze(['platform_product', 'sales_order', 'refund_return']),
   lazada: Object.freeze([]),
 });
 const mockWarehouseSyncResourceRegistry = Object.freeze({
@@ -760,9 +767,11 @@ export const mockSyncAlertIncidents = (filters = '') => {
   const params = typeof filters === 'string' ? { status: filters } : (filters || {});
   const rows = mockIncidentRows.filter((item) => {
     if (params.status && item.status !== params.status) return false;
+    if (params.resource_type && item.resource_type !== params.resource_type) return false;
     if (params.store_id) {
       const job = workspaceJobs.find((entry) => String(entry.id) === String(item.sync_job_id));
-      const authorization = mockAuthorizationRows.find((entry) => String(entry.id) === String(job?.selected_authorization_id));
+      const authorization = mockAuthorizationRows.find((entry) => String(entry.id) === String(job?.selected_authorization_id))
+        || mockAuthorizationRows.find((entry) => String(entry.store_code || '') === String(job?.subject_code || ''));
       if (!job || String(job.store_id || authorization?.store_id) !== String(params.store_id)) return false;
     }
     return true;
@@ -1046,6 +1055,7 @@ const mockWarehouseAuthorizationRows = [{
   integration_config_id: 3,
   warehouse_id: 1,
   warehouse_code: 'MY-WMS-01',
+  external_warehouse_code: 'MY-JIFENG-01',
   warehouse_name: '马来极风仓',
   country_code: 'MY',
   provider: 'jifeng_wms',
@@ -1063,6 +1073,7 @@ const mockWarehouseAuthorizationRows = [{
   integration_config_id: 3,
   warehouse_id: 1,
   warehouse_code: 'MY-WMS-01',
+  external_warehouse_code: 'MY-JIFENG-01',
   warehouse_name: '马来极风仓',
   country_code: 'MY',
   provider: 'jifeng_wms',
@@ -1080,6 +1091,7 @@ const mockWarehouseAuthorizationRows = [{
   integration_config_id: 3,
   warehouse_id: 1,
   warehouse_code: 'MY-WMS-01',
+  external_warehouse_code: 'MY-JIFENG-01',
   warehouse_name: '马来极风仓',
   country_code: 'MY',
   provider: 'jifeng_wms',
@@ -1097,6 +1109,7 @@ const mockWarehouseAuthorizationRows = [{
   integration_config_id: 3,
   warehouse_id: 1,
   warehouse_code: 'MY-WMS-01',
+  external_warehouse_code: 'MY-JIFENG-01',
   warehouse_name: '马来极风仓',
   country_code: 'MY',
   provider: 'jifeng_wms',
@@ -1114,6 +1127,7 @@ const mockWarehouseAuthorizationRows = [{
   integration_config_id: 3,
   warehouse_id: 1,
   warehouse_code: 'MY-WMS-01',
+  external_warehouse_code: 'MY-JIFENG-01',
   warehouse_name: '马来极风仓',
   country_code: 'MY',
   provider: 'jifeng_wms',
@@ -1255,24 +1269,44 @@ export const mockWarehouseAuthorizations = (params = {}) => {
 };
 
 export const mockBindWarehouseAuthorization = (payload = {}) => {
+  const externalWarehouseCode = String(payload.external_warehouse_code || '').trim();
+  if (!externalWarehouseCode) return mockFailure('INVALID_EXTERNAL_WAREHOUSE_CODE', '生产库存 API 必须填写服务商返回的外部仓库编码');
+  const config = configFixtures.find((item) => String(item.id) === String(payload.integration_config_id));
+  if (!config || config.platform !== 'jifeng_wms') return mockFailure('INVALID_CONFIG', '请选择库存 API 配置');
   const current = mockWarehouseAuthorizationRows.find((row) => (
     String(row.warehouse_id) === String(payload.warehouse_id) && row.status === 'active'
   ));
-  if (current && String(current.integration_config_id) === String(payload.integration_config_id)) {
+  if (payload.expected_authorization_id && (!current || String(payload.expected_authorization_id) !== String(current.id))) {
+    return mockFailure('STATE_CONFLICT', '仓库授权状态已变化，请刷新页面后重新操作');
+  }
+  if (current
+      && String(current.integration_config_id) === String(payload.integration_config_id)
+      && String(current.external_warehouse_code || '').trim() === externalWarehouseCode) {
     return successResponse({ idempotent: true, operation: 'already_bound', authorization: { ...current } });
   }
   if (current && !payload.replace) return mockFailure('STATE_CONFLICT', '仓库已有库存 API 绑定，请明确确认后再更换绑定');
   if (current) {
     current.status = 'revoked';
     current.revoked_at = new Date().toISOString();
+    current.active_warehouse_binding_key = null;
+    workspaceJobs
+      .filter((job) => String(job.warehouse_authorization_id ?? job.selected_authorization_id) === String(current.id))
+      .forEach((job) => {
+        job.is_enabled = false;
+        job.status = 'disabled';
+        job.health_state = 'disabled';
+        job.schedule_state = 'disabled';
+        job.next_run_at = null;
+        job.blocked_reason = '仓库 API 绑定已更换，任务已停用';
+        job.authorization_status = 'revoked';
+      });
   }
-  const config = configFixtures.find((item) => String(item.id) === String(payload.integration_config_id));
-  if (!config || config.platform !== 'jifeng_wms') return mockFailure('INVALID_CONFIG', '请选择库存 API 配置');
   const record = {
     id: Math.max(...mockWarehouseAuthorizationRows.map((item) => item.id), 202) + 1,
     integration_config_id: config.id,
     warehouse_id: Number(payload.warehouse_id),
     warehouse_code: 'MY-WMS-01',
+    external_warehouse_code: externalWarehouseCode,
     warehouse_name: '马来极风仓',
     country_code: 'MY',
     provider: 'jifeng_wms',
@@ -1408,6 +1442,7 @@ export const mockConnectionCapabilities = () => successResponse({
   available_codes: ['PRODUCT', 'CATEGORY', 'LISTING', 'PRICE', 'ORDER', 'INVENTORY', 'FULFILLMENT', 'WAREHOUSE', 'RETURN_REFUND', 'SETTLEMENT', 'PAYMENT', 'ADVERTISING', 'AFFILIATE', 'REVIEW', 'REPORT', 'WEBHOOK'],
   results: [
     { capability_code: 'ORDER', read_enabled: true, write_enabled: false, sync_mode: 'scheduled', source_priority: 10, status: 'active' },
-    { capability_code: 'RETURN_REFUND', read_enabled: true, write_enabled: false, sync_mode: 'manual', source_priority: 20, status: 'active' }
+    { capability_code: 'RETURN_REFUND', read_enabled: true, write_enabled: false, sync_mode: 'manual', source_priority: 20, status: 'active' },
+    { capability_code: 'PRODUCT', read_enabled: true, write_enabled: false, sync_mode: 'scheduled', source_priority: 5, status: 'active' }
   ]
 });

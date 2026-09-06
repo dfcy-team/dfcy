@@ -25,6 +25,9 @@ describe('仓库 API 接入操作闭环', () => {
     expect(dialog).toContain('response.data?.simulated === true');
     expect(dialog).toContain('response.data?.external_api_called === false');
     expect(dialog).toContain('模拟检查完成，未调用真实平台。');
+    expect(dialog).toContain('authorization-history-table');
+    expect(dialog).toContain('min-width: 0; max-width: 100%;');
+    expect(dialog).toContain('overflow-x: auto;');
     expect(dialog).toContain("query.action = 'credentials'");
     expect(dialog).toContain("query.config_id = selected.id");
     expect(dialog).toContain('requiresCredentialRotate');

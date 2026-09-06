@@ -81,6 +81,7 @@ SAFE_DEFAULTS = {
     "platforms": {
         "lazada": {
             "contract_approved": False,
+            "product_contract_approved": False,
             "app_id": "",
             "redirect_uri": "",
             "auth_url": "https://auth.lazada.com/oauth/authorize",
@@ -91,6 +92,9 @@ SAFE_DEFAULTS = {
         },
         "shopee": {
             "contract_approved": False,
+            # Product APIs have a separate evidence/contract gate.  This must
+            # never inherit order/read contract approval from an older release.
+            "product_contract_approved": False,
             "app_id": "",
             "redirect_uri": "",
             "auth_url": "https://partner.shopeemobile.com/api/v2/shop/auth_partner",
@@ -103,11 +107,17 @@ SAFE_DEFAULTS = {
             "order_detail_path": "/api/v2/order/get_order_detail",
             "return_list_path": "/api/v2/returns/get_return_list",
             "return_detail_path": "/api/v2/returns/get_return_detail",
+            "product_list_path": "/api/v2/product/get_item_list",
+            "product_base_info_path": "/api/v2/product/get_item_base_info",
+            "product_model_list_path": "/api/v2/product/get_model_list",
             "market": "",
             "region": "",
         },
         "tiktok": {
             "contract_approved": False,
+            # Search/Get Product scopes and lifecycle semantics are reviewed
+            # independently from order/return contracts.
+            "product_contract_approved": False,
             "app_id": "",
             "service_id": "",
             "redirect_uri": "",
@@ -125,6 +135,8 @@ SAFE_DEFAULTS = {
             "order_list_path": "/order/202309/orders/search",
             "order_detail_path": "/order/202309/orders",
             "return_list_path": "/return_refund/202602/returns/search",
+            "product_search_path": "/product/202502/products/search",
+            "product_detail_path": "/product/202309/products/{product_id}",
         },
     },
 }
@@ -181,17 +193,20 @@ _LISTING_WRITE_KEYS = {
     "allowed_store_ids",
     "max_batch_size",
 }
-_PLATFORM_COMMON_KEYS = {"contract_approved", "app_id", "service_id", "redirect_uri", "market"}
+_PLATFORM_COMMON_KEYS = {
+    "contract_approved", "product_contract_approved", "app_id", "service_id", "redirect_uri", "market",
+}
 _PLATFORM_KEYS_BY_NAME = {
     "lazada": _PLATFORM_COMMON_KEYS | {"auth_url", "api_host", "token_path", "refresh_path"},
         "shopee": _PLATFORM_COMMON_KEYS | {
         "auth_url", "api_host", "token_path", "refresh_path", "revoke_path", "shop_path", "region",
         "order_list_path", "order_detail_path", "return_list_path", "return_detail_path",
+        "product_list_path", "product_base_info_path", "product_model_list_path",
     },
     "tiktok": _PLATFORM_COMMON_KEYS | {
         "auth_url", "api_host", "auth_urls", "api_hosts", "token_host", "token_path", "refresh_path",
         "revoke_path", "authorized_shops_path", "metadata_path", "order_list_path", "order_detail_path",
-        "return_list_path",
+        "return_list_path", "product_search_path", "product_detail_path",
     },
 }
 
@@ -508,6 +523,10 @@ def validate_runtime_config(value: Any):
             _validate_mapping_keys(item, _PLATFORM_KEYS_BY_NAME[platform], path)
             if "contract_approved" in item:
                 result["platforms"][platform]["contract_approved"] = _boolean(item["contract_approved"], f"{path}.contract_approved")
+            if "product_contract_approved" in item:
+                result["platforms"][platform]["product_contract_approved"] = _boolean(
+                    item["product_contract_approved"], f"{path}.product_contract_approved"
+                )
             for key in ("app_id", "service_id", "market", "region"):
                 if key in item:
                     result["platforms"][platform][key] = _string(item[key], f"{path}.{key}", max_length=120)
@@ -518,7 +537,11 @@ def validate_runtime_config(value: Any):
             for key in ("auth_url", "api_host", "token_host"):
                 if key in item:
                     result["platforms"][platform][key] = _https_url(item[key], f"{path}.{key}")
-            for key in _SAFE_PATH_KEYS | {"shop_path", "order_list_path", "order_detail_path", "return_list_path", "return_detail_path"}:
+            for key in _SAFE_PATH_KEYS | {
+                "shop_path", "order_list_path", "order_detail_path", "return_list_path", "return_detail_path",
+                "product_list_path", "product_base_info_path", "product_model_list_path",
+                "product_search_path", "product_detail_path",
+            }:
                 if key in item:
                     result["platforms"][platform][key] = _path(item[key], f"{path}.{key}")
             for key in ("auth_urls", "api_hosts"):
@@ -608,6 +631,7 @@ def _environment_config():
         "platforms": {
             "lazada": {
                 "contract_approved": bool(_setting("LIVE_LAZADA_CONTRACT_APPROVED", False)),
+                "product_contract_approved": False,
                 "app_id": _setting("LIVE_LAZADA_APP_KEY", "") or "",
                 "redirect_uri": _setting("LIVE_LAZADA_REDIRECT_URI", "") or "",
                 "auth_url": _setting("LIVE_LAZADA_AUTH_URL", SAFE_DEFAULTS["platforms"]["lazada"]["auth_url"]),
@@ -618,6 +642,7 @@ def _environment_config():
             },
             "shopee": {
                 "contract_approved": bool(_setting("LIVE_SHOPEE_CONTRACT_APPROVED", False)),
+                "product_contract_approved": bool(_setting("LIVE_SHOPEE_PRODUCT_CONTRACT_APPROVED", False)),
                 "app_id": _setting("LIVE_SHOPEE_PARTNER_ID", "") or "",
                 "redirect_uri": _setting("LIVE_SHOPEE_REDIRECT_URI", "") or "",
                 "auth_url": _setting("LIVE_SHOPEE_AUTH_URL", SAFE_DEFAULTS["platforms"]["shopee"]["auth_url"]),
@@ -630,11 +655,15 @@ def _environment_config():
                 "order_detail_path": _setting("LIVE_SHOPEE_ORDER_DETAIL_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["order_detail_path"]),
                 "return_list_path": _setting("LIVE_SHOPEE_RETURN_LIST_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["return_list_path"]),
                 "return_detail_path": _setting("LIVE_SHOPEE_RETURN_DETAIL_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["return_detail_path"]),
+                "product_list_path": _setting("LIVE_SHOPEE_PRODUCT_LIST_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["product_list_path"]),
+                "product_base_info_path": _setting("LIVE_SHOPEE_PRODUCT_BASE_INFO_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["product_base_info_path"]),
+                "product_model_list_path": _setting("LIVE_SHOPEE_PRODUCT_MODEL_LIST_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["product_model_list_path"]),
                 "market": _setting("LIVE_SHOPEE_MARKET", "") or "",
                 "region": _setting("LIVE_SHOPEE_DEFAULT_REGION", "") or "",
             },
             "tiktok": {
                 "contract_approved": bool(_setting("LIVE_TIKTOK_CONTRACT_APPROVED", False)),
+                "product_contract_approved": bool(_setting("LIVE_TIKTOK_PRODUCT_CONTRACT_APPROVED", False)),
                 "app_id": _setting("LIVE_TIKTOK_APP_KEY", "") or "",
                 "service_id": _setting("LIVE_TIKTOK_SERVICE_ID", "") or "",
                 "redirect_uri": _setting("LIVE_TIKTOK_REDIRECT_URI", "") or "",
@@ -660,6 +689,8 @@ def _environment_config():
                 "order_list_path": _setting("LIVE_TIKTOK_ORDER_LIST_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["order_list_path"]),
                 "order_detail_path": _setting("LIVE_TIKTOK_ORDER_DETAIL_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["order_detail_path"]),
                 "return_list_path": _setting("LIVE_TIKTOK_RETURN_LIST_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["return_list_path"]),
+                "product_search_path": _setting("LIVE_TIKTOK_PRODUCT_SEARCH_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["product_search_path"]),
+                "product_detail_path": _setting("LIVE_TIKTOK_PRODUCT_DETAIL_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["product_detail_path"]),
             },
         },
     }

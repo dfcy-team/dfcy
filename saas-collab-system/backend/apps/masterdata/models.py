@@ -1,3 +1,5 @@
+import hashlib
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -85,6 +87,34 @@ class PlatformMaster(models.Model):
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_platform_master_code")]
 
+    def _identity_type_change_blocked(self, previous_type):
+        """Whether changing platform type would invalidate bound identities."""
+
+        if not self.pk or not previous_type or previous_type == self.platform_type:
+            return False
+        # Store identity keys include platform_type, while active OAuth rows
+        # carry the same platform identity.  Refuse a type mutation while
+        # either identity is in use; operators must migrate/rebind explicitly
+        # instead of leaving stale keys behind.
+        if self.stores.exclude(external_store_id="").exists():
+            return True
+        return self.stores.filter(marketplace_authorizations__status="active").exists()
+
+    def clean(self):
+        if self.pk:
+            previous_type = type(self).objects.filter(pk=self.pk).values_list("platform_type", flat=True).first()
+            if self._identity_type_change_blocked(previous_type):
+                raise ValidationError(
+                    {"platform_type": "已有店铺外部身份或有效平台授权绑定该平台，不能直接修改平台类型。"}
+                )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous_type = type(self).objects.filter(pk=self.pk).values_list("platform_type", flat=True).first()
+            if self._identity_type_change_blocked(previous_type):
+                raise ValidationError("已有店铺外部身份或有效平台授权绑定该平台，不能直接修改平台类型。")
+        return super().save(*args, **kwargs)
+
 
 class PlatformSiteMaster(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="platform_site_masters")
@@ -136,6 +166,7 @@ class StoreMaster(models.Model):
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=120)
     external_store_id = models.CharField(max_length=160, blank=True, default="")
+    external_store_identity_key = models.CharField(max_length=64, null=True, blank=True, default=None)
     seller_entity_id = models.CharField(max_length=160, blank=True, default="")
     business_model = models.CharField(
         max_length=30, choices=BusinessModel.choices, default=BusinessModel.OTHER,
@@ -174,10 +205,41 @@ class StoreMaster(models.Model):
 
     class Meta:
         ordering = ["tenant_id", "code"]
-        constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_store_master_code")]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uniq_store_master_code"),
+            # The canonical key is nullable so manual archives with no
+            # upstream identity can coexist.  A concrete key is unique per
+            # tenant and already contains the platform + region dimensions.
+            models.UniqueConstraint(
+                fields=["tenant", "external_store_identity_key"],
+                name="uniq_store_external_identity",
+            ),
+        ]
 
     def clean(self):
         errors = {}
+        # Store external ids are copied from the platform identity contract.
+        # Canonicalise values at the model boundary as well as in the API
+        # serializer so service/import callers cannot create whitespace or
+        # lowercase-region aliases around the database constraint.
+        self.external_store_id = str(self.external_store_id or "").strip()
+        self.country_code = str(self.country_code or "").strip().upper()
+        if self.external_store_id:
+            platform_type = (
+                type(self).platform.field.remote_field.model.objects.filter(pk=self.platform_id)
+                .values_list("platform_type", flat=True)
+                .first()
+            )
+            duplicate = StoreMaster.objects.filter(
+                tenant_id=self.tenant_id,
+                platform__platform_type=platform_type,
+                country_code__iexact=self.country_code,
+                external_store_id=self.external_store_id,
+            ).exclude(pk=self.pk)
+            if duplicate.exists():
+                errors["external_store_id"] = (
+                    "该平台和站点的外部店铺 ID 已绑定其他店铺档案，请复用原档案或先处理重复数据。"
+                )
         if self.platform_site_id:
             if self.platform_site.tenant_id != self.tenant_id:
                 errors["platform_site"] = "Platform site tenant must match store tenant."
@@ -188,6 +250,63 @@ class StoreMaster(models.Model):
             errors["fulfillment_modes"] = "Unsupported fulfillment mode."
         if errors:
             raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.external_store_id = str(self.external_store_id or "").strip()
+        self.country_code = str(self.country_code or "").strip().upper()
+        if self.external_store_id and self.tenant_id and self.platform_id:
+            platform_type = (
+                type(self).platform.field.remote_field.model.objects.filter(pk=self.platform_id)
+                .values_list("platform_type", flat=True)
+                .first()
+            )
+            canonical = f"{str(platform_type or '').strip().lower()}:{self.country_code}:{self.external_store_id}"
+            self.external_store_identity_key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        else:
+            self.external_store_identity_key = None
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "platform_id", "country_code", "external_store_id"
+            ).first()
+            identity_changed = previous and (
+                previous["platform_id"] != self.platform_id
+                or str(previous["country_code"] or "").strip().upper() != self.country_code
+                or str(previous["external_store_id"] or "").strip() != self.external_store_id
+            )
+            if identity_changed:
+                active_authorizations = getattr(self, "marketplace_authorizations", None)
+                if active_authorizations is not None:
+                    platform_type = type(self).platform.field.remote_field.model.objects.filter(
+                        pk=self.platform_id
+                    ).values_list("platform_type", flat=True).first()
+                    for authorization in active_authorizations.filter(status="active").only(
+                        "platform", "region", "platform_store_id"
+                    ):
+                        if (
+                            authorization.platform_store_id != self.external_store_id
+                            or str(authorization.region or "").strip().upper() != self.country_code
+                            or authorization.platform != platform_type
+                        ):
+                            raise ValidationError(
+                                "已有有效平台授权绑定该店铺，不能修改与外部平台身份冲突的店铺档案字段。"
+                            )
+        if kwargs.get("update_fields") is not None:
+            # Keep the canonical key in sync when a narrow write explicitly
+            # changes one of its source columns.  Do not force the source
+            # columns into unrelated status-only updates: doing so could let
+            # a stale in-memory archive overwrite a concurrent identity edit.
+            update_fields = set(kwargs["update_fields"])
+            if update_fields & {
+                "tenant",
+                "tenant_id",
+                "platform",
+                "platform_id",
+                "country_code",
+                "external_store_id",
+            }:
+                update_fields.add("external_store_identity_key")
+            kwargs["update_fields"] = update_fields
+        return super().save(*args, **kwargs)
 
 
 class CountrySiteMaster(models.Model):
