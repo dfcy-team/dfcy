@@ -33,6 +33,11 @@
     <el-table v-else :data="roles" border table-layout="fixed">
       <el-table-column v-if="showRoleField('name')" prop="name" label="角色" min-width="160" />
       <el-table-column v-if="showRoleField('code')" prop="code" label="角色编码" min-width="180" />
+      <el-table-column label="类型" width="120">
+        <template #default="{ row }">
+          <el-tag :type="row.is_protected ? 'warning' : 'info'" effect="plain">{{ row.role_type_label || roleTypeLabel(row.role_type) }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="权限数" width="100">
         <template #default="{ row }">{{ row.permission_codes?.length || 0 }}</template>
       </el-table-column>
@@ -46,7 +51,7 @@
         <template #default="{ row }">
           <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
           <el-button
-            v-if="manageAccess.visible && row.code !== 'administrator'"
+            v-if="manageAccess.visible && !row.is_protected"
             link
             :type="row.status === 'active' ? 'warning' : 'success'"
             :disabled="manageAccess.disabled"
@@ -54,7 +59,7 @@
             @click="toggleRoleStatus(row)"
           >{{ row.status === 'active' ? '停用' : '启用' }}</el-button>
           <el-button
-            v-if="manageAccess.visible && row.code !== 'administrator'"
+            v-if="manageAccess.visible && !row.is_protected"
             link
             type="danger"
             :disabled="manageAccess.disabled"
@@ -78,20 +83,78 @@
     <el-drawer v-model="drawerOpen" title="角色权限配置" size="min(680px, 96vw)">
       <div class="role-heading">
         <div><strong>{{ selectedRole.name }}</strong><span>{{ selectedRole.code }}</span></div>
-        <el-tag effect="plain">目标租户：{{ targetTenantLabel }}</el-tag>
+        <div class="role-heading__tags">
+          <el-tag effect="plain">{{ selectedRole.role_type_label || roleTypeLabel(selectedRole.role_type) }}</el-tag>
+          <el-tag v-if="selectedRole.is_protected" type="warning" effect="plain">受保护</el-tag>
+          <el-tag effect="plain">目标租户：{{ targetTenantLabel }}</el-tag>
+        </div>
       </div>
       <el-form label-position="top">
+        <el-form-item label="配置方式">
+          <el-radio-group v-model="assignmentMode" :disabled="isBuiltInAdministrator">
+            <el-radio-button value="quick">快速分配</el-radio-button>
+            <el-radio-button value="advanced">高级配置</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <section v-if="assignmentMode === 'quick'" class="quick-assignment">
+          <el-alert
+            title="按模块选择权限档位；未触及模块保留原有权限。高风险权限不会随档位自动授予。"
+            type="info"
+            :closable="false"
+            show-icon
+          />
+          <div class="quick-template-row">
+            <span>角色模板</span>
+            <el-select v-model="selectedTemplate" clearable placeholder="选择模板后可继续调整" @change="applyRoleTemplate">
+              <el-option v-for="template in roleTemplates" :key="template.code" :label="template.name" :value="template.code" />
+            </el-select>
+          </div>
+          <el-alert v-if="templateHint" :title="templateHint" type="warning" :closable="false" show-icon />
+          <el-table :data="packageModules" border size="small" table-layout="fixed">
+            <el-table-column prop="module" label="模块" width="150" />
+            <el-table-column label="权限档位" min-width="180">
+              <template #default="{ row }">
+                <el-select v-model="quickSelections[row.module]" :disabled="!manageAccess.allowed" style="width: 100%" @change="markQuickModuleTouched(row.module, $event)">
+                  <el-option v-for="level in packageLevels" :key="level.code" :label="level.name" :value="level.code" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="高风险权限" min-width="180">
+              <template #default="{ row }">{{ row.high_risk_codes?.length || 0 }} 项需单独确认</template>
+            </el-table-column>
+          </el-table>
+          <div v-if="highRiskPermissions.length" class="quick-high-risk">
+            <strong>高风险权限单独确认</strong>
+            <small>删除、审批、导出、凭证、授权、回滚和生产动作等不会随模块档位自动授予。</small>
+            <el-checkbox-group v-model="quickExtraPermissionCodes" :disabled="!manageAccess.allowed" class="permission-groups">
+              <el-checkbox v-for="permission in highRiskPermissions" :key="permission.code" :value="permission.code" @change="markHighRiskTouched(permission.code)">
+                {{ permission.name }} <small class="permission-code">{{ permission.code }}</small>
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+          <el-alert :title="`保存前摘要：将配置 ${quickSelectedModuleCount} 个模块，预计变更 ${quickPermissionCount} 项权限。`" type="success" :closable="false" />
+        </section>
         <el-form-item label="数据范围">
           <el-radio-group v-model="roleForm.scope_type" :disabled="!manageAccess.allowed || isBuiltInAdministrator" @change="onScopeTypeChange">
             <el-radio-button value="all">全部</el-radio-button>
             <el-radio-button value="department">本部门</el-radio-button>
+            <el-radio-button value="department_tree">本部门及下级</el-radio-button>
             <el-radio-button value="own">本人</el-radio-button>
             <el-radio-button value="custom">自定义</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="roleForm.scope_type === 'department'" label="部门范围说明">
+        <el-alert
+          v-if="departmentTreeScopeError"
+          :title="departmentTreeScopeError"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+        <el-form-item v-if="['department', 'department_tree'].includes(roleForm.scope_type)" label="部门范围说明">
           <el-alert
-            title="本部门范围按实际使用者所属部门生效，不需要手工选择部门。"
+            :title="roleForm.scope_type === 'department_tree'
+              ? '本部门及下级范围按实际使用者主部门递归计算，兼任部门不改变数据范围锚点。'
+              : '本部门范围按实际使用者所属部门生效，不需要手工选择部门。'"
             type="info"
             :closable="false"
             show-icon
@@ -125,7 +188,7 @@
             </label>
           </div>
         </el-form-item>
-        <el-form-item label="权限配置">
+        <el-form-item v-if="assignmentMode === 'advanced'" label="权限配置">
           <el-alert
             title="四类授权相互独立：菜单只负责入口显示，功能操作由后端 action 权限校验，字段权限只控制非敏感列显示，数据范围控制记录边界。"
             type="info"
@@ -176,7 +239,7 @@ import { useRoute } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import {
-  createRole, deleteRole, fetchAllPermissions, fetchRoleScopeOptions, fetchRoles,
+  createRole, deleteRole, fetchAllPermissions, fetchPermissionPackages, fetchRoleScopeOptions, fetchRoles,
   updateRolePermissions, updateRoleStatus
 } from '../../api/systemAdmin';
 import { useMock } from '../../api/request';
@@ -200,6 +263,20 @@ const createOpen = ref(false);
 const saving = ref(false);
 const selectedRole = ref({});
 const targetTenant = ref(null);
+const assignmentMode = ref('quick');
+const packageCatalog = ref([]);
+const packageLevels = ref([
+  { code: 'none', name: '无权限' },
+  { code: 'read', name: '只读' },
+  { code: 'operate', name: '可操作' },
+  { code: 'admin', name: '模块管理员' },
+]);
+const selectedTemplate = ref('');
+const templateHint = ref('');
+const quickSelections = reactive({});
+const quickTouchedModules = ref(new Set());
+const quickExtraPermissionCodes = ref([]);
+const originalPermissionCodes = ref([]);
 const roleForm = reactive({
   permission_codes: [],
   menu_permission_codes: [],
@@ -223,6 +300,12 @@ const targetTenantLabel = computed(() => {
   if (tenant?.name || tenant?.code) return `${tenant.name || '未命名'}（${tenant.code || `#${tenant.id}`}）`;
   return targetTenantId.value ? `租户 #${targetTenantId.value}` : `当前租户 #${auth.currentUser?.tenant_id || '—'}`;
 });
+const roleTemplates = [
+  { code: 'readonly', name: '只读人员', level: 'read', scope_type: 'own' },
+  { code: 'operator', name: '业务操作员', level: 'operate', scope_type: 'own' },
+  { code: 'department_manager', name: '部门负责人', level: 'operate', scope_type: 'department' },
+  { code: 'security_auditor', name: '安全审计员', level: 'read', scope_type: 'all', modules: ['audit', 'security', 'system'] },
+];
 
 const layers = [
   { title: 'Tenant', note: '租户隔离' }, { title: '用户类型', note: 'internal / external / RPA' },
@@ -255,6 +338,128 @@ function permissionGroupsFor(type) {
   return [...grouped.entries()].map(([module, items]) => ({ module, items }));
 }
 
+const packageModules = computed(() => packageCatalog.value);
+const highRiskPermissions = computed(() => {
+  const codes = new Set(packageCatalog.value.flatMap((item) => item.high_risk_codes || []));
+  return permissions.value.filter((permission) => codes.has(permission.code));
+});
+const quickSelectedModuleCount = computed(() => Object.values(quickSelections).filter((value) => value && value !== 'none').length);
+const quickPermissionCount = computed(() => {
+  let count = 0;
+  for (const item of packageCatalog.value) {
+    const level = quickSelections[item.module] || 'none';
+    count += (item.levels?.[level] || []).length;
+  }
+  count += quickExtraPermissionCodes.value.filter((code) => quickTouchedModules.value.has(permissionModuleForCode(code))).length;
+  return count;
+});
+
+const pendingHighRiskPermissionCodes = computed(() => {
+  const original = new Set(originalPermissionCodes.value);
+  const highRiskCodes = new Set(highRiskPermissions.value.map((permission) => permission.code));
+  return candidatePermissionCodes.value.filter((code) => highRiskCodes.has(code) && !original.has(code));
+});
+
+const pendingHighRiskSummary = computed(() => pendingHighRiskPermissionCodes.value
+  .map((code) => highRiskPermissions.value.find((permission) => permission.code === code)?.name || code)
+  .filter(Boolean)
+  .join('、'));
+
+const candidatePermissionCodes = computed(() => {
+  if (assignmentMode.value !== 'quick') {
+    return [...new Set([
+      ...roleForm.menu_permission_codes,
+      ...roleForm.action_permission_codes,
+      ...roleForm.field_permission_codes,
+    ])];
+  }
+  const touchedModules = quickTouchedModules.value;
+  const touchedCodes = packageCatalog.value.flatMap((item) => (
+    touchedModules.has(item.module) ? (item.levels?.[quickSelections[item.module] || 'none'] || []) : []
+  ));
+  const untouchedCodes = roleForm.permission_codes.filter(
+    (code) => !touchedModules.has(permissionModuleForCode(code)),
+  );
+  const extraCodes = quickExtraPermissionCodes.value.filter(
+    (code) => touchedModules.has(permissionModuleForCode(code)),
+  );
+  return [...new Set([...touchedCodes, ...extraCodes, ...untouchedCodes])];
+});
+
+const departmentTreeScopeError = computed(() => {
+  if (roleForm.scope_type !== 'department_tree') return '';
+  const candidateCodes = candidatePermissionCodes.value;
+  if (candidateCodes.includes('system.roles.manage')) {
+    return 'system.roles.manage 需要全部数据范围，不能使用本部门及下级；部门树范围仅用于组织和用户管理。';
+  }
+  const unsupportedModules = [...new Set(candidateCodes
+    .map((code) => permissionModuleForCode(code))
+    .filter((module) => module && module !== 'system'))];
+  return unsupportedModules.length
+    ? `本部门及下级仅支持 system 模块权限，当前角色还包含 ${unsupportedModules.join('、')} 模块，请调整权限或改用全部范围。`
+    : '';
+});
+
+function permissionModuleForCode(code) {
+  return permissions.value.find((permission) => permission.code === code)?.module
+    || packageCatalog.value.find((item) => (item.available_codes || []).includes(code))?.module
+    || '';
+}
+
+function inferQuickSelection(role) {
+  quickTouchedModules.value = new Set();
+  const highRisk = new Set(packageCatalog.value.flatMap((item) => item.high_risk_codes || []));
+  for (const item of packageCatalog.value) {
+    const roleCodes = new Set((role?.permission_codes || []).filter((code) => {
+      const permission = permissions.value.find((candidate) => candidate.code === code);
+      return permission?.module === item.module && !highRisk.has(code);
+    }));
+    const level = Object.entries(item.levels || {}).find(([, codes]) => {
+      const normalized = new Set(codes);
+      return normalized.size === roleCodes.size && [...normalized].every((code) => roleCodes.has(code));
+    });
+    quickSelections[item.module] = level ? level[0] : (roleCodes.size ? 'admin' : 'none');
+  }
+  quickExtraPermissionCodes.value = (role?.permission_codes || []).filter((code) => highRisk.has(code));
+}
+
+function applyRoleTemplate(templateCode) {
+  const template = roleTemplates.find((item) => item.code === templateCode);
+  if (!template) return;
+  templateHint.value = '';
+  const selectedModules = packageCatalog.value
+    .filter((item) => quickSelections[item.module] && quickSelections[item.module] !== 'none')
+    .map((item) => item.module);
+  const explicitModules = template.modules || [];
+  if (explicitModules.length) {
+    quickTouchedModules.value = new Set(explicitModules);
+    for (const item of packageCatalog.value) {
+      if (explicitModules.includes(item.module)) quickSelections[item.module] = template.level;
+    }
+  } else if (selectedModules.length) {
+    quickTouchedModules.value = new Set([...quickTouchedModules.value, ...selectedModules]);
+    for (const module of selectedModules) quickSelections[module] = template.level;
+  } else {
+    templateHint.value = `“${template.name}”仅提供 ${template.level === 'read' ? '只读' : '可操作'} 档位和数据范围建议；当前角色尚未选择模块，请在下方逐项选择模块。`;
+  }
+  roleForm.scope_type = template.scope_type;
+  roleForm.scope_config = {};
+}
+
+function markQuickModuleTouched(module, level) {
+  quickTouchedModules.value = new Set([...quickTouchedModules.value, module]);
+  if (level === 'none') {
+    quickExtraPermissionCodes.value = quickExtraPermissionCodes.value.filter(
+      (code) => permissionModuleForCode(code) !== module,
+    );
+  }
+}
+
+function markHighRiskTouched(code) {
+  const module = packageCatalog.value.find((item) => (item.high_risk_codes || []).includes(code))?.module;
+  if (module) markQuickModuleTouched(module);
+}
+
 function categorizedRoleCodes(role, type) {
   const property = {
     menu: 'menu_permission_codes',
@@ -277,7 +482,10 @@ function responseCapability(response) {
   return response?.http_status ? 'pending' : 'degraded';
 }
 function scopeLabel(value) {
-  return { all: '全部租户内数据', department: '本部门', own: '本人数据', custom: '自定义范围' }[value] || '未配置';
+  return { all: '全部租户内数据', department: '本部门', department_tree: '本部门及下级', own: '本人数据', custom: '自定义范围' }[value] || '未配置';
+}
+function roleTypeLabel(value) {
+  return { builtin: '内置角色', template: '角色模板', custom: '自定义角色' }[value] || '自定义角色';
 }
 function formatUserOption(item) {
   return `${item.username || ''}${item.full_name ? `（${item.full_name}）` : ''}`;
@@ -286,13 +494,14 @@ function formatUserOption(item) {
 async function load() {
   state.value = 'loading';
   const tenantParams = targetTenantId.value ? { tenant_id: targetTenantId.value } : {};
-  const [roleResponse, permissionResult] = await Promise.all([
+  const [roleResponse, permissionResult, packageResponse] = await Promise.all([
     fetchRoles({ ...tenantParams, search: search.value.trim(), page: page.value, page_size: pageSize }),
     fetchAllPermissions(),
+    fetchPermissionPackages(tenantParams),
   ]);
   const permissionResponse = permissionResult.response;
-  if (!roleResponse.success || !permissionResponse.success) {
-    const failed = !roleResponse.success ? roleResponse : permissionResponse;
+  if (!roleResponse.success || !permissionResponse.success || !packageResponse.success) {
+    const failed = !roleResponse.success ? roleResponse : (!permissionResponse.success ? permissionResponse : packageResponse);
     state.value = statusFromApiResponse(failed, navigator.onLine);
     errorMessage.value = failed.message;
     capability.value = responseCapability(failed);
@@ -301,6 +510,8 @@ async function load() {
   roles.value = unpack(roleResponse);
   total.value = Number.isFinite(roleResponse.data?.count) ? roleResponse.data.count : roles.value.length;
   permissions.value = permissionResult.rows;
+  packageCatalog.value = packageResponse.data?.packages || [];
+  packageLevels.value = packageResponse.data?.levels || packageLevels.value;
   targetTenant.value = roleResponse.data?.tenant || targetTenant.value || {
     id: targetTenantId.value || auth.currentUser?.tenant_id,
     name: targetTenantId.value ? '' : '当前租户',
@@ -321,6 +532,10 @@ watch(targetTenantId, () => {
 });
 function openRole(role) {
   selectedRole.value = role;
+  originalPermissionCodes.value = [...new Set(role.permission_codes || [])];
+  assignmentMode.value = 'quick';
+  selectedTemplate.value = '';
+  inferQuickSelection(role);
   roleForm.menu_permission_codes = categorizedRoleCodes(role, 'menu');
   roleForm.action_permission_codes = categorizedRoleCodes(role, 'action');
   roleForm.field_permission_codes = categorizedRoleCodes(role, 'field');
@@ -373,6 +588,23 @@ async function saveRole() {
       return;
     }
   }
+  if (departmentTreeScopeError.value) {
+    ElMessage.warning(departmentTreeScopeError.value);
+    return;
+  }
+  if (pendingHighRiskPermissionCodes.value.length) {
+    try {
+      await ElMessageBox.confirm(
+        `当前将新增 ${pendingHighRiskPermissionCodes.value.length} 项高风险权限：${pendingHighRiskSummary.value}。该授权会写入角色并记录审计，确认继续吗？`,
+        '确认授予高风险权限',
+        { type: 'warning', confirmButtonText: '确认授予', cancelButtonText: '取消' },
+      );
+    } catch (error) {
+      if (error === 'cancel' || error === 'close') return;
+      ElMessage.error(error?.message || '高风险权限确认失败');
+      return;
+    }
+  }
   saving.value = true;
   const permissionCodes = [
     ...new Set([
@@ -381,9 +613,21 @@ async function saveRole() {
       ...roleForm.field_permission_codes,
     ]),
   ];
+  const payload = assignmentMode.value === 'quick'
+    ? {
+        package_selections: Object.fromEntries(
+          [...quickTouchedModules.value].map((module) => [module, quickSelections[module] || 'none']),
+        ),
+        extra_permission_codes: quickExtraPermissionCodes.value.filter(
+          (code) => quickTouchedModules.value.has(permissionModuleForCode(code)),
+        ),
+        scope_type: roleForm.scope_type,
+        scope_config: roleForm.scope_config,
+      }
+    : { ...roleForm, permission_codes: permissionCodes };
   const response = await updateRolePermissions(
     selectedRole.value.id,
-    { ...roleForm, permission_codes: permissionCodes },
+    payload,
     targetTenantId.value || undefined,
   );
   saving.value = false;
@@ -464,6 +708,11 @@ load();
 .role-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #e5eaf0; }
 .role-heading strong, .role-heading span { display: block; }
 .role-heading span { margin-top: 4px; color: #64748b; font-size: 12px; }
+.role-heading__tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.quick-assignment { display: grid; gap: 12px; margin-bottom: 18px; }
+.quick-template-row { display: grid; grid-template-columns: 90px minmax(180px, 1fr); gap: 10px; align-items: center; color: #475569; font-size: 12px; }
+.quick-high-risk { display: grid; gap: 6px; padding: 12px; border: 1px solid #f1d29a; border-radius: 6px; background: #fffaf0; }
+.quick-high-risk small { color: #7c5b16; font-size: 11px; line-height: 1.5; }
 .permission-surface { margin-top: 16px; padding: 12px; border: 1px solid #dbe3ec; border-radius: 6px; background: #fbfdff; }
 .permission-surface__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .permission-surface__heading strong { color: #172033; font-size: 14px; }

@@ -35,6 +35,26 @@ def _current_department_id(user):
     return getattr(profile, "department_id", None)
 
 
+def department_tree_ids(queryset, root_ids):
+    """Return tenant-local roots and descendants without trusting tree shape."""
+    rows = list(queryset.values("id", "parent_id"))
+    known_ids = {row["id"] for row in rows}
+    children = {}
+    for row in rows:
+        parent_id = row["parent_id"]
+        if parent_id in known_ids:
+            children.setdefault(parent_id, set()).add(row["id"])
+    result = {int(value) for value in root_ids if value in known_ids}
+    pending = list(result)
+    while pending:
+        current = pending.pop()
+        for child_id in children.get(current, ()):
+            if child_id not in result:
+                result.add(child_id)
+                pending.append(child_id)
+    return result
+
+
 def require_all_scope(user, permission_code):
     scopes = _permission_scopes(user, permission_code)
     if not _has_all_scope(scopes):
@@ -54,6 +74,14 @@ def filter_system_users(user, queryset, permission_code):
             allowed |= Q(pk=user.pk)
         elif scope_type == DataScope.ScopeType.DEPARTMENT and department_id:
             allowed |= Q(internal_profile__department_id=department_id)
+        elif scope_type == DataScope.ScopeType.DEPARTMENT_TREE and department_id:
+            from apps.tenants.models import Department
+
+            allowed_department_ids = department_tree_ids(
+                Department.objects.filter(tenant=user.tenant),
+                {department_id},
+            )
+            allowed |= Q(internal_profile__department_id__in=allowed_department_ids)
         elif scope_type == DataScope.ScopeType.CUSTOM:
             user_ids = _configured_ids(scope, "user_ids")
             department_ids = _configured_ids(scope, "department_ids")
@@ -75,6 +103,16 @@ def filter_departments(user, queryset, permission_code):
         if scope["scope_type"] in {DataScope.ScopeType.OWN, DataScope.ScopeType.DEPARTMENT}:
             if department_id:
                 allowed_ids.add(department_id)
+        elif scope["scope_type"] == DataScope.ScopeType.DEPARTMENT_TREE:
+            if department_id:
+                from apps.tenants.models import Department
+
+                allowed_ids.update(
+                    department_tree_ids(
+                        Department.objects.filter(tenant=user.tenant),
+                        {department_id},
+                    )
+                )
         elif scope["scope_type"] == DataScope.ScopeType.CUSTOM:
             allowed_ids.update(_configured_ids(scope, "department_ids"))
     return queryset.filter(pk__in=allowed_ids)
@@ -95,6 +133,17 @@ def filter_roles(user, queryset, permission_code):
             allowed |= Q(
                 user_roles__tenant=user.tenant,
                 user_roles__user__internal_profile__department_id=department_id,
+            )
+        elif scope_type == DataScope.ScopeType.DEPARTMENT_TREE and department_id:
+            from apps.tenants.models import Department
+
+            allowed_department_ids = department_tree_ids(
+                Department.objects.filter(tenant=user.tenant),
+                {department_id},
+            )
+            allowed |= Q(
+                user_roles__tenant=user.tenant,
+                user_roles__user__internal_profile__department_id__in=allowed_department_ids,
             )
         elif scope_type == DataScope.ScopeType.CUSTOM:
             role_ids = _configured_ids(scope, "role_ids")

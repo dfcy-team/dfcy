@@ -10,6 +10,8 @@ export const mockAuthUser = {
   user_type: 'internal',
   tenant_id: 'mock-tenant-001',
   is_superuser: false,
+  identity_label: '演示用户',
+  role_labels: ['演示用户'],
   roles: ['stage0_viewer'],
   permissions: [
     'mock.view',

@@ -196,9 +196,9 @@ export async function downloadApiFile(url, filename) {
   }
 }
 
-export function getMockResponse(mockHandler, moduleName) {
+export function getMockResponse(mockHandler, moduleName, params = {}) {
   if (typeof mockHandler === 'function') {
-    return normalizeApiResponse(mockHandler());
+    return normalizeApiResponse(mockHandler(params));
   }
   return normalizeApiResponse(pendingResponse(moduleName));
 }
@@ -214,13 +214,13 @@ export async function requestWithMockFallback(config, mockHandler, moduleName) {
   // Only an explicit VITE_USE_MOCK=true build may short-circuit writes into
   // fixtures.  This is the deliberate local演练 path.
   if (explicitMockMode) {
-    return getMockResponse(mockHandler, moduleName);
+    return getMockResponse(mockHandler, moduleName, config?.params);
   }
 
   // Preserve the existing implicit mock behaviour for read-only local pages;
   // mutation requests continue to the API so a network failure is visible.
   if (useMock && !mutation) {
-    return getMockResponse(mockHandler, moduleName);
+    return getMockResponse(mockHandler, moduleName, config?.params);
   }
 
   const response = await requestApi(config);
@@ -242,7 +242,7 @@ export async function requestWithMockFallback(config, mockHandler, moduleName) {
   try {
     throw new Error(response.message);
   } catch (error) {
-    const fallback = getMockResponse(mockHandler, moduleName);
+    const fallback = getMockResponse(mockHandler, moduleName, config?.params);
     const fallbackData =
       fallback.data && typeof fallback.data === 'object' && !Array.isArray(fallback.data)
         ? fallback.data

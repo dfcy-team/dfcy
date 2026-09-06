@@ -5,6 +5,11 @@ from apps.tenants.models import Tenant
 
 
 class Role(models.Model):
+    class RoleType(models.TextChoices):
+        BUILTIN = "builtin", "内置角色"
+        TEMPLATE = "template", "角色模板"
+        CUSTOM = "custom", "自定义角色"
+
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         INACTIVE = "inactive", "Inactive"
@@ -12,6 +17,17 @@ class Role(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="roles")
     name = models.CharField(max_length=100)
     code = models.SlugField(max_length=80)
+    description = models.TextField(blank=True, default="")
+    role_type = models.CharField(
+        max_length=20,
+        choices=RoleType.choices,
+        default=RoleType.CUSTOM,
+    )
+    # A protected role remains assignable/configurable only through the
+    # explicit safeguards in the system-management API.  This is deliberately
+    # data-backed instead of inferred from a display name so role codes remain
+    # stable when labels are localized or corrected.
+    is_protected = models.BooleanField(default=False)
     permissions = models.ManyToManyField("Permission", blank=True, related_name="roles")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -82,6 +98,7 @@ class DataScope(models.Model):
     class ScopeType(models.TextChoices):
         ALL = "all", "All"
         DEPARTMENT = "department", "Department"
+        DEPARTMENT_TREE = "department_tree", "Department and descendants"
         OWN = "own", "Own"
         CUSTOM = "custom", "Custom"
 

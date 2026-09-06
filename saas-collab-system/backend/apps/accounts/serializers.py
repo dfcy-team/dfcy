@@ -72,6 +72,8 @@ class CurrentUserSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     phone = serializers.CharField(read_only=True)
     roles = serializers.SerializerMethodField()
+    role_labels = serializers.SerializerMethodField()
+    identity_label = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
     menu_permission_codes = serializers.SerializerMethodField()
     action_permission_codes = serializers.SerializerMethodField()
@@ -90,6 +92,8 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             "tenant_id",
             "is_superuser",
             "roles",
+            "role_labels",
+            "identity_label",
             "permissions",
             "menu_permission_codes",
             "action_permission_codes",
@@ -106,6 +110,23 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             .values_list("role__code", flat=True)
             .distinct()
         )
+
+    def get_role_labels(self, obj):
+        if obj.is_superuser:
+            return ["平台超级管理员"]
+        return list(
+            obj.user_roles.filter(tenant=obj.tenant, role__status="active")
+            .select_related("role")
+            .order_by("role__name")
+            .values_list("role__name", flat=True)
+            .distinct()
+        )
+
+    def get_identity_label(self, obj):
+        if obj.is_superuser:
+            return "平台超级管理员"
+        labels = self.get_role_labels(obj)
+        return " / ".join(labels) if labels else "未分配角色"
 
     def get_permissions(self, obj):
         if obj.is_superuser:
