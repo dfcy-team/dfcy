@@ -140,6 +140,12 @@
         <div class="workspace-actions workspace-actions--stack">
           <el-button type="primary" :disabled="storeViewAccess.disabled" :title="storeViewAccess.reason" @click="openCapabilityMatrix(selectedStore)">维护同步能力矩阵</el-button>
           <el-button plain :disabled="!syncViewAccess.allowed" :title="syncViewAccess.reason" @click="openStoreSyncJobs(selectedStore)">查看同步任务</el-button>
+          <el-button
+            plain
+            :disabled="!storeProductSyncAccess.allowed || storeProductSyncLoading"
+            :title="storeProductSyncAccess.reason"
+            @click="openStoreProductSyncJobs(selectedStore)"
+          >{{ storeProductSyncLoading ? '校验中…' : '平台商品同步任务' }}</el-button>
           <el-button plain :disabled="!syncViewAccess.allowed" :title="syncViewAccess.reason" @click="openStoreSyncIncidents(selectedStore)">查看同步异常</el-button>
         </div>
         <p class="workspace-note">当前店铺的授权状态、能力开关、同步任务和异常记录均在目标页面中重新按权限查询。</p>
@@ -311,6 +317,7 @@ const importOpen = ref(false); const importFile = ref(null); const importing = r
 const capabilityOpen = ref(false); const capabilityLoading = ref(false); const capabilitySaving = ref(false);
 const selectedStore = ref(null); const authorizationOptions = ref([]); const selectedAuthorizationId = ref(null); const capabilityRows = ref([]);
 const capabilitySuggestions = ref([]);
+const storeProductSyncLoading = ref(false);
 const capabilityCodes = ['PRODUCT', 'CATEGORY', 'LISTING', 'PRICE', 'ORDER', 'INVENTORY', 'FULFILLMENT', 'WAREHOUSE', 'RETURN_REFUND', 'SETTLEMENT', 'PAYMENT', 'ADVERTISING', 'AFFILIATE', 'REVIEW', 'REPORT', 'WEBHOOK'];
 const selectedAuthorization = computed(() => authorizationOptions.value.find((item) => item.id === selectedAuthorizationId.value));
 
@@ -354,6 +361,20 @@ const storeApiViewAccess = computed(() => {
       ? storeViewAccess.value.reason
       : integrationViewAccess.value.reason,
   };
+});
+const productSyncPlatforms = new Set(['shopee', 'tiktok']);
+const storeProductSyncAccess = computed(() => {
+  if (!syncViewAccess.value.allowed) return { allowed: false, reason: syncViewAccess.value.reason || '当前角色无权查看同步任务。' };
+  if (!storeApiViewAccess.value.allowed) return { allowed: false, reason: storeApiViewAccess.value.reason || '需要店铺 API 查看权限才能验证授权状态。' };
+  const platform = storePlatformCode(selectedStore.value);
+  if (!productSyncPlatforms.has(platform)) return { allowed: false, reason: '当前平台尚未登记已验证的平台商品同步连接器。' };
+  if (selectedStore.value?.product_sync_supported === false || selectedStore.value?.connector_supported === false) {
+    return { allowed: false, reason: '当前店铺平台商品同步连接器未实现或未启用。' };
+  }
+  if (apiConnectionSummary.value.status !== 'healthy') {
+    return { allowed: false, reason: apiConnectionSummary.value.status === 'loading' ? '正在验证店铺授权状态，请稍候。' : '店铺 API 尚未验证为有效授权，暂不能进入平台商品同步任务。' };
+  }
+  return { allowed: true, reason: '仅进入当前已验证授权店铺的平台商品同步任务。' };
 });
 const storeAuthorizeAccess = computed(() => getActionAccess(auth, { permission: 'integrations.store.authorize', unauthorizedBehavior: 'disable' }));
 const capabilitySaveAccess = computed(() => storeAuthorizeAccess.value);
@@ -538,6 +559,52 @@ function openStoreSyncJobs(row) {
     platform: storePlatformCode(row),
     subject: row?.name || row?.code || '',
   } });
+}
+
+async function openStoreProductSyncJobs(row) {
+  if (!storeProductSyncAccess.value.allowed) {
+    ElMessage.warning(storeProductSyncAccess.value.reason || '当前店铺暂不能进入平台商品同步任务');
+    return;
+  }
+  if (!row?.id) {
+    ElMessage.warning('当前店铺缺少主体标识，暂不能进入平台商品同步任务');
+    return;
+  }
+  storeProductSyncLoading.value = true;
+  try {
+    // Re-check the exact store authorization and PRODUCT read-only capability
+    // at navigation time; a healthy summary may be stale or may not include
+    // the capability that the product task requires.
+    const accessResponse = await fetchSubjectApiAccess('store', row.id);
+    if (!accessResponse?.success) throw new Error(accessResponse?.message || '店铺 API 授权读取失败');
+    const access = accessResponse.data || {};
+    const platform = storePlatformCode(row);
+    const binding = (access.bindings || []).find((item) => (
+      String(item.api_type || '').toLowerCase() === 'marketplace'
+      && String(item.platform || platform).toLowerCase() === platform
+      && ['active', 'authorized'].includes(String(item.status || '').toLowerCase())
+    ));
+    if (!binding?.id) throw new Error('当前店铺没有有效的平台授权，请先完成店铺 API 授权。');
+    const capabilityResponse = await fetchConnectionCapabilities(binding.id);
+    const productCapability = (capabilityResponse?.data?.results || []).find((item) => (
+      String(item.capability_code || '').toUpperCase() === 'PRODUCT'
+      && item.read_enabled === true
+      && item.write_enabled !== true
+      && item.status === 'active'
+    ));
+    if (!productCapability) throw new Error('当前店铺的平台商品只读能力尚未验证或未启用。');
+    router.push({ path: '/integrations/sync-jobs', query: {
+      platform,
+      api_type: 'marketplace',
+      resource_type: 'platform_product',
+      store_id: String(row.id),
+      subject: row?.name || row?.code || '',
+    } });
+  } catch (error) {
+    ElMessage.warning(error?.message || '当前店铺暂不能进入平台商品同步任务。');
+  } finally {
+    storeProductSyncLoading.value = false;
+  }
 }
 
 function openStoreSyncIncidents(row) {

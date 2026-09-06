@@ -20,6 +20,26 @@
       </section>
 
       <el-alert
+        v-if="productSyncContext"
+        class="product-sync-context"
+        type="info"
+        show-icon
+        :closable="false"
+        :title="`当前查看：${contextStoreLabel} · 平台商品同步任务`"
+      >
+        <template #default>
+          <span>任务和同步异常已按店铺范围过滤；如果尚未创建商品只读任务，请先在该店铺 API 接入抽屉完成授权、PRODUCT 只读能力校验后创建。</span>
+          <el-button
+            v-if="canOpenStoreApiConfig"
+            link
+            type="primary"
+            class="context-action"
+            @click="openStoreApiConfig"
+          >去店铺配置并创建商品同步任务</el-button>
+        </template>
+      </el-alert>
+
+      <el-alert
         title="健康状态与调度状态分开统计；失败、重试等待、重试耗尽和陈旧运行均需人工关注。"
         type="warning"
         show-icon
@@ -29,8 +49,8 @@
       <section class="incident-workbench" aria-label="同步事件工作台">
         <header class="incident-header">
           <div>
-            <h2>同步事件工作台</h2>
-            <p>集中处理失败事件、负责人和脱敏备注；人工重试只允许 Mock/沙箱模拟运行。</p>
+            <h2>{{ productSyncContext ? '当前店铺同步事件' : '同步事件工作台' }}</h2>
+            <p>{{ productSyncContext ? '仅显示当前店铺的平台商品同步事件。' : '集中处理失败事件、负责人和脱敏备注；人工重试只允许 Mock/沙箱模拟运行。' }}</p>
           </div>
           <div class="incident-filters">
             <el-select v-model="incidentStatus" clearable placeholder="全部事件" @change="loadIncidents">
@@ -76,7 +96,9 @@
             <small>{{ row.subject_code || '-' }}</small>
           </template>
         </el-table-column>
-        <el-table-column prop="resource_type" label="资源类型" min-width="150" />
+        <el-table-column prop="resource_type" label="资源类型" min-width="150">
+          <template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template>
+        </el-table-column>
         <el-table-column prop="health_state" label="任务健康" min-width="120">
           <template #default="{ row }">
             <el-tag :type="stateTagType(row.health_state)" effect="plain">{{ stateLabel(row.health_state) }}</el-tag>
@@ -145,7 +167,7 @@
             <el-descriptions-item label="事件状态">
               <el-tag :type="incidentStatusType(selectedIncident.status)" effect="plain">{{ incidentStatusLabel(selectedIncident.status) }}</el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="同步任务">#{{ selectedIncident.sync_job_id }} · {{ selectedIncident.resource_type }}</el-descriptions-item>
+            <el-descriptions-item label="同步任务">#{{ selectedIncident.sync_job_id }} · {{ resourceLabel(selectedIncident.resource_type) }}</el-descriptions-item>
             <el-descriptions-item label="发生次数">{{ selectedIncident.occurrence_count || 0 }}</el-descriptions-item>
             <el-descriptions-item label="负责人">{{ selectedIncident.assignee_name || '未指派' }}</el-descriptions-item>
             <el-descriptions-item label="错误码">{{ selectedIncident.last_error_code || '-' }}</el-descriptions-item>
@@ -228,7 +250,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import { useMock } from '../../api/request';
@@ -264,6 +286,7 @@ const actionConfigs = [
 
 const auth = useAuthStore();
 const route = useRoute();
+const router = useRouter();
 const rows = ref([]);
 const summary = ref({});
 const state = ref('loading');
@@ -286,6 +309,12 @@ const retryPreview = ref(null);
 const retryLoading = ref(false);
 const retrySubmitting = ref(false);
 const retryIdempotencyKey = ref('');
+
+const productSyncContext = computed(() => String(route.query.resource_type || '') === 'platform_product' && Boolean(route.query.store_id));
+const contextStoreLabel = computed(() => String(route.query.subject || route.query.store_name || route.query.store_id || '当前店铺'));
+const canOpenStoreApiConfig = computed(() => auth.hasPermission('masterdata.view')
+  && auth.hasPermission('integrations.view')
+  && auth.hasPermission('integrations.store.view'));
 
 const summaryItems = computed(() => [
   { key: 'job_count', label: '任务总数', value: summary.value.job_count || 0, tone: '' },
@@ -322,6 +351,17 @@ function stateLabel(value) {
     due: '待执行',
     healthy: '健康'
   }[value] || value || '-';
+}
+
+function resourceLabel(value) {
+  return ({
+    platform_product: '平台商品',
+    sales_order: '销售订单',
+    refund_return: '退款退货',
+    inventory_snapshot: '库存快照',
+    inbound: '入库单',
+    shipment: '出库单',
+  })[value] || value || '-';
 }
 
 function incidentStatusLabel(value) {
@@ -382,6 +422,17 @@ function capabilityTagType(value) {
   }[value] || 'info';
 }
 
+function openStoreApiConfig() {
+  if (!productSyncContext.value || !canOpenStoreApiConfig.value) {
+    ElMessage.warning('当前角色没有进入店铺 API 配置的权限。');
+    return;
+  }
+  router.push({ path: '/master-data/stores', query: {
+    store_id: String(route.query.store_id),
+    panel: 'api',
+  } });
+}
+
 async function load() {
   state.value = 'loading';
   loading.value = true;
@@ -392,6 +443,7 @@ async function load() {
       api_type: route.query.api_type || '',
       resource_type: route.query.resource_type || '',
       subject: route.query.subject || '',
+      ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
     });
     if (!response?.success) {
       state.value = statusFromApiResponse(response, typeof navigator === 'undefined' ? true : navigator.onLine);
@@ -425,7 +477,11 @@ async function loadIncidents() {
   incidentLoading.value = true;
   incidentError.value = '';
   try {
-    const response = await fetchSyncAlertIncidents(incidentStatus.value);
+    const response = await fetchSyncAlertIncidents({
+      status: incidentStatus.value,
+      ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
+      ...(route.query.resource_type ? { resource_type: route.query.resource_type } : {}),
+    });
     if (!response?.success) throw new Error(response?.message || '同步事件加载失败');
     incidents.value = incidentRows(response.data);
   } catch (error) {
@@ -627,6 +683,8 @@ onMounted(() => {
 .summary-card--danger { border-left-color: #dc2626; }
 .summary-card--warning { border-left-color: #d97706; }
 .summary-card--success { border-left-color: #059669; }
+.product-sync-context { margin-top: 16px; }
+.context-action { margin-left: 8px; font-weight: 600; }
 small { color: #64748b; font-size: 12px; }
 
 .incident-workbench {

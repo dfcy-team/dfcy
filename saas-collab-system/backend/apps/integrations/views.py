@@ -182,6 +182,7 @@ def _warehouse_binding_request_data(request, *, current=None):
     allowed_fields = {
         "warehouse_id",
         "integration_config_id",
+        "external_warehouse_code",
         "replace",
         "expected_authorization_id",
         "idempotency_key",
@@ -200,6 +201,12 @@ def _warehouse_binding_request_data(request, *, current=None):
             if supplied_warehouse_id != current.warehouse_id:
                 raise ValidationError("换绑操作不能更改仓库主体。")
         payload["warehouse_id"] = current.warehouse_id
+        # Rebind keeps the current provider identity unless the operator
+        # explicitly supplies a replacement code.  This prevents a legacy
+        # config-level value or an omitted UI field from accidentally clearing
+        # the external warehouse identity.
+        if "external_warehouse_code" not in payload:
+            payload["external_warehouse_code"] = current.external_warehouse_code
         payload["replace"] = True
         payload["expected_authorization_id"] = current.id
     serializer = WarehouseAuthorizationBindSerializer(data=payload)
@@ -242,6 +249,7 @@ def _perform_warehouse_binding(request, data):
         actor=request.user,
         warehouse=warehouse,
         integration_config=integration_config,
+        external_warehouse_code=data.get("external_warehouse_code"),
     )
     authorization, idempotent, operation = bind_warehouse_authorization(
         actor=request.user,
@@ -250,6 +258,7 @@ def _perform_warehouse_binding(request, data):
         replace=data.get("replace", False),
         expected_authorization_id=data.get("expected_authorization_id"),
         idempotency_key=data.get("idempotency_key"),
+        external_warehouse_code=data.get("external_warehouse_code"),
     )
     return success_response(
         {
@@ -354,11 +363,19 @@ def integration_workspace_view(request):
     allowed_query = {
         "mode", "page", "page_size", "platform", "status", "environment", "api_type",
         "resource_type", "schedule_type", "job_state", "subject", "run_id", "started_from", "started_to",
+        "store_id",
     }
     if set(request.query_params) - allowed_query:
         raise ValidationError("Unknown integration workspace query parameter.")
+    params = request.query_params
+    if request.query_params.get("store_id"):
+        store_id = positive_int(request.query_params.get("store_id"), default=None, maximum=2147483647)
+        if store_id is None:
+            raise ValidationError({"store_id": "店铺 ID 无效。"})
+        params = request.query_params.copy()
+        params["store_id"] = str(store_id)
     try:
-        data = integration_workspace(request.user, request.query_params.get("mode", "configs"), request.query_params)
+        data = integration_workspace(request.user, params.get("mode", "configs"), params)
     except (TypeError, ValueError) as exc:
         raise ValidationError(str(exc)) from exc
     return success_response(data)
@@ -2201,6 +2218,7 @@ def check_integration_readonly_connection(request, pk):
             integration_config=config,
             store_authorization=store_authorization,
             resource_type__in=(
+                SyncJob.ResourceType.PLATFORM_PRODUCT,
                 SyncJob.ResourceType.SALES_ORDER,
                 SyncJob.ResourceType.REFUND_RETURN,
             ),
@@ -2261,11 +2279,20 @@ def check_integration_readonly_connection(request, pk):
 @permission_classes([IsIntegrationReadOrManage])
 def sync_job_collection(request):
     if request.method == "GET":
+        if set(request.query_params) - {"store_id"}:
+            raise ValidationError("Unknown sync job query parameter.")
         queryset = filter_sync_jobs(
             request.user,
             SyncJob.objects.filter(tenant=request.user.tenant).select_related("integration_config"),
             "integrations.view",
         )
+        if request.query_params.get("store_id"):
+            store_id = positive_int(request.query_params.get("store_id"), default=None, maximum=2147483647)
+            if store_id is None:
+                raise ValidationError({"store_id": "店铺 ID 无效。"})
+            # Apply the exact store subject predicate after permission scope
+            # filtering.  This keeps a deep link from broadening visibility.
+            queryset = queryset.filter(store_authorization__store_id=store_id)
         return success_response(SyncJobSerializer(queryset, many=True, context={"request": request}).data)
 
     serializer = SyncJobSerializer(data=request.data, context={"request": request})
@@ -2351,6 +2378,8 @@ def _set_job_scope(job, values):
     query = scope.get("query") if isinstance(scope.get("query"), dict) else {}
     if "execution_mode" in values:
         scope["execution_mode"] = values["execution_mode"]
+    if "product_full_sync" in values:
+        scope["product_full_sync"] = values["product_full_sync"]
     for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until"):
         if key in values:
             schedule[key] = values[key]
@@ -2376,6 +2405,7 @@ def _set_job_scope(job, values):
 def _validated_job_policy(data):
     allowed = {
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
+        "product_full_sync",
         "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
         "query_mode", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
@@ -2392,6 +2422,8 @@ def _validated_job_policy(data):
     for key, valid in choices.items():
         if key in values and values[key] not in valid:
             raise ValidationError({key: "策略选项无效。"})
+    if "product_full_sync" in values and not isinstance(values["product_full_sync"], bool):
+        raise ValidationError({"product_full_sync": "商品同步全量开关必须为布尔值。"})
     limits = {
         "max_retry_count": (0, 10),
         "backoff_base_seconds": (1, 5),
@@ -2563,20 +2595,22 @@ def _incident_queryset(request, permission_code):
 @api_view(["GET"])
 @permission_classes([IsIntegrationViewer])
 def sync_alert_incident_collection(request):
-    if set(request.query_params) - {"status", "store_id"}:
+    if set(request.query_params) - {"status", "store_id", "resource_type"}:
         raise ValidationError("Unknown sync incident query parameter.")
     queryset = _incident_queryset(request, "integrations.view")
     if request.query_params.get("store_id"):
-        store_id = positive_int(request.query_params.get("store_id"), default=None)
+        store_id = positive_int(request.query_params.get("store_id"), default=None, maximum=2147483647)
         if store_id is None:
             raise ValidationError({"store_id": "店铺 ID 无效。"})
-        store_filter = Q(sync_job__store_authorization__store_id=store_id)
-        # Some deployments carry a denormalized SyncJob.store_id.  Keep the
-        # filter compatible with both schemas while the authorization relation
-        # remains the canonical source in this checkout.
-        if any(field.name == "store_id" for field in SyncJob._meta.fields):
-            store_filter |= Q(sync_job__store_id=store_id)
-        queryset = queryset.filter(store_filter)
+        # Apply the exact authorization subject predicate after the visible
+        # job queryset has been permission-scoped.  Do not broaden historical
+        # rows through a denormalized or guessed SyncJob field.
+        queryset = queryset.filter(sync_job__store_authorization__store_id=store_id)
+    resource_type = str(request.query_params.get("resource_type") or "").strip()
+    if resource_type:
+        if resource_type not in {choice for choice, _label in SyncJob.ResourceType.choices}:
+            raise ValidationError({"resource_type": "Unsupported sync resource type."})
+        queryset = queryset.filter(sync_job__resource_type=resource_type)
     status_value = str(request.query_params.get("status") or "").strip()
     if status_value:
         if status_value not in SyncAlertIncident.Status.values:

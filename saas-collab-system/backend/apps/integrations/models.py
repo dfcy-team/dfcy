@@ -820,6 +820,7 @@ class MarketplaceProductMapping(models.Model):
         SYNTHETIC_DISCOVERY = "synthetic_discovery", "Synthetic discovery"
         MANUAL = "manual", "Manual"
         SUGGESTED = "suggested", "Suggested"
+        API_EXACT_MATCH = "api_exact_match", "Trusted API exact match"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="product_mappings")
     platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
@@ -944,7 +945,20 @@ class MarketplaceProductMapping(models.Model):
                 errors["sku"] = "Suggested mappings require a candidate SKU."
         if self.status == self.Status.MAPPED:
             if not self.manually_confirmed:
-                errors["manually_confirmed"] = "Mapped product mappings require manual confirmation."
+                # A trusted, tenant-scoped platform feed may promote an
+                # exact new+legacy SKU match without pretending that a fuzzy
+                # suggestion was manually approved.  The service layer is the
+                # only writer that can select API_EXACT_MATCH; the narrow
+                # invariant below keeps direct/manual writes from spoofing it.
+                exact_api_match = (
+                    self.mapping_source == self.MappingSource.API_EXACT_MATCH
+                    and self.confidence == 100
+                    and self.sku_id is not None
+                    and self.platform_detail_id is not None
+                    and self.platform_detail.internal_sku_id == self.sku_id
+                )
+                if not exact_api_match:
+                    errors["manually_confirmed"] = "Mapped product mappings require manual confirmation."
             if not self.sku_id:
                 errors["sku"] = "Mapped product mappings require an internal SKU."
         if errors:
@@ -980,6 +994,14 @@ class WarehouseAuthorization(models.Model):
         related_name="api_authorizations",
     )
     provider = models.CharField(max_length=32)
+    # A warehouse code is an upstream resource identity, not a local archive
+    # code and not an API config/credential identity.  It is stored on the
+    # binding because one managed config can legitimately serve many local
+    # warehouses.  Region is retained with the code because the same provider
+    # may reuse warehouse codes across regional accounts.
+    external_warehouse_code = models.CharField(max_length=160, blank=True, default="")
+    external_warehouse_region = models.CharField(max_length=8, blank=True, default="")
+    external_warehouse_identity_key = models.CharField(max_length=64, null=True, blank=True, default=None)
     credential_id = models.CharField(max_length=255)
     token_id = models.CharField(max_length=255)
     credential_mask = models.JSONField(default=dict, blank=True)
@@ -1009,19 +1031,69 @@ class WarehouseAuthorization(models.Model):
             models.Index(fields=["tenant", "status"], name="idx_wh_auth_tenant_status"),
             models.Index(fields=["tenant", "warehouse"], name="idx_wh_auth_tenant_wh"),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                # Nullable identity keys allow manual/legacy bindings with no
+                # provider-issued code to coexist.  Active rows receive a
+                # concrete key; revoked history clears it on save so a later
+                # active rebind can reuse the provider identity.
+                fields=["tenant", "external_warehouse_identity_key"],
+                name="uniq_active_wh_external_identity",
+            ),
+        ]
 
     def clean(self):
         errors = {}
+        self.external_warehouse_code = str(self.external_warehouse_code or "").strip()
+        self.external_warehouse_region = str(self.external_warehouse_region or "").strip().upper()
         if self.integration_config_id and self.integration_config.tenant_id != self.tenant_id:
             errors["integration_config"] = "Integration config tenant must match warehouse authorization tenant."
         if self.warehouse_id and self.warehouse.tenant_id != self.tenant_id:
             errors["warehouse"] = "Warehouse tenant must match authorization tenant."
+        if self.status == self.Status.ACTIVE and self.external_warehouse_code:
+            duplicate = type(self).objects.filter(
+                tenant_id=self.tenant_id,
+                provider=self.provider,
+                external_warehouse_region__iexact=self.external_warehouse_region,
+                external_warehouse_code=self.external_warehouse_code,
+                status=self.Status.ACTIVE,
+            ).exclude(pk=self.pk)
+            if duplicate.exists():
+                errors["external_warehouse_code"] = (
+                    "该服务商和站点的外部仓库编码已绑定其他仓库，请复用原绑定或先处理重复数据。"
+                )
         if errors:
             raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.external_warehouse_code = str(self.external_warehouse_code or "").strip()
+        self.external_warehouse_region = str(self.external_warehouse_region or "").strip().upper()
+        if self.status == self.Status.ACTIVE and self.external_warehouse_code and self.tenant_id:
+            canonical = f"{self.provider}:{self.external_warehouse_region}:{self.external_warehouse_code}"
+            self.external_warehouse_identity_key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        else:
+            self.external_warehouse_identity_key = None
+        if kwargs.get("update_fields") is not None:
+            # Add the derived key when a narrow write changes one of its
+            # source columns.  Keep unrelated writes narrow so a stale object
+            # cannot overwrite a concurrent code/region edit.
+            update_fields = set(kwargs["update_fields"])
+            if update_fields & {
+                "tenant",
+                "tenant_id",
+                "provider",
+                "status",
+                "external_warehouse_code",
+                "external_warehouse_region",
+            }:
+                update_fields.add("external_warehouse_identity_key")
+            kwargs["update_fields"] = update_fields
+        return super().save(*args, **kwargs)
 
 
 class SyncJob(models.Model):
     class ResourceType(models.TextChoices):
+        PLATFORM_PRODUCT = "platform_product", "Platform product"
         SALES_ORDER = "sales_order", "Sales order"
         REFUND_RETURN = "refund_return", "Refund or return"
         INVENTORY_SNAPSHOT = "inventory_snapshot", "Inventory snapshot"

@@ -64,10 +64,12 @@ def test_capability_matrix_upsert_is_idempotent_and_write_is_fail_closed():
     assert ConnectionCapability.objects.filter(authorization=authorization, capability_code="ORDER").count() == 1
     assert first.data["data"]["available_codes"] == list(ConnectionCapability.CapabilityCode.values)
     suggestions = {item["capability_code"]: item for item in first.data["data"]["suggestions"]}
-    assert set(suggestions) == {"ORDER", "RETURN_REFUND"}
+    assert set(suggestions) == {"PRODUCT", "ORDER", "RETURN_REFUND"}
     assert suggestions["ORDER"]["read_enabled"] is True
     assert suggestions["ORDER"]["write_enabled"] is False
     assert suggestions["ORDER"]["scope_verification"] == "unverified"
+    assert suggestions["PRODUCT"]["read_enabled"] is True
+    assert suggestions["PRODUCT"]["write_enabled"] is False
     assert first.data["data"]["results"][0]["read_enabled"] is True
 
     payload["capabilities"][0]["write_enabled"] = True

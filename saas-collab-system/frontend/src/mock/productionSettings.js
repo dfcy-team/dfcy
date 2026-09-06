@@ -54,6 +54,7 @@ const initialConfig = {
       market: ''
     },
     shopee: {
+      product_contract_approved: false,
       contract_approved: true,
       app_id: '',
       redirect_uri: 'https://saas.example.test/api/internal/integrations/store-authorizations/oauth/callback/shopee/',
@@ -67,10 +68,14 @@ const initialConfig = {
       order_detail_path: '/api/v2/order/get_order_detail',
       return_list_path: '/api/v2/returns/get_return_list',
       return_detail_path: '/api/v2/returns/get_return_detail',
+      product_list_path: '/api/v2/product/get_item_list',
+      product_base_info_path: '/api/v2/product/get_item_base_info',
+      product_model_list_path: '/api/v2/product/get_model_list',
       market: '',
       region: ''
     },
     tiktok: {
+      product_contract_approved: false,
       contract_approved: false,
       app_id: '',
       service_id: '',
@@ -88,7 +93,9 @@ const initialConfig = {
       metadata_path: '/seller/202309/permissions',
       order_list_path: '/order/202309/orders/search',
       order_detail_path: '/order/202309/orders',
-      return_list_path: '/return_refund/202602/returns/search'
+      return_list_path: '/return_refund/202602/returns/search',
+      product_search_path: '/product/202502/products/search',
+      product_detail_path: '/product/202309/products/{product_id}'
     }
   }
 };

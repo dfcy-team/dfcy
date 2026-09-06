@@ -221,4 +221,35 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(wrapper.vm.selectedAuthorizationDetail).toMatchObject({ status: 'expired' });
     expect(wrapper.text()).toContain('access_credential_hint=••••0203');
   });
+
+  it('persists the provider warehouse code when replacing a warehouse binding', async () => {
+    api.rebindWarehouseAuthorization.mockResolvedValue({
+      success: true,
+      code: 'OK',
+      data: { idempotent: false, operation: 'warehouse_rebind' },
+    });
+    const wrapper = await mountDialog('warehouse');
+    expect(wrapper.vm.warehouseExternalCode).toBe('MY-JIFENG-01');
+
+    wrapper.vm.warehouseExternalCode = 'MY-JIFENG-02';
+    await wrapper.vm.bindWarehouse('inventory');
+    await flushPromises();
+
+    expect(api.rebindWarehouseAuthorization).toHaveBeenCalledWith(
+      202,
+      expect.objectContaining({
+        warehouse_id: 1,
+        integration_config_id: 3,
+        external_warehouse_code: 'MY-JIFENG-02',
+        replace: true,
+        expected_authorization_id: 202,
+      }),
+    );
+  });
+
+  it('keeps a long warehouse authorization history inside a local scroll container', async () => {
+    const wrapper = await mountDialog('warehouse');
+    expect(wrapper.find('.authorization-history-table').exists()).toBe(true);
+    expect(wrapper.findAll('.authorization-history-table .table').length).toBeGreaterThan(0);
+  });
 });

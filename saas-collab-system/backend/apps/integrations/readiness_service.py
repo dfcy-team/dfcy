@@ -8,11 +8,13 @@ returns credential material.
 from collections import defaultdict
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from .capability import approved_custody_configured, live_network_mode_enabled
 from .live_providers import integration_config_oauth_blockers
 from .platform_schema_service import get_platform_schema
-from .production_settings import get_runtime_setting
+from .platform_capabilities import get_platform_capability
+from .production_settings import get_runtime_platform_config, get_runtime_setting
 
 
 MARKETPLACE_PLATFORMS = (
@@ -43,6 +45,7 @@ BLOCKER_LABELS = {
     "callback_not_allowlisted": "授权回调地址不在白名单内",
     "public_app_id_missing": "平台应用 ID 未填写",
     "readonly_not_approved": "生产只读能力尚未审批",
+    "product_contract_not_approved": "平台商品只读接口合同尚未单独审批",
 }
 
 READINESS_ACTION_LABELS = {
@@ -60,6 +63,38 @@ def _expected_contract(config):
     return str(
         get_platform_schema(platform, environment=getattr(config, "environment", None))["contract_versions"][0]
     )
+
+
+def _supported_readonly_resources(platform):
+    """Expose registry-backed resource support without exposing credentials."""
+    try:
+        capability = get_platform_capability(platform)
+    except DjangoValidationError:
+        return []
+    return sorted(
+        resource
+        for resource, execution_modes in capability.resources.items()
+        if "live_readonly" in execution_modes
+    )
+
+
+def _resource_readiness(platform):
+    """Expose resource-level gates without making order approval contagious."""
+    resources = _supported_readonly_resources(platform)
+    runtime_platform = get_runtime_platform_config(platform)
+    result = {}
+    for resource in resources:
+        if resource == "platform_product":
+            approved = bool(runtime_platform.get("product_contract_approved", False))
+            blockers = [] if approved else ["product_contract_not_approved"]
+            result[resource] = {
+                "contract_approved": approved,
+                "blocker_codes": blockers,
+                "blocker_summary": "；".join(BLOCKER_LABELS.get(code, code) for code in blockers),
+            }
+        else:
+            result[resource] = {"contract_approved": bool(runtime_platform.get("contract_approved", False)), "blocker_codes": []}
+    return result
 
 
 def _readonly_state(config):
@@ -158,6 +193,8 @@ def _config_readiness(config):
         "sync_read_enabled": bool(config.sync_read_enabled),
         "sync_write_enabled": bool(config.sync_write_enabled),
         "readonly_approved": readonly_approved,
+        "supported_readonly_resources": _supported_readonly_resources(config.platform),
+        "readonly_resource_readiness": _resource_readiness(config.platform),
         "config_version": config.config_version,
         "blocker_codes": blocker_codes,
         "blocker_summary": "；".join(BLOCKER_LABELS.get(code, code) for code in blocker_codes),
@@ -218,6 +255,8 @@ def build_platform_readiness(configs):
                 "production_status": "production_readonly_ready" if ready_configs else "production_disabled",
                 "production_status_label": "生产只读就绪" if ready_configs else "生产接入关闭",
                 "config_summary": _config_summary(platform_configs),
+                "supported_readonly_resources": _supported_readonly_resources(platform),
+                "readonly_resource_readiness": _resource_readiness(platform),
                 "configs": config_rows,
                 "blocker_codes": blockers,
                 "blocker_summary": "；".join(BLOCKER_LABELS.get(code, code) for code in blockers),

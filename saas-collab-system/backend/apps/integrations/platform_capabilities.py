@@ -19,12 +19,20 @@ CAPABILITY_REGISTRY = {
     "shopee": PlatformCapability(
         api_types=("marketplace", "advertising"),
         authorization="oauth_store",
-        resources={"sales_order": ("live_readonly",), "refund_return": ("live_readonly",)},
+        resources={
+            "platform_product": ("live_readonly",),
+            "sales_order": ("live_readonly",),
+            "refund_return": ("live_readonly",),
+        },
     ),
     "tiktok": PlatformCapability(
         api_types=("marketplace", "advertising"),
         authorization="oauth_store",
-        resources={"sales_order": ("live_readonly",), "refund_return": ("live_readonly",)},
+        resources={
+            "platform_product": ("live_readonly",),
+            "sales_order": ("live_readonly",),
+            "refund_return": ("live_readonly",),
+        },
     ),
     "jifeng_wms": PlatformCapability(
         api_types=("inventory",),

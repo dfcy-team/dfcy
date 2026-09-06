@@ -30,9 +30,10 @@ describe('系统管理员生产环境 API 配置闭环', () => {
       'connection', 'max_retries', 'backoff_base_seconds', 'connect_timeout_seconds', 'read_timeout_seconds',
       'max_retry_wait_seconds', 'max_total_wait_seconds',
       'custody.backend', 'service_url', 'service_host', 'auth_file_path', 'ca_file_path', 'token_available',
-      'contract_approved', 'app_id', 'service_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path',
+      'contract_approved', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path',
       'refresh_path', 'revoke_path', 'shop_path', 'authorized_shops_path', 'metadata_path', 'order_list_path',
       'order_detail_path', 'return_list_path', 'return_detail_path', 'market', 'region', 'auth_urls', 'api_hosts',
+      'product_list_path', 'product_base_info_path', 'product_model_list_path', 'product_search_path', 'product_detail_path',
       'listing_write', 'emergency_stop', 'require_batch_approval', 'allowed_platforms', 'allowed_actions', 'allowed_store_ids', 'max_batch_size'
     ]) expect(page).toContain(field);
     expect(page).toContain("systemActionAccess('config.manage')");
@@ -75,7 +76,9 @@ describe('系统管理员生产环境 API 配置闭环', () => {
     expect(response.data.masked_status.custody.token_available).toBe(false);
     expect(response.data.config.platforms.lazada).toHaveProperty('auth_url');
     expect(response.data.config.platforms.shopee).toHaveProperty('order_detail_path');
+    expect(response.data.config.platforms.shopee).toHaveProperty('product_model_list_path');
     expect(response.data.config.platforms.tiktok).toHaveProperty('authorized_shops_path');
+    expect(response.data.config.platforms.tiktok).toHaveProperty('product_detail_path');
     expect(JSON.stringify(response)).not.toMatch(/"(?:access_token|refresh_token|client_secret|app_secret|partner_key|token_id|cookie|session)"\s*:/i);
   });
 
@@ -94,7 +97,7 @@ describe('系统管理员生产环境 API 配置闭环', () => {
 
   it('maps readiness blockers to permission-aware actions and supports workspace deep links', () => {
     expect(readiness).toContain('BLOCKER_ACTIONS');
-    for (const code of ['platform_network_mode_disabled', 'credential_custody_not_approved', 'outbound_host_allowlist_missing', 'credential_not_configured', 'callback_missing', 'readonly_not_approved']) {
+    for (const code of ['platform_network_mode_disabled', 'credential_custody_not_approved', 'outbound_host_allowlist_missing', 'credential_not_configured', 'callback_missing', 'readonly_not_approved', 'product_contract_not_approved']) {
       expect(readiness).toContain(code);
     }
     expect(readiness).toContain('openBlockerAction');

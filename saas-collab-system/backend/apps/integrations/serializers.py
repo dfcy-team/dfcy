@@ -22,6 +22,7 @@ from .audit_sanitizer import (
     sanitize_audit_detail as _sanitize_audit_detail,
 )
 from .platform_schema_service import get_platform_schema, validate_platform_config
+from .platform_capabilities import supports_resource
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 
 
@@ -367,6 +368,8 @@ class WarehouseAuthorizationSerializer(serializers.ModelSerializer):
             "warehouse_name",
             "country_code",
             "provider",
+            "external_warehouse_code",
+            "external_warehouse_region",
             "status",
             "authorized_at",
             "last_verified_at",
@@ -385,6 +388,7 @@ class WarehouseAuthorizationBindSerializer(serializers.Serializer):
 
     warehouse_id = serializers.IntegerField(min_value=1)
     integration_config_id = serializers.IntegerField(min_value=1)
+    external_warehouse_code = serializers.CharField(required=False, allow_blank=True, max_length=160)
     replace = serializers.BooleanField(default=False)
     expected_authorization_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     idempotency_key = serializers.CharField(min_length=8, max_length=120, required=False, allow_blank=True)
@@ -764,12 +768,7 @@ class SyncJobSerializer(serializers.ModelSerializer):
             PlatformIntegrationConfig.Environment.PRODUCTION,
         }:
             return attrs
-        supported = {
-            PlatformChoices.SHOPEE: {SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN},
-            PlatformChoices.TIKTOK: {SyncJob.ResourceType.SALES_ORDER, SyncJob.ResourceType.REFUND_RETURN},
-            PlatformChoices.JIFENG_WMS: {SyncJob.ResourceType.INVENTORY_SNAPSHOT},
-        }
-        if resource_type not in supported.get(config.platform, set()):
+        if not supports_resource(config.platform, resource_type, "live_readonly"):
             raise serializers.ValidationError("Platform and readonly resource type are incompatible.")
         if config.sync_write_enabled:
             raise serializers.ValidationError("Readonly production jobs reject write-enabled integration configs.")

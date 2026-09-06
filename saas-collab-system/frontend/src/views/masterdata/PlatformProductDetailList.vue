@@ -2,8 +2,8 @@
   <AppPage
     eyebrow="MASTER DATA"
     title="平台商品明细数据"
-    subtitle="按平台、店铺维护商品与变体快照；旧 SKU 关联仅用于内部 SKU 映射，不保存平台凭据。"
-    boundary-note="页面只展示当前租户可见的商品明细；导入会校验平台、店铺、国家代码和旧 SKU 的租户边界。"
+    subtitle="平台商品明细来源于已授权店铺的商品/变体快照；新旧 SKU 一致时自动关联，冲突或缺失时进入待处理。"
+    boundary-note="页面只展示当前租户可见的商品明细；来源、平台更新时间、本地更新时间和 SKU 归集状态均以服务端返回为准，不在此保存平台凭据。"
     :capability="capability"
   >
     <template #action>
@@ -25,6 +25,16 @@
       show-icon
       closable
       @close="message = ''"
+    />
+
+    <el-alert
+      v-if="!mappingOnly"
+      class="identity-guidance"
+      title="平台商品来源与 SKU 归集规则"
+      description="平台商品档案按店铺授权的商品/变体身份幂等更新；按平台 SKU 精确匹配内部新 SKU 或旧 SKU，同时提供新旧编码时必须指向同一条内部商品明细，满足条件则自动关联。缺失、重复或新旧编码不一致会保留平台明细并标记为待处理，不会静默覆盖已有人工确认。"
+      type="info"
+      show-icon
+      :closable="false"
     />
 
     <ProductMappingPanel
@@ -60,7 +70,7 @@
         <strong>{{ total }}</strong>
       </div>
       <div class="summary-item">
-        <span>已关联新 SKU</span>
+        <span>已完成 SKU 归集</span>
         <strong>{{ linkedCount }}</strong>
       </div>
       <div class="summary-item">
@@ -130,11 +140,28 @@
         <el-table-column prop="platform_product_id" label="平台商品 ID" min-width="150" show-overflow-tooltip />
         <el-table-column prop="platform_variant_id" label="变体 ID" min-width="140" show-overflow-tooltip />
         <el-table-column prop="platform_sku" label="平台 SKU" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="source_old_sku_code" label="旧 SKU 关联" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.source_old_sku_code || row.internal_legacy_sku_code || '-' }}</template>
+        <el-table-column prop="source_old_sku_code" label="来源 SKU" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.source_old_sku_code || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="internal_sku_code" label="新 SKU" min-width="140" show-overflow-tooltip>
+        <el-table-column prop="internal_legacy_sku_code" label="内部旧 SKU" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.internal_legacy_sku_code || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="internal_sku_code" label="内部新 SKU" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.internal_sku_code || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="SKU 归集" min-width="125">
+          <template #default="{ row }">
+            <el-tag :type="skuIdentityStateType(row)" effect="plain">{{ skuIdentityStateLabel(row) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="数据来源" min-width="130" show-overflow-tooltip>
+          <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
+        </el-table-column>
+        <el-table-column label="平台更新时间" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatDateTime(row.platform_updated_at, '未提供') }}</template>
+        </el-table-column>
+        <el-table-column label="本地更新时间" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatDateTime(row.updated_at, '未提供') }}</template>
         </el-table-column>
         <el-table-column v-if="canViewMapping && integrationEnabled" label="SKU 映射状态" min-width="125">
           <template #default="{ row }">
@@ -152,9 +179,17 @@
         </el-table-column>
         <el-table-column prop="owner" label="负责人" min-width="110" show-overflow-tooltip />
         <el-table-column prop="leader" label="组长" min-width="110" show-overflow-tooltip />
-        <el-table-column v-if="(canViewMapping && integrationEnabled) || canManage" label="操作" min-width="170" fixed="right">
+        <el-table-column v-if="(canViewMapping && integrationEnabled) || canManage || canViewSync" label="操作" min-width="250" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canViewMapping && integrationEnabled" link type="primary" @click="openMapping(row)">SKU 映射</el-button>
+            <el-button
+              v-if="canViewSync"
+              link
+              type="primary"
+              :disabled="!productSyncEntryState(row).allowed"
+              :title="productSyncEntryState(row).reason"
+              @click="openProductSync(row)"
+            >平台商品同步</el-button>
             <el-button v-if="canManage" link type="primary" @click="openEdit(row)">编辑</el-button>
           </template>
         </el-table-column>
@@ -312,12 +347,14 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { ElMessageBox } from 'element-plus';
-import { useRoute } from 'vue-router';
+import { ElMessage } from 'element-plus';
+import { useRoute, useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import ProductMappingPanel from '../../components/ProductMappingPanel.vue';
 import { fetchPlatforms, fetchStores } from '../../api/masterData';
 import { fetchPlatformProductDetails, importPlatformProductDetails, importPlatformProductIds, updatePlatformProductDetail, bulkUpdatePlatformProductDetails } from '../../api/platformProductDetails';
+import { fetchConnectionCapabilities, fetchSubjectApiAccess } from '../../api/integrations';
 import { fetchProductCategories } from '../../api/products';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
@@ -345,6 +382,7 @@ const serverPaginated = ref(false);
 const platformOptions = ref([]);
 const storeOptions = ref([]);
 const route = useRoute();
+const router = useRouter();
 const filters = reactive({ search: '', platform_id: '', store_id: String(route.query.store_id || ''), platform_variant_id: String(route.query.variant_id || ''), sales_status: '', mapping_status: String(route.query.mapping_status || ''), category_id: '', page: 1, page_size: 20 });
 const pageSizeOptions = [20, 50, 100];
 const auth = useAuthStore();
@@ -352,6 +390,7 @@ const canManage = computed(() => auth.hasPermission('listings.product_detail.man
 const canImport = computed(() => auth.hasPermission('listings.product_detail.import'));
 const canViewDetails = computed(() => auth.hasPermission('listings.product_detail.view'));
 const canViewMapping = computed(() => auth.hasPermission('integrations.product_mapping.view'));
+const canViewSync = computed(() => auth.hasPermission('integrations.view') && auth.hasPermission('integrations.store.view'));
 const integrationEnabled = computed(() => auth.isModuleEnabled('api_integrations'));
 const mappingOnly = computed(() => canViewMapping.value && !canViewDetails.value);
 const mappingPanelVisible = ref(false);
@@ -469,7 +508,7 @@ function downloadTemplate() {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-const linkedCount = computed(() => allRows.value.filter((row) => row.internal_sku_code || row.internal_sku).length);
+const linkedCount = computed(() => allRows.value.filter((row) => ['auto', 'manual', 'linked'].includes(skuIdentityState(row))).length);
 const onSaleCount = computed(() => allRows.value.filter((row) => /active|on.?sale|在售/i.test(String(row.sales_status || ''))).length);
 
 function rowMappingStatus(row) {
@@ -486,6 +525,108 @@ function mappingStatusLabel(value) {
 }
 function mappingStatusType(value) {
   return ({ unmapped: 'info', suggested: 'warning', mapped: 'success', conflict: 'danger', inactive: 'info' })[value] || 'info';
+}
+
+const productSyncPlatforms = new Set(['shopee', 'tiktok']);
+
+function platformCode(row) {
+  return String(row?.platform_code || row?.platform_key || row?.platform_type || row?.platform || '').trim().toLowerCase();
+}
+
+function productSyncEntryState(row) {
+  if (!canViewSync.value) return { allowed: false, reason: '当前角色没有查看同步任务的权限。' };
+  if (!row?.store_id && !row?.store) return { allowed: false, reason: '当前平台商品明细没有可定位的店铺，暂不能进入商品同步任务。' };
+  const platform = platformCode(row);
+  if (!productSyncPlatforms.has(platform)) return { allowed: false, reason: '当前平台尚未登记已验证的平台商品同步连接器。' };
+  if (row?.product_sync_supported === false || row?.connector_supported === false) {
+    return { allowed: false, reason: '当前平台商品同步连接器未实现或未启用。' };
+  }
+  if (row?.connector_verified === false || row?.product_sync_verified === false) {
+    return { allowed: false, reason: '平台商品同步连接器尚未通过验证。' };
+  }
+  return { allowed: true, reason: '仅查看当前已授权店铺的平台商品同步任务。' };
+}
+
+function sourceLabel(value) {
+  return ({
+    api: '平台 API 同步',
+    api_sync: '平台 API 同步',
+    sync: '平台 API 同步',
+    import: '人工导入',
+    manual: '人工维护',
+  })[String(value || '').toLowerCase()] || (value || '未标明');
+}
+
+function formatDateTime(value, emptyLabel = '未提供') {
+  if (!value) return emptyLabel;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function skuIdentityState(row) {
+  const explicit = String(
+    row?.sku_resolution_state
+      || row?.sku_ingestion_state
+      || row?.identity_status
+      || row?.mapping?.resolution_state
+      || '',
+  ).toLowerCase();
+  if (['conflict', 'mismatch', 'ambiguous'].includes(explicit)) return 'conflict';
+  if (['pending', 'unresolved', 'missing', 'unmapped'].includes(explicit)) return 'pending';
+  if (['matched', 'exact', 'auto', 'auto_matched', 'resolved'].includes(explicit)) return 'auto';
+  if (['api_exact_match', 'api_sync_exact_match'].includes(String(row?.mapping?.mapping_source || '').toLowerCase())
+      && row?.mapping?.status === 'mapped' && row?.mapping?.manually_confirmed === false) return 'auto';
+  if (row?.mapping?.status === 'conflict') return 'conflict';
+  if (row?.mapping?.status === 'suggested' || row?.mapping?.status === 'unmapped') return 'pending';
+  if (row?.mapping?.status === 'mapped') return row.mapping.manually_confirmed ? 'manual' : 'linked';
+  return 'pending';
+}
+
+function skuIdentityStateLabel(row) {
+  return ({ auto: '自动精确关联', manual: '人工确认', linked: '已关联', pending: '待处理', conflict: '待人工确认' })[skuIdentityState(row)] || '待处理';
+}
+
+function skuIdentityStateType(row) {
+  return ({ auto: 'success', manual: 'success', linked: 'success', pending: 'warning', conflict: 'danger' })[skuIdentityState(row)] || 'info';
+}
+
+async function openProductSync(row) {
+  const state = productSyncEntryState(row);
+  if (!state.allowed) {
+    ElMessage.warning(state.reason);
+    return;
+  }
+  const storeId = row?.store_id || row?.store;
+  try {
+    // Re-check effective authorization and PRODUCT read capability at the
+    // action boundary.  A stale platform-detail row must never turn into an
+    // active sync-task action after authorization has been revoked.
+    const accessResponse = await fetchSubjectApiAccess('store', storeId);
+    if (!accessResponse?.success) throw new Error(accessResponse?.message || '店铺 API 授权读取失败');
+    const access = accessResponse.data || {};
+    const platform = platformCode(row);
+    const binding = (access.bindings || []).find((item) => (
+      String(item.api_type || '').toLowerCase() === 'marketplace'
+      && String(item.platform || platform).toLowerCase() === platform
+      && ['active', 'authorized'].includes(String(item.status || '').toLowerCase())
+    ));
+    if (!binding?.id) throw new Error('当前店铺没有有效的平台授权，请先完成店铺 API 授权。');
+    const capabilityResponse = await fetchConnectionCapabilities(binding.id);
+    const capabilities = capabilityResponse?.data?.results || [];
+    const productCapability = capabilities.find((item) => String(item.capability_code || '').toUpperCase() === 'PRODUCT');
+    if (!productCapability || !productCapability.read_enabled || productCapability.write_enabled || productCapability.status !== 'active') {
+      throw new Error('当前店铺的平台商品只读能力尚未验证或未启用。');
+    }
+    router.push({ path: '/integrations/sync-jobs', query: {
+      platform,
+      api_type: 'marketplace',
+      resource_type: 'platform_product',
+      store_id: String(storeId),
+      subject: row?.store_name || row?.store_code || '',
+    } });
+  } catch (error) {
+    ElMessage.warning(error?.message || '当前店铺暂不能进入平台商品同步任务。');
+  }
 }
 function openMapping(row) {
   if (!canViewMapping.value) return;

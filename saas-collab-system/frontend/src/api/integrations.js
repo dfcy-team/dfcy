@@ -267,7 +267,11 @@ export const fetchSyncAlertIncidents = (filters = {}) => {
     {
       method: 'get',
       url: '/api/internal/integrations/sync-alert-incidents/',
-      params: { status: params.status || '', ...(params.store_id ? { store_id: params.store_id } : {}) }
+      params: {
+        status: params.status || '',
+        ...(params.store_id ? { store_id: params.store_id } : {}),
+        ...(params.resource_type ? { resource_type: params.resource_type } : {}),
+      }
     },
     () => mockSyncAlertIncidents(params),
     'integrations.sync_alert_incidents'

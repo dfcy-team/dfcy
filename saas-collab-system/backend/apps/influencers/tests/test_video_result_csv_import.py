@@ -19,7 +19,7 @@ def test_video_csv_import_keeps_only_latest_real_snapshot_and_replays_as_noop(tm
         platform="TikTok",
         handle="creator.account",
     )
-    InfluencerProfile.objects.create(
+    profile = InfluencerProfile.objects.create(
         tenant=tenant,
         influencer=influencer,
         external_influencer_id="CREATOR-1",
@@ -57,6 +57,18 @@ def test_video_csv_import_keeps_only_latest_real_snapshot_and_replays_as_noop(tm
     assert result.views == 25
     assert result.orders == 2
     assert result.currency == "UNKNOWN"
+
+    refresh_preview = StringIO()
+    call_command(
+        "refresh_influencer_video_profiles",
+        tenant_id=tenant.pk,
+        stdout=refresh_preview,
+    )
+    assert "mode=dry-run" in refresh_preview.getvalue()
+    profile.refresh_from_db()
+    assert profile.average_video_views == 0
+    assert profile.historical_gmv == 0
+    assert profile.historical_orders == 0
 
     refresh = StringIO()
     call_command(

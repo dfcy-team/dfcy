@@ -353,32 +353,9 @@ class PlatformProductDetailView(APIView):
     def patch(self, request, pk):
         item = self.get_object(request, pk, permission_code=PLATFORM_DETAIL_MANAGE_PERMISSION)
         payload = request.data.copy()
-        # Accept either legacy or generated SKU code when remapping a detail.
-        # Resolve it to the tenant-scoped FK before serializer validation so
-        # callers cannot attach a SKU from another tenant or an unknown code.
-        if "new_sku_code" in payload and "internal_sku" not in payload:
-            new_code = str(payload.get("new_sku_code") or "").strip()
-            if new_code:
-                try:
-                    payload["internal_sku"] = _resolve_sku(
-                        request.user.tenant,
-                        {"new_sku_code": new_code, "source_old_sku_code": ""},
-                    ).pk
-                except (ValueError, TypeError) as exc:
-                    from rest_framework.exceptions import ValidationError
-                    raise ValidationError({"new_sku_code": str(exc)}) from exc
-            payload.pop("new_sku_code", None)
-        if "source_old_sku_code" in payload and "internal_sku" not in payload:
-            old_code = str(payload.get("source_old_sku_code") or "").strip()
-            if old_code:
-                try:
-                    payload["internal_sku"] = _resolve_sku(request.user.tenant, {"source_old_sku_code": old_code, "new_sku_code": ""}).pk
-                except (ValueError, TypeError) as exc:
-                    from rest_framework.exceptions import ValidationError
-                    raise ValidationError({"source_old_sku_code": str(exc)}) from exc
-        _reject_direct_mapping_edit(item, payload)
         serializer = PlatformProductDetailSerializer(item, data=payload, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        _reject_direct_mapping_edit(item, serializer.validated_data)
         if "platform_variant_id" in serializer.validated_data:
             variant_id = serializer.validated_data["platform_variant_id"]
             conflict = PlatformProductDetail.objects.filter(
@@ -457,20 +434,29 @@ def platform_product_detail_bulk_update(request):
     mapped_sku = None
     if new_code is not sentinel or mapping_code is not sentinel or internal_sku_id is not sentinel:
         try:
-            if new_code is not sentinel and str(new_code).strip():
-                mapped_sku = _resolve_sku(tenant, {"new_sku_code": str(new_code).strip(), "source_old_sku_code": ""})
-            elif mapping_code is not sentinel and str(mapping_code).strip():
-                mapped_sku = _resolve_sku(tenant, {"new_sku_code": "", "source_old_sku_code": str(mapping_code).strip()})
-            elif internal_sku_id is not sentinel:
+            if internal_sku_id is not sentinel:
                 mapped_sku = ProductSKU.objects.filter(tenant=tenant, pk=internal_sku_id).first()
                 if mapped_sku is None:
                     raise ValueError("指定的新 SKU 不存在或不属于当前租户。")
+            if new_code is not sentinel or mapping_code is not sentinel:
+                resolved = _resolve_sku(tenant, {
+                    "new_sku_code": str(new_code).strip() if new_code is not sentinel else (mapped_sku.sku_code if mapped_sku else ""),
+                    "source_old_sku_code": str(mapping_code).strip() if mapping_code is not sentinel else "",
+                })
+                if mapped_sku is not None and resolved.pk != mapped_sku.pk:
+                    raise ValueError("新旧 SKU 编码与所选内部商品明细不一致。")
+                mapped_sku = resolved
         except (ValueError, TypeError) as exc:
             return error_response(ErrorCode.VALIDATION_ERROR, str(exc), status=400)
     simple_fields = ("title", "variant", "sales_status", "owner", "leader", "platform_sku", "platform_product_id")
     for item in rows:
         try:
             controlled_payload = dict(fields)
+            # ``new_sku_code`` is only an input alias.  It is not persisted on
+            # PlatformProductDetail, so comparing it as a model field would
+            # make every controlled row look changed even when it resolves to
+            # the row's current internal SKU.
+            controlled_payload.pop("new_sku_code", None)
             if mapped_sku is not None:
                 controlled_payload["internal_sku"] = mapped_sku.pk
             if item.id in controlled_detail_ids and _controlled_mapping_changes(item, controlled_payload):
@@ -480,6 +466,9 @@ def platform_product_detail_bulk_update(request):
                 if field in fields and getattr(item, field) != fields[field]:
                     updates[field] = fields[field]
             if mapped_sku is not None:
+                effective_old = item.source_old_sku_code if mapping_code is sentinel else str(mapping_code).strip()
+                if effective_old:
+                    _resolve_sku(tenant, {"new_sku_code": mapped_sku.sku_code, "source_old_sku_code": effective_old})
                 updates["internal_sku"] = mapped_sku
                 if mapping_code is not sentinel:
                     updates["source_old_sku_code"] = str(mapping_code).strip()

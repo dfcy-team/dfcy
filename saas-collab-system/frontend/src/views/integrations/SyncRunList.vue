@@ -16,7 +16,14 @@ import { fetchSyncRuns } from '../../api/integrations';
 const columns = [
   { prop: 'run_id', label: '执行ID' },
   { prop: 'platform', label: '平台' },
-  { prop: 'resource_type', label: '资源类型' },
+  { prop: 'resource_type', label: '资源类型', formatter: (value) => ({
+    platform_product: '平台商品',
+    sales_order: '销售订单',
+    refund_return: '退款退货',
+    inventory_snapshot: '库存快照',
+    inbound: '入库单',
+    shipment: '出库单',
+  })[value] || value || '-' },
   { prop: 'status', label: '状态', type: 'status' },
   { prop: 'started_at', label: '开始时间' },
   { prop: 'finished_at', label: '结束时间' },
