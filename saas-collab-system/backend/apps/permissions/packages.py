@@ -6,7 +6,7 @@ expanded code must already exist in ``ALL_PERMISSION_DEFINITIONS`` and the
 role still stores the normal ``Permission`` many-to-many relation.
 """
 
-from .catalog import ALL_PERMISSION_DEFINITIONS
+from .catalog import runtime_permission_definitions
 
 
 PACKAGE_LEVELS = ("none", "read", "operate", "admin")
@@ -81,20 +81,20 @@ def is_high_risk_permission(code, *, action=None, permission_type="action"):
     return bool(parts & HIGH_RISK_ACTION_PARTS)
 
 
-def _definitions_by_module():
+def _definitions_by_module(definitions=None):
     grouped = {}
-    for definition in ALL_PERMISSION_DEFINITIONS:
+    for definition in definitions or runtime_permission_definitions():
         grouped.setdefault(definition["module"], []).append(definition)
     return grouped
 
 
-def permission_package_catalog():
+def permission_package_catalog(definitions=None):
     """Return package metadata for the role quick-assignment UI/API."""
     packages = []
-    for module, definitions in sorted(_definitions_by_module().items()):
-        menus = [d["code"] for d in definitions if _permission_type(d) == "menu"]
-        fields = [d["code"] for d in definitions if _permission_type(d) == "field"]
-        actions = [d for d in definitions if _permission_type(d) == "action"]
+    for module, module_definitions in sorted(_definitions_by_module(definitions).items()):
+        menus = [d["code"] for d in module_definitions if _permission_type(d) == "menu"]
+        fields = [d["code"] for d in module_definitions if _permission_type(d) == "field"]
+        actions = [d for d in module_definitions if _permission_type(d) == "action"]
         high_risk = [d["code"] for d in actions if _is_high_risk(d)]
         routine_actions = [d["code"] for d in actions if not _is_high_risk(d)]
         read_actions = [
@@ -122,16 +122,16 @@ def permission_package_catalog():
                 "admin": admin_codes,
             },
             "high_risk_codes": sorted(high_risk),
-            "available_codes": sorted(d["code"] for d in definitions),
+            "available_codes": sorted(d["code"] for d in module_definitions),
         })
     return packages
 
 
-def package_index():
-    return {item["module"]: item for item in permission_package_catalog()}
+def package_index(definitions=None):
+    return {item["module"]: item for item in permission_package_catalog(definitions)}
 
 
-def expand_package_selections(selections, extra_permission_codes=()):
+def expand_package_selections(selections, extra_permission_codes=(), definitions=None):
     """Expand validated module levels into canonical permission codes.
 
     ``selections`` is a mapping of module name to one of the four levels.  A
@@ -143,7 +143,7 @@ def expand_package_selections(selections, extra_permission_codes=()):
         selections = {}
     if not isinstance(selections, dict):
         raise ValueError("package_selections must be an object mapping modules to levels")
-    index = package_index()
+    index = package_index(definitions)
     unknown = sorted(set(selections) - set(index))
     if unknown:
         raise ValueError(f"Unknown permission package modules: {', '.join(unknown)}")
@@ -176,7 +176,7 @@ def expand_package_selections(selections, extra_permission_codes=()):
         )
     definition_by_code = {
         code: definition
-        for definition in ALL_PERMISSION_DEFINITIONS
+        for definition in (definitions or runtime_permission_definitions())
         for code in [definition["code"]]
     }
     selected_modules = set(selections)
@@ -203,8 +203,8 @@ def expand_package_selections(selections, extra_permission_codes=()):
     return sorted(codes)
 
 
-def high_risk_codes_for_modules(modules):
-    index = package_index()
+def high_risk_codes_for_modules(modules, definitions=None):
+    index = package_index(definitions)
     return sorted({
         code
         for module in modules
@@ -213,10 +213,10 @@ def high_risk_codes_for_modules(modules):
     })
 
 
-def high_risk_permission_codes():
+def high_risk_permission_codes(definitions=None):
     """Return the catalog-derived high-risk action permission codes."""
     return {
         code
-        for item in permission_package_catalog()
+        for item in permission_package_catalog(definitions)
         for code in item["high_risk_codes"]
     }

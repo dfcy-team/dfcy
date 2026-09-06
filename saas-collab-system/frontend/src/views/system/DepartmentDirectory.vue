@@ -46,6 +46,7 @@ import {
 } from '../../api/systemAdmin';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
+import { departmentDisplayName } from '../../utils/adminDisplayLabels';
 
 const auth = useAuthStore();
 const resourcePage = ref(null);
@@ -57,10 +58,10 @@ const selectedDepartment = ref(null);
 const manageAccess = computed(() => getActionAccess(auth, { permission: 'system.organization.manage' }));
 
 const columns = [
-  { prop: 'name', label: '部门名称', width: 180 },
-  { prop: 'parent_name', label: '上级部门', width: 180 },
+  { prop: 'name', label: '部门名称', width: 180, format: (value) => departmentDisplayName(value) || '-' },
+  { prop: 'parent_name', label: '上级部门', width: 180, format: (value) => departmentDisplayName(value) || '-' },
   { prop: 'status', label: '状态', type: 'status' },
-  { prop: 'tenant_id', label: '租户ID' }
+  { prop: 'tenant_id', label: '租户编号' }
 ];
 
 function flattenTree(nodes, result = []) {
@@ -72,7 +73,7 @@ function flattenTree(nodes, result = []) {
 }
 
 const departmentOptions = computed(() => flattenTree(treeNodes.value)
-  .map((item) => ({ label: item.name, value: item.id })));
+  .map((item) => ({ label: departmentDisplayName(item.name), value: item.id })));
 
 const formFields = computed(() => [
   { key: 'name', label: '部门名称', required: true },

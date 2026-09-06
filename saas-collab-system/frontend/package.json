@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "permissions:export": "node scripts/export-menu-registry.mjs",
+    "permissions:check": "node scripts/export-menu-registry.mjs --check",
+    "prebuild": "npm run permissions:check",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run"

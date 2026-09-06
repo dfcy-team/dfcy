@@ -421,6 +421,15 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
     scope_type = serializers.ChoiceField(choices=DataScope.ScopeType.choices)
     scope_config = serializers.JSONField(required=False, default=dict)
 
+    def validate_scope_type(self, value):
+        # Keep the legacy values in the model and response serializers so old
+        # roles can still be inspected.  They are deliberately rejected on a
+        # new permission submission so a save can never silently broaden an
+        # organization-scoped role into tenant-wide access.
+        if value not in DataScope.NEW_SCOPE_TYPES:
+            raise serializers.ValidationError("历史组织范围不能用于新配置，请重新选择租户内全部数据或按业务范围限制。")
+        return value
+
     def validate(self, attrs):
         category_fields = (
             "menu_permission_codes", "action_permission_codes", "field_permission_codes",
@@ -436,9 +445,21 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
             })
         if package_selections is not None:
             try:
+                # The role update is validated against rows that actually
+                # exist in this database.  The release sync command is
+                # responsible for materializing the frontend menu registry;
+                # before that first sync, do not manufacture menu codes that
+                # the strict permission lookup cannot persist.
+                database_definitions = list(
+                    Permission.objects.values(
+                        "code", "name", "module", "action", "description",
+                        "permission_type", "metadata",
+                    )
+                )
                 package_codes = expand_package_selections(
                     package_selections,
                     attrs.get("extra_permission_codes") or [],
+                    definitions=database_definitions,
                 )
             except ValueError as exc:
                 raise serializers.ValidationError({"package_selections": str(exc)}) from exc
@@ -504,14 +525,14 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
                 })
         attrs["permission_codes"] = sorted(supplied_codes)
 
-        """Validate scope shape and every referenced object in the actor tenant.
+        """Validate scope shape and every referenced object in the target tenant.
 
         The permission API is intentionally strict: a malformed custom scope
         must fail closed instead of becoming an effectively unscoped role.
-        ``department`` means the actor's current department per the shared
-        scope contract.  Older clients may send a department_ids hint; it is
-        validated as metadata but does not widen the effective current-
-        department scope.
+        Tenant isolation is enforced by the target tenant relation and by
+        checking every referenced business object against that tenant.  The
+        old organization/user/role keys remain readable in existing records,
+        but are not accepted in new business-scope submissions.
         """
         scope_type = attrs.get("scope_type")
         config = attrs.get("scope_config")
@@ -525,10 +546,7 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
             DataScope.ScopeType.OWN: {"owner_field"},
             DataScope.ScopeType.DEPARTMENT: {"department_ids"},
             DataScope.ScopeType.DEPARTMENT_TREE: {"department_ids"},
-            DataScope.ScopeType.CUSTOM: {
-                "user_ids", "department_ids", "role_ids",
-                "platform_ids", "store_ids", "site_ids", "warehouse_ids", "supplier_ids",
-            },
+            DataScope.ScopeType.CUSTOM: set(DataScope.BUSINESS_SCOPE_KEYS),
         }[scope_type]
         unknown = sorted(set(config) - allowed_keys)
         if unknown:

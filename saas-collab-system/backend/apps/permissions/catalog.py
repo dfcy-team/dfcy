@@ -1,3 +1,6 @@
+from functools import lru_cache
+
+
 PERMISSION_DEFINITIONS = (
     {
         "code": "listings.product_detail.view",
@@ -1040,7 +1043,55 @@ FIELD_PERMISSION_DEFINITIONS = (
 )
 
 
+# ``MENU_PERMISSION_DEFINITIONS`` is retained as the migration-era baseline
+# for backwards compatibility.  New menu entries must not be added here: the
+# frontend sidebar declaration is the auditable menu registration source and
+# is loaded by ``runtime_permission_definitions`` below.  Keeping the static
+# tuple available also lets historical migrations and package consumers import
+# the catalog without executing JavaScript during Django app startup.
+BASE_PERMISSION_DEFINITIONS = PERMISSION_DEFINITIONS + FIELD_PERMISSION_DEFINITIONS
 ALL_PERMISSION_DEFINITIONS = PERMISSION_DEFINITIONS + MENU_PERMISSION_DEFINITIONS + FIELD_PERMISSION_DEFINITIONS
+
+
+@lru_cache(maxsize=1)
+def _load_runtime_menu_definitions():
+    from .menu_registry import load_menu_permission_definitions
+
+    return tuple(load_menu_permission_definitions())
+
+
+def clear_runtime_permission_cache():
+    """Clear the process-local menu snapshot after a source reload in tests."""
+    _load_runtime_menu_definitions.cache_clear()
+
+
+def runtime_permission_definitions(menu_definitions=None):
+    """Return the current application catalog with menus from the frontend.
+
+    Action and field permissions remain Python-owned and therefore preserve
+    the existing API/data contracts.  Menu permissions are intentionally
+    loaded from ``frontend/src/router/menu.js`` so adding or renaming a route
+    cannot silently leave the administrator permission matrix stale.  The
+    optional argument is useful for tests and release tooling that already
+    loaded the source registry; omitting it performs the normal lazy load.
+    """
+    if menu_definitions is None:
+        menu_definitions = _load_runtime_menu_definitions()
+    merged = []
+    by_code = {}
+    for definition in (*BASE_PERMISSION_DEFINITIONS, *tuple(menu_definitions or ())):
+        code = definition.get("code")
+        if not code:
+            continue
+        # A source declaration wins over a legacy row with the same stable
+        # code.  This keeps explicit menu metadata (path/name/status) current
+        # while action/field codes continue to use their Python catalog.
+        if code in by_code:
+            merged[by_code[code]] = definition
+            continue
+        by_code[code] = len(merged)
+        merged.append(definition)
+    return tuple(merged)
 
 
 def permission_defaults(definition):

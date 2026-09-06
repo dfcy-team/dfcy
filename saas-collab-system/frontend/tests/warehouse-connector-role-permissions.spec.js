@@ -17,11 +17,13 @@ const expectedCodes = [
 ];
 
 describe('仓储连接器角色权限登记', () => {
-  it('在角色页面同时展示权限名称、说明和权限码', () => {
+  it('在角色页面默认只展示中文权限名称，保留代码用于提交', () => {
     const source = read('src/views/system/RolePermissionMatrix.vue');
-    expect(source).toContain("permission.description || '暂无权限说明'");
-    expect(source).toContain('class="permission-description"');
-    expect(source).toContain('class="permission-code"');
+    expect(source).toContain('adminPermissionLabel(permission)');
+    expect(source).not.toContain('permission.description ||');
+    expect(source).not.toContain('class="permission-description"');
+    expect(source).not.toContain('class="permission-code"');
+    expect(source).toContain(':value="permission.code"');
   });
 
   it('登记档案识别和实际连接配置的独立权限边界', () => {

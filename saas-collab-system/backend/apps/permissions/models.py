@@ -96,15 +96,32 @@ class UserRole(models.Model):
 
 class DataScope(models.Model):
     class ScopeType(models.TextChoices):
-        ALL = "all", "All"
-        DEPARTMENT = "department", "Department"
-        DEPARTMENT_TREE = "department_tree", "Department and descendants"
-        OWN = "own", "Own"
-        CUSTOM = "custom", "Custom"
+        # ``all`` is always tenant-local.  It never means platform-wide data.
+        ALL = "all", "租户内全部数据"
+        # These values remain readable for historical role records.  New
+        # permission updates must use only ALL or CUSTOM (see the serializer).
+        DEPARTMENT = "department", "历史组织范围（本部门）"
+        DEPARTMENT_TREE = "department_tree", "历史组织范围（部门及下级）"
+        OWN = "own", "历史组织范围（本人）"
+        CUSTOM = "custom", "按业务范围限制"
+
+    NEW_SCOPE_TYPES = frozenset({ScopeType.ALL, ScopeType.CUSTOM})
+    LEGACY_SCOPE_TYPES = frozenset({ScopeType.DEPARTMENT, ScopeType.DEPARTMENT_TREE, ScopeType.OWN})
+    # Business scope is intentionally limited to tenant-owned master-data
+    # dimensions.  Organization/user/role keys are legacy scope metadata and
+    # cannot be submitted by the new role-permission API.
+    BUSINESS_SCOPE_KEYS = frozenset({
+        "platform_ids", "site_ids", "store_ids", "warehouse_ids", "supplier_ids",
+    })
+    LEGACY_ORGANIZATION_SCOPE_KEYS = frozenset({"user_ids", "department_ids", "role_ids"})
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="data_scopes")
     role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="data_scopes")
-    scope_type = models.CharField(max_length=20, choices=ScopeType.choices)
+    scope_type = models.CharField(
+        max_length=20,
+        choices=ScopeType.choices,
+        help_text="新配置只能使用租户内全部数据或按业务范围限制；历史组织范围仅兼容读取。",
+    )
     config = models.JSONField(default=dict, blank=True)
 
     class Meta:

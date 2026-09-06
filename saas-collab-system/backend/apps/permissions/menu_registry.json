@@ -1,0 +1,3417 @@
+{
+  "version": 1,
+  "source": "frontend/src/router/menu.js",
+  "menus": [
+    {
+      "code": "menu.products.products_master.view",
+      "name": "商品主数据",
+      "module": "products",
+      "action": "products_master.view",
+      "description": "显示商品主数据入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/master",
+        "route": "/products/master",
+        "resource": "products_master",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.master.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.products_details.view",
+      "name": "商品明细数据",
+      "module": "products",
+      "action": "products_details.view",
+      "description": "显示商品明细数据入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/details",
+        "route": "/products/details",
+        "resource": "products_details",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.master.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.products_platform_details.view",
+      "name": "平台商品明细数据",
+      "module": "listings",
+      "action": "products_platform_details.view",
+      "description": "显示平台商品明细数据入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/platform-details",
+        "route": "/products/platform-details",
+        "resource": "products_platform_details",
+        "parent": "基础档案",
+        "action_codes": [
+          "listings.product_detail.view",
+          "integrations.product_mapping.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.products_categories.view",
+      "name": "分类设置",
+      "module": "products",
+      "action": "products_categories.view",
+      "description": "显示分类设置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/categories",
+        "route": "/products/categories",
+        "resource": "products_categories",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.category.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.products_attributes.view",
+      "name": "属性设置",
+      "module": "products",
+      "action": "products_attributes.view",
+      "description": "显示属性设置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/attributes",
+        "route": "/products/attributes",
+        "resource": "products_attributes",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.attribute.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.products_colors.view",
+      "name": "颜色设置",
+      "module": "products",
+      "action": "products_colors.view",
+      "description": "显示颜色设置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/colors",
+        "route": "/products/colors",
+        "resource": "products_colors",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.color.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.products_specifications.view",
+      "name": "规格设置",
+      "module": "products",
+      "action": "products_specifications.view",
+      "description": "显示规格设置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/specifications",
+        "route": "/products/specifications",
+        "resource": "products_specifications",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.specification.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.products_bundles.view",
+      "name": "组合商品",
+      "module": "products",
+      "action": "products_bundles.view",
+      "description": "显示组合商品入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/bundles",
+        "route": "/products/bundles",
+        "resource": "products_bundles",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.bundle.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.masterdata.master_data_platforms.view",
+      "name": "平台档案",
+      "module": "masterdata",
+      "action": "master_data_platforms.view",
+      "description": "显示平台档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/platforms",
+        "route": "/master-data/platforms",
+        "resource": "master_data_platforms",
+        "parent": "基础档案",
+        "action_codes": [
+          "masterdata.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.masterdata.master_data_sites.view",
+      "name": "国家信息",
+      "module": "masterdata",
+      "action": "master_data_sites.view",
+      "description": "显示国家信息入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/sites",
+        "route": "/master-data/sites",
+        "resource": "master_data_sites",
+        "parent": "基础档案",
+        "action_codes": [
+          "masterdata.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.masterdata.master_data_stores.view",
+      "name": "店铺档案",
+      "module": "masterdata",
+      "action": "master_data_stores.view",
+      "description": "显示店铺档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/stores",
+        "route": "/master-data/stores",
+        "resource": "master_data_stores",
+        "parent": "基础档案",
+        "action_codes": [
+          "masterdata.view",
+          "integrations.store_mapping.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.masterdata.master_data_warehouses.view",
+      "name": "仓库档案",
+      "module": "masterdata",
+      "action": "master_data_warehouses.view",
+      "description": "显示仓库档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/warehouses",
+        "route": "/master-data/warehouses",
+        "resource": "master_data_warehouses",
+        "parent": "基础档案",
+        "action_codes": [
+          "masterdata.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.masterdata.master_data_suppliers.view",
+      "name": "供应商档案",
+      "module": "masterdata",
+      "action": "master_data_suppliers.view",
+      "description": "显示供应商档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/suppliers",
+        "route": "/master-data/suppliers",
+        "resource": "master_data_suppliers",
+        "parent": "基础档案",
+        "action_codes": [
+          "masterdata.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.masterdata.master_data_settings.view",
+      "name": "基础档案设置",
+      "module": "masterdata",
+      "action": "master_data_settings.view",
+      "description": "显示基础档案设置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/settings",
+        "route": "/master-data/settings",
+        "resource": "master_data_settings",
+        "parent": "基础档案",
+        "action_codes": [
+          "masterdata.settings.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.products_research.view",
+      "name": "新品市调",
+      "module": "products",
+      "action": "products_research.view",
+      "description": "显示新品市调入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/research",
+        "route": "/products/research",
+        "resource": "products_research",
+        "parent": "产品开发",
+        "action_codes": [
+          "products.research.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_requirements.view",
+      "name": "选品提报",
+      "module": "development",
+      "action": "development_requirements.view",
+      "description": "显示选品提报入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/requirements",
+        "route": "/development/requirements",
+        "resource": "development_requirements",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.requirement.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_review.view",
+      "name": "需求审核",
+      "module": "development",
+      "action": "development_review.view",
+      "description": "显示需求审核入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/review",
+        "route": "/development/review",
+        "resource": "development_review",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.requirement.review"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_projects.view",
+      "name": "开发项目",
+      "module": "development",
+      "action": "development_projects.view",
+      "description": "显示开发项目入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/projects",
+        "route": "/development/projects",
+        "resource": "development_projects",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.project.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_projects_archives.view",
+      "name": "开发产品档案",
+      "module": "development",
+      "action": "development_projects_archives.view",
+      "description": "显示开发产品档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/projects/archives",
+        "route": "/development/projects/archives",
+        "resource": "development_projects_archives",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.product_archive.view",
+          "development.project.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_costs.view",
+      "name": "成本核算",
+      "module": "development",
+      "action": "development_costs.view",
+      "description": "显示成本核算入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/costs",
+        "route": "/development/costs",
+        "resource": "development_costs",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.cost.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_sales.view",
+      "name": "销售数据",
+      "module": "development",
+      "action": "development_sales.view",
+      "description": "显示销售数据入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/sales",
+        "route": "/development/sales",
+        "resource": "development_sales",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.sales.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_retrospectives.view",
+      "name": "选品复盘",
+      "module": "development",
+      "action": "development_retrospectives.view",
+      "description": "显示选品复盘入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/retrospectives",
+        "route": "/development/retrospectives",
+        "resource": "development_retrospectives",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.review.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.development.development_dashboard.view",
+      "name": "效能看板",
+      "module": "development",
+      "action": "development_dashboard.view",
+      "description": "显示效能看板入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/development/dashboard",
+        "route": "/development/dashboard",
+        "resource": "development_dashboard",
+        "parent": "产品开发",
+        "action_codes": [
+          "development.dashboard.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.supply.supply_chain_consolidations.view",
+      "name": "集货管理",
+      "module": "supply",
+      "action": "supply_chain_consolidations.view",
+      "description": "显示集货管理入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/supply-chain/consolidations",
+        "route": "/supply-chain/consolidations",
+        "resource": "supply_chain_consolidations",
+        "parent": "供应链协同",
+        "action_codes": [
+          "supply.consolidation.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.supply.supply_chain_shipments.view",
+      "name": "发运管理",
+      "module": "supply",
+      "action": "supply_chain_shipments.view",
+      "description": "显示发运管理入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/supply-chain/shipments",
+        "route": "/supply-chain/shipments",
+        "resource": "supply_chain_shipments",
+        "parent": "供应链协同",
+        "action_codes": [
+          "supply.shipment.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.purchasing.purchasing_orders.view",
+      "name": "采购订单",
+      "module": "purchasing",
+      "action": "purchasing_orders.view",
+      "description": "显示采购订单入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/purchasing/orders",
+        "route": "/purchasing/orders",
+        "resource": "purchasing_orders",
+        "parent": "供应链协同",
+        "action_codes": [
+          "purchasing.orders.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.suppliers.suppliers_performance.view",
+      "name": "供应商绩效",
+      "module": "suppliers",
+      "action": "suppliers_performance.view",
+      "description": "显示供应商绩效入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/suppliers/performance",
+        "route": "/suppliers/performance",
+        "resource": "suppliers_performance",
+        "parent": "供应链协同",
+        "action_codes": [
+          "suppliers.performance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.alerts.decision_inventory_alerts.view",
+      "name": "库存预警",
+      "module": "alerts",
+      "action": "decision_inventory_alerts.view",
+      "description": "显示库存预警入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/decision/inventory/alerts",
+        "route": "/decision/inventory/alerts",
+        "resource": "decision_inventory_alerts",
+        "parent": "库存管理",
+        "action_codes": [
+          "alerts.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.replenishment.decision_inventory_replenishment.view",
+      "name": "补货建议",
+      "module": "replenishment",
+      "action": "decision_inventory_replenishment.view",
+      "description": "显示补货建议入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/decision/inventory/replenishment",
+        "route": "/decision/inventory/replenishment",
+        "resource": "decision_inventory_replenishment",
+        "parent": "库存管理",
+        "action_codes": [
+          "replenishment.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_workbench.view",
+      "name": "全球刊登工作台",
+      "module": "listings",
+      "action": "listings_workbench.view",
+      "description": "显示全球刊登工作台入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/workbench",
+        "route": "/listings/workbench",
+        "resource": "listings_workbench",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.workbench.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_tasks.view",
+      "name": "刊登任务",
+      "module": "listings",
+      "action": "listings_tasks.view",
+      "description": "显示刊登任务入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/tasks",
+        "route": "/listings/tasks",
+        "resource": "listings_tasks",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.task.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_online_products.view",
+      "name": "在线商品",
+      "module": "listings",
+      "action": "listings_online_products.view",
+      "description": "显示在线商品入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/online-products",
+        "route": "/listings/online-products",
+        "resource": "listings_online_products",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.profile.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_category_mappings.view",
+      "name": "平台类目映射",
+      "module": "listings",
+      "action": "listings_category_mappings.view",
+      "description": "显示平台类目映射入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/category-mappings",
+        "route": "/listings/category-mappings",
+        "resource": "listings_category_mappings",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.mapping.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_attribute_mappings.view",
+      "name": "商品属性映射",
+      "module": "listings",
+      "action": "listings_attribute_mappings.view",
+      "description": "显示商品属性映射入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/attribute-mappings",
+        "route": "/listings/attribute-mappings",
+        "resource": "listings_attribute_mappings",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.mapping.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_logs.view",
+      "name": "刊登日志",
+      "module": "listings",
+      "action": "listings_logs.view",
+      "description": "显示刊登日志入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/logs",
+        "route": "/listings/logs",
+        "resource": "listings_logs",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.task.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_exceptions.view",
+      "name": "刊登异常",
+      "module": "listings",
+      "action": "listings_exceptions.view",
+      "description": "显示刊登异常入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/exceptions",
+        "route": "/listings/exceptions",
+        "resource": "listings_exceptions",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.task.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_sites.view",
+      "name": "刊登资料",
+      "module": "listings",
+      "action": "listings_sites.view",
+      "description": "显示刊登资料入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/sites",
+        "route": "/listings/sites",
+        "resource": "listings_sites",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.profile.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.listings.listings_templates.view",
+      "name": "刊登模板",
+      "module": "listings",
+      "action": "listings_templates.view",
+      "description": "显示刊登模板入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/listings/templates",
+        "route": "/listings/templates",
+        "resource": "listings_templates",
+        "parent": "全球刊登",
+        "action_codes": [
+          "listings.template.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_overview.view",
+      "name": "销售总览",
+      "module": "sales_management",
+      "action": "sales_management_overview.view",
+      "description": "显示销售总览入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/overview",
+        "route": "/sales-management/overview",
+        "resource": "sales_management_overview",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_orders.view",
+      "name": "销售订单",
+      "module": "sales_management",
+      "action": "sales_management_orders.view",
+      "description": "显示销售订单入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/orders",
+        "route": "/sales-management/orders",
+        "resource": "sales_management_orders",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.orders.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_returns.view",
+      "name": "退款退货",
+      "module": "sales_management",
+      "action": "sales_management_returns.view",
+      "description": "显示退款退货入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/returns",
+        "route": "/sales-management/returns",
+        "resource": "sales_management_returns",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.returns.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_stores.view",
+      "name": "门店销售",
+      "module": "sales_management",
+      "action": "sales_management_stores.view",
+      "description": "显示门店销售入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/stores",
+        "route": "/sales-management/stores",
+        "resource": "sales_management_stores",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.stores.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_skus.view",
+      "name": "SKU销售",
+      "module": "sales_management",
+      "action": "sales_management_skus.view",
+      "description": "显示SKU销售入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/skus",
+        "route": "/sales-management/skus",
+        "resource": "sales_management_skus",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.skus.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_exports.view",
+      "name": "销售明细导出",
+      "module": "sales_management",
+      "action": "sales_management_exports.view",
+      "description": "显示销售明细导出入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/exports",
+        "route": "/sales-management/exports",
+        "resource": "sales_management_exports",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.export"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_data_quality.view",
+      "name": "数据同步与质量",
+      "module": "sales_management",
+      "action": "sales_management_data_quality.view",
+      "description": "显示数据同步与质量入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/data-quality",
+        "route": "/sales-management/data-quality",
+        "resource": "sales_management_data_quality",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.data_quality.view",
+          "sales_management.sync.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.influencers.influencers.view",
+      "name": "达人档案",
+      "module": "influencers",
+      "action": "influencers.view",
+      "description": "显示达人档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/influencers",
+        "route": "/influencers",
+        "resource": "influencers",
+        "parent": "达人管理",
+        "action_codes": [
+          "influencers.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.influencers.influencers_outreach_tasks.view",
+      "name": "建联任务",
+      "module": "influencers",
+      "action": "influencers_outreach_tasks.view",
+      "description": "显示建联任务入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/influencers/outreach-tasks",
+        "route": "/influencers/outreach-tasks",
+        "resource": "influencers_outreach_tasks",
+        "parent": "达人管理",
+        "action_codes": [
+          "influencers.outreach.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.influencers.influencers_sample_fulfillments.view",
+      "name": "送样履约",
+      "module": "influencers",
+      "action": "influencers_sample_fulfillments.view",
+      "description": "显示送样履约入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/influencers/sample-fulfillments",
+        "route": "/influencers/sample-fulfillments",
+        "resource": "influencers_sample_fulfillments",
+        "parent": "达人管理",
+        "action_codes": [
+          "influencers.fulfillment.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.influencers.influencers_bd_performance.view",
+      "name": "BD绩效",
+      "module": "influencers",
+      "action": "influencers_bd_performance.view",
+      "description": "显示BD绩效入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/influencers/bd-performance",
+        "route": "/influencers/bd-performance",
+        "resource": "influencers_bd_performance",
+        "parent": "达人管理",
+        "action_codes": [
+          "influencers.outreach.view",
+          "influencers.fulfillment.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_imports.view",
+      "name": "财务导入",
+      "module": "finance",
+      "action": "finance_imports.view",
+      "description": "显示财务导入入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/imports",
+        "route": "/finance/imports",
+        "resource": "finance_imports",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.import"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_analytics.view",
+      "name": "财务分析",
+      "module": "finance",
+      "action": "finance_analytics.view",
+      "description": "显示财务分析入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/analytics",
+        "route": "/finance/analytics",
+        "resource": "finance_analytics",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_statements.view",
+      "name": "平台账单",
+      "module": "finance",
+      "action": "finance_statements.view",
+      "description": "显示平台账单入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/statements",
+        "route": "/finance/statements",
+        "resource": "finance_statements",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_withdrawals.view",
+      "name": "提现记录",
+      "module": "finance",
+      "action": "finance_withdrawals.view",
+      "description": "显示提现记录入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/withdrawals",
+        "route": "/finance/withdrawals",
+        "resource": "finance_withdrawals",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_bank_receipts.view",
+      "name": "银行到账",
+      "module": "finance",
+      "action": "finance_bank_receipts.view",
+      "description": "显示银行到账入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/bank-receipts",
+        "route": "/finance/bank-receipts",
+        "resource": "finance_bank_receipts",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_reconciliation_exceptions.view",
+      "name": "对账异常",
+      "module": "finance",
+      "action": "finance_reconciliation_exceptions.view",
+      "description": "显示对账异常入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/reconciliation/exceptions",
+        "route": "/finance/reconciliation/exceptions",
+        "resource": "finance_reconciliation_exceptions",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_reconciliation_matches.view",
+      "name": "对账差异",
+      "module": "finance",
+      "action": "finance_reconciliation_matches.view",
+      "description": "显示对账差异入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/reconciliation/matches",
+        "route": "/finance/reconciliation/matches",
+        "resource": "finance_reconciliation_matches",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.analytics.analytics_overview.view",
+      "name": "经营总览",
+      "module": "analytics",
+      "action": "analytics_overview.view",
+      "description": "显示经营总览入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/analytics/overview",
+        "route": "/analytics/overview",
+        "resource": "analytics_overview",
+        "parent": "经营分析",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.analytics.analytics_sales.view",
+      "name": "销售分析",
+      "module": "analytics",
+      "action": "analytics_sales.view",
+      "description": "显示销售分析入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/analytics/sales",
+        "route": "/analytics/sales",
+        "resource": "analytics_sales",
+        "parent": "经营分析",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.analytics.analytics_inventory.view",
+      "name": "库存分析",
+      "module": "analytics",
+      "action": "analytics_inventory.view",
+      "description": "显示库存分析入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/analytics/inventory",
+        "route": "/analytics/inventory",
+        "resource": "analytics_inventory",
+        "parent": "经营分析",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.decision_lifecycle_reviews.view",
+      "name": "生命周期复盘",
+      "module": "products",
+      "action": "decision_lifecycle_reviews.view",
+      "description": "显示生命周期复盘入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/decision/lifecycle/reviews",
+        "route": "/decision/lifecycle/reviews",
+        "resource": "decision_lifecycle_reviews",
+        "parent": "经营决策",
+        "action_codes": [
+          "products.lifecycle.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.products.decision_lifecycle_history.view",
+      "name": "复盘历史",
+      "module": "products",
+      "action": "decision_lifecycle_history.view",
+      "description": "显示复盘历史入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/decision/lifecycle/history",
+        "route": "/decision/lifecycle/history",
+        "resource": "decision_lifecycle_history",
+        "parent": "经营决策",
+        "action_codes": [
+          "products.lifecycle.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.workflow.decision_lifecycle_clearance_requests.view",
+      "name": "清仓申请",
+      "module": "workflow",
+      "action": "decision_lifecycle_clearance_requests.view",
+      "description": "显示清仓申请入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/decision/lifecycle/clearance-requests",
+        "route": "/decision/lifecycle/clearance-requests",
+        "resource": "decision_lifecycle_clearance_requests",
+        "parent": "经营决策",
+        "action_codes": [
+          "workflow.approvals.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.alerts.decision_alerts_business.view",
+      "name": "经营预警",
+      "module": "alerts",
+      "action": "decision_alerts_business.view",
+      "description": "显示经营预警入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/decision/alerts/business",
+        "route": "/decision/alerts/business",
+        "resource": "decision_alerts_business",
+        "parent": "经营决策",
+        "action_codes": [
+          "alerts.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.reports.reports_basic.view",
+      "name": "基础报表",
+      "module": "reports",
+      "action": "reports_basic.view",
+      "description": "显示基础报表入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/reports/basic",
+        "route": "/reports/basic",
+        "resource": "reports_basic",
+        "parent": "报表中心",
+        "action_codes": [
+          "reports.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.reports.reports_exports.view",
+      "name": "报表导出",
+      "module": "reports",
+      "action": "reports_exports.view",
+      "description": "显示报表导出入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/reports/exports",
+        "route": "/reports/exports",
+        "resource": "reports_exports",
+        "parent": "报表中心",
+        "action_codes": [
+          "reports.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.workflow.workflow_approvals.view",
+      "name": "审批中心",
+      "module": "workflow",
+      "action": "workflow_approvals.view",
+      "description": "显示审批中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/workflow/approvals",
+        "route": "/workflow/approvals",
+        "resource": "workflow_approvals",
+        "parent": "流程协同",
+        "action_codes": [
+          "workflow.approvals.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.workflow.workflow_exceptions.view",
+      "name": "异常中心",
+      "module": "workflow",
+      "action": "workflow_exceptions.view",
+      "description": "显示异常中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/workflow/exceptions",
+        "route": "/workflow/exceptions",
+        "resource": "workflow_exceptions",
+        "parent": "流程协同",
+        "action_codes": [
+          "workflow.exceptions.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.workflow.workflow_collaboration_events.view",
+      "name": "协同回填",
+      "module": "workflow",
+      "action": "workflow_collaboration_events.view",
+      "description": "显示协同回填入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/workflow/collaboration-events",
+        "route": "/workflow/collaboration-events",
+        "resource": "workflow_collaboration_events",
+        "parent": "流程协同",
+        "action_codes": [
+          "workflow.collaboration.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.rpa.rpa_tasks.view",
+      "name": "任务中心",
+      "module": "rpa",
+      "action": "rpa_tasks.view",
+      "description": "显示任务中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/rpa/tasks",
+        "route": "/rpa/tasks",
+        "resource": "rpa_tasks",
+        "parent": "RPA协同",
+        "action_codes": [
+          "rpa.tasks.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.rpa.rpa_runs.view",
+      "name": "运行记录",
+      "module": "rpa",
+      "action": "rpa_runs.view",
+      "description": "显示运行记录入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/rpa/runs",
+        "route": "/rpa/runs",
+        "resource": "rpa_runs",
+        "parent": "RPA协同",
+        "action_codes": [
+          "rpa.tasks.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.rpa.rpa_devices.view",
+      "name": "设备管理",
+      "module": "rpa",
+      "action": "rpa_devices.view",
+      "description": "显示设备管理入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/rpa/devices",
+        "route": "/rpa/devices",
+        "resource": "rpa_devices",
+        "parent": "RPA协同",
+        "action_codes": [
+          "rpa.devices.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.rpa.rpa_manual_queue.view",
+      "name": "人工队列",
+      "module": "rpa",
+      "action": "rpa_manual_queue.view",
+      "description": "显示人工队列入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/rpa/manual-queue",
+        "route": "/rpa/manual-queue",
+        "resource": "rpa_manual_queue",
+        "parent": "RPA协同",
+        "action_codes": [
+          "rpa.tasks.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.rpa.rpa_stability.view",
+      "name": "稳定性",
+      "module": "rpa",
+      "action": "rpa_stability.view",
+      "description": "显示稳定性入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/rpa/stability",
+        "route": "/rpa/stability",
+        "resource": "rpa_stability",
+        "parent": "RPA协同",
+        "action_codes": [
+          "rpa.stability.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.rpa.rpa_account_locks.view",
+      "name": "账号串行锁",
+      "module": "rpa",
+      "action": "rpa_account_locks.view",
+      "description": "显示账号串行锁入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/rpa/account-locks",
+        "route": "/rpa/account-locks",
+        "resource": "rpa_account_locks",
+        "parent": "RPA协同",
+        "action_codes": [
+          "rpa.stability.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.rpa.rpa_page_signatures.view",
+      "name": "页面签名",
+      "module": "rpa",
+      "action": "rpa_page_signatures.view",
+      "description": "显示页面签名入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/rpa/page-signatures",
+        "route": "/rpa/page-signatures",
+        "resource": "rpa_page_signatures",
+        "parent": "RPA协同",
+        "action_codes": [
+          "rpa.stability.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.masterdata.integrations_platform_sites.view",
+      "name": "平台站点",
+      "module": "masterdata",
+      "action": "integrations_platform_sites.view",
+      "description": "显示平台站点入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/platform-sites",
+        "route": "/integrations/platform-sites",
+        "resource": "integrations_platform_sites",
+        "parent": "API数据接入",
+        "action_codes": [
+          "masterdata.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_readiness.view",
+      "name": "生产准入",
+      "module": "integrations",
+      "action": "integrations_readiness.view",
+      "description": "显示生产准入入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/readiness",
+        "route": "/integrations/readiness",
+        "resource": "integrations_readiness",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.config.integrations_production_settings.view",
+      "name": "生产环境配置",
+      "module": "config",
+      "action": "integrations_production_settings.view",
+      "description": "显示生产环境配置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/production-settings",
+        "route": "/integrations/production-settings",
+        "resource": "integrations_production_settings",
+        "parent": "API数据接入",
+        "action_codes": [
+          "config.system.manage",
+          "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_capabilities.view",
+      "name": "能力矩阵",
+      "module": "integrations",
+      "action": "integrations_capabilities.view",
+      "description": "显示能力矩阵入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/capabilities",
+        "route": "/integrations/capabilities",
+        "resource": "integrations_capabilities",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.store.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_incidents.view",
+      "name": "同步异常",
+      "module": "integrations",
+      "action": "integrations_incidents.view",
+      "description": "显示同步异常入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/incidents",
+        "route": "/integrations/incidents",
+        "resource": "integrations_incidents",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_audit.view",
+      "name": "集成审计",
+      "module": "integrations",
+      "action": "integrations_audit.view",
+      "description": "显示集成审计入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/audit",
+        "route": "/integrations/audit",
+        "resource": "integrations_audit",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.audit.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_platform_drill.view",
+      "name": "平台操作演练",
+      "module": "integrations",
+      "action": "integrations_platform_drill.view",
+      "description": "显示平台操作演练入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/platform-drill",
+        "route": "/integrations/platform-drill",
+        "resource": "integrations_platform_drill",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_configs.view",
+      "name": "连接配置",
+      "module": "integrations",
+      "action": "integrations_configs.view",
+      "description": "显示连接配置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/configs",
+        "route": "/integrations/configs",
+        "resource": "integrations_configs",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_sync_jobs.view",
+      "name": "同步任务",
+      "module": "integrations",
+      "action": "integrations_sync_jobs.view",
+      "description": "显示同步任务入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/sync-jobs",
+        "route": "/integrations/sync-jobs",
+        "resource": "integrations_sync_jobs",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.integrations_sync_runs.view",
+      "name": "同步运行记录",
+      "module": "integrations",
+      "action": "integrations_sync_runs.view",
+      "description": "显示同步运行记录入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/sync-runs",
+        "route": "/integrations/sync-runs",
+        "resource": "integrations_sync_runs",
+        "parent": "API数据接入",
+        "action_codes": [
+          "integrations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.system.tenants.view",
+      "name": "租户管理",
+      "module": "system",
+      "action": "tenants.view",
+      "description": "显示租户管理入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/system/tenants",
+        "route": "/system/tenants",
+        "resource": "system_tenants",
+        "parent": "系统管理",
+        "action_codes": [],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.system.organization.view",
+      "name": "组织架构",
+      "module": "system",
+      "action": "organization.view",
+      "description": "显示组织架构入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/system/departments",
+        "route": "/system/departments",
+        "resource": "system_departments",
+        "parent": "系统管理",
+        "action_codes": [
+          "system.organization.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.system.users.view",
+      "name": "用户目录",
+      "module": "system",
+      "action": "users.view",
+      "description": "显示用户目录入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/system/users",
+        "route": "/system/users",
+        "resource": "system_users",
+        "parent": "系统管理",
+        "action_codes": [
+          "system.users.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.system.roles.view",
+      "name": "角色权限",
+      "module": "system",
+      "action": "roles.view",
+      "description": "显示角色权限入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/system/roles",
+        "route": "/system/roles",
+        "resource": "system_roles",
+        "parent": "系统管理",
+        "action_codes": [
+          "system.roles.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.system.security_operations.view",
+      "name": "安全运维",
+      "module": "system",
+      "action": "security_operations.view",
+      "description": "显示安全运维入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/system/security-operations",
+        "route": "/system/security-operations",
+        "resource": "system_security_operations",
+        "parent": "系统管理",
+        "action_codes": [
+          "security.operations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.config.settings_config_center.view",
+      "name": "配置中心",
+      "module": "config",
+      "action": "settings_config_center.view",
+      "description": "显示配置中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/settings/config-center",
+        "route": "/settings/config-center",
+        "resource": "settings_config_center",
+        "parent": "系统管理",
+        "action_codes": [
+          "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.config.settings_config_versions.view",
+      "name": "配置版本",
+      "module": "config",
+      "action": "settings_config_versions.view",
+      "description": "显示配置版本入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/settings/config-versions",
+        "route": "/settings/config-versions",
+        "resource": "settings_config_versions",
+        "parent": "系统管理",
+        "action_codes": [
+          "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.config.settings_module_controls.view",
+      "name": "模块发布控制",
+      "module": "config",
+      "action": "settings_module_controls.view",
+      "description": "显示模块发布控制入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/settings/module-controls",
+        "route": "/settings/module-controls",
+        "resource": "settings_module_controls",
+        "parent": "系统管理",
+        "action_codes": [
+          "config.system.manage",
+          "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.settings_platform_readiness.view",
+      "name": "平台准入",
+      "module": "integrations",
+      "action": "settings_platform_readiness.view",
+      "description": "显示平台准入入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/settings/platform-readiness",
+        "route": "/settings/platform-readiness",
+        "resource": "settings_platform_readiness",
+        "parent": "系统管理",
+        "action_codes": [
+          "integrations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.release.releases_contracts.view",
+      "name": "发布合同",
+      "module": "release",
+      "action": "releases_contracts.view",
+      "description": "显示发布合同入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/releases/contracts",
+        "route": "/releases/contracts",
+        "resource": "releases_contracts",
+        "parent": "系统管理",
+        "action_codes": [
+          "release.contract.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.audit.audit_operations.view",
+      "name": "日志审计",
+      "module": "audit",
+      "action": "audit_operations.view",
+      "description": "显示日志审计入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/audit/operations",
+        "route": "/audit/operations",
+        "resource": "audit_operations",
+        "parent": "系统管理",
+        "action_codes": [
+          "audit.operation_logs.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.governance.governance.view",
+      "name": "治理中心",
+      "module": "governance",
+      "action": "governance.view",
+      "description": "显示治理中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/governance",
+        "route": "/governance",
+        "resource": "governance",
+        "parent": "治理与试点",
+        "action_codes": [
+          "governance.api.view",
+          "governance.assistants.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.pilot.pilot_validation.view",
+      "name": "验证中心",
+      "module": "pilot",
+      "action": "pilot_validation.view",
+      "description": "显示验证中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/pilot/validation",
+        "route": "/pilot/validation",
+        "resource": "pilot_validation",
+        "parent": "治理与试点",
+        "action_codes": [
+          "pilot.security_review.view",
+          "pilot.verification.view",
+          "pilot.performance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.pilot.pilot_releases.view",
+      "name": "发布中心",
+      "module": "pilot",
+      "action": "pilot_releases.view",
+      "description": "显示发布中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/pilot/releases",
+        "route": "/pilot/releases",
+        "resource": "pilot_releases",
+        "parent": "治理与试点",
+        "action_codes": [
+          "pilot.release.view",
+          "pilot.recovery.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.pilot.pilot_control_room.view",
+      "name": "运维控制台",
+      "module": "pilot",
+      "action": "pilot_control_room.view",
+      "description": "显示运维控制台入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/pilot/control-room",
+        "route": "/pilot/control-room",
+        "resource": "pilot_control_room",
+        "parent": "治理与试点",
+        "action_codes": [
+          "pilot.control.view",
+          "pilot.topology.view",
+          "pilot.capacity.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "path": "/",
+      "exact": true,
+      "userTypes": [
+        "internal",
+        "external"
+      ]
+    },
+    {
+      "path": "/forbidden",
+      "exact": true
+    },
+    {
+      "path": "/development/requirements",
+      "permissions": [
+        "development.requirement.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_requirements.view"
+      ]
+    },
+    {
+      "path": "/development/review",
+      "permissions": [
+        "development.requirement.review"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_review.view"
+      ]
+    },
+    {
+      "path": "/development/projects",
+      "permissions": [
+        "development.project.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_projects.view"
+      ]
+    },
+    {
+      "path": "/development/projects/archives",
+      "permissions": [
+        "development.product_archive.view",
+        "development.project.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_projects_archives.view"
+      ]
+    },
+    {
+      "path": "/development/costs",
+      "permissions": [
+        "development.cost.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_costs.view"
+      ]
+    },
+    {
+      "path": "/development/sales",
+      "permissions": [
+        "development.sales.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_sales.view"
+      ]
+    },
+    {
+      "path": "/development/retrospectives",
+      "permissions": [
+        "development.review.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_retrospectives.view"
+      ]
+    },
+    {
+      "path": "/development/dashboard",
+      "permissions": [
+        "development.dashboard.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.development.development_dashboard.view"
+      ]
+    },
+    {
+      "path": "/analytics/overview",
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.analytics.analytics_overview.view"
+      ]
+    },
+    {
+      "path": "/analytics/sales",
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.analytics.analytics_sales.view"
+      ]
+    },
+    {
+      "path": "/analytics/inventory",
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.analytics.analytics_inventory.view"
+      ]
+    },
+    {
+      "path": "/decision/inventory/alerts",
+      "permissions": [
+        "alerts.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.alerts.decision_inventory_alerts.view"
+      ]
+    },
+    {
+      "path": "/decision/inventory/replenishment",
+      "permissions": [
+        "replenishment.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.replenishment.decision_inventory_replenishment.view"
+      ]
+    },
+    {
+      "path": "/decision/lifecycle/reviews",
+      "permissions": [
+        "products.lifecycle.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.decision_lifecycle_reviews.view"
+      ]
+    },
+    {
+      "path": "/decision/lifecycle/history",
+      "permissions": [
+        "products.lifecycle.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.decision_lifecycle_history.view"
+      ]
+    },
+    {
+      "path": "/decision/lifecycle/clearance-requests",
+      "permissions": [
+        "workflow.approvals.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.workflow.decision_lifecycle_clearance_requests.view"
+      ]
+    },
+    {
+      "path": "/decision/alerts/business",
+      "permissions": [
+        "alerts.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.alerts.decision_alerts_business.view"
+      ]
+    },
+    {
+      "path": "/inventory/alerts",
+      "permissions": [
+        "alerts.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/inventory/replenishment",
+      "permissions": [
+        "replenishment.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/lifecycle/reviews",
+      "permissions": [
+        "products.lifecycle.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/lifecycle/history",
+      "permissions": [
+        "products.lifecycle.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/lifecycle/clearance-requests",
+      "permissions": [
+        "workflow.approvals.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/alerts/business",
+      "permissions": [
+        "alerts.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/sales-management/overview",
+      "permissions": [
+        "sales_management.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_overview.view"
+      ]
+    },
+    {
+      "path": "/sales-management/orders",
+      "permissions": [
+        "sales_management.orders.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_orders.view"
+      ]
+    },
+    {
+      "path": "/sales-management/returns",
+      "permissions": [
+        "sales_management.returns.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_returns.view"
+      ]
+    },
+    {
+      "path": "/sales-management/stores",
+      "permissions": [
+        "sales_management.stores.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_stores.view"
+      ]
+    },
+    {
+      "path": "/sales-management/skus",
+      "permissions": [
+        "sales_management.skus.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_skus.view"
+      ]
+    },
+    {
+      "path": "/sales-management/exports",
+      "permissions": [
+        "sales_management.export"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_exports.view"
+      ]
+    },
+    {
+      "path": "/sales-management/data-quality",
+      "permissions": [
+        "sales_management.data_quality.view",
+        "sales_management.sync.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_data_quality.view"
+      ]
+    },
+    {
+      "path": "/workflow/approvals",
+      "permissions": [
+        "workflow.approvals.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.workflow.workflow_approvals.view"
+      ]
+    },
+    {
+      "path": "/workflow/exceptions",
+      "permissions": [
+        "workflow.exceptions.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.workflow.workflow_exceptions.view"
+      ]
+    },
+    {
+      "path": "/workflow/collaboration-events",
+      "permissions": [
+        "workflow.collaboration.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.workflow.workflow_collaboration_events.view"
+      ]
+    },
+    {
+      "path": "/products/research",
+      "permissions": [
+        "products.research.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_research.view"
+      ]
+    },
+    {
+      "path": "/products/master",
+      "permissions": [
+        "products.master.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_master.view"
+      ]
+    },
+    {
+      "path": "/products/details",
+      "permissions": [
+        "products.master.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_details.view"
+      ]
+    },
+    {
+      "path": "/products/platform-details",
+      "permissions": [
+        "listings.product_detail.view",
+        "integrations.product_mapping.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.products_platform_details.view"
+      ]
+    },
+    {
+      "path": "/products/categories",
+      "permissions": [
+        "products.category.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_categories.view"
+      ]
+    },
+    {
+      "path": "/master-data/settings",
+      "permissions": [
+        "masterdata.settings.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.masterdata.master_data_settings.view"
+      ]
+    },
+    {
+      "path": "/products/colors",
+      "permissions": [
+        "products.color.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_colors.view"
+      ]
+    },
+    {
+      "path": "/products/attributes",
+      "permissions": [
+        "products.attribute.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_attributes.view"
+      ]
+    },
+    {
+      "path": "/products/specifications",
+      "permissions": [
+        "products.specification.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_specifications.view"
+      ]
+    },
+    {
+      "path": "/products/bundles",
+      "permissions": [
+        "products.bundle.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_bundles.view"
+      ]
+    },
+    {
+      "path": "/products/status-dashboard",
+      "permissions": [
+        "products.status.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/products/status-recommendations",
+      "permissions": [
+        "products.status.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/products/status-transitions",
+      "permissions": [
+        "products.status.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/products/status",
+      "permissions": [
+        "products.master.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/purchasing/orders",
+      "permissions": [
+        "purchasing.orders.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.purchasing.purchasing_orders.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/consolidations",
+      "permissions": [
+        "supply.consolidation.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_consolidations.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/shipments",
+      "permissions": [
+        "supply.shipment.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_shipments.view"
+      ]
+    },
+    {
+      "path": "/suppliers/my-performance",
+      "userTypes": [
+        "external"
+      ]
+    },
+    {
+      "path": "/suppliers/performance",
+      "permissions": [
+        "suppliers.performance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.suppliers.suppliers_performance.view"
+      ]
+    },
+    {
+      "path": "/suppliers/tasks",
+      "userTypes": [
+        "external"
+      ]
+    },
+    {
+      "path": "/suppliers/shipments",
+      "userTypes": [
+        "external"
+      ]
+    },
+    {
+      "path": "/listings/sites",
+      "permissions": [
+        "listings.profile.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_sites.view"
+      ]
+    },
+    {
+      "path": "/listings/templates",
+      "permissions": [
+        "listings.template.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_templates.view"
+      ]
+    },
+    {
+      "path": "/listings/workbench",
+      "permissions": [
+        "listings.workbench.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_workbench.view"
+      ]
+    },
+    {
+      "path": "/listings/tasks",
+      "permissions": [
+        "listings.task.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_tasks.view"
+      ]
+    },
+    {
+      "path": "/listings/online-products",
+      "permissions": [
+        "listings.profile.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_online_products.view"
+      ]
+    },
+    {
+      "path": "/listings/category-mappings",
+      "permissions": [
+        "listings.mapping.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_category_mappings.view"
+      ]
+    },
+    {
+      "path": "/listings/attribute-mappings",
+      "permissions": [
+        "listings.mapping.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_attribute_mappings.view"
+      ]
+    },
+    {
+      "path": "/listings/logs",
+      "permissions": [
+        "listings.task.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_logs.view"
+      ]
+    },
+    {
+      "path": "/listings/exceptions",
+      "permissions": [
+        "listings.task.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.listings.listings_exceptions.view"
+      ]
+    },
+    {
+      "path": "/pricing/prices",
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/rpa/tasks",
+      "permissions": [
+        "rpa.tasks.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.rpa.rpa_tasks.view"
+      ]
+    },
+    {
+      "path": "/rpa/runs",
+      "permissions": [
+        "rpa.tasks.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.rpa.rpa_runs.view"
+      ]
+    },
+    {
+      "path": "/rpa/attempts",
+      "permissions": [
+        "rpa.tasks.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/rpa/devices",
+      "permissions": [
+        "rpa.devices.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.rpa.rpa_devices.view"
+      ]
+    },
+    {
+      "path": "/rpa/manual-queue",
+      "permissions": [
+        "rpa.tasks.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.rpa.rpa_manual_queue.view"
+      ]
+    },
+    {
+      "path": "/rpa/stability",
+      "permissions": [
+        "rpa.stability.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.rpa.rpa_stability.view"
+      ]
+    },
+    {
+      "path": "/rpa/account-locks",
+      "permissions": [
+        "rpa.stability.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.rpa.rpa_account_locks.view"
+      ]
+    },
+    {
+      "path": "/rpa/page-signatures",
+      "permissions": [
+        "rpa.stability.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.rpa.rpa_page_signatures.view"
+      ]
+    },
+    {
+      "path": "/integrations/configs",
+      "permissions": [
+        "integrations.config.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_configs.view"
+      ]
+    },
+    {
+      "path": "/integrations/readiness",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_readiness.view"
+      ]
+    },
+    {
+      "path": "/integrations/production-settings",
+      "permissions": [
+        "config.system.manage"
+      ],
+      "allPermissions": [
+        "config.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.config.integrations_production_settings.view"
+      ]
+    },
+    {
+      "path": "/integrations/capabilities",
+      "permissions": [
+        "integrations.store.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_capabilities.view"
+      ]
+    },
+    {
+      "path": "/integrations/store-mappings",
+      "permissions": [
+        "integrations.store_mapping.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/integrations/product-mappings",
+      "permissions": [
+        "integrations.product_mapping.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/integrations/incidents",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_incidents.view"
+      ]
+    },
+    {
+      "path": "/integrations/audit",
+      "permissions": [
+        "integrations.audit.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_audit.view"
+      ]
+    },
+    {
+      "path": "/integrations/platform-sites",
+      "permissions": [
+        "masterdata.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.masterdata.integrations_platform_sites.view"
+      ]
+    },
+    {
+      "path": "/integrations/platform-drill",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_platform_drill.view"
+      ]
+    },
+    {
+      "path": "/integrations/sync-jobs",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_sync_jobs.view"
+      ]
+    },
+    {
+      "path": "/integrations/sync-runs",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.integrations_sync_runs.view"
+      ]
+    },
+    {
+      "path": "/integrations/api-sync",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/finance/imports",
+      "permissions": [
+        "finance.import"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_imports.view"
+      ]
+    },
+    {
+      "path": "/finance/statements",
+      "permissions": [
+        "finance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_statements.view"
+      ]
+    },
+    {
+      "path": "/finance/withdrawals",
+      "permissions": [
+        "finance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_withdrawals.view"
+      ]
+    },
+    {
+      "path": "/finance/bank-receipts",
+      "permissions": [
+        "finance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_bank_receipts.view"
+      ]
+    },
+    {
+      "path": "/finance/reconciliation/matches",
+      "permissions": [
+        "finance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_reconciliation_matches.view"
+      ]
+    },
+    {
+      "path": "/finance/reconciliation/exceptions",
+      "permissions": [
+        "finance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_reconciliation_exceptions.view"
+      ]
+    },
+    {
+      "path": "/finance/analytics",
+      "permissions": [
+        "finance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_analytics.view"
+      ]
+    },
+    {
+      "path": "/reports/basic",
+      "permissions": [
+        "reports.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.reports.reports_basic.view"
+      ]
+    },
+    {
+      "path": "/reports/exports",
+      "permissions": [
+        "reports.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.reports.reports_exports.view"
+      ]
+    },
+    {
+      "path": "/settings/platform-risk",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/settings/platform-readiness",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.settings_platform_readiness.view"
+      ]
+    },
+    {
+      "path": "/settings/security-review",
+      "permissions": [
+        "integrations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/settings/config-center",
+      "permissions": [
+        "config.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.config.settings_config_center.view"
+      ]
+    },
+    {
+      "path": "/settings/config-versions",
+      "permissions": [
+        "config.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.config.settings_config_versions.view"
+      ]
+    },
+    {
+      "path": "/settings/module-controls",
+      "permissions": [
+        "config.system.manage"
+      ],
+      "allPermissions": [
+        "config.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.config.settings_module_controls.view"
+      ]
+    },
+    {
+      "path": "/system/tenants",
+      "superuserOnly": true,
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.system.tenants.view"
+      ]
+    },
+    {
+      "path": "/system/departments",
+      "permissions": [
+        "system.organization.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.system.organization.view"
+      ]
+    },
+    {
+      "path": "/system/users",
+      "permissions": [
+        "system.users.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.system.users.view"
+      ]
+    },
+    {
+      "path": "/system/roles",
+      "permissions": [
+        "system.roles.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.system.roles.view"
+      ]
+    },
+    {
+      "path": "/system/security-operations",
+      "permissions": [
+        "security.operations.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.system.security_operations.view"
+      ]
+    },
+    {
+      "path": "/master-data/platforms",
+      "permissions": [
+        "masterdata.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.masterdata.master_data_platforms.view"
+      ]
+    },
+    {
+      "path": "/master-data/stores",
+      "permissions": [
+        "masterdata.view",
+        "integrations.store_mapping.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.masterdata.master_data_stores.view"
+      ]
+    },
+    {
+      "path": "/master-data/warehouses",
+      "permissions": [
+        "masterdata.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.masterdata.master_data_warehouses.view"
+      ]
+    },
+    {
+      "path": "/master-data/suppliers",
+      "permissions": [
+        "masterdata.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.masterdata.master_data_suppliers.view"
+      ]
+    },
+    {
+      "path": "/master-data/sites",
+      "permissions": [
+        "masterdata.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.masterdata.master_data_sites.view"
+      ]
+    },
+    {
+      "path": "/influencers",
+      "permissions": [
+        "influencers.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.influencers.influencers.view"
+      ]
+    },
+    {
+      "path": "/influencers/outreach-tasks",
+      "permissions": [
+        "influencers.outreach.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.influencers.influencers_outreach_tasks.view"
+      ]
+    },
+    {
+      "path": "/influencers/sample-fulfillments",
+      "permissions": [
+        "influencers.fulfillment.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.influencers.influencers_sample_fulfillments.view"
+      ]
+    },
+    {
+      "path": "/influencers/bd-performance",
+      "permissions": [
+        "influencers.outreach.view",
+        "influencers.fulfillment.view"
+      ],
+      "allPermissions": [
+        "influencers.outreach.view",
+        "influencers.fulfillment.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.influencers.influencers_bd_performance.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/purchase-orders",
+      "permissions": [
+        "supply.purchase_order.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/audit/operations",
+      "permissions": [
+        "audit.operation_logs.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.audit.audit_operations.view"
+      ]
+    },
+    {
+      "path": "/releases/contracts",
+      "permissions": [
+        "release.contract.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.release.releases_contracts.view"
+      ]
+    },
+    {
+      "path": "/governance",
+      "permissions": [
+        "governance.api.view",
+        "governance.assistants.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.governance.governance.view"
+      ]
+    },
+    {
+      "path": "/governance/api-contracts",
+      "permissions": [
+        "governance.api.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/governance/assistants",
+      "permissions": [
+        "governance.assistants.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/validation",
+      "permissions": [
+        "pilot.security_review.view",
+        "pilot.verification.view",
+        "pilot.performance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.pilot.pilot_validation.view"
+      ]
+    },
+    {
+      "path": "/pilot/readiness",
+      "permissions": [
+        "pilot.readiness.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/topology",
+      "permissions": [
+        "pilot.topology.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/recovery",
+      "permissions": [
+        "pilot.recovery.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/releases",
+      "permissions": [
+        "pilot.release.view",
+        "pilot.recovery.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.pilot.pilot_releases.view"
+      ]
+    },
+    {
+      "path": "/pilot/capacity",
+      "permissions": [
+        "pilot.capacity.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/control-room",
+      "permissions": [
+        "pilot.control.view",
+        "pilot.topology.view",
+        "pilot.capacity.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.pilot.pilot_control_room.view"
+      ]
+    },
+    {
+      "path": "/pilot/security-reviews",
+      "permissions": [
+        "pilot.security_review.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/verification-runs",
+      "permissions": [
+        "pilot.verification.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/performance-runs",
+      "permissions": [
+        "pilot.performance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/pilot/entry-decisions",
+      "permissions": [
+        "pilot.entry.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    }
+  ]
+}

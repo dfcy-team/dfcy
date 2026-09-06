@@ -28,6 +28,9 @@ def test_permission_catalog_is_seeded_with_current_metadata():
         for field, expected in permission_defaults(definition).items():
             assert getattr(permission, field) == expected
 
+    # Menu permissions are source-registered by the release sync command;
+    # migrations intentionally do not execute mutable frontend JavaScript.
+    call_command("sync_permissions")
     call_command("sync_permissions", "--check")
 
 

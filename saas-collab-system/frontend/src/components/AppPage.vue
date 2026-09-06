@@ -39,7 +39,7 @@ const props = defineProps({
 });
 
 const capabilityLabels = {
-  mock: 'Mock', pending: '待接入', sandbox: '沙箱', connected: '已连接', degraded: '降级', disabled: '已禁用'
+  mock: '模拟数据', pending: '待接入', sandbox: '沙箱', connected: '已连接', degraded: '降级', disabled: '已禁用'
 };
 const capabilityTypes = {
   mock: 'warning', pending: 'info', sandbox: 'warning', connected: 'success', degraded: 'danger', disabled: 'info'

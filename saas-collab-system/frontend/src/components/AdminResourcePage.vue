@@ -40,7 +40,7 @@
       </div>
       <div class="summary-item summary-item--scope">
         <span>数据边界</span>
-        <strong>当前 tenant</strong>
+        <strong>当前租户</strong>
       </div>
     </section>
 
@@ -158,12 +158,12 @@
           <span v-else>{{ columnValue(column, selectedRow[column.prop], selectedRow) }}</span>
         </el-descriptions-item>
       </el-descriptions>
-      <p class="drawer-note">字段可见性与数据范围由后端 tenant、permission 和 data_scope 最终校验。</p>
+      <p class="drawer-note">字段可见性和数据范围最终由服务端校验。</p>
     </el-drawer>
 
     <el-dialog v-model="formOpen" :title="editingRow ? `编辑${entityLabel}` : `新建${entityLabel}`" width="min(760px, 94vw)" destroy-on-close>
       <el-alert
-        title="仅保存当前租户的档案信息；凭据、Token、Cookie 和 Session 不在此表单采集。"
+        title="仅保存当前租户的档案信息；密钥、令牌、浏览器标识和会话内容不在此表单采集。"
         type="info"
         :closable="false"
         show-icon
@@ -229,7 +229,7 @@ import { getActionAccess } from '../utils/actionAccess';
 import { statusFromApiResponse } from '../utils/uiState';
 
 const props = defineProps({
-  eyebrow: { type: String, default: 'SYSTEM MANAGEMENT' },
+  eyebrow: { type: String, default: '系统管理' },
   title: { type: String, required: true },
   subtitle: { type: String, default: '' },
   boundaryNote: { type: String, default: '' },

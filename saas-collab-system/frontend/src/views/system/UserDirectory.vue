@@ -34,7 +34,7 @@
       <el-alert
         v-else
         :title="departmentFieldVisible
-          ? '当前角色没有 system.organization.view，组织筛选树未加载；部门调整仍需用户管理权限。'
+          ? '当前角色没有组织查看权限，组织筛选树未加载；部门调整仍需用户管理权限。'
           : '当前角色没有部门字段权限，组织筛选和部门调整入口已隐藏。'"
         type="info"
         :closable="false"
@@ -120,13 +120,13 @@
           multiple
           filterable
           :loading="roleOptionsLoading"
-          placeholder="选择当前 tenant 的角色"
+          placeholder="选择当前租户的角色"
           style="width: 100%"
         >
           <el-option
             v-for="role in roleOptions"
             :key="role.code"
-            :label="`${role.name} (${role.code})`"
+            :label="adminRoleDisplayName(role)"
             :value="role.code"
           />
         </el-select>
@@ -150,6 +150,7 @@ import {
 } from '../../api/systemAdmin';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
+import { adminRoleDisplayName, departmentDisplayName } from '../../utils/adminDisplayLabels';
 
 const auth = useAuthStore();
 const resourcePage = ref(null);
@@ -212,7 +213,7 @@ const formFields = [
 
 function flattenTree(nodes, result = []) {
   for (const node of nodes || []) {
-    result.push({ label: node.name, value: node.id });
+    result.push({ label: departmentDisplayName(node.name), value: node.id });
     flattenTree(node.children, result);
   }
   return result;

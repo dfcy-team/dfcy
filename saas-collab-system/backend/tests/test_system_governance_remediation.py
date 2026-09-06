@@ -78,6 +78,12 @@ def test_role_custom_scope_is_tenant_validated_and_lifecycle_is_safe():
     manager = user(tenant, "role-manager")
     target = Role.objects.create(tenant=tenant, name="Operator", code="operator")
     foreign_department = Department.objects.create(tenant=foreign, name="Foreign department")
+    local_platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="local-platform",
+        name="Local platform",
+        platform_type=PlatformMaster.PlatformType.OTHER,
+    )
     foreign_platform = PlatformMaster.objects.create(
         tenant=foreign,
         code="foreign-platform",
@@ -109,11 +115,11 @@ def test_role_custom_scope_is_tenant_validated_and_lifecycle_is_safe():
     assert denied_platform.status_code == 400
     valid = api.put(
         f"/api/internal/system/roles/{target.pk}/permissions/",
-        {"permission_codes": [], "scope_type": "custom", "scope_config": {"role_ids": [target.pk]}},
+        {"permission_codes": [], "scope_type": "custom", "scope_config": {"platform_ids": [local_platform.pk]}},
         format="json",
     )
     assert valid.status_code == 200
-    assert valid.data["data"]["data_scopes"][0]["config"] == {"role_ids": [target.pk]}
+    assert valid.data["data"]["data_scopes"][0]["config"] == {"platform_ids": [local_platform.pk]}
 
     changed = api.post(f"/api/internal/system/roles/{target.pk}/status/", {"status": "inactive"}, format="json")
     assert changed.status_code == 200

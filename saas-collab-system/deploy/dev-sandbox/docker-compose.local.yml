@@ -69,7 +69,7 @@ services:
       dockerfile: deploy/dev-sandbox/Dockerfile.backend.dev
     profiles: *local-profiles
     entrypoint: []
-    command: ["sh", "-c", "python manage.py check && python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"]
+    command: ["sh", "-c", "python manage.py check && python manage.py migrate --noinput && python manage.py sync_permissions && python manage.py runserver 0.0.0.0:8000"]
     environment: *backend-environment
     volumes:
       - ../../backend:/app

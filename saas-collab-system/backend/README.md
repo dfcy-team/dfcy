@@ -42,8 +42,23 @@ python manage.py migrate
 Migrations seed the canonical application permission catalog. Validate it in CI or after deployment with:
 
 ```powershell
+cd ..\frontend
+npm run permissions:check
+cd ..\backend
+python manage.py sync_permissions --dry-run
 python manage.py sync_permissions --check
 ```
+
+The sidebar declaration in `frontend/src/router/menu.js` is the development
+registration source. `npm run permissions:export` refreshes the committed
+snapshot at `backend/apps/permissions/menu_registry.json`; `permissions:check`
+is also a frontend build precondition. The backend reads this UTF-8 JSON
+snapshot only, so the Python runtime image does not need Node.js or the
+frontend source.
+
+Sandbox, pilot and production migration jobs run `sync_permissions` immediately
+after a successful migration; a failed sync stops the job before application
+traffic is started.
 
 To repair missing or stale permission metadata without changing role assignments:
 
