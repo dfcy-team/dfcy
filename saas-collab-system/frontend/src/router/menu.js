@@ -1,3 +1,5 @@
+import { buildMenuPermissionRegistry, menuPermissionCodesForItem } from './menuRegistry.js';
+
 export const menuItems = [
   { path: '/', label: '工作台' },
   {
@@ -283,6 +285,11 @@ const topLevelMenuOrder = [
 
 menuItems.sort((left, right) => topLevelMenuOrder.indexOf(left.label) - topLevelMenuOrder.indexOf(right.label));
 
+// The sidebar itself is the registration source. Derived menu.* codes are
+// collected without mutating the declaration; npm run permissions:export
+// snapshots the same registry for the backend release sync.
+export const menuPermissionRegistry = buildMenuPermissionRegistry(menuItems);
+
 // Every authenticated route must be registered here. The guard deliberately
 // denies paths without a contract so a newly added page cannot bypass RBAC.
 export const routeCapabilities = [
@@ -430,6 +437,26 @@ export const routeCapabilities = [
   { path: '/pilot/entry-decisions', permissions: ['pilot.entry.view'], userTypes: ['internal'] }
 ];
 
+// A route contract may carry both surfaces: menu permissions control whether
+// the entry is discoverable, while action/allPermissions continue to control
+// the operation behind the page.  Derive the menu side from the same registry
+// used by the sidebar so a newly registered page cannot accidentally bypass
+// menu gating on a deep link.
+const menuCodesByRoute = new Map();
+for (const definition of menuPermissionRegistry) {
+  const path = definition.metadata?.path || definition.metadata?.route;
+  if (!path) continue;
+  const codes = menuCodesByRoute.get(path) || [];
+  codes.push(definition.code);
+  menuCodesByRoute.set(path, codes);
+}
+for (const capability of routeCapabilities) {
+  const menuCodes = menuCodesByRoute.get(capability.path);
+  if (menuCodes?.length && !capability.menuPermissions?.length) {
+    capability.menuPermissions = [...new Set(menuCodes)];
+  }
+}
+
 function matchesPath(contract, path) {
   return contract.exact
     ? path === contract.path
@@ -454,22 +481,30 @@ function canAccessCapability(user, capability) {
   if (capability.internal && user.user_type !== 'internal') return false;
   if (capability.superuserOnly) return user.user_type === 'internal' && Boolean(user.is_superuser);
   if (user.is_superuser) return true;
-  if (!capability.permissions?.length) return true;
-  const isMenuContract = capability.menuPermissions?.length;
-  const categorized = isMenuContract ? user.menu_permission_codes : user.action_permission_codes;
-  // New sessions expose separate permission surfaces. Keep the legacy union
-  // as a compatibility fallback for sessions issued before V2.44.62.
-  const hasCategorizedPermissions = Array.isArray(categorized);
-  const permissions = hasCategorizedPermissions
-    ? new Set(categorized)
-    : new Set(user.permissions || []);
-  const required = isMenuContract && hasCategorizedPermissions
-    ? capability.menuPermissions
-    : capability.permissions;
-  if (capability.allPermissions?.length && !capability.allPermissions.every((code) => permissions.has(code))) {
+
+  // Keep the two authorization surfaces independent.  A menu grant is only
+  // an entry-point grant; it must never satisfy an action/allPermissions
+  // requirement (and vice versa).  Older sessions only expose ``permissions``
+  // so they continue to work against the legacy union as a compatibility
+  // fallback.
+  // An explicitly populated menu surface is authoritative.  An empty menu
+  // array is retained by older sessions during the rollout and must continue
+  // to use the legacy action/permissions route check until it is refreshed.
+  const hasMenuSurface = Array.isArray(user.menu_permission_codes) && user.menu_permission_codes.length > 0;
+  const hasActionSurface = Array.isArray(user.action_permission_codes);
+  const menuPermissions = new Set(hasMenuSurface ? user.menu_permission_codes : (user.permissions || []));
+  const actionPermissions = new Set(hasActionSurface ? user.action_permission_codes : (user.permissions || []));
+  const requiredMenu = capability.menuPermissions || [];
+  const requiredActions = capability.permissions || [];
+  // Sessions created before the surface split do not expose
+  // menu_permission_codes.  Preserve their action-based access until the
+  // session refreshes; new sessions must satisfy the independent menu grant.
+  if (hasMenuSurface && requiredMenu.length && !requiredMenu.some((code) => menuPermissions.has(code))) return false;
+  if (capability.allPermissions?.length && !capability.allPermissions.every((code) => actionPermissions.has(code))) {
     return false;
   }
-  return required.some((code) => permissions.has(code));
+  if (!requiredActions.length) return true;
+  return requiredActions.some((code) => actionPermissions.has(code));
 }
 
 // Keep the existing menu and permission surfaces stable while allowing the
@@ -546,6 +581,17 @@ function isModuleVisible(user, code) {
 }
 
 export function canAccessMenuItem(user, item) {
+  // Once a session carries categorized menu permissions, sidebar entries are
+  // controlled by the menu surface.  Action-only legacy sessions continue to
+  // use the existing action permission fallback.
+  if (Array.isArray(user?.menu_permission_codes)) {
+    const required = item?.menuPermissions?.length
+      ? item.menuPermissions
+      : menuPermissionCodesForItem(item);
+    if (required.length) {
+      return required.some((code) => user.menu_permission_codes.includes(code));
+    }
+  }
   return canAccessCapability(user, item);
 }
 
@@ -564,8 +610,11 @@ export function filterMenuItems(user, items = menuItems) {
           return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex);
         });
       }
-      const canSeeParent = canAccessMenuItem(user, item)
-        || (item.showWhenChildAccessible && children.length > 0);
+      // A parent is a visual container, but a disabled rollout module must not
+      // become visible merely because one of its children has a grant.
+      const moduleCode = moduleCodeForMenuLabel(item.label);
+      const moduleEnabled = !moduleCode || isModuleVisible(user, moduleCode);
+      const canSeeParent = moduleEnabled && (canAccessMenuItem(user, item) || children.length > 0);
       return children.length && canSeeParent ? [{ ...item, children }] : [];
     }
     return canAccessMenuItem(user, item) ? [item] : [];

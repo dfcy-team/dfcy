@@ -56,10 +56,11 @@ describe('步骤7 共享组织树与用户目录契约', () => {
     expect(mock).toContain('department_ids');
   });
 
-  it('角色权限矩阵公开本部门及下级数据范围说明', () => {
+  it('角色权限矩阵公开历史组织范围兼容提示和新的业务范围配置', () => {
     const rolePage = read('src/views/system/RolePermissionMatrix.vue');
-    expect(rolePage).toContain('value="department_tree"');
-    expect(rolePage).toContain('本部门及下级');
-    expect(rolePage).toContain('兼任部门不改变数据范围锚点');
+    expect(rolePage).not.toContain('value="department_tree"');
+    expect(rolePage).toContain('历史组织范围，需重新配置');
+    expect(rolePage).toContain('platform_ids');
+    expect(rolePage).toContain('supplier_ids');
   });
 });

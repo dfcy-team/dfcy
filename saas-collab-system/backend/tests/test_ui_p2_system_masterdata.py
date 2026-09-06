@@ -5,7 +5,14 @@ from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.audit.models import OperationLog
 from apps.integrations.credential_service import reference_fingerprint, rotate_config_references
 from apps.integrations.models import PlatformIntegrationConfig
-from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, SupplierMaster
+from apps.masterdata.models import (
+    CountrySiteMaster,
+    PlatformMaster,
+    StatusChoices,
+    StoreMaster,
+    SupplierMaster,
+    WarehouseMaster,
+)
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.suppliers.models import SupplierTask
 from apps.tenants.models import Department, Tenant
@@ -202,17 +209,141 @@ def test_role_permission_and_data_scope_update_is_audited():
 
     response = client_for(manager).put(
         f"/api/internal/system/roles/{target.pk}/permissions/",
-        {"permission_codes": ["masterdata.view"], "scope_type": "department", "scope_config": {"department_ids": [10]}},
+        {"permission_codes": ["masterdata.view"], "scope_type": "all", "scope_config": {}},
         format="json",
     )
 
     assert response.status_code == 200
     assert response.data["data"]["permission_codes"] == ["masterdata.view"]
-    assert DataScope.objects.get(role=target).scope_type == DataScope.ScopeType.DEPARTMENT
+    assert DataScope.objects.get(role=target).scope_type == DataScope.ScopeType.ALL
     audit = OperationLog.objects.get(tenant=tenant, action="role_permissions_update", object_id=str(target.pk))
     assert audit.after_data["data_scopes"] == [
-        {"scope_type": "department", "config": {"department_ids": [10]}}
+        {"scope_type": "all", "config": {}}
     ]
+
+
+@pytest.mark.parametrize("legacy_scope_type", ["department", "department_tree", "own"])
+def test_role_permission_update_rejects_legacy_scope_without_rewriting_existing_record(legacy_scope_type):
+    tenant = Tenant.objects.create(name="Tenant", code=f"legacy-scope-{legacy_scope_type}")
+    manager = create_user(tenant, f"legacy-manager-{legacy_scope_type}")
+    grant(manager, "system.roles.view", "system.roles.manage")
+    target = Role.objects.create(tenant=tenant, name="Legacy role", code=f"legacy-{legacy_scope_type}")
+    existing = DataScope.objects.create(
+        tenant=tenant,
+        role=target,
+        scope_type=legacy_scope_type,
+        config={},
+    )
+    client = client_for(manager)
+
+    listed = client.get("/api/internal/system/roles/")
+    assert listed.status_code == 200
+    row = next(item for item in listed.data["data"]["results"] if item["id"] == target.pk)
+    assert row["data_scopes"] == [{"scope_type": legacy_scope_type, "config": {}}]
+
+    response = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {"permission_codes": [], "scope_type": legacy_scope_type, "scope_config": {}},
+        format="json",
+    )
+    assert response.status_code == 400
+    existing.refresh_from_db()
+    assert existing.scope_type == legacy_scope_type
+
+
+def test_role_business_scope_accepts_tenant_objects_and_rejects_legacy_or_foreign_keys():
+    tenant = Tenant.objects.create(name="Tenant", code="business-scope-tenant")
+    other = Tenant.objects.create(name="Other", code="business-scope-other")
+    manager = create_user(tenant, "business-scope-manager")
+    grant(manager, "system.roles.view", "system.roles.manage")
+    target = Role.objects.create(tenant=tenant, name="Business role", code="business-scope-role")
+    platform = PlatformMaster.objects.create(
+        tenant=tenant, code="local-platform", name="Local platform", platform_type="other"
+    )
+    foreign_platform = PlatformMaster.objects.create(
+        tenant=other, code="foreign-platform", name="Foreign platform", platform_type="other"
+    )
+    client = client_for(manager)
+
+    accepted = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {
+            "permission_codes": [],
+            "scope_type": "custom",
+            "scope_config": {"platform_ids": [platform.pk]},
+        },
+        format="json",
+    )
+    assert accepted.status_code == 200
+    assert DataScope.objects.get(role=target).config == {"platform_ids": [platform.pk]}
+
+    legacy_key = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {
+            "permission_codes": [],
+            "scope_type": "custom",
+            "scope_config": {"department_ids": [1]},
+        },
+        format="json",
+    )
+    assert legacy_key.status_code == 400
+
+    foreign_key = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {
+            "permission_codes": [],
+            "scope_type": "custom",
+            "scope_config": {"platform_ids": [foreign_platform.pk]},
+        },
+        format="json",
+    )
+    assert foreign_key.status_code == 400
+    assert DataScope.objects.get(role=target).config == {"platform_ids": [platform.pk]}
+
+
+def test_role_scope_options_return_only_target_tenant_business_dimensions():
+    tenant = Tenant.objects.create(name="Tenant", code="scope-options-tenant")
+    other = Tenant.objects.create(name="Other", code="scope-options-other")
+    manager = create_user(tenant, "scope-options-manager")
+    grant(manager, "system.roles.manage")
+
+    platform = PlatformMaster.objects.create(
+        tenant=tenant, code="platform", name="Platform", platform_type="other"
+    )
+    other_platform = PlatformMaster.objects.create(
+        tenant=other, code="other-platform", name="Other platform", platform_type="other"
+    )
+    site = CountrySiteMaster.objects.create(
+        tenant=tenant, code="ph", name="Philippines", country_code="PH", currency="PHP"
+    )
+    StoreMaster.objects.create(
+        tenant=tenant,
+        platform=platform,
+        code="store",
+        name="Store",
+        country_code="PH",
+        currency="PHP",
+    )
+    WarehouseMaster.objects.create(
+        tenant=tenant,
+        code="warehouse",
+        name="Warehouse",
+        country_code="PH",
+        warehouse_type=WarehouseMaster.WarehouseType.OWNED,
+    )
+    SupplierMaster.objects.create(tenant=tenant, code="supplier", name="Supplier")
+    CountrySiteMaster.objects.create(
+        tenant=other, code="us", name="United States", country_code="US", currency="USD"
+    )
+
+    response = client_for(manager).get("/api/internal/system/role-scope-options/")
+
+    assert response.status_code == 200
+    data = response.data["data"]
+    assert set(data) == {"platforms", "sites", "stores", "warehouses", "suppliers"}
+    assert [item["id"] for item in data["platforms"]] == [platform.pk]
+    assert [item["id"] for item in data["sites"]] == [site.pk]
+    assert other_platform.pk not in {item["id"] for item in data["platforms"]}
 
 
 def test_user_role_assignment_uses_users_manage_without_roles_view():

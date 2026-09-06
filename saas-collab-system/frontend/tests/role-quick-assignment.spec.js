@@ -8,7 +8,7 @@ const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 describe('角色快速分配与内置身份契约', () => {
   it('保留快速/高级两种配置模式和四类角色模板', () => {
     const page = read('src/views/system/RolePermissionMatrix.vue');
-    for (const phrase of ['快速分配', '高级配置', '只读人员', '业务操作员', '部门负责人', '安全审计员']) {
+    for (const phrase of ['快速分配', '高级配置', '只读人员', '业务操作员', '业务范围负责人', '安全审计员']) {
       expect(page).toContain(phrase);
     }
     expect(page).toContain('package_selections');
@@ -26,9 +26,9 @@ describe('角色快速分配与内置身份契约', () => {
     expect(page).toContain('确认授予高风险权限');
     expect(page).toContain('pendingHighRiskPermissionCodes');
     expect(page).toContain('originalPermissionCodes');
-    expect(page).toContain('departmentTreeScopeError');
-    expect(page).toContain('仅支持 system 模块权限');
-    expect(page).toContain('system.roles.manage 需要全部数据范围');
+    expect(page).toContain('历史组织范围，需重新配置');
+    expect(page).toContain('租户隔离始终生效');
+    expect(page).toContain('业务范围至少选择一个平台、国家/站点、店铺、仓库或供应商');
   });
 
   it('mock 权限包与后端高风险目录一致，operate 不含 manage 而 admin 保留普通 manage', () => {

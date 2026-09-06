@@ -31,7 +31,7 @@ services:
     command:
       - sh
       - -c
-      - python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
+      - python manage.py migrate --noinput && python manage.py sync_permissions && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}

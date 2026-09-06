@@ -35,6 +35,13 @@ from apps.permissions.ui_p2_scopes import (
     require_department_create_scope,
     require_user_create_scope,
 )
+from apps.masterdata.models import (
+    CountrySiteMaster,
+    PlatformMaster,
+    StoreMaster,
+    SupplierMaster,
+    WarehouseMaster,
+)
 from apps.tenants.models import Department, Tenant
 
 from .models import CustomUser
@@ -89,7 +96,6 @@ def _scope_changed(before_scopes, scope_type, config):
         for scope in before_scopes
     }
     return current != {_scope_signature(scope_type, config)}
-
 
 def _safe_department_tree(departments):
     """Build a visible forest and break legacy parent cycles fail-closed."""
@@ -850,12 +856,14 @@ class RoleCollectionView(APIView):
 
 
 class RoleScopeOptionsView(APIView):
-    """Return tenant-scoped options needed to configure a custom role scope.
+    """Return tenant-scoped business dimensions for a custom role scope.
 
-    This uses the role-management permission and all scope so administrators
-    do not need unrelated user/organization read permissions merely to define
-    a role's explicit scope.  All option querysets are tenant-filtered before
-    serialization.
+    Tenant isolation is implicit and cannot be selected in this response.  We
+    intentionally do not return departments, users, or roles: those were the
+    old organization-scope dimensions and are no longer valid for new role
+    permission submissions.  Every queryset is filtered to the target tenant
+    before serialization so a platform administrator cannot accidentally use
+    an object from another tenant.
     """
 
     permission_classes = [DeclaredApplicationPermission]
@@ -865,18 +873,28 @@ class RoleScopeOptionsView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         tenant = requested_tenant(request)
-        departments = Department.objects.filter(tenant=tenant).select_related("parent")
-        users = CustomUser.objects.filter(tenant=tenant).select_related(
-            "internal_profile__department",
-        ).prefetch_related(
-            "user_roles__role",
-            "internal_profile__departments",
-        )
-        roles = Role.objects.filter(tenant=tenant, status=Role.Status.ACTIVE)
+        active = "active"
         return success_response({
-            "departments": DepartmentAdminSerializer(departments, many=True).data,
-            "users": UserAdminSerializer(users, many=True, context={"request": request}).data,
-            "roles": RoleOptionSerializer(roles, many=True).data,
+            "platforms": list(
+                PlatformMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name")
+            ),
+            "sites": list(
+                CountrySiteMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name", "country_code", "currency")
+            ),
+            "stores": list(
+                StoreMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name", "country_code", "platform_id")
+            ),
+            "warehouses": list(
+                WarehouseMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name", "country_code")
+            ),
+            "suppliers": list(
+                SupplierMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name")
+            ),
         })
 
 
@@ -911,6 +929,17 @@ class RolePermissionView(APIView):
                 role.permissions.exclude(module__in=touched_modules).values_list("code", flat=True)
             )
         permission_codes = sorted(permission_codes)
+
+        # Retired menu grants stay attached for auditability even though they
+        # are no longer offered in the active permission directory.  A normal
+        # role edit must not silently revoke them merely because the frontend
+        # no longer renders the retired checkbox.
+        permission_codes = sorted(set(permission_codes) | set(
+            role.permissions.filter(
+                permission_type=Permission.PermissionType.MENU,
+                metadata__registry_status="inactive",
+            ).values_list("code", flat=True)
+        ))
 
         # A role manager may delegate only permissions already granted to the
         # actor through an all-tenant role.  Existing grants that were not
@@ -1088,7 +1117,12 @@ class PermissionCollectionView(APIView):
             # Permission catalog is global; accepting tenant_id here would
             # imply a tenant-specific catalog and make client context unsafe.
             requested_tenant(request)
-        queryset = Permission.objects.all()
+        queryset = Permission.objects.exclude(
+            Q(
+                permission_type=Permission.PermissionType.MENU,
+                metadata__registry_status="inactive",
+            )
+        )
         module = request.query_params.get("module", "").strip()
         permission_type = request.query_params.get("permission_type", "").strip()
         if module:

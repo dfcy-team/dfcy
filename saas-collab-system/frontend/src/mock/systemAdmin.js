@@ -1,4 +1,5 @@
 import { successResponse } from './index';
+import { menuPermissionRegistry } from '../router/menu';
 
 const page = (results) => ({ status: 'mock', count: results.length, next: null, previous: null, results });
 
@@ -16,6 +17,16 @@ const mappingPermissionCatalog = [
   permission_type: 'action', metadata: {}, description
 }));
 const mappingPermissionCodes = mappingPermissionCatalog.map(({ code }) => code);
+const mockMenuPermissionCatalog = menuPermissionRegistry.map((permission, index) => ({
+  ...permission,
+  id: 1000 + index,
+}));
+const mockMenuCodesForActions = (actionCodes = []) => {
+  const selected = new Set(actionCodes);
+  return mockMenuPermissionCatalog
+    .filter((permission) => (permission.metadata?.action_codes || []).some((code) => selected.has(code)))
+    .map(({ code }) => code);
+};
 
 export const mockTenants = () => successResponse(page([
   { id: 1, name: '演示租户', code: 'demo', status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
@@ -112,7 +123,8 @@ export const mockRoles = () => successResponse(page([
   {
     id: 1, tenant_id: 1, name: '运营只读', code: 'operator_viewer', status: 'active',
     permission_codes: ['analytics.view', 'products.status.view'],
-    menu_permission_codes: [], action_permission_codes: ['analytics.view', 'products.status.view'], field_permission_codes: [],
+    menu_permission_codes: mockMenuCodesForActions(['analytics.view', 'products.status.view']),
+    action_permission_codes: ['analytics.view', 'products.status.view'], field_permission_codes: [],
     data_scopes: [{ scope_type: 'department', config: {} }]
   },
   {
@@ -127,10 +139,7 @@ export const mockRoles = () => successResponse(page([
       'integrations.store.view', 'integrations.store.authorize', 'integrations.store.revoke',
       'integrations.warehouse.view', 'integrations.warehouse.authorize', 'integrations.warehouse.revoke'
     ],
-    menu_permission_codes: [
-      'menu.system.organization.view', 'menu.system.users.view', 'menu.system.roles.view',
-      'menu.system.security_operations.view'
-    ],
+    menu_permission_codes: mockMenuPermissionCatalog.map(({ code }) => code),
     action_permission_codes: [
       ...mappingPermissionCodes,
       'system.users.view', 'system.roles.view', 'masterdata.view', 'masterdata.manage',
@@ -151,24 +160,33 @@ export const mockRoles = () => successResponse(page([
 export const mockRoleScopeOptions = () => successResponse({
   status: 'mock',
   api_status: 'mock',
-  departments: [
-    { id: 1, tenant_id: 1, name: '经营中心', parent_id: null, parent_name: '', status: 'active' },
-    { id: 2, tenant_id: 1, name: '供应链组', parent_id: 1, parent_name: '经营中心', status: 'active' }
+  tenant_boundary: '当前租户',
+  platforms: [
+    { id: 1, code: 'shopee', name: '虾皮', status: 'active' },
+    { id: 2, code: 'tiktok', name: '短视频', status: 'active' }
   ],
-  users: [
-    { id: 1, username: 'demo-operator', full_name: '演示运营', user_type: 'internal', is_active: true },
-    { id: 2, username: 'demo-finance', full_name: '演示财务', user_type: 'internal', is_active: false }
+  sites: [
+    { id: 1, code: 'ph', name: '菲律宾站', country_code: 'PH', currency: 'PHP', status: 'active' },
+    { id: 2, code: 'us', name: '美国站', country_code: 'US', currency: 'USD', status: 'active' }
+  ],
+  stores: [
+    { id: 1, code: 'demo-store', name: '演示店铺', country_code: 'PH', platform_id: 1, status: 'active' }
+  ],
+  warehouses: [
+    { id: 1, code: 'demo-warehouse', name: '演示仓库', country_code: 'PH', status: 'active' }
   ],
   roles: [
     { id: 1, name: '运营只读', code: 'operator_viewer', status: 'active' },
     { id: 2, name: '租户管理员', code: 'administrator', role_type: 'builtin', is_protected: true, status: 'active' }
+  ],
+  suppliers: [
+    { id: 1, code: 'demo-supplier', name: '演示供应商', status: 'active' }
   ]
 });
 
 export const mockPermissions = () => successResponse(page([
+  ...mockMenuPermissionCatalog,
   ...mappingPermissionCatalog,
-  { id: 1, code: 'menu.system.users.view', name: '查看用户目录菜单', module: 'system', action: 'users.view', permission_type: 'menu', metadata: { path: '/system/users', resource: 'users' }, description: '显示用户目录入口' },
-  { id: 2, code: 'menu.system.roles.view', name: '查看角色权限菜单', module: 'system', action: 'roles.view', permission_type: 'menu', metadata: { path: '/system/roles', resource: 'roles' }, description: '显示角色权限入口' },
   { id: 3, code: 'system.users.view', name: '查看用户目录', module: 'system', action: 'users.view', permission_type: 'action', metadata: {}, description: '租户内用户只读访问' },
   { id: 4, code: 'system.users.manage', name: '管理用户目录', module: 'system', action: 'users.manage', permission_type: 'action', metadata: {}, description: '租户内用户启停和角色绑定' },
   { id: 5, code: 'masterdata.view', name: '查看基础档案与连接器识别', module: 'masterdata', action: 'view', permission_type: 'action', metadata: {}, description: '查看当前租户的平台、站点、店铺、仓库和供应商基础档案，以及仓储业务分类、服务商名称和连接器识别结果；不包含实际连接器配置或凭据内容。' },
