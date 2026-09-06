@@ -45,18 +45,25 @@
       <template #default="{ data }">
         <div class="department-tree__node">
           <span class="department-tree__label">
-            <span>{{ data.name }}</span>
+            <span>{{ departmentDisplayName(data.name) }}</span>
             <small v-if="showCounts && data.direct_user_count !== null && data.direct_user_count !== undefined">
               {{ data.direct_user_count }}人<span v-if="data.descendant_user_count">，下级{{ data.descendant_user_count }}人</span>
             </small>
           </span>
           <span v-if="canManage" class="department-tree__actions">
-            <el-button link type="primary" @click.stop="$emit('add-child', data)">子部门</el-button>
-            <el-button link type="primary" @click.stop="$emit('edit', data)">编辑</el-button>
-            <el-button link :type="data.status === 'active' ? 'warning' : 'success'" @click.stop="$emit('toggle-status', data)">
-              {{ data.status === 'active' ? '停用' : '启用' }}
-            </el-button>
-            <el-button link type="danger" @click.stop="$emit('delete', data)">删除</el-button>
+            <el-dropdown trigger="click" @command="(command) => handleAction(command, data)">
+              <el-button link type="primary" @click.stop>操作</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="add-child">新增子部门</el-dropdown-item>
+                  <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                  <el-dropdown-item command="toggle-status">
+                    {{ data.status === 'active' ? '停用' : '启用' }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </span>
         </div>
       </template>
@@ -86,6 +93,7 @@
 
 <script setup>
 import { ref } from 'vue';
+import { departmentDisplayName } from '../utils/adminDisplayLabels';
 
 defineProps({
   nodes: { type: Array, default: () => [] },
@@ -107,7 +115,10 @@ const treeRef = ref(null);
 
 function filterNode(value, data) {
   if (!value) return true;
-  return String(data.name || '').toLowerCase().includes(String(value).toLowerCase());
+  const query = String(value).toLowerCase();
+  const original = String(data.name || '').toLowerCase();
+  const display = departmentDisplayName(data.name).toLowerCase();
+  return original.includes(query) || display.includes(query);
 }
 
 function filterTree() {
@@ -118,6 +129,10 @@ function selectNode(data) {
   // Keep the payload at the node level so both management and directory pages
   // share one visibility and selection contract.
   emit('select', data);
+}
+
+function handleAction(command, node) {
+  emit(command, node);
 }
 </script>
 

@@ -9,10 +9,15 @@ describe('步骤7 共享组织树与用户目录契约', () => {
     const tree = read('src/components/DepartmentTree.vue');
     for (const phrase of [
       '<el-tree', 'default-expand-all', 'filter-node-method', 'filterTree',
-      "select-all", "showAll", "select-unassigned", "add-child", "toggle-status", "canManage"
+      "select-all", "showAll", "select-unassigned", "add-child", "toggle-status", "canManage",
+      '<el-dropdown', 'handleAction', 'departmentDisplayName(data.name)'
     ]) {
       expect(tree).toContain(phrase);
     }
+    expect(tree).not.toContain('@click.stop="$emit(\'add-child\', data)"');
+    expect(tree).not.toContain('@click.stop="$emit(\'edit\', data)"');
+    expect(tree).not.toContain('@click.stop="$emit(\'toggle-status\', data)"');
+    expect(tree).not.toContain('@click.stop="$emit(\'delete\', data)"');
   });
 
   it('组织架构页和用户目录共用树接口与组件', () => {
