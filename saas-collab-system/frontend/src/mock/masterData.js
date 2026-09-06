@@ -134,6 +134,7 @@ export const masterDataMocks = {
       warehouse_type: 'third_party',
       service_platform_id: 2,
       service_platform_code: 'myjf',
+      service_platform_integration_key: 'jifeng_wms',
       service_platform_name: '马来极风',
       service_platform_type: 'warehouse_third_party',
       api_access_available: true,

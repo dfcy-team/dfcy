@@ -308,7 +308,9 @@ const workspaceJobs = [
     capability_state: 'ready',
     capability_code: 'INVENTORY',
     source_priority: 20,
+    integration_config_id: 3,
     selected_authorization_id: 202,
+    warehouse_authorization_id: 202,
     latest_run_status: 'running',
     latest_run_id: 'MOCK-RUN-INVENTORY-001',
     latest_started_at: '2026-09-01T09:30:00Z',
@@ -644,8 +646,16 @@ export const mockCreateSyncJob = (payload = {}) => {
   if (!supportedResources.includes(resourceType)) {
     return mockFailure('UNSUPPORTED_RESOURCE', `${platform || '当前平台'} 未注册可创建的同步资源：${resourceType || '未指定'}`);
   }
-  if (workspaceJobs.some((item) => String(item.selected_authorization_id) === String(authorization.id) && item.resource_type === resourceType)) {
-    return successResponse({ idempotent: true, message: '该授权和资源已经存在同步任务', sync_job: workspaceJobs.find((item) => String(item.selected_authorization_id) === String(authorization.id) && item.resource_type === resourceType) });
+  const existingJob = workspaceJobs.find((item) => {
+    const jobAuthorizationId = isWarehouse
+      ? (item.warehouse_authorization_id ?? item.selected_authorization_id)
+      : (item.store_authorization_id ?? item.selected_authorization_id);
+    return String(jobAuthorizationId) === String(authorization.id)
+      && item.resource_type === resourceType
+      && (!payload.integration_config_id || String(item.integration_config_id || '') === String(payload.integration_config_id));
+  });
+  if (existingJob) {
+    return successResponse({ idempotent: true, message: '该授权和资源已经存在同步任务', sync_job: existingJob });
   }
   const row = {
     id: Math.max(...workspaceJobs.map((item) => item.id), 0) + 1,
