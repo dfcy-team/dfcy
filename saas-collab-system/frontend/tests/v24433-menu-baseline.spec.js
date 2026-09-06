@@ -55,7 +55,9 @@ describe('current deployment menu baseline', () => {
     // system management; all other baseline entries remain unchanged.
     // V2.44.67 consolidates the two mapping menus and the duplicate store
     // archive entry into the two foundation pages.
-    expect(flattenMenuItems(menuItems)).toHaveLength(111);
+    // Four aggregate governance/pilot centers replace eight legacy menu
+    // entries; the detail routes remain in the route contract.
+    expect(flattenMenuItems(menuItems)).toHaveLength(103);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
@@ -90,6 +92,23 @@ describe('current deployment menu baseline', () => {
       user_type: 'external', is_superuser: false, permissions: []
     })).map((item) => item.path);
     expect(externalPaths).not.toContain('/pricing/prices');
+  });
+
+  it('exposes governance and pilot as four aggregate centers while keeping detail routes routable', () => {
+    const governance = menuItems.find((item) => item.label === '治理与试点');
+    expect(governance).toMatchObject({ internal: true });
+    expect(governance.children.map(({ label, path }) => ({ label, path }))).toEqual([
+      { label: '治理中心', path: '/governance' },
+      { label: '验证中心', path: '/pilot/validation' },
+      { label: '发布中心', path: '/pilot/releases' },
+      { label: '运维控制台', path: '/pilot/control-room' }
+    ]);
+    const flatItems = flattenMenuItems(menuItems);
+    for (const route of ['/governance', '/pilot/validation', '/pilot/releases', '/pilot/control-room']) {
+      expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
+    }
+    expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
+    expect(flatItems).toHaveLength(103);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

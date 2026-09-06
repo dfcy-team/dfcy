@@ -2,7 +2,7 @@
   <section class="app-page">
     <header class="app-page__header">
       <div class="app-page__heading">
-        <div class="app-page__eyebrow">{{ eyebrow }}</div>
+        <div v-if="eyebrow" class="app-page__eyebrow">{{ eyebrow }}</div>
         <h1>{{ title }}</h1>
         <p v-if="subtitle">{{ subtitle }}</p>
       </div>

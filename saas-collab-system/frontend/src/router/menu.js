@@ -237,19 +237,26 @@ export const menuItems = [
   },
   {
     label: '治理与试点',
+    internal: true,
+    permissions: [
+      'governance.api.view',
+      'governance.assistants.view',
+      'pilot.readiness.view',
+      'pilot.topology.view',
+      'pilot.recovery.view',
+      'pilot.release.view',
+      'pilot.capacity.view',
+      'pilot.control.view',
+      'pilot.security_review.view',
+      'pilot.verification.view',
+      'pilot.performance.view',
+      'pilot.entry.view'
+    ],
     children: [
-      { path: '/governance/api-contracts', label: 'API 合同', permissions: ['governance.api.view'] },
-      { path: '/governance/assistants', label: '助手治理', permissions: ['governance.assistants.view'] },
-      { path: '/pilot/readiness', label: '试点准入', permissions: ['pilot.readiness.view'] },
-      { path: '/pilot/topology', label: '部署拓扑', permissions: ['pilot.topology.view'] },
-      { path: '/pilot/recovery', label: '恢复演练', permissions: ['pilot.recovery.view'] },
-      { path: '/pilot/releases', label: '发布记录', permissions: ['pilot.release.view'] },
-      { path: '/pilot/capacity', label: '容量观察', permissions: ['pilot.capacity.view'] },
-      { path: '/pilot/control-room', label: '试点控制台', permissions: ['pilot.control.view'] },
-      { path: '/pilot/security-reviews', label: '专项安全评审', permissions: ['pilot.security_review.view'] },
-      { path: '/pilot/verification-runs', label: '受控验证', permissions: ['pilot.verification.view'] },
-      { path: '/pilot/performance-runs', label: '性能验证', permissions: ['pilot.performance.view'] },
-      { path: '/pilot/entry-decisions', label: '准入决策', permissions: ['pilot.entry.view'] }
+      { path: '/governance', label: '治理中心', internal: true, permissions: ['governance.api.view', 'governance.assistants.view'] },
+      { path: '/pilot/validation', label: '验证中心', internal: true, permissions: ['pilot.security_review.view', 'pilot.verification.view', 'pilot.performance.view'] },
+      { path: '/pilot/releases', label: '发布中心', internal: true, permissions: ['pilot.release.view', 'pilot.recovery.view'] },
+      { path: '/pilot/control-room', label: '运维控制台', internal: true, permissions: ['pilot.control.view', 'pilot.topology.view', 'pilot.capacity.view'] }
     ]
   }
 ];
@@ -407,14 +414,16 @@ export const routeCapabilities = [
   { path: '/supply-chain/purchase-orders', permissions: ['supply.purchase_order.view'], userTypes: ['internal'] },
   { path: '/audit/operations', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] },
   { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
+  { path: '/governance', permissions: ['governance.api.view', 'governance.assistants.view'], userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
   { path: '/governance/assistants', permissions: ['governance.assistants.view'], userTypes: ['internal'] },
+  { path: '/pilot/validation', permissions: ['pilot.security_review.view', 'pilot.verification.view', 'pilot.performance.view'], userTypes: ['internal'] },
   { path: '/pilot/readiness', permissions: ['pilot.readiness.view'], userTypes: ['internal'] },
   { path: '/pilot/topology', permissions: ['pilot.topology.view'], userTypes: ['internal'] },
   { path: '/pilot/recovery', permissions: ['pilot.recovery.view'], userTypes: ['internal'] },
-  { path: '/pilot/releases', permissions: ['pilot.release.view'], userTypes: ['internal'] },
+  { path: '/pilot/releases', permissions: ['pilot.release.view', 'pilot.recovery.view'], userTypes: ['internal'] },
   { path: '/pilot/capacity', permissions: ['pilot.capacity.view'], userTypes: ['internal'] },
-  { path: '/pilot/control-room', permissions: ['pilot.control.view'], userTypes: ['internal'] },
+  { path: '/pilot/control-room', permissions: ['pilot.control.view', 'pilot.topology.view', 'pilot.capacity.view'], userTypes: ['internal'] },
   { path: '/pilot/security-reviews', permissions: ['pilot.security_review.view'], userTypes: ['internal'] },
   { path: '/pilot/verification-runs', permissions: ['pilot.verification.view'], userTypes: ['internal'] },
   { path: '/pilot/performance-runs', permissions: ['pilot.performance.view'], userTypes: ['internal'] },
