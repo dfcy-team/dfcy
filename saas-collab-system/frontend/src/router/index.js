@@ -122,6 +122,8 @@ const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
 const ExceptionDetail = () => import('../views/workflow/ExceptionDetail.vue');
 const CollaborationEventList = () => import('../views/workflow/CollaborationEventList.vue');
 const GovernanceCatalog = () => import('../views/governance/GovernanceCatalog.vue');
+const GovernanceCenter = () => import('../views/governance/GovernanceCenter.vue');
+const ValidationCenter = () => import('../views/pilot/ValidationCenter.vue');
 const PilotReadiness = () => import('../views/pilot/ReadinessDashboard.vue');
 const PilotTopology = () => import('../views/pilot/TopologyOverview.vue');
 const PilotWorkflow = () => import('../views/pilot/PilotWorkflow.vue');
@@ -168,14 +170,20 @@ const routes = [
       { path: 'workflow/exceptions', component: ExceptionList },
       { path: 'workflow/exceptions/:id', component: ExceptionDetail },
       { path: 'workflow/collaboration-events', component: CollaborationEventList },
+      { path: 'governance', component: GovernanceCenter },
       { path: 'governance/api-contracts', component: GovernanceCatalog, props: { resource: 'api-contracts' } },
       { path: 'governance/api-contracts/:id', component: GovernanceCatalog, props: { resource: 'api-contracts' } },
       { path: 'governance/assistants', component: GovernanceCatalog, props: { resource: 'assistants' } },
       { path: 'governance/assistants/:id', component: GovernanceCatalog, props: { resource: 'assistants' } },
+      { path: 'pilot/validation', component: ValidationCenter },
       { path: 'pilot/readiness', component: PilotReadiness },
       { path: 'pilot/topology', component: PilotTopology },
       { path: 'pilot/recovery', component: PilotWorkflow, props: { kind: 'recovery' } },
-      { path: 'pilot/releases', component: PilotWorkflow, props: { kind: 'release' } },
+      {
+        path: 'pilot/releases',
+        component: PilotWorkflow,
+        props: (route) => ({ kind: route.query.mode === 'recovery' ? 'recovery' : 'release' })
+      },
       { path: 'pilot/capacity', component: PilotCapacity },
       { path: 'pilot/control-room', component: PilotControlRoom },
       { path: 'pilot/security-reviews', component: PilotSecurityReviews },
