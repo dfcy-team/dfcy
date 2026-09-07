@@ -184,6 +184,26 @@
                 >
                   生成 SKU
                 </el-button>
+                <el-button
+                  v-if="canManage"
+                  link
+                  type="primary"
+                  :disabled="!row.id"
+                  data-testid="product-master-status-button"
+                  @click="openStatusEdit(row)"
+                >
+                  变更状态
+                </el-button>
+                <el-button
+                  v-if="canManage"
+                  link
+                  type="danger"
+                  :disabled="!row.id"
+                  :data-testid="`product-master-delete-${row.id}`"
+                  @click="deleteMaster(row)"
+                >
+                  删除
+                </el-button>
               </div>
             </template>
           </el-table-column>
@@ -279,7 +299,14 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="skuCreateOpen" title="生成 SKU" width="min(600px, 94vw)">
+    <el-dialog
+      v-model="skuCreateOpen"
+      title="批量生成 SKU"
+      width="min(600px, 94vw)"
+      :close-on-click-modal="!skuSaving"
+      :close-on-press-escape="!skuSaving"
+      :show-close="!skuSaving"
+    >
       <el-alert
         v-if="skuTarget"
         :title="`${skuTarget.spu_code || ''} · ${skuTarget.product_name || ''}`"
@@ -290,17 +317,22 @@
       <el-form label-position="top" class="sku-form">
         <el-form-item label="启用颜色" required>
           <el-select
-            v-model="skuForm.color_code"
+            v-model="skuForm.color_codes"
             class="form-control"
             filterable
             clearable
-            placeholder="请选择启用的颜色"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            :disabled="skuSaving"
+            data-testid="batch-color"
+            placeholder="请选择启用的颜色（可多选）"
           >
             <el-option
               v-for="color in activeColors"
               :key="color.id || color.code"
               :label="`${color.name}（${color.code}）`"
-              :value="color.code"
+              :value="String(color.code)"
             />
           </el-select>
         </el-form-item>
@@ -311,13 +343,17 @@
             :label="dimension.name || dimension.code"
           >
             <el-select
-              v-if="Array.isArray(dimension.values) && dimension.values.length"
               v-model="skuForm.spec_values[dimension.code]"
               class="form-control"
               filterable
               clearable
               allow-create
               default-first-option
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              :disabled="skuSaving"
+              :data-testid="`batch-spec-${dimension.code}`"
               :placeholder="`请选择或填写${dimension.name || dimension.code}`"
             >
               <el-option
@@ -327,20 +363,25 @@
                 :value="value"
               />
             </el-select>
-            <el-input
-              v-else
-              v-model="skuForm.spec_values[dimension.code]"
-              class="form-control"
-              clearable
-              :placeholder="`填写${dimension.name || dimension.code}（可选）`"
-            />
           </el-form-item>
         </template>
         <el-empty v-else description="该分类未配置规格，可直接按颜色生成 SKU" :image-size="64" />
+        <div class="sku-batch-summary" data-testid="sku-batch-summary">
+          <span>预计生成 {{ skuCombinationCount }} 个 SKU</span>
+          <span v-if="skuCombinationCount > skuBatchLimit" class="sku-batch-limit">
+            单次最多生成 {{ skuBatchLimit }} 个，请减少颜色或规格选项
+          </span>
+        </div>
       </el-form>
       <template #footer>
-        <el-button @click="skuCreateOpen = false">取消</el-button>
-        <el-button type="primary" :loading="skuSaving" @click="saveSku">生成 SKU</el-button>
+        <el-button :disabled="skuSaving" @click="skuCreateOpen = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="skuSaving"
+          :disabled="!canSubmitSkuBatch"
+          data-testid="batch-submit"
+          @click="saveSku"
+        >生成 SKU</el-button>
       </template>
     </el-dialog>
 
@@ -399,26 +440,62 @@
         <el-button type="primary" :loading="moveCategorySaving" @click="saveMoveCategory">确认移动</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="statusVisible" title="变更商品状态" width="min(460px, 94vw)" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="生命周期" required>
+          <el-select v-model="statusForm.lifecycle_status" class="form-control" data-testid="product-master-lifecycle-status">
+            <el-option
+              v-for="option in lifecycleOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="销售状态" required>
+          <el-select v-model="statusForm.sales_status" class="form-control" data-testid="product-master-sales-status">
+            <el-option
+              v-for="option in salesStatusOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="statusVisible = false">取消</el-button>
+        <el-button type="primary" :loading="statusSaving" data-testid="product-master-save-status" @click="saveStatus">保存状态</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import {
-  createProductSku,
+  createProductSkuBatch,
   createProductSpu,
   fetchProductCategories,
   fetchProductColors,
   fetchProductAttributes,
   fetchProductMasterList,
   updateProductSpu,
+  updateProductSpuStatus,
+  deleteProductSpu,
   bulkUpdateProductSpus
 } from '../../api/products';
 import { useAuthStore } from '../../stores/auth';
 import { apiState, collectionRows, collectionTotal, detailData, stateTagType } from '../../utils/businessResponse';
 import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
 import { buildCategoryTree, categoryRowClass, categoryRowStyle } from '../../utils/productCategoryPresentation';
+import {
+  buildSkuBatchPayload,
+  normalizeBatchSelection,
+  skuBatchCombinationCount
+} from '../../utils/skuBatch';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
@@ -463,7 +540,8 @@ const attributes = ref([]);
 const skuCreateOpen = ref(false);
 const skuSaving = ref(false);
 const skuTarget = ref(null);
-const skuForm = reactive({ color_code: '', spec_values: {} });
+const skuForm = reactive({ color_codes: [], spec_values: {} });
+const skuBatchLimit = 200;
 const skuPreviewLimit = 2;
 const skuPopoverId = ref(null);
 const selectedSkuTitle = ref('');
@@ -474,6 +552,21 @@ const bulkMasterForm = reactive({ product_name: '', category_node: null });
 const moveCategoryVisible = ref(false);
 const moveCategorySaving = ref(false);
 const moveCategoryNode = ref(null);
+const statusVisible = ref(false);
+const statusSaving = ref(false);
+const statusForm = reactive({ id: null, lifecycle_status: 'draft', sales_status: 'not_listed' });
+
+const lifecycleOptions = [
+  { value: 'draft', label: '草稿' },
+  { value: 'active', label: '启用' },
+  { value: 'discontinued', label: '停用' },
+];
+const salesStatusOptions = [
+  { value: 'not_listed', label: '未刊登' },
+  { value: 'on_sale', label: '销售中' },
+  { value: 'paused', label: '暂停' },
+  { value: 'stopped', label: '停止' },
+];
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
@@ -838,6 +931,99 @@ async function saveEdit() {
   }
 }
 
+function openStatusEdit(row) {
+  if (!canManage.value || !row?.id) return;
+  Object.assign(statusForm, {
+    id: row.id,
+    lifecycle_status: row.lifecycle_status || 'draft',
+    sales_status: row.sales_status || 'not_listed',
+  });
+  statusVisible.value = true;
+}
+
+async function saveStatus() {
+  if (!canManage.value || !statusForm.id || statusSaving.value) return;
+  if (!lifecycleOptions.some((option) => option.value === statusForm.lifecycle_status)
+    || !salesStatusOptions.some((option) => option.value === statusForm.sales_status)) {
+    ElMessage.warning('请选择有效的生命周期和销售状态');
+    return;
+  }
+  statusSaving.value = true;
+  try {
+    const response = await updateProductSpuStatus(statusForm.id, {
+      lifecycle_status: statusForm.lifecycle_status,
+      sales_status: statusForm.sales_status,
+    });
+    if (!response.success) {
+      ElMessage.error(response.message || '商品状态更新失败');
+      return;
+    }
+    statusVisible.value = false;
+    ElMessage.success('商品状态已更新');
+    await load();
+  } finally {
+    statusSaving.value = false;
+  }
+}
+
+function stateConflict(response) {
+  return response?.http_status === 409 || response?.code === 'STATE_CONFLICT';
+}
+
+function referenceDescription(response) {
+  const references = Array.isArray(response?.data?.references) ? response.data.references.filter(Boolean) : [];
+  return references.length ? references.join('、') : '其他业务数据';
+}
+
+async function deleteMaster(row) {
+  if (!canManage.value || !row?.id) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除商品主数据“${row.spu_code || row.product_name || row.id}”吗？删除后不可恢复。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+
+  const response = await deleteProductSpu(row.id);
+  if (response.success) {
+    ElMessage.success('商品主数据已删除');
+    await load();
+    return;
+  }
+  if (!stateConflict(response)) {
+    ElMessage.error(response.message || '商品主数据删除失败');
+    return;
+  }
+
+  if (!response.data?.can_deactivate) {
+    ElMessage.warning(`商品存在引用（${referenceDescription(response)}），当前只能保留并由业务流程处理。`);
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `该商品被以下数据引用：${referenceDescription(response)}。存在引用时不能删除，是否改为停用？`,
+      '存在业务引用',
+      { type: 'warning', confirmButtonText: '停用', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  const statusResponse = await updateProductSpuStatus(row.id, {
+    lifecycle_status: 'discontinued',
+    sales_status: 'stopped',
+    reason: '删除时存在业务引用，改为停用',
+  });
+  if (!statusResponse.success) {
+    ElMessage.error(statusResponse.message || '商品停用失败');
+    return;
+  }
+  ElMessage.success('商品存在引用，已改为停用');
+  await load();
+}
+
 function openSkuCreate(row) {
   if (!canManage.value || !row?.id) return;
   if (!isUsableCategory(row.category_node)) {
@@ -845,34 +1031,43 @@ function openSkuCreate(row) {
     return;
   }
   skuTarget.value = row;
-  skuForm.color_code = '';
-  skuForm.spec_values = Object.fromEntries(skuDimensions.value.map((dimension) => [dimension.code, '']));
+  skuForm.color_codes = [];
+  skuForm.spec_values = Object.fromEntries(skuDimensions.value.map((dimension) => [dimension.code, []]));
   skuCreateOpen.value = true;
 }
 
 async function saveSku() {
   if (!canManage.value || skuSaving.value) return;
-  if (!skuTarget.value?.id || !skuForm.color_code) {
+  const colorCodes = normalizeBatchSelection(skuForm.color_codes);
+  if (!skuTarget.value?.id || !colorCodes.length) {
     ElMessage.warning('请选择启用的颜色');
     return;
   }
-  if (!activeColors.value.some((color) => color.code === skuForm.color_code)) {
+  if (!colorCodes.every((code) => activeColors.value.some((color) => String(color.code) === code))) {
     ElMessage.warning('请选择当前租户的启用颜色');
     return;
   }
+  if (skuCombinationCount.value > skuBatchLimit) {
+    ElMessage.warning(`单次最多生成 ${skuBatchLimit} 个 SKU，请减少颜色或规格选项`);
+    return;
+  }
+  const payload = buildSkuBatchPayload(
+    skuTarget.value.id,
+    colorCodes,
+    skuForm.spec_values,
+  );
   skuSaving.value = true;
   try {
-    const response = await createProductSku({
-      spu: skuTarget.value.id,
-      color_code: skuForm.color_code,
-      spec_values: { ...skuForm.spec_values }
-    });
+    const response = await createProductSkuBatch(payload);
     if (!response.success) {
       ElMessage.error(response.message || 'SKU 生成失败');
       return;
     }
+    const result = detailData(response.data);
+    const created = Number(result?.created || 0);
+    const skipped = Number(result?.skipped || 0);
     skuCreateOpen.value = false;
-    ElMessage.success(`SKU ${detailData(response.data)?.sku_code || ''} 已生成`);
+    ElMessage.success(`SKU 生成完成：新增 ${created} 个，已存在 ${skipped} 个`);
     await load();
   } finally {
     skuSaving.value = false;
@@ -884,6 +1079,17 @@ onMounted(async () => {
   await Promise.all([loadCategories(), loadColors(), loadAttributes()]);
   await load();
 });
+
+const skuCombinationCount = computed(() =>
+  skuBatchCombinationCount(skuForm.color_codes, skuForm.spec_values)
+);
+const canSubmitSkuBatch = computed(() =>
+  Boolean(skuTarget.value?.id) &&
+  normalizeBatchSelection(skuForm.color_codes).length > 0 &&
+  skuCombinationCount.value > 0 &&
+  skuCombinationCount.value <= skuBatchLimit &&
+  !skuSaving.value
+);
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleDocumentClick, true);
@@ -1095,6 +1301,20 @@ onBeforeUnmount(() => {
 
 .sku-form {
   margin-top: 16px;
+}
+
+.sku-batch-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.sku-batch-limit {
+  color: var(--el-color-danger);
 }
 
 .sku-summary {
