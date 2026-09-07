@@ -96,6 +96,8 @@
           :row-style="productRowStyle"
           @selection-change="selectedRows = $event"
         >
+          <el-table-column type="index" label="序号" width="70" fixed="left" :index="(page - 1) * pageSize + 1" />
+          <el-table-column v-if="canManage" type="selection" width="48" fixed="left" reserve-selection />
           <el-table-column label="图片" width="92" align="center" fixed="left">
             <template #default="{ row }">
               <el-image
@@ -115,8 +117,6 @@
               >无图</span>
             </template>
           </el-table-column>
-          <el-table-column type="index" label="序号" width="70" :index="(page - 1) * pageSize + 1" />
-          <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
           <el-table-column prop="legacy_spu_code" label="旧 SPU 编码" min-width="125" show-overflow-tooltip />
           <el-table-column prop="legacy_sku_code" label="旧 SKU 编码" min-width="150" show-overflow-tooltip />
           <el-table-column prop="spu_code" label="新 SPU 编码" min-width="125" show-overflow-tooltip>
@@ -507,6 +507,7 @@ import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import {
   fetchProductCategories,
+  fetchProductCategoryBackgroundColors,
   fetchProductColors,
   fetchProductAttributes,
   fetchProductDetailList,
@@ -522,7 +523,12 @@ import {
 } from '../../api/products';
 import { collectionRows, collectionTotal } from '../../utils/businessResponse';
 import { apiBaseUrl } from '../../api/baseUrl';
-import { buildCategoryTree, categoryRowClass, categoryRowStyle } from '../../utils/productCategoryPresentation';
+import {
+  buildCategoryTree,
+  categoryRowClass,
+  categoryRowStyle,
+  mergeCategoryBackgroundColors,
+} from '../../utils/productCategoryPresentation';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
@@ -937,10 +943,18 @@ async function load() {
 }
 
 async function loadDictionaries() {
-  const [categoryResponse, colorResponse, attributeResponse] = await Promise.all([
-    fetchProductCategories(), fetchProductColors(), fetchProductAttributes(),
+  const [categoryResponse, backgroundResponse, colorResponse, attributeResponse] = await Promise.all([
+    fetchProductCategories({ page: 1, page_size: 500 }),
+    fetchProductCategoryBackgroundColors(),
+    fetchProductColors(),
+    fetchProductAttributes(),
   ]);
-  if (categoryResponse.success) categories.value = collectionRows(categoryResponse.data);
+  if (categoryResponse.success || backgroundResponse.success) {
+    categories.value = mergeCategoryBackgroundColors(
+      categoryResponse.success ? collectionRows(categoryResponse.data) : [],
+      backgroundResponse.success ? collectionRows(backgroundResponse.data) : [],
+    );
+  }
   if (colorResponse.success) colors.value = collectionRows(colorResponse.data);
   if (attributeResponse.success) attributes.value = collectionRows(attributeResponse.data);
 }

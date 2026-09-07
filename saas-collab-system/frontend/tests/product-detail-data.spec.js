@@ -100,19 +100,24 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('if (!Object.keys(payload.fields).length && !payload.clear_fields.length)');
   });
 
-  it('把图片列放在序号和选择列之前，并保留放大预览', () => {
+  it('按序号、选择、图片的顺序展示列，并保留放大预览', () => {
     const imageIndex = page.indexOf('<el-table-column label="图片"');
     const indexColumn = page.indexOf('<el-table-column type="index"');
     const selectionColumn = page.indexOf('<el-table-column v-if="canManage" type="selection"');
     expect(imageIndex).toBeGreaterThan(-1);
-    expect(imageIndex).toBeLessThan(indexColumn);
-    expect(imageIndex).toBeLessThan(selectionColumn);
+    expect(indexColumn).toBeLessThan(selectionColumn);
+    expect(selectionColumn).toBeLessThan(imageIndex);
+    expect(page).toContain('type="index" label="序号" width="70" fixed="left"');
+    expect(page).toContain('type="selection" width="48" fixed="left"');
+    expect(page).toContain('label="图片" width="92" align="center" fixed="left"');
     expect(page).toContain(':preview-src-list="[resolveImageUrl(row.image_url || row.image)]"');
     expect(page).toContain('preview-teleported');
   });
 
   it('刷新查询时同步读取分类字典并支持三种导入模式', () => {
     expect(page).toContain('await loadDictionaries();');
+    expect(page).toContain('fetchProductCategoryBackgroundColors()');
+    expect(page).toContain('mergeCategoryBackgroundColors(');
     expect(page).toContain('data-testid="detail-import-mode"');
     expect(page).toContain('value="auto"');
     expect(page).toContain('value="create"');

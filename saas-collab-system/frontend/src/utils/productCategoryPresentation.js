@@ -51,6 +51,50 @@ function categoryById(categories) {
   );
 }
 
+/**
+ * Merge the FoundationSettings L2 colour collection into the category
+ * dictionary used by product tables.  The settings endpoint is deliberately
+ * separate from category CRUD, so a product page must not assume that the
+ * regular category response carries the latest colour (or even every L2
+ * node when that response is paginated).
+ */
+export function mergeCategoryBackgroundColors(categories = [], backgroundCategories = []) {
+  const merged = new Map();
+  for (const item of categories || []) {
+    const id = categoryReferenceId(item?.id);
+    if (id !== null && id !== undefined && id !== '') merged.set(String(id), { ...item });
+  }
+  for (const item of backgroundCategories || []) {
+    const id = categoryReferenceId(item?.id);
+    if (id === null || id === undefined || id === '') continue;
+    const key = String(id);
+    const existing = merged.get(key);
+    const background = String(item?.row_background_color ?? '').trim();
+    if (existing) {
+      merged.set(key, {
+        ...existing,
+        ...(item?.parent !== undefined && existing.parent === undefined ? { parent: item.parent } : {}),
+        ...(item?.parent_id !== undefined && existing.parent_id === undefined ? { parent_id: item.parent_id } : {}),
+        ...(item?.level !== undefined && existing.level === undefined ? { level: item.level } : {}),
+        ...(item?.code !== undefined && existing.code === undefined ? { code: item.code } : {}),
+        ...(item?.name !== undefined && existing.name === undefined ? { name: item.name } : {}),
+        // The settings endpoint is authoritative, including an empty value
+        // when an operator restores the category's default colour.
+        row_background_color: background,
+      });
+    } else {
+      merged.set(key, {
+        ...item,
+        level: Number(item?.level || 2),
+        parent: item?.parent ?? item?.parent_id ?? null,
+        parent_id: item?.parent_id ?? item?.parent ?? null,
+        row_background_color: background,
+      });
+    }
+  }
+  return Array.from(merged.values());
+}
+
 function l2Category(row, categories = []) {
   const map = categoryById(categories);
   const directReference = row?.category_l2_id

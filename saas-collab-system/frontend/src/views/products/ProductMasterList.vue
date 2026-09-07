@@ -479,6 +479,7 @@ import {
   createProductSkuBatch,
   createProductSpu,
   fetchProductCategories,
+  fetchProductCategoryBackgroundColors,
   fetchProductColors,
   fetchProductAttributes,
   fetchProductMasterList,
@@ -490,7 +491,12 @@ import {
 import { useAuthStore } from '../../stores/auth';
 import { apiState, collectionRows, collectionTotal, detailData, stateTagType } from '../../utils/businessResponse';
 import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
-import { buildCategoryTree, categoryRowClass, categoryRowStyle } from '../../utils/productCategoryPresentation';
+import {
+  buildCategoryTree,
+  categoryRowClass,
+  categoryRowStyle,
+  mergeCategoryBackgroundColors,
+} from '../../utils/productCategoryPresentation';
 import {
   buildSkuBatchPayload,
   normalizeBatchSelection,
@@ -714,8 +720,16 @@ async function load() {
 }
 
 async function loadCategories() {
-  const response = await fetchProductCategories({ page: 1, page_size: 500 });
-  if (response.success) categories.value = collectionRows(response.data);
+  const [response, backgroundResponse] = await Promise.all([
+    fetchProductCategories({ page: 1, page_size: 500 }),
+    fetchProductCategoryBackgroundColors(),
+  ]);
+  if (response.success || backgroundResponse.success) {
+    categories.value = mergeCategoryBackgroundColors(
+      response.success ? collectionRows(response.data) : [],
+      backgroundResponse.success ? collectionRows(backgroundResponse.data) : [],
+    );
+  }
 }
 
 async function loadColors() {
@@ -1036,6 +1050,24 @@ function openSkuCreate(row) {
   skuCreateOpen.value = true;
 }
 
+function skuGenerationErrorMessage(response) {
+  const collect = (value, path = '') => {
+    if (value === null || value === undefined || value === '') return [];
+    if (Array.isArray(value)) return value.flatMap((item) => collect(item, path));
+    if (typeof value === 'object') {
+      return Object.entries(value).flatMap(([key, item]) => collect(item, path ? `${path}.${key}` : key));
+    }
+    const text = String(value).trim();
+    return text ? [path ? `${path}：${text}` : text] : [];
+  };
+  const detailMessages = collect(response?.data);
+  if (detailMessages.length) return [...new Set(detailMessages)].join('；');
+
+  const message = String(response?.message || response?.error?.message || '').trim();
+  const generic = /^(?:error message|sku\s*生成失败|request failed(?: with status code \d+)?|api request failed|network error)$/i;
+  return message && !generic.test(message) ? message : 'SKU 生成失败，请检查商品分类、颜色和规格配置。';
+}
+
 async function saveSku() {
   if (!canManage.value || skuSaving.value) return;
   const colorCodes = normalizeBatchSelection(skuForm.color_codes);
@@ -1060,15 +1092,20 @@ async function saveSku() {
   try {
     const response = await createProductSkuBatch(payload);
     if (!response.success) {
-      ElMessage.error(response.message || 'SKU 生成失败');
+      ElMessage.error(skuGenerationErrorMessage(response));
       return;
     }
-    const result = detailData(response.data);
+    // Batch responses keep summary counters at the top level even when the
+    // response also includes per-SKU rows.  Do not use detailData here: it
+    // unwraps results[0] and loses the aggregate created/skipped counters.
+    const result = response.data || {};
     const created = Number(result?.created || 0);
     const skipped = Number(result?.skipped || 0);
     skuCreateOpen.value = false;
     ElMessage.success(`SKU 生成完成：新增 ${created} 个，已存在 ${skipped} 个`);
     await load();
+  } catch (error) {
+    ElMessage.error(skuGenerationErrorMessage(error?.response || error));
   } finally {
     skuSaving.value = false;
   }
