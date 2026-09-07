@@ -252,8 +252,17 @@
         <el-form-item label="建联任务">
           <el-input :model-value="`${displayValue(sampleContext?.task_no)} · ${displayValue(sampleContext?.task_name)}`" readonly />
         </el-form-item>
-        <el-form-item label="达人" required>
-          <el-select v-model="sampleForm.influencer" filterable placeholder="请选择达人">
+        <el-form-item label="达人昵称" required>
+          <el-select
+            v-model="sampleForm.influencer"
+            filterable
+            allow-create
+            default-first-option
+            reserve-keyword
+            :loading="sampleInfluencerLoading"
+            @change="resolveSelectedSampleInfluencer"
+            placeholder="选择或输入达人昵称"
+          >
             <el-option
               v-for="influencer in influencerOptions"
               :key="influencer.id"
@@ -261,6 +270,7 @@
               :value="influencer.id"
             />
           </el-select>
+          <small class="field-hint">新达人可直接输入昵称，平台达人 ID 可后续补录。</small>
           <el-alert v-if="selectedSampleInfluencer?.is_blacklisted" class="blacklist-alert" type="error" :closable="false" title="该达人在黑名单中，不能创建送样。" />
           <el-alert v-else-if="duplicateSampleWarning" class="blacklist-alert" type="warning" :closable="false" :title="duplicateSampleWarning" />
         </el-form-item>
@@ -278,7 +288,7 @@
       </el-form>
       <template #footer>
         <el-button @click="sampleVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="selectedSampleInfluencer?.is_blacklisted" :loading="sampleSaving" @click="submitSample">创建送样</el-button>
+        <el-button type="primary" :disabled="sampleInfluencerLoading || selectedSampleInfluencer?.is_blacklisted" :loading="sampleSaving" @click="submitSample">创建送样</el-button>
       </template>
     </el-dialog>
 
@@ -392,6 +402,7 @@ import {
   OUTREACH_STATUS_LABELS,
   restoreOutreachTarget,
   restoreOutreachTask,
+  resolveOrCreateInfluencerNickname,
   sampleDuplicateWarning,
   statusLabel,
   updateOutreachStatus,
@@ -460,8 +471,10 @@ const productMatchType = ref('info');
 const productMatchSeq = ref(0);
 const sampleVisible = ref(false);
 const sampleSaving = ref(false);
+const sampleInfluencerLoading = ref(false);
 const sampleRequestKey = ref('');
 const sampleContext = ref(null);
+const sampleTargetInfluencerId = ref(null);
 const sampleForm = reactive({
   outreach_task: null,
   outreach_target: null,
@@ -927,6 +940,31 @@ async function refreshSampleInfluencer(id) {
   }
 }
 
+async function resolveSelectedSampleInfluencer() {
+  const selected = selectedSampleInfluencer.value;
+  if (selected) {
+    await refreshSampleInfluencer(selected.id);
+    return selectedSampleInfluencer.value;
+  }
+  const nickname = String(sampleForm.influencer || '').trim();
+  if (!nickname) return null;
+  sampleInfluencerLoading.value = true;
+  const response = await resolveOrCreateInfluencerNickname(nickname, sampleRequestKey.value);
+  sampleInfluencerLoading.value = false;
+  if (!response.success) {
+    ElMessage.error(formatInfluencerError(response, '达人昵称保存失败'));
+    return null;
+  }
+  const resolved = response.data;
+  influencerOptions.value = [
+    resolved,
+    ...influencerOptions.value.filter((item) => String(item.id) !== String(resolved.id))
+  ];
+  sampleForm.influencer = resolved.id;
+  if (resolved.created) ElMessage.success('已按昵称建立达人档案，达人 ID 可后续补录');
+  return resolved;
+}
+
 async function openSampleCreate(task, target = null) {
   if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
   if (target && (!target.id || target.is_deleted)) return;
@@ -949,6 +987,7 @@ async function openSampleCreate(task, target = null) {
     requested_sku: '',
     quantity: 1
   });
+  sampleTargetInfluencerId.value = target?.influencer ?? null;
   await refreshSampleInfluencer(sampleForm.influencer);
   sampleRequestKey.value = newRequestKey();
   sampleVisible.value = true;
@@ -968,6 +1007,8 @@ async function submitSample() {
   if (!sampleForm.outreach_task || !sampleForm.influencer || !sampleForm.store) {
     return ElMessage.warning('请先选择送样达人');
   }
+  const resolvedInfluencer = await resolveSelectedSampleInfluencer();
+  if (!resolvedInfluencer) return;
   if (selectedSampleInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能创建送样');
   const siteCode = String(sampleForm.site_code || '').trim().toUpperCase();
   const quantity = Number(sampleForm.quantity);
@@ -977,7 +1018,9 @@ async function submitSample() {
   sampleSaving.value = true;
   const payload = {
     outreach_task: sampleForm.outreach_task,
-    ...(sampleForm.outreach_target ? { outreach_target: sampleForm.outreach_target } : {}),
+    ...(sampleForm.outreach_target && String(sampleTargetInfluencerId.value) === String(sampleForm.influencer)
+      ? { outreach_target: sampleForm.outreach_target }
+      : {}),
     influencer: sampleForm.influencer,
     store: sampleForm.store,
     external_product_id: sampleForm.external_product_id,
