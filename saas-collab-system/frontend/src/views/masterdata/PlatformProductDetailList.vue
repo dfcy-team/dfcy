@@ -1,16 +1,18 @@
 <template>
   <AppPage
     eyebrow="MASTER DATA"
-    title="平台商品明细"
-    subtitle="按平台、店铺维护商品与变体快照；旧 SKU 关联仅用于内部 SKU 映射，不保存平台凭据。"
-    boundary-note="页面只展示当前 tenant 可见的商品明细；导入会校验平台、店铺、国家代码和旧 SKU 的租户边界。"
+    title="平台商品明细数据"
+    subtitle="平台商品明细来源于已授权店铺的商品/变体快照；新旧 SKU 一致时自动关联，冲突或缺失时进入待处理。"
+    boundary-note="页面只展示当前租户可见的商品明细；来源、平台更新时间、本地更新时间和 SKU 归集状态均以服务端返回为准，不在此保存平台凭据。"
     :capability="capability"
   >
     <template #action>
-      <el-button class="template-button" @click="downloadTemplate">下载导入模板</el-button>
-      <el-button class="format-button" @click="templateDialog = true">字段说明</el-button>
-      <el-button class="import-button" type="primary" :loading="importing" :disabled="importing" @click="fileInput?.click()">{{ importing ? '正在导入' : '导入 CSV/XLSX' }}</el-button>
-      <el-button class="variant-id-import-button" :loading="importing" :disabled="importing" @click="variantProductIdFileInput?.click()">按变体ID导入平台商品ID</el-button>
+      <template v-if="!mappingOnly">
+        <el-button class="template-button" @click="downloadTemplate">下载导入模板</el-button>
+        <el-button class="format-button" @click="templateDialog = true">字段说明</el-button>
+        <el-button v-if="canImport" class="import-button" type="primary" :loading="importing" :disabled="importing" @click="fileInput?.click()">{{ importing ? '正在导入' : '导入 CSV/XLSX' }}</el-button>
+        <el-button v-if="canImport" class="variant-id-import-button" :loading="importing" :disabled="importing" @click="variantProductIdFileInput?.click()">按变体ID导入平台商品ID</el-button>
+      </template>
       <input ref="fileInput" hidden type="file" accept=".csv,.xlsx" @change="onImport" />
       <input ref="variantProductIdFileInput" hidden type="file" accept=".csv,.xlsx" @change="onVariantProductIdImport" />
     </template>
@@ -25,7 +27,24 @@
       @close="message = ''"
     />
 
-    <div class="detail-workspace">
+    <el-alert
+      v-if="!mappingOnly"
+      class="identity-guidance"
+      title="平台商品来源与 SKU 归集规则"
+      description="平台商品档案按店铺授权的商品/变体身份幂等更新；按平台 SKU 精确匹配内部新 SKU 或旧 SKU，同时提供新旧编码时必须指向同一条内部商品明细，满足条件则自动关联。缺失、重复或新旧编码不一致会保留平台明细并标记为待处理，不会静默覆盖已有人工确认。"
+      type="info"
+      show-icon
+      :closable="false"
+    />
+
+    <ProductMappingPanel
+      v-if="mappingOnly"
+      standalone
+      :initial-variant-id="route.query.variant_id"
+      :initial-store-id="route.query.store_id"
+    />
+
+    <div v-else class="detail-workspace">
       <aside class="category-panel">
         <div class="panel-title">
           <strong>分类目录</strong>
@@ -51,7 +70,7 @@
         <strong>{{ total }}</strong>
       </div>
       <div class="summary-item">
-        <span>已关联新 SKU</span>
+        <span>已完成 SKU 归集</span>
         <strong>{{ linkedCount }}</strong>
       </div>
       <div class="summary-item">
@@ -60,9 +79,21 @@
       </div>
       <div class="summary-item summary-item--scope">
         <span>数据边界</span>
-        <strong>当前 tenant</strong>
+        <strong>当前租户</strong>
       </div>
     </section>
+
+    <div v-if="canViewMapping && integrationEnabled" class="mapping-tabs-bar">
+      <el-tabs v-model="filters.mapping_status" class="mapping-tabs" @tab-change="submitFilters">
+        <el-tab-pane label="全部商品明细" name="" />
+        <el-tab-pane label="待映射" name="unmapped" />
+        <el-tab-pane label="待确认" name="suggested" />
+        <el-tab-pane label="映射冲突" name="conflict" />
+        <el-tab-pane label="已映射" name="mapped" />
+        <el-tab-pane label="已停用" name="inactive" />
+      </el-tabs>
+      <el-button class="mapping-history-button" @click="unlinkedHistoryVisible = true">未归集历史</el-button>
+    </div>
 
     <section class="resource-toolbar" aria-label="筛选条件">
       <el-input
@@ -109,11 +140,33 @@
         <el-table-column prop="platform_product_id" label="平台商品 ID" min-width="150" show-overflow-tooltip />
         <el-table-column prop="platform_variant_id" label="变体 ID" min-width="140" show-overflow-tooltip />
         <el-table-column prop="platform_sku" label="平台 SKU" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="source_old_sku_code" label="旧 SKU 关联" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.source_old_sku_code || row.internal_legacy_sku_code || '-' }}</template>
+        <el-table-column prop="source_old_sku_code" label="来源 SKU" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.source_old_sku_code || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="internal_sku_code" label="新 SKU" min-width="140" show-overflow-tooltip>
+        <el-table-column prop="internal_legacy_sku_code" label="内部旧 SKU" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.internal_legacy_sku_code || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="internal_sku_code" label="内部新 SKU" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.internal_sku_code || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="SKU 归集" min-width="125">
+          <template #default="{ row }">
+            <el-tag :type="skuIdentityStateType(row)" effect="plain">{{ skuIdentityStateLabel(row) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="数据来源" min-width="130" show-overflow-tooltip>
+          <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
+        </el-table-column>
+        <el-table-column label="平台更新时间" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatDateTime(row.platform_updated_at, '未提供') }}</template>
+        </el-table-column>
+        <el-table-column label="本地更新时间" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatDateTime(row.updated_at, '未提供') }}</template>
+        </el-table-column>
+        <el-table-column v-if="canViewMapping && integrationEnabled" label="SKU 映射状态" min-width="125">
+          <template #default="{ row }">
+            <el-tag :type="mappingStatusType(rowMappingStatus(row))" effect="plain">{{ mappingStatusLabel(rowMappingStatus(row)) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="title" label="标题" min-width="190" show-overflow-tooltip />
         <el-table-column prop="variant" label="变体" min-width="150" show-overflow-tooltip />
@@ -126,8 +179,19 @@
         </el-table-column>
         <el-table-column prop="owner" label="负责人" min-width="110" show-overflow-tooltip />
         <el-table-column prop="leader" label="组长" min-width="110" show-overflow-tooltip />
-        <el-table-column v-if="canManage" label="操作" min-width="110" fixed="right">
-          <template #default="{ row }"><el-button link type="primary" @click="openEdit(row)">编辑</el-button></template>
+        <el-table-column v-if="(canViewMapping && integrationEnabled) || canManage || canViewSync" label="操作" min-width="250" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="canViewMapping && integrationEnabled" link type="primary" @click="openMapping(row)">SKU 映射</el-button>
+            <el-button
+              v-if="canViewSync"
+              link
+              type="primary"
+              :disabled="!productSyncEntryState(row).allowed"
+              :title="productSyncEntryState(row).reason"
+              @click="openProductSync(row)"
+            >平台商品同步</el-button>
+            <el-button v-if="canManage" link type="primary" @click="openEdit(row)">编辑</el-button>
+          </template>
         </el-table-column>
       </el-table>
 
@@ -146,6 +210,17 @@
     </section>
       </main>
     </div>
+
+    <ProductMappingPanel
+      v-if="!mappingOnly"
+      v-model="mappingPanelVisible"
+      :row="mappingRow"
+      @updated="onMappingUpdated"
+    />
+
+    <el-drawer v-model="unlinkedHistoryVisible" title="未归集历史" size="min(1100px, 96vw)" destroy-on-close>
+      <ProductMappingPanel v-if="unlinkedHistoryVisible" standalone initial-status="unlinked" />
+    </el-drawer>
 
     <el-dialog v-model="importDialog" :title="importing ? '正在导入' : '导入结果'" width="min(680px, 94vw)" :close-on-click-modal="!importing" :show-close="!importing">
       <el-steps :active="importStep" finish-status="success" align-center><el-step title="文件已选择"/><el-step title="上传并解析"/><el-step title="导入完成"/></el-steps>
@@ -212,16 +287,24 @@
     </el-dialog>
 
     <el-dialog v-model="editVisible" title="编辑平台商品明细" width="min(620px, 94vw)" :close-on-click-modal="false">
+      <el-alert
+        v-if="editControlled"
+        title="该明细已纳入 SKU 映射控制"
+        description="平台商品身份和 SKU 字段请从 SKU 映射维护；本窗口仍可修改标题、销售状态、负责人等描述字段。"
+        type="info"
+        show-icon
+        :closable="false"
+      />
       <el-form label-position="top">
         <el-form-item label="标题"><el-input v-model="editForm.title" placeholder="留空则不修改" /></el-form-item>
         <el-form-item label="变体标题"><el-input v-model="editForm.variant" placeholder="留空则不修改" /></el-form-item>
-        <el-form-item label="平台商品 ID"><el-input v-model="editForm.platform_product_id" placeholder="留空则不修改" /></el-form-item>
-        <el-form-item label="平台变体 ID"><el-input v-model="editForm.platform_variant_id" placeholder="留空则不修改，必须保持店铺内唯一" /></el-form-item>
-        <el-form-item label="平台 SKU"><el-input v-model="editForm.platform_sku" placeholder="留空则不修改" /></el-form-item>
+        <el-form-item label="平台商品 ID"><el-input v-model="editForm.platform_product_id" :disabled="editControlled" placeholder="留空则不修改" /></el-form-item>
+        <el-form-item label="平台变体 ID"><el-input v-model="editForm.platform_variant_id" :disabled="editControlled" placeholder="留空则不修改，必须保持店铺内唯一" /></el-form-item>
+        <el-form-item label="平台 SKU"><el-input v-model="editForm.platform_sku" :disabled="editControlled" placeholder="留空则不修改" /></el-form-item>
         <el-form-item label="销售状态"><el-input v-model="editForm.sales_status" placeholder="例如：在售、停售、草稿" /></el-form-item>
         <el-form-item label="负责人"><el-input v-model="editForm.owner" placeholder="留空则不修改" /></el-form-item>
         <el-form-item label="组长"><el-input v-model="editForm.leader" placeholder="留空则不修改" /></el-form-item>
-        <el-form-item label="旧 SKU 关联"><el-input v-model="editForm.source_old_sku_code" placeholder="留空则不修改，必须匹配已存在 SKU" /></el-form-item>
+        <el-form-item label="旧 SKU 关联"><el-input v-model="editForm.source_old_sku_code" :disabled="editControlled" placeholder="留空则不修改，必须匹配已存在 SKU" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -264,10 +347,14 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
+import { useRoute, useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
+import ProductMappingPanel from '../../components/ProductMappingPanel.vue';
 import { fetchPlatforms, fetchStores } from '../../api/masterData';
 import { fetchPlatformProductDetails, importPlatformProductDetails, importPlatformProductIds, updatePlatformProductDetail, bulkUpdatePlatformProductDetails } from '../../api/platformProductDetails';
+import { fetchConnectionCapabilities, fetchSubjectApiAccess } from '../../api/integrations';
 import { fetchProductCategories } from '../../api/products';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
@@ -294,10 +381,21 @@ let importTimer = null;
 const serverPaginated = ref(false);
 const platformOptions = ref([]);
 const storeOptions = ref([]);
-const filters = reactive({ search: '', platform_id: '', store_id: '', sales_status: '', category_id: '', page: 1, page_size: 20 });
+const route = useRoute();
+const router = useRouter();
+const filters = reactive({ search: '', platform_id: '', store_id: String(route.query.store_id || ''), platform_variant_id: String(route.query.variant_id || ''), sales_status: '', mapping_status: String(route.query.mapping_status || ''), category_id: '', page: 1, page_size: 20 });
 const pageSizeOptions = [20, 50, 100];
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('listings.product_detail.manage'));
+const canImport = computed(() => auth.hasPermission('listings.product_detail.import'));
+const canViewDetails = computed(() => auth.hasPermission('listings.product_detail.view'));
+const canViewMapping = computed(() => auth.hasPermission('integrations.product_mapping.view'));
+const canViewSync = computed(() => auth.hasPermission('integrations.view') && auth.hasPermission('integrations.store.view'));
+const integrationEnabled = computed(() => auth.isModuleEnabled('api_integrations'));
+const mappingOnly = computed(() => canViewMapping.value && !canViewDetails.value);
+const mappingPanelVisible = ref(false);
+const unlinkedHistoryVisible = ref(false);
+const mappingRow = ref(null);
 const categories = ref([]);
 const categorySearch = ref('');
 const categoryTreeRef = ref(null);
@@ -305,6 +403,10 @@ const selectedRows = ref([]);
 const editVisible = ref(false);
 const editSaving = ref(false);
 const editForm = reactive({ id: null, title: '', variant: '', platform_product_id: '', platform_variant_id: '', platform_sku: '', sales_status: '', owner: '', leader: '', source_old_sku_code: '' });
+const editSnapshot = ref(null);
+const editFieldNames = ['title', 'variant', 'platform_product_id', 'platform_variant_id', 'platform_sku', 'sales_status', 'owner', 'leader', 'source_old_sku_code'];
+const controlledEditFields = new Set(['platform_product_id', 'platform_variant_id', 'platform_sku', 'source_old_sku_code']);
+const editControlled = computed(() => Boolean(editSnapshot.value?.controlled));
 const bulkVisible = ref(false);
 const bulkSaving = ref(false);
 const bulkPreview = ref(null);
@@ -406,8 +508,134 @@ function downloadTemplate() {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-const linkedCount = computed(() => allRows.value.filter((row) => row.internal_sku_code || row.internal_sku).length);
+const linkedCount = computed(() => allRows.value.filter((row) => ['auto', 'manual', 'linked'].includes(skuIdentityState(row))).length);
 const onSaleCount = computed(() => allRows.value.filter((row) => /active|on.?sale|在售/i.test(String(row.sales_status || ''))).length);
+
+function rowMappingStatus(row) {
+  const mapping = row?.mapping || row?.mapping_summary;
+  if (mapping?.status) return mapping.status;
+  if (row?.mapping_status) return row.mapping_status;
+  // A detail-only response may intentionally omit the mapping summary.  Only
+  // an explicit unmapped field or the protected unmapped server filter is
+  // allowed to make that state visible; otherwise keep the state neutral.
+  return filters.mapping_status === 'unmapped' ? 'unmapped' : 'unknown';
+}
+function mappingStatusLabel(value) {
+  return ({ unmapped: '待映射', suggested: '待确认', mapped: '已映射', conflict: '冲突', inactive: '已停用', unknown: '未获取映射状态' })[value] || '未获取映射状态';
+}
+function mappingStatusType(value) {
+  return ({ unmapped: 'info', suggested: 'warning', mapped: 'success', conflict: 'danger', inactive: 'info' })[value] || 'info';
+}
+
+const productSyncPlatforms = new Set(['shopee', 'tiktok']);
+
+function platformCode(row) {
+  return String(row?.platform_code || row?.platform_key || row?.platform_type || row?.platform || '').trim().toLowerCase();
+}
+
+function productSyncEntryState(row) {
+  if (!canViewSync.value) return { allowed: false, reason: '当前角色没有查看同步任务的权限。' };
+  if (!row?.store_id && !row?.store) return { allowed: false, reason: '当前平台商品明细没有可定位的店铺，暂不能进入商品同步任务。' };
+  const platform = platformCode(row);
+  if (!productSyncPlatforms.has(platform)) return { allowed: false, reason: '当前平台尚未登记已验证的平台商品同步连接器。' };
+  if (row?.product_sync_supported === false || row?.connector_supported === false) {
+    return { allowed: false, reason: '当前平台商品同步连接器未实现或未启用。' };
+  }
+  if (row?.connector_verified === false || row?.product_sync_verified === false) {
+    return { allowed: false, reason: '平台商品同步连接器尚未通过验证。' };
+  }
+  return { allowed: true, reason: '仅查看当前已授权店铺的平台商品同步任务。' };
+}
+
+function sourceLabel(value) {
+  return ({
+    api: '平台 API 同步',
+    api_sync: '平台 API 同步',
+    sync: '平台 API 同步',
+    import: '人工导入',
+    manual: '人工维护',
+  })[String(value || '').toLowerCase()] || (value || '未标明');
+}
+
+function formatDateTime(value, emptyLabel = '未提供') {
+  if (!value) return emptyLabel;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function skuIdentityState(row) {
+  const explicit = String(
+    row?.sku_resolution_state
+      || row?.sku_ingestion_state
+      || row?.identity_status
+      || row?.mapping?.resolution_state
+      || '',
+  ).toLowerCase();
+  if (['conflict', 'mismatch', 'ambiguous'].includes(explicit)) return 'conflict';
+  if (['pending', 'unresolved', 'missing', 'unmapped'].includes(explicit)) return 'pending';
+  if (['matched', 'exact', 'auto', 'auto_matched', 'resolved'].includes(explicit)) return 'auto';
+  if (['api_exact_match', 'api_sync_exact_match'].includes(String(row?.mapping?.mapping_source || '').toLowerCase())
+      && row?.mapping?.status === 'mapped' && row?.mapping?.manually_confirmed === false) return 'auto';
+  if (row?.mapping?.status === 'conflict') return 'conflict';
+  if (row?.mapping?.status === 'suggested' || row?.mapping?.status === 'unmapped') return 'pending';
+  if (row?.mapping?.status === 'mapped') return row.mapping.manually_confirmed ? 'manual' : 'linked';
+  return 'pending';
+}
+
+function skuIdentityStateLabel(row) {
+  return ({ auto: '自动精确关联', manual: '人工确认', linked: '已关联', pending: '待处理', conflict: '待人工确认' })[skuIdentityState(row)] || '待处理';
+}
+
+function skuIdentityStateType(row) {
+  return ({ auto: 'success', manual: 'success', linked: 'success', pending: 'warning', conflict: 'danger' })[skuIdentityState(row)] || 'info';
+}
+
+async function openProductSync(row) {
+  const state = productSyncEntryState(row);
+  if (!state.allowed) {
+    ElMessage.warning(state.reason);
+    return;
+  }
+  const storeId = row?.store_id || row?.store;
+  try {
+    // Re-check effective authorization and PRODUCT read capability at the
+    // action boundary.  A stale platform-detail row must never turn into an
+    // active sync-task action after authorization has been revoked.
+    const accessResponse = await fetchSubjectApiAccess('store', storeId);
+    if (!accessResponse?.success) throw new Error(accessResponse?.message || '店铺 API 授权读取失败');
+    const access = accessResponse.data || {};
+    const platform = platformCode(row);
+    const binding = (access.bindings || []).find((item) => (
+      String(item.api_type || '').toLowerCase() === 'marketplace'
+      && String(item.platform || platform).toLowerCase() === platform
+      && ['active', 'authorized'].includes(String(item.status || '').toLowerCase())
+    ));
+    if (!binding?.id) throw new Error('当前店铺没有有效的平台授权，请先完成店铺 API 授权。');
+    const capabilityResponse = await fetchConnectionCapabilities(binding.id);
+    const capabilities = capabilityResponse?.data?.results || [];
+    const productCapability = capabilities.find((item) => String(item.capability_code || '').toUpperCase() === 'PRODUCT');
+    if (!productCapability || !productCapability.read_enabled || productCapability.write_enabled || productCapability.status !== 'active') {
+      throw new Error('当前店铺的平台商品只读能力尚未验证或未启用。');
+    }
+    router.push({ path: '/integrations/sync-jobs', query: {
+      platform,
+      api_type: 'marketplace',
+      resource_type: 'platform_product',
+      store_id: String(storeId),
+      subject: row?.store_name || row?.store_code || '',
+    } });
+  } catch (error) {
+    ElMessage.warning(error?.message || '当前店铺暂不能进入平台商品同步任务。');
+  }
+}
+function openMapping(row) {
+  if (!canViewMapping.value) return;
+  mappingRow.value = row;
+  mappingPanelVisible.value = true;
+}
+function onMappingUpdated() {
+  loadData();
+}
 
 function responseRows(response) {
   const data = response?.data;
@@ -508,7 +736,9 @@ function resetFilters() {
   filters.search = '';
   filters.platform_id = '';
   filters.store_id = '';
+  filters.platform_variant_id = '';
   filters.sales_status = '';
+  filters.mapping_status = '';
   filters.category_id = '';
   filters.page = 1;
   loadData();
@@ -527,22 +757,35 @@ function openEdit(row) {
     leader: row.leader || '',
     source_old_sku_code: row.source_old_sku_code || row.internal_legacy_sku_code || '',
   });
+  editSnapshot.value = {
+    controlled: Boolean(row?.mapping?.id || row?.mapping_summary?.id || row?.mapping_id),
+    values: Object.fromEntries(editFieldNames.map((field) => [field, String(editForm[field] || '').trim()])),
+  };
   editVisible.value = true;
 }
 
 async function saveEdit() {
   const payload = {};
-  for (const field of ['title', 'variant', 'platform_product_id', 'platform_variant_id', 'platform_sku', 'sales_status', 'owner', 'leader', 'source_old_sku_code']) {
-    if (String(editForm[field] || '').trim()) payload[field] = String(editForm[field]).trim();
+  const original = editSnapshot.value?.values || {};
+  for (const field of editFieldNames) {
+    if (editControlled.value && controlledEditFields.has(field)) continue;
+    const value = String(editForm[field] || '').trim();
+    if (value && value !== original[field]) payload[field] = value;
   }
   if (!Object.keys(payload).length) { message.value = '请至少填写一个需要修改的字段'; messageType.value = 'warning'; return; }
   editSaving.value = true;
-  const response = await updatePlatformProductDetail(editForm.id, payload);
-  editSaving.value = false;
-  if (!response.success) { message.value = response.message || '保存失败'; messageType.value = 'error'; return; }
-  editVisible.value = false;
-  message.value = '平台商品明细已更新'; messageType.value = 'success';
-  await loadData();
+  try {
+    const response = await updatePlatformProductDetail(editForm.id, payload);
+    if (!response?.success) { message.value = response?.message || '保存失败'; messageType.value = 'error'; return; }
+    editVisible.value = false;
+    message.value = '平台商品明细已更新'; messageType.value = 'success';
+    await loadData();
+  } catch (error) {
+    message.value = error?.message || '保存失败，请稍后重试。';
+    messageType.value = 'error';
+  } finally {
+    editSaving.value = false;
+  }
 }
 
 function bulkPayload(preview = false) {
@@ -691,9 +934,25 @@ async function onVariantProductIdImport(event) {
   } finally { importing.value = false; importElapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000); clearInterval(importTimer); importTimer = null; }
 }
 
+async function openMappingFromRoute() {
+  if (!canViewMapping.value || route.query.panel !== 'mapping') return;
+  const variantId = String(route.query.variant_id || '').trim();
+  const storeId = String(route.query.store_id || '').trim();
+  if (!variantId) return;
+  const target = rows.value.find((row) => String(row.platform_variant_id || '') === variantId && (!storeId || String(row.store_id || row.store || '') === storeId));
+  if (target) openMapping(target);
+}
+
 onMounted(async () => {
+  // A detail-only role must not carry a mapping filter from an old deep link
+  // into the detail endpoint, because that filter is protected separately.
+  if (!canViewMapping.value || !integrationEnabled.value) filters.mapping_status = '';
+  // A mapping-only role must never fan out into platform/store/category APIs.
+  // The compatibility panel owns its scoped options request instead.
+  if (mappingOnly.value || !canViewDetails.value) return;
   await Promise.all([loadReferenceOptions(), loadCategories()]);
   await loadData();
+  await openMappingFromRoute();
 });
 onUnmounted(() => clearInterval(importTimer));
 </script>
@@ -734,6 +993,10 @@ onUnmounted(() => clearInterval(importTimer));
   border: 1px solid #dbe3ec;
   background: #fff;
 }
+.mapping-tabs-bar { display: flex; align-items: flex-start; gap: 12px; margin-top: 16px; }
+.mapping-tabs { flex: 1; min-width: 0; }
+.mapping-history-button { flex: 0 0 auto; margin-top: 4px; }
+.mapping-tabs :deep(.el-tabs__item) { font-size: 13px; }
 .toolbar-actions { display: flex; gap: 8px; }
 .resource-table { min-width: 0; margin-top: 16px; overflow: hidden; }
 .resource-table :deep(.el-table) { width: 100%; }
@@ -782,5 +1045,11 @@ onUnmounted(() => clearInterval(importTimer));
   .category-panel { min-height: 0; }
   .resource-pagination { flex-direction: column; align-items: stretch; }
   .resource-pagination :deep(.el-pagination) { justify-content: flex-start; margin-left: 0; }
+  .mapping-tabs-bar { align-items: stretch; flex-direction: column; }
+  .mapping-history-button { align-self: flex-start; margin-top: 0; }
+}
+@media (max-width: 560px) {
+  :deep(.app-page__actions) { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  :deep(.app-page__actions .el-button) { max-width: 100%; margin-left: 0; }
 }
 </style>

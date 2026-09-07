@@ -269,48 +269,216 @@ def _unique_skus(candidates):
     return list(unique.values())
 
 
+def _tenant_skus(tenant, candidates):
+    """Keep cache/direct-call candidates inside the resolver tenant."""
+
+    tenant_id = getattr(tenant, "pk", tenant)
+    return [candidate for candidate in _unique_skus(candidates) if candidate.tenant_id == tenant_id]
+
+
 class _NormalizedSKUCache(dict):
     """Marker type for importer caches whose keys are already normalized."""
 
     normalized_keys = True
 
 
+class SKUResolutionError(ValueError):
+    """A tenant-scoped SKU could not be resolved deterministically.
+
+    The importer uses the machine-readable ``code`` and ``state`` values to
+    keep the platform row while marking it pending/conflicted.  Direct API
+    callers still receive a regular ``ValueError`` subclass and therefore
+    retain the existing validation behaviour.
+    """
+
+    def __init__(self, message, code="sku_unresolved", state="pending"):
+        super().__init__(message)
+        self.code = code
+        self.state = state
+
+
+def _sku_candidates(tenant, value, cache, *, code_label):
+    """Resolve one new-SKU value from a cache or the tenant database."""
+
+    label = "新 SKU" if code_label == "new" else "SKU"
+    key = _sku_key(value)
+    if cache is not None:
+        candidates = _tenant_skus(tenant, _cache_candidates(cache, key))
+    else:
+        candidates = _tenant_skus(
+            tenant,
+            (
+                sku
+                for sku in ProductSKU.objects.filter(tenant=tenant)
+                if _sku_key(sku.sku_code) == key
+            ),
+        )
+    if len(candidates) > 1:
+        raise SKUResolutionError(
+            f"{label}匹配多个内部 SKU: {value}",
+            code=f"ambiguous_{code_label.lower().replace(' ', '_')}_sku",
+            state="conflict",
+        )
+    if not candidates:
+        raise SKUResolutionError(
+            f"{label}编码不存在或不属于当前租户: {value}",
+            code=f"missing_{code_label.lower().replace(' ', '_')}_sku",
+            state="pending",
+        )
+    return candidates[0]
+
+
+def _legacy_sku_candidates(tenant, value, cache):
+    """Resolve a legacy SKU through both legacy rows and SKU aliases."""
+
+    key = _sku_key(value)
+    if cache is not None:
+        return _tenant_skus(tenant, _cache_candidates(cache, key))
+    legacy_items = ProductLegacyItem.objects.filter(
+        tenant=tenant,
+    ).select_related("generated_sku")
+    candidates = [
+        item.generated_sku
+        for item in legacy_items
+        if (
+            item.generated_sku_id
+            and item.generated_sku.tenant_id == tenant.id
+            and _sku_key(item.legacy_sku_code) == key
+        )
+    ]
+    candidates += [
+        sku
+        for sku in ProductSKU.objects.filter(tenant=tenant)
+        if _sku_key(sku.legacy_sku_code) == key
+    ]
+    return _tenant_skus(tenant, candidates)
+
+
+def build_sku_resolution_caches(tenant):
+    """Build normalized tenant SKU indexes once for API/import batches.
+
+    The API ingestion path can process hundreds of variants in one page.  A
+    cache keeps matching O(catalogue + records) instead of scanning every
+    ``ProductSKU`` row for every incoming record.
+    """
+
+    sku_rows = list(
+        ProductSKU.objects.filter(tenant=tenant).only(
+            "id", "sku_code", "legacy_sku_code", "tenant_id", "spu_id"
+        )
+    )
+    new_index = {}
+    legacy_index = {}
+    for item in sku_rows:
+        new_index.setdefault(_sku_key(item.sku_code), {})[item.pk] = item
+        if item.legacy_sku_code:
+            legacy_index.setdefault(_sku_key(item.legacy_sku_code), {})[item.pk] = item
+    for item in ProductLegacyItem.objects.filter(
+        tenant=tenant,
+        generated_sku__isnull=False,
+        generated_sku__tenant=tenant,
+    ).select_related("generated_sku"):
+        legacy_index.setdefault(_sku_key(item.legacy_sku_code), {})[item.generated_sku_id] = item.generated_sku
+    return (
+        _NormalizedSKUCache({key: list(items.values()) for key, items in new_index.items()}),
+        _NormalizedSKUCache({key: list(items.values()) for key, items in legacy_index.items()}),
+    )
+
+
+def resolve_platform_sku(tenant, value, new_skus=None, legacy_skus=None):
+    """Resolve a generic platform SKU against new and legacy namespaces.
+
+    Platform APIs often return only ``seller_sku``/``model_sku`` without
+    declaring whether it is an old or generated internal code.  A unique
+    candidate in the union is safe; a value matching two different internal
+    SKUs is a conflict and an unknown value stays pending.  This helper does
+    not write a detail row.
+    """
+
+    value = _clean_sku(value)
+    if not value:
+        raise SKUResolutionError("平台 SKU 不能为空", code="missing_platform_sku", state="pending")
+    key = _sku_key(value)
+    new_candidates = (
+        _tenant_skus(tenant, _cache_candidates(new_skus, key))
+        if new_skus is not None
+        else _tenant_skus(
+            tenant,
+            (
+                sku
+                for sku in ProductSKU.objects.filter(tenant=tenant)
+                if _sku_key(sku.sku_code) == key
+            ),
+        )
+    )
+    legacy_candidates = _legacy_sku_candidates(tenant, value, legacy_skus)
+    candidates = _unique_skus([*new_candidates, *legacy_candidates])
+    if len(candidates) > 1:
+        raise SKUResolutionError(
+            f"平台 SKU 匹配多个内部 SKU: {value}",
+            code="ambiguous_platform_sku",
+            state="conflict",
+        )
+    if not candidates:
+        raise SKUResolutionError(
+            f"平台 SKU 未匹配到内部 SKU: {value}",
+            code="missing_platform_sku",
+            state="pending",
+        )
+    return candidates[0]
+
+
 def _resolve_sku(tenant, row, new_skus=None, legacy_skus=None):
-    # Clean first, then use casefolded keys for both cache and DB paths.  The
-    # cleaned old value is also returned to the caller for persistence.
+    """Resolve the canonical tenant SKU using both supplied code systems.
+
+    When both codes are supplied they are an assertion about the same
+    internal SKU, not two alternatives.  Resolve both independently and
+    reject a missing, ambiguous, or mismatched side.  This prevents a valid
+    new code from silently masking a typo or stale legacy code.
+    """
+
     new_value = _clean_sku(row.get("new_sku_code"))
     value = _clean_sku(row.get("source_old_sku_code"))
-    new_key = _sku_key(new_value)
-    old_key = _sku_key(value)
-    if new_value:
-        if new_skus is not None:
-            candidates = _unique_skus(_cache_candidates(new_skus, new_key))
-        else:
-            candidates = _unique_skus(
-                sku for sku in ProductSKU.objects.filter(tenant=tenant)
-                if _sku_key(sku.sku_code) == new_key
+    if not new_value and not value:
+        raise SKUResolutionError(
+            "旧 SKU 编码和新 SKU 编码必须至少填写一个",
+            code="missing_sku_codes",
+            state="pending",
+        )
+
+    new_sku = _sku_candidates(tenant, new_value, new_skus, code_label="new") if new_value else None
+    if value:
+        old_candidates = _legacy_sku_candidates(tenant, value, legacy_skus)
+        if len(old_candidates) > 1:
+            raise SKUResolutionError(
+                f"旧 SKU 匹配多个内部 SKU: {value}",
+                code="ambiguous_legacy_sku",
+                state="conflict",
             )
-        if len(candidates) > 1:
-            raise ValueError(f"新 SKU 匹配多个内部 SKU: {new_value}")
-        if candidates:
-            return candidates[0]
-        raise ValueError(f"新 SKU 编码不存在或不属于当前租户: {new_value}")
-    if not value:
-        raise ValueError("旧 SKU 编码和新 SKU 编码必须至少填写一个")
-    if legacy_skus is not None:
-        candidates = _unique_skus(_cache_candidates(legacy_skus, old_key))
+        if not old_candidates:
+            raise SKUResolutionError(
+                f"旧 SKU 不存在或尚未生成新 SKU: {value}",
+                code="missing_legacy_sku",
+                state="pending",
+            )
+        old_sku = old_candidates[0]
     else:
-        legacy_items = ProductLegacyItem.objects.filter(tenant=tenant).select_related("generated_sku")
-        candidates = [item.generated_sku for item in legacy_items
-                      if item.generated_sku_id and _sku_key(item.legacy_sku_code) == old_key]
-        candidates += [sku for sku in ProductSKU.objects.filter(tenant=tenant)
-                       if _sku_key(sku.legacy_sku_code) == old_key]
-        candidates = _unique_skus(candidates)
-    if len(candidates) > 1:
-        raise ValueError(f"旧 SKU 匹配多个内部 SKU: {value}")
-    if candidates:
-        return candidates[0]
-    raise ValueError(f"旧 SKU 不存在或尚未生成新 SKU: {value}")
+        old_sku = None
+
+    if new_sku is not None and old_sku is not None and new_sku.pk != old_sku.pk:
+        error = SKUResolutionError(
+            f"新旧 SKU 编码不属于同一内部商品明细: {new_value} / {value}",
+            code="sku_code_conflict",
+            state="conflict",
+        )
+        # Keep the deterministic candidate available to the ingestion audit.
+        # The old candidate remains discoverable through the supplied code;
+        # choosing the new-code side here makes the proposal explicit without
+        # ever changing an established detail/mapping link.
+        error.proposed_sku_id = new_sku.id
+        error.proposed_old_sku_id = old_sku.id
+        raise error
+    return new_sku or old_sku
 
 
 def _resolve_site(tenant, platform, store, row, sites=None):
@@ -428,20 +596,7 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
     stores = list(StoreMaster.objects.filter(tenant=tenant))
     store_cache = {(item.platform_id, value.casefold()): item for item in stores for value in (item.code, item.name) if value}
     sites = list(CountrySiteMaster.objects.filter(tenant=tenant))
-    sku_rows = list(ProductSKU.objects.filter(tenant=tenant).only("id", "sku_code", "legacy_sku_code", "tenant_id", "spu_id"))
-    # Index by normalized keys and retain every candidate so a case/NFKC
-    # collision is reported as ambiguous instead of whichever row was last.
-    new_sku_index = {}
-    for item in sku_rows:
-        new_sku_index.setdefault(_sku_key(item.sku_code), {})[item.pk] = item
-    new_skus = _NormalizedSKUCache({key: list(items.values()) for key, items in new_sku_index.items()})
-    legacy_skus = {}
-    for item in sku_rows:
-        if item.legacy_sku_code:
-            legacy_skus.setdefault(_sku_key(item.legacy_sku_code), {})[item.pk] = item
-    for item in ProductLegacyItem.objects.filter(tenant=tenant, generated_sku__isnull=False).select_related("generated_sku"):
-        legacy_skus.setdefault(_sku_key(item.legacy_sku_code), {})[item.generated_sku_id] = item.generated_sku
-    legacy_skus = _NormalizedSKUCache({code: list(items.values()) for code, items in legacy_skus.items()})
+    new_skus, legacy_skus = build_sku_resolution_caches(tenant)
     for sheet_name, rows in parse_import_rows(raw, filename, platform_hint):
         for row_index, row in enumerate(rows, start=2):
             rows_seen += 1
@@ -449,6 +604,29 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
             try:
                 platform = _resolve_platform(tenant, row.get("platform") or sheet_name.replace("商品明细", ""), platform_cache)
                 store = _resolve_store(tenant, platform, row, store_cache)
+                if actor is not None:
+                    # Imports can create a new detail row, so a queryset-only
+                    # scope check is insufficient.  Validate the canonical
+                    # platform/store pair before adding the plan; this also
+                    # prevents an out-of-scope existing row from being
+                    # treated as a create and colliding with its unique key.
+                    from apps.permissions.ui_p6_scopes import integration_values_allowed
+
+                    platform_values = {
+                        str(platform.platform_type or "").strip().lower(),
+                        str(platform.code or "").strip().lower(),
+                    }
+                    if not any(
+                        integration_values_allowed(
+                            actor,
+                            "listings.product_detail.import",
+                            platform=platform_value,
+                            store_id=store.pk,
+                        )
+                        for platform_value in platform_values
+                        if platform_value
+                    ):
+                        raise ValueError("该平台/店铺不在当前导入数据范围内。")
                 variant_id = _text(row.get("platform_variant_id"))
                 if not variant_id:
                     raise ValueError("缺少变种ID")
@@ -463,13 +641,24 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
                     "sku_prefix": _text(row.get("sku_prefix")), "shop_abbr": _text(row.get("shop_abbr")), "sales_status": _text(row.get("sales_status")),
                     "owner": _text(row.get("owner")), "leader": _text(row.get("leader")), "source": "import",
                     "platform_created_at": _parse_datetime(row.get("platform_created_at")), "platform_updated_at": _parse_datetime(row.get("platform_updated_at")),
+                    "__row": line, "__sheet": sheet_name,
                 }
                 plans.append(values)
+            except SKUResolutionError as exc:
+                errors.append({
+                    "row": line,
+                    "sheet": sheet_name,
+                    "code": exc.code,
+                    "state": exc.state,
+                    "message": str(exc),
+                })
             except (ValueError, TypeError, KeyError) as exc:
                 errors.append({"row": line, "sheet": sheet_name, "message": str(exc)})
     # Keep valid rows transactional and idempotent even when another row in
     # the same upload is invalid.  Invalid rows remain in ``errors`` and are
-    # reported to the caller without rolling back valid plans.
+    # reported to the caller without rolling back valid plans.  API ingestion
+    # uses ``upsert_platform_product`` for the different requirement of
+    # retaining unresolved source rows as pending platform details.
     if not dry_run and plans:
         # A platform/store/variant key is unique in the destination.  Keep
         # the last valid occurrence in a file so a future duplicate export
@@ -485,6 +674,17 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
         # retention during bulk updates.
         for plan_chunk in _chunks(plans, IMPORT_WRITE_CHUNK_SIZE):
             existing = _existing_for_plans(tenant, plan_chunk)
+            from apps.integrations.models import MarketplaceProductMapping
+
+            controlled_detail_ids = set(
+                MarketplaceProductMapping.objects.filter(
+                    tenant=tenant,
+                    platform_detail__tenant=tenant,
+                    platform_detail__platform_id__in={item["platform"].pk for item in plan_chunk},
+                    platform_detail__store_id__in={item["store"].pk for item in plan_chunk},
+                    platform_detail__platform_variant_id__in={item["platform_variant_id"] for item in plan_chunk},
+                ).values_list("platform_detail_id", flat=True)
+            )
             to_create = []
             update_groups = defaultdict(list)
             now = timezone.now()
@@ -492,9 +692,26 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
                 key = (values["platform"].pk, values["store"].pk, values["platform_variant_id"])
                 instance = existing.get(key)
                 if instance is None:
-                    to_create.append(PlatformProductDetail(**values))
+                    model_values = {name: value for name, value in values.items() if not name.startswith("__")}
+                    to_create.append(PlatformProductDetail(**model_values))
                     created += 1
                     continue
+
+                if instance.pk in controlled_detail_ids:
+                    blocked_fields = []
+                    for name in ("platform_product_id", "platform_sku", "source_old_sku_code", "internal_sku"):
+                        value = values[name]
+                        if not _same_import_value(instance, name, value):
+                            blocked_fields.append(name)
+                    if blocked_fields:
+                        errors.append({
+                            "row": values.get("__row"),
+                            "sheet": values.get("__sheet"),
+                            "code": "controlled_mapping_edit",
+                            "message": "该平台商品已纳入受控映射，导入不能直接修改身份或内部 SKU。",
+                            "fields": blocked_fields,
+                        })
+                        continue
 
                 changed_fields = []
                 for name in IMPORT_UPDATE_FIELDS:
@@ -530,7 +747,7 @@ def import_platform_product_details(*, tenant, raw, filename="", platform_hint="
     }
 
 
-def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
+def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False, actor=None):
     """Update platform product IDs by existing tenant-scoped variant IDs."""
 
     errors = []
@@ -574,6 +791,7 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
     unmatched_sample = []
     ambiguous = 0
     changed_items = []
+    from apps.integrations.models import MarketplaceProductMapping
     with transaction.atomic():
         for group_chunk in _chunks(groups, IMPORT_EXISTING_QUERY_CHUNK_SIZE):
             variant_ids = [group["variant_id"] for group in group_chunk]
@@ -581,6 +799,14 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
                 tenant=tenant,
                 platform_variant_id__in=variant_ids,
             )
+            if actor is not None:
+                from apps.permissions.ui_p6_scopes import filter_platform_product_details
+
+                queryset = filter_platform_product_details(
+                    actor,
+                    queryset,
+                    "listings.product_detail.import",
+                )
             if not dry_run:
                 queryset = queryset.select_for_update()
             matches_by_variant = defaultdict(list)
@@ -609,8 +835,24 @@ def import_platform_product_ids(*, tenant, raw, filename="", dry_run=False):
                         })
                     continue
                 item = matches[0]
+                # Idempotent replays of the same product ID are safe even
+                # after the row entered controlled mapping; do this check
+                # before the direct-edit guard so a production export can be
+                # retried without a false controlled_mapping_edit error.
                 if item.platform_product_id == group["product_id"]:
                     unchanged += len(rows)
+                    continue
+                if MarketplaceProductMapping.objects.filter(
+                    tenant=tenant,
+                    platform_detail_id=item.id,
+                ).exists():
+                    for row in rows:
+                        errors.append({
+                            "row": row["row"],
+                            "sheet": row["sheet"],
+                            "code": "controlled_mapping_edit",
+                            "message": "该平台商品已纳入受控映射，导入不能直接修改平台商品 ID。",
+                        })
                     continue
                 item.platform_product_id = group["product_id"]
                 item.updated_at = timezone.now()

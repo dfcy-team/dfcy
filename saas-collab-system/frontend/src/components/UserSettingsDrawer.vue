@@ -118,6 +118,8 @@ const drawerVisible = computed({
   set: (value) => emit('update:modelValue', value),
 });
 const roleLabel = computed(() => {
+  if (props.currentUser?.identity_label) return props.currentUser.identity_label;
+  if (props.currentUser?.is_superuser) return '平台超级管理员';
   const roles = props.currentUser?.roles?.filter(Boolean) || [];
   return roles.length ? roles.join(' / ') : '未分配角色';
 });

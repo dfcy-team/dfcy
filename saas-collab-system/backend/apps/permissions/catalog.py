@@ -1,3 +1,6 @@
+from functools import lru_cache
+
+
 PERMISSION_DEFINITIONS = (
     {
         "code": "listings.product_detail.view",
@@ -509,6 +512,31 @@ PERMISSION_DEFINITIONS = (
             ("store.sync", "Synchronize marketplace stores", "Request an approved store synchronization action."),
             ("store.retry", "Retry marketplace store operations", "Retry a failed marketplace store operation."),
             (
+                "store_mapping.view",
+                "查看店铺平台关联",
+                "查看当前租户店铺与平台店铺身份的映射关系、状态和验证信息。",
+            ),
+            (
+                "store_mapping.manage",
+                "维护店铺平台关联",
+                "创建、更新或停用当前租户店铺与平台店铺身份的映射关系。",
+            ),
+            (
+                "product_mapping.view",
+                "查看商品 SKU 映射",
+                "查看当前租户平台商品变体与内部 SKU 的映射决策及状态。",
+            ),
+            (
+                "product_mapping.manage",
+                "维护商品 SKU 映射建议",
+                "创建商品映射建议、更新建议或停用平台商品映射。",
+            ),
+            (
+                "product_mapping.confirm",
+                "确认商品 SKU 映射",
+                "人工确认平台商品变体与内部 SKU 的映射，并记录确认审计。",
+            ),
+            (
                 "warehouse.view",
                 "查看仓库 API 授权",
                 "查看当前租户仓库与库存 API 接入配置的脱敏授权关系；不读取或导出凭据。",
@@ -1015,7 +1043,55 @@ FIELD_PERMISSION_DEFINITIONS = (
 )
 
 
+# ``MENU_PERMISSION_DEFINITIONS`` is retained as the migration-era baseline
+# for backwards compatibility.  New menu entries must not be added here: the
+# frontend sidebar declaration is the auditable menu registration source and
+# is loaded by ``runtime_permission_definitions`` below.  Keeping the static
+# tuple available also lets historical migrations and package consumers import
+# the catalog without executing JavaScript during Django app startup.
+BASE_PERMISSION_DEFINITIONS = PERMISSION_DEFINITIONS + FIELD_PERMISSION_DEFINITIONS
 ALL_PERMISSION_DEFINITIONS = PERMISSION_DEFINITIONS + MENU_PERMISSION_DEFINITIONS + FIELD_PERMISSION_DEFINITIONS
+
+
+@lru_cache(maxsize=1)
+def _load_runtime_menu_definitions():
+    from .menu_registry import load_menu_permission_definitions
+
+    return tuple(load_menu_permission_definitions())
+
+
+def clear_runtime_permission_cache():
+    """Clear the process-local menu snapshot after a source reload in tests."""
+    _load_runtime_menu_definitions.cache_clear()
+
+
+def runtime_permission_definitions(menu_definitions=None):
+    """Return the current application catalog with menus from the frontend.
+
+    Action and field permissions remain Python-owned and therefore preserve
+    the existing API/data contracts.  Menu permissions are intentionally
+    loaded from ``frontend/src/router/menu.js`` so adding or renaming a route
+    cannot silently leave the administrator permission matrix stale.  The
+    optional argument is useful for tests and release tooling that already
+    loaded the source registry; omitting it performs the normal lazy load.
+    """
+    if menu_definitions is None:
+        menu_definitions = _load_runtime_menu_definitions()
+    merged = []
+    by_code = {}
+    for definition in (*BASE_PERMISSION_DEFINITIONS, *tuple(menu_definitions or ())):
+        code = definition.get("code")
+        if not code:
+            continue
+        # A source declaration wins over a legacy row with the same stable
+        # code.  This keeps explicit menu metadata (path/name/status) current
+        # while action/field codes continue to use their Python catalog.
+        if code in by_code:
+            merged[by_code[code]] = definition
+            continue
+        by_code[code] = len(merged)
+        merged.append(definition)
+    return tuple(merged)
 
 
 def permission_defaults(definition):
@@ -1102,6 +1178,11 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "integrations.store.revoke": "撤销平台店铺授权",
     "integrations.store.sync": "同步平台店铺",
     "integrations.store.retry": "重试平台店铺操作",
+    "integrations.store_mapping.view": "查看店铺平台关联",
+    "integrations.store_mapping.manage": "维护店铺平台关联",
+    "integrations.product_mapping.view": "查看商品 SKU 映射",
+    "integrations.product_mapping.manage": "维护商品 SKU 映射建议",
+    "integrations.product_mapping.confirm": "确认商品 SKU 映射",
     "integrations.warehouse.view": "查看仓库 API 授权",
     "integrations.warehouse.authorize": "绑定仓库 API 配置",
     "integrations.warehouse.revoke": "解除仓库 API 绑定",

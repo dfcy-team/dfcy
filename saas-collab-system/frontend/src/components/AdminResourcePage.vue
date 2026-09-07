@@ -20,6 +20,11 @@
       </el-button>
     </template>
 
+    <div :class="{ 'resource-layout': Boolean($slots.sidebar) }">
+      <aside v-if="$slots.sidebar" class="resource-sidebar">
+        <slot name="sidebar" />
+      </aside>
+      <div class="resource-main">
     <section class="resource-summary" aria-label="数据摘要">
       <div class="summary-item">
         <span>当前结果</span>
@@ -35,7 +40,7 @@
       </div>
       <div class="summary-item summary-item--scope">
         <span>数据边界</span>
-        <strong>当前 tenant</strong>
+        <strong>当前租户</strong>
       </div>
     </section>
 
@@ -143,6 +148,9 @@
       </footer>
     </section>
 
+      </div>
+    </div>
+
     <el-drawer v-model="detailOpen" :title="`${entityLabel}详情`" size="min(520px, 92vw)">
       <el-descriptions :column="1" border>
         <el-descriptions-item v-for="column in columns" :key="column.prop" :label="column.label">
@@ -150,12 +158,12 @@
           <span v-else>{{ columnValue(column, selectedRow[column.prop], selectedRow) }}</span>
         </el-descriptions-item>
       </el-descriptions>
-      <p class="drawer-note">字段可见性与数据范围由后端 tenant、permission 和 data_scope 最终校验。</p>
+      <p class="drawer-note">字段可见性和数据范围最终由服务端校验。</p>
     </el-drawer>
 
     <el-dialog v-model="formOpen" :title="editingRow ? `编辑${entityLabel}` : `新建${entityLabel}`" width="min(760px, 94vw)" destroy-on-close>
       <el-alert
-        title="仅保存当前租户的档案信息；凭据、Token、Cookie 和 Session 不在此表单采集。"
+        title="仅保存当前租户的档案信息；密钥、令牌、浏览器标识和会话内容不在此表单采集。"
         type="info"
         :closable="false"
         show-icon
@@ -221,7 +229,7 @@ import { getActionAccess } from '../utils/actionAccess';
 import { statusFromApiResponse } from '../utils/uiState';
 
 const props = defineProps({
-  eyebrow: { type: String, default: 'SYSTEM MANAGEMENT' },
+  eyebrow: { type: String, default: '系统管理' },
   title: { type: String, required: true },
   subtitle: { type: String, default: '' },
   boundaryNote: { type: String, default: '' },
@@ -239,7 +247,8 @@ const props = defineProps({
   searchLabel: { type: String, default: '' },
   showFilterLabels: { type: Boolean, default: false },
   showPageSize: { type: Boolean, default: false },
-  tableMaxHeight: { type: Number, default: 0 }
+  tableMaxHeight: { type: Number, default: 0 },
+  externalFilters: { type: Object, default: () => ({}) }
 });
 
 const auth = useAuthStore();
@@ -309,7 +318,7 @@ async function loadData() {
   pageState.value = 'loading';
   stateTitle.value = '';
   stateDetail.value = '';
-  const response = await props.loader({ ...filters });
+  const response = await props.loader({ ...filters, ...props.externalFilters });
   if (!response?.success) {
     pageState.value = statusFromApiResponse(response, navigator.onLine);
     stateDetail.value = response?.message || '接口请求失败';
@@ -341,13 +350,13 @@ function openDetail(row) {
   detailOpen.value = true;
 }
 
-function openCreate() {
+function openCreate(defaults = {}) {
   if (!createAccess.value.allowed) {
     ElMessage.warning(createAccess.value.reason);
     return;
   }
   editingRow.value = null;
-  fillForm();
+  fillForm(defaults);
   formOpen.value = true;
 }
 
@@ -441,7 +450,7 @@ async function confirmDelete(row) {
   }
 }
 
-defineExpose({ loadData });
+defineExpose({ loadData, openCreate, openEdit, confirmStatus, confirmDelete });
 loadData();
 </script>
 
@@ -454,6 +463,9 @@ loadData();
   background: #fff;
 }
 
+.resource-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.resource-main { min-width: 0; }
+.resource-sidebar { position: sticky; top: 12px; min-width: 0; }
 .summary-item { min-height: 74px; padding: 14px 16px; border-right: 1px solid #e5eaf0; }
 .summary-item:last-child { border-right: 0; }
 .summary-item span { display: block; color: #64748b; font-size: 12px; }
@@ -480,6 +492,8 @@ loadData();
 .field-help { margin: 4px 0 12px; color: #64748b; font-size: 12px; line-height: 1.55; }
 
 @media (max-width: 760px) {
+  .resource-layout { grid-template-columns: 1fr; }
+  .resource-sidebar { position: static; }
   .resource-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-item:nth-child(2) { border-right: 0; }
   .summary-item:nth-child(-n + 2) { border-bottom: 1px solid #e5eaf0; }

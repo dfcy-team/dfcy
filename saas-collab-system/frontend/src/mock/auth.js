@@ -1,4 +1,5 @@
 import { successResponse } from './index';
+import { menuPermissionRegistry } from '../router/menu';
 
 export const mockAuthUser = {
   id: 1,
@@ -10,6 +11,8 @@ export const mockAuthUser = {
   user_type: 'internal',
   tenant_id: 'mock-tenant-001',
   is_superuser: false,
+  identity_label: '演示用户',
+  role_labels: ['演示用户'],
   roles: ['stage0_viewer'],
   permissions: [
     'mock.view',
@@ -17,6 +20,9 @@ export const mockAuthUser = {
     'system.users.view', 'system.users.manage',
     'system.roles.view', 'system.roles.manage',
     'masterdata.view', 'masterdata.manage',
+    'listings.product_detail.view', 'listings.product_detail.manage', 'listings.product_detail.import',
+    'integrations.store_mapping.view', 'integrations.store_mapping.manage',
+    'integrations.product_mapping.view', 'integrations.product_mapping.manage', 'integrations.product_mapping.confirm',
     'security.operations.view',
     'products.research.view', 'products.research.manage',
     'products.master.view', 'products.master.manage', 'products.master.freeze',
@@ -60,6 +66,9 @@ export const mockAuthUser = {
     'system.users.view', 'system.users.manage',
     'system.roles.view', 'system.roles.manage',
     'masterdata.view', 'masterdata.manage',
+    'listings.product_detail.view', 'listings.product_detail.manage', 'listings.product_detail.import',
+    'integrations.store_mapping.view', 'integrations.store_mapping.manage',
+    'integrations.product_mapping.view', 'integrations.product_mapping.manage', 'integrations.product_mapping.confirm',
     'security.operations.view',
     'products.research.view', 'products.research.manage',
     'products.master.view', 'products.master.manage', 'products.master.freeze',
@@ -86,6 +95,19 @@ export const mockAuthUser = {
   field_permission_codes: [],
   data_scope: []
 };
+
+// Mirror the release sync's additive compatibility migration: a mock user
+// that already owns a page action also receives the corresponding registered
+// menu entry.  This keeps the local sidebar representative of a synchronized
+// tenant without maintaining another hand-written menu list.
+const mockActionCodes = new Set(mockAuthUser.action_permission_codes);
+mockAuthUser.menu_permission_codes = menuPermissionRegistry
+  .filter((permission) => (permission.metadata?.action_codes || []).some((code) => mockActionCodes.has(code)))
+  .map(({ code }) => code);
+mockAuthUser.permissions = [...new Set([
+  ...mockAuthUser.permissions,
+  ...mockAuthUser.menu_permission_codes,
+])];
 
 // Keep mock authentication aligned with the production module-gate contract.
 // The mock defaults to a safe pilot posture while still exposing the complete

@@ -87,6 +87,8 @@ const userSettingsOpen = ref(false);
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
 const currentLabel = computed(() => findMenuLabel(route.path, visibleMenuItems.value));
 const roleLabel = computed(() => {
+  if (auth.currentUser?.identity_label) return auth.currentUser.identity_label;
+  if (auth.currentUser?.is_superuser) return '平台超级管理员';
   const roles = auth.currentUser?.roles?.filter(Boolean) || [];
   return roles.length ? roles.join(' / ') : '未分配角色';
 });

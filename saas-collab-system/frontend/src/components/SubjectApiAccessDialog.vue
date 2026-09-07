@@ -111,6 +111,10 @@
               <span>{{ apiType === 'advertising' ? '广告账户 ID' : '平台店铺 ID' }}</span>
               <strong>{{ primaryBinding(apiType).platform_store_id || '—' }}</strong>
             </div>
+            <div v-if="subjectType === 'warehouse' && apiType === 'inventory'">
+              <span>服务商外部仓库编码</span>
+              <strong>{{ primaryBinding(apiType).external_warehouse_code || '未填写' }}</strong>
+            </div>
             <div><span>授权时间</span><strong>{{ formatDate(primaryBinding(apiType).authorized_at) }}</strong></div>
             <div><span>最近同步</span><strong>{{ formatDate(primaryBinding(apiType).last_run_at) }}</strong></div>
           </div>
@@ -125,6 +129,16 @@
                   :value="config.id"
                 />
               </el-select>
+            </el-form-item>
+            <el-form-item label="服务商外部仓库编码" required>
+              <el-input
+                v-model="warehouseExternalCode"
+                maxlength="160"
+                clearable
+                placeholder="填写极风/WMS 返回的仓库编码，不要填写本地仓库档案编码"
+                :disabled="warehouseAuthorizeAccess.disabled"
+              />
+              <small class="form-hint">用于与服务商仓库身份做唯一绑定；本地档案编码仅作为 SaaS 内部标识。</small>
             </el-form-item>
             <el-alert
               v-if="selectedConfig(apiType) && !['configured', 'verified', 'active'].includes(selectedConfig(apiType).status)"
@@ -255,30 +269,32 @@
               </div>
               <el-tag type="info" effect="plain">{{ historyBindings(apiType).length }} 条</el-tag>
             </div>
-            <el-table v-loading="historyLoading" :data="historyBindings(apiType)" border size="small" empty-text="暂无历史记录">
-              <el-table-column label="状态" width="100">
-                <template #default="{ row: historyRow }">
-                  <el-tag :type="statusTagType(historyRow.status)" effect="plain">{{ statusLabel(historyRow.status) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="接入配置" min-width="150">
-                <template #default="{ row: historyRow }">{{ historyRow.account_alias || configAlias(historyRow) || '—' }}</template>
-              </el-table-column>
-              <el-table-column label="授权范围" min-width="180">
-                <template #default="{ row: historyRow }">{{ scopesLabel(historyRow) }}</template>
-              </el-table-column>
-              <el-table-column label="到期时间" min-width="170">
-                <template #default="{ row: historyRow }">{{ formatDate(expirationDate(historyRow)) }}</template>
-              </el-table-column>
-              <el-table-column label="最近错误" min-width="220" show-overflow-tooltip>
-                <template #default="{ row: historyRow }">{{ errorLabel(historyRow) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="100" fixed="right">
-                <template #default="{ row: historyRow }">
-                  <el-button link type="primary" @click="openAuthorizationDetail(historyRow)">查看详情</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <div class="authorization-history-table">
+              <el-table v-loading="historyLoading" :data="historyBindings(apiType)" border size="small" empty-text="暂无历史记录">
+                <el-table-column label="状态" width="100">
+                  <template #default="{ row: historyRow }">
+                    <el-tag :type="statusTagType(historyRow.status)" effect="plain">{{ statusLabel(historyRow.status) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="接入配置" min-width="150">
+                  <template #default="{ row: historyRow }">{{ historyRow.account_alias || configAlias(historyRow) || '—' }}</template>
+                </el-table-column>
+                <el-table-column label="授权范围" min-width="180">
+                  <template #default="{ row: historyRow }">{{ scopesLabel(historyRow) }}</template>
+                </el-table-column>
+                <el-table-column label="到期时间" min-width="170">
+                  <template #default="{ row: historyRow }">{{ formatDate(expirationDate(historyRow)) }}</template>
+                </el-table-column>
+                <el-table-column label="最近错误" min-width="220" show-overflow-tooltip>
+                  <template #default="{ row: historyRow }">{{ errorLabel(historyRow) }}</template>
+                </el-table-column>
+                <el-table-column label="操作" width="100" fixed="right">
+                  <template #default="{ row: historyRow }">
+                    <el-button link type="primary" @click="openAuthorizationDetail(historyRow)">查看详情</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
           </div>
 
           <div v-if="subjectType === 'warehouse' && apiType === 'inventory'" class="reauthorize-panel">
@@ -325,6 +341,7 @@
       </el-descriptions-item>
       <el-descriptions-item label="接入配置">{{ selectedAuthorizationDetail.account_alias || configAlias(selectedAuthorizationDetail) || '—' }}</el-descriptions-item>
       <el-descriptions-item label="平台主体 ID">{{ selectedAuthorizationDetail.platform_store_id || selectedAuthorizationDetail.warehouse_code || '—' }}</el-descriptions-item>
+      <el-descriptions-item v-if="selectedAuthorizationDetail.external_warehouse_code" label="服务商外部仓库编码">{{ selectedAuthorizationDetail.external_warehouse_code }}</el-descriptions-item>
       <el-descriptions-item label="授权范围">{{ scopesLabel(selectedAuthorizationDetail) }}</el-descriptions-item>
       <el-descriptions-item label="授权时间">{{ formatDate(selectedAuthorizationDetail.authorized_at) }}</el-descriptions-item>
       <el-descriptions-item label="到期时间">{{ formatDate(expirationDate(selectedAuthorizationDetail)) }}</el-descriptions-item>
@@ -376,6 +393,7 @@ const storeSyncResourceSelection = reactive({});
 const authorizationUrl = ref('');
 const authorizationDetailOpen = ref(false);
 const selectedAuthorizationDetail = ref(null);
+const warehouseExternalCode = ref('');
 const historyLoading = ref(false);
 const historyError = ref('');
 
@@ -390,7 +408,9 @@ const storeSyncResourceRegistry = Object.freeze({
   tiktok: Object.freeze(['sales_order', 'refund_return']),
   lazada: Object.freeze([]),
 });
+const productSyncResourcePlatforms = new Set(['shopee', 'tiktok']);
 const storeSyncResourceLabels = {
+  platform_product: '平台商品',
   sales_order: '销售订单',
   refund_return: '退款退货',
 };
@@ -674,6 +694,10 @@ async function load() {
     if (!response?.success) throw new Error(response?.message || 'API 接入信息读取失败');
     access.value = response.data;
     await loadAuthorizationHistory(props.subjectType, props.row.id, response.data);
+    if (props.subjectType === 'warehouse') {
+      const binding = primaryBinding('inventory');
+      warehouseExternalCode.value = binding?.external_warehouse_code || props.row?.external_warehouse_code || '';
+    }
     for (const apiType of response.data?.api_types || []) {
       const binding = primaryBinding(apiType);
       selections[apiType] = binding?.integration_config_id || configsFor(apiType)[0]?.id || '';
@@ -879,7 +903,11 @@ async function copyAuthorizationUrl() {
 function storeSyncResourceOptions(apiType) {
   if (apiType !== 'marketplace') return [];
   const platform = String(access.value?.subject?.platform || '').toLowerCase();
-  return (storeSyncResourceRegistry[platform] || []).map((value) => ({
+  const values = [
+    ...(storeSyncResourceRegistry[platform] || []),
+    ...(productSyncResourcePlatforms.has(platform) ? ['platform_product'] : []),
+  ];
+  return values.map((value) => ({
     value,
     label: storeSyncResourceLabels[value] || value,
   }));
@@ -973,7 +1001,9 @@ async function bindWarehouse(apiType) {
     return;
   }
   const binding = primaryBinding(apiType);
-  if (binding && String(binding.integration_config_id) === String(config.id)) {
+  if (binding
+      && String(binding.integration_config_id) === String(config.id)
+      && String(binding.external_warehouse_code || '').trim() === String(warehouseExternalCode.value || '').trim()) {
     ElMessage.info('当前仓库已经绑定此配置，无需重复操作。');
     return;
   }
@@ -990,9 +1020,16 @@ async function bindWarehouse(apiType) {
   }
   busy.value = `warehouse-bind-${apiType}`;
   try {
+    const externalWarehouseCode = String(warehouseExternalCode.value || '').trim();
+    if (!externalWarehouseCode) {
+      ElMessage.warning('请填写服务商返回的外部仓库编码，不能使用本地仓库档案编码代替');
+      busy.value = '';
+      return;
+    }
     const payload = {
       warehouse_id: access.value.subject.id,
       integration_config_id: config.id,
+      external_warehouse_code: externalWarehouseCode,
       replace: Boolean(binding),
       ...(binding ? { expected_authorization_id: binding.id } : {})
     };
@@ -1135,8 +1172,8 @@ function goToConfigs(apiType, options = {}) {
 .subject-summary > div:last-child { border-right: 0; }
 .subject-summary span, .binding-grid span, .advertiser-heading span { display: block; margin-bottom: 5px; color: #64748b; font-size: 12px; }
 .subject-summary strong, .binding-grid strong, .advertiser-heading strong { color: #27364a; font-size: 14px; overflow-wrap: anywhere; }
-.access-list { display: grid; gap: 14px; }
-.access-section { padding: 16px; border: 1px solid #d9e2ef; border-radius: 10px; }
+.access-list { display: grid; gap: 14px; min-width: 0; max-width: 100%; }
+.access-section { min-width: 0; max-width: 100%; box-sizing: border-box; padding: 16px; border: 1px solid #d9e2ef; border-radius: 10px; }
 .section-heading, .advertiser-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .section-heading h3, .reauthorize-panel h4 { margin: 0; color: #263241; font-size: 18px; }
 .section-heading p, .reauthorize-panel p { margin: 4px 0 0; color: #7a8492; font-size: 13px; line-height: 1.6; }
@@ -1151,7 +1188,9 @@ function goToConfigs(apiType, options = {}) {
 .advertiser-list { display: grid; gap: 12px; margin-top: 14px; }
 .advertiser-binding { padding: 12px 14px; border: 1px solid #e1e7ef; border-radius: 8px; background: #fbfcfe; }
 .advertiser-binding .binding-grid { border-right: 0; border-left: 0; border-radius: 0; }
-.authorization-history { margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e7ef; }
+.authorization-history { min-width: 0; max-width: 100%; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e7ef; }
+.authorization-history-table { width: 100%; min-width: 0; max-width: 100%; overflow-x: auto; }
+.authorization-history-table :deep(.el-table) { min-width: 0; }
 .history-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .history-heading h4 { margin: 0; color: #334155; font-size: 15px; }
 .history-heading p { margin: 4px 0 0; color: #7a8492; font-size: 12px; line-height: 1.5; }

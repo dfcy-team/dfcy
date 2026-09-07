@@ -9,6 +9,7 @@
     <template #action><el-button :loading="loading" @click="load">刷新</el-button></template>
 
     <section class="toolbar" aria-label="同步异常筛选">
+      <el-tag v-if="route.query.store_id" effect="plain">店铺：{{ route.query.store_name || route.query.store_id }}</el-tag>
       <el-select v-model="status" clearable placeholder="全部状态" @change="applyFilters">
         <el-option label="未确认" value="open" />
         <el-option label="已确认" value="acknowledged" />
@@ -23,7 +24,7 @@
       <el-table-column prop="id" label="事件 ID" width="90" />
       <el-table-column prop="sync_job_id" label="任务 ID" width="90" />
       <el-table-column prop="platform" label="平台" width="110" />
-      <el-table-column prop="resource_type" label="资源" min-width="150" />
+      <el-table-column prop="resource_type" label="资源" min-width="150"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template></el-table-column>
       <el-table-column prop="status" label="状态" width="110">
         <template #default="{ row }"><el-tag :type="statusType(row.status)" effect="plain">{{ statusLabel(row.status) }}</el-tag></template>
       </el-table-column>
@@ -42,7 +43,7 @@
         <el-descriptions :column="1" border>
           <el-descriptions-item label="事件">#{{ selected.id }} · 任务 #{{ selected.sync_job_id }}</el-descriptions-item>
           <el-descriptions-item label="状态"><el-tag :type="statusType(selected.status)" effect="plain">{{ statusLabel(selected.status) }}</el-tag></el-descriptions-item>
-          <el-descriptions-item label="平台/资源">{{ selected.platform || '-' }} · {{ selected.resource_type || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="平台/资源">{{ selected.platform || '-' }} · {{ resourceLabel(selected.resource_type) }}</el-descriptions-item>
           <el-descriptions-item label="发生次数">{{ selected.occurrence_count || 0 }}</el-descriptions-item>
           <el-descriptions-item label="当前负责人">{{ selected.assignee_name || '未指派' }}</el-descriptions-item>
           <el-descriptions-item label="错误码">{{ selected.last_error_code || '-' }}</el-descriptions-item>
@@ -107,7 +108,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import { fetchUsers } from '../../api/systemAdmin';
@@ -116,6 +118,7 @@ import { useMock } from '../../api/request';
 import { actOnSyncAlertIncident, fetchSyncAlertIncidentRetryPreview, fetchSyncAlertIncidents, retrySyncAlertIncident } from '../../api/integrations';
 
 const auth = useAuthStore();
+const route = useRoute();
 const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
 const error = ref('');
@@ -141,13 +144,26 @@ function responseRows(response) {
   return Array.isArray(data) ? data : (data?.results || data?.items || []);
 }
 function statusLabel(value) { return ({ open: '未确认', acknowledged: '已确认', resolved: '已解决' })[value] || value || '未知'; }
+function resourceLabel(value) {
+  return ({
+    platform_product: '平台商品',
+    sales_order: '销售订单',
+    refund_return: '退款退货',
+    inventory_snapshot: '库存快照',
+    inbound: '入库单',
+    shipment: '出库单',
+  })[value] || value || '未知';
+}
 function statusType(value) { return ({ open: 'danger', acknowledged: 'warning', resolved: 'success' })[value] || 'info'; }
 function assigneeLabel(user) { return user?.full_name || user?.username || `用户 #${user?.id || '-'}`; }
 async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const response = await fetchSyncAlertIncidents({ status: status.value });
+    const response = await fetchSyncAlertIncidents({
+      status: status.value,
+      ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
+    });
     capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded');
     if (response?.success) rows.value = responseRows(response);
     else { rows.value = []; error.value = response?.message || '读取同步异常失败。'; }
@@ -161,6 +177,7 @@ async function load() {
 }
 function applyFilters() { load(); }
 function resetFilters() { status.value = ''; applyFilters(); }
+watch(() => route.query.store_id, load);
 async function loadAssignees() {
   if (!canViewUsers.value || assigneeOptions.value.length) return;
   assigneeLoading.value = true;

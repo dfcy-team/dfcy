@@ -182,6 +182,7 @@ class ListingTaskSerializer(serializers.ModelSerializer):
 
 
 class PlatformProductDetailSerializer(serializers.ModelSerializer):
+    new_sku_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
     platform_name = serializers.CharField(source="platform.name", read_only=True)
     platform_code = serializers.CharField(source="platform.code", read_only=True)
     store_name = serializers.CharField(source="store.name", read_only=True)
@@ -191,17 +192,72 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
     country_code = serializers.CharField(source="site.country_code", read_only=True, allow_null=True)
     internal_sku_code = serializers.CharField(source="internal_sku.sku_code", read_only=True, allow_null=True)
     internal_legacy_sku_code = serializers.CharField(source="internal_sku.legacy_sku_code", read_only=True, allow_null=True)
+    mapping = serializers.SerializerMethodField()
 
     class Meta:
         model = PlatformProductDetail
         fields = (
             "id", "tenant", "platform", "platform_name", "platform_code", "store", "store_name", "store_code",
             "site", "site_code", "site_name", "country_code", "platform_product_id", "platform_variant_id", "platform_sku", "source_old_sku_code",
-            "internal_sku", "internal_sku_code", "internal_legacy_sku_code", "title", "variant",
+            "internal_sku", "new_sku_code", "internal_sku_code", "internal_legacy_sku_code", "title", "variant",
             "category_l1", "category_l2", "category_l3", "sku_prefix", "shop_abbr", "sales_status",
             "owner", "leader", "platform_created_at", "platform_updated_at", "source", "created_at", "updated_at",
+            "mapping",
         )
         read_only_fields = ("tenant", "created_at", "updated_at", "source")
+
+    def get_mapping(self, obj):
+        """Expose mapping workflow state only inside its own permission scope."""
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        from apps.permissions.services import check_user_permission
+
+        if not check_user_permission(user, "integrations.product_mapping.view"):
+            return None
+        prefetched_sentinel = object()
+        prefetched = getattr(obj, "_authorized_marketplace_mapping", prefetched_sentinel)
+        if prefetched is not prefetched_sentinel:
+            # ``to_attr`` for a reverse OneToOne relation is a single model
+            # instance (or None), while older queryset code may still hand us
+            # a one-item list.  Handle both without falling back to an
+            # unscoped reverse lookup when the authorized prefetch found no
+            # visible relation.
+            if isinstance(prefetched, (list, tuple)):
+                mapping = prefetched[0] if prefetched else None
+            else:
+                mapping = prefetched
+        else:
+            try:
+                mapping = obj.marketplace_mapping
+            except Exception:  # reverse one-to-one is absent for unmapped details
+                mapping = None
+            if mapping is not None:
+                from apps.integrations.models import MarketplaceProductMapping
+                from apps.permissions.ui_p6_scopes import filter_product_mappings
+
+                authorized = filter_product_mappings(
+                    user,
+                    MarketplaceProductMapping.objects.filter(
+                        tenant=user.tenant,
+                        pk=mapping.pk,
+                    ),
+                    "integrations.product_mapping.view",
+                )
+                if not authorized.exists():
+                    return None
+        if mapping is None:
+            return None
+        return {
+            "id": mapping.id,
+            "status": mapping.status,
+            "sku_id": mapping.sku_id,
+            "sku_code": mapping.sku.sku_code if mapping.sku_id and mapping.sku else None,
+            "confidence": mapping.confidence,
+            "mapping_source": mapping.mapping_source,
+            "result_code": mapping.result_code,
+            "manually_confirmed": mapping.manually_confirmed,
+        }
 
     def validate(self, attrs):
         request = self.context.get("request")
@@ -211,11 +267,13 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
         site = attrs.get("site", getattr(self.instance, "site", None))
         internal_sku = attrs.get("internal_sku", getattr(self.instance, "internal_sku", None))
         errors = {}
+        sku_input = bool({"internal_sku", "source_old_sku_code", "new_sku_code"} & set(attrs))
+        new_code = attrs.pop("new_sku_code", "")
         old_code = attrs.get("source_old_sku_code", getattr(self.instance, "source_old_sku_code", ""))
         # Manual creation/editing must retain a SKU mapping.  The dedicated
         # variant-ID import intentionally bypasses this serializer because it
         # only updates platform_product_id on an existing row.
-        if not old_code and internal_sku is None:
+        if (self.instance is None or sku_input) and not old_code and internal_sku is None and not new_code:
             errors["source_old_sku_code"] = "旧 SKU 编码和新 SKU 编码必须至少提供一个。"
         if tenant:
             for name, value in (("platform", platform), ("store", store), ("site", site), ("internal_sku", internal_sku)):
@@ -231,6 +289,24 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
                 errors["site"] = "站点所属平台与平台商品不一致。"
         if errors:
             raise serializers.ValidationError(errors)
+        # A title-only edit must not re-resolve an API row still awaiting SKU
+        # association.  Any submitted identity codes, however, are joint
+        # assertions: a valid new code cannot conceal an incompatible old one.
+        if tenant and (self.instance is None or sku_input):
+            from .platform_product_details import _resolve_sku
+
+            explicit_sku = attrs.get("internal_sku")
+            resolver_new = new_code or (explicit_sku.sku_code if explicit_sku is not None else "")
+            if resolver_new or old_code:
+                try:
+                    resolved = _resolve_sku(tenant, {
+                        "new_sku_code": resolver_new, "source_old_sku_code": old_code,
+                    })
+                except (ValueError, TypeError) as exc:
+                    raise serializers.ValidationError({"source_old_sku_code": str(exc)}) from exc
+                if explicit_sku is not None and resolved.pk != explicit_sku.pk:
+                    raise serializers.ValidationError({"internal_sku": "新旧 SKU 编码与所选内部商品明细不一致。"})
+                attrs["internal_sku"] = resolved
         return attrs
 
 

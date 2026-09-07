@@ -2,7 +2,7 @@
   <section class="app-page">
     <header class="app-page__header">
       <div class="app-page__heading">
-        <div class="app-page__eyebrow">{{ eyebrow }}</div>
+        <div v-if="eyebrow" class="app-page__eyebrow">{{ eyebrow }}</div>
         <h1>{{ title }}</h1>
         <p v-if="subtitle">{{ subtitle }}</p>
       </div>
@@ -39,7 +39,7 @@ const props = defineProps({
 });
 
 const capabilityLabels = {
-  mock: 'Mock', pending: '待接入', sandbox: '沙箱', connected: '已连接', degraded: '降级', disabled: '已禁用'
+  mock: '模拟数据', pending: '待接入', sandbox: '沙箱', connected: '已连接', degraded: '降级', disabled: '已禁用'
 };
 const capabilityTypes = {
   mock: 'warning', pending: 'info', sandbox: 'warning', connected: 'success', degraded: 'danger', disabled: 'info'

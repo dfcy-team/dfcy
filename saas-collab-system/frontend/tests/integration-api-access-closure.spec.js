@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { canAccessPath, menuItems, routeCapabilities } from '../src/router/menu';
+import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems, routeCapabilities } from '../src/router/menu';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
@@ -15,8 +15,6 @@ describe('API 数据接入生产页面闭环', () => {
     const expected = {
       '/integrations/readiness': 'integrations.view',
       '/integrations/capabilities': 'integrations.store.view',
-      '/integrations/store-mappings': 'integrations.store.view',
-      '/integrations/product-mappings': 'integrations.store.view',
       '/integrations/incidents': 'integrations.view',
       '/integrations/audit': 'integrations.audit.view',
       '/integrations/platform-sites': 'masterdata.view',
@@ -26,6 +24,27 @@ describe('API 数据接入生产页面闭环', () => {
       expect(apiMenu.children.find((item) => item.path === pathName)?.permissions).toEqual([permission]);
       expect(routeCapabilities.find((item) => item.path === pathName)?.permissions).toEqual([permission]);
     }
+  });
+
+  it('consolidates mapping menus while preserving mapping-only role access', () => {
+    const flat = flattenMenuItems(menuItems);
+    for (const [legacy, target, permission] of [
+      ['/integrations/store-mappings', '/master-data/stores', 'integrations.store_mapping.view'],
+      ['/integrations/product-mappings', '/products/platform-details', 'integrations.product_mapping.view']
+    ]) {
+      expect(flat.filter((item) => item.path === target)).toHaveLength(1);
+      expect(flat.some((item) => item.path === legacy)).toBe(false);
+      const viewer = { user_type: 'internal', permissions: [permission] };
+      expect(canAccessPath(viewer, legacy)).toBe(true);
+      expect(canAccessPath(viewer, target)).toBe(true);
+      expect(flattenMenuItems(filterMenuItems(viewer)).some((item) => item.path === target)).toBe(true);
+      expect(canAccessPath({ user_type: 'internal', permissions: ['integrations.store.authorize'] }, legacy)).toBe(false);
+    }
+    const detailViewer = { user_type: 'internal', permissions: ['listings.product_detail.view'] };
+    expect(flattenMenuItems(filterMenuItems(detailViewer)).some((item) => item.path === '/products/platform-details')).toBe(true);
+    const disabledMasterdata = { ...detailViewer, module_statuses: { masterdata: 'disabled' } };
+    expect(filterMenuItems(disabledMasterdata).some((item) => item.label === '基础档案')).toBe(false);
+    expect(canAccessPath(disabledMasterdata, '/products/platform-details')).toBe(false);
   });
 
   it('routes store authorization through store master data while preserving audit isolation', () => {
@@ -48,7 +67,7 @@ describe('API 数据接入生产页面闭环', () => {
     expect(read('src/components/SubjectApiAccessDialog.vue')).toContain('发起平台 OAuth 授权');
     expect(read('src/views/integrations/IntegrationCapabilityMatrix.vue')).toContain('write_enabled: false');
     expect(read('src/views/integrations/SyncIncidentList.vue')).toContain('retrySyncAlertIncident');
-    for (const file of ['IntegrationCapabilityMatrix.vue', 'StoreMappingList.vue', 'ProductMappingList.vue', 'SyncIncidentList.vue', 'IntegrationAuditList.vue']) {
+    for (const file of ['IntegrationCapabilityMatrix.vue', 'SyncIncidentList.vue', 'IntegrationAuditList.vue']) {
       expect(read(`src/views/integrations/${file}`)).toContain('empty-text');
     }
   });
@@ -105,8 +124,8 @@ describe('API 数据接入生产页面闭环', () => {
   });
 
   it('documents mapping platform boundaries and closes incident/audit actions', () => {
-    expect(read('src/views/integrations/StoreMappingList.vue')).toContain('Lazada 已支持授权但映射尚未开放');
-    expect(read('src/views/integrations/ProductMappingList.vue')).toContain('Lazada 已支持授权但映射尚未开放');
+    expect(read('src/views/integrations/StoreMappingList.vue')).toContain('StoreMappingPanel');
+    expect(read('src/views/integrations/ProductMappingList.vue')).toContain('ProductMappingPanel');
 
     const incidents = read('src/views/integrations/SyncIncidentList.vue');
     expect(incidents).toContain("from '../../api/systemAdmin'");

@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from apps.permissions.catalog import permission_display_name
 from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.permissions.packages import expand_package_selections, is_high_risk_permission
 from apps.permissions.services import has_field_permission
 from apps.tenants.models import Department, Tenant
 from apps.rpa.models import RPAAgent
@@ -59,6 +60,14 @@ class DepartmentAdminSerializer(serializers.ModelSerializer):
         model = Department
         fields = ("id", "tenant_id", "name", "parent_id", "parent_name", "status")
         read_only_fields = ("id", "tenant_id", "parent_name")
+
+    def to_internal_value(self, data):
+        # Nullable select controls may submit an empty string when a root
+        # department has no parent. Treat it as the API's canonical null.
+        if isinstance(data, dict) and isinstance(data.get("parent_id"), str) and not data["parent_id"].strip():
+            data = data.copy()
+            data["parent_id"] = None
+        return super().to_internal_value(data)
 
     def validate_parent_id(self, value):
         if value is None:
@@ -195,6 +204,11 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
+        profile = getattr(instance, "internal_profile", None)
+        representation["department_id"] = getattr(profile, "department_id", None)
+        representation["department_ids"] = sorted(
+            department.pk for department in profile.departments.all()
+        ) if profile else []
         request = self.context.get("request")
         # Existing roles have no field grants, so all non-sensitive columns
         # stay visible until a field allow-list is explicitly introduced.
@@ -205,6 +219,8 @@ class UserAdminSerializer(serializers.ModelSerializer):
                 "full_name": "field.system.users.full_name.view",
                 "department_name": "field.system.users.department.view",
                 "department_names": "field.system.users.department.view",
+                "department_id": "field.system.users.department.view",
+                "department_ids": "field.system.users.department.view",
                 "roles": "field.system.users.roles.view",
                 "role_labels": "field.system.users.roles.view",
                 "is_active": "field.system.users.status.view",
@@ -269,17 +285,28 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
 class UserProfileUpdateSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    department_id = serializers.IntegerField(required=False, allow_null=True)
     department_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, allow_empty=True
     )
 
-    def validate_department_ids(self, value):
+    def validate(self, attrs):
         tenant = self.context["request"].user.tenant
-        ids = set(value)
+        ids = set(attrs.get("department_ids") or [])
+        if "department_id" in attrs and attrs["department_id"] is not None:
+            ids.add(attrs["department_id"])
         found = set(Department.objects.filter(tenant=tenant, pk__in=ids).values_list("pk", flat=True))
         if found != ids:
             raise serializers.ValidationError("所选部门不属于当前租户。")
-        return list(dict.fromkeys(value))
+        if "department_ids" in attrs:
+            department_ids = list(dict.fromkeys(attrs.get("department_ids") or []))
+            if "department_id" in attrs and attrs["department_id"] is not None:
+                department_id = attrs["department_id"]
+                department_ids = [department_id] + [
+                    value for value in department_ids if value != department_id
+                ]
+            attrs["department_ids"] = department_ids
+        return attrs
 
 
 class UserPasswordResetSerializer(serializers.Serializer):
@@ -314,16 +341,17 @@ class RoleAdminSerializer(serializers.ModelSerializer):
     action_permission_codes = serializers.SerializerMethodField()
     field_permission_codes = serializers.SerializerMethodField()
     data_scopes = serializers.SerializerMethodField()
+    role_type_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Role
         fields = (
-            "id", "tenant_id", "name", "code", "status", "permission_codes",
+            "id", "tenant_id", "name", "code", "description", "role_type", "role_type_label", "is_protected", "status", "permission_codes",
             "menu_permission_codes", "action_permission_codes", "field_permission_codes",
             "data_scopes", "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "permission_codes", "menu_permission_codes",
+            "id", "tenant_id", "role_type", "role_type_label", "is_protected", "permission_codes", "menu_permission_codes",
             "action_permission_codes", "field_permission_codes", "data_scopes",
             "created_at", "updated_at",
         )
@@ -361,6 +389,9 @@ class RoleAdminSerializer(serializers.ModelSerializer):
             return [{"scope_type": scope.scope_type, "config": scope.config} for scope in cached]
         return list(obj.data_scopes.values("scope_type", "config"))
 
+    def get_role_type_label(self, obj):
+        return dict(Role.RoleType.choices).get(obj.role_type, obj.role_type)
+
     def validate_code(self, value):
         tenant = self.context.get("target_tenant") or self.context["request"].user.tenant
         if Role.objects.filter(tenant=tenant, code=value).exclude(pk=getattr(self.instance, "pk", None)).exists():
@@ -371,7 +402,7 @@ class RoleAdminSerializer(serializers.ModelSerializer):
 class RoleOptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
-        fields = ("id", "name", "code", "status")
+        fields = ("id", "name", "code", "description", "role_type", "is_protected", "status")
         read_only_fields = fields
 
 
@@ -391,8 +422,21 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
     field_permission_codes = serializers.ListField(
         child=serializers.CharField(max_length=120), allow_empty=True, required=False
     )
+    package_selections = serializers.JSONField(required=False)
+    extra_permission_codes = serializers.ListField(
+        child=serializers.CharField(max_length=120), allow_empty=True, required=False, default=list
+    )
     scope_type = serializers.ChoiceField(choices=DataScope.ScopeType.choices)
     scope_config = serializers.JSONField(required=False, default=dict)
+
+    def validate_scope_type(self, value):
+        # Keep the legacy values in the model and response serializers so old
+        # roles can still be inspected.  They are deliberately rejected on a
+        # new permission submission so a save can never silently broaden an
+        # organization-scoped role into tenant-wide access.
+        if value not in DataScope.NEW_SCOPE_TYPES:
+            raise serializers.ValidationError("历史组织范围不能用于新配置，请重新选择租户内全部数据或按业务范围限制。")
+        return value
 
     def validate(self, attrs):
         category_fields = (
@@ -402,6 +446,34 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
         for field in category_fields:
             supplied_codes.update(attrs.get(field) or [])
 
+        package_selections = attrs.get("package_selections")
+        if package_selections is None and attrs.get("extra_permission_codes"):
+            raise serializers.ValidationError({
+                "extra_permission_codes": "高风险权限确认必须随 package_selections 一起提交。"
+            })
+        if package_selections is not None:
+            try:
+                # The role update is validated against rows that actually
+                # exist in this database.  The release sync command is
+                # responsible for materializing the frontend menu registry;
+                # before that first sync, do not manufacture menu codes that
+                # the strict permission lookup cannot persist.
+                database_definitions = list(
+                    Permission.objects.values(
+                        "code", "name", "module", "action", "description",
+                        "permission_type", "metadata",
+                    )
+                )
+                package_codes = expand_package_selections(
+                    package_selections,
+                    attrs.get("extra_permission_codes") or [],
+                    definitions=database_definitions,
+                )
+            except ValueError as exc:
+                raise serializers.ValidationError({"package_selections": str(exc)}) from exc
+            supplied_codes.update(package_codes)
+            attrs["package_permission_codes"] = package_codes
+
         found_permissions = {
             permission.code: permission
             for permission in Permission.objects.filter(code__in=supplied_codes)
@@ -410,6 +482,30 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
         missing = sorted(supplied_codes - found)
         if missing:
             raise serializers.ValidationError(f"Unknown permission codes: {', '.join(missing)}")
+
+        high_risk_codes = {
+            code
+            for code, permission in found_permissions.items()
+            if is_high_risk_permission(
+                code,
+                action=permission.action,
+                permission_type=permission.permission_type,
+            )
+        }
+        if high_risk_codes:
+            # Advanced mode remains backwards-compatible: it submits the
+            # canonical explicit permission lists and is protected by the
+            # caller-delegation intersection below.  Only quick package mode
+            # needs this separate confirmation channel, because category
+            # fields must not smuggle high-risk actions around its UI confirm.
+            if package_selections is not None:
+                confirmed_codes = set(attrs.get("extra_permission_codes") or [])
+                unconfirmed = sorted(high_risk_codes - confirmed_codes)
+                if unconfirmed:
+                    raise serializers.ValidationError({
+                        "extra_permission_codes": "高风险权限必须明确确认：" + ", ".join(unconfirmed)
+                    })
+
         for field, permission_type in (
             ("menu_permission_codes", Permission.PermissionType.MENU),
             ("action_permission_codes", Permission.PermissionType.ACTION),
@@ -421,16 +517,30 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
             )
             if wrong_type:
                 raise serializers.ValidationError({field: f"权限类型不匹配：{', '.join(wrong_type)}"})
+        if attrs.get("scope_type") == DataScope.ScopeType.DEPARTMENT_TREE:
+            unsupported_modules = sorted({
+                permission.module
+                for permission in found_permissions.values()
+                if permission.module != "system"
+            })
+            if unsupported_modules:
+                raise serializers.ValidationError({
+                    "scope_type": "department_tree 仅支持 system 模块权限，不能与其他模块混用。"
+                })
+            if "system.roles.manage" in found_permissions:
+                raise serializers.ValidationError({
+                    "scope_type": "system.roles.manage 需要全部数据范围，不能使用 department_tree。"
+                })
         attrs["permission_codes"] = sorted(supplied_codes)
 
-        """Validate scope shape and every referenced object in the actor tenant.
+        """Validate scope shape and every referenced object in the target tenant.
 
         The permission API is intentionally strict: a malformed custom scope
         must fail closed instead of becoming an effectively unscoped role.
-        ``department`` means the actor's current department per the shared
-        scope contract.  Older clients may send a department_ids hint; it is
-        validated as metadata but does not widen the effective current-
-        department scope.
+        Tenant isolation is enforced by the target tenant relation and by
+        checking every referenced business object against that tenant.  The
+        old organization/user/role keys remain readable in existing records,
+        but are not accepted in new business-scope submissions.
         """
         scope_type = attrs.get("scope_type")
         config = attrs.get("scope_config")
@@ -443,10 +553,8 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
             DataScope.ScopeType.ALL: {"all"},
             DataScope.ScopeType.OWN: {"owner_field"},
             DataScope.ScopeType.DEPARTMENT: {"department_ids"},
-            DataScope.ScopeType.CUSTOM: {
-                "user_ids", "department_ids", "role_ids",
-                "platform_ids", "store_ids", "site_ids", "warehouse_ids", "supplier_ids",
-            },
+            DataScope.ScopeType.DEPARTMENT_TREE: {"department_ids"},
+            DataScope.ScopeType.CUSTOM: set(DataScope.BUSINESS_SCOPE_KEYS),
         }[scope_type]
         unknown = sorted(set(config) - allowed_keys)
         if unknown:
@@ -467,7 +575,7 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
             attrs["scope_config"] = config
             return attrs
 
-        if scope_type == DataScope.ScopeType.DEPARTMENT:
+        if scope_type in {DataScope.ScopeType.DEPARTMENT, DataScope.ScopeType.DEPARTMENT_TREE}:
             if "department_ids" in config:
                 values = config["department_ids"]
                 if not isinstance(values, list):

@@ -4,7 +4,7 @@ import re
 import zipfile
 from xml.etree import ElementTree
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import NotFound, ValidationError
@@ -86,6 +86,8 @@ STORE_IMPORT_ALIASES = {
     "平台": "platform", "平台编码": "platform", "platform": "platform",
     "平台店铺名": "platform_store_name", "平台店铺名称": "platform_store_name",
     "platform_store_name": "platform_store_name",
+    "外部店铺ID": "external_store_id", "外部店铺编号": "external_store_id",
+    "平台店铺ID": "external_store_id", "external_store_id": "external_store_id",
     "国家代码": "country_code", "国家": "country_code", "country_code": "country_code",
     "币种": "currency", "currency": "currency", "时区": "timezone", "timezone": "timezone",
     "类目": "category", "分类": "category", "category": "category",
@@ -181,8 +183,42 @@ def import_stores(*, request, raw, filename="", dry_run=False):
                         refs[field] = CustomUser.objects.filter(tenant=tenant, is_active=True).filter(query).first()
                         if not refs[field]: raise ValueError(f"{label}用户不存在: {value}")
                 connected = _import_text(row.get("is_connected")).casefold() in {"1", "true", "yes", "y", "是", "已建联", "active"}
-                plans.append({"tenant": tenant, "platform": platform, "code": code, "name": name, "platform_store_name": _import_text(row.get("platform_store_name")), "category": category, **refs, "is_connected": connected, "tactical_client": _import_text(row.get("tactical_client")), "country_code": _import_text(row.get("country_code")).upper(), "currency": _import_text(row.get("currency")).upper(), "timezone": _import_text(row.get("timezone")) or "UTC", "status": _import_text(row.get("status")) or StatusChoices.ACTIVE})
+                plan = {"tenant": tenant, "platform": platform, "code": code, "name": name, "platform_store_name": _import_text(row.get("platform_store_name")), "category": category, **refs, "is_connected": connected, "tactical_client": _import_text(row.get("tactical_client")), "country_code": _import_text(row.get("country_code")).upper(), "currency": _import_text(row.get("currency")).upper(), "timezone": _import_text(row.get("timezone")) or "UTC", "status": _import_text(row.get("status")) or StatusChoices.ACTIVE}
+                # Older templates do not carry the upstream identity column.
+                # Omit the field entirely in that case so updating an archive
+                # cannot silently clear an existing OAuth/API identity.
+                if "external_store_id" in row:
+                    plan["external_store_id"] = _import_text(row.get("external_store_id"))
+                plans.append(plan)
             except (ValueError, TypeError, KeyError) as exc: errors.append({"row": line, "sheet": sheet, "message": str(exc)})
+    # Validate platform identity uniqueness before entering the write
+    # transaction.  The database constraint remains the race-safe backstop,
+    # while imports get a row-level remediation message instead of a 500.
+    identity_rows = {}
+    for index, values in enumerate(plans):
+        external_id = str(values.get("external_store_id") or "").strip()
+        if not external_id:
+            continue
+        key = (values["platform"].id, str(values.get("country_code") or "").strip().upper(), external_id)
+        if key in identity_rows:
+            errors.append({
+                "row": index + 2,
+                "sheet": "",
+                "message": "外部店铺 ID 在导入文件中重复，请保留一个店铺档案。",
+            })
+            continue
+        identity_rows[key] = values["code"]
+        if StoreMaster.objects.filter(
+            tenant=tenant,
+            platform__platform_type=values["platform"].platform_type,
+            country_code__iexact=key[1],
+            external_store_id=external_id,
+        ).exclude(code=values["code"]).exists():
+            errors.append({
+                "row": index + 2,
+                "sheet": "",
+                "message": "外部店铺 ID 已绑定其他店铺档案，请复用原档案或先处理重复数据。",
+            })
     created = updated = 0
     if not dry_run and not errors:
         with transaction.atomic():
@@ -243,7 +279,14 @@ class MasterDataCollectionView(APIView):
         _, serializer_class = resource_contract(resource)
         serializer = serializer_class(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        instance = serializer.save(tenant=request.user.tenant)
+        try:
+            instance = serializer.save(tenant=request.user.tenant)
+        except IntegrityError as exc:
+            if resource == "stores":
+                raise ValidationError(
+                    {"external_store_id": "店铺外部身份已被其他请求占用，请刷新后重新选择或复用原店铺档案。"}
+                ) from exc
+            raise
         write_operation_log(
             tenant=request.user.tenant,
             user=request.user,
@@ -280,7 +323,14 @@ class MasterDataDetailView(APIView):
             instance, data=request.data, partial=True, context={"request": request}
         )
         serializer.is_valid(raise_exception=True)
-        instance = serializer.save()
+        try:
+            instance = serializer.save()
+        except IntegrityError as exc:
+            if resource == "stores":
+                raise ValidationError(
+                    {"external_store_id": "店铺外部身份已被其他请求占用，请刷新后重新选择或复用原店铺档案。"}
+                ) from exc
+            raise
         write_operation_log(
             tenant=request.user.tenant,
             user=request.user,

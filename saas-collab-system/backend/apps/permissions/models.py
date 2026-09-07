@@ -5,6 +5,11 @@ from apps.tenants.models import Tenant
 
 
 class Role(models.Model):
+    class RoleType(models.TextChoices):
+        BUILTIN = "builtin", "内置角色"
+        TEMPLATE = "template", "角色模板"
+        CUSTOM = "custom", "自定义角色"
+
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         INACTIVE = "inactive", "Inactive"
@@ -12,6 +17,17 @@ class Role(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="roles")
     name = models.CharField(max_length=100)
     code = models.SlugField(max_length=80)
+    description = models.TextField(blank=True, default="")
+    role_type = models.CharField(
+        max_length=20,
+        choices=RoleType.choices,
+        default=RoleType.CUSTOM,
+    )
+    # A protected role remains assignable/configurable only through the
+    # explicit safeguards in the system-management API.  This is deliberately
+    # data-backed instead of inferred from a display name so role codes remain
+    # stable when labels are localized or corrected.
+    is_protected = models.BooleanField(default=False)
     permissions = models.ManyToManyField("Permission", blank=True, related_name="roles")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -80,14 +96,32 @@ class UserRole(models.Model):
 
 class DataScope(models.Model):
     class ScopeType(models.TextChoices):
-        ALL = "all", "All"
-        DEPARTMENT = "department", "Department"
-        OWN = "own", "Own"
-        CUSTOM = "custom", "Custom"
+        # ``all`` is always tenant-local.  It never means platform-wide data.
+        ALL = "all", "租户内全部数据"
+        # These values remain readable for historical role records.  New
+        # permission updates must use only ALL or CUSTOM (see the serializer).
+        DEPARTMENT = "department", "历史组织范围（本部门）"
+        DEPARTMENT_TREE = "department_tree", "历史组织范围（部门及下级）"
+        OWN = "own", "历史组织范围（本人）"
+        CUSTOM = "custom", "按业务范围限制"
+
+    NEW_SCOPE_TYPES = frozenset({ScopeType.ALL, ScopeType.CUSTOM})
+    LEGACY_SCOPE_TYPES = frozenset({ScopeType.DEPARTMENT, ScopeType.DEPARTMENT_TREE, ScopeType.OWN})
+    # Business scope is intentionally limited to tenant-owned master-data
+    # dimensions.  Organization/user/role keys are legacy scope metadata and
+    # cannot be submitted by the new role-permission API.
+    BUSINESS_SCOPE_KEYS = frozenset({
+        "platform_ids", "site_ids", "store_ids", "warehouse_ids", "supplier_ids",
+    })
+    LEGACY_ORGANIZATION_SCOPE_KEYS = frozenset({"user_ids", "department_ids", "role_ids"})
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="data_scopes")
     role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="data_scopes")
-    scope_type = models.CharField(max_length=20, choices=ScopeType.choices)
+    scope_type = models.CharField(
+        max_length=20,
+        choices=ScopeType.choices,
+        help_text="新配置只能使用租户内全部数据或按业务范围限制；历史组织范围仅兼容读取。",
+    )
     config = models.JSONField(default=dict, blank=True)
 
     class Meta:

@@ -6,6 +6,7 @@ from .models import ConnectionCapability, MarketplaceStoreAuthorization, SyncJob
 
 
 RESOURCE_CAPABILITY = {
+    SyncJob.ResourceType.PLATFORM_PRODUCT: ConnectionCapability.CapabilityCode.PRODUCT,
     SyncJob.ResourceType.SALES_ORDER: ConnectionCapability.CapabilityCode.ORDER,
     SyncJob.ResourceType.REFUND_RETURN: ConnectionCapability.CapabilityCode.RETURN_REFUND,
     SyncJob.ResourceType.INVENTORY_SNAPSHOT: ConnectionCapability.CapabilityCode.INVENTORY,

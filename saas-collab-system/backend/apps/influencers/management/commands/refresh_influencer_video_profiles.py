@@ -8,11 +8,18 @@ from ...models import InfluencerProfile, VideoResult
 
 
 class Command(BaseCommand):
-    help = "Refresh influencer profile video metrics from imported video results."
+    help = (
+        "Refresh influencer profile video metrics from imported video results; "
+        "dry-run unless --apply is supplied."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--tenant-id", type=int, required=True)
-        parser.add_argument("--apply", action="store_true")
+        parser.add_argument(
+            "--apply",
+            action="store_true",
+            help="Persist the refreshed profile metrics (default: dry-run).",
+        )
 
     def handle(self, *args, **options):
         try:

@@ -68,6 +68,16 @@ def test_department_update_prevents_hierarchy_cycles_and_audits_delete():
     )
     assert updated.status_code == 200
 
+    # The UI's nullable parent select historically submitted an empty string
+    # for a root department. The API accepts that legacy form as null too.
+    root_updated = api.patch(
+        f"/api/internal/system/departments/{root['id']}/",
+        {"name": "Renamed root", "parent_id": ""},
+        format="json",
+    )
+    assert root_updated.status_code == 200
+    assert root_updated.data["data"]["parent_id"] is None
+
     assert api.delete(f"/api/internal/system/departments/{child['id']}/").status_code == 200
     assert OperationLog.objects.filter(tenant=tenant, action="department_delete", object_id=str(child["id"])).exists()
 
@@ -78,6 +88,12 @@ def test_role_custom_scope_is_tenant_validated_and_lifecycle_is_safe():
     manager = user(tenant, "role-manager")
     target = Role.objects.create(tenant=tenant, name="Operator", code="operator")
     foreign_department = Department.objects.create(tenant=foreign, name="Foreign department")
+    local_platform = PlatformMaster.objects.create(
+        tenant=tenant,
+        code="local-platform",
+        name="Local platform",
+        platform_type=PlatformMaster.PlatformType.OTHER,
+    )
     foreign_platform = PlatformMaster.objects.create(
         tenant=foreign,
         code="foreign-platform",
@@ -109,11 +125,11 @@ def test_role_custom_scope_is_tenant_validated_and_lifecycle_is_safe():
     assert denied_platform.status_code == 400
     valid = api.put(
         f"/api/internal/system/roles/{target.pk}/permissions/",
-        {"permission_codes": [], "scope_type": "custom", "scope_config": {"role_ids": [target.pk]}},
+        {"permission_codes": [], "scope_type": "custom", "scope_config": {"platform_ids": [local_platform.pk]}},
         format="json",
     )
     assert valid.status_code == 200
-    assert valid.data["data"]["data_scopes"][0]["config"] == {"role_ids": [target.pk]}
+    assert valid.data["data"]["data_scopes"][0]["config"] == {"platform_ids": [local_platform.pk]}
 
     changed = api.post(f"/api/internal/system/roles/{target.pk}/status/", {"status": "inactive"}, format="json")
     assert changed.status_code == 200

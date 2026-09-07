@@ -185,6 +185,8 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         self.config = config
         self.scope = default_sync_scope(config)
         self.authorization = None
+        self.warehouse_authorization = None
+        self.resource_type = None
         self.client = client
         self.source_run = None
 
@@ -218,6 +220,11 @@ class ProductionReadonlyAdapter(PlatformAdapter):
             raise ValidationError("Sync job and integration config scope do not match.")
         if self.config.environment not in {"pilot", "production"}:
             raise ValidationError("Production adapter requires pilot or production environment.")
+        # Query policy belongs to the concrete sync job.  Keep endpoint and
+        # contract settings on the integration config, but allow the job's
+        # approved scope to select a full or incremental product pass.
+        self.scope = default_sync_scope(self.config, sync_job.sync_scope)
+        self.resource_type = sync_job.resource_type
         if not supports_resource(self.config.platform, sync_job.resource_type, self.execution_mode):
             raise ValidationError("Platform capability registry does not allow this resource and execution mode.")
         if self.config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
@@ -230,23 +237,28 @@ class ProductionReadonlyAdapter(PlatformAdapter):
                 or authorization.status != authorization.Status.ACTIVE
             ):
                 raise ValidationError("Sync job warehouse authorization is not active in the configured tenant scope.")
+            self.warehouse_authorization = authorization
         self._client().preflight()
 
     def _client(self):
         if self.client is not None:
+            self.client.resource_type = self.resource_type
             return self.client
         if self.config.platform == PlatformChoices.SHOPEE:
             self.client = ShopeeReadonlyClient(self.config, self.authorization)
         elif self.config.platform == PlatformChoices.TIKTOK:
             self.client = TikTokReadonlyClient(self.config, self.authorization)
         elif self.config.platform == PlatformChoices.JIFENG_WMS:
-            self.client = JifengWmsReadonlyClient(self.config)
+            self.client = JifengWmsReadonlyClient(self.config, self.warehouse_authorization)
         else:
             raise ValidationError("Unsupported production readonly platform.")
+        self.client.resource_type = self.resource_type
         return self.client
 
     def fetch_page(self, sync_job, cursor_value=None):
         client = self._client()
+        if sync_job.resource_type == SyncJob.ResourceType.PLATFORM_PRODUCT:
+            return client.fetch_products(cursor_value, self.scope)
         if sync_job.resource_type == SyncJob.ResourceType.SALES_ORDER:
             return client.fetch_orders(cursor_value, self.scope)
         if sync_job.resource_type == SyncJob.ResourceType.REFUND_RETURN:
@@ -269,6 +281,85 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         if self.source_run is None:
             raise ValidationError("Production adapter is not bound to a SyncRun.")
         return self.source_run
+
+
+class MarketplaceProductAdapter(ProductionReadonlyAdapter):
+    """Normalize authorized-shop product snapshots without enabling writes."""
+
+    def normalize_record(self, record):
+        if not isinstance(record, dict):
+            return {}
+        store = self.authorization.store
+        platform_sku = _text(record.get("platform_sku"), record.get("seller_sku"))
+        status_only = record.get("status_only", record.get("partial_snapshot", False))
+        if isinstance(status_only, str):
+            status_only = status_only.strip().casefold() in {"1", "true", "yes", "y", "status_only"}
+        else:
+            status_only = bool(status_only)
+        return {
+            "contract_version": "platform_product.v1",
+            "platform": str(self.config.platform),
+            "store_id": str(store.id),
+            "platform_product_id": _text(record.get("platform_product_id")),
+            "platform_variant_id": _text(record.get("platform_variant_id")),
+            "platform_sku": platform_sku,
+            "seller_sku": platform_sku,
+            # Platform/seller SKU is a provider-side identifier, not proof of
+            # an internal legacy SKU.  The SKU ingestion service resolves new
+            # and old codes independently and promotes only a verified match.
+            "source_old_sku_code": _text(record.get("source_old_sku_code")),
+            "new_sku_code": _text(record.get("new_sku_code")),
+            "title": _text(record.get("title")),
+            "variant": _text(record.get("variant")),
+            "category_l1": _text(record.get("category_l1")),
+            "category_l2": _text(record.get("category_l2")),
+            "category_l3": _text(record.get("category_l3")),
+            "sales_status": _text(record.get("sales_status")),
+            "platform_created_at": _iso(record.get("platform_created_at")) or None,
+            "platform_updated_at": _iso(record.get("platform_updated_at")) or None,
+            "source": "api",
+            # Partial status snapshots are an explicit ingestion contract:
+            # only sales_status/platform_updated_at may change an existing
+            # exact variant; no title/SKU/detail is inferred from the search
+            # summary.  The ingestion service audits unknown variants.
+            "status_only": status_only,
+            "partial_snapshot": status_only,
+            "snapshot_kind": "status_only" if status_only else "complete",
+        }
+
+    def validate_record(self, record):
+        if not isinstance(record, dict) or not record.get("store_id") or not record.get("platform_product_id"):
+            return False
+        if record.get("status_only"):
+            # A provider tombstone may contain no SKU list.  It is still a
+            # valid page record: ingestion records an auditable skip rather
+            # than manufacturing a variant identity.
+            return bool(record.get("sales_status") and record.get("platform_updated_at"))
+        return bool(record.get("platform_variant_id"))
+
+    def persist_record(self, sync_job, record):
+        run = self._require_run()
+        # Kept as a lazy import so the read adapter remains importable while
+        # the listing ingestion module evolves independently.  The ingestion
+        # function is the sole write boundary for PlatformProductDetail.
+        from apps.integrations.platform_product_ingestion import upsert_platform_product
+
+        payload = dict(record)
+        payload["source_run_id"] = run.id
+        result = upsert_platform_product(sync_job=sync_job, normalized_record=payload)
+        if not isinstance(result, dict):
+            raise ValidationError("Platform product ingestion returned an invalid result.")
+        action = result.get("action") or "skipped"
+        variant_key = record.get("platform_variant_id") or (
+            f"status:{record.get('platform_product_id')}:{record.get('sales_status')}:{record.get('platform_updated_at')}"
+            if record.get("status_only")
+            else ""
+        )
+        return {
+            **result,
+            "action": action,
+            "idempotency_key": result.get("idempotency_key") or f"{sync_job.id}:{variant_key}",
+        }
 
 
 class MarketplaceOrderAdapter(ProductionReadonlyAdapter):
@@ -457,11 +548,23 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
 class JifengInventoryAdapter(ProductionReadonlyAdapter):
     def normalize_record(self, record):
         config = self.config.platform_config or {}
+        warehouse_authorization = self.warehouse_authorization
+        warehouse = getattr(warehouse_authorization, "warehouse", None)
         return normalize_inventory_snapshot_record(
             {
                 "contract_version": "inventory_snapshot.v1",
-                "site_code": _text(config.get("site_code")).upper(),
-                "warehouse_id": str(config.get("warehouse_id") or ""),
+                # The provider-issued code is used only in the upstream
+                # request.  Normalized facts must retain the tenant-owned
+                # warehouse archive selected by the sync job.
+                "site_code": _text(
+                    getattr(warehouse, "country_code", ""),
+                    config.get("site_code"),
+                ).upper(),
+                "warehouse_id": str(
+                    getattr(warehouse_authorization, "warehouse_id", None)
+                    or config.get("warehouse_id")
+                    or ""
+                ),
                 "source_sku": _text(record.get("sku"), record.get("skuCode"), record.get("code"), record.get("sellerSku")),
                 "seller_sku": _text(record.get("sellerSku"), record.get("sku")),
                 "on_hand_qty": _quantity(record.get("totalNum"), record.get("total"), record.get("quantity")),
@@ -499,6 +602,8 @@ def get_adapter_for_config(config, resource_type=None):
         return DisabledProductionAdapter()
     if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
         return MarketplaceOrderAdapter(config)
+    if resource_type == SyncJob.ResourceType.PLATFORM_PRODUCT and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+        return MarketplaceProductAdapter(config)
     if resource_type == SyncJob.ResourceType.REFUND_RETURN and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
         return MarketplaceRefundAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.JIFENG_WMS:

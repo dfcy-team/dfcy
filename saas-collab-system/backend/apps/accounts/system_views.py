@@ -1,3 +1,5 @@
+import json
+
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -12,6 +14,12 @@ from apps.integrations.models import PlatformIntegrationConfig
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.api_permissions import InternalSuperuserPermission
 from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.permissions.packages import permission_package_catalog
+from apps.permissions.services import (
+    check_user_permission,
+    get_permission_data_scopes,
+    get_user_delegable_permission_codes,
+)
 from apps.permissions.role_catalog import (
     TENANT_ADMIN_ROLE_CODE,
     sync_tenant_administrator_role,
@@ -22,9 +30,17 @@ from apps.permissions.ui_p2_scopes import (
     filter_departments,
     filter_roles,
     filter_system_users,
+    department_tree_ids,
     require_all_scope,
     require_department_create_scope,
     require_user_create_scope,
+)
+from apps.masterdata.models import (
+    CountrySiteMaster,
+    PlatformMaster,
+    StoreMaster,
+    SupplierMaster,
+    WarehouseMaster,
 )
 from apps.tenants.models import Department, Tenant
 
@@ -58,6 +74,140 @@ def pagination(request):
         positive_int(request.query_params.get("page", 1), 1),
         positive_int(request.query_params.get("page_size", 20), 20),
     )
+
+
+def _query_bool(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _scope_signature(scope_type, config):
+    """Normalize one data scope for safe before/after comparisons."""
+    normalized = config if isinstance(config, dict) else {}
+    if scope_type == DataScope.ScopeType.ALL:
+        # Existing administrator rows historically use either {} or
+        # {"all": true}; both represent the same effective scope.
+        normalized = {"all": True}
+    return scope_type, json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+
+
+def _scope_changed(before_scopes, scope_type, config):
+    current = {
+        _scope_signature(scope.get("scope_type"), scope.get("config"))
+        for scope in before_scopes
+    }
+    return current != {_scope_signature(scope_type, config)}
+
+def _safe_department_tree(departments):
+    """Build a visible forest and break legacy parent cycles fail-closed."""
+    rows = list(departments)
+    visible_ids = {row.pk for row in rows}
+    parent_by_id = {row.pk: row.parent_id for row in rows}
+
+    def safe_parent_id(node_id):
+        parent_id = parent_by_id.get(node_id)
+        if parent_id not in visible_ids:
+            return None
+        seen = {node_id}
+        current = parent_id
+        while current in visible_ids:
+            if current in seen:
+                return None
+            seen.add(current)
+            current = parent_by_id.get(current)
+        return parent_id
+
+    nodes = {
+        row.pk: {
+            "id": row.pk,
+            "name": row.name,
+            "parent_id": safe_parent_id(row.pk),
+            "status": row.status,
+            "children": [],
+        }
+        for row in rows
+    }
+    roots = []
+    for node in nodes.values():
+        parent_id = node["parent_id"]
+        if parent_id in nodes:
+            nodes[parent_id]["children"].append(node)
+        else:
+            node["parent_id"] = None
+            roots.append(node)
+
+    def sort_nodes(items):
+        items.sort(key=lambda item: (item["name"].casefold(), item["id"]))
+        for item in items:
+            sort_nodes(item["children"])
+
+    sort_nodes(roots)
+    descendant_ids = {}
+
+    def collect_descendants(node):
+        values = {node["id"]}
+        for child in node["children"]:
+            values.update(collect_descendants(child))
+        descendant_ids[node["id"]] = values
+        return values
+
+    for root in roots:
+        collect_descendants(root)
+    return roots, nodes, descendant_ids
+
+
+def _department_user_counts(request, tenant, nodes, descendant_ids):
+    users_permission = "system.users.view"
+    if not check_user_permission(request.user, users_permission):
+        return {department_id: None for department_id in nodes}
+    if not get_permission_data_scopes(request.user, users_permission):
+        return {department_id: None for department_id in nodes}
+
+    users = CustomUser.objects.filter(tenant=tenant).prefetch_related(
+        "internal_profile__departments",
+    )
+    users = filter_system_users(request.user, users, users_permission)
+    assignments = []
+    visible_ids = set(nodes)
+    for user in users:
+        profile = getattr(user, "internal_profile", None)
+        if profile is None:
+            continue
+        department_ids = {department.pk for department in profile.departments.all()}
+        if profile.department_id:
+            department_ids.add(profile.department_id)
+        assignments.append(department_ids & visible_ids)
+
+    counts = {}
+    for department_id in nodes:
+        direct = sum(department_id in assigned for assigned in assignments)
+        descendants = descendant_ids.get(department_id, {department_id}) - {department_id}
+        descendant_count = sum(bool(assigned & descendants) for assigned in assignments)
+        counts[department_id] = (direct, descendant_count)
+    return counts
+
+
+def _department_filter_ids(request, raw_department_id, include_descendants):
+    try:
+        department_id = int(raw_department_id)
+    except (TypeError, ValueError):
+        raise ValidationError({"department_id": "department_id 必须是正整数。"})
+    if department_id < 1:
+        raise ValidationError({"department_id": "department_id 必须是正整数。"})
+
+    all_departments = Department.objects.filter(tenant=request.user.tenant)
+    visible_departments = filter_departments(
+        request.user,
+        all_departments,
+        "system.organization.view",
+    )
+    if not visible_departments.filter(pk=department_id).exists():
+        from rest_framework.exceptions import NotFound
+
+        raise NotFound("Department does not exist in the permitted organization scope.")
+    visible_ids = set(visible_departments.values_list("pk", flat=True))
+    if include_descendants:
+        return department_tree_ids(all_departments, {department_id}) & visible_ids
+    return {department_id}
 
 
 def _is_platform_superuser(user):
@@ -258,6 +408,34 @@ class DepartmentCollectionView(APIView):
         return success_response(DepartmentAdminSerializer(department).data, status=201)
 
 
+class DepartmentTreeView(APIView):
+    """Return the caller's tenant-scoped organization as a visible forest."""
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.organization.view"
+    write_permission_code = "system.organization.manage"
+
+    def get(self, request):
+        tenant = request.user.tenant
+        departments = filter_departments(
+            request.user,
+            Department.objects.filter(tenant=tenant).select_related("parent"),
+            self.read_permission_code,
+        )
+        roots, nodes, descendant_ids = _safe_department_tree(departments)
+        counts = _department_user_counts(request, tenant, nodes, descendant_ids)
+        for department_id, node in nodes.items():
+            value = counts.get(department_id)
+            node["direct_user_count"] = value[0] if isinstance(value, tuple) else value
+            node["descendant_user_count"] = value[1] if isinstance(value, tuple) else value
+        return success_response({
+            "items": roots,
+            "results": roots,
+            "count": len(nodes),
+            "tenant": {"id": tenant.pk, "name": tenant.name, "code": tenant.code},
+        })
+
+
 class DepartmentDetailView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "system.organization.view"
@@ -327,6 +505,23 @@ class UserCollectionView(APIView):
             "internal_profile__departments",
         )
         queryset = filter_system_users(request.user, queryset, self.read_permission_code)
+        raw_department_id = request.query_params.get("department_id")
+        if raw_department_id not in (None, ""):
+            department_ids = _department_filter_ids(
+                request,
+                raw_department_id,
+                _query_bool(request.query_params.get("include_descendants")),
+            )
+            queryset = queryset.filter(
+                Q(internal_profile__department_id__in=department_ids)
+                | Q(internal_profile__departments__id__in=department_ids)
+            ).distinct()
+        if _query_bool(request.query_params.get("unassigned")):
+            queryset = queryset.filter(
+                user_type=CustomUser.UserType.INTERNAL,
+                internal_profile__department__isnull=True,
+                internal_profile__departments__isnull=True,
+            )
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
@@ -348,10 +543,26 @@ class UserCollectionView(APIView):
     def post(self, request):
         serializer = UserAdminSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        role_codes = serializer.validated_data.get("role_codes", [])
+        assignable_roles = filter_assignable_roles(
+            request.user,
+            Role.objects.filter(
+                tenant=request.user.tenant,
+                status=Role.Status.ACTIVE,
+            ),
+            self.write_permission_code,
+        )
+        denied_role_codes = sorted(
+            set(role_codes) - set(assignable_roles.filter(code__in=role_codes).values_list("code", flat=True))
+        )
+        if denied_role_codes:
+            raise PermissionDenied(
+                f"Roles outside the assignable data scope: {', '.join(denied_role_codes)}"
+            )
         ensure_admin_role_assignment_allowed(
             request,
             request.user.tenant,
-            serializer.validated_data.get("role_codes", []),
+            role_codes,
         )
         require_user_create_scope(
             request.user,
@@ -383,29 +594,66 @@ class UserDetailView(APIView):
         )
         serializer = UserProfileUpdateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        if "department_ids" in serializer.validated_data and user.user_type != CustomUser.UserType.INTERNAL:
+        department_update = (
+            "department_id" in serializer.validated_data
+            or "department_ids" in serializer.validated_data
+        )
+        if department_update and user.user_type != CustomUser.UserType.INTERNAL:
             raise ValidationError({"department_ids": "只有内部用户可以配置部门归属。"})
+        profile = getattr(user, "internal_profile", None)
+        if department_update and profile is None:
+            raise ValidationError({"department_ids": "内部用户缺少组织档案，无法配置部门归属。"})
+        current_department_ids = (
+            list(profile.departments.values_list("id", flat=True))
+            if profile is not None else []
+        )
+        if department_update:
+            if "department_ids" in serializer.validated_data:
+                department_ids = list(serializer.validated_data["department_ids"])
+            else:
+                department_ids = current_department_ids
+            if "department_id" in serializer.validated_data:
+                primary_department_id = serializer.validated_data["department_id"]
+                if primary_department_id is not None and primary_department_id not in department_ids:
+                    department_ids.insert(0, primary_department_id)
+            elif "department_ids" in serializer.validated_data:
+                primary_department_id = department_ids[0] if department_ids else None
+            else:
+                primary_department_id = profile.department_id
+            visible_departments = filter_departments(
+                request.user,
+                Department.objects.filter(tenant=request.user.tenant),
+                self.write_permission_code,
+            )
+            visible_department_ids = set(visible_departments.values_list("id", flat=True))
+            selected_ids = set(department_ids)
+            if primary_department_id is not None:
+                selected_ids.add(primary_department_id)
+            if not selected_ids.issubset(visible_department_ids):
+                raise PermissionDenied("所选部门超出当前用户管理数据范围。")
+        else:
+            department_ids = current_department_ids
+            primary_department_id = profile.department_id if profile is not None else None
         before = {
             "full_name": user.full_name,
-            "department_ids": list(user.internal_profile.departments.values_list("id", flat=True))
-            if hasattr(user, "internal_profile") else [],
+            "department_id": profile.department_id if profile is not None else None,
+            "department_ids": current_department_ids,
         }
         if "full_name" in serializer.validated_data:
             user.full_name = serializer.validated_data["full_name"]
             user.save(update_fields=["full_name", "updated_at"])
-        if "department_ids" in serializer.validated_data:
-            department_ids = serializer.validated_data["department_ids"]
-            profile = user.internal_profile
+        if department_update:
             profile.departments.set(department_ids)
-            profile.department_id = department_ids[0] if department_ids else None
+            profile.department_id = primary_department_id
             profile.save(update_fields=["department", "updated_at"])
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="system", action="user_profile_update",
             object_type="user", object_id=user.pk, before_data=before,
             after_data={
                 "full_name": user.full_name,
-                "department_ids": list(user.internal_profile.departments.values_list("id", flat=True))
-                if hasattr(user, "internal_profile") else [],
+                "department_id": profile.department_id if profile is not None else None,
+                "department_ids": list(profile.departments.values_list("id", flat=True))
+                if profile is not None else [],
             },
         )
         return success_response(UserAdminSerializer(user, context={"request": request}).data)
@@ -608,12 +856,14 @@ class RoleCollectionView(APIView):
 
 
 class RoleScopeOptionsView(APIView):
-    """Return tenant-scoped options needed to configure a custom role scope.
+    """Return tenant-scoped business dimensions for a custom role scope.
 
-    This uses the role-management permission and all scope so administrators
-    do not need unrelated user/organization read permissions merely to define
-    a role's explicit scope.  All option querysets are tenant-filtered before
-    serialization.
+    Tenant isolation is implicit and cannot be selected in this response.  We
+    intentionally do not return departments, users, or roles: those were the
+    old organization-scope dimensions and are no longer valid for new role
+    permission submissions.  Every queryset is filtered to the target tenant
+    before serialization so a platform administrator cannot accidentally use
+    an object from another tenant.
     """
 
     permission_classes = [DeclaredApplicationPermission]
@@ -623,18 +873,28 @@ class RoleScopeOptionsView(APIView):
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
         tenant = requested_tenant(request)
-        departments = Department.objects.filter(tenant=tenant).select_related("parent")
-        users = CustomUser.objects.filter(tenant=tenant).select_related(
-            "internal_profile__department",
-        ).prefetch_related(
-            "user_roles__role",
-            "internal_profile__departments",
-        )
-        roles = Role.objects.filter(tenant=tenant, status=Role.Status.ACTIVE)
+        active = "active"
         return success_response({
-            "departments": DepartmentAdminSerializer(departments, many=True).data,
-            "users": UserAdminSerializer(users, many=True, context={"request": request}).data,
-            "roles": RoleOptionSerializer(roles, many=True).data,
+            "platforms": list(
+                PlatformMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name")
+            ),
+            "sites": list(
+                CountrySiteMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name", "country_code", "currency")
+            ),
+            "stores": list(
+                StoreMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name", "country_code", "platform_id")
+            ),
+            "warehouses": list(
+                WarehouseMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name", "country_code")
+            ),
+            "suppliers": list(
+                SupplierMaster.objects.filter(tenant=tenant, status=active)
+                .values("id", "code", "name")
+            ),
         })
 
 
@@ -650,7 +910,7 @@ class RolePermissionView(APIView):
         role = Role.objects.select_for_update().get(pk=role.pk)
         target_tenant = role.tenant
         if role.code == TENANT_ADMIN_ROLE_CODE:
-            raise StateConflict("The built-in administrator role is synchronized from the permission catalog.")
+            raise StateConflict("租户管理员角色由权限目录自动同步，不能手工修改权限。")
         serializer = RolePermissionUpdateSerializer(
             data=request.data,
             context={"request": request, "target_tenant": target_tenant},
@@ -658,7 +918,73 @@ class RolePermissionView(APIView):
         serializer.is_valid(raise_exception=True)
         before = list(role.permissions.values_list("code", flat=True))
         before_scopes = list(role.data_scopes.values("scope_type", "config"))
-        permission_codes = serializer.validated_data["permission_codes"]
+        permission_codes = set(serializer.validated_data["permission_codes"])
+        package_selections = serializer.validated_data.get("package_selections")
+        # Quick assignment is module-local.  Any module that was not touched
+        # by the quick form keeps its existing canonical grants, so selecting
+        # one package cannot accidentally wipe unrelated responsibilities.
+        if package_selections is not None:
+            touched_modules = set(package_selections)
+            permission_codes.update(
+                role.permissions.exclude(module__in=touched_modules).values_list("code", flat=True)
+            )
+        permission_codes = sorted(permission_codes)
+
+        # Retired menu grants stay attached for auditability even though they
+        # are no longer offered in the active permission directory.  A normal
+        # role edit must not silently revoke them merely because the frontend
+        # no longer renders the retired checkbox.
+        permission_codes = sorted(set(permission_codes) | set(
+            role.permissions.filter(
+                permission_type=Permission.PermissionType.MENU,
+                metadata__registry_status="inactive",
+            ).values_list("code", flat=True)
+        ))
+
+        # A role manager may delegate only permissions already granted to the
+        # actor through an all-tenant role.  Existing grants that were not
+        # touched by a quick package remain intact, but a request may not use
+        # role management itself as an implicit grant of unrelated catalog
+        # capabilities.
+        if not _is_platform_superuser(request.user) and not user_is_tenant_administrator(
+            request.user, target_tenant
+        ):
+            delegable_permissions = get_user_delegable_permission_codes(request.user)
+            if _scope_changed(
+                before_scopes,
+                serializer.validated_data["scope_type"],
+                serializer.validated_data["scope_config"],
+            ) and (set(before) - delegable_permissions):
+                raise PermissionDenied(
+                    "目标角色包含调用者无权委派的现有权限，不能修改其数据范围。"
+                )
+            before_set = set(before)
+            newly_granted = set(permission_codes) - before_set
+            denied_permissions = sorted(
+                newly_granted - delegable_permissions
+            )
+            if denied_permissions:
+                raise PermissionDenied(
+                    "只能委派调用者已有全部数据范围的权限：" + ", ".join(denied_permissions)
+                )
+
+        # department_tree is implemented by the system organization/user/role
+        # scope helpers.  Reject mixed roles here instead of persisting a
+        # globally valid DataScope value that unrelated modules would interpret
+        # inconsistently or silently as no data.
+        if serializer.validated_data["scope_type"] == DataScope.ScopeType.DEPARTMENT_TREE:
+            unsupported_modules = sorted(
+                set(
+                    Permission.objects.filter(code__in=permission_codes)
+                    .exclude(module="system")
+                    .values_list("module", flat=True)
+                )
+            )
+            if unsupported_modules:
+                raise ValidationError({
+                    "scope_type": "department_tree 仅支持 system 模块权限，不能与其他模块混用。"
+                })
+
         role.permissions.set(Permission.objects.filter(code__in=permission_codes))
         DataScope.objects.filter(tenant=target_tenant, role=role).delete()
         DataScope.objects.create(
@@ -674,6 +1000,8 @@ class RolePermissionView(APIView):
             after_data={
                 **audit_context(request, target_tenant),
                 "permissions": permission_codes,
+                "package_selections": package_selections,
+                "extra_permission_codes": serializer.validated_data.get("extra_permission_codes", []),
                 "menu_permissions": serializer.validated_data.get("menu_permission_codes", []),
                 "action_permissions": serializer.validated_data.get("action_permission_codes", []),
                 "field_permissions": serializer.validated_data.get("field_permission_codes", []),
@@ -704,7 +1032,7 @@ class RoleDetailView(APIView):
         role_ref = role_target(request, pk)
         role = Role.objects.select_for_update().prefetch_related("permissions", "data_scopes").get(pk=role_ref.pk)
         target_tenant = role.tenant
-        if role.code == TENANT_ADMIN_ROLE_CODE:
+        if role.code == TENANT_ADMIN_ROLE_CODE or role.is_protected:
             raise StateConflict("The built-in administrator role is synchronized from the permission catalog.")
         serializer = RoleAdminSerializer(
             role,
@@ -732,8 +1060,8 @@ class RoleDetailView(APIView):
         role_ref = role_target(request, pk)
         role = Role.objects.select_for_update().get(pk=role_ref.pk)
         target_tenant = role.tenant
-        if role.code == TENANT_ADMIN_ROLE_CODE:
-            raise StateConflict("The built-in administrator role cannot be deleted.")
+        if role.code == TENANT_ADMIN_ROLE_CODE or role.is_protected:
+            raise StateConflict("内置受保护角色不能删除。")
         if role.user_roles.filter(tenant=target_tenant).exists():
             raise StateConflict("角色仍绑定用户，不能删除；请先停用并解除角色绑定。")
         before_data = {"name": role.name, "code": role.code, "status": role.status}
@@ -758,8 +1086,8 @@ class RoleStatusView(APIView):
         role_ref = role_target(request, pk)
         role = Role.objects.select_for_update().prefetch_related("permissions", "data_scopes").get(pk=role_ref.pk)
         target_tenant = role.tenant
-        if role.code == TENANT_ADMIN_ROLE_CODE:
-            raise StateConflict("The built-in administrator role cannot be disabled.")
+        if role.code == TENANT_ADMIN_ROLE_CODE or role.is_protected:
+            raise StateConflict("内置受保护角色不能停用。")
         status = request.data.get("status")
         if status is None and isinstance(request.data.get("is_active"), bool):
             status = Role.Status.ACTIVE if request.data["is_active"] else Role.Status.INACTIVE
@@ -789,7 +1117,12 @@ class PermissionCollectionView(APIView):
             # Permission catalog is global; accepting tenant_id here would
             # imply a tenant-specific catalog and make client context unsafe.
             requested_tenant(request)
-        queryset = Permission.objects.all()
+        queryset = Permission.objects.exclude(
+            Q(
+                permission_type=Permission.PermissionType.MENU,
+                metadata__registry_status="inactive",
+            )
+        )
         module = request.query_params.get("module", "").strip()
         permission_type = request.query_params.get("permission_type", "").strip()
         if module:
@@ -800,6 +1133,30 @@ class PermissionCollectionView(APIView):
         return success_response(
             paginated_data(request, queryset, PermissionAdminSerializer, page=page, page_size=page_size)
         )
+
+
+class PermissionPackageCollectionView(APIView):
+    """Return quick-assignment metadata derived from the trusted catalog."""
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.roles.view"
+    write_permission_code = "system.roles.manage"
+
+    def get(self, request):
+        if request.query_params.get("tenant_id") not in (None, ""):
+            # The catalog is global, but an explicit tenant context must still
+            # pass the same platform-superuser boundary as role operations.
+            requested_tenant(request)
+        return success_response({
+            "levels": [
+                {"code": "none", "name": "无权限"},
+                {"code": "read", "name": "只读"},
+                {"code": "operate", "name": "可操作"},
+                {"code": "admin", "name": "模块管理员"},
+            ],
+            "packages": permission_package_catalog(),
+            "high_risk_policy": "operate/admin 不自动授予高风险权限，需通过 extra_permission_codes 明确确认。",
+        })
 
 
 class SecurityOperationsView(APIView):

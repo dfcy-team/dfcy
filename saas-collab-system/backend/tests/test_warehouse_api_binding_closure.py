@@ -245,3 +245,86 @@ def test_warehouse_readonly_check_uses_the_selected_warehouse_binding(monkeypatc
     assert checked.data["data"]["sample_count"] == 1
     assert seen["authorization_id"] == authorization_id
     assert WarehouseAuthorization.objects.get(pk=authorization_id).last_verified_at is not None
+
+
+def test_configured_wms_credentials_keep_workspace_job_ready():
+    user, warehouse, config, _replacement = _fixture()
+    client = APIClient()
+    client.force_authenticate(user)
+
+    bound = client.post(
+        "/api/internal/integrations/warehouse-authorizations/",
+        {"warehouse_id": warehouse.id, "integration_config_id": config.id},
+        format="json",
+    )
+    authorization_id = bound.data["data"]["authorization"]["id"]
+    created = client.post(
+        "/api/internal/integrations/sync-jobs/",
+        {
+            "integration_config_id": config.id,
+            "warehouse_authorization_id": authorization_id,
+            "resource_type": "inventory_snapshot",
+            "schedule_type": "manual",
+            "is_enabled": True,
+        },
+        format="json",
+    )
+    assert created.status_code == 201
+
+    response = client.get("/api/internal/integrations/workspace/", {"mode": "sync-jobs"})
+
+    assert response.status_code == 200
+    row = response.data["data"]["results"][0]
+    assert row["credential_status"] == PlatformIntegrationConfig.CredentialStatus.CONFIGURED
+    assert row["health_state"] == "healthy"
+    assert row["blocked_reason"] == ""
+    assert response.data["data"]["previews"]["reconcile"]["eligible_subject_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("credential_status", "config_status"),
+    [
+        (PlatformIntegrationConfig.CredentialStatus.EXPIRED, PlatformIntegrationConfig.Status.VERIFIED),
+        (PlatformIntegrationConfig.CredentialStatus.REVOKED, PlatformIntegrationConfig.Status.VERIFIED),
+        (PlatformIntegrationConfig.CredentialStatus.CONFIGURED, PlatformIntegrationConfig.Status.DISABLED),
+    ],
+)
+def test_expired_revoked_or_disabled_wms_credentials_block_workspace_job(
+    credential_status,
+    config_status,
+):
+    user, warehouse, config, _replacement = _fixture()
+    client = APIClient()
+    client.force_authenticate(user)
+
+    bound = client.post(
+        "/api/internal/integrations/warehouse-authorizations/",
+        {"warehouse_id": warehouse.id, "integration_config_id": config.id},
+        format="json",
+    )
+    authorization_id = bound.data["data"]["authorization"]["id"]
+    created = client.post(
+        "/api/internal/integrations/sync-jobs/",
+        {
+            "integration_config_id": config.id,
+            "warehouse_authorization_id": authorization_id,
+            "resource_type": "inventory_snapshot",
+            "schedule_type": "manual",
+            "is_enabled": True,
+        },
+        format="json",
+    )
+    assert created.status_code == 201
+
+    with authorization_service_write():
+        config.credential_status = credential_status
+        config.status = config_status
+        config.save(update_fields=["credential_status", "status", "updated_at"])
+
+    response = client.get("/api/internal/integrations/workspace/", {"mode": "sync-jobs"})
+
+    assert response.status_code == 200
+    row = response.data["data"]["results"][0]
+    assert row["health_state"] == "configuration"
+    assert row["blocked_reason"] == "开发者凭据尚未就绪"
+    assert response.data["data"]["previews"]["reconcile"]["eligible_subject_count"] == 0

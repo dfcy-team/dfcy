@@ -41,7 +41,7 @@
       <el-table-column v-for="column in columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 130" show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])">{{ row[column.prop] || '-' }}</el-tag>
-          <span v-else>{{ formatValue(row[column.prop]) }}</span>
+          <span v-else>{{ formatValue(typeof column.formatter === 'function' ? column.formatter(row[column.prop], row) : row[column.prop]) }}</span>
         </template>
       </el-table-column>
     </el-table>

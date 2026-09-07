@@ -1,6 +1,5 @@
 from django.db import transaction
-from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
@@ -9,7 +8,14 @@ from rest_framework.views import APIView
 from apps.common.query import pagination_query
 from apps.common.responses import error_response, paginated_data, success_response
 from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied
 from apps.products.models import ProductCategory, ProductLegacyItem, ProductSKU
+from apps.permissions.services import check_user_permission
+from apps.permissions.ui_p6_scopes import (
+    filter_platform_product_details,
+    filter_product_mappings,
+    filter_store_mappings,
+)
 
 from .models import ListingProfile, ListingTemplate, PlatformProductDetail
 from .permissions import CanApproveListings, CanManageListings, CanManageTemplates, CanPublishListingEndpoint, CanViewListings, CanViewTemplates, CanViewPlatformProductDetails, CanManagePlatformProductDetails, CanImportPlatformProductDetails
@@ -22,6 +28,127 @@ from .serializers import (
 )
 from .platform_product_details import _resolve_sku, import_platform_product_details
 from .services import approve_listing, queue_listing_publication, submit_listing_for_approval
+
+
+MAPPING_VIEW_PERMISSION = "integrations.product_mapping.view"
+PLATFORM_DETAIL_VIEW_PERMISSION = "listings.product_detail.view"
+PLATFORM_DETAIL_MANAGE_PERMISSION = "listings.product_detail.manage"
+PLATFORM_DETAIL_IMPORT_PERMISSION = "listings.product_detail.import"
+CONTROLLED_MAPPING_DETAIL_FIELDS = {
+    "platform",
+    "store",
+    "internal_sku",
+    "new_sku_code",
+    "source_old_sku_code",
+    "platform_product_id",
+    "platform_variant_id",
+    "platform_sku",
+}
+
+
+def _controlled_mapping_changes(item, payload):
+    """Return controlled fields whose submitted value differs from ``item``."""
+
+    changed = set()
+    relation_fields = {"platform": "platform_id", "store": "store_id", "internal_sku": "internal_sku_id"}
+    for field in CONTROLLED_MAPPING_DETAIL_FIELDS:
+        if field not in payload:
+            continue
+        raw_value = payload[field]
+        if field in relation_fields:
+            current_id = getattr(item, relation_fields[field])
+            if raw_value in (None, ""):
+                if current_id is not None:
+                    changed.add(field)
+                continue
+            try:
+                submitted_id = int(raw_value.pk if hasattr(raw_value, "pk") else raw_value)
+            except (TypeError, ValueError):
+                changed.add(field)
+                continue
+            if current_id != submitted_id:
+                changed.add(field)
+            continue
+        if str(getattr(item, field, "") or "") != str(raw_value or ""):
+            changed.add(field)
+    return changed
+
+
+def _authorized_mapping_prefetch(user):
+    from apps.integrations.models import MarketplaceProductMapping
+
+    mapping_queryset = MarketplaceProductMapping.objects.filter(
+        tenant=user.tenant,
+    ).select_related("sku")
+    mapping_queryset = filter_product_mappings(user, mapping_queryset, MAPPING_VIEW_PERMISSION)
+    return Prefetch(
+        "marketplace_mapping",
+        queryset=mapping_queryset,
+        to_attr="_authorized_marketplace_mapping",
+    )
+
+
+def _visible_product_mappings(user):
+    """Return mappings visible to the caller, including every scope dimension."""
+
+    from apps.integrations.models import MarketplaceProductMapping
+
+    queryset = MarketplaceProductMapping.objects.filter(tenant=user.tenant)
+    return filter_product_mappings(user, queryset, MAPPING_VIEW_PERMISSION)
+
+
+def _mapping_visible_detail_scope(user, queryset):
+    """Limit status-filtered details to visible mapping store/platform pairs."""
+
+    from apps.integrations.models import MarketplaceStoreMapping
+
+    store_mappings = filter_store_mappings(
+        user,
+        MarketplaceStoreMapping.objects.filter(tenant=user.tenant),
+        MAPPING_VIEW_PERMISSION,
+    )
+    pairs = list(store_mappings.values_list("store_id", "platform"))
+    allowed = Q(pk__in=[])
+    for store_id, platform in pairs:
+        allowed |= Q(store_id=store_id) & (
+            Q(platform__platform_type=platform) | Q(platform__code=platform)
+        )
+    return queryset.filter(allowed).distinct()
+
+
+def _platform_detail_target_allowed(user, permission_code, platform, store):
+    """Check a new detail's platform/store tuple before it exists in the DB."""
+
+    from apps.permissions.ui_p6_scopes import integration_values_allowed
+
+    platform_values = {
+        str(getattr(platform, "platform_type", "") or "").strip().lower(),
+        str(getattr(platform, "code", "") or "").strip().lower(),
+    }
+    return any(
+        integration_values_allowed(
+            user,
+            permission_code,
+            platform=value,
+            store_id=store.pk,
+        )
+        for value in platform_values
+        if value
+    )
+
+
+def _reject_direct_mapping_edit(item, payload):
+    try:
+        mapping = item.marketplace_mapping
+    except Exception:  # reverse one-to-one is absent for details without a mapping
+        mapping = None
+    changed = _controlled_mapping_changes(item, payload)
+    if mapping is not None and changed:
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError({
+            "mapping": "该平台商品已纳入受控映射，请在 SKU 映射操作中完成建议、确认或冲突处理。",
+        })
 
 
 def _require(request, permission):
@@ -111,6 +238,41 @@ class PlatformProductDetailCollectionView(APIView):
 
     def get(self, request):
         queryset = PlatformProductDetail.objects.filter(tenant=request.user.tenant).select_related("platform", "store", "site", "internal_sku")
+        # Detail visibility is independent from the mapping permission.  The
+        # page must first be reduced to the caller's product-detail range;
+        # mapping filters below are then applied only to mappings the caller
+        # is allowed to inspect.
+        queryset = filter_platform_product_details(
+            request.user,
+            queryset,
+            PLATFORM_DETAIL_VIEW_PERMISSION,
+        )
+        mapping_status = request.query_params.get("mapping_status", "").strip().lower()
+        if mapping_status:
+            from apps.integrations.models import MarketplaceProductMapping
+
+            if not check_user_permission(request.user, MAPPING_VIEW_PERMISSION):
+                raise PermissionDenied("缺少商品映射查看权限。")
+            if mapping_status not in MarketplaceProductMapping.Status.values:
+                raise PermissionDenied("不支持的平台商品映射状态筛选。")
+            queryset = _mapping_visible_detail_scope(request.user, queryset)
+            visible_mappings = _visible_product_mappings(request.user)
+            if mapping_status == MarketplaceProductMapping.Status.UNMAPPED:
+                visible_unmapped_detail_ids = visible_mappings.filter(
+                    status=MarketplaceProductMapping.Status.UNMAPPED,
+                    platform_detail_id__isnull=False,
+                ).values_list("platform_detail_id", flat=True)
+                queryset = queryset.filter(
+                    Q(marketplace_mapping__isnull=True)
+                    | Q(pk__in=visible_unmapped_detail_ids)
+                )
+            else:
+                visible_mapping_ids = visible_mappings.filter(
+                    status=mapping_status,
+                ).values_list("pk", flat=True)
+                queryset = queryset.filter(marketplace_mapping__pk__in=visible_mapping_ids)
+        if check_user_permission(request.user, MAPPING_VIEW_PERMISSION):
+            queryset = queryset.prefetch_related(_authorized_mapping_prefetch(request.user))
         for field in ("platform_id", "store_id", "site_id", "internal_sku_id"):
             value = request.query_params.get(field)
             if value:
@@ -153,6 +315,18 @@ class PlatformProductDetailCollectionView(APIView):
         self.check_permissions(request)
         serializer = PlatformProductDetailSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        platform = serializer.validated_data.get("platform")
+        store = serializer.validated_data.get("store")
+        if platform is not None and store is not None and not _platform_detail_target_allowed(
+            request.user,
+            PLATFORM_DETAIL_MANAGE_PERMISSION,
+            platform,
+            store,
+        ):
+            raise DataScopeDenied(
+                "平台商品明细新增超出当前数据范围。",
+                error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+            )
         item = serializer.save(tenant=request.user.tenant)
         return success_response(PlatformProductDetailSerializer(item, context={"request": request}).data, status=201)
 
@@ -161,40 +335,27 @@ class PlatformProductDetailView(APIView):
     def get_permissions(self):
         return [CanViewPlatformProductDetails() if self.request.method == "GET" else CanManagePlatformProductDetails()]
 
-    def get_object(self, request, pk):
-        return get_object_or_404(PlatformProductDetail.objects.select_related("platform", "store", "site", "internal_sku"), pk=pk, tenant=request.user.tenant)
+    def get_object(self, request, pk, *, permission_code):
+        queryset = PlatformProductDetail.objects.select_related("platform", "store", "site", "internal_sku")
+        queryset = filter_platform_product_details(request.user, queryset, permission_code)
+        if check_user_permission(request.user, MAPPING_VIEW_PERMISSION):
+            queryset = queryset.prefetch_related(_authorized_mapping_prefetch(request.user))
+        return get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
-        return success_response(PlatformProductDetailSerializer(self.get_object(request, pk), context={"request": request}).data)
+        return success_response(
+            PlatformProductDetailSerializer(
+                self.get_object(request, pk, permission_code=PLATFORM_DETAIL_VIEW_PERMISSION),
+                context={"request": request},
+            ).data
+        )
 
     def patch(self, request, pk):
-        item = self.get_object(request, pk)
+        item = self.get_object(request, pk, permission_code=PLATFORM_DETAIL_MANAGE_PERMISSION)
         payload = request.data.copy()
-        # Accept either legacy or generated SKU code when remapping a detail.
-        # Resolve it to the tenant-scoped FK before serializer validation so
-        # callers cannot attach a SKU from another tenant or an unknown code.
-        if "new_sku_code" in payload and "internal_sku" not in payload:
-            new_code = str(payload.get("new_sku_code") or "").strip()
-            if new_code:
-                try:
-                    payload["internal_sku"] = _resolve_sku(
-                        request.user.tenant,
-                        {"new_sku_code": new_code, "source_old_sku_code": ""},
-                    ).pk
-                except (ValueError, TypeError) as exc:
-                    from rest_framework.exceptions import ValidationError
-                    raise ValidationError({"new_sku_code": str(exc)}) from exc
-            payload.pop("new_sku_code", None)
-        if "source_old_sku_code" in payload and "internal_sku" not in payload:
-            old_code = str(payload.get("source_old_sku_code") or "").strip()
-            if old_code:
-                try:
-                    payload["internal_sku"] = _resolve_sku(request.user.tenant, {"source_old_sku_code": old_code, "new_sku_code": ""}).pk
-                except (ValueError, TypeError) as exc:
-                    from rest_framework.exceptions import ValidationError
-                    raise ValidationError({"source_old_sku_code": str(exc)}) from exc
         serializer = PlatformProductDetailSerializer(item, data=payload, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        _reject_direct_mapping_edit(item, serializer.validated_data)
         if "platform_variant_id" in serializer.validated_data:
             variant_id = serializer.validated_data["platform_variant_id"]
             conflict = PlatformProductDetail.objects.filter(
@@ -231,7 +392,7 @@ def platform_product_detail_bulk_update(request):
     match_type = payload["match_type"]
     code = payload["spu_code"]
     query = PlatformProductDetail.objects.select_for_update().select_related("platform", "store", "internal_sku", "internal_sku__spu")
-    query = query.filter(tenant=tenant)
+    query = filter_platform_product_details(request.user, query, PLATFORM_DETAIL_MANAGE_PERMISSION)
     if match_type == "old_spu":
         # A platform row may not have an internal SKU yet.  In that case the
         # source old-SKU value is still matchable through the tenant's legacy
@@ -253,6 +414,14 @@ def platform_product_detail_bulk_update(request):
         ids = [value for _kind, value in refs if value is not None]
         query = query.filter(pk__in=ids)
     rows = list(query.order_by("id"))
+    from apps.integrations.models import MarketplaceProductMapping
+
+    controlled_detail_ids = set(
+        MarketplaceProductMapping.objects.filter(
+            tenant=tenant,
+            platform_detail_id__in=[item.id for item in rows],
+        ).values_list("platform_detail_id", flat=True)
+    )
     result = {"matched": len(rows), "updated": 0, "unchanged": 0, "errors": []}
     if payload.get("preview"):
         result["preview"] = True
@@ -265,24 +434,41 @@ def platform_product_detail_bulk_update(request):
     mapped_sku = None
     if new_code is not sentinel or mapping_code is not sentinel or internal_sku_id is not sentinel:
         try:
-            if new_code is not sentinel and str(new_code).strip():
-                mapped_sku = _resolve_sku(tenant, {"new_sku_code": str(new_code).strip(), "source_old_sku_code": ""})
-            elif mapping_code is not sentinel and str(mapping_code).strip():
-                mapped_sku = _resolve_sku(tenant, {"new_sku_code": "", "source_old_sku_code": str(mapping_code).strip()})
-            elif internal_sku_id is not sentinel:
+            if internal_sku_id is not sentinel:
                 mapped_sku = ProductSKU.objects.filter(tenant=tenant, pk=internal_sku_id).first()
                 if mapped_sku is None:
                     raise ValueError("指定的新 SKU 不存在或不属于当前租户。")
+            if new_code is not sentinel or mapping_code is not sentinel:
+                resolved = _resolve_sku(tenant, {
+                    "new_sku_code": str(new_code).strip() if new_code is not sentinel else (mapped_sku.sku_code if mapped_sku else ""),
+                    "source_old_sku_code": str(mapping_code).strip() if mapping_code is not sentinel else "",
+                })
+                if mapped_sku is not None and resolved.pk != mapped_sku.pk:
+                    raise ValueError("新旧 SKU 编码与所选内部商品明细不一致。")
+                mapped_sku = resolved
         except (ValueError, TypeError) as exc:
             return error_response(ErrorCode.VALIDATION_ERROR, str(exc), status=400)
     simple_fields = ("title", "variant", "sales_status", "owner", "leader", "platform_sku", "platform_product_id")
     for item in rows:
         try:
+            controlled_payload = dict(fields)
+            # ``new_sku_code`` is only an input alias.  It is not persisted on
+            # PlatformProductDetail, so comparing it as a model field would
+            # make every controlled row look changed even when it resolves to
+            # the row's current internal SKU.
+            controlled_payload.pop("new_sku_code", None)
+            if mapped_sku is not None:
+                controlled_payload["internal_sku"] = mapped_sku.pk
+            if item.id in controlled_detail_ids and _controlled_mapping_changes(item, controlled_payload):
+                raise ValueError("该平台商品已纳入受控映射，请在 SKU 映射操作中完成身份或 SKU 修改。")
             updates = {}
             for field in simple_fields:
                 if field in fields and getattr(item, field) != fields[field]:
                     updates[field] = fields[field]
             if mapped_sku is not None:
+                effective_old = item.source_old_sku_code if mapping_code is sentinel else str(mapping_code).strip()
+                if effective_old:
+                    _resolve_sku(tenant, {"new_sku_code": mapped_sku.sku_code, "source_old_sku_code": effective_old})
                 updates["internal_sku"] = mapped_sku
                 if mapping_code is not sentinel:
                     updates["source_old_sku_code"] = str(mapping_code).strip()
@@ -321,6 +507,30 @@ class PlatformProductDetailImportView(APIView):
             raw=raw,
             filename=getattr(upload, "name", ""),
             platform_hint=request.data.get("platform", ""),
+            dry_run=str(request.data.get("dry_run", "")).lower() in {"1", "true", "yes", "on"},
+            actor=request.user,
+        )
+        return success_response(result)
+
+
+class PlatformProductDetailProductIdImportView(APIView):
+    """Import platform product IDs through the same scoped import boundary."""
+
+    permission_classes = [CanImportPlatformProductDetails]
+
+    def post(self, request):
+        upload = request.FILES.get("file")
+        raw = upload.read() if upload else str(request.data.get("csv_text", "")).encode("utf-8-sig")
+        if not raw:
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError({"file": "CSV/XLSX 文件不能为空。"})
+        from .platform_product_details import import_platform_product_ids
+
+        result = import_platform_product_ids(
+            tenant=request.user.tenant,
+            raw=raw,
+            filename=getattr(upload, "name", ""),
             dry_run=str(request.data.get("dry_run", "")).lower() in {"1", "true", "yes", "on"},
             actor=request.user,
         )

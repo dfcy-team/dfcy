@@ -1,3 +1,5 @@
+import { buildMenuPermissionRegistry, menuPermissionCodesForItem } from './menuRegistry.js';
+
 export const menuItems = [
   { path: '/', label: '工作台' },
   {
@@ -139,12 +141,9 @@ export const menuItems = [
     children: [
       { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
       { path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
-      { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
       { path: '/integrations/readiness', label: '生产准入', permissions: ['integrations.view'] },
       { path: '/integrations/production-settings', label: '生产环境配置', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
       { path: '/integrations/capabilities', label: '能力矩阵', permissions: ['integrations.store.view'] },
-      { path: '/integrations/store-mappings', label: '店铺映射', permissions: ['integrations.store.view'] },
-      { path: '/integrations/product-mappings', label: '商品映射', permissions: ['integrations.store.view'] },
       { path: '/integrations/incidents', label: '同步异常', permissions: ['integrations.view'] },
       { path: '/integrations/audit', label: '集成审计', permissions: ['integrations.audit.view'] },
       { path: '/integrations/platform-drill', label: '平台操作演练', permissions: ['integrations.view'] },
@@ -178,6 +177,9 @@ export const menuItems = [
     label: '基础档案',
     permissions: [
       'masterdata.view',
+      'listings.product_detail.view',
+      'integrations.store_mapping.view',
+      'integrations.product_mapping.view',
       'products.master.view',
       'products.category.view',
       'products.attribute.view',
@@ -189,7 +191,7 @@ export const menuItems = [
     children: [
       { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
       { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view'] },
-      { path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view'] },
+      { path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view', 'integrations.product_mapping.view'] },
       { path: '/products/categories', label: '分类设置', permissions: ['products.category.view'] },
       { path: '/products/attributes', label: '属性设置', permissions: ['products.attribute.view'] },
       { path: '/products/colors', label: '颜色设置', permissions: ['products.color.view'] },
@@ -197,7 +199,7 @@ export const menuItems = [
       { path: '/products/bundles', label: '组合商品', permissions: ['products.bundle.view'] },
       { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
       { path: '/master-data/sites', label: '国家信息', permissions: ['masterdata.view'] },
-      { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view'] },
+      { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view', 'integrations.store_mapping.view'] },
       { path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
       { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] },
       { path: '/master-data/settings', label: '基础档案设置', permissions: ['masterdata.settings.view'] }
@@ -237,19 +239,26 @@ export const menuItems = [
   },
   {
     label: '治理与试点',
+    internal: true,
+    permissions: [
+      'governance.api.view',
+      'governance.assistants.view',
+      'pilot.readiness.view',
+      'pilot.topology.view',
+      'pilot.recovery.view',
+      'pilot.release.view',
+      'pilot.capacity.view',
+      'pilot.control.view',
+      'pilot.security_review.view',
+      'pilot.verification.view',
+      'pilot.performance.view',
+      'pilot.entry.view'
+    ],
     children: [
-      { path: '/governance/api-contracts', label: 'API 合同', permissions: ['governance.api.view'] },
-      { path: '/governance/assistants', label: '助手治理', permissions: ['governance.assistants.view'] },
-      { path: '/pilot/readiness', label: '试点准入', permissions: ['pilot.readiness.view'] },
-      { path: '/pilot/topology', label: '部署拓扑', permissions: ['pilot.topology.view'] },
-      { path: '/pilot/recovery', label: '恢复演练', permissions: ['pilot.recovery.view'] },
-      { path: '/pilot/releases', label: '发布记录', permissions: ['pilot.release.view'] },
-      { path: '/pilot/capacity', label: '容量观察', permissions: ['pilot.capacity.view'] },
-      { path: '/pilot/control-room', label: '试点控制台', permissions: ['pilot.control.view'] },
-      { path: '/pilot/security-reviews', label: '专项安全评审', permissions: ['pilot.security_review.view'] },
-      { path: '/pilot/verification-runs', label: '受控验证', permissions: ['pilot.verification.view'] },
-      { path: '/pilot/performance-runs', label: '性能验证', permissions: ['pilot.performance.view'] },
-      { path: '/pilot/entry-decisions', label: '准入决策', permissions: ['pilot.entry.view'] }
+      { path: '/governance', label: '治理中心', internal: true, permissions: ['governance.api.view', 'governance.assistants.view'] },
+      { path: '/pilot/validation', label: '验证中心', internal: true, permissions: ['pilot.security_review.view', 'pilot.verification.view', 'pilot.performance.view'] },
+      { path: '/pilot/releases', label: '发布中心', internal: true, permissions: ['pilot.release.view', 'pilot.recovery.view'] },
+      { path: '/pilot/control-room', label: '运维控制台', internal: true, permissions: ['pilot.control.view', 'pilot.topology.view', 'pilot.capacity.view'] }
     ]
   }
 ];
@@ -275,6 +284,11 @@ const topLevelMenuOrder = [
 ];
 
 menuItems.sort((left, right) => topLevelMenuOrder.indexOf(left.label) - topLevelMenuOrder.indexOf(right.label));
+
+// The sidebar itself is the registration source. Derived menu.* codes are
+// collected without mutating the declaration; npm run permissions:export
+// snapshots the same registry for the backend release sync.
+export const menuPermissionRegistry = buildMenuPermissionRegistry(menuItems);
 
 // Every authenticated route must be registered here. The guard deliberately
 // denies paths without a contract so a newly added page cannot bypass RBAC.
@@ -321,7 +335,7 @@ export const routeCapabilities = [
   { path: '/products/research', permissions: ['products.research.view'], userTypes: ['internal'] },
   { path: '/products/master', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/products/details', permissions: ['products.master.view'], userTypes: ['internal'] },
-  { path: '/products/platform-details', permissions: ['listings.product_detail.view'], userTypes: ['internal'] },
+  { path: '/products/platform-details', permissions: ['listings.product_detail.view', 'integrations.product_mapping.view'], userTypes: ['internal'] },
   { path: '/products/categories', permissions: ['products.category.view'], userTypes: ['internal'] },
   { path: '/master-data/settings', permissions: ['masterdata.settings.view'], userTypes: ['internal'] },
   { path: '/products/colors', permissions: ['products.color.view'], userTypes: ['internal'] },
@@ -361,8 +375,8 @@ export const routeCapabilities = [
   { path: '/integrations/readiness', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/production-settings', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
   { path: '/integrations/capabilities', permissions: ['integrations.store.view'], userTypes: ['internal'] },
-  { path: '/integrations/store-mappings', permissions: ['integrations.store.view'], userTypes: ['internal'] },
-  { path: '/integrations/product-mappings', permissions: ['integrations.store.view'], userTypes: ['internal'] },
+  { path: '/integrations/store-mappings', permissions: ['integrations.store_mapping.view'], userTypes: ['internal'] },
+  { path: '/integrations/product-mappings', permissions: ['integrations.product_mapping.view'], userTypes: ['internal'] },
   { path: '/integrations/incidents', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/audit', permissions: ['integrations.audit.view'], userTypes: ['internal'] },
   { path: '/integrations/platform-sites', permissions: ['masterdata.view'], userTypes: ['internal'] },
@@ -391,7 +405,7 @@ export const routeCapabilities = [
   { path: '/system/roles', permissions: ['system.roles.view'], userTypes: ['internal'] },
   { path: '/system/security-operations', permissions: ['security.operations.view'], userTypes: ['internal'] },
   { path: '/master-data/platforms', permissions: ['masterdata.view'], userTypes: ['internal'] },
-  { path: '/master-data/stores', permissions: ['masterdata.view'], userTypes: ['internal'] },
+  { path: '/master-data/stores', permissions: ['masterdata.view', 'integrations.store_mapping.view'], userTypes: ['internal'] },
   { path: '/master-data/warehouses', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/suppliers', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/sites', permissions: ['masterdata.view'], userTypes: ['internal'] },
@@ -407,19 +421,41 @@ export const routeCapabilities = [
   { path: '/supply-chain/purchase-orders', permissions: ['supply.purchase_order.view'], userTypes: ['internal'] },
   { path: '/audit/operations', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] },
   { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
+  { path: '/governance', permissions: ['governance.api.view', 'governance.assistants.view'], userTypes: ['internal'] },
   { path: '/governance/api-contracts', permissions: ['governance.api.view'], userTypes: ['internal'] },
   { path: '/governance/assistants', permissions: ['governance.assistants.view'], userTypes: ['internal'] },
+  { path: '/pilot/validation', permissions: ['pilot.security_review.view', 'pilot.verification.view', 'pilot.performance.view'], userTypes: ['internal'] },
   { path: '/pilot/readiness', permissions: ['pilot.readiness.view'], userTypes: ['internal'] },
   { path: '/pilot/topology', permissions: ['pilot.topology.view'], userTypes: ['internal'] },
   { path: '/pilot/recovery', permissions: ['pilot.recovery.view'], userTypes: ['internal'] },
-  { path: '/pilot/releases', permissions: ['pilot.release.view'], userTypes: ['internal'] },
+  { path: '/pilot/releases', permissions: ['pilot.release.view', 'pilot.recovery.view'], userTypes: ['internal'] },
   { path: '/pilot/capacity', permissions: ['pilot.capacity.view'], userTypes: ['internal'] },
-  { path: '/pilot/control-room', permissions: ['pilot.control.view'], userTypes: ['internal'] },
+  { path: '/pilot/control-room', permissions: ['pilot.control.view', 'pilot.topology.view', 'pilot.capacity.view'], userTypes: ['internal'] },
   { path: '/pilot/security-reviews', permissions: ['pilot.security_review.view'], userTypes: ['internal'] },
   { path: '/pilot/verification-runs', permissions: ['pilot.verification.view'], userTypes: ['internal'] },
   { path: '/pilot/performance-runs', permissions: ['pilot.performance.view'], userTypes: ['internal'] },
   { path: '/pilot/entry-decisions', permissions: ['pilot.entry.view'], userTypes: ['internal'] }
 ];
+
+// A route contract may carry both surfaces: menu permissions control whether
+// the entry is discoverable, while action/allPermissions continue to control
+// the operation behind the page.  Derive the menu side from the same registry
+// used by the sidebar so a newly registered page cannot accidentally bypass
+// menu gating on a deep link.
+const menuCodesByRoute = new Map();
+for (const definition of menuPermissionRegistry) {
+  const path = definition.metadata?.path || definition.metadata?.route;
+  if (!path) continue;
+  const codes = menuCodesByRoute.get(path) || [];
+  codes.push(definition.code);
+  menuCodesByRoute.set(path, codes);
+}
+for (const capability of routeCapabilities) {
+  const menuCodes = menuCodesByRoute.get(capability.path);
+  if (menuCodes?.length && !capability.menuPermissions?.length) {
+    capability.menuPermissions = [...new Set(menuCodes)];
+  }
+}
 
 function matchesPath(contract, path) {
   return contract.exact
@@ -445,22 +481,30 @@ function canAccessCapability(user, capability) {
   if (capability.internal && user.user_type !== 'internal') return false;
   if (capability.superuserOnly) return user.user_type === 'internal' && Boolean(user.is_superuser);
   if (user.is_superuser) return true;
-  if (!capability.permissions?.length) return true;
-  const isMenuContract = capability.menuPermissions?.length;
-  const categorized = isMenuContract ? user.menu_permission_codes : user.action_permission_codes;
-  // New sessions expose separate permission surfaces. Keep the legacy union
-  // as a compatibility fallback for sessions issued before V2.44.62.
-  const hasCategorizedPermissions = Array.isArray(categorized);
-  const permissions = hasCategorizedPermissions
-    ? new Set(categorized)
-    : new Set(user.permissions || []);
-  const required = isMenuContract && hasCategorizedPermissions
-    ? capability.menuPermissions
-    : capability.permissions;
-  if (capability.allPermissions?.length && !capability.allPermissions.every((code) => permissions.has(code))) {
+
+  // Keep the two authorization surfaces independent.  A menu grant is only
+  // an entry-point grant; it must never satisfy an action/allPermissions
+  // requirement (and vice versa).  Older sessions only expose ``permissions``
+  // so they continue to work against the legacy union as a compatibility
+  // fallback.
+  // An explicitly populated menu surface is authoritative.  An empty menu
+  // array is retained by older sessions during the rollout and must continue
+  // to use the legacy action/permissions route check until it is refreshed.
+  const hasMenuSurface = Array.isArray(user.menu_permission_codes) && user.menu_permission_codes.length > 0;
+  const hasActionSurface = Array.isArray(user.action_permission_codes);
+  const menuPermissions = new Set(hasMenuSurface ? user.menu_permission_codes : (user.permissions || []));
+  const actionPermissions = new Set(hasActionSurface ? user.action_permission_codes : (user.permissions || []));
+  const requiredMenu = capability.menuPermissions || [];
+  const requiredActions = capability.permissions || [];
+  // Sessions created before the surface split do not expose
+  // menu_permission_codes.  Preserve their action-based access until the
+  // session refreshes; new sessions must satisfy the independent menu grant.
+  if (hasMenuSurface && requiredMenu.length && !requiredMenu.some((code) => menuPermissions.has(code))) return false;
+  if (capability.allPermissions?.length && !capability.allPermissions.every((code) => actionPermissions.has(code))) {
     return false;
   }
-  return required.some((code) => permissions.has(code));
+  if (!requiredActions.length) return true;
+  return requiredActions.some((code) => actionPermissions.has(code));
 }
 
 // Keep the existing menu and permission surfaces stable while allowing the
@@ -537,6 +581,17 @@ function isModuleVisible(user, code) {
 }
 
 export function canAccessMenuItem(user, item) {
+  // Once a session carries categorized menu permissions, sidebar entries are
+  // controlled by the menu surface.  Action-only legacy sessions continue to
+  // use the existing action permission fallback.
+  if (Array.isArray(user?.menu_permission_codes)) {
+    const required = item?.menuPermissions?.length
+      ? item.menuPermissions
+      : menuPermissionCodesForItem(item);
+    if (required.length) {
+      return required.some((code) => user.menu_permission_codes.includes(code));
+    }
+  }
   return canAccessCapability(user, item);
 }
 
@@ -555,8 +610,11 @@ export function filterMenuItems(user, items = menuItems) {
           return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex);
         });
       }
-      const canSeeParent = canAccessMenuItem(user, item)
-        || (item.showWhenChildAccessible && children.length > 0);
+      // A parent is a visual container, but a disabled rollout module must not
+      // become visible merely because one of its children has a grant.
+      const moduleCode = moduleCodeForMenuLabel(item.label);
+      const moduleEnabled = !moduleCode || isModuleVisible(user, moduleCode);
+      const canSeeParent = moduleEnabled && (canAccessMenuItem(user, item) || children.length > 0);
       return children.length && canSeeParent ? [{ ...item, children }] : [];
     }
     return canAccessMenuItem(user, item) ? [item] : [];

@@ -80,6 +80,21 @@ class PlatformMasterSerializer(TenantOwnedSerializer):
             raise serializers.ValidationError("Unknown platform type.")
         return normalized
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance and "platform_type" in attrs:
+            previous_type = str(self.instance.platform_type or "").strip().lower()
+            next_type = str(attrs["platform_type"] or "").strip().lower()
+            if previous_type != next_type:
+                stores = self.instance.stores
+                if stores.exclude(external_store_id="").exists() or stores.filter(
+                    marketplace_authorizations__status="active"
+                ).exists():
+                    raise serializers.ValidationError(
+                        {"platform_type": "已有店铺外部身份或有效平台授权绑定该平台，不能直接修改平台类型。"}
+                    )
+        return attrs
+
     def get_canonical_code(self, obj):
         return self._catalog_value(obj, "canonical_code")
 
@@ -152,6 +167,8 @@ class PlatformSiteMasterSerializer(TenantOwnedSerializer):
 
 class StoreMasterSerializer(TenantOwnedSerializer):
     platform_id = serializers.IntegerField()
+    external_store_id = serializers.CharField(required=False, allow_blank=True, max_length=160)
+    country_code = serializers.CharField(max_length=8)
     platform_name = serializers.CharField(source="platform.name", read_only=True)
     platform_site_id = serializers.IntegerField(required=False, allow_null=True)
     platform_site_name = serializers.CharField(source="platform_site.name", read_only=True, allow_null=True)
@@ -258,10 +275,44 @@ class StoreMasterSerializer(TenantOwnedSerializer):
     def validate_settlement_currency(self, value):
         return str(value or "").strip().upper()
 
+    def validate_external_store_id(self, value):
+        # The platform OAuth identity is whitespace-insensitive.  Keep the
+        # persisted value canonical so the database constraint and the
+        # authorization identity key use the same value.
+        return str(value or "").strip()
+
+    def validate_country_code(self, value):
+        value = str(value or "").strip().upper()
+        if not value:
+            raise serializers.ValidationError("店铺国家/站点代码不能为空。")
+        return value
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        site_id = attrs.get("platform_site_id", getattr(self.instance, "platform_site_id", None))
+        tenant = self.context["request"].user.tenant
         platform_id = attrs.get("platform_id", getattr(self.instance, "platform_id", None))
+        platform_type = PlatformMaster.objects.filter(
+            tenant=tenant,
+            pk=platform_id,
+        ).values_list("platform_type", flat=True).first()
+        country_code = str(attrs.get("country_code", getattr(self.instance, "country_code", "")) or "").strip().upper()
+        external_store_id = str(
+            attrs.get("external_store_id", getattr(self.instance, "external_store_id", "")) or ""
+        ).strip()
+        if external_store_id and platform_id:
+            candidates = StoreMaster.objects.filter(
+                tenant=tenant,
+                platform__platform_type=platform_type,
+            ).exclude(pk=getattr(self.instance, "pk", None))
+            if any(
+                str(item.external_store_id or "").strip() == external_store_id
+                and str(item.country_code or "").strip().upper() == country_code
+                for item in candidates.only("external_store_id", "country_code")
+            ):
+                raise serializers.ValidationError(
+                    {"external_store_id": "该平台和站点的外部店铺 ID 已绑定其他店铺档案，请复用原档案或先处理重复数据。"}
+                )
+        site_id = attrs.get("platform_site_id", getattr(self.instance, "platform_site_id", None))
         if site_id:
             site = PlatformSiteMaster.objects.filter(tenant=self.context["request"].user.tenant, pk=site_id).first()
             if site and site.platform_id != platform_id:

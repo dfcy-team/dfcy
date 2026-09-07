@@ -1,15 +1,37 @@
 <template>
   <AppPage
-    eyebrow="PRODUCTION PILOT"
-    :title="release ? '生产部署' : '生产恢复'"
+    eyebrow=""
+    :title="release ? '发布中心' : '生产恢复'"
     :subtitle="release ? '创建发布计划、完成双人审批，并执行部署或回滚作业。' : '创建恢复计划、完成双人审批，并执行受控恢复作业。'"
     boundary-note="部署、恢复和回滚都会产生真实生产影响；每次操作必须通过服务端权限、版本、审批分离和审计校验。"
     :capability="capability"
   >
     <template #action>
+      <el-button-group v-if="canViewRelease && canViewRecovery" aria-label="发布中心工作类型">
+        <el-button :type="release ? 'primary' : 'default'" @click="switchMode('release')">部署与回滚</el-button>
+        <el-button :type="release ? 'default' : 'primary'" @click="switchMode('recovery')">恢复演练</el-button>
+      </el-button-group>
       <el-button v-if="canPlan" type="primary" @click="openCreate">{{ release ? '创建部署计划' : '创建恢复计划' }}</el-button>
       <el-button @click="load" :loading="state === 'loading'">刷新</el-button>
     </template>
+
+    <GovernancePilotJourney :active-step="release ? 3 : 5" />
+
+    <section v-if="release && workOrder" class="work-order" aria-labelledby="work-order-title">
+      <div class="work-order__heading">
+        <div>
+          <h2 id="work-order-title">统一发布工单</h2>
+          <p>当前选中计划优先；未选择时展示列表首条真实记录。字段缺失显示“—”。</p>
+        </div>
+        <button type="button" class="work-order__select" @click="openDetail(workOrder)">查看计划详情</button>
+      </div>
+      <dl class="work-order__fields">
+        <div v-for="field in workOrderFields" :key="field.label">
+          <dt>{{ field.label }}</dt>
+          <dd :class="{ 'work-order__mono': field.mono }">{{ field.value }}</dd>
+        </div>
+      </dl>
+    </section>
 
     <AppState v-if="state !== 'ready'" :status="state" :detail="errorMessage" @action="load" />
     <template v-else>
@@ -29,26 +51,38 @@
           <template #default="{ row }"><span>{{ executionIdFor(row) || '—' }}</span><small v-if="executionStatusFor(row)" class="execution-status">{{ executionStatusFor(row) }}</small><small v-if="executionErrors[row.id]" class="execution-error" role="alert">{{ executionErrors[row.id] }}</small></template>
         </el-table-column>
         <el-table-column prop="audit_ref" label="审计引用" min-width="150" />
-        <el-table-column label="生产操作" min-width="560">
+        <el-table-column label="常规操作" min-width="420">
           <template #default="{ row }">
             <el-button v-if="canPlan && row.status === 'draft'" size="small" @click.stop="beginAction(row, 'submit-review')">提交审批</el-button>
             <el-button v-if="canReview && row.status === 'review_pending'" size="small" type="success" @click.stop="beginAction(row, 'approve')">批准</el-button>
             <el-button v-if="canReview && row.status === 'review_pending'" size="small" @click.stop="beginAction(row, 'reject')">拒绝</el-button>
             <el-button v-if="canPlan && row.status === 'approved'" size="small" @click.stop="openSchedule(row)">设置执行窗口</el-button>
-            <el-button v-if="canExecute && row.status === 'scheduled'" size="small" type="danger" :disabled="!isExecutionWindowOpen(row)" @click.stop="confirmExecution(row)">{{ isExecutionWindowOpen(row) ? (release ? '执行部署' : '执行恢复') : '等待执行窗口' }}</el-button>
             <el-button v-if="canExecute && ['queued', 'running'].includes(row.status)" size="small" @click.stop="refreshExecution(row)">刷新作业</el-button>
             <el-button v-if="canPlan && cancellable(row)" size="small" type="danger" plain @click.stop="beginAction(row, 'cancel')">取消计划</el-button>
-            <template v-if="release && canRollback && row.status === 'rollback_required'">
-              <el-button v-if="!row.rollback_approval_ref" size="small" type="warning" @click.stop="openRollbackApproval(row)">申请回滚批准</el-button>
-              <el-button v-else size="small" type="danger" @click.stop="confirmRollback(row)">执行回滚</el-button>
-            </template>
             <el-button v-if="canRecord && row.status === 'manual_required'" size="small" @click.stop="beginAction(row, 'resume')">人工处理后继续</el-button>
-          </template>
-        </el-table-column>
+            <el-button size="small" type="primary" plain @click.stop="openDetail(row)">查看详情</el-button>
+           </template>
+         </el-table-column>
       </el-table>
     </template>
 
     <el-drawer v-model="drawer" title="计划详情与执行审计" size="min(680px, 92vw)">
+      <template v-if="selected">
+        <template v-for="row in [selected]" :key="row.id">
+          <section class="detail-actions" aria-labelledby="detail-actions-title">
+            <h3 id="detail-actions-title">详情内生产操作</h3>
+            <p>高风险操作仅在当前选中计划上下文内可用，服务端仍会再次校验权限、版本、审批和执行窗口。</p>
+            <div class="detail-actions__buttons">
+              <el-button v-if="canExecute && row.status === 'scheduled'" type="danger" :disabled="!isExecutionWindowOpen(row)" @click="confirmExecution(row)">{{ isExecutionWindowOpen(row) ? (release ? '执行部署' : '执行恢复') : '等待执行窗口' }}</el-button>
+              <el-button v-if="canExecute && ['queued', 'running'].includes(row.status)" @click="refreshExecution(row)">刷新作业</el-button>
+              <template v-if="release && canRollback && row.status === 'rollback_required'">
+                <el-button v-if="!row.rollback_approval_ref" type="warning" @click="openRollbackApproval(row)">申请回滚批准</el-button>
+                <el-button v-else type="danger" @click="confirmRollback(row)">执行回滚</el-button>
+              </template>
+            </div>
+          </section>
+        </template>
+      </template>
       <el-descriptions v-if="selected" :column="1" border>
         <el-descriptions-item v-for="(value, key) in selected" :key="key" :label="key"><pre v-if="typeof value === 'object'">{{ JSON.stringify(value, null, 2) }}</pre><span v-else>{{ value }}</span></el-descriptions-item>
       </el-descriptions>
@@ -128,8 +162,10 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
+import GovernancePilotJourney from '../../components/GovernancePilotJourney.vue';
 import {
   createRecoveryPlan,
   createReleasePlan,
@@ -148,7 +184,13 @@ import { statusFromApiResponse } from '../../utils/uiState';
 
 const props = defineProps({ kind: { type: String, required: true } });
 const auth = useAuthStore();
-const release = computed(() => props.kind === 'release');
+const router = useRouter();
+const canViewRelease = computed(() => auth.isSuperuser || auth.hasPermission('pilot.release.view'));
+const canViewRecovery = computed(() => auth.isSuperuser || auth.hasPermission('pilot.recovery.view'));
+// The aggregate route is visible to either viewer role. If a recovery-only
+// operator opens its default URL, land on the authorized recovery workbench
+// instead of issuing an avoidable release API request that must fail with 403.
+const release = computed(() => props.kind === 'release' && (canViewRelease.value || !canViewRecovery.value));
 const prefix = computed(() => release.value ? 'pilot.release' : 'pilot.recovery');
 const canPlan = computed(() => auth.hasPermission(`${prefix.value}.plan`));
 const canReview = computed(() => auth.hasPermission(`${prefix.value}.review`));
@@ -187,7 +229,47 @@ const createForm = reactive({
 let executionPollTimer = null;
 
 const activeExecutionStates = new Set(['queued', 'running', 'pending', 'in_progress']);
+const workOrder = computed(() => release.value ? (selected.value || rows.value[0] || null) : null);
+const workOrderFields = computed(() => {
+  const row = workOrder.value;
+  if (!row) return [];
+  const execution = executionCache[row.id] || row.execution || {};
+  const executionId = pick(execution, ['id', 'execution_id']);
+  const executionStatus = pick(execution, ['status', 'state']);
+  return [
+    { label: '工单号', value: displayValue(pick(row, ['work_order_id', 'work_order', 'id'])) },
+    { label: '版本 SHA', value: displayValue(pick(row, ['commit_sha', 'version_sha', 'release.commit_sha'])), mono: true },
+    { label: '环境', value: displayValue(pick(row, ['environment_id', 'environment'])) },
+    { label: '创建人', value: displayValue(pick(row, ['owner_name', 'owner', 'responsible_person', 'created_by_name', 'created_by', 'created_by_id'])) },
+    { label: '审批人', value: displayValue(pick(row, ['approved_by_name', 'approved_by', 'approved_by_id'])) },
+    { label: '计划状态', value: displayValue(pick(row, ['approval_status', 'review_status', 'status'])) },
+    { label: '证据', value: displayValue(pick(row, ['evidence_refs', 'evidence', 'audit_ref'])) },
+    { label: '执行窗口', value: displayValue(pick(row, ['scheduled_at', 'execution_window', 'window'])) },
+    { label: '最新作业', value: displayValue(executionId ? `${executionId}${executionStatus ? ` · ${executionStatus}` : ''}` : undefined) }
+  ];
+});
 const splitValues = (value) => String(value || '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+function pick(source, paths) {
+  for (const path of paths) {
+    const value = path.split('.').reduce((current, part) => current?.[part], source);
+    if (value === undefined || value === null || value === '') continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) continue;
+    return value;
+  }
+  return undefined;
+}
+function displayValue(value) {
+  if (value === undefined || value === null || value === '') return '—';
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '—';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+function switchMode(mode) {
+  if (mode === 'release' && !canViewRelease.value) return;
+  if (mode === 'recovery' && !canViewRecovery.value) return;
+  router.push({ path: '/pilot/releases', query: mode === 'recovery' ? { mode: 'recovery' } : {} });
+}
 const cancellable = (row) => ['draft', 'review_pending', 'approved', 'scheduled'].includes(row.status);
 const formatDateTime = (value) => {
   const date = new Date(value);
@@ -344,6 +426,22 @@ load();
 .execution-detail { margin-top: 20px; padding-top: 18px; border-top: 1px solid #e8edf3; }
 .execution-error-alert { margin-top: 16px; }
 .execution-detail h3 { margin: 0 0 12px; font-size: 15px; }
+.detail-actions { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid #e8edf3; }
+.detail-actions h3 { margin: 0; color: #172033; font-size: 15px; }
+.detail-actions p { margin: 6px 0 12px; color: #64748b; font-size: 12px; line-height: 1.5; }
+.detail-actions__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.work-order { margin-bottom: 20px; padding: 18px 20px; border: 1px solid #dbe3ec; background: #fff; }
+.work-order__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 12px; border-bottom: 1px solid #e8edf3; }
+.work-order__heading h2 { margin: 0; color: #172033; font-size: 16px; }
+.work-order__heading p { margin: 5px 0 0; color: #64748b; font-size: 12px; line-height: 1.45; }
+.work-order__select { padding: 0; border: 0; background: transparent; color: #1d4ed8; font: inherit; font-size: 13px; cursor: pointer; }
+.work-order__select:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.work-order__fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 0; }
+.work-order__fields > div { min-height: 64px; padding: 14px 16px 10px 0; }
+.work-order__fields > div:nth-child(n + 5) { border-top: 1px solid #edf1f5; }
+.work-order__fields dt { color: #64748b; font-size: 12px; }
+.work-order__fields dd { margin: 5px 0 0; color: #172033; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.work-order__mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .create-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .create-form :deep(.el-textarea), .create-form :deep(.el-form-item:last-of-type) { grid-column: 1 / -1; }
 .create-form :deep(.el-input), .create-form :deep(.el-select), .create-form :deep(.el-input-number) { width: 100%; }
@@ -351,5 +449,6 @@ load();
 .form-hint { display: block; margin-top: 6px; color: #64748b; font-size: 12px; line-height: 1.4; }
 .inline-error { display: block; color: #c45656; font-size: 13px; }
 pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
-@media (max-width: 720px) { .create-form { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .work-order__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .work-order__fields > div:nth-child(3), .work-order__fields > div:nth-child(4) { border-top: 1px solid #edf1f5; } }
+@media (max-width: 720px) { .create-form { grid-template-columns: 1fr; } .work-order { padding: 16px; } .work-order__heading { flex-direction: column; gap: 8px; } .work-order__fields { grid-template-columns: 1fr; } .work-order__fields > div { min-height: auto; padding: 10px 0; border-top: 1px solid #edf1f5; } .work-order__fields > div:first-child { border-top: 0; } }
 </style>

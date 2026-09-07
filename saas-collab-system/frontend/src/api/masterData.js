@@ -14,6 +14,27 @@ export const fetchPlatformCatalog = () => requestWithMockFallback(
   'masterdata.platforms.catalog'
 );
 export const fetchStores = (params = {}) => resourceRequest('stores', params);
+
+// Deep links must resolve a single tenant-scoped record instead of guessing
+// from the first page of a collection.  The detail request deliberately does
+// not fall back to a collection fixture after a network failure; an invalid
+// deep link must remain visible as a failure rather than opening another row.
+export const fetchMasterDataDetail = (resource, id) => requestWithMockFallback(
+  {
+    method: 'get',
+    url: `/api/internal/master-data/${encodeURIComponent(resource)}/${encodeURIComponent(id)}/`,
+    noMockFallback: true,
+  },
+  () => {
+    const fixture = masterDataMocks[resource]?.();
+    const rows = fixture?.data && Array.isArray(fixture.data.results) ? fixture.data.results : [];
+    const item = rows.find((row) => String(row.id) === String(id));
+    return item
+      ? { success: true, code: 'OK', message: 'success', data: JSON.parse(JSON.stringify(item)) }
+      : { success: false, code: 'MOCK_NOT_FOUND', message: '模拟数据未提供该主档记录', data: null };
+  },
+  `masterdata.${resource}.detail`
+);
 export const fetchWarehouses = (params = {}) => resourceRequest('warehouses', params);
 export const fetchSupplierMasters = (params = {}) => resourceRequest('suppliers', params);
 export const fetchCountrySites = (params = {}) => resourceRequest('sites', params);

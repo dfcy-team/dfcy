@@ -29,7 +29,7 @@ services:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
     env_file:
       - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
-    command: python manage.py migrate --noinput
+    command: sh -c "python manage.py migrate --noinput && python manage.py sync_permissions"
     restart: "no"
     networks:
       - production-internal

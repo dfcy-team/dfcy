@@ -80,12 +80,12 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     const rolePage = read('src/views/system/RolePermissionMatrix.vue');
     const userPage = read('src/views/system/UserDirectory.vue');
     const resourcePage = read('src/components/AdminResourcePage.vue');
-    for (const label of ['Tenant', '用户类型', '角色', 'Permission', 'Data scope', '字段与流程']) {
+    for (const label of ['租户', '用户类型', '角色', '权限', '数据范围', '字段与流程']) {
       expect(rolePage).toContain(label);
     }
     expect(resourcePage).toContain("getActionAccess(auth, { permission: props.managePermission })");
     expect(resourcePage).toContain('if (!manageAccess.value.allowed');
-    expect(resourcePage).toContain('凭据、Token、Cookie 和 Session 不在此表单采集');
+    expect(resourcePage).toContain('密钥、令牌、浏览器标识和会话内容不在此表单采集');
     expect(resourcePage).toContain("ref(useMock ? 'mock' : 'pending')");
     expect(resourcePage).toContain("apiStatus === 'fallback' ? 'degraded' : apiStatus");
     expect(rolePage).toMatch(/async function submitRole\(\) \{\s+if \(!manageAccess\.value\.allowed\)/);

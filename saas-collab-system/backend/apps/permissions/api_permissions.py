@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from apps.accounts.models import CustomUser
@@ -244,5 +246,41 @@ class IsIntegrationAuditViewer(IntegrationActionPermission):
 
 class IsMarketplaceStoreMappingManager(IntegrationActionPermission):
     def has_permission(self, request, view):
-        permission_code = "integrations.store.view" if request.method in SAFE_METHODS else "integrations.store.authorize"
+        permission_code = (
+            "integrations.store_mapping.view"
+            if request.method in SAFE_METHODS
+            else "integrations.store_mapping.manage"
+        )
+        return self.has_action_permission(request, permission_code)
+
+
+def _strictly_confirms_product_mapping(request):
+    """Return true only for a JSON boolean confirmation.
+
+    Product mapping confirmation is a separate, higher-risk button/API action.
+    Do not treat values such as ``"true"``, ``1`` or arbitrary truthy objects
+    as confirmation, since doing so would let a normal manage grant cross the
+    confirmation boundary accidentally.
+    """
+
+    try:
+        payload = request.data
+    except Exception:
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    value = payload.get("manually_confirmed")
+    return type(value) is bool and value is True
+
+
+class IsMarketplaceProductMappingManager(IntegrationActionPermission):
+    """Authorize product mapping reads, suggestions/deactivation and confirm."""
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            permission_code = "integrations.product_mapping.view"
+        elif request.method == "PATCH" and _strictly_confirms_product_mapping(request):
+            permission_code = "integrations.product_mapping.confirm"
+        else:
+            permission_code = "integrations.product_mapping.manage"
         return self.has_action_permission(request, permission_code)

@@ -22,7 +22,7 @@ services:
     image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
-    command: python manage.py migrate --noinput
+    command: sh -c "python manage.py migrate --noinput && python manage.py sync_permissions"
     restart: "no"
     networks:
       - pilot-internal

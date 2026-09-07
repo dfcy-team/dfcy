@@ -68,7 +68,41 @@ def _config_api_type(config):
     return value or ("inventory" if config.platform == "jifeng_wms" else "marketplace")
 
 
-def validate_warehouse_binding(*, actor, warehouse, integration_config):
+def resolve_external_warehouse_identity(*, warehouse, integration_config, provider, external_warehouse_code=None):
+    """Resolve the upstream warehouse identity for one local binding.
+
+    The code is deliberately binding-scoped.  A managed API configuration or
+    credential may be shared by several warehouses and therefore must not be
+    used as the warehouse's external identity.  Existing Jifeng configs may
+    still carry the legacy ``platform_config.warehouse_code`` value; it is
+    accepted as a compatibility fallback, but newly bound production UI
+    requests should send the explicit field.
+    """
+
+    requested = str(external_warehouse_code or "").strip()
+    legacy = str((integration_config.platform_config or {}).get("warehouse_code") or "").strip()
+    code = requested or legacy
+    # Jifeng's readonly contract requires the warehouse query parameter.  Do
+    # not silently substitute the local archive code when neither the binding
+    # nor the managed config contains the provider-issued code.
+    if provider == "jifeng_wms" and integration_config.environment in {
+        PlatformIntegrationConfig.Environment.PILOT,
+        PlatformIntegrationConfig.Environment.PRODUCTION,
+    } and (integration_config.platform_config or {}).get("contract_approved") and not code:
+        raise ValidationError({
+            "external_warehouse_code": "生产库存 API 必须填写服务商返回的外部仓库编码，不能使用本地仓库编码代替。"
+        })
+    configured_region = str((integration_config.platform_config or {}).get("site_code") or "").strip().upper()
+    warehouse_region = str(warehouse.country_code or "").strip().upper()
+    if configured_region and warehouse_region and configured_region != warehouse_region:
+        raise ValidationError({
+            "external_warehouse_region": "接入配置站点与仓库国家/站点不一致，不能建立外部仓库身份绑定。"
+        })
+    region = configured_region or warehouse_region
+    return code, region
+
+
+def validate_warehouse_binding(*, actor, warehouse, integration_config, external_warehouse_code=None):
     """Validate the non-secret prerequisites for binding a config to a warehouse."""
     if actor.tenant_id != warehouse.tenant_id:
         raise ValidationError("仓库不属于当前租户。")
@@ -98,6 +132,12 @@ def validate_warehouse_binding(*, actor, warehouse, integration_config):
     regions = {str(value or "").upper() for value in (integration_config.regions or [])}
     if regions and str(warehouse.country_code or "").upper() not in regions:
         raise ValidationError("仓库所在国家/站点不在接入配置的区域范围内。")
+    resolve_external_warehouse_identity(
+        warehouse=warehouse,
+        integration_config=integration_config,
+        provider=provider,
+        external_warehouse_code=external_warehouse_code,
+    )
     return provider
 
 
@@ -133,16 +173,24 @@ def bind_warehouse_authorization(
     replace=False,
     expected_authorization_id=None,
     idempotency_key=None,
+    external_warehouse_code=None,
 ):
     """Create or safely replace the one active inventory binding per warehouse."""
     provider = validate_warehouse_binding(
         actor=actor,
         warehouse=warehouse,
         integration_config=integration_config,
+        external_warehouse_code=external_warehouse_code,
+    )
+    external_code, external_region = resolve_external_warehouse_identity(
+        warehouse=warehouse,
+        integration_config=integration_config,
+        provider=provider,
+        external_warehouse_code=external_warehouse_code,
     )
     key_hash = _idempotency_key_hash(idempotency_key)
     payload_digest = _digest(
-        f"{warehouse.id}:{integration_config.id}:{bool(replace)}:{expected_authorization_id or ''}"
+        f"{warehouse.id}:{integration_config.id}:{external_region}:{external_code}:{bool(replace)}:{expected_authorization_id or ''}"
     )
     replay = _replay_by_idempotency(
         actor=actor,
@@ -181,7 +229,14 @@ def bind_warehouse_authorization(
         .first()
     )
     if active and active.integration_config_id == integration_config.id:
-        return active, True, "already_bound"
+        identity_matches = (
+            active.external_warehouse_code == external_code
+            and active.external_warehouse_region == external_region
+        )
+        if identity_matches:
+            return active, True, "already_bound"
+        if not replace:
+            raise StateConflict("仓库已有不同的外部仓库身份绑定，请明确确认后再更换绑定。")
     if active and not replace:
         raise StateConflict("仓库已有库存 API 绑定，请明确确认后再更换绑定。")
     if active and replace and expected_authorization_id is None:
@@ -212,11 +267,26 @@ def bind_warehouse_authorization(
             warehouse_authorization=active,
         ).update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
 
+    # Give operators a deterministic conflict before relying on the unique
+    # index; the index remains the race-safe backstop for concurrent requests.
+    if external_code:
+        existing_external = WarehouseAuthorization.objects.select_for_update().filter(
+            tenant=actor.tenant,
+            provider=provider,
+            external_warehouse_region=external_region,
+            external_warehouse_code=external_code,
+            status=WarehouseAuthorization.Status.ACTIVE,
+        ).exclude(warehouse_id=warehouse.id).first()
+        if existing_external:
+            raise StateConflict("该服务商和站点的外部仓库编码已绑定其他仓库，请先处理外部身份冲突。")
+
     record = WarehouseAuthorization(
         tenant=actor.tenant,
         integration_config=integration_config,
         warehouse=warehouse,
         provider=provider,
+        external_warehouse_code=external_code,
+        external_warehouse_region=external_region,
         # These are opaque references from the managed configuration.  The
         # API never accepts client-supplied credential values.
         credential_id=integration_config.credential_id,
@@ -245,6 +315,8 @@ def bind_warehouse_authorization(
             "authorization_id": record.id,
             "warehouse_id": warehouse.id,
             "warehouse_code": warehouse.code,
+            "external_warehouse_code": external_code,
+            "external_warehouse_region": external_region,
             "provider": provider,
             "integration_config_id": integration_config.id,
             "previous_authorization_id": previous_id,
@@ -295,6 +367,8 @@ def revoke_warehouse_authorization(*, actor, authorization):
             "authorization_id": locked.id,
             "warehouse_id": locked.warehouse_id,
             "warehouse_code": locked.warehouse.code,
+            "external_warehouse_code": locked.external_warehouse_code,
+            "external_warehouse_region": locked.external_warehouse_region,
             "provider": locked.provider,
             "integration_config_id": locked.integration_config_id,
             "previous_status": previous_status,

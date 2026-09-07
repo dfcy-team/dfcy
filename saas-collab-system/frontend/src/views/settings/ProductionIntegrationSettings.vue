@@ -181,6 +181,10 @@
           <article v-for="platform in platformKeys" :key="platform" :ref="(element) => setPlatformSectionRef(platform, element)" class="platform-card">
             <header><div><strong>{{ platformLabels[platform] }}</strong><small>{{ platformDescriptions[platform] }}</small></div><el-tag effect="plain" :type="form.platforms[platform].contract_approved ? 'success' : 'warning'">{{ form.platforms[platform].contract_approved ? '合同已批准' : '合同未批准' }}</el-tag></header>
             <el-form-item label="合同审批状态"><el-switch v-model="form.platforms[platform].contract_approved" active-text="已批准" inactive-text="未批准" /></el-form-item>
+            <el-form-item v-if="platform === 'shopee' || platform === 'tiktok'" label="平台商品只读合同审批">
+              <el-switch v-model="form.platforms[platform].product_contract_approved" active-text="已批准" inactive-text="未批准" />
+              <small class="field-help">独立于订单/退款合同；未完成该平台商品接口证据核验时保持关闭。</small>
+            </el-form-item>
             <div class="form-grid compact">
               <el-form-item label="公开 App ID *"><el-input v-model="form.platforms[platform].app_id" autocomplete="off" placeholder="填写平台公开应用 ID" /></el-form-item>
               <el-form-item v-if="platform === 'tiktok'" label="Service ID"><el-input v-model="form.platforms[platform].service_id" autocomplete="off" placeholder="TikTok Shop Service ID" /></el-form-item>
@@ -316,7 +320,10 @@ const platformEndpointFields = {
     { key: 'order_list_path', label: 'Order List Path order_list_path', kind: 'path', placeholder: '/api/v2/order/get_order_list' },
     { key: 'order_detail_path', label: 'Order Detail Path order_detail_path', kind: 'path', placeholder: '/api/v2/order/get_order_detail' },
     { key: 'return_list_path', label: 'Return List Path return_list_path', kind: 'path', placeholder: '/api/v2/returns/get_return_list' },
-    { key: 'return_detail_path', label: 'Return Detail Path return_detail_path', kind: 'path', placeholder: '/api/v2/returns/get_return_detail' }
+    { key: 'return_detail_path', label: 'Return Detail Path return_detail_path', kind: 'path', placeholder: '/api/v2/returns/get_return_detail' },
+    { key: 'product_list_path', label: '商品列表接口路径 product_list_path', kind: 'path', placeholder: '/api/v2/product/get_item_list' },
+    { key: 'product_base_info_path', label: '商品基本信息接口路径 product_base_info_path', kind: 'path', placeholder: '/api/v2/product/get_item_base_info' },
+    { key: 'product_model_list_path', label: '商品变体接口路径 product_model_list_path', kind: 'path', placeholder: '/api/v2/product/get_model_list' }
   ],
   tiktok: [
     { key: 'auth_url', label: '默认授权地址 auth_url', kind: 'url', placeholder: 'https://auth.tiktok-shops.com' },
@@ -331,13 +338,15 @@ const platformEndpointFields = {
     { key: 'metadata_path', label: 'Metadata Path metadata_path', kind: 'path', placeholder: '/seller/202309/permissions' },
     { key: 'order_list_path', label: 'Order List Path order_list_path', kind: 'path', placeholder: '/order/202309/orders/search' },
     { key: 'order_detail_path', label: 'Order Detail Path order_detail_path', kind: 'path', placeholder: '/order/202309/orders' },
-    { key: 'return_list_path', label: 'Return List Path return_list_path', kind: 'path', placeholder: '/return_refund/202602/returns/search' }
+    { key: 'return_list_path', label: 'Return List Path return_list_path', kind: 'path', placeholder: '/return_refund/202602/returns/search' },
+    { key: 'product_search_path', label: '商品搜索接口路径 product_search_path', kind: 'path', placeholder: '/product/202502/products/search' },
+    { key: 'product_detail_path', label: '商品详情接口路径 product_detail_path', kind: 'path', placeholder: '/product/202309/products/{product_id}' }
   ]
 };
 const platformPayloadKeys = {
   lazada: ['contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'market'],
-  shopee: ['contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'market', 'region'],
-  tiktok: ['contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path']
+  shopee: ['contract_approved', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'market', 'region'],
+  tiktok: ['contract_approved', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path']
 };
 
 function createEmptyConfig() {
@@ -368,10 +377,11 @@ function createEmptyConfig() {
       max_batch_size: 20
     },
     platforms: Object.fromEntries(platformKeys.map((platform) => [platform, {
-      contract_approved: false, app_id: '', service_id: '', redirect_uri: '', market: '', region: '',
+      contract_approved: false, product_contract_approved: false, app_id: '', service_id: '', redirect_uri: '', market: '', region: '',
       auth_url: '', api_host: '', auth_urls: {}, api_hosts: {}, token_host: '', token_path: '', refresh_path: '',
       revoke_path: '', shop_path: '', authorized_shops_path: '', metadata_path: '', order_list_path: '',
-      order_detail_path: '', return_list_path: '', return_detail_path: ''
+      order_detail_path: '', return_list_path: '', return_detail_path: '', product_list_path: '', product_base_info_path: '',
+      product_model_list_path: '', product_search_path: '', product_detail_path: ''
     }]))
   };
 }
@@ -548,6 +558,7 @@ function isDangerousChange() {
       || (form.network.security_approved && !previous.network.security_approved)
       || (form.network.readonly_sync_enabled && !previous.network.readonly_sync_enabled)
       || platformKeys.some((platform) => form.platforms[platform].contract_approved && !previous.platforms[platform].contract_approved)
+      || ['shopee', 'tiktok'].some((platform) => form.platforms[platform].product_contract_approved && !previous.platforms[platform].product_contract_approved)
       || (form.listing_write.mode === 'controlled' && previous.listing_write.mode !== 'controlled')
       || (form.listing_write.emergency_stop === false && previous.listing_write.emergency_stop !== false)
   );

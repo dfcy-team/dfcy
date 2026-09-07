@@ -50,7 +50,7 @@ services:
     image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
     env_file:
       - ${SANDBOX_ENV_FILE:-.env.sandbox}
-    command: python manage.py migrate --noinput
+    command: sh -c "python manage.py migrate --noinput && python manage.py sync_permissions"
     restart: "no"
     networks:
       - sandbox-app-internal

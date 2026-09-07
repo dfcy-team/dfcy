@@ -1,12 +1,14 @@
 import { requestWithMockFallback } from './request';
 import {
   mockDepartments,
+  mockDepartmentTree,
   mockPermissions,
   mockRoleScopeOptions,
   mockRoles,
   mockSecurityOperations,
   mockTenants,
-  mockUsers
+  mockUsers,
+  mockUpdateUserProfile
 } from '../mock/systemAdmin';
 
 export const fetchTenants = (params = {}) => requestWithMockFallback(
@@ -15,6 +17,11 @@ export const fetchTenants = (params = {}) => requestWithMockFallback(
 
 export const fetchDepartments = (params = {}) => requestWithMockFallback(
   { method: 'get', url: '/api/internal/system/departments/', params }, mockDepartments, 'system.departments'
+);
+export const fetchDepartmentTree = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/system/departments/tree/', params },
+  mockDepartmentTree,
+  'system.department_tree'
 );
 const mockWrite = (data) => () => ({ success: true, code: 'OK', message: 'Mock操作已记录', data: { ...data, api_status: 'mock' } });
 
@@ -46,8 +53,12 @@ export const updateUserRoles = (id, roleCodes) => requestWithMockFallback(
 );
 export const updateUserProfile = (id, payload) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/system/users/${id}/`, data: payload },
-  mockWrite({ id, ...payload }), 'system.users.update'
+  () => mockUpdateUserProfile(id, payload), 'system.users.update'
 );
+export const updateUserDepartments = (id, department_id, department_ids) => updateUserProfile(id, {
+  department_id,
+  department_ids,
+});
 export const resetUserPassword = (id, payload) => requestWithMockFallback(
   { method: 'post', url: `/api/internal/system/users/${id}/reset-password/`, data: payload },
   mockWrite({ id }), 'system.users.reset_password'
@@ -87,6 +98,63 @@ export const updateRolePermissions = (id, payload, tenantId) => requestWithMockF
 
 export const fetchPermissions = (params = {}) => requestWithMockFallback(
   { method: 'get', url: '/api/internal/system/permissions/', params }, mockPermissions, 'system.permissions'
+);
+
+export const buildMockPermissionPackages = () => {
+    const grouped = new Map();
+    for (const permission of mockPermissions().data?.results || []) {
+      if (!grouped.has(permission.module)) grouped.set(permission.module, []);
+      grouped.get(permission.module).push(permission);
+    }
+    const highRiskParts = new Set([
+      'delete', 'review', 'approve', 'export', 'credential', 'authorize', 'revoke', 'rollback',
+      'publish', 'production', 'confirm', 'freeze', 'rotate', 'disable', 'verify', 'cancel',
+      'clear', 'run_live_readonly', 'execute', 'start', 'resume', 'record', 'deploy', 'restore'
+    ]);
+    const highRiskPermissionCodes = new Set([
+      'system.roles.manage', 'system.users.manage', 'system.organization.manage', 'config.system.manage'
+    ]);
+    const packages = [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([module, definitions]) => {
+      const menus = definitions.filter((item) => item.permission_type === 'menu').map((item) => item.code);
+      const fields = definitions.filter((item) => item.permission_type === 'field').map((item) => item.code);
+      const actions = definitions.filter((item) => (item.permission_type || 'action') === 'action');
+      const highRisk = actions.filter((item) => (
+        highRiskPermissionCodes.has(item.code)
+        || String(item.action || '').split('.').some((part) => highRiskParts.has(part))
+      )).map((item) => item.code);
+      const routineDefinitions = actions.filter((item) => !highRisk.includes(item.code));
+      const routine = routineDefinitions.map((item) => item.code);
+      const read = actions.filter((item) => String(item.action || '').split('.').at(-1) === 'view').map((item) => item.code);
+      const readCodes = [...new Set([...menus, ...fields, ...read])].sort();
+      const operateActions = routineDefinitions
+        .filter((item) => String(item.action || '').split('.').at(-1) !== 'manage')
+        .map((item) => item.code);
+      const operateCodes = [...new Set([...readCodes, ...operateActions])].sort();
+      const adminCodes = [...new Set([...readCodes, ...routine])].sort();
+      return { module, levels: { none: [], read: readCodes, operate: operateCodes, admin: adminCodes }, high_risk_codes: highRisk.sort(), available_codes: definitions.map((item) => item.code).sort() };
+    });
+    return {
+    success: true,
+    code: 'MOCK',
+    message: 'Mock权限包目录',
+    data: {
+      status: 'mock',
+      levels: [
+        { code: 'none', name: '无权限' },
+        { code: 'read', name: '只读' },
+        { code: 'operate', name: '可操作' },
+        { code: 'admin', name: '模块管理员' },
+      ],
+      packages,
+      high_risk_policy: 'operate/admin 不自动授予高风险权限，需单独确认。',
+    },
+    };
+};
+
+export const fetchPermissionPackages = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/system/permission-packages/', params },
+  buildMockPermissionPackages,
+  'system.permission_packages'
 );
 
 // The permission directory is intentionally paginated by the backend. Keep
