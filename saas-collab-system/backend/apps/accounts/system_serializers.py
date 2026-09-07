@@ -399,6 +399,25 @@ class RoleAdminSerializer(serializers.ModelSerializer):
         return value
 
 
+class RoleCopySerializer(serializers.Serializer):
+    """Validate the identity of a new custom role copied from an existing one.
+
+    Permissions and data scopes are intentionally not accepted from the
+    caller.  The copy endpoint always takes both from the tenant-local source
+    role after applying the delegation boundary in the view.
+    """
+
+    name = serializers.CharField(max_length=100, allow_blank=False, trim_whitespace=True)
+    code = serializers.SlugField(max_length=80, allow_blank=False, trim_whitespace=True)
+    description = serializers.CharField(max_length=10000, allow_blank=True, required=False)
+
+    def validate_code(self, value):
+        tenant = self.context.get("target_tenant") or self.context["request"].user.tenant
+        if Role.objects.filter(tenant=tenant, code=value).exists():
+            raise serializers.ValidationError("当前租户内的系统标识已存在，请换一个。")
+        return value
+
+
 class RoleOptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
