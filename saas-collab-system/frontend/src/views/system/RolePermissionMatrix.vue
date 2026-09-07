@@ -48,9 +48,17 @@
       <el-table-column v-if="showRoleField('status')" prop="status" label="状态" width="100">
         <template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'" effect="plain">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="290">
+      <el-table-column label="操作" width="350">
         <template #default="{ row }">
           <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
+          <el-button
+            v-if="manageAccess.visible"
+            link
+            type="primary"
+            :disabled="manageAccess.disabled"
+            :title="manageAccess.reason"
+            @click="openCopyRole(row)"
+          >复制</el-button>
           <el-button
             v-if="manageAccess.visible && !row.is_protected"
             link
@@ -265,6 +273,36 @@
         <el-button type="primary" :loading="saving" @click="submitRole">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="copyOpen"
+      title="复制为自定义角色"
+      width="min(480px, 94vw)"
+      @closed="finishCopyRole"
+    >
+      <el-alert
+        :title="`来源角色：${adminRoleDisplayName(copySourceRole)}`"
+        description="系统会复制来源角色当前的权限和数据范围，新角色为启用中的自定义角色；保存后仍可继续调整。"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+      <el-form label-position="top" class="copy-role-form">
+        <el-form-item label="角色名称" required>
+          <el-input v-model="copyRoleForm.name" maxlength="100" show-word-limit />
+        </el-form-item>
+        <el-form-item label="系统标识" required>
+          <el-input v-model="copyRoleForm.code" maxlength="80" placeholder="用于唯一识别，建议使用小写字母、数字和连字符" />
+        </el-form-item>
+        <el-form-item label="角色说明">
+          <el-input v-model="copyRoleForm.description" maxlength="10000" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="copyOpen = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitCopyRole">复制并配置</el-button>
+      </template>
+    </el-dialog>
   </AppPage>
 </template>
 
@@ -275,7 +313,7 @@ import { useRoute } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import {
-  createRole, deleteRole, fetchAllPermissions, fetchPermissionPackages, fetchRoleScopeOptions, fetchRoles,
+  copyRole, createRole, deleteRole, fetchAllPermissions, fetchPermissionPackages, fetchRoleScopeOptions, fetchRoles,
   updateRolePermissions, updateRoleStatus
 } from '../../api/systemAdmin';
 import { useMock } from '../../api/request';
@@ -298,8 +336,11 @@ const pageSize = 20;
 const total = ref(0);
 const drawerOpen = ref(false);
 const createOpen = ref(false);
+const copyOpen = ref(false);
 const saving = ref(false);
 const selectedRole = ref({});
+const copySourceRole = ref({});
+const pendingCopiedRole = ref(null);
 const targetTenant = ref(null);
 const assignmentMode = ref('quick');
 const packageCatalog = ref([]);
@@ -328,6 +369,7 @@ const roleForm = reactive({
   scope_config: {},
 });
 const newRole = reactive({ name: '', code: '', status: 'active' });
+const copyRoleForm = reactive({ name: '', code: '', description: '' });
 const scopePlatforms = ref([]);
 const scopeSites = ref([]);
 const scopeStores = ref([]);
@@ -630,6 +672,24 @@ function openRole(role) {
   loadScopeOptions();
 }
 
+function copyRoleCode(source) {
+  const base = String(source?.code || 'role').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'role';
+  const suffix = '-copy';
+  return `${base.slice(0, 80 - suffix.length)}${suffix}`;
+}
+
+function openCopyRole(role) {
+  if (!manageAccess.value.allowed) {
+    ElMessage.warning(manageAccess.value.reason);
+    return;
+  }
+  copySourceRole.value = role;
+  copyRoleForm.name = `${role?.name || '角色'}副本`;
+  copyRoleForm.code = copyRoleCode(role);
+  copyRoleForm.description = role?.description || '';
+  copyOpen.value = true;
+}
+
 function ensureCustomScopeShape() {
   const current = roleForm.scope_config || {};
   roleForm.scope_config = Object.fromEntries(
@@ -778,6 +838,45 @@ async function submitRole() {
   load();
 }
 
+async function submitCopyRole() {
+  if (!manageAccess.value.allowed) {
+    ElMessage.warning(manageAccess.value.reason);
+    return;
+  }
+  const name = copyRoleForm.name.trim();
+  const code = copyRoleForm.code.trim();
+  if (!name || !code) return ElMessage.warning('请填写角色名称和系统标识');
+  saving.value = true;
+  const response = await copyRole(
+    copySourceRole.value.id,
+    { name, code, description: copyRoleForm.description.trim() },
+    targetTenantId.value || undefined,
+  );
+  saving.value = false;
+  if (!response?.success) return ElMessage.error(response?.message || '角色复制失败');
+  const copiedRole = {
+    ...copySourceRole.value,
+    ...(response.data || {}),
+    role_type: 'custom',
+    is_protected: false,
+    status: 'active',
+  };
+  pendingCopiedRole.value = copiedRole;
+  copyOpen.value = false;
+  ElMessage.success('角色已复制，可继续调整权限');
+  await load();
+}
+
+function finishCopyRole() {
+  const copiedRole = pendingCopiedRole.value;
+  pendingCopiedRole.value = null;
+  copySourceRole.value = {};
+  copyRoleForm.name = '';
+  copyRoleForm.code = '';
+  copyRoleForm.description = '';
+  if (copiedRole?.id) openRole(copiedRole);
+}
+
 load();
 </script>
 
@@ -794,6 +893,7 @@ load();
 .role-pagination { display: flex; align-items: center; justify-content: space-between; padding-top: 12px; color: #64748b; font-size: 13px; }
 .role-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #e5eaf0; }
 .role-heading strong, .role-heading span { display: block; }
+.copy-role-form { margin-top: 16px; }
 .role-heading span { margin-top: 4px; color: #64748b; font-size: 12px; }
 .role-heading__tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .quick-assignment { display: grid; gap: 12px; margin-bottom: 18px; }

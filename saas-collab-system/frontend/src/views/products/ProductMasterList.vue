@@ -9,8 +9,8 @@
           <summary>商品 SKU 生成规则说明</summary>
           <div class="coding-guide-content">
             <p>
-              新建商品时，系统根据所选分类和一位季节码生成 SPU；季节码未填写时按
-              <code>0</code> 处理，同一分类和季节码组合内按 <code>001–999</code> 顺序编号。
+              新建商品时，系统根据所选分类和一位属性编码生成 SPU；属性编码未选择时按
+              <code>0</code> 处理，同一分类和属性编码组合内按 <code>001–999</code> 顺序编号。
             </p>
             <p>
               新增 SKU 时，编码格式为 <code>SPU编码-颜色编码[-规格值]</code>。颜色需选择启用的颜色字典；多个规格值按类目配置顺序以
@@ -223,8 +223,32 @@
         <el-form-item label="品牌">
           <el-input v-model="createForm.brand" />
         </el-form-item>
-        <el-form-item label="季节编码">
-          <el-input v-model="createForm.season_code" placeholder="例如 0" />
+        <el-form-item label="属性编码">
+          <el-select
+            v-model="createForm.season_code"
+            class="form-control"
+            data-testid="product-attribute-code"
+            filterable
+            :loading="attributeLoading"
+            :disabled="attributeLoading"
+            placeholder="请选择属性编码（默认 0）"
+          >
+            <el-option label="未指定（0）" value="0" />
+            <el-option
+              v-for="attribute in activeAttributes"
+              :key="attribute.id || attribute.code"
+              :label="`${attribute.code} ${attribute.name}`"
+              :value="String(attribute.code)"
+            />
+          </el-select>
+          <small class="form-help">属性设置中维护的启用编码；未选择时按 0 处理。</small>
+          <el-alert
+            v-if="attributeLoadError"
+            :title="attributeLoadError"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -386,6 +410,7 @@ import {
   createProductSpu,
   fetchProductCategories,
   fetchProductColors,
+  fetchProductAttributes,
   fetchProductMasterList,
   updateProductSpu,
   bulkUpdateProductSpus
@@ -424,11 +449,17 @@ const categoryFilter = categorySearch;
 const categoryTreeRef = ref(null);
 const createOpen = ref(false);
 const saving = ref(false);
+const attributeLoading = ref(false);
+const attributeLoadError = ref('');
+let attributeRequestId = 0;
+// The API keeps the legacy season_code field for compatibility. Its value is
+// now the one-digit code maintained by the product attribute dictionary.
 const createForm = reactive({ product_name: '', category_node: null, brand: '', season_code: '0' });
 const editOpen = ref(false);
 const editSaving = ref(false);
 const editForm = reactive({ id: null, product_name: '', category_node: null });
 const colors = ref([]);
+const attributes = ref([]);
 const skuCreateOpen = ref(false);
 const skuSaving = ref(false);
 const skuTarget = ref(null);
@@ -449,6 +480,10 @@ const productRowClassName = ({ row }) => categoryRowClass(row, categories.value)
 const productRowStyle = ({ row }) => categoryRowStyle(row, categories.value);
 
 const activeColors = computed(() => colors.value.filter((item) => item?.is_active !== false));
+const activeAttributes = computed(() => attributes.value
+  .filter((item) => item?.is_active !== false && /^[1-9]$/.test(String(item?.code ?? '').trim()))
+  .map((item) => ({ ...item, code: String(item.code).trim() }))
+  .sort((left, right) => Number(left.code) - Number(right.code)));
 const skuCategory = computed(() => {
   const categoryId = skuTarget.value?.category_node;
   return categories.value.find((item) => String(item.id) === String(categoryId)) || null;
@@ -596,6 +631,33 @@ async function loadColors() {
   if (response.success) colors.value = collectionRows(response.data);
 }
 
+async function loadAttributes({ notifyOnError = false } = {}) {
+  if (!canManage.value) return { success: false, data: [] };
+  const requestId = ++attributeRequestId;
+  attributeLoading.value = true;
+  attributeLoadError.value = '';
+  try {
+    const response = await fetchProductAttributes({ page: 1, page_size: 500 });
+    if (requestId !== attributeRequestId) return response;
+    if (response.success) {
+      attributes.value = collectionRows(response.data);
+      return response;
+    }
+    attributes.value = [];
+    attributeLoadError.value = response.message || '属性编码字典加载失败，请稍后重试';
+    if (notifyOnError) ElMessage.error(attributeLoadError.value);
+    return response;
+  } catch (error) {
+    if (requestId !== attributeRequestId) return { success: false, message: error?.message, data: [] };
+    attributes.value = [];
+    attributeLoadError.value = '属性编码字典加载失败，请稍后重试';
+    if (notifyOnError) ElMessage.error(attributeLoadError.value);
+    return { success: false, message: error?.message || attributeLoadError.value, data: [] };
+  } finally {
+    if (requestId === attributeRequestId) attributeLoading.value = false;
+  }
+}
+
 function search() {
   page.value = 1;
   return load();
@@ -697,10 +759,13 @@ async function saveMoveCategory() {
   }
 }
 
-function openCreate() {
+async function openCreate() {
   if (!canManage.value) return;
   Object.assign(createForm, { product_name: '', category_node: null, brand: '', season_code: '0' });
   createOpen.value = true;
+  // Refresh when the dialog opens so recently changed attribute settings are
+  // reflected and stale/deactivated codes cannot be submitted.
+  await loadAttributes({ notifyOnError: true });
 }
 
 async function saveProduct() {
@@ -708,7 +773,17 @@ async function saveProduct() {
   if (!createForm.product_name?.trim() || !isUsableCategory(createForm.category_node)) {
     return ElMessage.warning('请填写商品名称并选择末级分类');
   }
+  if (attributeLoading.value) {
+    return ElMessage.warning('属性编码字典加载中，请稍后重试');
+  }
+  const attributeCode = String(createForm.season_code ?? '').trim() || '0';
+  const isKnownAttribute = attributeCode === '0'
+    || activeAttributes.value.some((attribute) => attribute.code === attributeCode);
+  if (!/^[0-9]$/.test(attributeCode) || !isKnownAttribute) {
+    return ElMessage.warning('请选择属性设置中的启用属性编码，未选择时按 0 处理');
+  }
   if (saving.value) return;
+  createForm.season_code = attributeCode;
   saving.value = true;
   try {
     const response = await createProductSpu({
@@ -806,7 +881,7 @@ async function saveSku() {
 
 onMounted(async () => {
   document.addEventListener('click', handleDocumentClick, true);
-  await Promise.all([loadCategories(), loadColors()]);
+  await Promise.all([loadCategories(), loadColors(), loadAttributes()]);
   await load();
 });
 
@@ -1008,6 +1083,14 @@ onBeforeUnmount(() => {
 
 .form-control {
   width: 100%;
+}
+
+.form-help {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .sku-form {

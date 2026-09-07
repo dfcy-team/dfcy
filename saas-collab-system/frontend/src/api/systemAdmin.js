@@ -74,6 +74,16 @@ export const createRole = (payload, tenantId) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/system/roles/', params: tenantId ? { tenant_id: tenantId } : undefined, data: payload },
   mockWrite(payload), 'system.roles.create'
 );
+export const copyRole = (id, payload, tenantId) => requestWithMockFallback(
+  {
+    method: 'post',
+    url: `/api/internal/system/roles/${id}/copy/`,
+    params: tenantId ? { tenant_id: tenantId } : undefined,
+    data: payload,
+  },
+  mockWrite({ id, ...payload, role_type: 'custom', is_protected: false, status: 'active' }),
+  'system.roles.copy'
+);
 export const fetchRoleScopeOptions = (params = {}) => requestWithMockFallback(
   { method: 'get', url: '/api/internal/system/role-scope-options/', params },
   mockRoleScopeOptions,

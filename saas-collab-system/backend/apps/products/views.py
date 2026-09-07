@@ -17,7 +17,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
@@ -486,7 +486,22 @@ def product_category_detail(request, pk):
         return success_response(ProductCategorySerializer(item).data)
     serializer = ProductCategorySerializer(item, data=request.data, partial=True, context=_serializer_context(request))
     serializer.is_valid(raise_exception=True)
-    item = serializer.save()
+    try:
+        with transaction.atomic():
+            item = serializer.save()
+    except DjangoValidationError as exc:
+        return error_response(
+            ErrorCode.VALIDATION_ERROR,
+            "分类层级或编码无效。",
+            data=getattr(exc, "message_dict", None) or {"detail": exc.messages},
+            status=400,
+        )
+    except IntegrityError:
+        return error_response(
+            ErrorCode.STATE_CONFLICT,
+            "目标上级下已存在相同分类编码。",
+            status=409,
+        )
     return success_response(ProductCategorySerializer(item).data)
 
 
@@ -519,13 +534,24 @@ def product_category_background_colors(request):
     return success_response(ProductCategorySerializer(queryset, many=True).data)
 
 
-@api_view(["GET", "PATCH", "DELETE"])
+@api_view(["GET", "PUT", "PATCH"])
 @permission_classes([IsProductAttributeReadOrManage])
 def product_category_attributes(request, pk):
     item = get_object_or_404(ProductCategory, pk=pk, tenant=request.user.tenant)
-    try:
-        category_path(item)
-    except DjangoValidationError:
+    # A leaf L2 may own its specification dimensions until an L3 child is
+    # introduced.  Automatic SPU/SKU coding still requires a complete L1/L2/L3
+    # path and keeps using ``category_path`` for that stricter rule.
+    supports_spec_dimensions = False
+    if item.level == ProductCategory.Level.L3:
+        try:
+            category_path(item)
+        except DjangoValidationError:
+            pass
+        else:
+            supports_spec_dimensions = True
+    elif item.level == ProductCategory.Level.L2:
+        supports_spec_dimensions = bool(item.parent_id and not item.children.exists())
+    if not supports_spec_dimensions:
         return error_response(ErrorCode.VALIDATION_ERROR, "规格只能设置在 L3 分类或没有 L3 下级的 L2 分类。", status=400)
     if request.method == "GET":
         return success_response({"category_id": item.id, "spec_dimensions": item.spec_dimensions})

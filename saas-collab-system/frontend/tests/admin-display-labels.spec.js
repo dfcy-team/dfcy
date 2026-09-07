@@ -24,9 +24,10 @@ describe('系统管理中文显示', () => {
     ]) expect(hasLatin(adminPermissionLabel(permission)), permission.code).toBe(false);
   });
 
-  it('平台部门名称只替换显示，不改变保存值', () => {
-    expect(departmentDisplayName('SHOPEE运营部')).toBe('虾皮运营部');
-    expect(departmentDisplayName('TikTok运营部')).toBe('短视频运营部');
+  it('部门名称按用户输入的保存值原样显示', () => {
+    expect(departmentDisplayName('SHOPEE运营部')).toBe('SHOPEE运营部');
+    expect(departmentDisplayName('TIKTOK运营部')).toBe('TIKTOK运营部');
+    expect(departmentDisplayName('短视频运营部')).toBe('短视频运营部');
     const page = read('src/views/system/DepartmentDirectory.vue');
     expect(page).toContain('departmentDisplayName(value)');
     expect(page).toContain('departmentDisplayName(item.name)');
