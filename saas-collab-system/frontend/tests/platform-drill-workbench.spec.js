@@ -8,6 +8,7 @@ import {
   mockStoreAuthorizations,
   mockWarehouseAuthorizations,
 } from '../src/mock/integrations';
+import { isWarehousePlatformDrillConfig, normalizePlatformDrillConfig } from '../src/views/integrations/platformDrillConfig';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -74,7 +75,7 @@ describe('platform drill operation closure', () => {
     expect(page).toContain("isWarehouseConfig.value ? '仓库接入' : '店铺授权'");
     expect(page).toContain('选择仓库接入');
     expect(page).toContain('打开仓库 API 接入');
-    expect(page).toContain("fetchWarehouseAuthorizations({ integration_config_id: selectedConfig.value.id })");
+    expect(page).toContain("fetchWarehouseAuthorizations({ integration_config_id: config.id })");
     expect(page).toContain('subject-type="warehouse"');
     expect(page).toContain("router.push(isWarehouseConfig.value ? '/master-data/warehouses' : '/master-data/stores')");
     expect(page).toContain("integrations.warehouse.view");
@@ -86,6 +87,30 @@ describe('platform drill operation closure', () => {
       status: 'active',
       provider: 'jifeng_wms',
     });
+  });
+
+  it('normalizes the production serializer shape before choosing warehouse authorization', () => {
+    const collectionConfig = {
+      id: 303,
+      platform: 'jifeng_wms',
+      account_alias: '极风 WMS · 生产',
+      environment: 'production',
+      platform_config: { api_type: 'inventory' },
+    };
+    const normalized = normalizePlatformDrillConfig(collectionConfig);
+
+    expect(normalized.api_type).toBe('inventory');
+    expect(isWarehousePlatformDrillConfig(normalized)).toBe(true);
+    expect(normalized).not.toHaveProperty('subject_type', 'store');
+
+    const detailOnlyType = normalizePlatformDrillConfig(
+      { id: 304, platform: 'jifeng_wms', environment: 'production' },
+      { id: 304, platform_config: { api_type: 'inventory' } },
+    );
+    expect(detailOnlyType.api_type).toBe('inventory');
+    expect(normalizePlatformDrillConfig({ id: 305, platform: 'jifeng_wms' }).api_type).toBe('inventory');
+    expect(read('src/views/integrations/PlatformDrillWorkbench.vue')).toContain('const detailResponse = await fetchIntegrationConfigDetail(configId);');
+    expect(read('src/views/integrations/PlatformDrillWorkbench.vue')).toContain('fetchWarehouseAuthorizations({ integration_config_id: config.id })');
   });
 
   it('keeps warehouse lifecycle actions on the warehouse access dialog', () => {

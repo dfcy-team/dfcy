@@ -228,6 +228,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import { fetchStores, fetchWarehouses } from '../../api/masterData';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
+import { isWarehousePlatformDrillConfig, normalizePlatformDrillConfig } from './platformDrillConfig';
 import {
   fetchConnectionCapabilities,
   createSyncJob,
@@ -275,9 +276,15 @@ const rows = (response) => {
   if (Array.isArray(data)) return data;
   return data?.results || data?.items || [];
 };
-const selectedConfig = computed(() => configs.value.find((item) => String(item.id) === String(selectedConfigId.value)) || null);
+const selectedConfigBase = computed(() => configs.value.find((item) => String(item.id) === String(selectedConfigId.value)) || null);
+const selectedConfig = computed(() => {
+  const base = selectedConfigBase.value;
+  if (!base) return null;
+  const detail = configDetail.value && String(configDetail.value.id) === String(base.id) ? configDetail.value : null;
+  return normalizePlatformDrillConfig(base, detail);
+});
 const selectedAuthorization = computed(() => authorizations.value.find((item) => String(item.id) === String(selectedAuthorizationId.value)) || null);
-const isWarehouseConfig = computed(() => selectedConfig.value?.subject_type === 'warehouse' || selectedConfig.value?.api_type === 'inventory');
+const isWarehouseConfig = computed(() => isWarehousePlatformDrillConfig(selectedConfig.value));
 const authorizationSubjectLabel = computed(() => isWarehouseConfig.value ? '仓库' : '店铺');
 const authorizationSectionLabel = computed(() => isWarehouseConfig.value ? '仓库接入' : '店铺授权');
 const canWarehouseView = computed(() => authStore.hasPermission('integrations.warehouse.view'));
@@ -388,15 +395,17 @@ async function loadContext() {
   selectedWarehouseId.value = null;
   selectedWarehouse.value = null;
   configDetail.value = null;
-  if (!selectedConfig.value) return;
-  const authorizationResponsePromise = isWarehouseConfig.value
-    ? fetchWarehouseAuthorizations({ integration_config_id: selectedConfig.value.id })
-    : fetchStoreAuthorizations({ platform: selectedConfig.value.platform, page: 1, page_size: 100 });
-  const [detailResponse, authorizationResponse] = await Promise.all([
-    fetchIntegrationConfigDetail(selectedConfig.value.id),
-    authorizationResponsePromise,
-  ]);
+  const configId = selectedConfigBase.value?.id;
+  if (!configId) return;
+  // The collection response may omit the effective api_type. Load the detail
+  // shape first so WMS configs choose warehouse authorizations correctly.
+  const detailResponse = await fetchIntegrationConfigDetail(configId);
   if (detailResponse?.success) configDetail.value = detailResponse.data;
+  const config = selectedConfig.value;
+  if (!config) return;
+  const authorizationResponse = isWarehouseConfig.value
+    ? await fetchWarehouseAuthorizations({ integration_config_id: config.id })
+    : await fetchStoreAuthorizations({ platform: config.platform, page: 1, page_size: 100 });
   authorizations.value = rows(authorizationResponse).filter((item) => !item.integration_config_id || String(item.integration_config_id) === String(selectedConfig.value.id));
   const active = authorizations.value.find((item) => ['active', 'authorized'].includes(item.status)) || authorizations.value[0];
   if (active) await selectAuthorization(active);
