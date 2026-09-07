@@ -23,7 +23,10 @@ try {
 }
 
 if (checkOnly) {
-  if (existing !== serialized) {
+  // Git may check JSON snapshots out with CRLF on Windows while the generated
+  // payload always uses LF. Compare normalized text so the release gate
+  // detects semantic/content drift instead of platform line endings.
+  if (existing.replace(/\r\n/g, '\n') !== serialized) {
     console.error(`菜单权限快照已漂移，请运行 npm run permissions:export：${snapshotPath}`);
     process.exitCode = 1;
   } else {

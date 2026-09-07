@@ -14,7 +14,11 @@ SEASONS = (
     {"code": "4", "name": "冬", "english_name": "Winter"},
     {"code": "5", "name": "春秋", "english_name": "Spring & Autumn"},
 )
+# ``SEASONS`` remains the legacy display/options contract for older clients.
+# New product creation uses the tenant attribute dictionary, whose one-digit
+# namespace also reserves ``0`` for the default/unset value.
 SEASON_CODES = {item["code"] for item in SEASONS}
+ATTRIBUTE_CODES = {str(number) for number in range(10)}
 SPEC_VALUE_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)?(?:cm|mm|kg|m|inch)$", re.IGNORECASE)
 SKU_CODE_MAX_LENGTH = 80
 
@@ -31,8 +35,9 @@ def category_path(category):
 def allocate_spu_code(*, tenant, category, season_code):
     if category.tenant_id != tenant.id or not category.is_active:
         raise ValidationError("Category must be active and belong to the current tenant.")
-    if season_code not in SEASON_CODES:
-        raise ValidationError("Unsupported season code.")
+    season_code = str(season_code or "")
+    if season_code not in ATTRIBUTE_CODES:
+        raise ValidationError("Unsupported attribute code.")
     l1, l2, l3 = category_path(category)
     sequence, _ = ProductCodeSequence.objects.select_for_update().get_or_create(
         tenant=tenant,
@@ -42,9 +47,24 @@ def allocate_spu_code(*, tenant, category, season_code):
         season_code=season_code,
         defaults={"current_value": 0},
     )
-    next_value = sequence.current_value + 1
+    # A category can be moved after products have been created.  Existing
+    # products retain their original identifiers, while newly generated codes
+    # use the category's new path.  Synchronize the sequence with persisted
+    # SPU codes before incrementing so a stale/missing sequence row cannot
+    # recreate an already-used code (manual imports are covered too).
+    prefix = f"{l1.code}{l2.code}{l3.code}{season_code}"
+    highest_used = sequence.current_value
+    for existing_code in ProductSPU.objects.filter(
+        tenant=tenant,
+        spu_code__startswith=prefix,
+    ).values_list("spu_code", flat=True):
+        suffix = existing_code[len(prefix):]
+        if len(suffix) == 3 and suffix.isdigit():
+            highest_used = max(highest_used, int(suffix))
+
+    next_value = highest_used + 1
     if next_value > 999:
-        raise ValidationError("This category and season has exhausted its 001-999 SPU sequence.")
+        raise ValidationError("This category and attribute code has exhausted its 001-999 SPU sequence.")
     sequence.current_value = next_value
     sequence.save(update_fields=["current_value", "updated_at"])
     return f"{l1.code}{l2.code}{l3.code}{season_code}{next_value:03d}", (l1.code, l2.code, l3.code)

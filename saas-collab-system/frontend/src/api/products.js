@@ -106,7 +106,15 @@ export const fetchProductCategories = (params = {}) =>
 export const createProductCategory = (data) => requestWithMockFallback({ method: 'post', url: dictionaryApi('categories'), data }, {}, 'products.categories.create');
 export const updateProductCategory = (id, data) => requestWithMockFallback({ method: 'patch', url: `${dictionaryApi('categories')}${id}/`, data }, {}, 'products.categories.update');
 export const deleteProductCategory = (id) => requestWithMockFallback({ method: 'delete', url: `${dictionaryApi('categories')}${id}/` }, {}, 'products.categories.delete');
-export const updateProductAttributes = (id, attributes) => requestWithMockFallback({ method: 'put', url: `${dictionaryApi('categories')}${id}/attributes/`, data: { attributes } }, {}, 'products.categories.attributes');
+export const updateProductAttributes = (id, spec_dimensions) => requestWithMockFallback(
+  {
+    method: 'put',
+    url: `${dictionaryApi('categories')}${id}/attributes/`,
+    data: { spec_dimensions }
+  },
+  {},
+  'products.categories.attributes'
+);
 export const fetchProductCategoryBackgroundColors = () => requestWithMockFallback(
   { method: 'get', url: dictionaryApi('category-background-colors') }, [], 'products.category_background_colors'
 );
