@@ -87,8 +87,24 @@ def build_specification(category, spec_values):
     for dimension in dimensions:
         code = dimension["code"]
         value = str(spec_values.get(code, "0")).strip()
-        if value != "0" and not SPEC_VALUE_PATTERN.fullmatch(value):
-            raise ValidationError(f"Specification value for {code} must include a supported unit.")
+        configured_values = {
+            str(item).strip()
+            for item in (dimension.get("values") or [])
+            if str(item).strip()
+        }
+        # Existing tenants may have legacy dictionary values such as
+        # ``90X200CM`` or ``2PCS-1``.  They are valid product specifications
+        # even though they are not expressible as a single numeric value with
+        # a unit.  Keep the unit-format fallback for new/custom values while
+        # accepting values explicitly configured on the category.
+        if (
+            value != "0"
+            and value not in configured_values
+            and not SPEC_VALUE_PATTERN.fullmatch(value)
+        ):
+            raise ValidationError(
+                f"Specification value for {code} must be a configured dictionary value or include a supported unit."
+            )
         normalized[code] = value
         values.append(value)
     return "×".join(values), normalized

@@ -8,6 +8,7 @@ const productsApi = vi.hoisted(() => ({
   createProductSpu: vi.fn(),
   fetchProductAttributes: vi.fn(),
   fetchProductCategories: vi.fn(),
+  fetchProductCategoryBackgroundColors: vi.fn(),
   fetchProductColors: vi.fn(),
   fetchProductMasterList: vi.fn(),
   updateProductSpu: vi.fn(),
@@ -86,6 +87,7 @@ const stubs = {
 
 function setupApiMocks() {
   productsApi.fetchProductCategories.mockResolvedValue(collection(categoryRows));
+  productsApi.fetchProductCategoryBackgroundColors.mockResolvedValue(collection([]));
   productsApi.fetchProductColors.mockResolvedValue(collection([]));
   productsApi.fetchProductAttributes.mockResolvedValue(collection(attributeRows));
   productsApi.fetchProductMasterList.mockResolvedValue(collection([]));

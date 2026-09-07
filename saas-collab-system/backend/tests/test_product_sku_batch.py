@@ -307,3 +307,71 @@ def test_batch_rejects_float_spu_inactive_color_invalid_unit_and_long_code():
         {"spu": long_spu.id, "color_codes": ["red"], "spec_values": {}},
     )
     assert too_long.status_code == 400
+
+
+@pytest.mark.django_db
+def test_batch_accepts_production_string_dictionary_values_without_units():
+    client, user, tenant, category, spu = _client_and_spu(
+        suffix="101011001",
+        dimensions=[
+            {
+                "code": "spec",
+                "name": "规格",
+                "values": ["90X200CM", "120X200CM", "2PCS-1"],
+            }
+        ],
+    )
+    spu.spu_code = "101011001"
+    spu.save(update_fields=["spu_code"])
+    for code in ("amber", "apricot", "apricotpink"):
+        ProductColor.objects.create(tenant=tenant, code=code, name=code)
+
+    invalid = _post(
+        client,
+        user,
+        {
+            "spu": spu.id,
+            "color_codes": ["amber"],
+            "spec_values": {"spec": ["NOT-A-SPEC"]},
+        },
+    )
+    assert invalid.status_code == 422
+    assert ProductSKU.objects.filter(tenant=tenant, spu=spu).count() == 0
+
+    response = _post(
+        client,
+        user,
+        {
+            "spu": spu.id,
+            "color_codes": ["amber", "apricot", "apricotpink"],
+            "spec_values": {"spec": ["90X200CM", "2PCS-1"]},
+        },
+    )
+    assert response.status_code == 201, response.json()
+    data = response.json()["data"]
+    assert data["created"] == 6
+    assert data["skipped"] == 0
+    assert data["total"] == 6
+    assert {
+        sku.sku_code
+        for sku in ProductSKU.objects.filter(tenant=tenant, spu=spu)
+    } == {
+        f"101011001-{color}-{spec}"
+        for color in ("amber", "apricot", "apricotpink")
+        for spec in ("90X200CM", "2PCS-1")
+    }
+
+    retry = _post(
+        client,
+        user,
+        {
+            "spu": spu.id,
+            "color_codes": ["amber", "apricot", "apricotpink"],
+            "spec_values": {"spec": ["90X200CM", "2PCS-1"]},
+        },
+    )
+    assert retry.status_code == 200, retry.json()
+    assert retry.json()["data"]["created"] == 0
+    assert retry.json()["data"]["skipped"] == 6
+    assert retry.json()["data"]["total"] == 6
+    assert ProductSKU.objects.filter(tenant=tenant, spu=spu).count() == 6

@@ -4,6 +4,7 @@ import {
   categoryBackgroundColor,
   categoryRowClass,
   categoryRowStyle,
+  mergeCategoryBackgroundColors,
 } from '../src/utils/productCategoryPresentation';
 
 describe('商品分类展示工具', () => {
@@ -87,5 +88,27 @@ describe('商品分类展示工具', () => {
     expect(categoryRowStyle(row, duplicateL2Code)).toEqual({
       '--product-category-row-background': '#445566',
     });
+  });
+
+  it('按 L2 id 合并 FoundationSettings 颜色，即使分类接口缺少 L2 节点或颜色', () => {
+    const row = {
+      category_node: 18,
+      category_l2_id: 16,
+      category_l2_code: '01',
+      category_l2_name: '床上用品',
+    };
+    const categoriesWithoutL2Color = [
+      { id: 14, level: 1, code: '1', name: '家纺' },
+      { id: 18, parent: 16, level: 3, code: '01', name: '床笠' },
+      { id: 15, level: 1, code: '2', name: '厨房' },
+      { id: 17, parent: 15, level: 2, code: '01', name: '餐厨', row_background_color: '#445566' },
+    ];
+    const merged = mergeCategoryBackgroundColors(categoriesWithoutL2Color, [
+      { id: 16, parent: 14, level: 2, code: '01', name: '床上用品', row_background_color: '#FFF4E6' },
+      { id: 17, parent: 15, level: 2, code: '01', name: '餐厨', row_background_color: '' },
+    ]);
+    expect(categoryBackgroundColor(row, merged)).toBe('#FFF4E6');
+    expect(categoryRowClass(row, merged)).toBe('product-category-custom');
+    expect(merged.find((item) => String(item.id) === '17').row_background_color).toBe('');
   });
 });

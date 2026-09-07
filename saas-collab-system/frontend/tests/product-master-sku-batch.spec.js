@@ -41,8 +41,27 @@ describe('商品主数据批量生成 SKU', () => {
     expect(page).toContain('skuBatchCombinationCount');
     expect(page).toContain('skuBatchLimit = 200');
     expect(page).toContain('createProductSkuBatch(payload)');
+    expect(page).toContain('skuGenerationErrorMessage(response)');
+    expect(page).toContain('skuGenerationErrorMessage(error?.response || error)');
     expect(api).toContain("url: '/api/internal/products/skus/batch/'");
     expect(api).toContain('color_codes');
     expect(api).toContain('spec_values');
+  });
+
+  it('从批量响应 data 顶层读取 created/skipped，不被 results 首项解包覆盖', () => {
+    const batchResponse = {
+      data: {
+        created: 6,
+        skipped: 0,
+        total: 6,
+        results: [{ sku_code: 'SKU-1', created: 1 }],
+      },
+    };
+    const result = batchResponse.data || {};
+
+    expect(Number(result.created || 0)).toBe(6);
+    expect(Number(result.skipped || 0)).toBe(0);
+    expect(page).toContain('const result = response.data || {};');
+    expect(page).not.toContain('const result = detailData(response.data);');
   });
 });
