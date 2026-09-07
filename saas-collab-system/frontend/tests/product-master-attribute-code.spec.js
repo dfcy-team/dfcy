@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const productsApi = vi.hoisted(() => ({
   bulkUpdateProductSpus: vi.fn(),
   createProductSku: vi.fn(),
+  createProductSkuBatch: vi.fn(),
   createProductSpu: vi.fn(),
   fetchProductAttributes: vi.fn(),
   fetchProductCategories: vi.fn(),

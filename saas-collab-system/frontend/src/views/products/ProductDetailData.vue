@@ -6,11 +6,22 @@
         <p>维护旧 SKU 与新 SPU/SKU 的对应关系。导入后可逐条补充信息，再生成新编码。</p>
       </div>
       <div class="header-actions">
-        <el-button @click="downloadTemplate">下载导入模板</el-button>
-        <el-button v-if="canManage" @click="openImageBatch">批量导入图片</el-button>
-        <el-button v-if="canManage" type="primary" @click="$refs.file?.click()">导入旧商品</el-button>
+        <el-button data-testid="detail-import-template" @click="downloadTemplate">下载导入模板</el-button>
+        <el-select
+          v-if="canManage"
+          v-model="importMode"
+          data-testid="detail-import-mode"
+          class="import-mode-control"
+          aria-label="导入模式"
+        >
+          <el-option label="自动导入（新增或更新）" value="auto" />
+          <el-option label="仅导入新增" value="create" />
+          <el-option label="仅更新已有记录" value="update" />
+        </el-select>
+        <el-button v-if="canManage" data-testid="image-batch-open" @click="openImageBatch">批量导入图片</el-button>
+        <el-button v-if="canManage" data-testid="detail-import-button" type="primary" @click="$refs.file?.click()">导入商品</el-button>
         <el-button v-if="canManage" @click="openBulk">批量修改</el-button>
-        <input ref="file" hidden type="file" accept=".csv,text/csv" @change="importFile" />
+        <input ref="file" data-testid="detail-import-file" hidden type="file" accept=".csv,text/csv" @change="importFile" />
       </div>
     </header>
 
@@ -73,6 +84,7 @@
         />
 
         <el-table
+          data-testid="product-detail-data-table"
           v-loading="loading"
           :data="rows"
           row-key="id"
@@ -84,6 +96,25 @@
           :row-style="productRowStyle"
           @selection-change="selectedRows = $event"
         >
+          <el-table-column label="图片" width="92" align="center" fixed="left">
+            <template #default="{ row }">
+              <el-image
+                v-if="row.image_url || row.image"
+                :data-testid="`product-detail-image-${row.id}`"
+                class="product-image-thumb"
+                :src="resolveImageUrl(row.image_url || row.image)"
+                :preview-src-list="[resolveImageUrl(row.image_url || row.image)]"
+                preview-teleported
+                fit="cover"
+                loading="lazy"
+              />
+              <span
+                v-else
+                :data-testid="`product-detail-image-empty-${row.id}`"
+                class="image-placeholder"
+              >无图</span>
+            </template>
+          </el-table-column>
           <el-table-column type="index" label="序号" width="70" :index="(page - 1) * pageSize + 1" />
           <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
           <el-table-column prop="legacy_spu_code" label="旧 SPU 编码" min-width="125" show-overflow-tooltip />
@@ -130,20 +161,6 @@
           <el-table-column prop="hs_code" label="HS编码" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.hs_code || '-' }}</template>
           </el-table-column>
-          <el-table-column label="图片" width="92" align="center">
-            <template #default="{ row }">
-              <el-image
-                v-if="row.image_url || row.image"
-                class="product-image-thumb"
-                :src="resolveImageUrl(row.image_url || row.image)"
-                :preview-src-list="[resolveImageUrl(row.image_url || row.image)]"
-                preview-teleported
-                fit="cover"
-                loading="lazy"
-              />
-              <span v-else class="image-placeholder">无图</span>
-            </template>
-          </el-table-column>
           <el-table-column prop="purchase_price" label="采购价格" min-width="110" align="right">
             <template #default="{ row }">{{ formatPrice(row.purchase_price) }}</template>
           </el-table-column>
@@ -166,12 +183,20 @@
                 </el-button>
                 <el-button
                   v-if="row.sku_id && canManage"
+                  :data-testid="`detail-status-${row.id}`"
                   link
                   :type="row.sku_is_active ? 'warning' : 'success'"
                   @click="toggleStatus(row)"
                 >
                   {{ row.sku_is_active ? '停用' : '启用' }}
                 </el-button>
+                <el-button
+                  v-if="canManage"
+                  :data-testid="`detail-delete-${row.id}`"
+                  link
+                  type="danger"
+                  @click="deleteRow(row)"
+                >删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -346,25 +371,67 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="imageBatchVisible" title="批量导入商品图片" width="min(920px, 94vw)" :close-on-click-modal="false">
+    <el-dialog
+      v-model="imageBatchVisible"
+      title="批量导入商品图片"
+      width="min(920px, 94vw)"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!imageBatchSaving && imageBatchPhase !== 'completed'"
+      :show-close="!imageBatchSaving && imageBatchPhase !== 'completed'"
+    >
       <div class="image-batch-toolbar">
-        <input ref="imageBatchFile" hidden type="file" accept=".csv,text/csv" @change="parseImageBatchFile" />
-        <el-button @click="downloadImageBatchTemplate">下载图片导入模板</el-button>
-        <el-button @click="imageBatchFile?.click()">选择 CSV 文件</el-button>
+        <input ref="imageBatchFile" data-testid="image-batch-file" hidden type="file" accept=".csv,text/csv" @change="parseImageBatchFile" />
+        <el-button data-testid="image-batch-template" :disabled="imageBatchSaving" @click="downloadImageBatchTemplate">下载图片导入模板</el-button>
+        <el-button data-testid="image-batch-file-button" :disabled="imageBatchSaving" @click="imageBatchFile?.click()">选择 CSV 文件</el-button>
         <span class="image-batch-hint">字段：旧SKU编码、新SKU编码、图片链接；旧/新 SKU 至少填写一个。</span>
-        <span v-if="imageBatchProgress" class="image-batch-progress">{{ imageBatchProgress }}</span>
       </div>
+      <div v-if="imageBatchRows.length" class="image-batch-summary" data-testid="image-batch-summary">
+        <strong>{{ imageBatchPhaseLabel }}</strong>
+        <span>{{ imageBatchSummary.total }} 行</span>
+        <span>待处理 {{ imageBatchSummary.pending }}</span>
+        <span>缓存中 {{ imageBatchSummary.processing }}</span>
+        <span>已更新 {{ imageBatchSummary.updated }}</span>
+        <span>已存在 {{ imageBatchSummary.unchanged }}</span>
+        <span>失败 {{ imageBatchSummary.error }}</span>
+        <span v-if="imageBatchSummary.invalid">（其中 {{ imageBatchSummary.invalid }} 行需修正 CSV）</span>
+      </div>
+      <el-progress
+        v-if="imageBatchRows.length && imageBatchPhase === 'processing'"
+        class="image-batch-progress-bar"
+        :percentage="imageBatchProgressPercent"
+        :format="() => imageBatchProgress"
+      />
+      <div v-else-if="imageBatchProgress" class="image-batch-progress" data-testid="image-batch-progress">{{ imageBatchProgress }}</div>
       <el-alert v-if="imageBatchError" class="image-batch-error" :title="imageBatchError" type="warning" :closable="false" />
       <el-table v-if="imageBatchRows.length" :data="imageBatchRows" border max-height="360" class="image-batch-table">
         <el-table-column type="index" label="序号" width="70" />
+        <el-table-column label="缓存图片" width="98" fixed="left">
+          <template #default="{ row }">
+            <el-image
+              v-if="row.cached_url"
+              :data-testid="`image-batch-preview-${row.line}`"
+              class="image-batch-thumb"
+              :src="resolveImageUrl(row.cached_url)"
+              :preview-src-list="[resolveImageUrl(row.cached_url)]"
+              preview-teleported
+              fit="cover"
+              loading="lazy"
+            />
+            <span v-else class="image-placeholder">待缓存</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="处理状态" width="112" fixed="left">
+          <template #default="{ row }">
+            <span :data-testid="`image-batch-state-${row.line}`" :class="`image-batch-state image-batch-state-${row.status}`">{{ imageBatchStatusLabel(row.status) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="legacy_sku_code" label="旧SKU编码" min-width="150" show-overflow-tooltip />
         <el-table-column prop="sku_code" label="新SKU编码" min-width="150" show-overflow-tooltip />
         <el-table-column prop="image_url" label="图片链接" min-width="280" show-overflow-tooltip />
-        <el-table-column prop="status" label="处理状态" width="110">
-          <template #default="{ row }">{{ imageBatchStatusLabel(row.status) }}</template>
-        </el-table-column>
-        <el-table-column prop="cached_url" label="服务器缓存地址" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.cached_url || '-' }}</template>
+        <el-table-column label="缓存文件信息" min-width="230" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ imageBatchFileInfo(row) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="message" label="说明" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">{{ row.message || '-' }}</template>
@@ -372,19 +439,38 @@
       </el-table>
       <el-empty v-else description="请选择图片 CSV 文件预览" :image-size="70" />
       <template #footer>
-        <el-button @click="imageBatchVisible = false">关闭</el-button>
+        <el-button v-if="imageBatchPhase !== 'completed'" :disabled="imageBatchSaving" @click="imageBatchVisible = false">关闭</el-button>
         <el-button
+          v-if="imageBatchPhase === 'completed' && imageBatchSummary.retryable"
+          data-testid="image-batch-retry"
+          :loading="imageBatchSaving"
+          @click="retryImageBatch"
+        >
+          重试失败项
+        </el-button>
+        <el-button
+          v-if="imageBatchPhase !== 'completed'"
+          data-testid="image-batch-submit"
           type="primary"
           :loading="imageBatchSaving"
           :disabled="!imageBatchRows.some((row) => row.valid)"
           @click="submitImageBatch"
         >
-          提交并缓存图片
+          {{ imageBatchSaving ? '缓存中…' : '提交并缓存图片' }}
+        </el-button>
+        <el-button
+          v-else
+          data-testid="image-batch-save"
+          type="primary"
+          :loading="imageBatchSaving"
+          @click="saveImageBatch"
+        >
+          保存
         </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="importing" title="导入旧商品" width="min(560px, 94vw)" :close-on-click-modal="false" :show-close="false">
+    <el-dialog v-model="importing" title="导入商品明细" width="min(560px, 94vw)" :close-on-click-modal="false" :show-close="false">
       <el-steps :active="importStep" finish-status="success" align-center>
         <el-step title="读取文件" />
         <el-step title="校验数据" />
@@ -393,7 +479,7 @@
       </el-steps>
       <el-progress class="import-progress" :percentage="importPercent" :indeterminate="importing" :duration="8" />
       <p class="import-status">{{ importStage }} · 已用时 {{ formatDuration(importElapsed) }}</p>
-      <p class="import-hint">重复的旧 SKU 不会新增记录；有变化的字段才会更新。</p>
+      <p class="import-hint">当前模式：{{ importModeLabel }}。新 SKU 编码只用于匹配已有商品；空白字段不会覆盖原值，待生成商品不能填写商品状态。</p>
     </el-dialog>
 
     <el-dialog v-model="summaryVisible" title="导入结果" width="min(720px, 94vw)">
@@ -428,6 +514,9 @@ import {
   updateLegacyProductItem,
   generateLegacyProductItem,
   updateProductSku,
+  updateProductSkuStatus,
+  deleteProductSku,
+  deleteProductLegacyItem,
   bulkUpdateProductDetails,
   bulkCacheProductImages,
 } from '../../api/products';
@@ -469,9 +558,10 @@ const editableDetailFields = [
   { key: 'image_url', label: '图片链接' },
 ];
 const editForm = reactive({
-  id: null, rowType: '', product_name: '', category_node: null, purchase_price: '', is_active: true,
+  id: null, skuId: null, rowType: '', product_name: '', category_node: null, purchase_price: '', is_active: true,
   package_weight: '', package_volume: '', package_length_cm: '', package_width_cm: '', package_height_cm: '',
   origin_country: '', hs_code: '', image_url: '', clearFields: [], hasSku: false, allowCategory: false, generated: false,
+  initial_is_active: null,
 });
 const bulkVisible = ref(false);
 const bulkSaving = ref(false);
@@ -495,6 +585,10 @@ const imageBatchRows = ref([]);
 const imageBatchError = ref('');
 const imageBatchFile = ref(null);
 const imageBatchProgress = ref('');
+const imageBatchPhase = ref('draft');
+const imageBatchFileName = ref('');
+const importMode = ref('auto');
+const importModeLabel = computed(() => ({ auto: '自动导入（新增或更新）', create: '仅导入新增', update: '仅更新已有记录' })[importMode.value] || '自动导入（新增或更新）');
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
@@ -570,16 +664,63 @@ function imageBatchField(row, headers, names) {
   return index >= 0 ? String(row[index] || '').trim() : '';
 }
 
+const imageBatchSummary = computed(() => {
+  const all = imageBatchRows.value;
+  const valid = all.filter((row) => row.valid);
+  const invalid = all.filter((row) => !row.valid).length;
+  const pending = valid.filter((row) => row.status === 'pending').length;
+  const processing = valid.filter((row) => row.status === 'processing').length;
+  const updated = valid.filter((row) => row.status === 'updated' || row.status === 'success').length;
+  const unchanged = valid.filter((row) => row.status === 'unchanged').length;
+  const error = all.filter((row) => row.status === 'error').length;
+  return {
+    total: all.length,
+    valid: valid.length,
+    invalid,
+    pending,
+    processing,
+    updated,
+    unchanged,
+    error,
+    completed: updated + unchanged + error,
+    retryable: valid.some((row) => row.status === 'error'),
+  };
+});
+const imageBatchPhaseLabel = computed(() => ({
+  draft: '待提交',
+  processing: '正在缓存图片',
+  completed: '缓存完成，请保存',
+}[imageBatchPhase.value] || '待提交'));
+const imageBatchProgressPercent = computed(() => {
+  const total = imageBatchSummary.value.total;
+  if (!total) return 0;
+  return Math.min(100, Math.round((imageBatchSummary.value.completed / total) * 100));
+});
+
 function openImageBatch() {
   if (!canManage.value) return;
   imageBatchRows.value = [];
   imageBatchError.value = '';
   imageBatchProgress.value = '';
+  imageBatchPhase.value = 'draft';
+  imageBatchFileName.value = '';
   imageBatchVisible.value = true;
 }
 
 function imageBatchStatusLabel(status) {
-  return ({ pending: '待提交', processing: '处理中', success: '成功', updated: '已更新', unchanged: '无变化', error: '失败' })[status] || '待提交';
+  return ({ pending: '待处理', processing: '缓存中', success: '已更新', updated: '已更新', unchanged: '已存在', error: '失败' })[status] || '待处理';
+}
+
+function imageBatchFileInfo(row) {
+  const parts = [];
+  if (row.file_name) parts.push(row.file_name);
+  if (row.file_size !== undefined && row.file_size !== null && row.file_size !== '') {
+    const size = Number(row.file_size);
+    parts.push(Number.isFinite(size) && size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`);
+  }
+  if (row.content_type) parts.push(row.content_type);
+  if (row.cached_url) parts.push(row.cached_url);
+  return parts.join(' · ') || (row.status === 'error' ? '未生成缓存文件' : '待缓存');
 }
 
 function validateImageBatchRow(row) {
@@ -590,36 +731,52 @@ function validateImageBatchRow(row) {
 }
 
 async function parseImageBatchFile(event) {
+  if (imageBatchSaving.value) return;
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file) return;
-  if (!/\.csv$/i.test(file.name)) {
-    imageBatchError.value = '图片批量导入当前仅支持 CSV 文件，请先另存为 CSV。';
-    return;
+  try {
+    if (!/\.csv$/i.test(file.name)) {
+      imageBatchError.value = '图片批量导入当前仅支持 CSV 文件，请先另存为 CSV。';
+      return;
+    }
+    const bytes = await file.arrayBuffer();
+    let text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('gb18030').decode(bytes); }
+    const parsed = parseCsvRows(text);
+    const headers = parsed.shift() || [];
+    if (!headers.length) throw new Error('CSV 缺少表头。');
+    const legacyNames = ['旧sku编码', '旧sku', 'legacy_skucode', 'legacy_sku_code'];
+    const newNames = ['新sku编码', '新sku', 'sku编码', 'sku_code', 'new_sku_code'];
+    const imageNames = ['图片链接', '图片url', '图片地址', 'image_url', 'image'];
+    const rowsFromFile = parsed.map((values, index) => {
+      const row = {
+        line: index + 2,
+        legacy_sku_code: imageBatchField(values, headers, legacyNames),
+        sku_code: imageBatchField(values, headers, newNames),
+        image_url: imageBatchField(values, headers, imageNames),
+        status: 'pending',
+        cached_url: '',
+        file_name: '',
+        file_size: '',
+        content_type: '',
+        message: '',
+      };
+      const error = validateImageBatchRow(row);
+      return { ...row, valid: !error, status: error ? 'error' : 'pending', message: error };
+    });
+    imageBatchRows.value = rowsFromFile;
+    imageBatchFileName.value = file.name;
+    imageBatchPhase.value = 'draft';
+    imageBatchProgress.value = rowsFromFile.length ? `待提交：可处理 ${rowsFromFile.filter((row) => row.valid).length} / ${rowsFromFile.length} 行` : '';
+    imageBatchError.value = rowsFromFile.length ? '' : 'CSV 中没有可预览的数据行。';
+  } catch (error) {
+    imageBatchRows.value = [];
+    imageBatchFileName.value = '';
+    imageBatchPhase.value = 'draft';
+    imageBatchProgress.value = '';
+    imageBatchError.value = error?.message || 'CSV 解析失败，请检查文件编码和格式。';
   }
-  const bytes = await file.arrayBuffer();
-  let text;
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('gb18030').decode(bytes); }
-  const parsed = parseCsvRows(text);
-  const headers = parsed.shift() || [];
-  const legacyNames = ['旧sku编码', '旧sku', 'legacy_skucode', 'legacy_sku_code'];
-  const newNames = ['新sku编码', '新sku', 'sku编码', 'sku_code', 'new_sku_code'];
-  const imageNames = ['图片链接', '图片url', '图片地址', 'image_url', 'image'];
-  const rowsFromFile = parsed.map((values, index) => {
-    const row = {
-      line: index + 2,
-      legacy_sku_code: imageBatchField(values, headers, legacyNames),
-      sku_code: imageBatchField(values, headers, newNames),
-      image_url: imageBatchField(values, headers, imageNames),
-      status: 'pending',
-      cached_url: '',
-      message: '',
-    };
-    const error = validateImageBatchRow(row);
-    return { ...row, valid: !error, status: error ? 'error' : 'pending', message: error };
-  });
-  imageBatchRows.value = rowsFromFile;
-  imageBatchError.value = rowsFromFile.length ? '' : 'CSV 中没有可预览的数据行。';
 }
 
 function downloadImageBatchTemplate() {
@@ -629,22 +786,63 @@ function downloadImageBatchTemplate() {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-async function submitImageBatch() {
-  const validRows = imageBatchRows.value.filter((row) => row.valid);
-  if (!validRows.length || imageBatchSaving.value) return;
+function imageBatchResultAt(resultRows, index) {
+  // The API index is relative to the current chunk.  Prefer it when present,
+  // and only use response order for older servers that omit index entirely.
+  const hasExplicitIndex = (item) => item && item.index !== undefined && item.index !== null && String(item.index).trim() !== '';
+  const indexed = resultRows.find((item) => hasExplicitIndex(item) && Number.isInteger(Number(item.index)) && Number(item.index) === index);
+  if (indexed) return indexed;
+  if (resultRows.some(hasExplicitIndex)) return null;
+  return resultRows[index] || null;
+}
+
+function applyImageBatchResult(row, result) {
+  if (!result) {
+    row.status = 'error';
+    row.cached_url = '';
+    row.message = '服务器未返回该行处理结果';
+    return;
+  }
+  const resultStatus = String(result.status || '').toLowerCase();
+  const cachedUrl = String(result.cached_url || result.image_url || result.url || '').trim();
+  const failed = resultStatus === 'error' || result.success === false || result.error;
+  // A positive status without the persisted media URL is not a successful
+  // cache: the list could not show the concrete image that was saved.
+  if (failed || !cachedUrl) {
+    row.status = 'error';
+    row.cached_url = '';
+    row.file_name = result.file_name || '';
+    row.file_size = result.file_size ?? '';
+    row.content_type = result.content_type || '';
+    row.message = result.message || (cachedUrl ? '服务器返回了失败状态' : '服务器未返回缓存图片地址');
+    return;
+  }
+  const isKnownImageStatus = ['updated', 'unchanged'].includes(resultStatus);
+  row.status = isKnownImageStatus && resultStatus === 'unchanged' ? 'unchanged' : 'updated';
+  row.cached_url = cachedUrl;
+  row.file_name = result.file_name || result.filename || '';
+  row.file_size = result.file_size ?? result.size ?? '';
+  row.content_type = result.content_type || result.mime_type || '';
+  row.message = result.message || (row.status === 'unchanged' ? '图片已存在，已复用缓存文件' : '图片已缓存并更新商品信息');
+}
+
+function updateImageBatchProgress(processed, total) {
+  const summary = imageBatchSummary.value;
+  imageBatchProgress.value = `缓存中：${processed} / ${total} 行（已更新 ${summary.updated}，已存在 ${summary.unchanged}，失败 ${summary.error}）`;
+}
+
+async function processImageBatchRows(targetRows) {
+  if (!targetRows.length || imageBatchSaving.value) return;
   imageBatchSaving.value = true;
-  validRows.forEach((row) => { row.status = 'processing'; row.message = ''; });
-  // Keep each request small enough for the reverse proxy timeout while still
-  // allowing the dialog to report progress and retain per-row results.
+  imageBatchPhase.value = 'processing';
   const batchSize = 5;
-  let completed = 0;
-  let failed = 0;
-  let succeeded = 0;
-  imageBatchProgress.value = `处理中：0 / ${validRows.length}`;
+  let processed = 0;
+  const total = imageBatchSummary.value.total;
+  updateImageBatchProgress(processed, total);
   try {
-    const resultKey = (item) => `${item.legacy_sku_code || item.old_sku_code || ''}::${item.sku_code || item.new_sku_code || ''}`;
-    for (let offset = 0; offset < validRows.length; offset += batchSize) {
-      const batchRows = validRows.slice(offset, offset + batchSize);
+    for (let offset = 0; offset < targetRows.length; offset += batchSize) {
+      const batchRows = targetRows.slice(offset, offset + batchSize);
+      batchRows.forEach((row) => { row.status = 'processing'; row.cached_url = row.cached_url || ''; row.message = ''; });
       const items = batchRows.map((row) => ({
         legacy_sku_code: row.legacy_sku_code,
         sku_code: row.sku_code,
@@ -661,37 +859,48 @@ async function submitImageBatch() {
         : Array.isArray(response?.data?.items) ? response.data.items : [];
       if (!response?.success) {
         const message = response?.message || '服务器缓存失败';
-        batchRows.forEach((row) => { row.status = 'error'; row.message = message; });
-        failed += batchRows.length;
+        batchRows.forEach((row) => { row.status = 'error'; row.cached_url = ''; row.message = message; });
       } else if (!resultRows.length) {
-        batchRows.forEach((row) => { row.status = 'error'; row.message = '服务器未返回逐行处理结果'; });
-        failed += batchRows.length;
+        batchRows.forEach((row) => { row.status = 'error'; row.cached_url = ''; row.message = '服务器未返回逐行处理结果'; });
       } else {
-        const resultMap = new Map(resultRows.map((item) => [resultKey(item), item]));
-        batchRows.forEach((row, index) => {
-          const result = resultMap.get(resultKey(row)) || resultRows[index];
-          if (!result) {
-            row.status = 'error';
-            row.message = '服务器未返回该行处理结果';
-            failed += 1;
-            return;
-          }
-          const resultStatus = String(result.status || '').toLowerCase();
-          row.status = resultStatus === 'error' || result.success === false || result.error
-            ? 'error'
-            : ['updated', 'unchanged'].includes(resultStatus) ? resultStatus : 'success';
-          row.cached_url = result.cached_url || result.image_url || result.url || '';
-          row.message = result.message || (resultStatus === 'unchanged' ? '图片地址未变化' : row.status !== 'error' ? '已提交服务器缓存' : '服务器未返回缓存地址');
-          if (row.status === 'error') failed += 1;
-          else succeeded += 1;
-        });
+        batchRows.forEach((row, index) => applyImageBatchResult(row, imageBatchResultAt(resultRows, index)));
       }
-      completed += batchRows.length;
-      imageBatchProgress.value = `处理中：${completed} / ${validRows.length}`;
+      processed += batchRows.length;
+      updateImageBatchProgress(processed, total);
     }
-    imageBatchProgress.value = `处理完成：成功 ${succeeded} 条，失败 ${failed} 条`;
-    imageBatchError.value = failed ? `图片缓存完成：成功 ${succeeded} 条，失败 ${failed} 条，请检查失败行说明。` : '';
-    if (succeeded) await load();
+    imageBatchPhase.value = 'completed';
+    const summary = imageBatchSummary.value;
+    imageBatchProgress.value = `处理完成：共 ${summary.total} 行，已更新 ${summary.updated}，已存在 ${summary.unchanged}，失败 ${summary.error}`;
+    imageBatchError.value = summary.error ? `图片缓存完成：${summary.error} 行失败，请检查失败行说明后重试。` : '';
+  } finally {
+    imageBatchSaving.value = false;
+  }
+}
+
+async function submitImageBatch() {
+  if (imageBatchPhase.value === 'completed') return;
+  const pendingRows = imageBatchRows.value.filter((row) => row.valid && row.status === 'pending');
+  if (!pendingRows.length || imageBatchSaving.value) return;
+  await processImageBatchRows(pendingRows);
+}
+
+async function retryImageBatch() {
+  if (imageBatchPhase.value !== 'completed' || imageBatchSaving.value) return;
+  imageBatchError.value = '';
+  const failedRows = imageBatchRows.value.filter((row) => row.valid && row.status === 'error');
+  if (!failedRows.length) return;
+  await processImageBatchRows(failedRows);
+}
+
+async function saveImageBatch() {
+  if (imageBatchPhase.value !== 'completed' || imageBatchSaving.value) return;
+  imageBatchSaving.value = true;
+  try {
+    const refreshed = await load();
+    if (refreshed) imageBatchVisible.value = false;
+    else imageBatchError.value = '图片缓存结果已保留，商品列表刷新失败，请稍后再次点击保存。';
+  } catch (error) {
+    imageBatchError.value = error?.message || '刷新商品明细失败，请稍后再次点击保存。';
   } finally {
     imageBatchSaving.value = false;
   }
@@ -702,6 +911,10 @@ function changePageSize() { page.value = 1; load(); }
 
 async function load() {
   loading.value = true;
+  // Category settings own the row background color.  Refreshing the
+  // dictionary together with every query makes a changed color visible
+  // immediately without a full page reload.
+  await loadDictionaries();
   const response = await fetchProductDetailList({
     search: filters.search.trim() || undefined,
     category_id: filters.category_id || undefined,
@@ -712,12 +925,15 @@ async function load() {
   if (response.success) {
     rows.value = collectionRows(response.data);
     total.value = collectionTotal(response.data);
+    loading.value = false;
+    return true;
   } else {
     rows.value = [];
     total.value = 0;
     show(response.message || '商品明细加载失败', 'error');
   }
   loading.value = false;
+  return false;
 }
 
 async function loadDictionaries() {
@@ -746,6 +962,7 @@ function openGenerate(row) {
 function openEdit(row) {
   Object.assign(editForm, {
     id: row.id,
+    skuId: row.sku_id || null,
     rowType: row.row_type,
     product_name: row.sku_product_name || row.product_name || '',
     category_node: row.category_node || null,
@@ -760,6 +977,7 @@ function openEdit(row) {
     image_url: row.image_url || row.image || '',
     clearFields: [],
     is_active: row.sku_is_active !== false,
+    initial_is_active: row.sku_is_active === true || row.sku_is_active === false ? row.sku_is_active : null,
     hasSku: Boolean(row.sku_id),
     allowCategory: row.row_type === 'legacy' && row.status !== 'generated',
     generated: Boolean(row.sku_id || row.status === 'generated'),
@@ -779,15 +997,29 @@ async function saveEdit() {
     if (value !== '' && value !== null && value !== undefined) payload[field.key] = value;
   }
   if (editForm.allowCategory && editForm.category_node) payload.category_node = editForm.category_node;
-  if (editForm.hasSku) payload.is_active = editForm.is_active;
+  const statusChanged = Boolean(
+    editForm.hasSku
+      && (editForm.is_active === true || editForm.is_active === false)
+      && editForm.initial_is_active !== null
+      && editForm.is_active !== editForm.initial_is_active,
+  );
   if (editForm.clearFields.length) payload.clear_fields = [...new Set(editForm.clearFields)];
-  if (!Object.keys(payload).length && !payload.clear_fields?.length) { show('请至少填写一个需要修改的字段', 'warning'); return; }
+  if (!Object.keys(payload).length && !payload.clear_fields?.length && !statusChanged) { show('请至少填写一个需要修改的字段', 'warning'); return; }
   saving.value = true;
-  const response = editForm.rowType === 'sku'
-    ? await updateProductSku(editForm.id, payload)
-    : await updateLegacyProductItem(editForm.id, payload);
+  const response = Object.keys(payload).length || payload.clear_fields?.length
+    ? editForm.rowType === 'sku'
+      ? await updateProductSku(editForm.id, payload)
+      : await updateLegacyProductItem(editForm.id, payload)
+    : { success: true };
   saving.value = false;
   if (!response.success) { show(response.message || '保存失败', 'error'); return; }
+  if (statusChanged) {
+    const statusResponse = await updateProductSkuStatus(editForm.skuId || editForm.id, {
+      is_active: editForm.is_active,
+      reason: '商品明细编辑中手动调整商品状态',
+    });
+    if (!statusResponse.success) { show(statusResponse.message || '商品状态更新失败', 'error'); return; }
+  }
   editVisible.value = false;
   show('商品明细已更新');
   await load();
@@ -876,14 +1108,84 @@ async function saveGenerate() {
 }
 
 async function toggleStatus(row) {
-  const next = !row.sku_is_active;
+  if (!row?.sku_id) return;
+  const next = row.sku_is_active !== true;
   try {
     await ElMessageBox.confirm(`确认${next ? '启用' : '停用'} SKU“${row.sku_code}”？`, `${next ? '启用' : '停用'}确认`, { type: next ? 'info' : 'warning' });
   } catch { return; }
-  const response = await updateProductSku(row.sku_id, { is_active: next });
+  const response = await updateProductSkuStatus(row.sku_id, {
+    is_active: next,
+    reason: '商品明细列表手动调整商品状态',
+  });
   if (!response.success) { show(response.message || '商品状态更新失败', 'error'); return; }
   show(`SKU 已${next ? '启用（在售）' : '停用（下架）'}`);
   await load();
+}
+
+function isStateConflict(response) {
+  return response?.http_status === 409 || response?.code === 'STATE_CONFLICT';
+}
+
+function referenceDescription(response) {
+  const references = Array.isArray(response?.data?.references)
+    ? response.data.references.filter(Boolean)
+    : [];
+  return references.length ? references.join('、') : '其他业务数据';
+}
+
+async function deactivateReferencedRow(row, response) {
+  const skuId = row?.sku_id || response?.data?.sku_id;
+  if (!response?.data?.can_deactivate || !skuId) {
+    show(`商品存在引用（${referenceDescription(response)}），当前记录不能删除。`, 'warning');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `该商品被以下数据引用：${referenceDescription(response)}。存在引用时不能删除，是否改为停用？`,
+      '存在业务引用',
+      { type: 'warning', confirmButtonText: '停用', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  const statusResponse = await updateProductSkuStatus(skuId, {
+    is_active: false,
+    reason: '删除时存在业务引用，改为停用',
+  });
+  if (!statusResponse.success) {
+    show(statusResponse.message || '商品停用失败', 'error');
+    return;
+  }
+  show('商品存在引用，已改为停用');
+  await load();
+}
+
+async function deleteRow(row) {
+  if (!canManage.value || !row?.id) return;
+  const label = row.sku_code || row.legacy_sku_code || row.id;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除商品明细“${label}”吗？删除后不可恢复。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+
+  const response = row.row_type === 'sku'
+    ? await deleteProductSku(row.sku_id || row.id)
+    : await deleteProductLegacyItem(row.id);
+  if (response.success) {
+    show('商品明细已删除');
+    await load();
+    return;
+  }
+  if (isStateConflict(response)) {
+    await deactivateReferencedRow(row, response);
+    return;
+  }
+  show(response.message || '商品明细删除失败', 'error');
 }
 
 function beginImportStatus() {
@@ -915,7 +1217,7 @@ async function importFile(event) {
     importPercent.value = 28;
     importStage.value = '文件解析完成，正在校验数据';
     importStep.value = 2;
-    const response = await importLegacyProductItems(csvText);
+    const response = await importLegacyProductItems(csvText, importMode.value);
     importPercent.value = 92;
     importStage.value = '服务端增量更新完成';
     importResult.value = response.success ? (response.data || {}) : { error_count: 1, errors: [{ line: '-', message: response.message || '导入失败' }] };
@@ -935,12 +1237,22 @@ async function importFile(event) {
 }
 
 function downloadTemplate() {
-  const csv = '\ufeff旧SPU编码,旧SKU编码,商品名称,完整类目编码,属性码,颜色英文编码,规格,采购价格\nOLD-SPU-001,OLD-SKU-001,示例 SKU 商品,10101,0,navy,150cm×220cm,35.8000\n';
+  const headers = [
+    '旧SPU编码', '旧SKU编码', '新SKU编码', '商品名称', '完整类目编码', '属性编码',
+    '颜色英文编码', '规格', '采购价格', '单位', '商品图片', '重量(g)', '体积(m³)',
+    '长(cm)', '宽(cm)', '高(cm)', '原产国', 'HS编码', '商品描述', '商品状态',
+  ];
+  const values = [
+    'OLD-SPU-001', 'OLD-SKU-001', '', '示例 SKU 商品', '10101', '0', 'navy',
+    '150cm×220cm', '35.8000', '件', 'https://example.com/product.jpg', '1200.000',
+    '0.045000', '150.000', '220.000', '20.000', '中国', '940490', '床品示例，空白字段不会覆盖原值', '',
+  ];
+  const csv = `\ufeff${headers.join(',')}\n${values.join(',')}\n`;
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const anchor = document.createElement('a'); anchor.href = url; anchor.download = '旧商品导入模板.csv'; anchor.click(); URL.revokeObjectURL(url);
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = '商品明细导入模板.csv'; anchor.click(); URL.revokeObjectURL(url);
 }
 
-onMounted(() => { loadDictionaries(); load(); });
+onMounted(() => { load(); });
 </script>
 
 <style scoped>
@@ -949,6 +1261,7 @@ onMounted(() => { loadDictionaries(); load(); });
 .page-head h1 { margin: 0 0 8px; }
 .page-head p { margin: 0; color: #64748b; }
 .header-actions, .row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.import-mode-control { width: 170px; }
 .workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
 .category-panel, .content-panel { border: 1px solid #d9e2ec; border-radius: 8px; background: #fff; }
 .category-panel { padding: 14px; min-height: 640px; }
@@ -980,8 +1293,19 @@ onMounted(() => { loadDictionaries(); load(); });
 .bulk-detail-fields { display: grid; gap: 8px; margin-top: 8px; }
 .image-batch-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .image-batch-hint { color: #64748b; font-size: 12px; }
+.image-batch-summary { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; color: #475569; font-size: 13px; }
+.image-batch-summary strong { color: #1d4ed8; }
+.image-batch-progress-bar { margin-top: 12px; }
+.image-batch-progress { margin-top: 12px; color: #334155; font-size: 13px; }
 .image-batch-error { margin-top: 14px; }
 .image-batch-table { margin-top: 14px; }
+.image-batch-thumb { width: 52px; height: 52px; border-radius: 6px; border: 1px solid #dbe3ec; background: #f8fafc; }
+.image-batch-state { font-size: 12px; font-weight: 600; }
+.image-batch-state-pending { color: #64748b; }
+.image-batch-state-processing { color: #2563eb; }
+.image-batch-state-updated { color: #15803d; }
+.image-batch-state-unchanged { color: #0f766e; }
+.image-batch-state-error { color: #dc2626; }
 @media (max-width: 1000px) { .workspace { grid-template-columns: 210px minmax(0, 1fr); } .search-control { width: 280px; } }
 @media (max-width: 760px) { .workspace { grid-template-columns: 1fr; } .category-panel { min-height: 0; } .search-control { width: 100%; } .page-head, .pager { align-items: flex-start; flex-direction: column; } }
 </style>

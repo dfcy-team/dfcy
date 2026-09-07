@@ -174,6 +174,108 @@ def test_bulk_image_cache_returns_partial_errors_and_rejects_private_hosts(monke
 
 
 @pytest.mark.django_db
+def test_bulk_image_cache_is_reflected_by_detail_rows_for_all_target_types(monkeypatch):
+    """Cached images must be visible through the same detail API the UI reads.
+
+    A generated legacy bridge can be targeted by its new SKU code.  In that
+    case only the SKU side changes, so the row serializer must prefer the
+    current SKU image over the stale imported image.  Pending legacy rows and
+    standalone SKUs exercise the two other detail-row builders; a bad row is
+    allowed to fail without hiding the successful rows.
+    """
+    tenant = Tenant.objects.create(name="Image detail tenant", code="image-detail")
+    user = _user(tenant, "image-detail-user")
+    generated_spu = ProductSPU.objects.create(tenant=tenant, spu_code="DETAIL-GEN-SPU", product_name="Generated")
+    generated_sku = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=generated_spu,
+        sku_code="DETAIL-GEN-SKU",
+        product_name="Generated variant",
+    )
+    generated_legacy = ProductLegacyItem.objects.create(
+        tenant=tenant,
+        legacy_sku_code="DETAIL-GEN-OLD",
+        product_name="Imported generated variant",
+        image_url="/media/product-images/tenant-legacy/stale.png",
+        status=ProductLegacyItem.Status.GENERATED,
+        generated_spu=generated_spu,
+        generated_sku=generated_sku,
+    )
+    pending = ProductLegacyItem.objects.create(
+        tenant=tenant,
+        legacy_sku_code="DETAIL-PENDING-OLD",
+        product_name="Pending variant",
+        status=ProductLegacyItem.Status.PENDING,
+    )
+    standalone_spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="DETAIL-STANDALONE-SPU",
+        product_name="Standalone",
+    )
+    standalone = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=standalone_spu,
+        sku_code="DETAIL-STANDALONE-SKU",
+        product_name="Standalone variant",
+    )
+    content = b"\x89PNG\r\n\x1a\n" + b"detail-image"
+    monkeypatch.setattr(
+        "apps.products.views.socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("8.8.8.8", 443))],
+    )
+    monkeypatch.setattr(
+        "apps.products.views._NO_REDIRECT_OPENER.open",
+        lambda request, timeout: _Response(content),
+    )
+    media_root = Path(__file__).resolve().parents[1] / ".test-product-image-cache-detail"
+    media_root.mkdir(parents=True, exist_ok=True)
+    with override_settings(MEDIA_ROOT=media_root):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        response = client.post(
+            "/api/internal/products/details/images/bulk-cache/",
+            {
+                "items": [
+                    # Target the new SKU only.  The linked legacy row should
+                    # still display this current SKU image.
+                    {"sku_code": generated_sku.sku_code, "image_url": "https://cdn.example.test/generated.png"},
+                    {"legacy_sku_code": pending.legacy_sku_code, "image_url": "https://cdn.example.test/pending.png"},
+                    {"sku_code": standalone.sku_code, "image_url": "https://cdn.example.test/standalone.png"},
+                    {"sku_code": "DETAIL-MISSING-SKU", "image_url": "https://cdn.example.test/missing.png"},
+                ],
+            },
+            format="json",
+        )
+        assert response.status_code == 200
+        payload = response.json()["data"]
+        assert payload["updated"] == 3
+        assert payload["error_count"] == 1
+        assert payload["results"][3]["index"] == 3
+        assert payload["results"][3]["status"] == "error"
+
+        generated_sku.refresh_from_db()
+        generated_legacy.refresh_from_db()
+        pending.refresh_from_db()
+        standalone.refresh_from_db()
+        assert generated_sku.image_url
+        assert generated_legacy.image_url.endswith("stale.png")
+        assert pending.image_url
+        assert standalone.image_url
+
+        detail = client.get("/api/internal/products/details/")
+        assert detail.status_code == 200
+        rows = detail.json()["data"]["results"]
+        by_old = {row["legacy_sku_code"]: row for row in rows if row["legacy_sku_code"]}
+        by_sku = {row["sku_code"]: row for row in rows if row["sku_code"]}
+
+        # Generated bridge rows prefer the current SKU image even when the
+        # imported legacy record still has its own old URL.
+        assert by_old[generated_legacy.legacy_sku_code]["image_url"] == generated_sku.image_url
+        assert by_old[pending.legacy_sku_code]["image_url"] == pending.image_url
+        assert by_sku[standalone.sku_code]["image_url"] == standalone.image_url
+
+
+@pytest.mark.django_db
 def test_spu_bulk_update_moves_only_visible_tenant_records_and_rejects_state_fields():
     tenant = Tenant.objects.create(name="SPU bulk tenant", code="spu-bulk")
     other = Tenant.objects.create(name="Other SPU tenant", code="spu-bulk-other")

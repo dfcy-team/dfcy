@@ -54,7 +54,7 @@ describe('基础档案商品列表增强契约', () => {
     expect(detail).toContain('cached_url');
     expect(detail).toContain("['updated', 'unchanged'].includes(resultStatus)");
     expect(detail).toContain("updated: '已更新'");
-    expect(detail).toContain("unchanged: '无变化'");
+    expect(detail).toContain("unchanged: '已存在'");
     expect(productsApi).toContain('/api/internal/products/details/images/bulk-cache/');
   });
 });

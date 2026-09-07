@@ -132,6 +132,23 @@
       <el-table :data="rows" row-key="id" border table-layout="fixed" empty-text="暂无符合条件的平台商品明细" @selection-change="selectedRows = $event">
         <el-table-column type="index" label="序号" width="70" :index="(filters.page - 1) * filters.page_size + 1" />
         <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
+        <el-table-column label="商品图片" width="92" align="center">
+          <template #default="{ row }">
+            <el-image
+              v-if="skuImageUrl(row)"
+              :data-testid="`platform-product-detail-image-${row.id}`"
+              class="platform-product-image-thumb"
+              :src="skuImageUrl(row)"
+              :preview-src-list="[skuImageUrl(row)]"
+              preview-teleported
+              fit="cover"
+              loading="lazy"
+            >
+              <template #error><span class="image-error">加载失败</span></template>
+            </el-image>
+            <span v-else :data-testid="`platform-product-detail-image-empty-${row.id}`" class="image-placeholder">无图</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="platform_name" label="平台" min-width="130" show-overflow-tooltip />
         <el-table-column prop="country_code" label="国家代码" min-width="110" show-overflow-tooltip>
           <template #default="{ row }">{{ row.country_code || '-' }}</template>
@@ -358,6 +375,7 @@ import { fetchConnectionCapabilities, fetchSubjectApiAccess } from '../../api/in
 import { fetchProductCategories } from '../../api/products';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
+import { apiBaseUrl } from '../../api/baseUrl';
 import { statusFromApiResponse } from '../../utils/uiState';
 
 const fileInput = ref(null);
@@ -661,6 +679,17 @@ function applyRows(results) {
 function filterCategory(value, data) {
   if (!value) return true;
   return String(data.displayName || data.name || '').toLowerCase().includes(String(value).toLowerCase());
+}
+
+function resolveImageUrl(value) {
+  const url = String(value || '').trim();
+  if (!url) return '';
+  if (/^(?:https?:)?\/\//i.test(url)) return url.startsWith('//') ? `${window.location.protocol}${url}` : url;
+  return `${apiBaseUrl}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
+function skuImageUrl(row) {
+  return resolveImageUrl(row?.internal_sku_image_url);
 }
 
 function selectCategory(data) {
@@ -1000,6 +1029,9 @@ onUnmounted(() => clearInterval(importTimer));
 .toolbar-actions { display: flex; gap: 8px; }
 .resource-table { min-width: 0; margin-top: 16px; overflow: hidden; }
 .resource-table :deep(.el-table) { width: 100%; }
+.platform-product-image-thumb { width: 52px; height: 52px; border: 1px solid #e5eaf0; border-radius: 6px; background: #f8fafc; }
+.image-placeholder, .image-error { color: #94a3b8; font-size: 12px; }
+.image-error { color: #b42318; }
 .resource-pagination {
   display: flex;
   flex-wrap: wrap;

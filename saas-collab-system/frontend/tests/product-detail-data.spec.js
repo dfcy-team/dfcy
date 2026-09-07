@@ -26,21 +26,27 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('row.sku_product_name || row.product_name');
   });
 
-  it('提供查看、逐条调整生成和 SKU 在售/下架操作', () => {
+  it('提供查看、逐条调整生成、状态和删除操作', () => {
     expect(page).toContain('查看');
     expect(page).toContain('调整并生成');
     expect(page).toContain('toggleStatus(row)');
-    expect(page).toContain('updateProductSku(row.sku_id, { is_active: next })');
+    expect(page).toContain('updateProductSkuStatus(row.sku_id, {');
+    expect(page).toContain('deleteProductSku');
+    expect(page).toContain('deleteProductLegacyItem');
+    expect(page).toContain('can_deactivate');
+    expect(page).toContain('存在业务引用');
     expect(page).toContain('启用（在售）');
     expect(page).toContain('停用（下架）');
   });
 
   it('显示导入阶段、耗时以及增量结果统计', () => {
-    expect(page).toContain('导入旧商品');
+    expect(page).toContain('导入商品明细');
     expect(page).toContain('importStage');
     expect(page).toContain('importElapsed');
-    expect(page).toContain('重复的旧 SKU 不会新增记录');
+    expect(page).toContain('空白字段不会覆盖原值');
+    expect(page).toContain('待生成商品不能填写商品状态');
     expect(page).toContain('importResult.created');
+    expect(page).toContain('importResult.updated');
     expect(page).toContain('importResult.unchanged');
     expect(page).toContain('importResult.skipped');
     expect(api).toContain("url: dictionaryApi('legacy-items')");
@@ -90,7 +96,30 @@ describe('商品明细数据页面契约', () => {
     // is allowed to send a clear_fields instruction to the API.
     expect(page).toContain("if (value !== '' && value !== null && value !== undefined) payload[field.key] = value;");
     expect(page).toContain("if (value !== '' && value !== null && value !== undefined) fields[field.key] = value;");
-    expect(page).toContain('if (!Object.keys(payload).length && !payload.clear_fields?.length)');
+    expect(page).toContain('if (!Object.keys(payload).length && !payload.clear_fields?.length && !statusChanged)');
     expect(page).toContain('if (!Object.keys(payload.fields).length && !payload.clear_fields.length)');
+  });
+
+  it('把图片列放在序号和选择列之前，并保留放大预览', () => {
+    const imageIndex = page.indexOf('<el-table-column label="图片"');
+    const indexColumn = page.indexOf('<el-table-column type="index"');
+    const selectionColumn = page.indexOf('<el-table-column v-if="canManage" type="selection"');
+    expect(imageIndex).toBeGreaterThan(-1);
+    expect(imageIndex).toBeLessThan(indexColumn);
+    expect(imageIndex).toBeLessThan(selectionColumn);
+    expect(page).toContain(':preview-src-list="[resolveImageUrl(row.image_url || row.image)]"');
+    expect(page).toContain('preview-teleported');
+  });
+
+  it('刷新查询时同步读取分类字典并支持三种导入模式', () => {
+    expect(page).toContain('await loadDictionaries();');
+    expect(page).toContain('data-testid="detail-import-mode"');
+    expect(page).toContain('value="auto"');
+    expect(page).toContain('value="create"');
+    expect(page).toContain('value="update"');
+    expect(page).toContain('importLegacyProductItems(csvText, importMode.value)');
+    expect(page).toContain('商品图片');
+    expect(page).toContain('商品描述');
+    expect(page).toContain('商品状态');
   });
 });
