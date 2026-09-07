@@ -559,63 +559,128 @@ class InfluencerResolveView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        """Resolve an exact account or create the minimal tenant profile needed for sampling."""
+        """Resolve an account or create a minimal nickname-only profile for sampling."""
         require_all_scope(request.user, self.write_permission_code)
         _lock_influencer_write_tenant(request.user)
+        nickname = " ".join(str(request.data.get("nickname") or "").split())
+        request_key = str(request.data.get("request_key") or "").strip()
         account = normalize_tiktok_username(
             request.data.get("handle") or request.data.get("account") or ""
         )
-        if not account or not is_valid_tiktok_username(account):
+        if nickname and len(nickname) > 120:
+            raise ValidationError({"nickname": "达人昵称不能超过 120 个字符。"})
+        if len(request_key) > 160:
+            raise ValidationError({"request_key": "请求标识不能超过 160 个字符。"})
+        if not nickname and (not account or not is_valid_tiktok_username(account)):
             raise ValidationError({
                 "handle": "TikTok username may contain only letters, numbers, periods, and underscores.",
             })
 
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        influencer = _resolve_existing_influencer(
-            tenant=request.user.tenant,
-            account=account,
-            blacklist_subquery=blacklist_subquery,
-        )
+        influencer = None
         created = False
-        if influencer is None:
-            digest = hashlib.sha256(
-                f"{request.user.tenant_id}:{account}".encode("utf-8")
-            ).hexdigest()[:20]
-            base_code = f"tk-{digest}"
-            for suffix in range(100):
-                code = base_code if suffix == 0 else f"{base_code[:72]}-{suffix}"
-                try:
-                    with transaction.atomic():
-                        candidate, candidate_created = Influencer.objects.get_or_create(
-                            tenant=request.user.tenant,
-                            code=code,
-                            defaults={
-                                "name": account,
-                                "handle": account,
-                                "platform": "TikTok",
-                                "status": Influencer.Status.ACTIVE,
-                            },
-                        )
-                except IntegrityError:
-                    continue
-                candidate_values = normalize_tiktok_username(candidate.handle)
-                if candidate_created or (
-                    candidate.platform.lower() == "tiktok" and candidate_values == account
-                ):
-                    influencer, created = candidate, candidate_created
-                    break
-            else:
-                raise ValidationError({"handle": "Unable to allocate a tenant-scoped influencer profile."})
-            if created:
-                write_operation_log(
+        if nickname:
+            identity_filter = Q(name__iexact=nickname) | Q(profile__display_name__iexact=nickname)
+            nickname_as_account = normalize_tiktok_username(nickname)
+            if is_valid_tiktok_username(nickname_as_account):
+                identity_filter |= Q(handle__iexact=nickname_as_account)
+            exact_matches = list(
+                Influencer.objects.filter(
                     tenant=request.user.tenant,
-                    user=request.user,
-                    module="influencers",
-                    action="create_from_fulfillment",
-                    object_type="influencer",
-                    object_id=influencer.pk,
-                    after_data={"code": influencer.code, "handle": influencer.handle},
+                    platform__iexact="TikTok",
+                    status=Influencer.Status.ACTIVE,
                 )
+                .filter(identity_filter)
+                .annotate(is_blacklisted=Exists(blacklist_subquery))
+                .order_by("-is_blacklisted", "id")[:2]
+            )
+            blacklisted_match = next((item for item in exact_matches if item.is_blacklisted), None)
+            if blacklisted_match is not None or len(exact_matches) == 1:
+                influencer = blacklisted_match or exact_matches[0]
+
+            if influencer is None:
+                # A dialog-scoped key keeps retries idempotent when no existing identity matches.
+                nickname_identity = request_key or f"nickname:{nickname.casefold()}"
+                digest = hashlib.sha256(
+                    f"{request.user.tenant_id}:nickname-draft:{nickname_identity}".encode("utf-8")
+                ).hexdigest()[:20]
+                base_code = f"draft-{digest}"
+                for suffix in range(100):
+                    code = base_code if suffix == 0 else f"{base_code[:72]}-{suffix}"
+                    try:
+                        with transaction.atomic():
+                            candidate, candidate_created = Influencer.objects.get_or_create(
+                                tenant=request.user.tenant,
+                                code=code,
+                                defaults={
+                                    "name": nickname,
+                                    "handle": "",
+                                    "platform": "TikTok",
+                                    "status": Influencer.Status.ACTIVE,
+                                },
+                            )
+                    except IntegrityError:
+                        continue
+                    if candidate_created or (
+                        candidate.platform.lower() == "tiktok"
+                        and not candidate.handle
+                        and candidate.name.casefold() == nickname.casefold()
+                    ):
+                        influencer, created = candidate, candidate_created
+                        break
+                else:
+                    raise ValidationError({"nickname": "无法创建当前租户的达人档案。"})
+        else:
+            influencer = _resolve_existing_influencer(
+                tenant=request.user.tenant,
+                account=account,
+                blacklist_subquery=blacklist_subquery,
+            )
+            if influencer is None:
+                digest = hashlib.sha256(
+                    f"{request.user.tenant_id}:{account}".encode("utf-8")
+                ).hexdigest()[:20]
+                base_code = f"tk-{digest}"
+                for suffix in range(100):
+                    code = base_code if suffix == 0 else f"{base_code[:72]}-{suffix}"
+                    try:
+                        with transaction.atomic():
+                            candidate, candidate_created = Influencer.objects.get_or_create(
+                                tenant=request.user.tenant,
+                                code=code,
+                                defaults={
+                                    "name": account,
+                                    "handle": account,
+                                    "platform": "TikTok",
+                                    "status": Influencer.Status.ACTIVE,
+                                },
+                            )
+                    except IntegrityError:
+                        continue
+                    candidate_values = normalize_tiktok_username(candidate.handle)
+                    if candidate_created or (
+                        candidate.platform.lower() == "tiktok" and candidate_values == account
+                    ):
+                        influencer, created = candidate, candidate_created
+                        break
+                else:
+                    raise ValidationError({"handle": "Unable to allocate a tenant-scoped influencer profile."})
+
+        if created:
+            write_operation_log(
+                tenant=request.user.tenant,
+                user=request.user,
+                module="influencers",
+                action="create_from_fulfillment",
+                object_type="influencer",
+                object_id=influencer.pk,
+                after_data={
+                    "code": influencer.code,
+                    "name": influencer.name,
+                    "handle": influencer.handle,
+                    "platform": influencer.platform,
+                },
+            )
 
         is_blacklisted = influencer_has_active_restriction(influencer)
         resolved_influencer = _with_open_sample_statuses(

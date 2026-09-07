@@ -125,7 +125,7 @@
           <el-form-item label="送样日期">
             <el-input :model-value="todayLabel" readonly />
           </el-form-item>
-          <el-form-item label="达人账号" required>
+          <el-form-item label="达人昵称" required>
             <el-select
               v-model="form.influencer"
               filterable
@@ -137,14 +137,15 @@
               :loading="influencerLoading"
               :disabled="!!editingSample"
               @change="resolveSelectedInfluencer"
-              placeholder="搜索达人账号或名称"
+              placeholder="选择或输入达人昵称"
             >
               <el-option v-for="influencer in influencerOptions" :key="influencer.id" :label="influencerLabel(influencer)" :value="influencer.id" />
             </el-select>
+            <small class="field-hint">新达人可直接输入昵称，平台达人 ID 可后续补录。</small>
             <el-alert v-if="selectedInfluencer?.is_blacklisted" class="blacklist-alert" type="error" :closable="false" title="该达人在黑名单中，不能保存送样。" />
             <el-alert v-else-if="duplicateSampleWarning" class="blacklist-alert" type="warning" :closable="false" :title="duplicateSampleWarning" />
           </el-form-item>
-          <el-form-item label="达人 ID">
+          <el-form-item label="系统档案 ID">
             <el-input :model-value="displayValue(selectedInfluencer?.id)" readonly />
           </el-form-item>
           <el-form-item label="店铺" required>
@@ -248,7 +249,7 @@ import {
   FULFILLMENT_LINK_TYPE_LABELS,
   FULFILLMENT_STATUS_LABELS,
   restoreSampleFulfillment,
-  resolveOrCreateInfluencer,
+  resolveOrCreateInfluencerNickname,
   sampleDuplicateWarning,
   statusLabel,
   updateSampleFulfillment
@@ -445,20 +446,20 @@ async function searchInfluencers(search) {
 async function resolveSelectedInfluencer(id) {
   const selected = influencerOptions.value.find((item) => String(item.id) === String(id));
   if (!selected) {
-    const account = String(id || '').trim().replace(/^@+/, '');
-    if (!account) return;
+    const nickname = String(id || '').trim();
+    if (!nickname) return;
     influencerLoading.value = true;
-    const created = await resolveOrCreateInfluencer(account);
+    const created = await resolveOrCreateInfluencerNickname(nickname, draftKey.value);
     influencerLoading.value = false;
     if (!created.success) {
       form.influencer = null;
-      return ElMessage.error(formatInfluencerError(created, '达人账号解析失败'));
+      return ElMessage.error(formatInfluencerError(created, '达人昵称保存失败'));
     }
     const resolved = created.data;
     influencerOptions.value = [resolved, ...influencerOptions.value.filter((item) => String(item.id) !== String(resolved.id))];
     form.influencer = resolved.id;
-    if (resolved.created) ElMessage.success('已自动建立达人档案');
-    return;
+    if (resolved.created) ElMessage.success('已按昵称建立达人档案，达人 ID 可后续补录');
+    return resolved;
   }
   const response = await fetchInfluencerResolve(selected.handle || selected.code || selected.name);
   if (!response.success) return;
@@ -542,8 +543,9 @@ async function restoreSample(row) {
 
 async function submit() {
   if (!form.influencer || !form.store || !form.external_product_id.trim()) return ElMessage.warning('请填写达人、店铺和产品 ID');
-  if (selectedInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能保存送样');
   if (editingSample.value) return submitEdit();
+  if (!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)) return;
+  if (selectedInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能保存送样');
   saving.value = true;
   const payload = {
     ...(form.outreach_task ? { outreach_task: form.outreach_task } : {}),

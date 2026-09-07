@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 
+from celery.schedules import crontab
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
 
@@ -329,7 +330,8 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
     "mark-overdue-sample-fulfillments": {
         "task": "influencers.mark_overdue_sample_fulfillments",
-        "schedule": 86400.0,
+        # Celery runs in UTC; 18:00 UTC is 02:00 the next day in Asia/Shanghai.
+        "schedule": crontab(minute=0, hour=18),
         "args": (),
     },
     "dispatch-due-readonly-sync-jobs": {

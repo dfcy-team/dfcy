@@ -24,6 +24,7 @@ import {
   FULFILLMENT_STATUS_TRANSITIONS,
   formatInfluencerError,
   OUTREACH_PRIORITY_LABELS,
+  resolveOrCreateInfluencerNickname,
   restoreOutreachTarget,
   sampleDuplicateWarning,
   updateOutreachStatus,
@@ -268,6 +269,10 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('influencerOptions');
     for (const field of ['influencer_name', 'influencer_code', 'influencer_platform']) expect(page).toContain(field);
     expect(page).toContain('openSampleCreate');
+    expect(page).toContain('label="达人昵称"');
+    expect(page).toContain('allow-create');
+    expect(page).toContain('@change="resolveSelectedSampleInfluencer"');
+    expect(page).toContain('平台达人 ID 可后续补录');
     expect(page).toContain('outreach_task: task.id');
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
@@ -306,9 +311,9 @@ describe('influencer integration workspace contracts', () => {
     const page = read('src/views/influencers/SampleFulfillmentList.vue');
     for (const field of ['form.link_type', 'form.influencer', 'form.store', 'form.external_product_id', 'inheritedTask?.sku_prefix', 'requested_sku', 'quantity', 'sample_order_no', 'notes']) expect(page).toContain(field);
     for (const label of ['搜索达人/送样编号/建联编号/产品/订单', '全部店铺', '全部状态', '新增送样', '送样 / 建联编号', '任务 ID', '达人', '店铺', '产品 / SKU / 数量', '商品 ID', '样品订单', '成本', '状态', '备注', '建联日期', '操作']) expect(page).toContain(label);
-    for (const field of ['送样履约', '新增送样记录', '送样日期', '达人账号', '达人 ID', '产品 ID', '待发样', 'SKU 与数量', '保存送样']) expect(page).toContain(field);
+    for (const field of ['送样履约', '新增送样记录', '送样日期', '达人昵称', '系统档案 ID', '产品 ID', '待发样', 'SKU 与数量', '保存送样']) expect(page).toContain(field);
     const dialog = page.slice(page.indexOf('<el-dialog v-model="visible"'));
-    const dialogOrder = ['送样类型', '送样日期', '达人账号', '达人 ID', '店铺', '样品订单', '产品 ID', '状态', 'SKU 与数量', '备注'];
+    const dialogOrder = ['送样类型', '送样日期', '达人昵称', '系统档案 ID', '店铺', '样品订单', '产品 ID', '状态', 'SKU 与数量', '备注'];
     let previous = -1;
     for (const field of dialogOrder) {
       const position = dialog.indexOf(`label="${field}"`);
@@ -352,6 +357,10 @@ describe('influencer integration workspace contracts', () => {
     expect(page).not.toContain('outreach_target: form.outreach_target');
     expect(page).toContain('querySelection');
     expect(page).toContain('influencerLabel');
+    expect(page).toContain('allow-create');
+    expect(page).toContain('@change="resolveSelectedInfluencer"');
+    expect(page).toContain('!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)');
+    expect(page).toContain('平台达人 ID 可后续补录');
     expect(page).toContain('selectedInfluencer?.id');
     expect(page).toContain('todayLabel');
     expect(page).toContain('readonly');
@@ -457,6 +466,28 @@ describe('influencer integration workspace contracts', () => {
     expect(formatInfluencerError({ http_status: 400, message: 'error message', data: { influencer: ['Blacklisted influencers cannot receive samples.'] } })).toBe('该达人已被加入黑名单，不能执行本次操作。');
     expect(formatInfluencerError({ http_status: 409, message: 'Completed outreach tasks cannot change targets.' })).toContain('终态');
     expect(formatInfluencerError({ http_status: 409, message: 'Workflow record was changed by another request.' })).toContain('409');
+  });
+
+  it('creates nickname-only influencer profiles without requiring a platform id', () => {
+    requestMock.mockReturnValue({ success: true });
+
+    resolveOrCreateInfluencerNickname('New Creator', 'nickname-draft-1');
+
+    expect(requestMock.mock.calls.at(-1)[0]).toMatchObject({
+      method: 'post',
+      url: '/api/internal/influencers/resolve/',
+      data: { nickname: 'New Creator', request_key: 'nickname-draft-1' }
+    });
+    for (const path of [
+      'src/views/influencers/OutreachTaskList.vue',
+      'src/views/influencers/SampleFulfillmentList.vue'
+    ]) {
+      const page = read(path);
+      expect(page, path).toContain('resolveOrCreateInfluencerNickname');
+      expect(page, path).toContain('label="达人昵称"');
+      expect(page, path).toContain('allow-create');
+      expect(page, path).toContain('平台达人 ID 可后续补录');
+    }
   });
 
   it('warns about open sample statuses without treating them as a blacklist block', () => {

@@ -38,7 +38,7 @@ def refresh_affiliate_order_attributions_task(tenant_id):
 
 @shared_task(name="influencers.mark_overdue_sample_fulfillments")
 def mark_overdue_sample_fulfillments_task():
-    """Hourly tenant-isolated reconciliation; it never calls an external platform."""
+    """Daily tenant-isolated reconciliation; it never calls an external platform."""
     now = timezone.now()
     tenant_ids = list(
         SampleFulfillment.objects.filter(

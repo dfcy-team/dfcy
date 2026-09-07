@@ -2323,6 +2323,109 @@ def test_fulfillment_account_resolve_rejects_display_name_as_tiktok_handle():
     assert not Influencer.objects.filter(tenant=user.tenant, name="She deserve ✨").exists()
 
 
+def test_fulfillment_can_create_nickname_only_profile_without_platform_id():
+    tenant, user, _, existing = _records("resolve-nickname")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    client = APIClient()
+    client.force_authenticate(user)
+
+    response = client.post(
+        "/api/internal/influencers/resolve/",
+        {"nickname": "  New   Creator  ", "request_key": "nickname-draft-1"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    payload = response.json()["data"]
+    assert payload["name"] == "New Creator"
+    assert payload["handle"] == ""
+    assert payload["code"].startswith("draft-")
+    assert payload["created"] is True
+    influencer = Influencer.objects.get(pk=payload["id"], tenant=tenant)
+    assert influencer.handle == ""
+    assert not InfluencerProfile.objects.filter(influencer=influencer).exists()
+    assert OperationLog.objects.filter(
+        tenant=tenant,
+        action="create_from_fulfillment",
+        object_id=influencer.pk,
+    ).exists()
+
+    repeated = client.post(
+        "/api/internal/influencers/resolve/",
+        {"nickname": "New Creator", "request_key": "nickname-draft-1"},
+        format="json",
+    )
+
+    assert repeated.status_code == 200
+    assert repeated.json()["data"]["id"] == influencer.pk
+    assert repeated.json()["data"]["created"] is False
+    assert Influencer.objects.filter(tenant=tenant, code__startswith="draft-").count() == 1
+
+    same_name_new_dialog = client.post(
+        "/api/internal/influencers/resolve/",
+        {"nickname": "New Creator", "request_key": "nickname-draft-2"},
+        format="json",
+    )
+    assert same_name_new_dialog.status_code == 200
+    assert same_name_new_dialog.json()["data"]["id"] == influencer.pk
+    assert Influencer.objects.filter(tenant=tenant, name="New Creator").count() == 1
+
+    existing.name = "Blocked Creator"
+    existing.save(update_fields=["name"])
+    set_influencer_blacklist(
+        user=user,
+        influencer=existing,
+        blacklisted=True,
+        reason="nickname match must preserve blacklist",
+    )
+    blocked = client.post(
+        "/api/internal/influencers/resolve/",
+        {"nickname": "Blocked Creator", "request_key": "blocked-draft"},
+        format="json",
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["data"]["id"] == existing.pk
+    assert blocked.json()["data"]["is_blacklisted"] is True
+
+
+def test_fulfillment_nickname_profile_is_tenant_scoped_and_length_bounded():
+    first_tenant, first_user, _, _ = _records("resolve-nickname-first")
+    second_tenant, second_user, _, _ = _records("resolve-nickname-second")
+    for user in (first_user, second_user):
+        role = user.user_roles.get().role
+        _grant_all_scope(role, "influencers.fulfillment.manage")
+
+    first_client = APIClient()
+    first_client.force_authenticate(first_user)
+    second_client = APIClient()
+    second_client.force_authenticate(second_user)
+    first = first_client.post(
+        "/api/internal/influencers/resolve/",
+        {"nickname": "Shared Nickname", "request_key": "shared-draft"},
+        format="json",
+    )
+    second = second_client.post(
+        "/api/internal/influencers/resolve/",
+        {"nickname": "Shared Nickname", "request_key": "shared-draft"},
+        format="json",
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["data"]["id"] != second.json()["data"]["id"]
+    assert first.json()["data"]["code"] != second.json()["data"]["code"]
+    assert Influencer.objects.filter(tenant=first_tenant, name="Shared Nickname").count() == 1
+    assert Influencer.objects.filter(tenant=second_tenant, name="Shared Nickname").count() == 1
+
+    too_long = first_client.post(
+        "/api/internal/influencers/resolve/",
+        {"nickname": "x" * 121},
+        format="json",
+    )
+    assert too_long.status_code == 400
+
+
 def test_outreach_manager_can_resolve_existing_influencer():
     _, user, _, influencer = _records("outreach-resolve")
     role = user.user_roles.get().role
