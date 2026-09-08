@@ -41,9 +41,14 @@ describe('系统管理中文显示', () => {
     expect(adminRoleDisplayName({ id: 10, code: 'custom-x', name: 'Unknown Role' })).toBe('自定义角色10');
   });
 
-  it('权限页面不在普通界面显示编码、英文分层或权限说明', () => {
+  it('权限页面分列显示角色名称和系统标识，并不暴露内部权限编码', () => {
     const page = read('src/views/system/RolePermissionMatrix.vue');
-    expect(page).toContain('placeholder="搜索角色名称"');
+    expect(page).toContain('placeholder="搜索角色名称或系统标识"');
+    expect(page).toContain('label="角色名称"');
+    expect(page).toContain('label="系统标识"');
+    expect(page).toContain('title="编辑角色名称"');
+    expect(page).toContain('label="系统标识（不可修改）"');
+    expect(page).toContain('readonly');
     expect(page).not.toContain('角色编码');
     expect(page).not.toContain('permission.description ||');
     expect(page).not.toContain('class="permission-code"');

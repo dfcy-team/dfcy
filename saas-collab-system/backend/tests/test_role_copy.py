@@ -163,3 +163,34 @@ def test_role_manager_can_copy_a_role_with_only_delegable_permissions():
     assert response.status_code == 201
     copied = Role.objects.get(tenant=tenant, code="allowed-source-copy")
     assert list(copied.permissions.values_list("code", flat=True)) == ["reports.view"]
+
+
+def test_custom_role_name_can_change_but_system_code_is_immutable():
+    tenant = Tenant.objects.create(name="Role rename tenant", code="role-rename-tenant")
+    administrator = sync_tenant_administrator_role(tenant)
+    actor = user(tenant, "role-rename-admin")
+    UserRole.objects.create(tenant=tenant, user=actor, role=administrator)
+    custom = Role.objects.create(tenant=tenant, name="原角色", code="stable-role-code")
+
+    rejected = client(actor).patch(
+        f"/api/internal/system/roles/{custom.pk}/",
+        {"name": "新角色", "code": "changed-role-code"},
+        format="json",
+    )
+
+    assert rejected.status_code == 400
+    assert "不可修改" in str(rejected.json())
+    custom.refresh_from_db()
+    assert custom.name == "原角色"
+    assert custom.code == "stable-role-code"
+
+    renamed = client(actor).patch(
+        f"/api/internal/system/roles/{custom.pk}/",
+        {"name": "新角色"},
+        format="json",
+    )
+
+    assert renamed.status_code == 200
+    custom.refresh_from_db()
+    assert custom.name == "新角色"
+    assert custom.code == "stable-role-code"

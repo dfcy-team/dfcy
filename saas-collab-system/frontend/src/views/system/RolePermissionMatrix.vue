@@ -24,31 +24,34 @@
     </section>
 
     <section class="matrix-toolbar">
-      <el-input v-model="search" clearable placeholder="搜索角色名称" @keyup.enter="searchRoles" />
+      <el-input v-model="search" clearable placeholder="搜索角色名称或系统标识" @keyup.enter="searchRoles" />
       <el-button type="primary" @click="searchRoles">查询</el-button>
       <span>权限目录 {{ permissions.length }} 项</span>
     </section>
 
     <AppState v-if="state !== 'ready'" :status="state" :detail="errorMessage" @action="load" />
     <el-table v-else :data="roles" border table-layout="fixed">
-      <el-table-column v-if="showRoleField('name')" label="角色" min-width="160">
-        <template #default="{ row }">{{ adminRoleDisplayName(row) }}</template>
+      <el-table-column v-if="showRoleField('name')" label="角色名称" min-width="140">
+        <template #default="{ row }">{{ row.name || '—' }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="120">
+      <el-table-column v-if="showRoleField('code')" prop="code" label="系统标识" min-width="150">
+        <template #default="{ row }"><span class="role-system-code">{{ row.code || '—' }}</span></template>
+      </el-table-column>
+      <el-table-column label="类型" width="110">
         <template #default="{ row }">
           <el-tag :type="row.is_protected ? 'warning' : 'info'" effect="plain">{{ roleTypeLabel(row.role_type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="权限数" width="100">
+      <el-table-column label="权限数" width="80">
         <template #default="{ row }">{{ row.permission_codes?.length || 0 }}</template>
       </el-table-column>
-      <el-table-column label="数据范围" min-width="170">
+      <el-table-column label="数据范围" min-width="150">
         <template #default="{ row }">{{ scopeLabel(row.data_scopes?.[0]) }}</template>
       </el-table-column>
-      <el-table-column v-if="showRoleField('status')" prop="status" label="状态" width="100">
+      <el-table-column v-if="showRoleField('status')" prop="status" label="状态" width="90">
         <template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'" effect="plain">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="350">
+      <el-table-column label="操作" width="280">
         <template #default="{ row }">
           <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
           <el-button
@@ -59,6 +62,14 @@
             :title="manageAccess.reason"
             @click="openCopyRole(row)"
           >复制</el-button>
+          <el-button
+            v-if="manageAccess.visible && showRoleField('name') && !row.is_protected"
+            link
+            type="primary"
+            :disabled="manageAccess.disabled"
+            :title="manageAccess.reason"
+            @click="openRoleNameEdit(row)"
+          >编辑</el-button>
           <el-button
             v-if="manageAccess.visible && !row.is_protected"
             link
@@ -274,6 +285,21 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="editNameOpen" title="编辑角色名称" width="min(480px, 94vw)">
+      <el-form label-position="top">
+        <el-form-item label="角色名称" required>
+          <el-input v-model="editingRole.name" maxlength="120" show-word-limit @keyup.enter="submitRoleName" />
+        </el-form-item>
+        <el-form-item label="系统标识（不可修改）">
+          <el-input :model-value="editingRole.code" readonly />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editNameOpen = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitRoleName">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog
       v-model="copyOpen"
       title="复制为自定义角色"
@@ -282,7 +308,7 @@
     >
       <el-alert
         :title="`来源角色：${adminRoleDisplayName(copySourceRole)}`"
-        description="系统会复制来源角色当前的权限和数据范围，新角色为启用中的自定义角色；保存后仍可继续调整。"
+        description="系统会原样复制来源角色当前的权限和数据范围，新角色为启用中的自定义角色；保存后仍可继续调整。"
         type="info"
         :closable="false"
         show-icon
@@ -313,7 +339,7 @@ import { useRoute } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import {
-  copyRole, createRole, deleteRole, fetchAllPermissions, fetchPermissionPackages, fetchRoleScopeOptions, fetchRoles,
+  copyRole, createRole, deleteRole, fetchAllPermissions, fetchPermissionPackages, fetchRoleScopeOptions, fetchRoles, updateRole,
   updateRolePermissions, updateRoleStatus
 } from '../../api/systemAdmin';
 import { useMock } from '../../api/request';
@@ -336,6 +362,7 @@ const pageSize = 20;
 const total = ref(0);
 const drawerOpen = ref(false);
 const createOpen = ref(false);
+const editNameOpen = ref(false);
 const copyOpen = ref(false);
 const saving = ref(false);
 const selectedRole = ref({});
@@ -369,6 +396,7 @@ const roleForm = reactive({
   scope_config: {},
 });
 const newRole = reactive({ name: '', code: '', status: 'active' });
+const editingRole = reactive({ id: null, name: '', originalName: '', code: '' });
 const copyRoleForm = reactive({ name: '', code: '', description: '' });
 const scopePlatforms = ref([]);
 const scopeSites = ref([]);
@@ -673,9 +701,31 @@ function openRole(role) {
 }
 
 function copyRoleCode(source) {
-  const base = String(source?.code || 'role').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'role';
-  const suffix = '-copy';
+  const normalized = String(source?.code || 'role')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '') || 'role';
+  const base = normalized.replace(/-copy(?:-\d+)?$/, '') || 'role';
+  const existingCodes = new Set(roles.value.map((role) => role.code));
+  for (let index = 1; index < 1000; index += 1) {
+    const suffix = index === 1 ? '-copy' : `-copy-${index}`;
+    const candidate = `${base.slice(0, 80 - suffix.length)}${suffix}`;
+    if (!existingCodes.has(candidate)) return candidate;
+  }
+  const suffix = `-${Date.now().toString(36)}`;
   return `${base.slice(0, 80 - suffix.length)}${suffix}`;
+}
+
+function copyRoleName(source) {
+  const base = `${source?.name || '角色'} 副本`;
+  const existingNames = new Set(roles.value.map((role) => role.name));
+  if (!existingNames.has(base)) return base.slice(0, 100);
+  for (let index = 2; index < 1000; index += 1) {
+    const suffix = ` ${index}`;
+    const candidate = `${base.slice(0, 100 - suffix.length)}${suffix}`;
+    if (!existingNames.has(candidate)) return candidate;
+  }
+  return base.slice(0, 100);
 }
 
 function openCopyRole(role) {
@@ -684,7 +734,7 @@ function openCopyRole(role) {
     return;
   }
   copySourceRole.value = role;
-  copyRoleForm.name = `${role?.name || '角色'}副本`;
+  copyRoleForm.name = copyRoleName(role);
   copyRoleForm.code = copyRoleCode(role);
   copyRoleForm.description = role?.description || '';
   copyOpen.value = true;
@@ -820,6 +870,36 @@ async function confirmRoleDelete(row) {
     ElMessage.error(error?.message || '角色删除失败');
   }
 }
+
+function openRoleNameEdit(row) {
+  if (!manageAccess.value.allowed || row.is_protected) return;
+  editingRole.id = row.id;
+  editingRole.name = row.name || '';
+  editingRole.originalName = row.name || '';
+  editingRole.code = row.code || '';
+  editNameOpen.value = true;
+}
+
+async function submitRoleName() {
+  if (!manageAccess.value.allowed) {
+    ElMessage.warning(manageAccess.value.reason);
+    return;
+  }
+  const name = editingRole.name.trim();
+  if (!name) return ElMessage.warning('请填写角色名称');
+  if (name === editingRole.originalName) {
+    editNameOpen.value = false;
+    return;
+  }
+  saving.value = true;
+  const response = await updateRole(editingRole.id, { name }, targetTenantId.value || undefined);
+  saving.value = false;
+  if (!response.success) return ElMessage.error(response.message || '角色名称保存失败');
+  ElMessage.success('角色名称已更新');
+  editNameOpen.value = false;
+  load();
+}
+
 async function submitRole() {
   if (!manageAccess.value.allowed) {
     ElMessage.warning(manageAccess.value.reason);
@@ -854,14 +934,15 @@ async function submitCopyRole() {
   );
   saving.value = false;
   if (!response?.success) return ElMessage.error(response?.message || '角色复制失败');
-  const copiedRole = {
+  pendingCopiedRole.value = {
     ...copySourceRole.value,
     ...(response.data || {}),
+    name,
+    code,
     role_type: 'custom',
     is_protected: false,
     status: 'active',
   };
-  pendingCopiedRole.value = copiedRole;
   copyOpen.value = false;
   ElMessage.success('角色已复制，可继续调整权限');
   await load();
@@ -892,6 +973,7 @@ load();
 .matrix-toolbar span { justify-self: end; color: #64748b; font-size: 13px; }
 .role-pagination { display: flex; align-items: center; justify-content: space-between; padding-top: 12px; color: #64748b; font-size: 13px; }
 .role-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #e5eaf0; }
+.role-system-code { color: #475569; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 12px; }
 .role-heading strong, .role-heading span { display: block; }
 .copy-role-form { margin-top: 16px; }
 .role-heading span { margin-top: 4px; color: #64748b; font-size: 12px; }

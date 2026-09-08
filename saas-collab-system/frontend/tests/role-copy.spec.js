@@ -29,7 +29,7 @@ describe('角色复制闭环', () => {
       '角色名称',
       '系统标识',
       '复制并配置',
-      '系统会复制来源角色当前的权限和数据范围',
+      '系统会原样复制来源角色当前的权限和数据范围',
       '@closed="finishCopyRole"',
       'pendingCopiedRole',
       'await load();',
@@ -37,5 +37,12 @@ describe('角色复制闭环', () => {
     ]) expect(page).toContain(phrase);
     expect(page).toContain('copyRoleForm');
     expect(page).toContain('copySourceRole');
+  });
+
+  it('为重复复制生成递增系统标识，最终仍由后端校验唯一性', () => {
+    const page = read('src/views/system/RolePermissionMatrix.vue');
+    expect(page).toContain("index === 1 ? '-copy' : `-copy-${index}`");
+    expect(page).toContain('if (!existingCodes.has(candidate)) return candidate');
+    expect(page).toContain('系统标识（不可修改）');
   });
 });
