@@ -372,6 +372,8 @@ def rotate_config_secrets(
                 },
             )
             operation.status = CredentialMutationRequest.Status.COMPLETED
+            from .warehouse_credential_service import invalidate_config_warehouses
+            invalidate_config_warehouses(locked)
             operation.response_metadata = {
                 "config_version": locked.config_version,
                 "reference_version": locked.credential_reference_version,
@@ -472,6 +474,8 @@ def clear_config_secrets(config, *, version, reason, actor, idempotency_key):
                     "reason_recorded": bool(reason),
                 },
             )
+            from .warehouse_credential_service import invalidate_config_warehouses
+            invalidate_config_warehouses(locked)
             operation.status = CredentialMutationRequest.Status.COMPLETED
             operation.response_metadata = {
                 "config_version": locked.config_version,

@@ -8,6 +8,7 @@
     :close-on-click-modal="!busy"
     :close-on-press-escape="!busy"
     @opened="load"
+    @closed="clearManualCallbacks"
   >
     <template #header>
       <div class="dialog-title">
@@ -116,10 +117,18 @@
               <strong>{{ primaryBinding(apiType).external_warehouse_code || '未填写' }}</strong>
             </div>
             <div><span>授权时间</span><strong>{{ formatDate(primaryBinding(apiType).authorized_at) }}</strong></div>
+            <div v-if="subjectType === 'warehouse'"><span>连接校验</span><strong>{{ warehouseValidationLabel(primaryBinding(apiType)) }}</strong></div>
             <div><span>最近同步</span><strong>{{ formatDate(primaryBinding(apiType).last_run_at) }}</strong></div>
           </div>
 
           <el-form v-if="subjectType === 'warehouse' && apiType === 'inventory'" label-position="top" class="config-form warehouse-config-form">
+            <el-form-item label="OMS Email" required>
+              <el-input v-model="warehouseEmail" :disabled="warehouseAuthorizeAccess.disabled" autocomplete="off" />
+            </el-form-item>
+            <el-form-item label="OMS 一次性授权 Token">
+              <el-input v-model="warehouseToken" type="password" :disabled="warehouseAuthorizeAccess.disabled" autocomplete="new-password" placeholder="首次必填；留空保留原值，输入新值才替换" />
+              <small class="form-hint">保存不代表连通。首次授权会消耗 Token，后续只读校验不会重复使用它。</small>
+            </el-form-item>
             <el-form-item label="库存 API 接入配置">
               <el-select v-model="selections[apiType]" :disabled="!configsFor(apiType).length" placeholder="暂无可用库存 API 配置">
                 <el-option
@@ -169,6 +178,19 @@
             />
           </el-form>
 
+          <el-form v-if="subjectType === 'store' && canAuthorize(apiType) && storeAuthorizeAccess.visible"
+            label-position="top" class="config-form" @submit.prevent="submitManualCallback(apiType)">
+            <el-form-item label="手动回填回调地址">
+              <el-input v-model="manualCallbackUrls[apiType]" type="password" autocomplete="off" maxlength="8192"
+                aria-label="授权完成后的完整回调地址" :disabled="storeAuthorizeAccess.disabled || Boolean(busy)"
+                placeholder="粘贴平台授权后浏览器地址栏中的完整 HTTPS 地址（包含 state 和授权码）" />
+              <small class="form-hint">先从当前店铺发起授权。若自动回调未完成，可回填完整地址；请勿粘贴初始授权链接或分享其中的授权码。</small>
+            </el-form-item>
+            <el-button :loading="busy === `manual-callback-${apiType}`"
+              :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !selectedConfig(apiType) || !manualCallbackUrls[apiType]?.trim()"
+              :title="storeAuthorizeAccess.reason" @click="submitManualCallback(apiType)">提交回调并完成授权</el-button>
+          </el-form>
+
           <div class="section-actions">
             <el-button
               v-if="subjectType === 'warehouse' && apiType === 'inventory' && warehouseAuthorizeAccess.visible"
@@ -177,7 +199,13 @@
               :disabled="warehouseAuthorizeAccess.disabled || !selectedConfig(apiType)"
               :title="warehouseAuthorizeAccess.disabled ? warehouseAuthorizeAccess.reason : (primaryBinding(apiType) ? '受控更换当前仓库的库存 API 配置绑定' : '将当前已托管配置绑定到仓库')"
               @click="bindWarehouse(apiType)"
-            >{{ primaryBinding(apiType) ? '更换绑定' : '绑定此配置' }}</el-button>
+            >保存仓库 API 配置</el-button>
+            <el-button v-if="subjectType === 'warehouse' && primaryBinding(apiType) && warehouseAuthorizeAccess.visible"
+              :disabled="warehouseAuthorizeAccess.disabled || Boolean(busy) || Boolean(primaryBinding(apiType).bootstrap_consumed_at)"
+              @click="firstWarehouseAuthorization(primaryBinding(apiType))">首次授权（使用一次性 Token）</el-button>
+            <el-button v-if="subjectType === 'warehouse' && primaryBinding(apiType)?.bootstrap_consumed_at && warehouseAuthorizeAccess.visible"
+              :disabled="warehouseAuthorizeAccess.disabled || Boolean(busy)"
+              @click="refreshWarehouseAuthorization(primaryBinding(apiType))">刷新仓库授权</el-button>
             <el-button
               v-if="subjectType === 'store' && canAuthorize(apiType) && storeAuthorizeAccess.visible"
               :type="primaryBinding(apiType) ? 'default' : 'primary'"
@@ -221,7 +249,7 @@
             <el-button
               v-if="subjectType === 'warehouse' && apiType === 'inventory' && primaryBinding(apiType) && warehouseSyncCreateAccess.visible"
               :loading="busy === `warehouse-sync-${primaryBinding(apiType).id}`"
-              :disabled="warehouseSyncCreateAccess.disabled"
+              :disabled="warehouseSyncCreateAccess.disabled || primaryBinding(apiType).validation_status !== 'verified'"
               :title="warehouseSyncCreateAccess.disabled ? warehouseSyncCreateAccess.reason : '创建一个库存快照只读同步任务；重复点击不会创建重复任务'"
               @click="createInventorySyncJob(primaryBinding(apiType))"
             >创建库存同步任务</el-button>
@@ -356,6 +384,7 @@
 </template>
 
 <script setup>
+import { authorizeJifengWarehouse, refreshJifengWarehouse, checkJifengWarehouse } from '../api/integrations';
 import { computed, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
@@ -365,6 +394,7 @@ import {
   bindWarehouseAuthorization,
   checkIntegrationReadonlyConnection,
   completeSyntheticStoreAuthorization,
+  completeManualStoreCallback,
   createSyncJob,
   fetchStoreAuthorizations,
   fetchSubjectApiAccess,
@@ -391,9 +421,78 @@ const access = ref(null);
 const selections = reactive({});
 const storeSyncResourceSelection = reactive({});
 const authorizationUrl = ref('');
+const manualCallbackUrls = reactive({});
+function clearManualCallbacks() {
+  for (const key of Object.keys(manualCallbackUrls)) delete manualCallbackUrls[key];
+}
+
+async function submitManualCallback(apiType) {
+  if (props.subjectType !== 'store' || !storeAuthorizeAccess.value.allowed || busy.value) return;
+  const config = selectedConfig(apiType);
+  const callbackUrl = manualCallbackUrls[apiType]?.trim();
+  if (!config || !callbackUrl) return;
+  try {
+    const parsed = new URL(callbackUrl);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash || !parsed.searchParams.get('state')) throw new Error();
+  } catch {
+    ElMessage.warning('请填写包含 state 的完整 HTTPS 回调地址。');
+    return;
+  }
+  busy.value = `manual-callback-${apiType}`;
+  try {
+    const response = await completeManualStoreCallback({ callback_url: callbackUrl,
+      store_id: props.row.id, integration_config_id: config.id });
+    if (!response?.success) throw new Error();
+    ElMessage.success('店铺授权已完成，可继续执行平台只读检查。');
+    await load();
+    emit('changed');
+  } catch {
+    ElMessage.error('回填未完成：请确认当前店铺、配置及回调地址正确；授权已自动完成时请刷新，已过期或已使用的回调请重新发起授权。');
+  } finally {
+    manualCallbackUrls[apiType] = '';
+    busy.value = '';
+  }
+}
 const authorizationDetailOpen = ref(false);
 const selectedAuthorizationDetail = ref(null);
 const warehouseExternalCode = ref('');
+const warehouseEmail = ref('');
+const warehouseToken = ref('');
+
+async function refreshWarehouseAuthorization(binding) {
+  busy.value = `refresh-${binding.id}`;
+  try {
+    const response = await refreshJifengWarehouse(binding.id);
+    if (!response?.success) throw new Error(response?.message || '刷新失败');
+    ElMessage.success('仓库授权已刷新，请重新执行只读校验后启用同步任务。');
+  } catch (reason) {
+    ElMessage.error(reason?.message || '刷新失败，请检查仓库授权。');
+  } finally {
+    busy.value = '';
+    await load();
+  }
+}
+
+function warehouseValidationLabel(binding) {
+  return { incomplete: '待补充', pending: '待校验', verified: '校验通过', failed: '校验失败' }[binding?.validation_status] || '未配置';
+}
+
+async function firstWarehouseAuthorization(binding) {
+  try {
+    await ElMessageBox.confirm('将消耗已保存的一次性 Token 并获取仓库授权。授权成功后仍需执行只读连接校验。', '确认首次授权', { type: 'warning' });
+  } catch { return; }
+  busy.value = `authorize-${binding.id}`;
+  try {
+    const response = await authorizeJifengWarehouse(binding.id);
+    if (!response?.success) throw new Error(response?.message || '授权失败');
+    ElMessage.success('首次授权成功，请执行只读连接校验。');
+  } catch (reason) {
+    ElMessage.error(reason?.message || '授权失败，请检查后更换新 Token。');
+  } finally {
+    busy.value = '';
+    await load();
+  }
+}
 const historyLoading = ref(false);
 const historyError = ref('');
 
@@ -668,6 +767,7 @@ function supportsReadonlyCheck() {
 }
 
 async function load() {
+  clearManualCallbacks();
   if (!props.row?.id) return;
   if (props.subjectType === 'store') {
     if (!storeApiViewAccess.value.allowed) {
@@ -697,6 +797,8 @@ async function load() {
     if (props.subjectType === 'warehouse') {
       const binding = primaryBinding('inventory');
       warehouseExternalCode.value = binding?.external_warehouse_code || props.row?.external_warehouse_code || '';
+      warehouseEmail.value = binding?.email || '';
+      warehouseToken.value = '';
     }
     for (const apiType of response.data?.api_types || []) {
       const binding = primaryBinding(apiType);
@@ -794,7 +896,7 @@ async function checkToken(binding) {
     return;
   }
   if (readonlyCheckBlocked(binding)) {
-    ElMessage.warning('请先创建库存同步任务，再执行只读检查。');
+    ElMessage.warning('仓库授权已失效，请先重新绑定。');
     return;
   }
   try {
@@ -808,7 +910,7 @@ async function checkToken(binding) {
   }
   busy.value = `check-${binding.id}`;
   try {
-    const response = await checkIntegrationReadonlyConnection(
+    const response = props.subjectType === 'warehouse' ? await checkJifengWarehouse(binding.id) : await checkIntegrationReadonlyConnection(
       binding.integration_config_id,
       props.subjectType === 'warehouse'
         ? { warehouse_authorization_id: binding.id }
@@ -1003,6 +1105,7 @@ async function bindWarehouse(apiType) {
   const binding = primaryBinding(apiType);
   if (binding
       && String(binding.integration_config_id) === String(config.id)
+      && String(binding.email || '') === warehouseEmail.value.trim() && !warehouseToken.value
       && String(binding.external_warehouse_code || '').trim() === String(warehouseExternalCode.value || '').trim()) {
     ElMessage.info('当前仓库已经绑定此配置，无需重复操作。');
     return;
@@ -1027,6 +1130,8 @@ async function bindWarehouse(apiType) {
       return;
     }
     const payload = {
+      email: warehouseEmail.value.trim(),
+      token: warehouseToken.value,
       warehouse_id: access.value.subject.id,
       integration_config_id: config.id,
       external_warehouse_code: externalWarehouseCode,
@@ -1037,7 +1142,8 @@ async function bindWarehouse(apiType) {
       ? await rebindWarehouseAuthorization(binding.id, payload)
       : await bindWarehouseAuthorization(payload);
     if (!response?.success) throw new Error(response?.message || '仓库 API 绑定失败');
-    ElMessage.success(response.data?.idempotent ? '绑定关系已存在，无需重复操作。' : (binding ? '仓库 API 绑定已更换。' : '仓库 API 已绑定。'));
+    warehouseToken.value = '';
+    ElMessage.success('仓库 API 配置已保存；请完成首次授权及只读校验，保存不代表已连通。');
     await load();
     emit('changed');
   } catch (reason) {
@@ -1133,11 +1239,11 @@ function viewSyncJobs(apiType) {
 }
 
 function readonlyCheckBlocked(binding) {
-  return props.subjectType === 'warehouse' && binding?.has_sync_job === false;
+  return props.subjectType === 'warehouse' && binding?.status !== 'active';
 }
 
 function readonlyCheckTitle(binding) {
-  if (readonlyCheckBlocked(binding)) return '请先创建库存同步任务，再执行只读检查。';
+  if (readonlyCheckBlocked(binding)) return '仓库授权已失效，请先重新绑定。';
   if (readonlyCheckAccess.value.disabled) return readonlyCheckAccess.value.reason;
   if (!binding?.integration_config_id) return '当前授权缺少接入配置，无法执行平台只读检查';
   return '调用一次平台只读接口，不会刷新或替换 Token';

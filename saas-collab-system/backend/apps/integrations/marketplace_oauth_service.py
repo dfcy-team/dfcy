@@ -6,8 +6,12 @@ return custody references only; raw tokens never reach this layer.
 """
 
 from django.db import transaction
+from rest_framework.exceptions import APIException
 
+from apps.accounts.models import CustomUser
 from apps.integrations.models import IntegrationAuditLog, MarketplaceStoreAuthorization
+from apps.permissions.services import user_has_integration_permission
+from apps.permissions.ui_p6_scopes import integration_values_allowed
 
 from .credential_service import RAW_CREDENTIAL_FIELDS
 from .marketplace_providers import get_oauth_provider
@@ -100,7 +104,34 @@ def _callback_audit(session, actor, result, result_code, authorization=None):
     )
 
 
+def _require_callback_target_scope(session, *, store_id, integration_config):
+    """Recheck the initiating actor at completion, including automatic callbacks."""
+    actor = session.initiated_by
+    if (
+        actor.tenant_id != session.tenant_id
+        or integration_config.tenant_id != session.tenant_id
+        or actor.user_type != CustomUser.UserType.INTERNAL
+        or not user_has_integration_permission(actor, "integrations.store.authorize")
+    ):
+        raise_oauth_error(OAUTH_CALLBACK_REJECTED, "Callback target is outside the authorized scope.")
+    try:
+        allowed = integration_values_allowed(
+            actor, "integrations.store.authorize", platform=session.platform,
+            environment=integration_config.environment, regions=[session.region],
+            config_id=integration_config.pk, store_id=store_id,
+        )
+    except APIException:
+        # Scope removal or malformed scope must fail closed with a controlled
+        # OAuth error so newly exchanged references are revoked by the caller.
+        allowed = False
+    if not allowed:
+        raise_oauth_error(OAUTH_CALLBACK_REJECTED, "Callback target is outside the authorized scope.")
+
+
 def _apply_exchange_result(session, exchange_result):
+    _require_callback_target_scope(
+        session, store_id=session.store_id, integration_config=session.integration_config,
+    )
     store_record = exchange_result["platform_store_records"][0]
     platform_store_id = store_record["platform_store_id"]
     identity_key = marketplace_identity_key(session.platform, session.region, platform_store_id)
@@ -109,8 +140,15 @@ def _apply_exchange_result(session, exchange_result):
         active_platform_identity_key=identity_key,
     ).first()
     if existing is not None:
-        if existing.tenant_id != session.tenant_id:
+        if (
+            existing.tenant_id != session.tenant_id
+            or existing.store_id != session.store_id
+            or existing.integration_config_id != session.integration_config_id
+        ):
             raise_oauth_error(OAUTH_STORE_BOUND_CONFLICT)
+        _require_callback_target_scope(
+            session, store_id=existing.store_id, integration_config=existing.integration_config,
+        )
         record = rotate_store_authorization_references(
             existing,
             credential_id=exchange_result["credential_id"],

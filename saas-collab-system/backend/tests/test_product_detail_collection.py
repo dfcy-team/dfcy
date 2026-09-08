@@ -1,5 +1,5 @@
-from decimal import Decimal
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from django.utils import timezone
@@ -146,11 +146,26 @@ def test_product_detail_collection_pages_across_legacy_and_sku_streams_without_d
     )
 
     # Make the legacy ordering explicit so the page-2 assertion is stable
-    # even when the database clock has coarse timestamp precision.
+    # even when the database clock has coarse timestamp precision.  Keep the
+    # legacy stream newer here so this test focuses on de-duplication and
+    # filtering; cross-stream recency ordering is covered separately below.
     anchor = timezone.now()
-    ProductLegacyItem.objects.filter(pk=pending_one.pk).update(created_at=anchor - timedelta(seconds=2))
-    ProductLegacyItem.objects.filter(pk=pending_two.pk).update(created_at=anchor - timedelta(seconds=1))
-    ProductLegacyItem.objects.filter(pk=linked_legacy.pk).update(created_at=anchor)
+    ProductLegacyItem.objects.filter(pk=pending_one.pk).update(
+        created_at=anchor - timedelta(seconds=2),
+        updated_at=anchor - timedelta(seconds=2),
+    )
+    ProductLegacyItem.objects.filter(pk=pending_two.pk).update(
+        created_at=anchor - timedelta(seconds=1),
+        updated_at=anchor - timedelta(seconds=1),
+    )
+    ProductLegacyItem.objects.filter(pk=linked_legacy.pk).update(
+        created_at=anchor,
+        updated_at=anchor,
+    )
+    ProductSKU.objects.filter(pk=standalone_one.pk).update(updated_at=anchor - timedelta(seconds=3))
+    ProductSKU.objects.filter(pk=inactive.pk).update(updated_at=anchor - timedelta(seconds=4))
+    ProductSKU.objects.filter(pk=standalone_two.pk).update(updated_at=anchor - timedelta(seconds=5))
+    ProductSKU.objects.filter(pk=linked_sku.pk).update(updated_at=anchor - timedelta(seconds=6))
 
     client = APIClient()
     client.force_authenticate(user=user)
@@ -216,6 +231,118 @@ def test_product_detail_collection_pages_across_legacy_and_sku_streams_without_d
     inactive_data = inactive_response.json()["data"]
     assert inactive_data["count"] == 1
     assert inactive_data["results"][0]["sku_code"] == "INACTIVE-SKU"
+
+
+@pytest.mark.django_db
+def test_product_detail_collection_sorts_by_latest_update_and_spu_list_is_recent_first():
+    tenant = Tenant.objects.create(name="Sorted products", code="sorted-products")
+    client = APIClient()
+    client.force_authenticate(user=_user(tenant))
+    first = ProductSPU.objects.create(tenant=tenant, spu_code="A", product_name="First")
+    second = ProductSPU.objects.create(tenant=tenant, spu_code="Z", product_name="Second")
+    sku = ProductSKU.objects.create(tenant=tenant, spu=first, sku_code="SKU")
+    linked = ProductSKU.objects.create(tenant=tenant, spu=second, sku_code="LINKED")
+    legacy = ProductLegacyItem.objects.create(tenant=tenant, legacy_sku_code="OLD", product_name="Old")
+    bridge = ProductLegacyItem.objects.create(
+        tenant=tenant,
+        legacy_sku_code="BRIDGE",
+        product_name="Bridge",
+        generated_sku=linked,
+        generated_spu=second,
+    )
+    now = timezone.now()
+    ProductLegacyItem.objects.filter(pk=bridge.pk).update(updated_at=now - timedelta(days=4))
+    ProductSKU.objects.filter(pk=linked.pk).update(updated_at=now - timedelta(days=3))
+    ProductLegacyItem.objects.filter(pk=legacy.pk).update(updated_at=now - timedelta(days=2))
+    ProductSKU.objects.filter(pk=sku.pk).update(updated_at=now - timedelta(days=1))
+
+    def row_at(page):
+        response = client.get("/api/internal/products/details/", {"page": page, "page_size": 1})
+        assert response.status_code == 200
+        assert response.json()["data"]["count"] == 3
+        return response.json()["data"]["results"][0]
+
+    assert row_at(1)["sku_code"] == "SKU"
+    assert row_at(2)["legacy_sku_code"] == "OLD"
+    assert row_at(3)["sku_code"] == "LINKED"
+
+    # Updating the generated SKU must move its legacy bridge to the top too.
+    ProductSKU.objects.filter(pk=linked.pk).update(updated_at=now)
+    assert row_at(1)["sku_code"] == "LINKED"
+
+    ProductSPU.objects.filter(pk=second.pk).update(updated_at=now + timedelta(seconds=1))
+    initial = client.get("/api/internal/products/spus/", {"page_size": 1}).json()["data"]
+    assert initial["results"][0]["id"] == second.id
+    ProductSPU.objects.filter(pk=second.pk).update(updated_at=now - timedelta(days=1))
+    ProductSPU.objects.filter(pk=first.pk).update(updated_at=now)
+    result = client.get("/api/internal/products/spus/", {"page_size": 1}).json()["data"]
+    assert result["results"][0]["id"] == first.id
+
+
+@pytest.mark.django_db
+def test_detail_collection_ignores_cross_tenant_generated_sku_for_sort_and_fields():
+    tenant = Tenant.objects.create(name="Local sorted tenant", code="sorted-local")
+    foreign_tenant = Tenant.objects.create(name="Foreign sorted tenant", code="sorted-foreign")
+    client = APIClient()
+    client.force_authenticate(user=_user(tenant))
+
+    local_spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="LOCAL-SPU",
+        product_name="Local product",
+    )
+    foreign_spu = ProductSPU.objects.create(
+        tenant=foreign_tenant,
+        spu_code="FOREIGN-SPU",
+        product_name="Foreign product",
+    )
+    local_sku = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=local_spu,
+        sku_code="LOCAL-SKU",
+        product_name="Local SKU",
+    )
+    foreign_sku = ProductSKU.objects.create(
+        tenant=foreign_tenant,
+        spu=foreign_spu,
+        sku_code="FOREIGN-SECRET-SKU",
+        product_name="Foreign secret SKU",
+        purchase_price=Decimal("99.0000"),
+        image_url="https://foreign.example/secret.png",
+    )
+    dirty_legacy = ProductLegacyItem.objects.create(
+        tenant=tenant,
+        legacy_sku_code="LOCAL-OLD",
+        product_name="Local legacy",
+        status=ProductLegacyItem.Status.GENERATED,
+        generated_spu=local_spu,
+        generated_sku=foreign_sku,
+    )
+    now = timezone.now()
+    ProductSKU.objects.filter(pk=local_sku.pk).update(updated_at=now - timedelta(days=1))
+    ProductLegacyItem.objects.filter(pk=dirty_legacy.pk).update(updated_at=now - timedelta(days=2))
+    # If the CASE reads a foreign SKU timestamp, this row incorrectly jumps
+    # ahead of LOCAL-SKU and its foreign fields could leak during hydration.
+    ProductSKU.objects.filter(pk=foreign_sku.pk).update(updated_at=now + timedelta(days=1))
+
+    first = client.get("/api/internal/products/details/", {"page": 1, "page_size": 1})
+    assert first.status_code == 200
+    assert first.json()["data"]["count"] == 2
+    assert first.json()["data"]["results"][0]["sku_code"] == "LOCAL-SKU"
+
+    second = client.get("/api/internal/products/details/", {"page": 2, "page_size": 1})
+    assert second.status_code == 200
+    row = second.json()["data"]["results"][0]
+    assert row["legacy_sku_code"] == "LOCAL-OLD"
+    assert row["sku_id"] is None
+    assert row["sku_code"] == ""
+    assert row["sku_product_name"] == "Local legacy"
+    assert row["purchase_price"] is None
+    assert row["image_url"] is None
+    assert row["spu_code"] == "LOCAL-SPU"
+    assert row["spu_product_name"] == "Local product"
+    assert "FOREIGN-SECRET-SKU" not in row.values()
+    assert "Foreign secret SKU" not in row.values()
 
 
 @pytest.mark.django_db

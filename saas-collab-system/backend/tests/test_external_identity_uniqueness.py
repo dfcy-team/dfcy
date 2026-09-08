@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 import pytest
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -272,6 +275,9 @@ def test_jifeng_request_uses_binding_code_and_normalized_fact_uses_local_warehou
         provider="jifeng_wms",
         external_warehouse_code="UPSTREAM-MY-001",
         external_warehouse_region="MY",
+        email="fixture@example.test",
+        oauth_user_id="123",
+        oauth_expires_at=timezone.now() + timedelta(hours=1),
         credential_id="identity-credential",
         token_id="identity-token",
         status=WarehouseAuthorization.Status.ACTIVE,

@@ -238,6 +238,8 @@ class ProductionReadonlyAdapter(PlatformAdapter):
             ):
                 raise ValidationError("Sync job warehouse authorization is not active in the configured tenant scope.")
             self.warehouse_authorization = authorization
+            from .warehouse_credential_service import require_verified_warehouse
+            require_verified_warehouse(authorization)
         self._client().preflight()
 
     def _client(self):

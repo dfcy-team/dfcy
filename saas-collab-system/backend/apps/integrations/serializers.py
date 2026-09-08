@@ -356,6 +356,10 @@ class WarehouseAuthorizationSerializer(serializers.ModelSerializer):
     country_code = serializers.CharField(source="warehouse.country_code", read_only=True)
     created_by_id = serializers.IntegerField(read_only=True)
     updated_by_id = serializers.IntegerField(read_only=True)
+    token_configured = serializers.SerializerMethodField()
+
+    def get_token_configured(self, obj):
+        return bool(obj.bootstrap_credential_id)
 
     class Meta:
         model = WarehouseAuthorization
@@ -368,6 +372,7 @@ class WarehouseAuthorizationSerializer(serializers.ModelSerializer):
             "warehouse_name",
             "country_code",
             "provider",
+            "email", "token_configured", "validation_status", "bootstrap_consumed_at",
             "external_warehouse_code",
             "external_warehouse_region",
             "status",
@@ -387,6 +392,8 @@ class WarehouseAuthorizationBindSerializer(serializers.Serializer):
     """Request contract for binding a managed config to a warehouse."""
 
     warehouse_id = serializers.IntegerField(min_value=1)
+    email = serializers.EmailField(required=False)
+    token = serializers.CharField(required=False, allow_blank=True, write_only=True, max_length=4096, trim_whitespace=False)
     integration_config_id = serializers.IntegerField(min_value=1)
     external_warehouse_code = serializers.CharField(required=False, allow_blank=True, max_length=160)
     replace = serializers.BooleanField(default=False)
@@ -763,6 +770,8 @@ class SyncJobSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"warehouse_authorization_id": "Only an active warehouse authorization can create a sync job."}
                 )
+            from .warehouse_credential_service import require_verified_warehouse
+            require_verified_warehouse(warehouse_authorization)
         if config.environment not in {
             PlatformIntegrationConfig.Environment.PILOT,
             PlatformIntegrationConfig.Environment.PRODUCTION,

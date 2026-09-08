@@ -666,7 +666,11 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
             raise ValidationError("Jifeng WMS site must be PH, TH, or MY.")
         host = _required(self.platform_config.get("api_host"), f"jifeng_wms.{site}.api_host")
         client_id = _required(self.platform_config.get("client_id"), f"jifeng_wms.{site}.client_id")
-        user_id = _required(self.platform_config.get("user_id"), f"jifeng_wms.{site}.user_id")
+        user_id = _required(getattr(authorization, "oauth_user_id", ""), "仓库 OAuth userId（请先完成首次授权）")
+        if not getattr(authorization, "email", ""):
+            raise ValidationError("仓库授权待补充：缺少 Email。")
+        if not authorization.oauth_expires_at or authorization.oauth_expires_at <= self.now():
+            raise ValidationError("仓库 AccessToken 已过期，请刷新授权后再校验。")
         # The warehouse query parameter belongs to the selected binding, not
         # to the shared API config.  Keep a legacy config fallback for older
         # pilot records, while production bindings should carry the explicit
@@ -676,7 +680,7 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
             "jifeng_wms.external_warehouse_code",
         )
         client_secret = self.custody.retrieve_secret(_required(self.config.credential_id, "jifeng_wms.credential_id"))
-        access_token = self.custody.retrieve_access_token(_required(self.config.token_id, "jifeng_wms.token_id"))
+        access_token = self.custody.retrieve_access_token(_required(authorization.token_id, "仓库 AccessToken"))
         timestamp = str(int(self.now().timestamp() * 1000))
         nonce = str(secrets.randbelow(10**12)).zfill(12)
         sign_values = {
@@ -691,10 +695,11 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
         sign_input = "&".join(f"{key}={sign_values[key]}" for key in sorted(sign_values))
         signature = hmac.new(client_secret.encode(), sign_input.encode(), hashlib.sha256).hexdigest()
         page_no = int(cursor or 1)
-        body = {"pageNo": page_no, "pageSize": scope["page_size"], "warehouse": warehouse_code}
+        body = {"pageNo": page_no, "pageSize": min(300, max(1, int(scope["page_size"]))), "warehouse": warehouse_code}
+        from .warehouse_credential_service import jifeng_api_url
         response = self.http.request(
             "POST",
-            f"{host.rstrip('/')}{self.INVENTORY_PATH}",
+            jifeng_api_url(host, self.INVENTORY_PATH),
             headers={
                 "Content-Type": "application/json",
                 "Accept-Language": "zh_CN",
@@ -710,8 +715,15 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
             read_timeout=self.config.read_timeout_seconds,
         )
         payload = self._response_json(response)
-        if int(payload.get("code") or 0) not in {0, 200}:
-            raise ValidationError("Jifeng WMS rejected the readonly request.")
+        code = str(payload.get("code"))
+        if code != "0":
+            if code in {"10041", "10042", "10050", "10051"}:
+                raise ValidationError("极风仓库不存在或当前 OMS 账号无仓库权限。")
+            if code in {"10000", "10001", "10043", "10052"}:
+                raise ValidationError("极风查询参数缺失或错误，请核对外部仓库编码和分页参数。")
+            if code in {"10002", "10008", "10009", "10015", "10016", "10026", "10040"}:
+                raise ValidationError("极风认证失败，请核对公共凭据及仓库授权。")
+            raise ValidationError("极风拒绝库存查询，请检查网络白名单或稍后重试。")
         data = payload.get("data")
         page = _as_dict(_as_dict(data).get("page"))
         source = page or _as_dict(data)
@@ -720,6 +732,8 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
             if isinstance(source.get(name), list):
                 records = source[name]
                 break
+        else:
+            raise ValidationError("极风库存响应缺少记录列表，不能标记为校验通过。")
         total_page = int(page.get("totalPage") or page_no)
         snapshot_at = self.now().isoformat()
         return {
