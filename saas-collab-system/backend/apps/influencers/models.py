@@ -545,6 +545,8 @@ class OutreachTarget(StateMachineTenantModel):
 
 
 class SampleFulfillment(StateMachineTenantModel):
+    SOURCE_FEISHU_FULL_IMPORT = "feishu_full_20260908"
+
     protected_state_fields = (
         "status",
         "version",
@@ -571,6 +573,7 @@ class SampleFulfillment(StateMachineTenantModel):
         ("PKDJ", "品库达人"),
         ("ZBDR", "直播达人"),
         ("TKOne", "TikTokOne建联"),
+        ("direct", "直接送样"),
     )
 
     class Status(models.TextChoices):
@@ -662,6 +665,10 @@ class SampleFulfillment(StateMachineTenantModel):
         super().clean()
         if self.link_type not in dict(self.LINK_TYPE_CHOICES):
             raise ValidationError({"link_type": "Unsupported link type."})
+        if self.link_type == "direct" and (self.outreach_task_id or self.outreach_target_id):
+            raise ValidationError(
+                {"link_type": "Direct samples must be standalone and cannot link to outreach records."}
+            )
         if not isinstance(self.quick_tags, list) or any(
             not isinstance(tag, str) or not tag.strip() for tag in self.quick_tags
         ):
@@ -688,7 +695,11 @@ class SampleFulfillment(StateMachineTenantModel):
             raise ValidationError({"outreach_task": "Cancelled outreach tasks cannot receive samples."})
         if self.store_id and task["store_id"] != self.store_id:
             raise ValidationError({"store": "Store must match the outreach task."})
-        if self.owner_id and task["owner_id"] != self.owner_id:
+        if (
+            self.owner_id
+            and task["owner_id"] != self.owner_id
+            and self.source != self.SOURCE_FEISHU_FULL_IMPORT
+        ):
             raise ValidationError({"owner": "Owner must match the outreach task."})
         if not self.outreach_target_id and task["influencer_id"] and task["influencer_id"] != self.influencer_id:
             raise ValidationError({"influencer": "Influencer must match the outreach task."})
@@ -754,16 +765,54 @@ class SampleItem(TenantValidatedModel):
 
 
 class FulfillmentStatusEvent(TenantValidatedModel):
+    SOURCE_IMPORT = SampleFulfillment.SOURCE_FEISHU_FULL_IMPORT
+
     fulfillment = models.ForeignKey(SampleFulfillment, on_delete=models.CASCADE, related_name="status_events")
     from_status = models.CharField(max_length=20, blank=True)
     to_status = models.CharField(max_length=20)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="sample_status_events")
     reason = models.CharField(max_length=240, blank=True)
+    # Source imports carry their own stable event identity.  Keeping the
+    # identity on the event makes a replay safe without treating the generic
+    # UI transition endpoint as an import API.  Historical/manual events keep
+    # these nullable fields empty and therefore remain unconstrained.
+    source = models.CharField(max_length=40, null=True, blank=True, default=None)
+    source_event_id = models.CharField(max_length=160, null=True, blank=True, default=None)
+    source_status = models.CharField(max_length=20, null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
     tenant_relation_fields = ("fulfillment", "actor")
 
     class Meta:
         ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "source", "source_event_id"],
+                name="uniq_fulfillment_status_source_event",
+            )
+        ]
+
+    def clean(self):
+        super().clean()
+        source_fields = (self.source, self.source_event_id, self.source_status)
+        if all(value in (None, "") for value in source_fields):
+            return
+        if any(value in (None, "") for value in source_fields):
+            raise ValidationError(
+                {
+                    "source": (
+                        "Source import events require source, source_event_id, "
+                        "and source_status together."
+                    )
+                }
+            )
+        if self.source != self.SOURCE_IMPORT:
+            raise ValidationError({"source": "Unsupported fulfillment status event source."})
+        if self.source_status not in {
+            SampleFulfillment.Status.PENDING,
+            SampleFulfillment.Status.SHIPPED,
+            SampleFulfillment.Status.PUBLISHED,
+        }:
+            raise ValidationError({"source_status": "Unsupported source fulfillment status."})
 
 
 class ImportBatch(TenantValidatedModel):
@@ -779,6 +828,12 @@ class ImportBatch(TenantValidatedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     row_count = models.PositiveIntegerField(default=0)
     error_count = models.PositiveIntegerField(default=0)
+    # A completed full-source import may be used for destructive
+    # reconciliation only when the caller presents the exact input manifest
+    # that was persisted with the batch.  Keep the digest on the durable batch
+    # instead of trusting an in-memory request object or a caller-provided
+    # collection at cleanup time.
+    manifest_digest = models.CharField(max_length=64, blank=True, default="")
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="influencer_import_batches")
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
