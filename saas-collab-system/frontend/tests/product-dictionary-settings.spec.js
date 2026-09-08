@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import ProductDictionarySettings from '../src/views/products/ProductDictionarySettings.vue';
+import { invalidateProductDictionaryCache } from '../src/utils/productDictionaryCache';
 
 const productApi = vi.hoisted(() => ({
   createProductAttribute: vi.fn(),
@@ -34,6 +35,9 @@ const elementPlus = vi.hoisted(() => ({
 }));
 
 vi.mock('../src/api/products', () => productApi);
+vi.mock('../src/utils/productDictionaryCache', () => ({
+  invalidateProductDictionaryCache: vi.fn()
+}));
 vi.mock('../src/stores/auth', () => ({
   useAuthStore: () => ({
     hasPermission: (...codes) => authState.allowed && codes.length > 0
@@ -201,6 +205,7 @@ describe('ProductDictionarySettings mounted kind matrix', () => {
     colorPage.vm.form.name = '藏青';
     await colorPage.vm.save();
     expect(productApi.createProductColor).toHaveBeenCalledWith({ code: 'navy', name: '藏青', is_active: true });
+    expect(invalidateProductDictionaryCache).toHaveBeenCalledTimes(2);
   });
 
   it('preserves existing specification values when saving a category', async () => {

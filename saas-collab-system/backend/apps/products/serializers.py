@@ -24,6 +24,7 @@ from .coding_services import (
     ATTRIBUTE_CODES,
     allocate_legacy_sku_code,
     allocate_spu_code,
+    build_legacy_sku_code,
     build_sku_code,
     category_path,
 )
@@ -598,6 +599,27 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"spec_values": f"Unknown specification dimensions: {', '.join(sorted(extra))}."}
                 )
+            # Prior versions included optional sentinel values in generated
+            # codes (for example ``SPU-red-0``).  Do not create a second
+            # logical SKU when a direct create retries one of those rows; the
+            # old code remains untouched and the caller receives the normal
+            # validation/conflict response.  Legacy imports carry an explicit
+            # legacy_sku_code and intentionally use the allocator below to
+            # keep distinct source rows separate.
+            if not str(attrs.get("legacy_sku_code") or "").strip():
+                legacy_code = build_legacy_sku_code(
+                    spu=attrs["spu"],
+                    color_code=attrs["color_code"],
+                    spec_values=spec_values,
+                )
+                if legacy_code and ProductSKU.objects.filter(
+                    tenant=self.context["request"].user.tenant,
+                    spu=attrs["spu"],
+                    sku_code=legacy_code,
+                ).exists():
+                    raise serializers.ValidationError(
+                        {"sku_code": f"SKU 已存在（旧编码兼容）：{legacy_code}。"}
+                    )
         return attrs
 
     def create(self, validated_data):

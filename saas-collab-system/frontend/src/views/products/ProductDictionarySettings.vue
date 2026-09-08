@@ -303,6 +303,7 @@ import {
   updateProductColor
 } from '../../api/products';
 import { collectionRows } from '../../utils/businessResponse';
+import { invalidateProductDictionaryCache } from '../../utils/productDictionaryCache';
 
 const props = defineProps({
   kind: { type: String, default: '' },
@@ -709,6 +710,7 @@ async function save() {
       response = await updateProductAttributes(form.id, serializeDimensions());
     }
     if (!response?.success) throw new Error(response?.message || '保存失败');
+    invalidateProductDictionaryCache();
     ElMessage.success('保存成功');
     visible.value = false;
     await load();
@@ -729,6 +731,7 @@ async function toggleActive(row) {
     else if (currentKind.value === 'colors') response = await updateProductColor(row.id, { is_active: next });
     else return;
     if (!response?.success) throw new Error(response?.message || '状态保存失败');
+    invalidateProductDictionaryCache();
     ElMessage.success(next ? '已启用' : '已停用');
     await load();
   } catch (error) {
@@ -749,6 +752,7 @@ async function remove(row) {
     else if (currentKind.value === 'attributes') response = await deleteProductAttribute(row.id);
     else response = await deleteProductColor(row.id);
     if (!response?.success) throw new Error(response?.message || '删除失败');
+    invalidateProductDictionaryCache();
     ElMessage.success('删除成功');
     await load();
   } catch (error) {

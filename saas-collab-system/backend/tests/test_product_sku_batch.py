@@ -134,6 +134,119 @@ def test_batch_supports_multiple_dimensions_and_no_specification_categories():
 
 
 @pytest.mark.django_db
+def test_zero_specification_sentinel_keeps_single_and_batch_codes_consistent():
+    client, user, tenant, _category, spu = _client_and_spu(
+        suffix="optional",
+        dimensions=[
+            {"code": "length", "name": "长度", "values": ["180cm"]},
+            {"code": "width", "name": "宽度", "values": ["80cm"]},
+        ],
+    )
+    for code in ("red", "blue", "green", "black"):
+        ProductColor.objects.create(tenant=tenant, code=code, name=code)
+    client.force_authenticate(user=user)
+
+    full = client.post(
+        "/api/internal/products/skus/",
+        {
+            "spu": spu.id,
+            "color_code": "red",
+            "spec_values": {"length": "180cm", "width": "80cm"},
+        },
+        format="json",
+    )
+    assert full.status_code == 201, full.json()
+    assert full.json()["data"]["sku_code"] == "SPU-optional-red-180cm×80cm"
+
+    partial = client.post(
+        "/api/internal/products/skus/",
+        {
+            "spu": spu.id,
+            "color_code": "blue",
+            "spec_values": {"length": "180cm", "width": "0"},
+        },
+        format="json",
+    )
+    assert partial.status_code == 201, partial.json()
+    assert partial.json()["data"]["sku_code"] == "SPU-optional-blue-180cm"
+    assert partial.json()["data"]["spec_values"] == {"length": "180cm", "width": "0"}
+
+    empty = client.post(
+        "/api/internal/products/skus/",
+        {
+            "spu": spu.id,
+            "color_code": "green",
+            "spec_values": {"length": "0", "width": "0"},
+        },
+        format="json",
+    )
+    assert empty.status_code == 201, empty.json()
+    assert empty.json()["data"]["sku_code"] == "SPU-optional-green"
+    assert empty.json()["data"]["spec_values"] == {"length": "0", "width": "0"}
+
+    batch = _post(
+        client,
+        user,
+        {
+            "spu": spu.id,
+            "color_codes": ["black"],
+            "spec_values": {"length": ["0"], "width": ["0"]},
+        },
+    )
+    assert batch.status_code == 201, batch.json()
+    assert batch.json()["data"]["results"][0]["sku_code"] == "SPU-optional-black"
+    created = ProductSKU.objects.get(tenant=tenant, spu=spu, color_code="black")
+    assert created.spec_values == {"length": "0", "width": "0"}
+
+
+@pytest.mark.django_db
+def test_batch_reuses_legacy_zero_suffix_without_rewriting_the_existing_code():
+    client, user, tenant, _category, spu = _client_and_spu(
+        suffix="legacy-zero",
+        dimensions=[{"code": "size", "name": "尺寸", "values": ["180cm"]}],
+    )
+    ProductColor.objects.create(tenant=tenant, code="red", name="红")
+    old = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=spu,
+        sku_code="SPU-legacy-zero-red-0",
+        color_code="red",
+        specification="0",
+        spec_values={"size": "0"},
+        size="0",
+    )
+    client.force_authenticate(user=user)
+
+    direct = client.post(
+        "/api/internal/products/skus/",
+        {
+            "spu": spu.id,
+            "color_code": "red",
+            "spec_values": {"size": "0"},
+        },
+        format="json",
+    )
+    assert direct.status_code == 400, direct.json()
+    assert ProductSKU.objects.filter(tenant=tenant, spu=spu).count() == 1
+
+    response = _post(
+        client,
+        user,
+        {
+            "spu": spu.id,
+            "color_codes": ["red"],
+            "spec_values": {"size": ["0"]},
+        },
+    )
+    assert response.status_code == 200, response.json()
+    assert response.json()["data"]["created"] == 0
+    assert response.json()["data"]["skipped"] == 1
+    assert ProductSKU.objects.filter(tenant=tenant, spu=spu).count() == 1
+    old.refresh_from_db()
+    assert old.sku_code == "SPU-legacy-zero-red-0"
+
+
+@pytest.mark.django_db
 def test_batch_allows_an_enabled_leaf_l2_category_for_existing_spu():
     tenant = Tenant.objects.create(name="L2 batch tenant", code="batch-l2")
     user = _user(tenant, "l2")
