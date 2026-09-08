@@ -34,4 +34,24 @@ describe('商品明细图片批量缓存流程', () => {
     expect(page).toContain('batchRows.forEach((row, index) => applyImageBatchResult(row, imageBatchResultAt(resultRows, index)))');
     expect(page).not.toContain('new Map(resultRows.map');
   });
+
+  it('读取 CSV 使用异步解析状态机并限制文件大小', () => {
+    expect(page).toContain("import { parseImageCsv, yieldToPage } from '../../utils/imageBatchCsv';");
+    expect(page).toContain("imageBatchPhase.value = 'reading'");
+    expect(page).toContain("if (file.size > 10 * 1024 * 1024)");
+    expect(page).toContain("new TextDecoder('utf-8', { fatal: true })");
+    expect(page).toContain("new TextDecoder('gb18030')");
+    expect(page).toContain('const parsed = await parseImageCsv(text');
+    expect(page).toContain('if (index % 250 === 0)');
+    expect(page).toContain("imageBatchPhase === 'reading' ? '读取中…'");
+    expect(page).toContain(':disabled="imageBatchSaving || !imageBatchSummary.valid"');
+  });
+
+  it('预览分页固定每页 50 行，并在每个后端批次后让出事件循环', () => {
+    expect(page).toContain('const imageBatchPreviewSize = 50;');
+    expect(page).toContain(':data="imageBatchPreviewRows"');
+    expect(page).toContain('data-testid="image-batch-pagination"');
+    expect(page).toContain('const batchSize = 5;');
+    expect(page).toContain('updateImageBatchProgress(processed, total);\n      await yieldToPage();');
+  });
 });

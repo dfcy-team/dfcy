@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 import pytest
@@ -160,3 +163,89 @@ def test_platform_detail_image_serialization_does_not_add_a_query_per_row():
     # select_related join; increasing the page size should not create one
     # additional query per returned detail.
     assert len(all_rows.captured_queries) <= len(one_page.captured_queries) + 1
+
+
+def test_platform_detail_list_sorts_latest_updates_before_pagination_and_keeps_scope_isolated():
+    tenant, user, platform, store, rows = _view_fixture()
+    hidden_store = StoreMaster.objects.create(
+        tenant=tenant,
+        platform=platform,
+        code="image-hidden-store",
+        name="Hidden image store",
+        country_code="US",
+        currency="USD",
+    )
+    hidden_detail = PlatformProductDetail.objects.create(
+        tenant=tenant,
+        platform=platform,
+        store=hidden_store,
+        platform_variant_id="IMAGE-V-HIDDEN",
+    )
+
+    other_tenant = Tenant.objects.create(name="Other sorted image tenant", code="other-sorted-image-tenant")
+    other_platform = PlatformMaster.objects.create(
+        tenant=other_tenant,
+        code="other-sorted-image-platform",
+        name="Other sorted image platform",
+        platform_type="other",
+    )
+    other_store = StoreMaster.objects.create(
+        tenant=other_tenant,
+        platform=other_platform,
+        code="other-sorted-image-store",
+        name="Other sorted image store",
+        country_code="US",
+        currency="USD",
+    )
+    foreign_detail = PlatformProductDetail.objects.create(
+        tenant=other_tenant,
+        platform=other_platform,
+        store=other_store,
+        platform_variant_id="IMAGE-V-FOREIGN",
+    )
+
+    anchor = timezone.now()
+    PlatformProductDetail.objects.filter(pk=rows[0].pk).update(updated_at=anchor - timedelta(days=2))
+    PlatformProductDetail.objects.filter(pk=rows[1].pk).update(updated_at=anchor - timedelta(days=2))
+    PlatformProductDetail.objects.filter(pk=rows[2].pk).update(updated_at=anchor - timedelta(days=1))
+    PlatformProductDetail.objects.filter(pk=hidden_detail.pk).update(updated_at=anchor + timedelta(days=1))
+    PlatformProductDetail.objects.filter(pk=foreign_detail.pk).update(updated_at=anchor + timedelta(days=2))
+
+    role = Role.objects.create(tenant=tenant, code="platform-image-sort-scope", name="Platform image sort scope")
+    role.permissions.add(Permission.objects.get(code="listings.product_detail.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(
+        tenant=tenant,
+        role=role,
+        scope_type=DataScope.ScopeType.CUSTOM,
+        config={"store_ids": [store.id]},
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    def row_at(page):
+        response = client.get(
+            "/api/internal/listings/product-details/",
+            {"page": page, "page_size": 1},
+        )
+        assert response.status_code == 200
+        payload = response.json()["data"]
+        assert payload["count"] == len(rows)
+        assert len(payload["results"]) == 1
+        return payload["results"][0]
+
+    assert row_at(1)["id"] == rows[2].id
+    # Equal timestamps use the required descending id tie-breaker.
+    assert row_at(2)["id"] == rows[1].id
+    assert row_at(3)["id"] == rows[0].id
+
+    all_response = client.get(
+        "/api/internal/listings/product-details/",
+        {"page": 1, "page_size": 100},
+    )
+    assert all_response.status_code == 200
+    assert {item["id"] for item in all_response.json()["data"]["results"]} == {item.id for item in rows}
+
+    PlatformProductDetail.objects.filter(pk=rows[0].pk).update(updated_at=anchor + timedelta(hours=1))
+    assert row_at(1)["id"] == rows[0].id
