@@ -1,4 +1,5 @@
 import pytest
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -8,6 +9,17 @@ from apps.tenants.models import Tenant
 
 
 pytestmark = pytest.mark.django_db
+
+
+def _mark_verified(authorization_id):
+    # Lifecycle tests start with a completed provider authorization. Separate
+    # credential tests assert that a mere binding cannot enable a live job.
+    WarehouseAuthorization.objects.filter(pk=authorization_id).update(
+        email="fixture@example.test", bootstrap_credential_id="synthetic-bootstrap",
+        token_id="synthetic-warehouse-oauth",
+        oauth_user_id="123", external_warehouse_code="TEST-WAREHOUSE",
+        validation_status="verified", last_verified_at=timezone.now(),
+    )
 
 
 def _fixture():
@@ -113,6 +125,7 @@ def test_warehouse_api_binding_rebind_and_revoke_are_idempotent_and_masked():
     )
     assert changed.status_code == 201
     changed_id = changed.data["data"]["authorization"]["id"]
+    _mark_verified(changed_id)
     assert WarehouseAuthorization.objects.get(pk=first_payload["id"]).status == WarehouseAuthorization.Status.REVOKED
     assert WarehouseAuthorization.objects.get(pk=changed_id).status == WarehouseAuthorization.Status.ACTIVE
 
@@ -196,6 +209,7 @@ def test_warehouse_readonly_check_uses_the_selected_warehouse_binding(monkeypatc
         format="json",
     )
     authorization_id = bound.data["data"]["authorization"]["id"]
+    _mark_verified(authorization_id)
     created = client.post(
         "/api/internal/integrations/sync-jobs/",
         {
@@ -258,6 +272,7 @@ def test_configured_wms_credentials_keep_workspace_job_ready():
         format="json",
     )
     authorization_id = bound.data["data"]["authorization"]["id"]
+    _mark_verified(authorization_id)
     created = client.post(
         "/api/internal/integrations/sync-jobs/",
         {
@@ -303,6 +318,7 @@ def test_expired_revoked_or_disabled_wms_credentials_block_workspace_job(
         format="json",
     )
     authorization_id = bound.data["data"]["authorization"]["id"]
+    _mark_verified(authorization_id)
     created = client.post(
         "/api/internal/integrations/sync-jobs/",
         {

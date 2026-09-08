@@ -151,6 +151,10 @@ def integration_platform_key(*, platform_type="", code="", name=""):
         "tiktok": "tiktok",
         "tiktokshop": "tiktok",
         "myjf": "jifeng_wms",
+        "jifeng": "jifeng_wms",
+        "极风": "jifeng_wms",
+        "极风平台": "jifeng_wms",
+        "马来极风": "jifeng_wms",
         "jifengwms": "jifeng_wms",
         "极风wms": "jifeng_wms",
     }

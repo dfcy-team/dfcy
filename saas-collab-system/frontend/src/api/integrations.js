@@ -1,4 +1,12 @@
-import { requestWithMockFallback } from './request';
+import { requestApi, requestWithMockFallback } from './request';
+
+// Credential/auth operations never fall back to simulated success.
+export const authorizeJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/authorize/`, data: { confirmed: true } });
+export const refreshJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/refresh/`, data: {} });
+export const checkJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/readonly-check/`, data: {} });
+export const completeManualStoreCallback = (data) => requestApi({
+  method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/manual-callback/', data,
+});
 import {
   mockStoreMappings, mockStoreMappingDetail, mockStoreMappingOptions, mockCreateStoreMapping, mockUpdateStoreMapping,
   mockProductMappings, mockProductMappingDetail, mockProductMappingOptions, mockCreateProductMapping, mockUpdateProductMapping

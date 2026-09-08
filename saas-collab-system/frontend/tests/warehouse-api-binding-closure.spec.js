@@ -20,8 +20,8 @@ describe('仓库 API 接入操作闭环', () => {
     expect(dialog).toContain('{ warehouse_authorization_id: binding.id }');
     expect(dialog).toContain("resource_type: 'inventory_snapshot'");
     expect(dialog).toContain("subject: access.value.subject.name");
-    expect(dialog).toContain('has_sync_job === false');
-    expect(dialog).toContain('请先创建库存同步任务，再执行只读检查。');
+    expect(dialog).not.toContain('has_sync_job === false');
+    expect(dialog).not.toContain('请先创建库存同步任务，再执行只读检查。');
     expect(dialog).toContain('response.data?.simulated === true');
     expect(dialog).toContain('response.data?.external_api_called === false');
     expect(dialog).toContain('模拟检查完成，未调用真实平台。');

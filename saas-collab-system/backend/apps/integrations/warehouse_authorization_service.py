@@ -1,18 +1,20 @@
 """Service-layer transitions for warehouse inventory API bindings.
 
-Warehouse authorization records contain only opaque custody references copied
-from an already managed integration configuration.  The page API never
-accepts raw credentials and all state transitions are audited here so callers
-cannot bypass the tenant and service-platform checks.
+This binding layer accepts only managed configuration references. Warehouse
+OMS credentials are handled separately by warehouse_credential_service in the
+same transaction. Binding transitions retain tenant and platform checks.
 """
 
 import hashlib
+import json
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 from rest_framework.exceptions import ValidationError
 
 from apps.common.exceptions import IdempotencyConflict, StateConflict
+from apps.tenants.models import Tenant
 
 from .models import (
     IntegrationAuditLog,
@@ -125,7 +127,7 @@ def validate_warehouse_binding(*, actor, warehouse, integration_config, external
         PlatformIntegrationConfig.Environment.PRODUCTION,
     } and integration_config.sync_write_enabled:
         raise ValidationError("试运行和生产库存接入不允许开启写同步。")
-    if not integration_config.credential_id or not integration_config.token_id:
+    if not integration_config.credential_id or (provider != "jifeng_wms" and not integration_config.token_id):
         raise ValidationError("接入配置的受控凭据引用不完整，请先维护接入凭据。")
     if integration_config.credential_status in REVOKED_CREDENTIAL_STATUSES:
         raise ValidationError("接入配置的受控凭据不可用，请先维护接入凭据。")
@@ -144,7 +146,9 @@ def validate_warehouse_binding(*, actor, warehouse, integration_config, external
 def _replay_by_idempotency(*, actor, key_hash, payload_digest):
     if not key_hash:
         return None
-    logs = IntegrationAuditLog.objects.filter(
+    # Locking read sees the transaction that released the tenant lock even
+    # under MySQL REPEATABLE READ, rather than an earlier request snapshot.
+    logs = IntegrationAuditLog.objects.select_for_update().filter(
         tenant=actor.tenant,
         action__in=("warehouse_authorize", "warehouse_rebind"),
     ).order_by("-id")
@@ -157,7 +161,7 @@ def _replay_by_idempotency(*, actor, key_hash, payload_digest):
         authorization_id = detail.get("authorization_id")
         if not authorization_id:
             return None
-        return WarehouseAuthorization.objects.filter(
+        return WarehouseAuthorization.objects.select_for_update().filter(
             tenant=actor.tenant,
             pk=authorization_id,
         ).select_related("warehouse", "integration_config").first()
@@ -174,6 +178,7 @@ def bind_warehouse_authorization(
     expected_authorization_id=None,
     idempotency_key=None,
     external_warehouse_code=None,
+    credential_payload=None,
 ):
     """Create or safely replace the one active inventory binding per warehouse."""
     provider = validate_warehouse_binding(
@@ -192,6 +197,18 @@ def bind_warehouse_authorization(
     payload_digest = _digest(
         f"{warehouse.id}:{integration_config.id}:{external_region}:{external_code}:{bool(replace)}:{expected_authorization_id or ''}"
     )
+    if credential_payload is not None:
+        # Include write-only fields in replay matching without recording their
+        # values (or an unkeyed, guessable token/email hash) in the audit log.
+        payload_digest = salted_hmac(
+            "warehouse-binding-credentials-v1",
+            json.dumps([payload_digest, credential_payload], sort_keys=True, separators=(",", ":")),
+            algorithm="sha256",
+        ).hexdigest()
+    if key_hash:
+        # Serialize tenant-scoped keys even when concurrent requests target
+        # different warehouses. There may not yet be an authorization to lock.
+        Tenant.objects.select_for_update().get(pk=actor.tenant_id)
     replay = _replay_by_idempotency(
         actor=actor,
         key_hash=key_hash,
@@ -234,6 +251,18 @@ def bind_warehouse_authorization(
             and active.external_warehouse_region == external_region
         )
         if identity_matches:
+            if key_hash:
+                # A same-binding credentials edit is still a new operation.
+                # Persist its key in the outer transaction so a retry cannot
+                # replace credentials again after OAuth has completed.
+                _audit(record=active, actor=actor, action="warehouse_authorize", detail={
+                    "authorization_id": active.id,
+                    "warehouse_id": warehouse.id,
+                    "integration_config_id": integration_config.id,
+                    "idempotency_key_hash": key_hash,
+                    "payload_digest": payload_digest,
+                    "external_api_called": False,
+                })
             return active, True, "already_bound"
         if not replace:
             raise StateConflict("仓库已有不同的外部仓库身份绑定，请明确确认后再更换绑定。")
@@ -299,6 +328,17 @@ def bind_warehouse_authorization(
         created_by=actor,
         updated_by=actor,
     )
+    if active and provider == "jifeng_wms":
+        record.email = active.email
+        record.bootstrap_credential_id = active.bootstrap_credential_id
+        record.bootstrap_consumed_at = active.bootstrap_consumed_at
+        record.validation_status = "pending" if active.bootstrap_credential_id else "incomplete"
+        if active.integration_config_id == integration_config.id:
+            record.token_id = active.token_id
+            record.oauth_user_id = active.oauth_user_id
+            record.oauth_expires_at = active.oauth_expires_at
+        else:
+            record.token_id = ""
     try:
         with authorization_service_write():
             record.full_clean()

@@ -896,7 +896,9 @@ async function prepareConfig() {
     const response = await createIntegrationConfig({ account_alias: configForm.account_alias.trim(), platform: configForm.platform, api_type: configForm.api_type, environment: configForm.environment, regions: configForm.regions });
     if (!response.success) { operationFailed(response, '接入配置创建失败。'); return; }
     configDialog.value = false;
-    ElMessage.success('接入配置已创建，请继续维护开发者凭据。');
+    ElMessage.success(configForm.platform === 'jifeng_wms'
+      ? '接入配置已创建：请在维护凭据中填写 API Base URL、Domain、Client ID、Client Secret，再到仓库档案填写 Email 和 Token。'
+      : '接入配置已创建，请继续维护开发者凭据。');
     await load();
   } finally {
     operating.value = false;

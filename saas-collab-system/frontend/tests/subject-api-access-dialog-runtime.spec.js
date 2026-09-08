@@ -6,8 +6,12 @@ import { inject, nextTick, provide, toRef } from 'vue';
 const authContext = vi.hoisted(() => ({ allowed: true, manage: true }));
 const api = vi.hoisted(() => ({
   bindWarehouseAuthorization: vi.fn(),
+  authorizeJifengWarehouse: vi.fn(),
+  refreshJifengWarehouse: vi.fn(),
+  checkJifengWarehouse: vi.fn(),
   checkIntegrationReadonlyConnection: vi.fn(),
   completeSyntheticStoreAuthorization: vi.fn(),
+  completeManualStoreCallback: vi.fn(),
   createSyncJob: vi.fn(),
   fetchStoreAuthorizations: vi.fn(),
   fetchSubjectApiAccess: vi.fn(),
@@ -121,6 +125,33 @@ async function mountDialog(subjectType = 'store') {
 }
 
 describe('SubjectApiAccessDialog runtime closures', () => {
+  it('submits a callback for the current store and clears the sensitive input', async () => {
+    const wrapper = await mountDialog('store');
+    api.completeManualStoreCallback.mockResolvedValue({ success: true });
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/callback?state=FAKE_STATE&code=FAKE_CODE';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeManualStoreCallback).toHaveBeenCalledWith(expect.objectContaining({ store_id: 1, integration_config_id: 1 }));
+    expect(wrapper.vm.manualCallbackUrls.marketplace).toBe('');
+    expect(wrapper.emitted('changed')).toBeTruthy();
+  });
+
+  it('rejects invalid callback input without sending it', async () => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/start';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    expect(ElMessage.warning).toHaveBeenCalled();
+  });
+
+  it('clears failed callback input and does not echo server details', async () => {
+    const wrapper = await mountDialog('store');
+    api.completeManualStoreCallback.mockRejectedValue(new Error('FAKE_SECRET_MUST_NOT_DISPLAY'));
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/callback?state=FAKE_STATE&code=FAKE_CODE';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(wrapper.vm.manualCallbackUrls.marketplace).toBe('');
+    expect(ElMessage.error).toHaveBeenCalled();
+    expect(String(ElMessage.error.mock.calls)).not.toContain('FAKE_SECRET_MUST_NOT_DISPLAY');
+  });
   beforeEach(() => {
     authContext.allowed = true;
     authContext.manage = true;
@@ -251,5 +282,37 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     const wrapper = await mountDialog('warehouse');
     expect(wrapper.find('.authorization-history-table').exists()).toBe(true);
     expect(wrapper.findAll('.authorization-history-table .table').length).toBeGreaterThan(0);
+  });
+
+  it('keeps saved bindings separate from successful validation', async () => {
+    const wrapper = await mountDialog('warehouse');
+    const button = wrapper.findAll('button').find(item => item.text().includes('创建库存同步任务'));
+    expect(button).toBeDefined();
+    expect(button.attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('保存不代表连通');
+    api.authorizeJifengWarehouse.mockResolvedValue({ success: true });
+    await wrapper.vm.firstWarehouseAuthorization({ id: 202 });
+    expect(ElMessageBox.confirm).toHaveBeenCalled();
+    expect(api.authorizeJifengWarehouse).toHaveBeenCalledWith(202);
+    expect(api.checkJifengWarehouse).not.toHaveBeenCalled();
+    expect(api.createSyncJob).not.toHaveBeenCalled();
+  });
+
+  it('allows readonly validation before a sync job exists', async () => {
+    const wrapper = await mountDialog('warehouse');
+    api.checkJifengWarehouse.mockResolvedValue({ success: true, data: { connected: true } });
+    await wrapper.vm.checkToken({ id: 202, integration_config_id: 3, status: 'active', has_sync_job: false });
+    expect(api.checkJifengWarehouse).toHaveBeenCalledWith(202);
+    expect(api.createSyncJob).not.toHaveBeenCalled();
+    expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the warehouse authorization without using the bootstrap endpoint', async () => {
+    const wrapper = await mountDialog('warehouse');
+    api.refreshJifengWarehouse.mockResolvedValue({ success: true });
+    await wrapper.vm.refreshWarehouseAuthorization({ id: 202 });
+    expect(api.refreshJifengWarehouse).toHaveBeenCalledWith(202);
+    expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('重新执行只读校验'));
   });
 });

@@ -298,6 +298,10 @@ def _warehouse_bindings(user, subject, config_map):
             # local archive code or a shared config credential.
             "external_warehouse_code": row.external_warehouse_code,
             "external_warehouse_region": row.external_warehouse_region,
+            "email": row.email,
+            "token_configured": bool(row.bootstrap_credential_id),
+            "bootstrap_consumed_at": row.bootstrap_consumed_at,
+            "validation_status": row.validation_status,
             "status": row.status,
             "authorized_at": row.authorized_at,
             "last_verified_at": row.last_verified_at,
