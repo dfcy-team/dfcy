@@ -126,6 +126,15 @@ _FEISHU_IMPORT_STATUS_ORDER = {
     SampleFulfillment.Status.OVERDUE: 1,
     SampleFulfillment.Status.PUBLISHED: 2,
 }
+_FEISHU_IMPORT_PRESERVED_STATUSES = frozenset(
+    {
+        SampleFulfillment.Status.COMPLETED,
+        SampleFulfillment.Status.CANCELLED,
+        SampleFulfillment.Status.LIVE_CREATOR,
+        SampleFulfillment.Status.BLACKLISTED,
+    }
+)
+FEISHU_FULL_IMPORT_PRESERVES_TERMINAL_SAMPLE_STATUS = True
 
 
 def _generate_outreach_task_no(tenant):
@@ -641,10 +650,15 @@ def _apply_source_chronology(
     }
     if desired_status in advanced_statuses:
         source_shipped_at = supplied_shipped_at or fulfillment.shipped_at
-    elif fulfillment.status in advanced_statuses or fulfillment.status in {
-        SampleFulfillment.Status.DELIVERED,
-        SampleFulfillment.Status.OVERDUE,
-    }:
+    elif (
+        fulfillment.status in advanced_statuses
+        or fulfillment.status
+        in {
+            SampleFulfillment.Status.DELIVERED,
+            SampleFulfillment.Status.OVERDUE,
+        }
+        or fulfillment.status in _FEISHU_IMPORT_PRESERVED_STATUSES
+    ):
         # A stale pending snapshot must not erase a chronology that has already
         # been recorded by a later workflow state.
         source_shipped_at = fulfillment.shipped_at
@@ -1475,6 +1489,161 @@ def add_outreach_target(
 
 
 @transaction.atomic
+def import_outreach_target_snapshot(
+    *,
+    user,
+    tenant,
+    source,
+    task,
+    influencer,
+    source_task_external_id,
+    source_sample_external_id,
+    first_linked_at,
+    actor=None,
+    return_metadata=False,
+):
+    """Materialize one historical Feishu task/creator relation.
+
+    Interactive writes must continue to reject target changes on terminal
+    tasks.  The fixed full-export importer has a narrower need: an approved
+    legacy task can already be terminal even though the source snapshot proves
+    that its creator relation existed earlier.  This adapter keeps that
+    exception source-scoped, tenant-locked, idempotent and audited without
+    relaxing ``OutreachTarget.clean`` or the public services.
+    """
+
+    if source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
+        raise ValidationError({"source": "Unsupported outreach target import source."})
+    if user is None or getattr(user, "tenant_id", None) is None:
+        raise ValidationError({"actor": "An explicit tenant import actor is required."})
+    if actor is not None and _pk(actor) != user.pk:
+        raise ValidationError({"actor": "Import actor does not match the authenticated user."})
+    if tenant is None or _pk(tenant) != user.tenant_id:
+        raise ValidationError({"tenant": "Import tenant does not match the actor tenant."})
+
+    task_external_id = str(source_task_external_id or "").strip()
+    sample_external_id = str(source_sample_external_id or "").strip()
+    if not task_external_id or len(task_external_id) > 160:
+        raise ValidationError({"source_task_external_id": "Source task id must be 1-160 characters."})
+    if not sample_external_id or len(sample_external_id) > 160:
+        raise ValidationError({"source_sample_external_id": "Source sample id must be 1-160 characters."})
+    linked_at = _source_datetime(first_linked_at, field="first_linked_at")
+    if linked_at is None:
+        raise ValidationError({"first_linked_at": "Source link time is required."})
+
+    _lock_tenant(user)
+    locked_influencer = _tenant_influencer(user, _pk(influencer), for_update=False)
+    locked_influencer = _assert_influencer_not_blacklisted(
+        user=user,
+        influencer=locked_influencer,
+        message="Blacklisted influencers cannot be imported as outreach targets.",
+        code="conflict",
+    )
+    locked_task = _locked_task(user, _pk(task))
+    if locked_task.is_deleted:
+        raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive imported targets."})
+    allowed_task_sources = {source, "legacy_shop_analytics_bd"}
+    if locked_task.source not in allowed_task_sources:
+        raise ValidationError(
+            {"source": "Outreach task is owned by another source."},
+            code="conflict",
+        )
+    if locked_task.source == source:
+        source_key_matches = str(locked_task.external_id or "").strip() == task_external_id
+    else:
+        source_key_matches = str(locked_task.task_no or "").strip() == task_external_id
+    if not source_key_matches:
+        raise ValidationError(
+            {"source_task_external_id": "Source task id does not match the imported task."},
+            code="conflict",
+        )
+
+    target = (
+        OutreachTarget.objects.select_for_update()
+        .filter(
+            tenant=user.tenant,
+            task=locked_task,
+            influencer=locked_influencer,
+        )
+        .first()
+    )
+    created = target is None
+    restored = False
+    historical_terminal_exception = locked_task.status in TERMINAL_OUTREACH_TASK_STATUSES
+    if target is None:
+        target = OutreachTarget(
+            tenant=user.tenant,
+            task=locked_task,
+            influencer=locked_influencer,
+            first_linked_at=linked_at,
+            notes=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        )
+        if historical_terminal_exception:
+            # ``bulk_create`` deliberately bypasses the model's interactive
+            # terminal-task guard.  Every relation and source invariant above
+            # has already been revalidated under the tenant/task locks.
+            QuerySet.bulk_create(OutreachTarget.objects.all(), [target])
+            target = OutreachTarget.objects.get(
+                tenant=user.tenant,
+                task=locked_task,
+                influencer=locked_influencer,
+            )
+        else:
+            _save(target)
+    elif target.is_deleted:
+        before_version = target.version
+        updated = QuerySet.update(
+            OutreachTarget.objects.filter(
+                pk=target.pk,
+                tenant=user.tenant,
+                is_deleted=True,
+                version=before_version,
+            ),
+            is_deleted=False,
+            deleted_at=None,
+            version=before_version + 1,
+            updated_at=timezone.now(),
+        )
+        if updated != 1:
+            raise ValidationError(
+                {"version": "Outreach target was changed by another request."},
+                code="conflict",
+            )
+        target.refresh_from_db()
+        restored = True
+
+    if created or restored:
+        _audit(
+            user,
+            "feishu_import_target_create" if created else "feishu_import_target_restore",
+            "outreach_target",
+            target,
+            before={"is_deleted": True} if restored else {},
+            after={
+                "source": source,
+                "source_task_external_id": task_external_id,
+                "source_sample_external_id": sample_external_id,
+                "task_id": locked_task.pk,
+                "influencer_id": locked_influencer.pk,
+                "first_linked_at": target.first_linked_at.isoformat(),
+                "source_first_linked_at": linked_at.isoformat(),
+                "is_deleted": False,
+                "historical_terminal_exception": historical_terminal_exception,
+            },
+        )
+
+    if return_metadata:
+        return {
+            "target": target,
+            "created": created,
+            "restored": restored,
+            "changed": created or restored,
+            "outcome": "created" if created else ("restored" if restored else "noop"),
+        }
+    return target, created
+
+
+@transaction.atomic
 def update_outreach_target(
     *, user, task, target, expected_version, outreach_result=None, notes=None
 ):
@@ -2227,8 +2396,14 @@ def _import_status_target(current_status, requested_status):
     # a stale pending snapshot as well.
     if current_rank is not None and requested_rank <= current_rank:
         return current_status
-    # Existing terminal or creator-managed states are outside this import
-    # compatibility contract and must not be silently changed.
+    # A controlled historical snapshot may refresh source-owned facts on a
+    # fulfillment that later reached a terminal or creator-managed state.
+    # Preserve that newer state and record the stale observation; never
+    # regress it to the source snapshot's pending/shipped/published value.
+    if current_status in _FEISHU_IMPORT_PRESERVED_STATUSES:
+        return current_status
+    # Unknown states are outside this compatibility contract and must not be
+    # guessed or silently changed.
     return None
 
 
@@ -3654,6 +3829,16 @@ def import_sample_fulfillment_snapshot(
         current_rank = _FEISHU_IMPORT_STATUS_ORDER.get(locked_fulfillment.status)
         historical_rank = _FEISHU_IMPORT_STATUS_ORDER.get(existing_event.to_status)
         historical_target = _import_status_target(existing_event.from_status, requested_status)
+        if locked_fulfillment.status in _FEISHU_IMPORT_PRESERVED_STATUSES:
+            current_not_behind_event = True
+        elif existing_event.to_status in _FEISHU_IMPORT_PRESERVED_STATUSES:
+            current_not_behind_event = locked_fulfillment.status == existing_event.to_status
+        else:
+            current_not_behind_event = (
+                current_rank is not None
+                and historical_rank is not None
+                and current_rank >= historical_rank
+            )
         # The event row is immutable evidence of the state observed when this
         # source snapshot first arrived.  A later snapshot may have advanced
         # the fulfillment, so recomputing the current transition must not turn
@@ -3664,9 +3849,7 @@ def import_sample_fulfillment_snapshot(
         if (
             existing_event.fulfillment_id != locked_fulfillment.pk
             or existing_event.source_status != requested_status
-            or historical_rank is None
-            or current_rank is None
-            or current_rank < historical_rank
+            or not current_not_behind_event
             or historical_target is None
             or existing_event.to_status != historical_target
         ):

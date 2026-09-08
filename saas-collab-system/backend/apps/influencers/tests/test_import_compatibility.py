@@ -24,6 +24,7 @@ from apps.influencers.services import (
     _import_manifest_digest,
     create_outreach_task,
     create_sample_fulfillment,
+    import_outreach_target_snapshot,
     import_outreach_task_snapshot,
     import_sample_fulfillment_snapshot,
     soft_delete_import_source,
@@ -1339,6 +1340,406 @@ def test_source_cleanup_requires_persisted_completed_batch(sample_records, statu
         tenant=records["tenant"],
         action="feishu_import_source_soft_delete",
     ).count() == 0
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED],
+)
+def test_feishu_target_snapshot_materializes_terminal_task_history_idempotently(
+    sample_records, terminal_status
+):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    QuerySet.update(
+        OutreachTask.objects.filter(pk=records["task"].pk),
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        external_id="FEISHU-TASK-HISTORY-1",
+        status=terminal_status,
+        version=4,
+    )
+    records["task"].refresh_from_db()
+    linked_at = datetime(2026, 8, 1, 9, 30, tzinfo=dt_timezone.utc)
+    kwargs = {
+        "user": records["user"],
+        "actor": records["user"],
+        "tenant": records["tenant"],
+        "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        "task": records["task"],
+        "influencer": records["second_influencer"],
+        "source_task_external_id": "FEISHU-TASK-HISTORY-1",
+        "source_sample_external_id": "FEISHU-SAMPLE-HISTORY-1",
+        "first_linked_at": linked_at,
+        "return_metadata": True,
+    }
+
+    first = import_outreach_target_snapshot(**kwargs)
+    replay = import_outreach_target_snapshot(**kwargs)
+
+    assert first["outcome"] == "created"
+    assert replay["outcome"] == "noop"
+    assert OutreachTarget.objects.filter(
+        tenant=records["tenant"],
+        task=records["task"],
+        influencer=records["second_influencer"],
+        is_deleted=False,
+    ).count() == 1
+    log = OperationLog.objects.get(
+        tenant=records["tenant"],
+        action="feishu_import_target_create",
+        object_id=str(first["target"].pk),
+    )
+    assert log.after_data["historical_terminal_exception"] is True
+    assert log.after_data["source_sample_external_id"] == "FEISHU-SAMPLE-HISTORY-1"
+
+
+def test_feishu_target_snapshot_keeps_source_boundary(sample_records):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    QuerySet.update(
+        OutreachTask.objects.filter(pk=records["task"].pk),
+        source="manual",
+        external_id="FEISHU-TASK-FOREIGN",
+        status=OutreachTask.Status.COMPLETED,
+    )
+    records["task"].refresh_from_db()
+
+    with pytest.raises(ValidationError, match="another source"):
+        import_outreach_target_snapshot(
+            user=records["user"],
+            actor=records["user"],
+            tenant=records["tenant"],
+            source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            task=records["task"],
+            influencer=records["second_influencer"],
+            source_task_external_id="FEISHU-TASK-FOREIGN",
+            source_sample_external_id="FEISHU-SAMPLE-FOREIGN",
+            first_linked_at=datetime(2026, 8, 1, tzinfo=dt_timezone.utc),
+        )
+    QuerySet.update(
+        OutreachTask.objects.filter(pk=records["task"].pk),
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        external_id="FEISHU-TASK-FOREIGN",
+    )
+    records["task"].refresh_from_db()
+    other_influencer = Influencer.objects.create(
+        tenant=records["other_user"].tenant,
+        code="other-tenant-target-influencer",
+        name="Other tenant target influencer",
+        platform="tiktok",
+    )
+    with pytest.raises(ValidationError, match="current tenant"):
+        import_outreach_target_snapshot(
+            user=records["user"],
+            actor=records["user"],
+            tenant=records["tenant"],
+            source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            task=records["task"],
+            influencer=other_influencer,
+            source_task_external_id="FEISHU-TASK-FOREIGN",
+            source_sample_external_id="FEISHU-SAMPLE-FOREIGN",
+            first_linked_at=datetime(2026, 8, 1, tzinfo=dt_timezone.utc),
+        )
+    assert not OutreachTarget.objects.filter(
+        task=records["task"],
+        influencer=records["second_influencer"],
+    ).exists()
+
+
+def test_feishu_target_snapshot_restore_audit_matches_persisted_link_time(sample_records):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    persisted_linked_at = datetime(2026, 7, 1, 8, 0, tzinfo=dt_timezone.utc)
+    supplied_linked_at = datetime(2026, 8, 1, 9, 30, tzinfo=dt_timezone.utc)
+    target = OutreachTarget.objects.create(
+        tenant=records["tenant"],
+        task=records["task"],
+        influencer=records["second_influencer"],
+        first_linked_at=persisted_linked_at,
+    )
+    QuerySet.update(
+        OutreachTarget.objects.filter(pk=target.pk),
+        is_deleted=True,
+        deleted_at=datetime(2026, 8, 2, tzinfo=dt_timezone.utc),
+    )
+    QuerySet.update(
+        OutreachTask.objects.filter(pk=records["task"].pk),
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        external_id="FEISHU-TASK-RESTORE-AUDIT",
+        status=OutreachTask.Status.COMPLETED,
+    )
+    records["task"].refresh_from_db()
+
+    result = import_outreach_target_snapshot(
+        user=records["user"],
+        actor=records["user"],
+        tenant=records["tenant"],
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        task=records["task"],
+        influencer=records["second_influencer"],
+        source_task_external_id="FEISHU-TASK-RESTORE-AUDIT",
+        source_sample_external_id="FEISHU-SAMPLE-RESTORE-AUDIT",
+        first_linked_at=supplied_linked_at,
+        return_metadata=True,
+    )
+
+    target.refresh_from_db()
+    assert result["outcome"] == "restored"
+    assert target.first_linked_at == persisted_linked_at
+    log = OperationLog.objects.get(
+        tenant=records["tenant"],
+        action="feishu_import_target_restore",
+        object_id=str(target.pk),
+    )
+    assert log.after_data["first_linked_at"] == persisted_linked_at.isoformat()
+    assert log.after_data["source_first_linked_at"] == supplied_linked_at.isoformat()
+
+
+@pytest.mark.parametrize(
+    "preserved_status",
+    [
+        SampleFulfillment.Status.COMPLETED,
+        SampleFulfillment.Status.CANCELLED,
+        SampleFulfillment.Status.LIVE_CREATOR,
+        SampleFulfillment.Status.BLACKLISTED,
+    ],
+)
+def test_source_status_import_preserves_terminal_and_creator_managed_states(
+    sample_records, preserved_status
+):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    fulfillment = _source_sample(records, f"preserved-{preserved_status}")
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        status=preserved_status,
+        version=7,
+    )
+    fulfillment.refresh_from_db()
+    event = {
+        "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        "source_event_id": f"preserved-{preserved_status}-shipped",
+    }
+
+    imported = import_sample_fulfillment_snapshot(
+        "shipped",
+        event,
+        None,
+        user=records["executor"],
+        fulfillment=fulfillment,
+    )
+    replay = import_sample_fulfillment_snapshot(
+        "shipped",
+        event,
+        None,
+        user=records["executor"],
+        fulfillment=fulfillment,
+        return_metadata=True,
+    )
+
+    imported.refresh_from_db()
+    assert imported.status == preserved_status
+    assert imported.version == 7
+    assert replay["outcome"] == "noop"
+    status_event = FulfillmentStatusEvent.objects.get(
+        tenant=records["tenant"],
+        source_event_id=f"preserved-{preserved_status}-shipped",
+    )
+    assert status_event.from_status == preserved_status
+    assert status_event.to_status == preserved_status
+    log = OperationLog.objects.get(
+        tenant=records["tenant"],
+        action="sample_status_import",
+        object_id=str(fulfillment.pk),
+    )
+    assert log.after_data["preserved"] is True
+
+
+def test_source_row_import_updates_legacy_facts_but_preserves_blacklisted_state(sample_records):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    legacy = _bare_source_sample(
+        records,
+        source="legacy_shop_analytics_bd",
+        external_id="LEGACY-BLACKLISTED-EXTERNAL",
+        fulfillment_no="FEISHU-BLACKLISTED-1",
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=legacy.pk),
+        status=SampleFulfillment.Status.BLACKLISTED,
+        version=5,
+    )
+    legacy.refresh_from_db()
+
+    result = import_sample_fulfillment_snapshot(
+        "shipped",
+        {
+            "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            "id": "FEISHU-BLACKLISTED-1",
+            "status": "shipped",
+        },
+        None,
+        user=records["user"],
+        tenant=records["tenant"],
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        request_key=f"{FEISHU_FULL_SAMPLE_STATUS_SOURCE}:sample:FEISHU-BLACKLISTED-1",
+        request_hash="e" * 64,
+        validated_data={
+            "fulfillment_no": "FEISHU-BLACKLISTED-1",
+            "influencer": records["influencer"],
+            "store": records["store"],
+            "owner": records["user"],
+            "link_type": "direct",
+            "external_product_id": "BLACKLISTED-PRODUCT",
+            "product_name_snapshot": "Blacklisted source product",
+        },
+        item_payloads=[
+            {
+                "site_code": "PH",
+                "requested_sku": "BLACKLISTED-SKU",
+                "product_name": "Blacklisted source product",
+                "quantity": 1,
+                "unit_cost": Decimal("3.0000"),
+                "cost_amount": Decimal("3.0000"),
+            }
+        ],
+        sample_sent_at=datetime(2026, 8, 1, tzinfo=dt_timezone.utc),
+        shipped_at=datetime(2026, 8, 2, tzinfo=dt_timezone.utc),
+        actor=records["user"],
+        return_metadata=True,
+    )
+
+    legacy.refresh_from_db()
+    assert result["outcome"] == "updated"
+    assert legacy.source == FEISHU_FULL_SAMPLE_STATUS_SOURCE
+    assert legacy.external_id == "FEISHU-BLACKLISTED-1"
+    assert legacy.status == SampleFulfillment.Status.BLACKLISTED
+    assert legacy.version == 6
+    assert SampleItem.objects.get(fulfillment=legacy).requested_sku == "BLACKLISTED-SKU"
+
+
+def test_pending_source_row_preserves_existing_terminal_shipping_chronology(sample_records):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    shipped_at = datetime(2026, 7, 5, 10, 0, tzinfo=dt_timezone.utc)
+    legacy = _bare_source_sample(
+        records,
+        source="legacy_shop_analytics_bd",
+        external_id="LEGACY-TERMINAL-CHRONOLOGY",
+        fulfillment_no="FEISHU-TERMINAL-CHRONOLOGY",
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=legacy.pk),
+        status=SampleFulfillment.Status.BLACKLISTED,
+        shipped_at=shipped_at,
+        video_deadline_at=shipped_at + timedelta(days=20),
+        version=5,
+    )
+    legacy.refresh_from_db()
+
+    result = import_sample_fulfillment_snapshot(
+        "pending",
+        {
+            "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            "id": "FEISHU-TERMINAL-CHRONOLOGY",
+            "status": "pending",
+        },
+        None,
+        user=records["user"],
+        tenant=records["tenant"],
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        request_key=(
+            f"{FEISHU_FULL_SAMPLE_STATUS_SOURCE}:sample:FEISHU-TERMINAL-CHRONOLOGY"
+        ),
+        request_hash="f" * 64,
+        validated_data={
+            "fulfillment_no": "FEISHU-TERMINAL-CHRONOLOGY",
+            "influencer": records["influencer"],
+            "store": records["store"],
+            "owner": records["user"],
+            "link_type": "direct",
+        },
+        item_payloads=[],
+        sample_sent_at=datetime(2026, 7, 1, tzinfo=dt_timezone.utc),
+        shipped_at=None,
+        actor=records["user"],
+        return_metadata=True,
+    )
+
+    legacy.refresh_from_db()
+    assert result["outcome"] == "updated"
+    assert legacy.status == SampleFulfillment.Status.BLACKLISTED
+    assert legacy.shipped_at == shipped_at
+    assert legacy.video_deadline_at == shipped_at + timedelta(days=20)
+
+
+def test_historical_status_event_replay_after_terminal_progress_is_noop(sample_records):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    fulfillment = _source_sample(records, "historical-event-then-completed")
+    event = {
+        "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        "source_event_id": "historical-event-then-completed-shipped",
+    }
+    import_sample_fulfillment_snapshot(
+        "shipped",
+        event,
+        None,
+        user=records["executor"],
+        fulfillment=fulfillment,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        status=SampleFulfillment.Status.COMPLETED,
+        version=9,
+    )
+
+    replay = import_sample_fulfillment_snapshot(
+        "shipped",
+        event,
+        None,
+        user=records["executor"],
+        fulfillment=fulfillment,
+        return_metadata=True,
+    )
+
+    fulfillment.refresh_from_db()
+    assert replay["outcome"] == "noop"
+    assert fulfillment.status == SampleFulfillment.Status.COMPLETED
+    assert fulfillment.version == 9
+
+
+def test_source_status_import_still_rejects_unknown_existing_state(sample_records):
+    records = sample_records
+    from django.db.models.query import QuerySet
+
+    fulfillment = _source_sample(records, "unknown-source-status")
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        status="future_unknown_state",
+    )
+    fulfillment.refresh_from_db()
+
+    with pytest.raises(ValidationError, match="Terminal or creator-managed"):
+        import_sample_fulfillment_snapshot(
+            "shipped",
+            {
+                "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+                "source_event_id": "unknown-source-status-shipped",
+            },
+            None,
+            user=records["executor"],
+            fulfillment=fulfillment,
+        )
+
+
 def test_source_cleanup_rejects_persisted_and_supplied_manifest_digest_mismatch(sample_records):
     records = sample_records
     fulfillment = _source_sample(records, "source-cleanup-digest-mismatch")
