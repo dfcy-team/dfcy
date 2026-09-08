@@ -502,6 +502,7 @@ import {
   normalizeBatchSelection,
   skuBatchCombinationCount
 } from '../../utils/skuBatch';
+import { subscribeProductDictionaryCacheInvalidation } from '../../utils/productDictionaryCache';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
@@ -731,6 +732,10 @@ async function loadCategories() {
     );
   }
 }
+
+const stopDictionaryInvalidation = subscribeProductDictionaryCacheInvalidation(() => {
+  void loadCategories();
+});
 
 async function loadColors() {
   if (!canManage.value) return;
@@ -1113,8 +1118,7 @@ async function saveSku() {
 
 onMounted(async () => {
   document.addEventListener('click', handleDocumentClick, true);
-  await Promise.all([loadCategories(), loadColors(), loadAttributes()]);
-  await load();
+  await Promise.all([loadCategories(), loadColors(), loadAttributes(), load()]);
 });
 
 const skuCombinationCount = computed(() =>
@@ -1129,6 +1133,7 @@ const canSubmitSkuBatch = computed(() =>
 );
 
 onBeforeUnmount(() => {
+  stopDictionaryInvalidation();
   document.removeEventListener('click', handleDocumentClick, true);
 });
 </script>

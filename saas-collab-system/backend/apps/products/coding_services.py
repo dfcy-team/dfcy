@@ -106,7 +106,11 @@ def build_specification(category, spec_values):
                 f"Specification value for {code} must be a configured dictionary value or include a supported unit."
             )
         normalized[code] = value
-        values.append(value)
+        # ``0`` is the persisted sentinel for an optional, unselected
+        # dimension. Keep it in ``normalized`` for compatibility, but do not
+        # expose it in the human-facing specification string or SKU code.
+        if value != "0":
+            values.append(value)
     return "×".join(values), normalized
 
 
@@ -114,7 +118,26 @@ def build_sku_code(*, spu, color_code, spec_values):
     if not spu.category_node_id:
         raise ValidationError("SPU has no structured category; SKU code cannot be generated automatically.")
     specification, normalized = build_specification(spu.category_node, spec_values)
-    return f"{spu.spu_code}-{color_code}-{specification}", specification, normalized
+    suffix = f"-{specification}" if specification else ""
+    return f"{spu.spu_code}-{color_code}{suffix}", specification, normalized
+
+
+def build_legacy_sku_code(*, spu, color_code, spec_values):
+    """Return the pre-2.44.80 code for the same optional-spec combination.
+
+    This is a lookup-only compatibility value.  It must never be written for
+    a new SKU: old rows keep codes such as ``SPU-red-0`` while new rows omit
+    the sentinel from their specification and code.
+    """
+
+    if not spu.category_node_id:
+        return None
+    dimensions = spu.category_node.spec_dimensions or []
+    codes = [item.get("code") for item in dimensions if isinstance(item, dict) and item.get("code")]
+    if not codes:
+        return None
+    values = [str((spec_values or {}).get(code, "0") or "0").strip() or "0" for code in codes]
+    return f"{spu.spu_code}-{color_code}-{'×'.join(values)}"
 
 
 def allocate_legacy_sku_code(*, tenant, base_code, legacy_sku_code, max_length=SKU_CODE_MAX_LENGTH):

@@ -502,7 +502,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import {
@@ -529,6 +529,11 @@ import {
   categoryRowStyle,
   mergeCategoryBackgroundColors,
 } from '../../utils/productCategoryPresentation';
+import {
+  getProductDictionaryCache,
+  productDictionaryCacheScope,
+  subscribeProductDictionaryCacheInvalidation,
+} from '../../utils/productDictionaryCache';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
@@ -604,7 +609,17 @@ const leaves = computed(() => categories.value.filter((item) => item.is_active !
 const selectedCategory = computed(() => categories.value.find((item) => String(item.id) === String(form.category_node)));
 const specOptions = computed(() => selectedCategory.value?.spec_dimensions?.[0]?.values || []);
 
+function currentProductDictionaryCache() {
+  return getProductDictionaryCache(productDictionaryCacheScope(auth.currentUser));
+}
+
 watch(categorySearch, (value) => categoryTreeRef.value?.filter(value));
+watch(() => productDictionaryCacheScope(auth.currentUser), () => {
+  categories.value = [];
+  colors.value = [];
+  attributes.value = [];
+  void loadDictionaries();
+});
 
 function show(value, type = 'success') { message.value = value; messageType.value = type; }
 function formatPrice(value) { return value === null || value === undefined || value === '' ? '-' : Number.isFinite(Number(value)) ? Number(value).toFixed(4) : value; }
@@ -916,11 +931,10 @@ function reset() { filters.search = ''; filters.sku_status = 'all'; selectCatego
 function changePageSize() { page.value = 1; load(); }
 
 async function load() {
+  // A failed initial dictionary request leaves no cache entry; let later
+  // searches or pagination retry it without delaying the list request.
+  if (!currentProductDictionaryCache().value) void loadDictionaries();
   loading.value = true;
-  // Category settings own the row background color.  Refreshing the
-  // dictionary together with every query makes a changed color visible
-  // immediately without a full page reload.
-  await loadDictionaries();
   const response = await fetchProductDetailList({
     search: filters.search.trim() || undefined,
     category_id: filters.category_id || undefined,
@@ -942,22 +956,67 @@ async function load() {
   return false;
 }
 
-async function loadDictionaries() {
-  const [categoryResponse, backgroundResponse, colorResponse, attributeResponse] = await Promise.all([
-    fetchProductCategories({ page: 1, page_size: 500 }),
-    fetchProductCategoryBackgroundColors(),
-    fetchProductColors(),
-    fetchProductAttributes(),
-  ]);
-  if (categoryResponse.success || backgroundResponse.success) {
-    categories.value = mergeCategoryBackgroundColors(
-      categoryResponse.success ? collectionRows(categoryResponse.data) : [],
-      backgroundResponse.success ? collectionRows(backgroundResponse.data) : [],
-    );
-  }
-  if (colorResponse.success) colors.value = collectionRows(colorResponse.data);
-  if (attributeResponse.success) attributes.value = collectionRows(attributeResponse.data);
+function applyProductDictionaries(dictionaryData) {
+  categories.value = dictionaryData.categories;
+  colors.value = dictionaryData.colors;
+  attributes.value = dictionaryData.attributes;
 }
+
+async function loadDictionaries() {
+  const cache = currentProductDictionaryCache();
+  const requestScope = productDictionaryCacheScope(auth.currentUser);
+  if (cache.value) {
+    applyProductDictionaries(cache.value);
+    return cache.value;
+  }
+
+  if (!cache.promise) {
+    const requestVersion = cache.version;
+    let request;
+    request = Promise.all([
+      fetchProductCategories({ page: 1, page_size: 500 }),
+      fetchProductCategoryBackgroundColors(),
+      fetchProductColors(),
+      fetchProductAttributes(),
+    ]).then(([categoryResponse, backgroundResponse, colorResponse, attributeResponse]) => {
+      if (requestVersion !== cache.version) return null;
+      const responses = [categoryResponse, backgroundResponse, colorResponse, attributeResponse];
+      const failed = responses.find((response) => !response?.success);
+      if (failed) throw new Error(failed.message || '商品字典加载失败，请重试');
+      const dictionaryData = {
+        categories: mergeCategoryBackgroundColors(
+          collectionRows(categoryResponse.data),
+          collectionRows(backgroundResponse.data),
+        ),
+        colors: collectionRows(colorResponse.data),
+        attributes: collectionRows(attributeResponse.data),
+      };
+      cache.value = dictionaryData;
+      return dictionaryData;
+    }).catch((error) => {
+      // A rejected first request must not poison the shared cache.  The next
+      // page entry or explicit retry should start a fresh dictionary request.
+      if (cache.promise === request) cache.promise = null;
+      throw error;
+    });
+    cache.promise = request;
+  }
+
+  try {
+    const dictionaryData = await cache.promise;
+    if (dictionaryData && requestScope === productDictionaryCacheScope(auth.currentUser)) {
+      applyProductDictionaries(dictionaryData);
+    }
+    return dictionaryData;
+  } catch (error) {
+    show(error?.message || '商品字典加载失败，请重试', 'error');
+    return null;
+  }
+}
+
+const stopDictionaryInvalidation = subscribeProductDictionaryCacheInvalidation(() => {
+  void loadDictionaries();
+});
 
 function viewRow(row) { selectedRow.value = row; viewVisible.value = true; }
 function openGenerate(row) {
@@ -1266,7 +1325,13 @@ function downloadTemplate() {
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = '商品明细导入模板.csv'; anchor.click(); URL.revokeObjectURL(url);
 }
 
-onMounted(() => { load(); });
+onMounted(() => {
+  void Promise.all([loadDictionaries(), load()]);
+});
+
+onBeforeUnmount(() => {
+  stopDictionaryInvalidation();
+});
 </script>
 
 <style scoped>

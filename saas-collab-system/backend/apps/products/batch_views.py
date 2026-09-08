@@ -17,7 +17,7 @@ from rest_framework.decorators import api_view, permission_classes
 from apps.common.responses import success_response
 from apps.permissions.ui_p5_scopes import filter_product_spus, require_create_scope
 
-from .coding_services import build_sku_code
+from .coding_services import build_legacy_sku_code, build_sku_code
 from .models import ProductCategory, ProductColor, ProductSKU, ProductSPU
 from .permissions import IsProductMasterReadOrManage
 from .serializers import ProductSKUSerializer
@@ -259,12 +259,26 @@ def product_sku_batch_create(request):
         spu.category_node = category
         combinations = _build_combinations(category, spu, color_codes, spec_values)
         candidate_codes = [item[2] for item in combinations]
-        existing = _existing_skus_for_codes(request.user.tenant, candidate_codes)
+        legacy_aliases = {
+            predicted_code: build_legacy_sku_code(
+                spu=spu,
+                color_code=color_code,
+                spec_values=current_specs,
+            )
+            for color_code, current_specs, predicted_code in combinations
+        }
+        lookup_codes = candidate_codes + [
+            alias
+            for alias in legacy_aliases.values()
+            if alias and alias not in candidate_codes
+        ]
+        existing = _existing_skus_for_codes(request.user.tenant, lookup_codes)
 
         # A generated code belonging to another SPU indicates a data collision,
         # rather than an idempotent retry.  Reject the complete batch.
         conflicting = [
-            code for code, item in existing.items() if item.spu_id != spu.id
+            code for code in candidate_codes
+            if code in existing and existing[code].spu_id != spu.id
         ]
         if conflicting:
             raise serializers.ValidationError(
@@ -275,6 +289,14 @@ def product_sku_batch_create(request):
         skipped = 0
         for color_code, current_specs, predicted_code in combinations:
             if predicted_code in existing:
+                skipped += 1
+                continue
+            legacy_alias = legacy_aliases.get(predicted_code)
+            legacy_item = existing.get(legacy_alias) if legacy_alias else None
+            if legacy_item is not None and legacy_item.spu_id == spu.id:
+                # The old code is intentionally preserved; only treat it as
+                # the idempotency record for the new no-sentinel candidate.
+                existing[predicted_code] = legacy_item
                 skipped += 1
                 continue
 

@@ -87,6 +87,7 @@ describe('基础档案设置前端契约', () => {
     expect(page).toContain("auth.hasPermission('masterdata.settings.manage')");
     expect(page).toContain('row_background_color');
     expect(page).toContain('category_id: row.id');
+    expect(page).toContain('invalidateProductDictionaryCache()');
     expect(api).toContain('fetchProductCategoryBackgroundColors');
     expect(api).toContain('updateProductCategoryBackgroundColors');
   });

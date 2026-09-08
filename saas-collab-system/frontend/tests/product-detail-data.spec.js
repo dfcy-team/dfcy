@@ -114,8 +114,19 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('preview-teleported');
   });
 
-  it('刷新查询时同步读取分类字典并支持三种导入模式', () => {
-    expect(page).toContain('await loadDictionaries();');
+  it('首次加载缓存商品字典，翻页和筛选只重新请求明细列表', () => {
+    const loadBody = page.slice(page.indexOf('async function load()'), page.indexOf('function applyProductDictionaries'));
+    expect(page).toContain('getProductDictionaryCache(productDictionaryCacheScope');
+    expect(page).toContain('cache.promise');
+    expect(page).toContain('if (cache.promise === request) cache.promise = null;');
+    expect(page).toContain('productDictionaryCacheScope(auth.currentUser)');
+    expect(page).toContain('if (!currentProductDictionaryCache().value) void loadDictionaries();');
+    expect(page).toContain('void Promise.all([loadDictionaries(), load()]);');
+    expect(loadBody).not.toContain('await loadDictionaries()');
+  });
+
+  it('支持分类颜色失效刷新并保留三种导入模式', () => {
+    expect(page).toContain('subscribeProductDictionaryCacheInvalidation');
     expect(page).toContain('fetchProductCategoryBackgroundColors()');
     expect(page).toContain('mergeCategoryBackgroundColors(');
     expect(page).toContain('data-testid="detail-import-mode"');

@@ -17,7 +17,6 @@ from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import Q
-from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 
@@ -1661,18 +1660,37 @@ def product_detail_collection(request):
         legacy_queryset = legacy_queryset.filter(generated_sku__is_active=False)
         sku_queryset = sku_queryset.filter(is_active=False)
 
-    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-created_at", "id")]
-    linked_sku_ids = {item.generated_sku.id for item in legacy_queryset if item.generated_sku_id}
-    sku_rows = [
-        _product_detail_row_from_sku(sku)
-        for sku in sku_queryset.order_by("sku_code")
-        if sku.id not in linked_sku_ids
-    ]
-    rows = legacy_rows + sku_rows
-
     page, page_size = pagination_query(request)
-    paginator = Paginator(rows, page_size)
-    page_obj = paginator.get_page(page)
+    # Keep linked SKUs out of the standalone stream without materializing all
+    # legacy rows or serializing the entire tenant before slicing the page.
+    # The subquery also preserves the legacy/SKU visibility and filters.
+    linked_sku_ids = legacy_queryset.exclude(generated_sku_id=None).values("generated_sku_id")
+    standalone_skus = sku_queryset.exclude(pk__in=linked_sku_ids).order_by("sku_code")
+    legacy_ordered = legacy_queryset.order_by("-created_at", "id")
+    legacy_count = legacy_ordered.count()
+    standalone_count = standalone_skus.count()
+    total_count = legacy_count + standalone_count
+
+    # ``Paginator.get_page`` clamps out-of-range pages to the last page (and
+    # uses page 1 for an empty result). Preserve that public API contract while
+    # slicing the database querysets directly.
+    last_page = max(1, (total_count + page_size - 1) // page_size)
+    page = min(page, last_page)
+    offset = (page - 1) * page_size
+    end = offset + page_size
+    rows = []
+    if offset < legacy_count:
+        legacy_page = legacy_ordered[offset:min(end, legacy_count)]
+        rows.extend(_product_detail_row_from_legacy(item) for item in legacy_page)
+        remaining = page_size - len(rows)
+        if remaining > 0:
+            rows.extend(_product_detail_row_from_sku(item) for item in standalone_skus[:remaining])
+    else:
+        sku_offset = offset - legacy_count
+        rows.extend(
+            _product_detail_row_from_sku(item)
+            for item in standalone_skus[sku_offset:sku_offset + page_size]
+        )
 
     def page_url(target_page):
         if target_page is None:
@@ -1684,10 +1702,10 @@ def product_detail_collection(request):
 
     return success_response(
         {
-            "count": paginator.count,
-            "next": page_url(page_obj.next_page_number()) if page_obj.has_next() else None,
-            "previous": page_url(page_obj.previous_page_number()) if page_obj.has_previous() else None,
-            "results": list(page_obj.object_list),
+            "count": total_count,
+            "next": page_url(page + 1) if page < last_page else None,
+            "previous": page_url(page - 1) if page > 1 else None,
+            "results": rows,
         }
     )
 
