@@ -20,6 +20,7 @@ from apps.influencers.models import (
 )
 from apps.influencers.serializers import SampleFulfillmentSerializer
 from apps.influencers.services import (
+    FEISHU_PERSONNEL_POLICY,
     FEISHU_FULL_SAMPLE_STATUS_SOURCE,
     _import_manifest_digest,
     create_outreach_task,
@@ -35,6 +36,23 @@ from apps.tenants.models import Tenant
 
 
 pytestmark = pytest.mark.django_db
+
+
+def _personnel_kwargs(owner, dispatcher=None):
+    """Keep legacy compatibility fixtures explicit about source provenance."""
+    result = {
+        "source_owner_name_snapshot": owner.username,
+        "owner_resolution": "exact_match",
+        "personnel_policy": FEISHU_PERSONNEL_POLICY,
+    }
+    if dispatcher is not None:
+        result.update(
+            {
+                "source_dispatcher_name_snapshot": dispatcher.username,
+                "dispatcher_resolution": "exact_match",
+            }
+        )
+    return result
 
 
 def _user(tenant, username):
@@ -161,6 +179,7 @@ def test_task_snapshot_uses_source_dates_and_does_not_fabricate_completion(sampl
             "external_product_id": "PRODUCT-COMPAT-1",
             "target_count": 2,
         },
+        **_personnel_kwargs(records["user"], records["executor"]),
         actor=records["user"],
     )
 
@@ -198,6 +217,7 @@ def test_task_snapshot_uses_source_dates_and_does_not_fabricate_completion(sampl
             "external_product_id": "PRODUCT-COMPAT-1",
             "target_count": 2,
         },
+        **_personnel_kwargs(records["user"], records["executor"]),
         actor=records["user"],
         return_metadata=True,
     )
@@ -222,6 +242,7 @@ def test_task_snapshot_chronology_revision_is_audited_and_exact_replay_is_noop(s
             "external_product_id": "PRODUCT-COMPAT-1",
             "target_count": 2,
         },
+        **_personnel_kwargs(records["user"], records["executor"]),
         "actor": records["user"],
     }
     import_outreach_task_snapshot(
@@ -346,6 +367,7 @@ def test_task_snapshot_adopts_approved_legacy_business_number(sample_records):
             "owner": records["user"],
             "dispatcher": records["executor"],
         },
+        **_personnel_kwargs(records["user"], records["executor"]),
         actor=records["user"],
     )
     legacy.refresh_from_db()
@@ -385,6 +407,7 @@ def test_task_snapshot_task_no_fallback_rejects_current_source_identity_change(s
                 "owner": records["user"],
                 "dispatcher": records["executor"],
             },
+            **_personnel_kwargs(records["user"], records["executor"]),
             actor=records["user"],
         )
     current.refresh_from_db()
@@ -413,6 +436,7 @@ def test_task_snapshot_rejects_multiple_current_legacy_external_candidates(sampl
             "owner": records["user"],
             "dispatcher": records["executor"],
         },
+        **_personnel_kwargs(records["user"], records["executor"]),
         actor=records["user"],
     )
     assert created is True
@@ -441,6 +465,7 @@ def test_task_snapshot_rejects_multiple_current_legacy_external_candidates(sampl
                 "owner": records["user"],
                 "dispatcher": records["executor"],
             },
+            **_personnel_kwargs(records["user"], records["executor"]),
             actor=records["user"],
         )
 
@@ -472,6 +497,7 @@ def test_source_snapshot_preserves_source_costs_and_zero_quantity_placeholder(sa
             "link_type": "direct",
             "product_name_snapshot": "Historical source product",
         },
+        **_personnel_kwargs(records["user"]),
         item_payloads=[
             {
                 "site_code": "PH",
@@ -751,6 +777,7 @@ def test_source_row_import_rejects_allowed_source_external_id_duplicates(sample_
                 "owner": records["user"],
                 "link_type": "direct",
             },
+            **_personnel_kwargs(records["user"]),
             item_payloads=[],
             sample_sent_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
             actor=records["user"],
@@ -785,6 +812,7 @@ def test_source_row_import_rejects_existing_external_business_number_mismatch(sa
                 "owner": records["user"],
                 "link_type": "direct",
             },
+            **_personnel_kwargs(records["user"]),
             item_payloads=[],
             sample_sent_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
             actor=records["user"],
@@ -835,6 +863,7 @@ def test_source_row_import_adopts_approved_legacy_business_number_and_items(samp
             "external_product_id": "PRODUCT-COMPAT-1",
             "product_name_snapshot": "Imported product",
         },
+        **_personnel_kwargs(records["user"]),
         item_payloads=[
             {
                 "external_product_id": "PRODUCT-COMPAT-1",
@@ -891,6 +920,7 @@ def test_source_row_import_rejects_current_source_number_identity_change(sample_
                 "owner": records["user"],
                 "link_type": "direct",
             },
+            **_personnel_kwargs(records["user"]),
             item_payloads=[],
             sample_sent_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
             actor=records["user"],
@@ -1134,6 +1164,7 @@ def test_source_row_import_api_upserts_source_number_and_uses_explicit_dates(sam
             "owner": records["executor"],
             "link_type": "direct",
         },
+        **_personnel_kwargs(records["executor"]),
         item_payloads=[],
         sample_sent_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
         shipped_at=datetime(2026, 9, 2, tzinfo=dt_timezone.utc),
@@ -1191,6 +1222,7 @@ def test_source_row_import_preserves_source_cost_facts_and_replay(sample_records
             "link_type": "direct",
             "external_product_id": "PRODUCT-SOURCE-COST",
         },
+        **_personnel_kwargs(records["executor"]),
         "item_payloads": [item_payload],
         "status": "shipped",
         "sample_sent_at": datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
@@ -1598,6 +1630,7 @@ def test_source_row_import_updates_legacy_facts_but_preserves_blacklisted_state(
             "external_product_id": "BLACKLISTED-PRODUCT",
             "product_name_snapshot": "Blacklisted source product",
         },
+        **_personnel_kwargs(records["user"]),
         item_payloads=[
             {
                 "site_code": "PH",
@@ -1665,6 +1698,7 @@ def test_pending_source_row_preserves_existing_terminal_shipping_chronology(samp
             "owner": records["user"],
             "link_type": "direct",
         },
+        **_personnel_kwargs(records["user"]),
         item_payloads=[],
         sample_sent_at=datetime(2026, 7, 1, tzinfo=dt_timezone.utc),
         shipped_at=None,
@@ -1737,6 +1771,42 @@ def test_source_status_import_still_rejects_unknown_existing_state(sample_record
             None,
             user=records["executor"],
             fulfillment=fulfillment,
+        )
+
+
+def test_full_source_row_import_requires_personnel_provenance(sample_records):
+    records = sample_records
+    with pytest.raises(ValidationError, match="personnel provenance"):
+        import_outreach_task_snapshot(
+            status="pending",
+            user=records["user"],
+            tenant=records["tenant"],
+            source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            source_row={"external_id": "MISSING-TASK-PERSONNEL"},
+            validated_data={
+                "store": records["store"],
+                "owner": records["user"],
+                "dispatcher": records["executor"],
+            },
+            actor=records["user"],
+        )
+    with pytest.raises(ValidationError, match="personnel provenance"):
+        import_sample_fulfillment_snapshot(
+            "pending",
+            user=records["user"],
+            tenant=records["tenant"],
+            source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            source_row={"external_id": "MISSING-SAMPLE-PERSONNEL"},
+            validated_data={
+                "fulfillment_no": "MISSING-SAMPLE-PERSONNEL",
+                "influencer": records["influencer"],
+                "store": records["store"],
+                "owner": records["user"],
+                "link_type": "direct",
+            },
+            item_payloads=[],
+            sample_sent_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
+            actor=records["user"],
         )
 
 

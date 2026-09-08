@@ -22,6 +22,8 @@ SUPPORTED_CURRENCY_CHOICES = (
     ("USD", "USD"),
 )
 
+FEISHU_FULL_PERSONNEL_SOURCE = "feishu_full_20260908"
+
 
 def normalize_tiktok_username(value):
     normalized = unicodedata.normalize("NFKC", str(value or ""))
@@ -381,6 +383,8 @@ class OutreachTask(StateMachineTenantModel):
         "outreach_at",
         "is_deleted",
         "deleted_at",
+        "source_owner_name_snapshot",
+        "source_dispatcher_name_snapshot",
     )
     initial_state_values = {
         "status": "pending",
@@ -419,6 +423,10 @@ class OutreachTask(StateMachineTenantModel):
     target_count = models.PositiveIntegerField(default=0)
     dispatcher = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="dispatched_outreach_tasks")
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="owned_outreach_tasks")
+    # Historical names from the source export remain stable even if the live
+    # user directory is renamed later.
+    source_owner_name_snapshot = models.CharField(max_length=255, blank=True, default="")
+    source_dispatcher_name_snapshot = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     dispatch_time = models.DateTimeField(default=timezone.now)
     outreach_at = models.DateTimeField(null=True, blank=True)
@@ -439,8 +447,31 @@ class OutreachTask(StateMachineTenantModel):
         constraints = [
             models.UniqueConstraint(fields=["tenant", "task_no"], name="uniq_outreach_task_no"),
             models.UniqueConstraint(fields=["tenant", "source", "external_id"], name="uniq_outreach_external"),
+            models.CheckConstraint(
+                condition=(
+                    Q(source=FEISHU_FULL_PERSONNEL_SOURCE)
+                    | (
+                        Q(source_owner_name_snapshot="")
+                        & Q(source_dispatcher_name_snapshot="")
+                    )
+                ),
+                name="outreach_source_personnel_guard",
+            ),
         ]
         indexes = [models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status")]
+
+    def clean(self):
+        super().clean()
+        if self.source != FEISHU_FULL_PERSONNEL_SOURCE and (
+            self.source_owner_name_snapshot or self.source_dispatcher_name_snapshot
+        ):
+            raise ValidationError(
+                {
+                    "source_owner_name_snapshot": (
+                        "Source personnel snapshots require the controlled Feishu source."
+                    )
+                }
+            )
 
     @property
     def linked_count(self):
@@ -556,6 +587,7 @@ class SampleFulfillment(StateMachineTenantModel):
         "is_deleted",
         "deleted_at",
         "deleted_by_id",
+        "source_owner_name_snapshot",
     )
     initial_state_values = {
         "status": "pending",
@@ -616,6 +648,7 @@ class SampleFulfillment(StateMachineTenantModel):
     video_deadline_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="owned_sample_fulfillments")
+    source_owner_name_snapshot = models.CharField(max_length=255, blank=True, default="")
     source = models.CharField(max_length=40, default="manual")
     external_id = models.CharField(max_length=160, blank=True, null=True)
     version = models.PositiveIntegerField(default=1)
@@ -652,6 +685,13 @@ class SampleFulfillment(StateMachineTenantModel):
             models.UniqueConstraint(fields=["tenant", "fulfillment_no"], name="uniq_sample_fulfillment_no"),
             models.UniqueConstraint(fields=["tenant", "request_key"], name="uniq_sample_request_key"),
             models.UniqueConstraint(fields=["tenant", "source", "external_id"], name="uniq_sample_external"),
+            models.CheckConstraint(
+                condition=(
+                    Q(source=FEISHU_FULL_PERSONNEL_SOURCE)
+                    | Q(source_owner_name_snapshot="")
+                ),
+                name="sample_source_personnel_guard",
+            ),
         ]
         indexes = [
             models.Index(fields=["tenant", "owner", "status"], name="idx_sample_owner_status"),
@@ -663,6 +703,14 @@ class SampleFulfillment(StateMachineTenantModel):
 
     def clean(self):
         super().clean()
+        if self.source != FEISHU_FULL_PERSONNEL_SOURCE and self.source_owner_name_snapshot:
+            raise ValidationError(
+                {
+                    "source_owner_name_snapshot": (
+                        "Source personnel snapshots require the controlled Feishu source."
+                    )
+                }
+            )
         if self.link_type not in dict(self.LINK_TYPE_CHOICES):
             raise ValidationError({"link_type": "Unsupported link type."})
         if self.link_type == "direct" and (self.outreach_task_id or self.outreach_target_id):

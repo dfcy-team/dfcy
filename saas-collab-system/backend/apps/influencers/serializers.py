@@ -323,7 +323,8 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "id", "tenant_id", "task_no", "task_name", "influencer", "store", "store_name", "spu",
             "external_product_id", "sku_prefix", "product_name_snapshot", "product_match_status",
             "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
-            "owner", "owner_name", "dispatcher_name", "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
+            "owner", "owner_name", "dispatcher_name", "source_owner_name_snapshot", "source_dispatcher_name_snapshot",
+            "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
             "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
             "sample_fulfillment_influencer_count",
@@ -333,7 +334,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id", "tenant_id", "task_no", "dispatcher_id", "linked_count", "status", "dispatch_time", "outreach_at",
             "started_at", "finalized_at", "product_matched_at", "is_deleted", "deleted_at", "version",
-            "created_at", "updated_at",
+            "source_owner_name_snapshot", "source_dispatcher_name_snapshot", "created_at", "updated_at",
         )
 
         extra_kwargs = {
@@ -560,6 +561,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
             "outreach_target", "influencer", "influencer_name", "influencer_display_name", "influencer_code",
             "influencer_handle", "influencer_platform", "store", "store_name", "owner", "owner_name",
+            "source_owner_name_snapshot",
             "product_name_snapshot", "external_product_id", "sample_order_no",
             "link_type", "quick_tags", "sample_sent_at", "shipped_at", "video_deadline_at", "status", "source", "external_id", "version",
             "notes", "finalized_at", "sku_quantity", "calculated_cost",
@@ -569,6 +571,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id", "tenant_id", "sample_sent_at", "shipped_at", "status",
             "version", "finalized_at", "sku_quantity", "calculated_cost", "video_deadline_at", "is_deleted", "deleted_at", "deleted_by", "deleted_by_name",
+            "source_owner_name_snapshot",
             "video_match_count", "video_matches", "created_at", "updated_at",
         )
 

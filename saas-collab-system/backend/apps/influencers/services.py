@@ -2,6 +2,7 @@ import hashlib
 import json
 import math
 import re
+import unicodedata
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation
@@ -92,6 +93,11 @@ SAMPLE_VIDEO_RECONCILE_STATUSES = frozenset(
 # controlled Feishu full export.  It is not a second generic status endpoint:
 # callers must identify this source and provide a stable source event key.
 FEISHU_FULL_SAMPLE_STATUS_SOURCE = FulfillmentStatusEvent.SOURCE_IMPORT
+FEISHU_PERSONNEL_POLICY = "feishu_unmatched_to_liyejun_v1"
+FEISHU_PERSONNEL_RESOLUTIONS = frozenset(
+    {"exact_match", "unmatched_fallback", "blank_dispatcher_uses_owner"}
+)
+FEISHU_PERSONNEL_FALLBACK_USERNAME = "liyejun"
 FEISHU_FULL_SAMPLE_STATUS_MAP = {
     "pending": SampleFulfillment.Status.PENDING,
     "待发样": SampleFulfillment.Status.PENDING,
@@ -1197,6 +1203,14 @@ def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_nam
 @transaction.atomic
 def create_outreach_task(*, user, validated_data):
     data = dict(validated_data)
+    if any(
+        field in data
+        for field in ("source_owner_name_snapshot", "source_dispatcher_name_snapshot")
+    ):
+        raise ValidationError(
+            {"source_personnel": "Source personnel snapshots are writable only by the Feishu import adapter."},
+            code="forbidden",
+        )
     # task_no is server-owned even for direct service callers that bypass the serializer.
     data.pop("task_no", None)
     owner_value = data.get("owner")
@@ -1306,6 +1320,14 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
 
     data = dict(validated_data)
+    if any(
+        field in data
+        for field in ("source_owner_name_snapshot", "source_dispatcher_name_snapshot")
+    ):
+        raise ValidationError(
+            {"source_personnel": "Source personnel snapshots are writable only by the Feishu import adapter."},
+            code="forbidden",
+        )
     if not data:
         raise ValidationError({"detail": "At least one editable task field is required."})
 
@@ -2104,6 +2126,11 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
     if not request_key or len(request_key) > 128:
         raise ValidationError({"idempotency_key": "Idempotency-Key must be 1-128 characters."})
     data = dict(validated_data)
+    if "source_owner_name_snapshot" in data:
+        raise ValidationError(
+            {"source_personnel": "Source personnel snapshots are writable only by the Feishu import adapter."},
+            code="forbidden",
+        )
     item_payloads = _normalize_item_payloads(item_payloads)
     request_hash = _payload_hash({"fulfillment": data, "items": item_payloads})
     existing = SampleFulfillment.objects.select_for_update().filter(
@@ -2565,6 +2592,322 @@ def _import_task_field(data, row, field, *aliases):
     return None
 
 
+def _personnel_raw_name(mapping, role):
+    """Read a source name without normalising or truncating its evidence."""
+    def raw(value, field):
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValidationError({field: "Source personnel names must be strings."})
+        return value
+
+    if not isinstance(mapping, Mapping):
+        return None
+    entry = mapping.get(role)
+    if isinstance(entry, Mapping):
+        for key in (
+            "source_name",
+            "raw_name",
+            "original_name",
+            "name",
+            "source_name_snapshot",
+            "snapshot",
+        ):
+            if key in entry:
+                return raw(entry[key], f"source_{role}_name_snapshot")
+    for key in (
+        f"source_{role}_name_snapshot",
+        f"source_{role}_name",
+        f"{role}_source_name",
+        f"{role}_name",
+        f"{role}_raw_name",
+    ):
+        if key in mapping:
+            return raw(mapping[key], f"source_{role}_name_snapshot")
+    return None
+
+
+def _personnel_entry(mapping, role):
+    if not isinstance(mapping, Mapping):
+        return {}
+    entry = mapping.get(role)
+    if isinstance(entry, Mapping):
+        return entry
+    return mapping
+
+
+def _personnel_resolution(mapping, role):
+    entry = _personnel_entry(mapping, role)
+    if not isinstance(entry, Mapping):
+        return None
+    for key in ("resolution", "provenance", "mapping", "match_type", "reason_code"):
+        value = entry.get(key)
+        if value not in (None, ""):
+            return str(value).strip()
+    for key in (f"{role}_resolution", f"{role}_provenance", f"{role}_mapping"):
+        value = mapping.get(key) if isinstance(mapping, Mapping) else None
+        if value not in (None, ""):
+            return str(value).strip()
+    return None
+
+
+def _personnel_actual_id(mapping, role):
+    entry = _personnel_entry(mapping, role)
+    if not isinstance(entry, Mapping):
+        return None
+    for key in (
+        "resolved_user_id",
+        "actual_user_id",
+        "resolved_id",
+        "user_id",
+        "actual_id",
+        "id",
+    ):
+        value = entry.get(key)
+        if value not in (None, ""):
+            return _pk(value)
+    for key in (f"{role}_resolved_user_id", f"{role}_user_id", f"{role}_actual_id"):
+        value = mapping.get(key) if isinstance(mapping, Mapping) else None
+        if value not in (None, ""):
+            return _pk(value)
+    return None
+
+
+def _personnel_reason(mapping, role, resolution):
+    # Reasons are a stable audit vocabulary, not caller-controlled text.
+    return {
+        "exact_match": "source name matched one qualified tenant user",
+        "unmatched_fallback": "source name had no qualified tenant match; policy fallback used",
+        "blank_dispatcher_uses_owner": "source dispatcher was blank; resolved owner reused",
+    }.get(resolution, "source personnel mapping")
+
+
+def _normalise_personnel_mapping(
+    mapping,
+    *,
+    owner_name=None,
+    dispatcher_name=None,
+    owner_resolution=None,
+    dispatcher_resolution=None,
+    personnel_policy=None,
+    roles=("owner",),
+):
+    """Validate the explicit importer-to-service personnel contract.
+
+    The importer supplies the resolved foreign keys in ``validated_data`` and
+    this function only validates the provenance envelope and preserves the raw
+    source names.  It intentionally never resolves or creates users.
+    """
+    supplied = any(
+        value is not None
+        for value in (
+            mapping,
+            owner_name,
+            dispatcher_name,
+            owner_resolution,
+            dispatcher_resolution,
+            personnel_policy,
+        )
+    )
+    if not supplied:
+        return None
+    if mapping is not None and not isinstance(mapping, Mapping):
+        raise ValidationError({"personnel_mapping": "Personnel mapping must be an object."})
+    mapping = dict(mapping or {})
+    policy = personnel_policy or mapping.get("personnel_policy") or mapping.get("policy")
+    if policy != FEISHU_PERSONNEL_POLICY:
+        raise ValidationError(
+            {"personnel_policy": "Unsupported personnel mapping policy."},
+            code="conflict",
+        )
+
+    # Explicit kwargs are authoritative and let the importer pass the raw
+    # fields without putting control metadata into validated model data.
+    if owner_name is not None:
+        existing_name = _personnel_raw_name(mapping, "owner")
+        if existing_name is not None and str(existing_name) != str(owner_name):
+            raise ValidationError(
+                {"source_owner_name_snapshot": "Conflicting personnel source names were supplied."},
+                code="conflict",
+            )
+        mapping["source_owner_name_snapshot"] = owner_name
+    if dispatcher_name is not None:
+        existing_name = _personnel_raw_name(mapping, "dispatcher")
+        if existing_name is not None and str(existing_name) != str(dispatcher_name):
+            raise ValidationError(
+                {"source_dispatcher_name_snapshot": "Conflicting personnel source names were supplied."},
+                code="conflict",
+            )
+        mapping["source_dispatcher_name_snapshot"] = dispatcher_name
+    if owner_resolution is not None:
+        existing_resolution = _personnel_resolution(mapping, "owner")
+        if existing_resolution is not None and str(existing_resolution) != str(owner_resolution):
+            raise ValidationError({"owner_resolution": "Conflicting personnel resolutions were supplied."}, code="conflict")
+        mapping["owner_resolution"] = owner_resolution
+    if dispatcher_resolution is not None:
+        existing_resolution = _personnel_resolution(mapping, "dispatcher")
+        if existing_resolution is not None and str(existing_resolution) != str(dispatcher_resolution):
+            raise ValidationError({"dispatcher_resolution": "Conflicting personnel resolutions were supplied."}, code="conflict")
+        mapping["dispatcher_resolution"] = dispatcher_resolution
+
+    result = {"policy": policy}
+    for role in roles:
+        name = _personnel_raw_name(mapping, role)
+        resolution = _personnel_resolution(mapping, role)
+        # A role is considered supplied only when either an explicit raw name
+        # or resolution was supplied.  This permits task imports that carry
+        # only owner provenance while retaining an existing dispatcher value.
+        if name is None and resolution is None:
+            continue
+        if name is None:
+            name = ""
+        if len(name) > 255:
+            raise ValidationError(
+                {f"source_{role}_name_snapshot": "Source personnel name must be at most 255 characters."}
+            )
+        if resolution not in FEISHU_PERSONNEL_RESOLUTIONS:
+            raise ValidationError(
+                {f"{role}_resolution": "Unsupported personnel mapping resolution."},
+                code="conflict",
+            )
+        reason = _personnel_reason(mapping, role, resolution)
+        if len(reason) > 5000:
+            raise ValidationError({f"{role}_resolution": "Personnel mapping reason is too long."})
+        result[role] = {
+            "name": name,
+            "resolution": resolution,
+            "reason": reason,
+            "actual_id": _personnel_actual_id(mapping, role),
+        }
+    if not any(role in result for role in roles):
+        raise ValidationError({"personnel_mapping": "At least one personnel mapping role is required."})
+    return result
+
+
+def _require_personnel_roles(personnel, roles):
+    """Require the complete provenance envelope for a full source-row import."""
+    if personnel is None:
+        raise ValidationError(
+            {"personnel_mapping": "Complete source-row imports require personnel provenance."},
+            code="required",
+        )
+    missing = [role for role in roles if role not in personnel]
+    if missing:
+        raise ValidationError(
+            {"personnel_mapping": f"Missing personnel provenance role(s): {', '.join(missing)}."},
+            code="required",
+        )
+
+
+def _qualified_personnel_matches(user, source_name):
+    """Return the current tenant's qualified users matching a source name."""
+    source_name = str(source_name or "")
+    if not source_name.strip():
+        return get_user_model().objects.none()
+    eligible = get_user_model().objects.filter(
+        tenant_id=user.tenant_id,
+        is_active=True,
+        user_type=get_user_model().UserType.INTERNAL,
+    ).filter(
+        user_roles__tenant_id=user.tenant_id,
+        user_roles__role__tenant_id=user.tenant_id,
+        user_roles__role__code="bd",
+        user_roles__role__status="active",
+    ).distinct()
+    normalized = unicodedata.normalize("NFKC", source_name).strip().casefold()
+    ids = [
+        candidate.pk
+        for candidate in eligible.only("pk", "username", "full_name")
+        if normalized in {
+            unicodedata.normalize("NFKC", str(candidate.username or "")).strip().casefold(),
+            unicodedata.normalize("NFKC", str(candidate.full_name or "")).strip().casefold(),
+        }
+    ]
+    return get_user_model().objects.filter(pk__in=ids)
+
+
+def _validate_personnel_role(*, user, role, entry, actual_user, owner_user=None, owner_entry=None):
+    """Recheck mapping against locked actual accounts during apply."""
+    if entry is None:
+        return
+    actual_id = _pk(actual_user)
+    supplied_id = entry.get("actual_id")
+    if supplied_id is not None and _pk(supplied_id) != actual_id:
+        raise ValidationError(
+            {f"{role}_resolution": "Resolved personnel id does not match the imported relation."},
+            code="conflict",
+        )
+    resolution = entry["resolution"]
+    name = entry["name"]
+    candidates = _qualified_personnel_matches(user, name)
+    if resolution == "exact_match":
+        if candidates.count() != 1 or candidates.first().pk != actual_id:
+            raise ValidationError(
+                {f"{role}_resolution": "Exact personnel mapping is no longer unique or does not match."},
+                code="conflict",
+            )
+    elif resolution == "unmatched_fallback":
+        if candidates.exists():
+            raise ValidationError(
+                {f"{role}_resolution": "Fallback requires zero qualified source-name matches."},
+                code="conflict",
+            )
+        fallback_candidates = get_user_model().objects.filter(
+            tenant_id=user.tenant_id,
+            is_active=True,
+            user_type=get_user_model().UserType.INTERNAL,
+            user_roles__tenant_id=user.tenant_id,
+            user_roles__role__tenant_id=user.tenant_id,
+            user_roles__role__code="bd",
+            user_roles__role__status="active",
+        ).distinct()
+        # The policy names one exact service account.  Do not apply the
+        # importer-side display-name normalization here: accepting full-width,
+        # case-folded, or padded usernames would make a Unicode lookalike account
+        # a different fallback principal than the reviewed ``liyejun`` account.
+        fallback_users = [
+            candidate
+            for candidate in fallback_candidates
+            if str(candidate.username or "") == FEISHU_PERSONNEL_FALLBACK_USERNAME
+        ]
+        if len(fallback_users) != 1 or fallback_users[0].pk != actual_id:
+            raise ValidationError(
+                {f"{role}_resolution": "The configured personnel fallback is not uniquely qualified."},
+                code="conflict",
+            )
+    elif resolution == "blank_dispatcher_uses_owner":
+        if role != "dispatcher" or unicodedata.normalize("NFKC", name).strip():
+            raise ValidationError(
+                {f"{role}_resolution": "Blank-dispatcher provenance requires an empty source dispatcher name."},
+                code="conflict",
+            )
+        if owner_entry is None or owner_user is None or actual_id != _pk(owner_user):
+            raise ValidationError(
+                {f"{role}_resolution": "Blank-dispatcher provenance must reuse the resolved owner account."},
+                code="conflict",
+            )
+
+
+def _personnel_audit_data(*, personnel, task=None, fulfillment=None):
+    data = {"personnel_policy": personnel["policy"]}
+    for role, entry in personnel.items():
+        if role == "policy":
+            continue
+        data.update(
+            {
+                f"source_{role}_name_snapshot": entry["name"],
+                f"{role}_resolution": entry["resolution"],
+                f"{role}_reason": entry["reason"],
+                f"actual_{role}_id": (
+                    getattr(task, f"{role}_id", None)
+                    if task is not None
+                    else getattr(fulfillment, f"{role}_id", None)
+                ),
+            }
+        )
+    return data
+
+
 @transaction.atomic
 def import_outreach_task_snapshot(
     status=None,
@@ -2584,6 +2927,12 @@ def import_outreach_task_snapshot(
     started_at=None,
     outreach_at=None,
     finalized_at=None,
+    personnel_mapping=None,
+    source_owner_name_snapshot=None,
+    source_dispatcher_name_snapshot=None,
+    owner_resolution=None,
+    dispatcher_resolution=None,
+    personnel_policy=None,
     return_metadata=False,
 ):
     """Upsert one Feishu task snapshot with audited, source-owned timestamps.
@@ -2598,6 +2947,16 @@ def import_outreach_task_snapshot(
 
     if source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
         raise ValidationError({"source": "Unsupported outreach task import source."})
+    personnel = _normalise_personnel_mapping(
+        personnel_mapping,
+        owner_name=source_owner_name_snapshot,
+        dispatcher_name=source_dispatcher_name_snapshot,
+        owner_resolution=owner_resolution,
+        dispatcher_resolution=dispatcher_resolution,
+        personnel_policy=personnel_policy,
+        roles=("owner", "dispatcher"),
+    )
+    _require_personnel_roles(personnel, ("owner", "dispatcher"))
     if user is None:
         user = actor
     if user is None:
@@ -2832,6 +3191,21 @@ def import_outreach_task_snapshot(
     dispatcher = _locked_user(user, _pk(dispatcher_value), field="dispatcher")
     _assert_active_bd_owner(user, owner)
     _assert_active_bd_owner(user, dispatcher)
+    if personnel is not None:
+        _validate_personnel_role(
+            user=user,
+            role="owner",
+            entry=personnel.get("owner"),
+            actual_user=owner,
+        )
+        _validate_personnel_role(
+            user=user,
+            role="dispatcher",
+            entry=personnel.get("dispatcher"),
+            actual_user=dispatcher,
+            owner_user=owner,
+            owner_entry=personnel.get("owner"),
+        )
     influencer = (
         _tenant_influencer(user, _pk(influencer_value), for_update=False)
         if influencer_value is not None
@@ -2900,6 +3274,13 @@ def import_outreach_task_snapshot(
         "notes": notes,
         "dispatch_time": parsed_dispatch,
     }
+    if personnel is not None:
+        source_values.update(
+            {
+                "source_owner_name_snapshot": personnel.get("owner", {}).get("name", ""),
+                "source_dispatcher_name_snapshot": personnel.get("dispatcher", {}).get("name", ""),
+            }
+        )
     restored = False
     if created:
         locked_task = OutreachTask(
@@ -2914,18 +3295,21 @@ def import_outreach_task_snapshot(
             **source_values,
         )
         _save(locked_task)
+        create_audit = {
+            "source": source,
+            "external_id": external_id,
+            "task_no": task_no,
+            "status": locked_task.status,
+            "dispatch_time": str(locked_task.dispatch_time),
+        }
+        if personnel is not None:
+            create_audit.update(_personnel_audit_data(personnel=personnel, task=locked_task))
         _audit(
             user,
             "feishu_import_task_create",
             "outreach_task",
             locked_task,
-            after={
-                "source": source,
-                "external_id": external_id,
-                "task_no": task_no,
-                "status": locked_task.status,
-                "dispatch_time": str(locked_task.dispatch_time),
-            },
+            after=create_audit,
         )
     else:
         if locked_task.is_deleted:
@@ -2958,6 +3342,8 @@ def import_outreach_task_snapshot(
                 "started_at",
                 "outreach_at",
                 "finalized_at",
+                "source_owner_name_snapshot",
+                "source_dispatcher_name_snapshot",
             )
         }
         desired_facts = {
@@ -2978,6 +3364,17 @@ def import_outreach_task_snapshot(
             "notes": notes,
             "dispatch_time": parsed_dispatch,
         }
+        if personnel is not None:
+            desired_facts.update(
+                {
+                    "source_owner_name_snapshot": personnel.get("owner", {}).get(
+                        "name", locked_task.source_owner_name_snapshot
+                    ),
+                    "source_dispatcher_name_snapshot": personnel.get("dispatcher", {}).get(
+                        "name", locked_task.source_dispatcher_name_snapshot
+                    ),
+                }
+            )
         fact_changes = {
             field: value
             for field, value in desired_facts.items()
@@ -3038,6 +3435,18 @@ def import_outreach_task_snapshot(
             raise ValidationError({"version": "Task was changed by another request."}, code="conflict")
         locked_task.refresh_from_db()
     if (fact_changes or chronology_changes) and not created:
+        update_after = {
+            **{
+                key: str(getattr(locked_task, key))
+                for key in before_facts
+                if key in fact_changes or key in chronology_changes or key in {"source", "external_id"}
+            },
+            "source": source,
+            "source_event_id": source_event_id,
+            "version": locked_task.version,
+        }
+        if personnel is not None:
+            update_after.update(_personnel_audit_data(personnel=personnel, task=locked_task))
         _audit(
             user,
             "feishu_import_task_update",
@@ -3048,16 +3457,7 @@ def import_outreach_task_snapshot(
                 for key, value in before_facts.items()
                 if key in fact_changes or key in chronology_changes or key in {"source", "external_id"}
             },
-            after={
-                **{
-                    key: str(getattr(locked_task, key))
-                    for key in before_facts
-                    if key in fact_changes or key in chronology_changes or key in {"source", "external_id"}
-                },
-                "source": source,
-                "source_event_id": source_event_id,
-                "version": locked_task.version,
-            },
+            after=update_after,
         )
 
     status_log = _import_task_operation_log_exists(
@@ -3067,6 +3467,17 @@ def import_outreach_task_snapshot(
         source_event_id=source_event_id,
     )
     if status_log is None:
+        task_status_after = {
+            "source": source,
+            "source_event_id": source_event_id,
+            "source_status": requested_status,
+            "status": locked_task.status,
+            "version": locked_task.version,
+            "preserved": target_status != requested_status,
+            "finalized_at": str(locked_task.finalized_at) if locked_task.finalized_at else None,
+        }
+        if personnel is not None:
+            task_status_after.update(_personnel_audit_data(personnel=personnel, task=locked_task))
         write_operation_log(
             tenant=user.tenant,
             user=user,
@@ -3078,15 +3489,7 @@ def import_outreach_task_snapshot(
                 "status": before_status,
                 "version": before_version,
             },
-            after_data={
-                "source": source,
-                "source_event_id": source_event_id,
-                "source_status": requested_status,
-                "status": locked_task.status,
-                "version": locked_task.version,
-                "preserved": target_status != requested_status,
-                "finalized_at": str(locked_task.finalized_at) if locked_task.finalized_at else None,
-            },
+            after_data=task_status_after,
         )
     if return_metadata:
         changed_fields = []
@@ -3134,6 +3537,10 @@ def _import_sample_row_snapshot(
     source_cost_currency="CNY",
     preserve_source_cost=False,
     ignore_current_sku_price=False,
+    personnel_mapping=None,
+    source_owner_name_snapshot=None,
+    owner_resolution=None,
+    personnel_policy=None,
     return_metadata=False,
 ):
     """Create/update one source-owned fulfillment before applying its status.
@@ -3148,6 +3555,14 @@ def _import_sample_row_snapshot(
     # never delegates costing to the live ProductSKU catalog.
     if source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
         raise ValidationError({"source": "Unsupported fulfillment import source."})
+    personnel = _normalise_personnel_mapping(
+        personnel_mapping,
+        owner_name=source_owner_name_snapshot,
+        owner_resolution=owner_resolution,
+        personnel_policy=personnel_policy,
+        roles=("owner",),
+    )
+    _require_personnel_roles(personnel, ("owner",))
     if tenant is None:
         tenant = getattr(user, "tenant", None)
     if tenant is None or getattr(tenant, "pk", None) != user.tenant_id:
@@ -3220,6 +3635,8 @@ def _import_sample_row_snapshot(
             "external_id": source_external_id,
         }
     )
+    if personnel is not None and "owner" in personnel:
+        data["source_owner_name_snapshot"] = personnel["owner"]["name"]
     item_payloads = list(item_payloads or [])
 
     _lock_tenant(user)
@@ -3295,6 +3712,9 @@ def _import_sample_row_snapshot(
         # chronology and audited source transition are applied below.
         create_data = dict(data)
         create_data["sample_order_no"] = ""
+        # Specialized source personnel fields are applied by this adapter
+        # after the ordinary creation service has validated relationships.
+        create_data.pop("source_owner_name_snapshot", None)
         fulfillment, created = create_sample_fulfillment(
             user=user,
             request_key=request_key,
@@ -3325,6 +3745,21 @@ def _import_sample_row_snapshot(
             **source_create_changes,
         )
         fulfillment.refresh_from_db()
+        if personnel is not None and "owner" in personnel:
+            _validate_personnel_role(
+                user=user,
+                role="owner",
+                entry=personnel["owner"],
+                actual_user=fulfillment.owner,
+            )
+            QuerySet.update(
+                SampleFulfillment.objects.filter(
+                    pk=fulfillment.pk,
+                    tenant_id=user.tenant_id,
+                ),
+                source_owner_name_snapshot=personnel["owner"]["name"],
+            )
+            fulfillment.refresh_from_db()
     else:
         before_status = fulfillment.status
         before_version = fulfillment.version
@@ -3344,6 +3779,7 @@ def _import_sample_row_snapshot(
                 "store_id",
                 "external_product_id",
                 "product_name_snapshot",
+                "source_owner_name_snapshot",
             )
         }
         if fulfillment.is_deleted:
@@ -3381,6 +3817,7 @@ def _import_sample_row_snapshot(
                 "influencer",
                 "store",
                 "product_name_snapshot",
+                "source_owner_name_snapshot",
                 "external_product_id",
                 "sample_order_no",
                 "link_type",
@@ -3401,6 +3838,7 @@ def _import_sample_row_snapshot(
             "influencer",
             "store",
             "product_name_snapshot",
+            "source_owner_name_snapshot",
             "external_product_id",
             "sample_order_no",
             "link_type",
@@ -3412,6 +3850,16 @@ def _import_sample_row_snapshot(
         ):
             if field in data:
                 setattr(fulfillment, field, data[field])
+        # Validate the resolved owner from the incoming source row, not the
+        # persisted owner.  A legitimate Feishu fallback can intentionally
+        # migrate an older same-source row to the configured ``liyejun`` user.
+        if personnel is not None and "owner" in personnel:
+            _validate_personnel_role(
+                user=user,
+                role="owner",
+                entry=personnel["owner"],
+                actual_user=fulfillment.owner,
+            )
         fulfillment.full_clean()
         after = {
             field: getattr(fulfillment, field)
@@ -3419,35 +3867,70 @@ def _import_sample_row_snapshot(
         }
         source_fields_changed = before != after
         if source_fields_changed:
-            fulfillment.save(
-                update_fields=[
-                    "fulfillment_no",
-                    "request_key",
-                    "request_hash",
-                    "outreach_task",
-                    "outreach_target",
-                    "influencer",
-                    "store",
-                    "product_name_snapshot",
-                    "external_product_id",
-                    "sample_order_no",
-                    "link_type",
-                    "quick_tags",
-                    "owner",
-                    "notes",
-                    "source",
-                    "external_id",
-                    "updated_at",
-                ]
+            # State-machine ``save`` protects source snapshots (and other
+            # workflow fields) from ordinary ORM writes.  This adapter is the
+            # narrow, audited exception: after ``full_clean`` above, persist
+            # only the source-owned allow-list under a tenant/version/state CAS.
+            source_update = {}
+            source_fk_fields = {
+                "outreach_task",
+                "outreach_target",
+                "influencer",
+                "store",
+                "owner",
+            }
+            for field in (
+                "fulfillment_no",
+                "request_key",
+                "request_hash",
+                "outreach_task",
+                "outreach_target",
+                "influencer",
+                "store",
+                "product_name_snapshot",
+                "external_product_id",
+                "sample_order_no",
+                "link_type",
+                "quick_tags",
+                "owner",
+                "source_owner_name_snapshot",
+                "notes",
+                "source",
+                "external_id",
+            ):
+                if field in source_fk_fields:
+                    source_update[f"{field}_id"] = getattr(fulfillment, f"{field}_id")
+                else:
+                    source_update[field] = getattr(fulfillment, field)
+            source_update["updated_at"] = timezone.now()
+            updated = QuerySet.update(
+                SampleFulfillment.objects.filter(
+                    pk=fulfillment.pk,
+                    tenant_id=user.tenant_id,
+                    version=fulfillment.version,
+                    status=fulfillment.status,
+                    is_deleted=False,
+                ),
+                **source_update,
             )
+            if updated != 1:
+                raise ValidationError(
+                    {"version": "Fulfillment was changed by another request."},
+                    code="conflict",
+                )
             fulfillment.refresh_from_db()
+            sample_update_after = {key: str(value) for key, value in after.items()}
+            if personnel is not None:
+                sample_update_after.update(
+                    _personnel_audit_data(personnel=personnel, fulfillment=fulfillment)
+                )
             _audit(
                 user,
                 "feishu_import_sample_update",
                 "sample_fulfillment",
                 fulfillment,
                 before={key: str(value) for key, value in before.items()},
-                after={key: str(value) for key, value in after.items()},
+                after=sample_update_after,
             )
 
     before_dates, _ = _apply_source_chronology(
@@ -3538,20 +4021,35 @@ def _import_sample_row_snapshot(
             "source_observed_at": source_shipped_at,
         }
     )
+    personnel_audit = (
+        _personnel_audit_data(personnel=personnel, fulfillment=fulfillment)
+        if personnel is not None
+        else {}
+    )
+    event_payload.update(personnel_audit)
+    status_operation_payload = {
+        "source": source,
+        "source_event_id": source_status_event_id,
+        "source_status": desired_status,
+        "tenant": tenant,
+        "fulfillment": fulfillment,
+        "actor": actor,
+    }
+    status_operation_payload.update(personnel_audit)
     import_sample_fulfillment_snapshot(
         desired_status,
         event_payload,
-        {
-            "source": source,
-            "source_event_id": source_status_event_id,
-            "source_status": desired_status,
-            "tenant": tenant,
-            "fulfillment": fulfillment,
-            "actor": actor,
-        },
+        status_operation_payload,
         user=user,
         fulfillment=fulfillment,
         source=source,
+        source_owner_name_snapshot=(
+            personnel["owner"]["name"] if personnel is not None and "owner" in personnel else None
+        ),
+        owner_resolution=(
+            personnel["owner"]["resolution"] if personnel is not None and "owner" in personnel else None
+        ),
+        personnel_policy=personnel["policy"] if personnel is not None else None,
     )
     fulfillment.refresh_from_db()
     after_status = fulfillment.status
@@ -3690,6 +4188,10 @@ def import_sample_fulfillment_snapshot(
     source_cost_currency="CNY",
     preserve_source_cost=False,
     ignore_current_sku_price=False,
+    personnel_mapping=None,
+    source_owner_name_snapshot=None,
+    owner_resolution=None,
+    personnel_policy=None,
     return_metadata=False,
 ):
     """Apply one Feishu sample-status snapshot through an audited import path.
@@ -3728,10 +4230,21 @@ def import_sample_fulfillment_snapshot(
             source_cost_currency=source_cost_currency,
             preserve_source_cost=preserve_source_cost,
             ignore_current_sku_price=ignore_current_sku_price,
+            personnel_mapping=personnel_mapping,
+            source_owner_name_snapshot=source_owner_name_snapshot,
+            owner_resolution=owner_resolution,
+            personnel_policy=personnel_policy,
             return_metadata=return_metadata,
         )
     if source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
         raise ValidationError({"source": "Unsupported fulfillment status import source."})
+    personnel = _normalise_personnel_mapping(
+        personnel_mapping,
+        owner_name=source_owner_name_snapshot,
+        owner_resolution=owner_resolution,
+        personnel_policy=personnel_policy,
+        roles=("owner",),
+    )
     requested_status = _import_source_status(status)
 
     event_source = _import_payload_value(event, "source")
@@ -3818,6 +4331,48 @@ def import_sample_fulfillment_snapshot(
     if locked_fulfillment.is_deleted:
         raise ValidationError({"fulfillment": "Deleted fulfillments cannot receive source snapshots."})
 
+    personnel_changed = False
+    if personnel is not None and "owner" in personnel:
+        _validate_personnel_role(
+            user=user,
+            role="owner",
+            entry=personnel["owner"],
+            actual_user=locked_fulfillment.owner,
+        )
+        desired_owner_name = personnel["owner"]["name"]
+        if locked_fulfillment.source_owner_name_snapshot != desired_owner_name:
+            before_personnel_name = locked_fulfillment.source_owner_name_snapshot
+            expected_personnel_version = locked_fulfillment.version
+            updated = QuerySet.update(
+                SampleFulfillment.objects.filter(
+                    pk=locked_fulfillment.pk,
+                    tenant_id=tenant_id,
+                    version=expected_personnel_version,
+                    is_deleted=False,
+                ),
+                source_owner_name_snapshot=desired_owner_name,
+                version=expected_personnel_version + 1,
+                updated_at=timezone.now(),
+            )
+            if updated != 1:
+                raise ValidationError({"version": "Fulfillment was changed by another request."}, code="conflict")
+            locked_fulfillment.refresh_from_db()
+            personnel_changed = True
+            _audit(
+                user,
+                "feishu_import_sample_personnel",
+                "sample_fulfillment",
+                locked_fulfillment,
+                before={"source_owner_name_snapshot": before_personnel_name},
+                after=_personnel_audit_data(personnel=personnel, fulfillment=locked_fulfillment),
+            )
+
+    personnel_audit = (
+        _personnel_audit_data(personnel=personnel, fulfillment=locked_fulfillment)
+        if personnel is not None
+        else {}
+    )
+
     # The tenant lock serializes imports while this source-key lookup also
     # catches accidental reuse of a source row for another fulfillment.
     existing_event = FulfillmentStatusEvent.objects.select_for_update().filter(
@@ -3885,15 +4440,16 @@ def import_sample_fulfillment_snapshot(
                     "version": locked_fulfillment.version,
                     "event_id": existing_event.pk,
                     "preserved": existing_event.to_status != requested_status,
+                    **personnel_audit,
                 },
             )
         if return_metadata:
             return {
                 "fulfillment": locked_fulfillment,
                 "created": False,
-                "changed": False,
-                "changed_fields": [],
-                "outcome": "noop",
+                "changed": personnel_changed,
+                "changed_fields": ["source_owner_name_snapshot"] if personnel_changed else [],
+                "outcome": "updated" if personnel_changed else "noop",
             }
         return locked_fulfillment
 
@@ -3960,10 +4516,13 @@ def import_sample_fulfillment_snapshot(
             "version": locked_fulfillment.version,
             "event_id": status_event.pk,
             "preserved": not should_update,
+            **personnel_audit,
         },
     )
     if return_metadata:
         changed_fields = ["status"] if should_update else []
+        if personnel_changed:
+            changed_fields.append("source_owner_name_snapshot")
         if before_shipped_at != locked_fulfillment.shipped_at:
             changed_fields.append("shipped_at")
         return {
@@ -4124,6 +4683,11 @@ def update_sample_fulfillment(
     )
 
     data = dict(validated_data or {})
+    if "source_owner_name_snapshot" in data:
+        raise ValidationError(
+            {"source_personnel": "Source personnel snapshots are writable only by the Feishu import adapter."},
+            code="forbidden",
+        )
     if item_payloads is not None and append_item_payloads is not None:
         raise ValidationError({"items": "Use either replacement items or append_items, not both."})
     if items_mode not in {"replace", "append"}:
