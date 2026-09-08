@@ -517,14 +517,38 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        # Creation payloads must include these relations, while partial
+        # updates may intentionally omit them.  Fall back to the instance so
+        # validation does not reinterpret omitted fields as null.
+        outreach_target = attrs.get(
+            "outreach_target", getattr(self.instance, "outreach_target", None)
+        )
+        influencer = attrs.get("influencer", getattr(self.instance, "influencer", None))
+        outreach_task = attrs.get(
+            "outreach_task", getattr(self.instance, "outreach_task", None)
+        )
+        link_type = attrs.get("link_type", getattr(self.instance, "link_type", None))
+        external_product_id = attrs.get(
+            "external_product_id", getattr(self.instance, "external_product_id", "")
+        )
+        if link_type == "direct" and outreach_task is not None:
+            raise serializers.ValidationError(
+                {"link_type": "Direct samples must be standalone and cannot link to outreach tasks."}
+            )
+        if link_type == "direct" and outreach_target is not None:
+            raise serializers.ValidationError(
+                {"link_type": "Direct samples must be standalone and cannot link to outreach targets."}
+            )
         # Legacy target payloads may derive influencer from the target; targetless creates cannot.
-        if attrs.get("outreach_target") is None and attrs.get("influencer") is None:
+        if outreach_target is None and influencer is None:
             raise serializers.ValidationError(
                 {"influencer": "This field is required when outreach_target is omitted."}
             )
-        if attrs.get("outreach_task") is None and not str(
-            attrs.get("external_product_id") or ""
-        ).strip():
+        if (
+            outreach_task is None
+            and link_type != "direct"
+            and not str(external_product_id or "").strip()
+        ):
             raise serializers.ValidationError(
                 {"external_product_id": "Standalone samples require an external product ID."}
             )
