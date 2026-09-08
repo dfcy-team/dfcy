@@ -403,8 +403,8 @@
       />
       <div v-else-if="imageBatchProgress" class="image-batch-progress" data-testid="image-batch-progress">{{ imageBatchProgress }}</div>
       <el-alert v-if="imageBatchError" class="image-batch-error" :title="imageBatchError" type="warning" :closable="false" />
-      <el-table v-if="imageBatchRows.length" :data="imageBatchRows" border max-height="360" class="image-batch-table">
-        <el-table-column type="index" label="序号" width="70" />
+      <el-table v-if="imageBatchRows.length" :data="imageBatchPreviewRows" row-key="line" border max-height="360" class="image-batch-table">
+        <el-table-column type="index" :index="(index) => (imageBatchPreviewPage - 1) * imageBatchPreviewSize + index + 1" label="序号" width="70" />
         <el-table-column label="缓存图片" width="98" fixed="left">
           <template #default="{ row }">
             <el-image
@@ -438,6 +438,15 @@
         </el-table-column>
       </el-table>
       <el-empty v-else description="请选择图片 CSV 文件预览" :image-size="70" />
+      <el-pagination
+        v-if="imageBatchRows.length"
+        v-model:current-page="imageBatchPreviewPage"
+        :page-size="imageBatchPreviewSize"
+        :total="imageBatchRows.length"
+        layout="total, prev, pager, next"
+        class="image-batch-progress"
+        data-testid="image-batch-pagination"
+      />
       <template #footer>
         <el-button v-if="imageBatchPhase !== 'completed'" :disabled="imageBatchSaving" @click="imageBatchVisible = false">关闭</el-button>
         <el-button
@@ -453,10 +462,10 @@
           data-testid="image-batch-submit"
           type="primary"
           :loading="imageBatchSaving"
-          :disabled="!imageBatchRows.some((row) => row.valid)"
+          :disabled="imageBatchSaving || !imageBatchSummary.valid"
           @click="submitImageBatch"
         >
-          {{ imageBatchSaving ? '缓存中…' : '提交并缓存图片' }}
+          {{ imageBatchPhase === 'reading' ? '读取中…' : imageBatchSaving ? '缓存中…' : '提交并缓存图片' }}
         </el-button>
         <el-button
           v-else
@@ -503,6 +512,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { parseImageCsv, yieldToPage } from '../../utils/imageBatchCsv';
 import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import {
@@ -651,30 +661,12 @@ function selectCategory(data) {
   load();
 }
 
-function parseCsvRows(text) {
-  const source = String(text || '').replace(/^\uFEFF/, '');
-  const output = [];
-  let row = [];
-  let cell = '';
-  let quoted = false;
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-    const next = source[index + 1];
-    if (character === '"' && quoted && next === '"') { cell += '"'; index += 1; continue; }
-    if (character === '"') { quoted = !quoted; continue; }
-    if (character === ',' && !quoted) { row.push(cell.trim()); cell = ''; continue; }
-    if ((character === '\n' || character === '\r') && !quoted) {
-      if (character === '\r' && next === '\n') index += 1;
-      row.push(cell.trim());
-      if (row.some((value) => value !== '')) output.push(row);
-      row = []; cell = ''; continue;
-    }
-    cell += character;
-  }
-  row.push(cell.trim());
-  if (row.some((value) => value !== '')) output.push(row);
-  return output;
-}
+const imageBatchPreviewPage = ref(1);
+const imageBatchPreviewSize = 50;
+const imageBatchPreviewRows = computed(() => imageBatchRows.value.slice(
+  (imageBatchPreviewPage.value - 1) * imageBatchPreviewSize,
+  imageBatchPreviewPage.value * imageBatchPreviewSize,
+));
 
 function normalizeImageHeader(value) {
   return String(value || '').replace(/\s+/g, '').toLowerCase();
@@ -709,6 +701,7 @@ const imageBatchSummary = computed(() => {
 });
 const imageBatchPhaseLabel = computed(() => ({
   draft: '待提交',
+  reading: '正在读取 CSV',
   processing: '正在缓存图片',
   completed: '缓存完成，请保存',
 }[imageBatchPhase.value] || '待提交'));
@@ -721,6 +714,7 @@ const imageBatchProgressPercent = computed(() => {
 function openImageBatch() {
   if (!canManage.value) return;
   imageBatchRows.value = [];
+  imageBatchPreviewPage.value = 1;
   imageBatchError.value = '';
   imageBatchProgress.value = '';
   imageBatchPhase.value = 'draft';
@@ -756,21 +750,36 @@ async function parseImageBatchFile(event) {
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file) return;
+  imageBatchSaving.value = true;
+  imageBatchRows.value = [];
+  imageBatchPreviewPage.value = 1;
+  imageBatchPhase.value = 'reading';
+  imageBatchError.value = '';
+  imageBatchProgress.value = '正在读取 CSV 文件…';
   try {
+    await yieldToPage();
     if (!/\.csv$/i.test(file.name)) {
-      imageBatchError.value = '图片批量导入当前仅支持 CSV 文件，请先另存为 CSV。';
-      return;
+      throw new Error('图片批量导入当前仅支持 CSV 文件，请先另存为 CSV。');
     }
+    if (file.size > 10 * 1024 * 1024) throw new Error('图片 CSV 文件不能超过 10 MB，请拆分后导入。');
     const bytes = await file.arrayBuffer();
     let text;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('gb18030').decode(bytes); }
-    const parsed = parseCsvRows(text);
+    const parsed = await parseImageCsv(text, (percent) => {
+      imageBatchProgress.value = `正在解析 CSV：${percent}%`;
+    });
     const headers = parsed.shift() || [];
     if (!headers.length) throw new Error('CSV 缺少表头。');
     const legacyNames = ['旧sku编码', '旧sku', 'legacy_skucode', 'legacy_sku_code'];
     const newNames = ['新sku编码', '新sku', 'sku编码', 'sku_code', 'new_sku_code'];
     const imageNames = ['图片链接', '图片url', '图片地址', 'image_url', 'image'];
-    const rowsFromFile = parsed.map((values, index) => {
+    const rowsFromFile = [];
+    for (let index = 0; index < parsed.length; index += 1) {
+      if (index % 250 === 0) {
+        imageBatchProgress.value = `正在校验数据：${index} / ${parsed.length} 行`;
+        await yieldToPage();
+      }
+      const values = parsed[index];
       const row = {
         line: index + 2,
         legacy_sku_code: imageBatchField(values, headers, legacyNames),
@@ -784,8 +793,8 @@ async function parseImageBatchFile(event) {
         message: '',
       };
       const error = validateImageBatchRow(row);
-      return { ...row, valid: !error, status: error ? 'error' : 'pending', message: error };
-    });
+      rowsFromFile.push({ ...row, valid: !error, status: error ? 'error' : 'pending', message: error });
+    }
     imageBatchRows.value = rowsFromFile;
     imageBatchFileName.value = file.name;
     imageBatchPhase.value = 'draft';
@@ -797,6 +806,8 @@ async function parseImageBatchFile(event) {
     imageBatchPhase.value = 'draft';
     imageBatchProgress.value = '';
     imageBatchError.value = error?.message || 'CSV 解析失败，请检查文件编码和格式。';
+  } finally {
+    imageBatchSaving.value = false;
   }
 }
 
@@ -888,6 +899,7 @@ async function processImageBatchRows(targetRows) {
       }
       processed += batchRows.length;
       updateImageBatchProgress(processed, total);
+      await yieldToPage();
     }
     imageBatchPhase.value = 'completed';
     const summary = imageBatchSummary.value;
