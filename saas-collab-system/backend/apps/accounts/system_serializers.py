@@ -398,6 +398,14 @@ class RoleAdminSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Role code must be unique within the current tenant.")
         return value
 
+    def validate(self, attrs):
+        # Role codes are stable system identifiers.  Creation and the explicit
+        # copy endpoint accept a new code, but an existing role may only have
+        # its display name/description/status edited.
+        if self.instance is not None and "code" in attrs:
+            raise serializers.ValidationError({"code": "系统标识不可修改。"})
+        return attrs
+
 
 class RoleCopySerializer(serializers.Serializer):
     """Validate the identity of a new custom role copied from an existing one.
