@@ -4,7 +4,7 @@ from io import StringIO
 from datetime import timedelta
 
 from django.db import IntegrityError, models, transaction
-from django.db.models import BooleanField, Case, Exists, Max, OuterRef, Prefetch, Q, When
+from django.db.models import BooleanField, Case, Exists, OuterRef, Prefetch, Q, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -1482,13 +1482,11 @@ class BdPerformanceView(APIView):
         )
         today = timezone.localdate()
         yesterday = today - timedelta(days=1)
-        max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=request.user.tenant).aggregate(
-            max_data_time=Max("data_time")
-        )["max_data_time"]
-        max_date = timezone.localtime(max_data_time).date() if max_data_time else None
-        latest_allowed = min(yesterday, max_date) if max_date else yesterday
-        if end_date > latest_allowed:
-            raise ValidationError({"end_date": "end_date must not exceed yesterday or the imported order date."})
+        # Imported order feeds can lag behind the calendar. Allow a completed
+        # date range to render its available facts instead of returning 400;
+        # the response exposes data_as_of so the UI can disclose the cutoff.
+        if end_date > yesterday:
+            raise ValidationError({"end_date": "end_date must not exceed yesterday."})
         if start_date > end_date:
             raise ValidationError({"date": "start_date must not be after end_date."})
         if (end_date - start_date).days > 30:
