@@ -2230,6 +2230,9 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert corrected_row["valid_order_count"] == 1
     attribution.refresh_from_db()
     assert attribution.owner_id == user.pk
+    assert corrected["totals"]["gmv_php"] == "1000.0000"
+    assert corrected["totals"]["gmv_myr"] == "0.0000"
+    assert corrected["totals"]["gmv_thb"] == "0.0000"
 
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():
