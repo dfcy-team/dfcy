@@ -8,30 +8,33 @@ V2.44.87 已从实际登记并部署的 V2.44.86 提交 `87def33bb7f17785a41be02
 
 - 商品明细页把商品新增、旧档案、图片批量导入和 BigSeller 商品 SKU 表导出收纳到“导入与导出”菜单；商品新增与旧档案导入使用独立上传弹窗、模板和处理说明。
 - 商品新增 CSV 导入沿用现有旧档案创建接口，随后生成 SPU/SKU，并为成功生成的 SKU 下载 BigSeller `.xlsx`；手工导出只处理已勾选且已有 SKU 编码的记录。
-- 组合商品页保留“新建组合 SKU”，新增导入/导出菜单、CSV 模板与上传弹窗；批量创建继续调用既有 SPU、SKU、组合明细 API，并可生成 BigSeller 组合商品表。
+- 组合商品页保留“新建组合 SKU”，新增导入/导出菜单、CSV 模板与上传弹窗；单条与批量导入都调用新的服务端单事务创建接口，SPU、SKU 或任一组件失败时整行全部回滚，成功后可生成 BigSeller 组合商品表。
 - BigSeller 工作簿在浏览器端生成最小 OOXML/ZIP 文件，不新增第三方依赖、不上传文件到外部站点。
 - 商品删除修复：通用反向引用扫描跳过 unmanaged 只读投影，避免先删 SKU 再删无业务引用 SPU 时访问缺失数据库视图并返回 500；并发外键竞态统一转换为稳定的 `STATE_CONFLICT` / HTTP 409。
 
 ## 变更边界
 
-代码和测试限于以下 9 个路径：
+代码和测试限于以下 12 个路径：
 
 1. `backend/apps/products/views.py`
-2. `backend/tests/test_product_actions.py`
-3. `frontend/src/api/products.js`
-4. `frontend/src/utils/bigsellerWorkbook.js`
-5. `frontend/src/views/products/ProductBundleManager.vue`
-6. `frontend/src/views/products/ProductDetailData.vue`
-7. `frontend/tests/bigseller-workbook.spec.js`
-8. `frontend/tests/product-bundle-buttons.spec.js`
-9. `frontend/tests/product-detail-data.spec.js`
+2. `backend/apps/products/serializers.py`
+3. `backend/apps/products/urls.py`
+4. `backend/tests/test_product_actions.py`
+5. `backend/tests/test_product_bundle_create_atomic.py`
+6. `frontend/src/api/products.js`
+7. `frontend/src/utils/bigsellerWorkbook.js`
+8. `frontend/src/views/products/ProductBundleManager.vue`
+9. `frontend/src/views/products/ProductDetailData.vue`
+10. `frontend/tests/bigseller-workbook.spec.js`
+11. `frontend/tests/product-bundle-buttons.spec.js`
+12. `frontend/tests/product-detail-data.spec.js`
 
 本批无模型或迁移改动，无菜单注册、路由、权限目录、角色权限、生产部署控制或环境文件改动。来源开发工作区基于旧分支且包含大量其他未提交变化，因此候选没有整体复制或合并来源工作树，而是逐 hunk 移植到 V2.44.86 基线。
 
 ## 验证证据
 
-- 后端删除专项：`9 passed`。
-- 后端全量：`1234 passed, 28 skipped`。
+- 后端删除与组合原子创建专项：`12 passed`。
+- 后端全量：`1237 passed, 28 skipped`。
 - Django `check`：通过；`makemigrations --check --dry-run`：`No changes detected`。
 - 前端候选专项：3 个文件、`19 passed`。
 - 前端全量（`VITE_USE_MOCK=true`）：86 个文件、`513 passed`。

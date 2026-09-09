@@ -28,6 +28,30 @@ export const createProductSpu = (data = {}) =>
     data: { id: `mock-${Date.now()}`, product_name: data.product_name, category_node: data.category_node, spu_code: 'MOCK-SPU-NEW' }
   }), 'products.spus.create');
 
+export const createProductBundle = (data = {}) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/products/bundles/create/', data },
+    () => {
+      const stamp = Date.now();
+      const spu = {
+        id: `mock-bundle-spu-${stamp}`,
+        product_name: data.product_name,
+        category_node: data.category_node,
+        product_type: 'bundle',
+        spu_code: `MOCK-BUNDLE-${stamp}`,
+      };
+      const sku = { id: `mock-bundle-sku-${stamp}`, spu: spu.id, sku_code: `MOCK-BUNDLE-SKU-${stamp}` };
+      const components = (data.components || []).map((item, index) => ({
+        id: `mock-bundle-component-${stamp}-${index}`,
+        bundle_sku: sku.id,
+        component_sku: item.component_sku,
+        quantity: item.quantity,
+      }));
+      return { success: true, code: 'OK', message: '组合商品已原子创建（模拟）', data: { spu, sku, components } };
+    },
+    'products.bundles.create'
+  );
+
 export const fetchCodingOptions = () =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/coding-options/' }, () => ({
     success: true,

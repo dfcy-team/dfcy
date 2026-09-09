@@ -30,10 +30,12 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('downloadBigSellerBundleWorkbook(selectedBundles.value, skus.value, bundleComponents.value)');
   });
 
-  it('批量导入复用现有创建链路，成功后自动生成 BigSeller 表', () => {
-    expect(page).toContain('createProductSpu');
-    expect(page).toContain('createProductSku');
-    expect(page).toContain('createBundleComponent');
+  it('批量导入复用服务端原子创建链路，成功后自动生成 BigSeller 表', () => {
+    expect(page).toContain('createProductBundle');
+    expect(api).toContain("url: '/api/internal/products/bundles/create/'");
+    expect(page).not.toContain('createProductSpu');
+    expect(page).not.toContain('createProductSku');
+    expect(page).not.toContain('createBundleComponent');
     expect(page).toContain('const result = await createBundle(prepareImportRow');
     expect(page).toContain('downloadBigSellerBundleWorkbook(createdSpus, createdSkus, createdComponents)');
     expect(page).toContain("'*组合商品名称', '*末级分类编码', '*季节编码', '*组合颜色英文编码'");

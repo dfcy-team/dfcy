@@ -122,9 +122,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import {
-  createBundleComponent,
-  createProductSku,
-  createProductSpu,
+  createProductBundle,
   fetchBundleComponents,
   fetchCodingOptions,
   fetchProductCategories,
@@ -188,28 +186,27 @@ function addFormComponent() {
 }
 
 async function createBundle({ name, category, season, color, components }) {
-  const productResponse = await createProductSpu({ product_name: name, category_node: category, season_code: season, product_type: 'bundle' });
-  if (!productResponse.success) throw new Error(productResponse.message || '组合 SPU 创建失败');
-  const spu = detailData(productResponse.data);
-  const categoryRecord = categories.value.find((item) => String(item.id) === String(category));
-  const specValues = Object.fromEntries((categoryRecord?.spec_dimensions || []).map((item) => [item.code, '组合']));
-  const skuResponse = await createProductSku({ spu: spu.id, color_code: color, spec_values: specValues });
-  if (!skuResponse.success) throw new Error(skuResponse.message || '组合 SKU 创建失败');
-  const sku = detailData(skuResponse.data);
-  const createdComponents = [];
-  for (const component of components) {
-    const componentResponse = await createBundleComponent({ bundle_sku: sku.id, component_sku: component.sku, quantity: component.quantity });
-    if (!componentResponse.success) throw new Error(componentResponse.message || `组成 SKU ${component.skuCode || component.sku} 保存失败`);
-    createdComponents.push({
-      ...detailData(componentResponse.data),
-      bundle_sku: sku.id,
+  const response = await createProductBundle({
+    product_name: name,
+    category_node: category,
+    season_code: season,
+    color_code: color,
+    components: components.map((component) => ({
       component_sku: component.sku,
-      component_sku_code: component.skuCode || normalSkus.value.find((item) => String(item.id) === String(component.sku))?.sku_code || '',
       quantity: component.quantity,
-      cost_allocation_ratio: component.costRatio ?? 1,
-    });
-  }
-  return { spu, sku, components: createdComponents };
+    })),
+  });
+  if (!response.success) throw new Error(response.message || '组合商品原子创建失败');
+  const created = detailData(response.data);
+  const createdComponents = (created.components || []).map((component, index) => ({
+    ...component,
+    component_sku_code: component.component_sku_code
+      || components[index]?.skuCode
+      || normalSkus.value.find((item) => String(item.id) === String(component.component_sku))?.sku_code
+      || '',
+    cost_allocation_ratio: components[index]?.costRatio ?? 1,
+  }));
+  return { spu: created.spu, sku: created.sku, components: createdComponents };
 }
 
 async function save() {

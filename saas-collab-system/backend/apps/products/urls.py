@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    product_bundle_create,
     product_bundle_component_collection,
     product_bundle_component_detail,
     product_category_collection,
@@ -68,6 +69,7 @@ urlpatterns = [
     path("legacy-items/", product_legacy_collection, name="product-legacy-collection"),
     path("legacy-items/<int:pk>/", product_legacy_detail, name="product-legacy-detail"),
     path("legacy-items/<int:pk>/generate/", product_legacy_generate, name="product-legacy-generate"),
+    path("bundles/create/", product_bundle_create, name="product-bundle-create"),
     path("bundle-components/", product_bundle_component_collection, name="product-bundle-component-collection"),
     path("bundle-components/<int:pk>/", product_bundle_component_detail, name="product-bundle-component-detail"),
     path("status-recommendations/", status_recommendation_collection, name="product-status-recommendation-collection"),
