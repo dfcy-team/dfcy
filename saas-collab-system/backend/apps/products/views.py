@@ -828,11 +828,11 @@ def product_spu_detail(request, pk):
             }
             try:
                 locked.delete()
-            except ProtectedError:
+            except (ProtectedError, IntegrityError):
                 # A relation may have been inserted between the generic
-                # probes and the database delete.  Keep the contract a
-                # deterministic 409 instead of leaking a 500.
-                references = _product_reverse_references(locked)
+                # probes and the database delete.  Some databases surface
+                # that race as a plain IntegrityError.  Do not query again
+                # inside the broken transaction; return a deterministic 409.
                 return error_response(
                     ErrorCode.STATE_CONFLICT,
                     "商品已被业务数据引用，不能删除，请改为停用。",
@@ -918,6 +918,12 @@ def _sku_business_references(item):
     """
     references = []
     for relation in item._meta.related_objects:
+        # Unmanaged models are read-only database projections.  They do not
+        # own persistent references and their backing views may be absent in
+        # lightweight/runtime databases, so probing them can turn a valid
+        # delete into an OperationalError/500.
+        if not relation.related_model._meta.managed:
+            continue
         accessor = relation.get_accessor_name()
         if not accessor:
             continue

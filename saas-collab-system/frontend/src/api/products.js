@@ -183,3 +183,10 @@ export const generateLegacyProductItem = (id) =>
   requestWithMockFallback({ method: 'post', url: `${dictionaryApi('legacy-items')}${id}/generate/` }, () => ({ success: false }), 'products.legacy_items.generate');
 
 export const createBundleComponent = (data) => requestWithMockFallback({ method: 'post', url: dictionaryApi('bundle-components'), data }, {}, 'products.bundle_components.create');
+
+export const fetchBundleComponents = (params = {}) =>
+  requestWithMockFallback(
+    { method: 'get', url: dictionaryApi('bundle-components'), params },
+    () => ({ success: true, data: [] }),
+    'products.bundle_components'
+  );

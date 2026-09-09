@@ -6,22 +6,22 @@
         <p>维护旧 SKU 与新 SPU/SKU 的对应关系。导入后可逐条补充信息，再生成新编码。</p>
       </div>
       <div class="header-actions">
-        <el-button data-testid="detail-import-template" @click="downloadTemplate">下载导入模板</el-button>
-        <el-select
-          v-if="canManage"
-          v-model="importMode"
-          data-testid="detail-import-mode"
-          class="import-mode-control"
-          aria-label="导入模式"
-        >
-          <el-option label="自动导入（新增或更新）" value="auto" />
-          <el-option label="仅导入新增" value="create" />
-          <el-option label="仅更新已有记录" value="update" />
-        </el-select>
-        <el-button v-if="canManage" data-testid="image-batch-open" @click="openImageBatch">批量导入图片</el-button>
-        <el-button v-if="canManage" data-testid="detail-import-button" type="primary" @click="$refs.file?.click()">导入商品</el-button>
+        <el-dropdown v-if="canManage" trigger="click" @command="handleIoCommand">
+          <el-button data-testid="detail-io-menu">导入与导出 <span class="io-menu-caret">⌄</span></el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item disabled>导入</el-dropdown-item>
+              <el-dropdown-item command="create-import" data-testid="detail-import-button">商品新增导入</el-dropdown-item>
+              <el-dropdown-item command="legacy-import" data-testid="legacy-import-button">旧商品档案导入</el-dropdown-item>
+              <el-dropdown-item command="image-import" data-testid="image-batch-open">批量导入图片</el-dropdown-item>
+              <el-dropdown-item divided disabled>导出</el-dropdown-item>
+              <el-dropdown-item command="bigseller-export" data-testid="bigseller-create-product-export" :disabled="!exportableSelectedRows.length || bigsellerExporting">
+                下载 BigSeller 商品SKU表
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button v-if="canManage" @click="openBulk">批量修改</el-button>
-        <input ref="file" data-testid="detail-import-file" hidden type="file" accept=".csv,text/csv" @change="importFile" />
       </div>
     </header>
 
@@ -479,16 +479,55 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="importing" title="导入商品明细" width="min(560px, 94vw)" :close-on-click-modal="false" :show-close="false">
+    <el-dialog v-model="createImportVisible" title="商品新增导入" width="min(560px, 94vw)">
+      <input ref="createImportInput" data-testid="detail-import-file" hidden type="file" accept=".csv,text/csv" @change="selectCreateImportFile" />
+      <div class="import-upload-box" role="button" tabindex="0" @click="createImportInput?.click()" @keydown.enter="createImportInput?.click()">
+        <span class="import-upload-icon">⇧</span>
+        <strong>{{ createImportFileName || '点击选择 CSV 文件' }}</strong>
+        <small>导入成功后将自动生成 SPU / SKU 并下载 BigSeller 表</small>
+      </div>
+      <el-button data-testid="detail-import-template" class="import-template-link" link type="primary" @click="downloadTemplate">下载商品新增模板</el-button>
+      <template #footer>
+        <el-button @click="createImportVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!createImportUpload" @click="confirmCreateImport">确定导入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="legacyImportVisible" title="旧商品档案导入" width="min(560px, 94vw)">
+      <el-form label-position="top">
+        <el-form-item label="导入模式">
+          <el-select v-model="legacyImportMode" data-testid="legacy-import-mode" style="width: 100%" aria-label="旧商品档案导入模式">
+            <el-option label="自动判断新增/更新" value="auto" />
+            <el-option label="仅导入新增档案" value="create" />
+            <el-option label="仅更新已有档案" value="update" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <input ref="legacyImportInput" data-testid="legacy-import-file" hidden type="file" accept=".csv,text/csv" @change="selectLegacyImportFile" />
+      <div class="import-upload-box" role="button" tabindex="0" @click="legacyImportInput?.click()" @keydown.enter="legacyImportInput?.click()">
+        <span class="import-upload-icon">⇧</span>
+        <strong>{{ legacyImportFileName || '点击选择 CSV 文件' }}</strong>
+        <small>支持旧商品档案的新增或增量更新</small>
+      </div>
+      <el-button data-testid="legacy-import-template" class="import-template-link" link type="primary" @click="downloadLegacyTemplate">下载旧档案模板</el-button>
+      <template #footer>
+        <el-button @click="legacyImportVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!legacyImportUpload" @click="confirmLegacyImport">确定导入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="importing" :title="activeImportKind === 'create' ? '商品新增导入' : '旧商品档案导入'" width="min(560px, 94vw)" :close-on-click-modal="false" :show-close="false">
       <el-steps :active="importStep" finish-status="success" align-center>
         <el-step title="读取文件" />
         <el-step title="校验数据" />
-        <el-step title="增量更新" />
+        <el-step :title="activeImportKind === 'create' ? '创建商品' : '写入档案'" />
+        <el-step v-if="activeImportKind === 'create'" title="生成 BigSeller 表" />
         <el-step title="完成" />
       </el-steps>
       <el-progress class="import-progress" :percentage="importPercent" :indeterminate="importing" :duration="8" />
       <p class="import-status">{{ importStage }} · 已用时 {{ formatDuration(importElapsed) }}</p>
-      <p class="import-hint">当前模式：{{ importModeLabel }}。新 SKU 编码只用于匹配已有商品；空白字段不会覆盖原值，待生成商品不能填写商品状态。</p>
+      <p v-if="activeImportKind === 'create'" class="import-hint">新增导入只处理未存在的旧 SKU。导入成功后自动生成 SPU / SKU，并下载 BigSeller 商品SKU表。</p>
+      <p v-else class="import-hint">按“{{ legacyImportModeLabel }}”处理旧商品档案，不自动生成新编码或下载 BigSeller 表。</p>
     </el-dialog>
 
     <el-dialog v-model="summaryVisible" title="导入结果" width="min(720px, 94vw)">
@@ -498,6 +537,8 @@
         <el-descriptions-item label="无变化">{{ importResult.unchanged || 0 }}</el-descriptions-item>
         <el-descriptions-item label="跳过">{{ importResult.skipped || 0 }}</el-descriptions-item>
         <el-descriptions-item label="异常">{{ importResult.error_count || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="生成 SKU">{{ importResult.generated || 0 }}</el-descriptions-item>
+        <el-descriptions-item label="BigSeller 表">{{ importResult.bigseller_file_name || '未生成' }}</el-descriptions-item>
         <el-descriptions-item label="耗时">{{ formatDuration(importResult.duration_ms || importElapsed) }}</el-descriptions-item>
       </el-descriptions>
       <el-alert v-if="importResult.errors?.length" class="import-errors" title="请按行号修正异常数据后重新导入" type="warning" :closable="false" />
@@ -531,7 +572,7 @@ import {
   bulkUpdateProductDetails,
   bulkCacheProductImages,
 } from '../../api/products';
-import { collectionRows, collectionTotal } from '../../utils/businessResponse';
+import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 import { apiBaseUrl } from '../../api/baseUrl';
 import {
   buildCategoryTree,
@@ -544,6 +585,7 @@ import {
   productDictionaryCacheScope,
   subscribeProductDictionaryCacheInvalidation,
 } from '../../utils/productDictionaryCache';
+import { downloadBigSellerProductWorkbook } from '../../utils/bigsellerWorkbook';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
@@ -566,6 +608,7 @@ const visible = ref(false);
 const viewVisible = ref(false);
 const selectedRow = ref(null);
 const selectedRows = ref([]);
+const bigsellerExporting = ref(false);
 const form = reactive({ id: null, product_name: '', category_node: null, attribute_code: '', color_code: '', specification: '', purchase_price: '' });
 const editVisible = ref(false);
 const editableDetailFields = [
@@ -593,12 +636,21 @@ const bulkForm = reactive({
   origin_country: '', hs_code: '', image_url: '', clearFields: [],
 });
 const importing = ref(false);
+const createImportVisible = ref(false);
+const legacyImportVisible = ref(false);
+const createImportInput = ref(null);
+const legacyImportInput = ref(null);
+const createImportUpload = ref(null);
+const legacyImportUpload = ref(null);
+const createImportFileName = ref('');
+const legacyImportFileName = ref('');
 const summaryVisible = ref(false);
 const importStep = ref(0);
 const importPercent = ref(0);
 const importStage = ref('准备导入');
 const importElapsed = ref(0);
 const importResult = ref({});
+const activeImportKind = ref('create');
 let importTimer = null;
 const imageBatchVisible = ref(false);
 const imageBatchSaving = ref(false);
@@ -608,8 +660,13 @@ const imageBatchFile = ref(null);
 const imageBatchProgress = ref('');
 const imageBatchPhase = ref('draft');
 const imageBatchFileName = ref('');
-const importMode = ref('auto');
-const importModeLabel = computed(() => ({ auto: '自动导入（新增或更新）', create: '仅导入新增', update: '仅更新已有记录' })[importMode.value] || '自动导入（新增或更新）');
+const legacyImportMode = ref('auto');
+const legacyImportModeLabel = computed(() => ({
+  auto: '自动判断新增/更新',
+  create: '仅导入新增档案',
+  update: '仅更新已有档案',
+})[legacyImportMode.value] || '自动判断新增/更新');
+const exportableSelectedRows = computed(() => selectedRows.value.filter((row) => row?.sku_code));
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
@@ -659,6 +716,31 @@ function selectCategory(data) {
   filters.category_id = data?.id ? String(data.id) : '';
   page.value = 1;
   load();
+}
+
+function parseCsvRows(text) {
+  const source = String(text || '').replace(/^\uFEFF/, '');
+  const output = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (character === '"' && quoted && next === '"') { cell += '"'; index += 1; continue; }
+    if (character === '"') { quoted = !quoted; continue; }
+    if (character === ',' && !quoted) { row.push(cell.trim()); cell = ''; continue; }
+    if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && next === '\n') index += 1;
+      row.push(cell.trim());
+      if (row.some((value) => value !== '')) output.push(row);
+      row = []; cell = ''; continue;
+    }
+    cell += character;
+  }
+  row.push(cell.trim());
+  if (row.some((value) => value !== '')) output.push(row);
+  return output;
 }
 
 const imageBatchPreviewPage = ref(1);
@@ -1288,30 +1370,98 @@ function finishImportStatus() {
   importElapsed.value = Math.max(importElapsed.value, 1);
   importing.value = false;
 }
-async function importFile(event) {
-  const file = event.target.files?.[0];
+function openCreateImport() {
+  activeImportKind.value = 'create';
+  createImportUpload.value = null;
+  createImportFileName.value = '';
+  createImportVisible.value = true;
+}
+
+function openLegacyImport() {
+  activeImportKind.value = 'legacy';
+  legacyImportUpload.value = null;
+  legacyImportFileName.value = '';
+  legacyImportVisible.value = true;
+}
+
+function handleIoCommand(command) {
+  if (command === 'create-import') openCreateImport();
+  else if (command === 'legacy-import') openLegacyImport();
+  else if (command === 'image-import') openImageBatch();
+  else if (command === 'bigseller-export') exportBigSellerProducts();
+}
+
+function selectCreateImportFile(event) {
+  const uploadedFile = event.target.files?.[0] || null;
   event.target.value = '';
-  if (!file) return;
-  if (!/\.csv$/i.test(file.name)) { show('请选择 CSV 文件', 'warning'); return; }
+  if (!uploadedFile) return;
+  if (!/\.csv$/i.test(uploadedFile.name)) { show('请选择 CSV 文件', 'warning'); return; }
+  createImportUpload.value = uploadedFile;
+  createImportFileName.value = uploadedFile.name;
+}
+
+function selectLegacyImportFile(event) {
+  const uploadedFile = event.target.files?.[0] || null;
+  event.target.value = '';
+  if (!uploadedFile) return;
+  if (!/\.csv$/i.test(uploadedFile.name)) { show('请选择 CSV 文件', 'warning'); return; }
+  legacyImportUpload.value = uploadedFile;
+  legacyImportFileName.value = uploadedFile.name;
+}
+
+function confirmCreateImport() {
+  if (!createImportUpload.value) return;
+  const uploadedFile = createImportUpload.value;
+  createImportVisible.value = false;
+  importFile(uploadedFile);
+}
+
+function confirmLegacyImport() {
+  if (!legacyImportUpload.value) return;
+  const uploadedFile = legacyImportUpload.value;
+  legacyImportVisible.value = false;
+  importLegacyFile(uploadedFile);
+}
+
+async function readImportCsv(uploadedFile) {
+  const bytes = await uploadedFile.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('gb18030').decode(bytes);
+  }
+}
+
+function normalizeImportHeaders(csvText) {
+  return csvText.replace(/^([^\r\n]*)/, (header) => header
+    .split(',')
+    .map((value) => value.replace(/^(\uFEFF?)\*/, '$1'))
+    .join(','));
+}
+
+async function importLegacyFile(uploadedFile) {
+  activeImportKind.value = 'legacy';
   beginImportStatus();
   try {
     importStep.value = 1;
-    const bytes = await file.arrayBuffer();
-    let csvText;
-    try { csvText = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { csvText = new TextDecoder('gb18030').decode(bytes); }
-    importPercent.value = 28;
+    const csvText = await readImportCsv(uploadedFile);
+    importPercent.value = 34;
     importStage.value = '文件解析完成，正在校验数据';
     importStep.value = 2;
-    const response = await importLegacyProductItems(csvText, importMode.value);
-    importPercent.value = 92;
-    importStage.value = '服务端增量更新完成';
-    importResult.value = response.success ? (response.data || {}) : { error_count: 1, errors: [{ line: '-', message: response.message || '导入失败' }] };
+    const response = await importLegacyProductItems(normalizeImportHeaders(csvText), legacyImportMode.value);
+    importPercent.value = 88;
+    importStage.value = '旧商品档案写入完成';
+    importResult.value = response.success
+      ? { ...(response.data || {}), generated: 0, bigseller_file_name: '' }
+      : { error_count: 1, errors: [{ line: '-', message: response.message || '导入失败' }] };
     importStep.value = 3;
     importPercent.value = 100;
     if (response.success) {
-      show(`导入完成：新增 ${response.data?.created || 0} 条，更新 ${response.data?.updated || 0} 条，无变化 ${response.data?.unchanged || 0} 条`);
+      show(`旧档案导入完成：新增 ${response.data?.created || 0} 条，更新 ${response.data?.updated || 0} 条，无变化 ${response.data?.unchanged || 0} 条`);
       await load();
-    } else show(response.message || '导入失败', 'error');
+    } else {
+      show(response.message || '导入失败', 'error');
+    }
   } catch (error) {
     importResult.value = { error_count: 1, errors: [{ line: '-', message: error?.message || '网络请求失败' }] };
     show(error?.message || '导入失败', 'error');
@@ -1321,20 +1471,148 @@ async function importFile(event) {
   }
 }
 
+function importedSkuTargets(csvText) {
+  const parsed = parseCsvRows(csvText);
+  if (parsed.length < 2) return [];
+  const headers = parsed[0];
+  const oldIndex = headers.indexOf('旧SKU编码');
+  const newIndex = headers.indexOf('新SKU编码');
+  return parsed.slice(1).map((values, index) => ({
+    line: index + 2,
+    legacySkuCode: oldIndex >= 0 ? String(values[oldIndex] || '').trim() : '',
+    skuCode: newIndex >= 0 ? String(values[newIndex] || '').trim() : '',
+  })).filter((item) => item.legacySkuCode || item.skuCode);
+}
+
+function normalizeGeneratedDetail(item) {
+  return {
+    ...item,
+    sku_code: item.sku_code || item.generated_sku_code || '',
+    spu_code: item.spu_code || item.generated_spu_code || '',
+    sku_product_name: item.sku_product_name || item.product_name || '',
+  };
+}
+
+async function generateImportedProducts(csvText, excludedLines = new Set()) {
+  const generatedRows = [];
+  const errors = [];
+  const seen = new Set();
+  for (const target of importedSkuTargets(csvText)) {
+    if (excludedLines.has(Number(target.line))) continue;
+    const key = target.legacySkuCode || target.skuCode;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const listResponse = await fetchProductDetailList({ search: key, page: 1, page_size: 100 });
+    if (!listResponse.success) {
+      errors.push({ line: target.line, message: listResponse.message || `无法读取导入后的 SKU ${key}` });
+      continue;
+    }
+    const matched = collectionRows(listResponse.data).find((row) => (
+      (!target.legacySkuCode || String(row.legacy_sku_code || '') === target.legacySkuCode)
+      && (!target.skuCode || String(row.sku_code || row.generated_sku_code || '') === target.skuCode)
+    ));
+    if (!matched) {
+      errors.push({ line: target.line, message: `未找到导入后的 SKU ${key}` });
+      continue;
+    }
+    if (matched.sku_code || matched.generated_sku_code) {
+      generatedRows.push(normalizeGeneratedDetail(matched));
+      continue;
+    }
+    if (matched.row_type !== 'legacy' || !matched.id) {
+      errors.push({ line: target.line, message: `SKU ${key} 不是可生成的待调整商品` });
+      continue;
+    }
+    const generateResponse = await generateLegacyProductItem(matched.id);
+    if (!generateResponse.success) {
+      errors.push({ line: target.line, message: generateResponse.message || `SKU ${key} 生成失败` });
+      continue;
+    }
+    generatedRows.push(normalizeGeneratedDetail(detailData(generateResponse.data)));
+  }
+  return { generatedRows, errors };
+}
+
+async function importFile(uploadedFile) {
+  activeImportKind.value = 'create';
+  beginImportStatus();
+  try {
+    importStep.value = 1;
+    const csvText = await readImportCsv(uploadedFile);
+    importPercent.value = 28;
+    importStage.value = '文件解析完成，正在校验数据';
+    importStep.value = 2;
+    const normalizedCsv = normalizeImportHeaders(csvText);
+    const response = await importLegacyProductItems(normalizedCsv, 'create');
+    importPercent.value = 58;
+    importStage.value = '商品数据导入完成，正在生成 SPU / SKU';
+    importResult.value = response.success ? { ...(response.data || {}), errors: [...(response.data?.errors || [])] } : { error_count: 1, errors: [{ line: '-', message: response.message || '导入失败' }] };
+    importStep.value = 3;
+    if (response.success) {
+      const rejectedLines = new Set((response.data?.errors || []).map((item) => Number(item.line)));
+      const generated = await generateImportedProducts(normalizedCsv, rejectedLines);
+      importResult.value.generated = generated.generatedRows.length;
+      importResult.value.errors.push(...generated.errors);
+      importResult.value.error_count = importResult.value.errors.length;
+      if (generated.generatedRows.length) {
+        importPercent.value = 86;
+        importStage.value = '正在生成 BigSeller 商品SKU表';
+        importStep.value = 4;
+        const filename = `BigSeller商品SKU_${Date.now()}.xlsx`;
+        downloadBigSellerProductWorkbook(generated.generatedRows, filename);
+        importResult.value.bigseller_file_name = filename;
+        show(`已新增导入并生成 ${generated.generatedRows.length} 个 SKU，BigSeller 表已自动下载`);
+      } else {
+        importResult.value.bigseller_file_name = '';
+        show('商品导入完成，但没有可生成 BigSeller 表的 SKU，请查看异常明细', 'warning');
+      }
+      await load();
+    } else show(response.message || '导入失败', 'error');
+    importStep.value = 5;
+    importPercent.value = 100;
+  } catch (error) {
+    importResult.value = { error_count: 1, errors: [{ line: '-', message: error?.message || '网络请求失败' }] };
+    show(error?.message || '导入失败', 'error');
+  } finally {
+    finishImportStatus();
+    summaryVisible.value = true;
+  }
+}
+
+function exportBigSellerProducts() {
+  if (bigsellerExporting.value) return;
+  bigsellerExporting.value = true;
+  try {
+    const count = downloadBigSellerProductWorkbook(exportableSelectedRows.value);
+    const skipped = selectedRows.value.length - count;
+    show(`已生成 ${count} 条 BigSeller 商品 SKU 数据${skipped ? `，已跳过 ${skipped} 条未生成 SKU 的记录` : ''}`);
+  } catch (error) {
+    show(error?.message || '生成 BigSeller 商品SKU表失败', 'warning');
+  } finally {
+    bigsellerExporting.value = false;
+  }
+}
+
 function downloadTemplate() {
   const headers = [
-    '旧SPU编码', '旧SKU编码', '新SKU编码', '商品名称', '完整类目编码', '属性编码',
-    '颜色英文编码', '规格', '采购价格', '单位', '商品图片', '重量(g)', '体积(m³)',
+    '*旧SPU编码', '*旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码',
+    '*颜色英文编码', '*规格', '采购价格', '单位', '商品图片', '重量(g)', '体积(m³)',
     '长(cm)', '宽(cm)', '高(cm)', '原产国', 'HS编码', '商品描述', '商品状态',
   ];
   const values = [
-    'OLD-SPU-001', 'OLD-SKU-001', '', '示例 SKU 商品', '10101', '0', 'navy',
+    'OLD-SPU-001', 'OLD-SKU-001', '示例 SKU 商品', '10101', '0', 'navy',
     '150cm×220cm', '35.8000', '件', 'https://example.com/product.jpg', '1200.000',
     '0.045000', '150.000', '220.000', '20.000', '中国', '940490', '床品示例，空白字段不会覆盖原值', '',
   ];
   const csv = `\ufeff${headers.join(',')}\n${values.join(',')}\n`;
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const anchor = document.createElement('a'); anchor.href = url; anchor.download = '商品明细导入模板.csv'; anchor.click(); URL.revokeObjectURL(url);
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = '商品新增导入模板.csv'; anchor.click(); URL.revokeObjectURL(url);
+}
+
+function downloadLegacyTemplate() {
+  const csv = '\ufeff旧SPU编码,旧SKU编码,新SKU编码,商品名称,完整类目编码,属性编码,颜色英文编码,规格,采购价格,单位,商品图片,重量(g),体积(m³),长(cm),宽(cm),高(cm),原产国,HS编码,商品描述,商品状态\nOLD-SPU-001,OLD-SKU-001,,示例 SKU 商品,10101,0,navy,150cm×220cm,35.8000,件,https://example.com/product.jpg,1200.000,0.045000,150.000,220.000,20.000,中国,940490,旧档案新增或更新示例,\n';
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = '旧商品档案导入模板.csv'; anchor.click(); URL.revokeObjectURL(url);
 }
 
 onMounted(() => {
@@ -1353,6 +1631,13 @@ onBeforeUnmount(() => {
 .page-head p { margin: 0; color: #64748b; }
 .header-actions, .row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .import-mode-control { width: 170px; }
+.io-menu-caret { margin-left: 4px; color: #64748b; }
+.import-upload-box { display: grid; justify-items: center; gap: 8px; padding: 28px 20px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fafcff; color: #475569; cursor: pointer; outline: none; }
+.import-upload-box:hover, .import-upload-box:focus { border-color: #6366f1; background: #f8f7ff; }
+.import-upload-box strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-upload-box small { color: #94a3b8; text-align: center; }
+.import-upload-icon { color: #64748b; font-size: 28px; line-height: 1; }
+.import-template-link { margin-top: 8px; }
 .workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
 .category-panel, .content-panel { border: 1px solid #d9e2ec; border-radius: 8px; background: #fff; }
 .category-panel { padding: 14px; min-height: 640px; }

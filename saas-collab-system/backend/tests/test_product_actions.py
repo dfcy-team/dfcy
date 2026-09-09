@@ -1,4 +1,5 @@
 import pytest
+from django.db import IntegrityError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -11,6 +12,7 @@ from apps.products.models import (
 )
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
+from apps.products.views import _product_reverse_references
 
 
 def _client_user(tenant, username, *, scope_type=DataScope.ScopeType.ALL, scope_config=None):
@@ -110,6 +112,46 @@ def test_unreferenced_sku_and_pending_legacy_can_be_deleted():
     assert response.status_code == 200
     assert response.json()["data"] == {"deleted": True, "id": legacy.id}
     assert not ProductLegacyItem.objects.filter(pk=legacy.pk).exists()
+
+
+@pytest.mark.django_db
+def test_spu_delete_ignores_unmanaged_read_only_reverse_projections(monkeypatch):
+    tenant = Tenant.objects.create(name="Product action tenant", code="product-action-unmanaged")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SPU-UNMANAGED", product_name="Unmanaged")
+    relation = next(
+        relation
+        for relation in ProductSPU._meta.related_objects
+        if not relation.related_model._meta.managed
+    )
+
+    class ExplodingProjectionAccessor:
+        def __get__(self, _instance, _owner=None):
+            raise AssertionError("unmanaged projection must not be queried during deletion")
+
+    monkeypatch.setattr(ProductSPU, relation.get_accessor_name(), ExplodingProjectionAccessor())
+
+    assert _product_reverse_references(spu) == []
+
+
+@pytest.mark.django_db
+def test_spu_delete_converts_database_fk_race_to_state_conflict(monkeypatch):
+    tenant = Tenant.objects.create(name="Product action tenant", code="product-action-integrity")
+    _user, client = _client_user(tenant, "product-action-integrity-user")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SPU-INTEGRITY", product_name="Integrity")
+
+    def raise_integrity_error(_self, *args, **kwargs):
+        raise IntegrityError("simulated concurrent foreign-key reference")
+
+    monkeypatch.setattr(ProductSPU, "delete", raise_integrity_error)
+    response = client.delete(f"/api/internal/products/spus/{spu.id}/")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "STATE_CONFLICT"
+    assert response.json()["data"] == {
+        "can_deactivate": True,
+        "references": ["protected_relation"],
+    }
+    assert ProductSPU.objects.filter(pk=spu.pk).exists()
 
 
 @pytest.mark.django_db
