@@ -1850,6 +1850,17 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.order_id == order.order_id
     assert attribution.sku_id == order.sku_id
 
+    performance = build_bd_performance(
+        tenant=tenant,
+        start_date=order_time.date(),
+        end_date=order_time.date(),
+        attribution="strict",
+        currency="CNY",
+    )
+    assert performance["totals"]["gmv_php"] == "1000.0000"
+    assert performance["totals"]["gmv_myr"] == "0.0000"
+    assert performance["totals"]["gmv_thb"] == "0.0000"
+
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():
     tenant = Tenant.objects.create(name="Performance tenant", code="performance-empty")

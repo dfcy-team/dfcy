@@ -544,6 +544,9 @@ def _owner_bucket():
         "item_quantity": 0,
         "gmv_cny": Decimal("0"),
         "commission_cny": Decimal("0"),
+        # Keep source-currency GMV separate. Cross-country values must never
+        # be added together merely because the dashboard is viewed as a table.
+        "native_gmv": {currency: Decimal("0") for currency in ("PHP", "MYR", "THB")},
         "missing_commission_count": 0,
         "order_ids": set(),
         "missing_exchange_rates": set(),
@@ -556,6 +559,10 @@ def _serialize_metrics(bucket, currency):
     gmv = bucket["gmv_cny"]
     commission = bucket["commission_cny"]
     roi = None if investment == 0 else gmv / investment
+    native_gmv = {
+        native_currency: _format_money(bucket["native_gmv"].get(native_currency, Decimal("0")))
+        for native_currency in ("PHP", "MYR", "THB")
+    }
     return {
         "task_count": bucket["task_count"],
         "outreach_tasks": bucket["task_count"],
@@ -571,6 +578,10 @@ def _serialize_metrics(bucket, currency):
         "quantity": bucket["item_quantity"],
         "gmv": _format_money(gmv),
         "commission": _format_money(commission),
+        "native_gmv": native_gmv,
+        "gmv_php": native_gmv["PHP"],
+        "gmv_myr": native_gmv["MYR"],
+        "gmv_thb": native_gmv["THB"],
         "missing_commission_count": bucket["missing_commission_count"],
         "roi": format(roi.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP), "f") if roi is not None else None,
     }
@@ -717,6 +728,10 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         bucket["order_ids"].add(str(row["order_snapshot__order_id"] or "").strip())
         bucket["item_quantity"] += row["order_snapshot__quantity"] or 0
         source_currency = str(row["order_snapshot__currency"] or "").upper()
+        if source_currency in bucket["native_gmv"]:
+            bucket["native_gmv"][source_currency] += _money(
+                row["order_snapshot__payment_amount"]
+            )
         converted, details = rate_resolver.convert(
             row["order_snapshot__payment_amount"],
             source_currency,
@@ -776,6 +791,8 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         total_bucket["item_quantity"] += bucket["item_quantity"]
         total_bucket["gmv_cny"] += bucket["gmv_cny"]
         total_bucket["commission_cny"] += bucket["commission_cny"]
+        for native_currency, amount in bucket["native_gmv"].items():
+            total_bucket["native_gmv"][native_currency] += amount
         total_bucket["missing_commission_count"] += bucket["missing_commission_count"]
         total_bucket["order_ids"].update(bucket["order_ids"])
         total_bucket["missing_exchange_rates"].update(bucket["missing_exchange_rates"])
