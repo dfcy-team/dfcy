@@ -46,10 +46,24 @@ SHIPPED_SAMPLE_STATUSES = frozenset(
         SampleFulfillment.Status.LIVE_CREATOR,
     }
 )
+COUNTRY_CURRENCY_BREAKDOWN = (
+    ("PH", "菲律宾", "PHP"),
+    ("MY", "马来西亚", "MYR"),
+    ("TH", "泰国", "THB"),
+)
+COUNTRY_BY_CODE = {code: (name, currency) for code, name, currency in COUNTRY_CURRENCY_BREAKDOWN}
+COUNTRY_BY_CURRENCY = {currency: code for code, _, currency in COUNTRY_CURRENCY_BREAKDOWN}
 
 
 def normalize_account(value):
     return " ".join(str(value or "").strip().split()).casefold()
+
+
+def _country_code(value):
+    normalized = str(value or "").strip().upper()
+    if normalized in COUNTRY_BY_CODE:
+        return normalized
+    return COUNTRY_BY_CURRENCY.get(normalized)
 
 
 def normalize_creator_handle(value):
@@ -547,6 +561,18 @@ def _owner_bucket():
         # Keep source-currency GMV separate. Cross-country values must never
         # be added together merely because the dashboard is viewed as a table.
         "native_gmv": {currency: Decimal("0") for currency in ("PHP", "MYR", "THB")},
+        "country_breakdown": {
+            code: {
+                "country_code": code,
+                "country": name,
+                "currency": country_currency,
+                "sample_count": 0,
+                "shipped_count": 0,
+                "order_ids": set(),
+                "gmv": Decimal("0"),
+            }
+            for code, name, country_currency in COUNTRY_CURRENCY_BREAKDOWN
+        },
         "missing_commission_count": 0,
         "order_ids": set(),
         "missing_exchange_rates": set(),
@@ -563,6 +589,20 @@ def _serialize_metrics(bucket, currency):
         native_currency: _format_money(bucket["native_gmv"].get(native_currency, Decimal("0")))
         for native_currency in ("PHP", "MYR", "THB")
     }
+    country_breakdown = []
+    for code, _, _ in COUNTRY_CURRENCY_BREAKDOWN:
+        country = bucket["country_breakdown"][code]
+        country_breakdown.append(
+            {
+                "country_code": country["country_code"],
+                "country": country["country"],
+                "currency": country["currency"],
+                "sample_count": country["sample_count"],
+                "shipped_count": country["shipped_count"],
+                "valid_order_count": len(country["order_ids"]),
+                "gmv": _format_money(country["gmv"]),
+            }
+        )
     return {
         "task_count": bucket["task_count"],
         "outreach_tasks": bucket["task_count"],
@@ -582,6 +622,7 @@ def _serialize_metrics(bucket, currency):
         "gmv_php": native_gmv["PHP"],
         "gmv_myr": native_gmv["MYR"],
         "gmv_thb": native_gmv["THB"],
+        "country_breakdown": country_breakdown,
         "missing_commission_count": bucket["missing_commission_count"],
         "roi": format(roi.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP), "f") if roi is not None else None,
     }
@@ -642,18 +683,23 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         sampled_at__gte=start_dt,
         sampled_at__lt=end_dt,
     ).values(
-        "owner_id", "fulfillment__calculated_cost",
+        "owner_id", "site", "fulfillment__calculated_cost",
         "sampled_at", "fulfillment__status", "fulfillment__shipped_at", "fulfillment__sample_order_no",
     ).order_by("id")
     for row in sample_rows.iterator(chunk_size=1000):
         bucket = buckets[row["owner_id"]]
         bucket["sample_count"] += 1
+        country = bucket["country_breakdown"].get(_country_code(row["site"]))
+        if country:
+            country["sample_count"] += 1
         if (
             row["fulfillment__status"] in SHIPPED_SAMPLE_STATUSES
             or row["fulfillment__shipped_at"] is not None
             or str(row["fulfillment__sample_order_no"] or "").strip()
         ):
             bucket["shipped_count"] += 1
+            if country:
+                country["shipped_count"] += 1
         if row["fulfillment__calculated_cost"] is not None:
             converted, details = rate_resolver.convert(
                 row["fulfillment__calculated_cost"],
@@ -696,6 +742,7 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
             "order_snapshot__quantity",
             "order_snapshot__payment_amount",
             "order_snapshot__currency",
+            "sample_attribution__site",
             "order_snapshot__actual_paid_commission",
             "order_snapshot__estimated_paid_commission",
             "order_snapshot__fully_returned",
@@ -732,6 +779,12 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
             bucket["native_gmv"][source_currency] += _money(
                 row["order_snapshot__payment_amount"]
             )
+        country = bucket["country_breakdown"].get(
+            _country_code(source_currency) or _country_code(row["sample_attribution__site"])
+        )
+        if country:
+            country["order_ids"].add(str(row["order_snapshot__order_id"] or "").strip())
+            country["gmv"] += _money(row["order_snapshot__payment_amount"])
         converted, details = rate_resolver.convert(
             row["order_snapshot__payment_amount"],
             source_currency,
@@ -793,6 +846,12 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         total_bucket["commission_cny"] += bucket["commission_cny"]
         for native_currency, amount in bucket["native_gmv"].items():
             total_bucket["native_gmv"][native_currency] += amount
+        for code, country in bucket["country_breakdown"].items():
+            total_country = total_bucket["country_breakdown"][code]
+            total_country["sample_count"] += country["sample_count"]
+            total_country["shipped_count"] += country["shipped_count"]
+            total_country["order_ids"].update(country["order_ids"])
+            total_country["gmv"] += country["gmv"]
         total_bucket["missing_commission_count"] += bucket["missing_commission_count"]
         total_bucket["order_ids"].update(bucket["order_ids"])
         total_bucket["missing_exchange_rates"].update(bucket["missing_exchange_rates"])

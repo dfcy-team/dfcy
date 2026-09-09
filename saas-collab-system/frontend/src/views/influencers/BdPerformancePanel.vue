@@ -39,14 +39,28 @@
       <template v-else>
         <el-alert v-if="sourceMessage" class="source-alert" type="info" show-icon :closable="false" :title="sourceMessage" />
         <el-table v-loading="loading" :data="rows" empty-text="暂无绩效数据">
+          <el-table-column type="expand" width="52">
+            <template #default="{ row }">
+              <div class="country-breakdown">
+                <p>仅展示已归因到该 BD 送样记录的联盟订单；本币 GMV 不跨国家相加。</p>
+                <el-table :data="row.country_breakdown || []" size="small" border>
+                  <el-table-column prop="country" label="国家" min-width="120" />
+                  <el-table-column prop="currency" label="本币" min-width="100" />
+                  <el-table-column prop="sample_count" label="对应送样" min-width="120" />
+                  <el-table-column prop="shipped_count" label="已发货送样" min-width="130" />
+                  <el-table-column prop="valid_order_count" label="有效订单" min-width="120" />
+                  <el-table-column prop="gmv" label="本币 GMV" min-width="160">
+                    <template #default="{ row: country }">{{ formatNativeMoney(country.gmv, country.currency) }}</template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column prop="owner" label="BD 成员" min-width="140" />
           <el-table-column prop="task_count" label="建联任务" min-width="110" />
           <el-table-column prop="sample_count" label="送样记录" min-width="110" />
           <el-table-column prop="valid_order_count" label="有效订单" min-width="110" />
           <el-table-column prop="gmv" label="合作单 GMV" min-width="145"><template #default="{ row }">{{ formatMoney(row.gmv) }}</template></el-table-column>
-          <el-table-column prop="gmv_php" label="PH GMV (PHP)" min-width="145"><template #default="{ row }">{{ formatNativeMoney(row.gmv_php, 'PHP') }}</template></el-table-column>
-          <el-table-column prop="gmv_myr" label="MY GMV (MYR)" min-width="145"><template #default="{ row }">{{ formatNativeMoney(row.gmv_myr, 'MYR') }}</template></el-table-column>
-          <el-table-column prop="gmv_thb" label="TH GMV (THB)" min-width="145"><template #default="{ row }">{{ formatNativeMoney(row.gmv_thb, 'THB') }}</template></el-table-column>
           <el-table-column prop="investment" label="合作单投入" min-width="145"><template #default="{ row }">{{ formatMoney(row.investment) }}</template></el-table-column>
           <el-table-column prop="roi" label="合作单 ROI" min-width="120"><template #default="{ row }">{{ formatRoi(row.roi) }}</template></el-table-column>
           <template v-if="filters.metrics === 'full'">
@@ -173,6 +187,8 @@ onMounted(load);
 .button-group button.active { background: #eaf6f2; color: #087657; box-shadow: inset 0 0 0 1px #14936f; }
 .scope-bar { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 12px; color: #768690; font-size: 12px; }
 .source-alert { margin-bottom: 12px; }
+.country-breakdown { padding: 8px 18px 16px 52px; background: #f7faf9; }
+.country-breakdown p { margin: 0 0 8px; color: #6b7b86; font-size: 12px; }
 .panel-state { display: grid; min-height: 150px; place-items: center; border: 1px dashed #dce4e9; color: #768690; }
 @media (max-width: 1100px) { .toolbar { flex-wrap: wrap; overflow: visible; } }
 @media (max-width: 760px) {

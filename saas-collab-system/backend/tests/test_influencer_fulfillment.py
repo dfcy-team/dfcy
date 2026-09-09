@@ -1860,6 +1860,19 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert performance["totals"]["gmv_php"] == "1000.0000"
     assert performance["totals"]["gmv_myr"] == "0.0000"
     assert performance["totals"]["gmv_thb"] == "0.0000"
+    philippines = next(
+        country for country in performance["rows"][0]["country_breakdown"]
+        if country["country_code"] == "PH"
+    )
+    assert philippines == {
+        "country_code": "PH",
+        "country": "菲律宾",
+        "currency": "PHP",
+        "sample_count": 1,
+        "shipped_count": 0,
+        "valid_order_count": 1,
+        "gmv": "1000.0000",
+    }
 
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():
