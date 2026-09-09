@@ -40,11 +40,11 @@ describe('商品明细数据页面契约', () => {
   });
 
   it('显示导入阶段、耗时以及增量结果统计', () => {
-    expect(page).toContain('导入商品明细');
+    expect(page).toContain("'商品新增导入' : '旧商品档案导入'");
     expect(page).toContain('importStage');
     expect(page).toContain('importElapsed');
-    expect(page).toContain('空白字段不会覆盖原值');
-    expect(page).toContain('待生成商品不能填写商品状态');
+    expect(page).toContain('新增导入只处理未存在的旧 SKU');
+    expect(page).toContain('导入成功后自动生成 SPU / SKU');
     expect(page).toContain('importResult.created');
     expect(page).toContain('importResult.updated');
     expect(page).toContain('importResult.unchanged');
@@ -125,17 +125,51 @@ describe('商品明细数据页面契约', () => {
     expect(loadBody).not.toContain('await loadDictionaries()');
   });
 
-  it('支持分类颜色失效刷新并保留三种导入模式', () => {
+  it('支持分类颜色失效刷新并提供独立导入模式', () => {
     expect(page).toContain('subscribeProductDictionaryCacheInvalidation');
     expect(page).toContain('fetchProductCategoryBackgroundColors()');
     expect(page).toContain('mergeCategoryBackgroundColors(');
-    expect(page).toContain('data-testid="detail-import-mode"');
+    expect(page).toContain('data-testid="detail-io-menu"');
+    expect(page).toContain('data-testid="legacy-import-mode"');
+    expect(page).toContain('data-testid="legacy-import-button"');
+    expect(page).toContain('command="legacy-import"');
     expect(page).toContain('value="auto"');
     expect(page).toContain('value="create"');
     expect(page).toContain('value="update"');
-    expect(page).toContain('importLegacyProductItems(csvText, importMode.value)');
+    expect(page).toContain('async function importLegacyFile(uploadedFile)');
+    expect(page).toContain('importLegacyProductItems(normalizeImportHeaders(csvText), legacyImportMode.value)');
+    expect(page).toContain("importLegacyProductItems(normalizedCsv, 'create')");
     expect(page).toContain('商品图片');
     expect(page).toContain('商品描述');
     expect(page).toContain('商品状态');
+  });
+
+  it('在商品明细页按选中的已生成 SKU 导出 BigSeller 商品表', () => {
+    expect(page).toContain('data-testid="bigseller-create-product-export"');
+    expect(page).toContain('下载 BigSeller 商品SKU表');
+    expect(page).toContain(':disabled="!exportableSelectedRows.length || bigsellerExporting"');
+    expect(page).toContain('selectedRows.value.filter((row) => row?.sku_code)');
+    expect(page).toContain('downloadBigSellerProductWorkbook(exportableSelectedRows.value)');
+    expect(page).not.toContain('组合商品导入');
+  });
+
+  it('在新增导入模板标记编码生成必需字段，上传前移除星号', () => {
+    for (const header of ['*旧SPU编码', '*旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码', '*颜色英文编码', '*规格']) {
+      expect(page).toContain(`'${header}'`);
+    }
+    expect(page).toContain("value.replace(/^(\\uFEFF?)\\*/, '$1')");
+    expect(page).toContain('data-testid="legacy-import-template"');
+    expect(page).toContain('旧商品档案导入模板.csv');
+  });
+
+  it('商品新增导入后生成 SPU/SKU 并自动下载 BigSeller 表', () => {
+    expect(page).toContain('command="create-import"');
+    expect(page).toContain('title="商品新增导入"');
+    expect(page).toContain('generateImportedProducts(normalizedCsv, rejectedLines)');
+    expect(page).toContain('if (excludedLines.has(Number(target.line))) continue;');
+    expect(page).toContain('generateLegacyProductItem(matched.id)');
+    expect(page).toContain('downloadBigSellerProductWorkbook(generated.generatedRows, filename)');
+    expect(page).toContain('BigSeller 表已自动下载');
+    expect(page).toContain('importResult.bigseller_file_name');
   });
 });

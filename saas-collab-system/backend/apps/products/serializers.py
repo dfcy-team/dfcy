@@ -959,6 +959,25 @@ class ProductDetailBulkUpdateSerializer(serializers.Serializer):
         return attrs
 
 
+class ProductBundleCreateComponentInputSerializer(serializers.Serializer):
+    component_sku = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class ProductBundleCreateInputSerializer(serializers.Serializer):
+    product_name = serializers.CharField(max_length=200)
+    category_node = serializers.IntegerField(min_value=1)
+    season_code = serializers.RegexField(r"^[0-9]$")
+    color_code = serializers.CharField(max_length=40)
+    components = ProductBundleCreateComponentInputSerializer(many=True, allow_empty=False, max_length=20)
+
+    def validate_components(self, value):
+        component_ids = [item["component_sku"] for item in value]
+        if len(component_ids) != len(set(component_ids)):
+            raise serializers.ValidationError("The same component SKU cannot be added twice.")
+        return value
+
+
 class ProductBundleComponentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     component_sku_code = serializers.CharField(source="component_sku.sku_code", read_only=True)

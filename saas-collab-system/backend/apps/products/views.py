@@ -62,6 +62,7 @@ from .permissions import (
     IsProductStatusViewer,
 )
 from .serializers import (
+    ProductBundleCreateInputSerializer,
     ProductBundleComponentSerializer,
     ProductCategorySerializer,
     ProductCategoryBackgroundColorBulkSerializer,
@@ -828,11 +829,11 @@ def product_spu_detail(request, pk):
             }
             try:
                 locked.delete()
-            except ProtectedError:
+            except (ProtectedError, IntegrityError):
                 # A relation may have been inserted between the generic
-                # probes and the database delete.  Keep the contract a
-                # deterministic 409 instead of leaking a 500.
-                references = _product_reverse_references(locked)
+                # probes and the database delete.  Some databases surface
+                # that race as a plain IntegrityError.  Do not query again
+                # inside the broken transaction; return a deterministic 409.
                 return error_response(
                     ErrorCode.STATE_CONFLICT,
                     "商品已被业务数据引用，不能删除，请改为停用。",
@@ -918,6 +919,12 @@ def _sku_business_references(item):
     """
     references = []
     for relation in item._meta.related_objects:
+        # Unmanaged models are read-only database projections.  They do not
+        # own persistent references and their backing views may be absent in
+        # lightweight/runtime databases, so probing them can turn a valid
+        # delete into an OperationalError/500.
+        if not relation.related_model._meta.managed:
+            continue
         accessor = relation.get_accessor_name()
         if not accessor:
             continue
@@ -2120,6 +2127,103 @@ def product_legacy_generate(request, pk):
         item.save(update_fields=["status", "error_message", "updated_at"])
         return error_response(ErrorCode.VALIDATION_ERROR, item.error_message, status=400)
     return success_response(ProductLegacyItemSerializer(item).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_create(request):
+    """Create one bundle SPU, its SKU, and all components atomically."""
+    _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
+    input_serializer = ProductBundleCreateInputSerializer(data=request.data)
+    input_serializer.is_valid(raise_exception=True)
+    payload = input_serializer.validated_data
+    tenant = request.user.tenant
+
+    category = ProductCategory.objects.filter(
+        pk=payload["category_node"], tenant=tenant, is_active=True,
+    ).first()
+    if category is None:
+        return error_response(ErrorCode.VALIDATION_ERROR, "请选择当前租户的启用末级分类。", status=400)
+    try:
+        category_path(category)
+    except DjangoValidationError:
+        return error_response(ErrorCode.VALIDATION_ERROR, "请选择当前租户的启用末级分类。", status=400)
+
+    color_code = payload["color_code"]
+    if not ProductColor.objects.filter(tenant=tenant, code=color_code, is_active=True).exists():
+        return error_response(ErrorCode.VALIDATION_ERROR, "请选择当前租户的启用颜色。", status=400)
+
+    component_payloads = payload["components"]
+    component_ids = [item["component_sku"] for item in component_payloads]
+    component_skus = {
+        item.id: item
+        for item in ProductSKU.objects.filter(
+            tenant=tenant,
+            id__in=component_ids,
+            is_active=True,
+        ).exclude(spu__product_type=ProductSPU.ProductType.BUNDLE).select_related("spu")
+    }
+    if len(component_skus) != len(component_ids):
+        return error_response(
+            ErrorCode.VALIDATION_ERROR,
+            "组成 SKU 必须是当前租户中启用的普通 SKU。",
+            status=400,
+        )
+
+    context = _serializer_context(request)
+    try:
+        with transaction.atomic():
+            spu_serializer = ProductSPUSerializer(
+                data={
+                    "product_name": payload["product_name"],
+                    "category_node": category.id,
+                    "season_code": payload["season_code"],
+                    "product_type": ProductSPU.ProductType.BUNDLE,
+                },
+                context=context,
+            )
+            spu_serializer.is_valid(raise_exception=True)
+            spu = spu_serializer.save(tenant=tenant)
+
+            spec_values = {
+                str(item["code"]): "组合"
+                for item in (category.spec_dimensions or [])
+                if isinstance(item, dict) and item.get("code")
+            }
+            sku_serializer = ProductSKUSerializer(
+                data={"spu": spu.id, "color_code": color_code, "spec_values": spec_values},
+                context=context,
+            )
+            sku_serializer.is_valid(raise_exception=True)
+            sku = sku_serializer.save(tenant=tenant)
+
+            components = []
+            for component_payload in component_payloads:
+                component_serializer = ProductBundleComponentSerializer(
+                    data={
+                        "bundle_sku": sku.id,
+                        "component_sku": component_payload["component_sku"],
+                        "quantity": component_payload["quantity"],
+                    },
+                    context=context,
+                )
+                component_serializer.is_valid(raise_exception=True)
+                components.append(component_serializer.save(tenant=tenant))
+    except IntegrityError:
+        return error_response(
+            ErrorCode.STATE_CONFLICT,
+            "组合商品编码或组成关系发生冲突，请刷新后重试。",
+            status=409,
+        )
+
+    return success_response(
+        {
+            "spu": ProductSPUSerializer(spu, context=context).data,
+            "sku": ProductSKUSerializer(sku, context=context).data,
+            "components": ProductBundleComponentSerializer(components, many=True, context=context).data,
+        },
+        status=201,
+    )
 
 
 @api_view(["GET", "POST"])
