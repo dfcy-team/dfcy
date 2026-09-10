@@ -59,7 +59,7 @@ def product_detail_collection(request):
     rows = [
         {
             "id": item.id, "row_type": "legacy", "legacy_spu_code": item.legacy_spu_code,
-            "legacy_sku_code": item.legacy_sku_code, "spu_code": "", "sku_code": "",
+            "legacy_sku_code": item.legacy_sku_code or "", "spu_code": "", "sku_code": "",
             "product_name": item.product_name, "category_node": item.category_node_id,
             "category_name": item.category_node.name if item.category_node else "",
             "color_code": item.color_code, "specification": item.specification,

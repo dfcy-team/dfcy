@@ -43,7 +43,7 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain("'商品新增导入' : '旧商品档案导入'");
     expect(page).toContain('importStage');
     expect(page).toContain('importElapsed');
-    expect(page).toContain('新增导入只处理未存在的旧 SKU');
+    expect(page).toContain('旧 SPU / SKU 编码可留空');
     expect(page).toContain('导入成功后自动生成 SPU / SKU');
     expect(page).toContain('importResult.created');
     expect(page).toContain('importResult.updated');
@@ -153,8 +153,8 @@ describe('商品明细数据页面契约', () => {
     expect(page).not.toContain('组合商品导入');
   });
 
-  it('在新增导入模板标记编码生成必需字段，上传前移除星号', () => {
-    for (const header of ['*旧SPU编码', '*旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码', '*颜色英文编码', '*规格']) {
+  it('在新增导入模板允许旧 SPU/SKU 留空，其他生成必需字段保留星号', () => {
+    for (const header of ['旧SPU编码', '旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码', '*颜色英文编码', '*规格']) {
       expect(page).toContain(`'${header}'`);
     }
     expect(page).toContain("value.replace(/^(\\uFEFF?)\\*/, '$1')");
@@ -165,7 +165,8 @@ describe('商品明细数据页面契约', () => {
   it('商品新增导入后生成 SPU/SKU 并自动下载 BigSeller 表', () => {
     expect(page).toContain('command="create-import"');
     expect(page).toContain('title="商品新增导入"');
-    expect(page).toContain('generateImportedProducts(normalizedCsv, rejectedLines)');
+    expect(page).toContain('generateImportedProducts(normalizedCsv, rejectedLines, response.data?.created_ids || [])');
+    expect(page).toContain('for (const id of createdIds)');
     expect(page).toContain('if (excludedLines.has(Number(target.line))) continue;');
     expect(page).toContain('generateLegacyProductItem(matched.id)');
     expect(page).toContain('downloadBigSellerProductWorkbook(generated.generatedRows, filename)');
