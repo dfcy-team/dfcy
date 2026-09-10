@@ -708,6 +708,11 @@ class ProductLegacyItemSerializer(ProductDetailEditMixin, serializers.ModelSeria
     origin_country = serializers.CharField(max_length=80, required=False, allow_blank=True, allow_null=True)
     image_url = serializers.CharField(max_length=500, required=False, allow_blank=True, allow_null=True)
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["legacy_sku_code"] = data.get("legacy_sku_code") or ""
+        return data
+
     class Meta:
         model = ProductLegacyItem
         fields = ("id", "legacy_spu_code", "legacy_sku_code", "product_name", "spu_product_name",

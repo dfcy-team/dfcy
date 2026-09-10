@@ -1,11 +1,13 @@
 from decimal import Decimal
 
 import pytest
+from django.db import transaction
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.permissions.models import DataScope, Permission, Role, UserRole
-from apps.products.models import ProductLegacyItem, ProductSKU, ProductSPU
+from apps.products.import_service import ImportRowError, _active_categories, _resolve_category
+from apps.products.models import ProductCategory, ProductColor, ProductLegacyItem, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
 
@@ -80,6 +82,122 @@ def test_import_create_update_sparse_columns_and_modes():
     assert rejected_create.json()["data"]["error_count"] == 1
     item.refresh_from_db()
     assert item.product_name == "Imported V2"
+
+
+@pytest.mark.django_db
+def test_create_import_without_legacy_codes_returns_id_and_generates_compatible_empty_code():
+    tenant = Tenant.objects.create(name="Import optional codes", code="import-optional")
+    client = _client(tenant)
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    ProductCategory.objects.create(
+        tenant=tenant,
+        parent=l2,
+        level=3,
+        code="08",
+        name="Mattress",
+        spec_dimensions=[{"code": "spec", "name": "Specification", "values": ["150cm"]}],
+    )
+    ProductColor.objects.create(tenant=tenant, code="noc", name="No color")
+
+    response = client.post(
+        "/api/internal/products/legacy-items/",
+        {
+            "mode": "create",
+            "csv_text": (
+                "旧SPU编码,旧SKU编码,商品名称,完整类目编码,属性编码,颜色英文编码,规格\n"
+                ",,Anonymous imported product,10108,1,noc,150cm\n"
+            ),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    payload = response.json()["data"]
+    assert payload["created"] == 1
+    assert len(payload["created_ids"]) == 1
+    item = ProductLegacyItem.objects.get(pk=payload["created_ids"][0], tenant=tenant)
+    assert item.legacy_spu_code == ""
+    assert item.legacy_sku_code is None
+
+    generated = client.post(f"/api/internal/products/legacy-items/{item.id}/generate/", format="json")
+
+    assert generated.status_code == 200
+    assert generated.json()["data"]["legacy_sku_code"] == ""
+    item.refresh_from_db()
+    assert item.generated_sku.legacy_sku_code == ""
+
+    retried = client.post(f"/api/internal/products/legacy-items/{item.id}/generate/", format="json")
+    assert retried.status_code == 200
+    assert retried.json()["data"]["legacy_sku_code"] == ""
+
+
+@pytest.mark.django_db
+def test_auto_and_update_imports_still_require_a_sku_key():
+    tenant = Tenant.objects.create(name="Import keyed modes", code="import-keyed")
+    client = _client(tenant)
+
+    for mode in ("auto", "update"):
+        response = client.post(
+            "/api/internal/products/legacy-items/",
+            {"mode": mode, "csv_text": "旧SKU编码,商品名称\n,No key\n"},
+            format="json",
+        )
+        assert response.status_code == 200
+        assert response.json()["data"]["created"] == 0
+        assert response.json()["data"]["error_count"] == 1
+
+    assert not ProductLegacyItem.objects.filter(tenant=tenant).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_stale_category_cache_rechecks_active_parent_inside_row_transaction():
+    tenant = Tenant.objects.create(name="Import category race", code="import-category-race")
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    l3 = ProductCategory.objects.create(tenant=tenant, parent=l2, level=3, code="08", name="Mattress")
+    cached = _active_categories(tenant)
+    ProductCategory.objects.filter(pk=l2.pk).update(is_active=False)
+
+    with transaction.atomic(), pytest.raises(ImportRowError, match="未找到有效的完整类目编码"):
+        _resolve_category(cached, "10108")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_stale_category_cache_rechecks_composite_code_after_category_move():
+    tenant = Tenant.objects.create(name="Import category move", code="import-category-move")
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    other_l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="2", name="Other")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    ProductCategory.objects.create(tenant=tenant, parent=l2, level=3, code="08", name="Mattress")
+    cached = _active_categories(tenant)
+    ProductCategory.objects.filter(pk=l2.pk).update(parent=other_l1)
+
+    with transaction.atomic(), pytest.raises(ImportRowError, match="未找到有效的完整类目编码"):
+        _resolve_category(cached, "10108")
+
+
+@pytest.mark.django_db
+def test_generate_rechecks_locked_category_parent_is_active():
+    tenant = Tenant.objects.create(name="Generate category race", code="generate-category-race")
+    client = _client(tenant)
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    l3 = ProductCategory.objects.create(tenant=tenant, parent=l2, level=3, code="08", name="Mattress")
+    item = ProductLegacyItem.objects.create(
+        tenant=tenant,
+        legacy_sku_code=None,
+        product_name="Blocked generation",
+        category_node=l3,
+        color_code="noc",
+        specification="150cm",
+    )
+    ProductCategory.objects.filter(pk=l2.pk).update(is_active=False)
+
+    response = client.post(f"/api/internal/products/legacy-items/{item.id}/generate/", format="json")
+
+    assert response.status_code == 400
+    assert not ProductSKU.objects.filter(tenant=tenant).exists()
 
 
 @pytest.mark.django_db
