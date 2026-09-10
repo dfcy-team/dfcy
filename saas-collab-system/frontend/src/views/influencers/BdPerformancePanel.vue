@@ -22,7 +22,7 @@
           <button type="button" :class="{ active: filters.metrics === 'core' }" :aria-pressed="filters.metrics === 'core'" @click="filters.metrics = 'core'">核心<small>GMV/投入/ROI</small></button>
           <button type="button" :class="{ active: filters.metrics === 'full' }" :aria-pressed="filters.metrics === 'full'" @click="filters.metrics = 'full'">完整<small>全部指标</small></button>
         </div>
-        <el-button type="primary" :loading="loading" @click="load">刷新统计</el-button>
+        <el-button type="primary" :loading="loading" @click="load()">刷新统计</el-button>
         <el-button :disabled="!rows.length || loading" @click="downloadCsv">导出 CSV</el-button>
       </div>
 
@@ -32,7 +32,7 @@
       </div>
 
       <el-alert v-if="errorMessage" type="error" show-icon :closable="false" :title="errorMessage">
-        <template #default><el-button link type="primary" @click="load">重试</el-button></template>
+        <template #default><el-button link type="primary" @click="load()">重试</el-button></template>
       </el-alert>
       <div v-else-if="state === 'loading'" class="panel-state" data-test="performance-loading">正在加载绩效聚合数据...</div>
       <div v-else-if="state === 'empty'" class="panel-state" data-test="performance-empty">当前筛选条件下暂无绩效数据</div>
@@ -62,7 +62,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { BD_PERFORMANCE_CURRENCIES, fetchBdPerformance } from '../../api/influencers';
+import { BD_PERFORMANCE_CURRENCIES, fetchBdPerformance, formatInfluencerError } from '../../api/influencers';
 import { collectionRows } from '../../utils/businessResponse';
 import { defaultCompletedDateRange } from './performanceDate';
 
@@ -112,16 +112,22 @@ function validateDates() {
   if (filters.startDay > filters.endDay) return '开始日期不能晚于结束日期';
   return '';
 }
-async function load() {
-  const validationMessage = validateDates();
-  if (validationMessage) { errorMessage.value = validationMessage; state.value = 'error'; return; }
+async function load({ includeDateRange = true } = {}) {
+  if (includeDateRange) {
+    const validationMessage = validateDates();
+    if (validationMessage) { errorMessage.value = validationMessage; state.value = 'error'; return; }
+  }
   loading.value = true; state.value = 'loading'; errorMessage.value = '';
   try {
-    const response = await fetchBdPerformance({ start_date: filters.startDay, end_date: filters.endDay, currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics });
+    const params = { currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics };
+    if (includeDateRange) Object.assign(params, { start_date: filters.startDay, end_date: filters.endDay });
+    const response = await fetchBdPerformance(params);
     if (!response?.success) {
-      rows.value = []; performance.value = {}; errorMessage.value = response?.message || '绩效聚合数据加载失败'; state.value = 'error'; return;
+      rows.value = []; performance.value = {}; errorMessage.value = formatInfluencerError(response, '绩效聚合数据加载失败'); state.value = 'error'; return;
     }
     performance.value = response.data || {};
+    if (performance.value.start_date) filters.startDay = performance.value.start_date;
+    if (performance.value.end_date) filters.endDay = performance.value.end_date;
     rows.value = collectionRows(response.data);
     state.value = rows.value.length ? 'ready' : 'empty';
   } catch (error) {
@@ -143,7 +149,7 @@ function downloadCsv() {
   if (!urlApi?.createObjectURL) return ElMessage.warning('当前环境不支持 CSV 下载');
   const link = document.createElement('a'); link.href = urlApi.createObjectURL(blob); link.download = `bd-performance-${filters.startDay}-${filters.endDay}.csv`; link.click(); urlApi.revokeObjectURL?.(link.href);
 }
-onMounted(load);
+onMounted(() => load({ includeDateRange: false }));
 </script>
 
 <style scoped>

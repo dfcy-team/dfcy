@@ -1,5 +1,5 @@
 import importlib
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from io import StringIO
 
@@ -1874,6 +1874,58 @@ def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_import
         "influencers.outreach.view",
     )
     assert denied_client.get("/api/internal/influencers/bd-performance/").status_code == 403
+
+
+def test_bd_performance_allows_completed_range_after_latest_imported_order():
+    tenant = Tenant.objects.create(name="Performance lag tenant", code="performance-lag")
+    _, client = user_with_permissions(
+        tenant,
+        "performance-lag-viewer",
+        "influencers.outreach.view",
+        "influencers.fulfillment.view",
+    )
+    order_day = timezone.localdate() - timedelta(days=3)
+    _new_affiliate_order(
+        tenant,
+        data_time=timezone.make_aware(datetime.combine(order_day, time.min)),
+    )
+
+    response = client.get(
+        "/api/internal/influencers/bd-performance/",
+        {
+            "start_date": order_day.isoformat(),
+            "end_date": (timezone.localdate() - timedelta(days=1)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["data_as_of"] == order_day.isoformat()
+
+
+@pytest.mark.parametrize("days_from_today", [0, 1])
+def test_bd_performance_rejects_today_and_future_end_dates(days_from_today):
+    tenant = Tenant.objects.create(
+        name=f"Performance incomplete range tenant {days_from_today}",
+        code=f"performance-incomplete-range-{days_from_today}",
+    )
+    _, client = user_with_permissions(
+        tenant,
+        f"performance-incomplete-range-viewer-{days_from_today}",
+        "influencers.outreach.view",
+        "influencers.fulfillment.view",
+    )
+    end_date = timezone.localdate() + timedelta(days=days_from_today)
+
+    response = client.get(
+        "/api/internal/influencers/bd-performance/",
+        {
+            "start_date": (end_date - timedelta(days=1)).isoformat(),
+            "end_date": end_date.isoformat(),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data["data"]["end_date"] == "end_date must not exceed yesterday."
 
 
 def test_bd_performance_export_and_zero_gmv_diagnostic_are_authorized_and_safe():
