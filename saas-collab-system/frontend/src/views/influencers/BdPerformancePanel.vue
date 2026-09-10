@@ -81,9 +81,10 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { BD_PERFORMANCE_CURRENCIES, fetchBdPerformance } from '../../api/influencers';
 import { collectionRows } from '../../utils/businessResponse';
-import { defaultCompletedDateRange } from './performanceDate';
 
-const filters = reactive({ ...defaultCompletedDateRange(), currency: 'CNY', attribution: 'strict', metrics: 'core' });
+// Let the API select its data-aware default on the first load. A calendar-only
+// default can be newer than the latest imported affiliate-order partition.
+const filters = reactive({ startDay: '', endDay: '', currency: 'CNY', attribution: 'strict', metrics: 'core' });
 const rows = ref([]);
 const performance = ref({});
 const loading = ref(false);
@@ -130,6 +131,7 @@ function formatVideo(row) {
   return row.video_count ?? row.video_results ?? row.videos ?? '—';
 }
 function validateDates() {
+  if (!filters.startDay && !filters.endDay) return '';
   if (!filters.startDay || !filters.endDay) return '请选择完整日期范围';
   if (filters.startDay > filters.endDay) return '开始日期不能晚于结束日期';
   return '';
@@ -139,11 +141,19 @@ async function load() {
   if (validationMessage) { errorMessage.value = validationMessage; state.value = 'error'; return; }
   loading.value = true; state.value = 'loading'; errorMessage.value = '';
   try {
-    const response = await fetchBdPerformance({ start_date: filters.startDay, end_date: filters.endDay, currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics });
+    const params = { currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics };
+    if (filters.startDay && filters.endDay) {
+      params.start_date = filters.startDay;
+      params.end_date = filters.endDay;
+    }
+    const response = await fetchBdPerformance(params);
     if (!response?.success) {
       rows.value = []; performance.value = {}; errorMessage.value = response?.message || '绩效聚合数据加载失败'; state.value = 'error'; return;
     }
     performance.value = response.data || {};
+    // Reflect the range the API actually used, including its imported-data cutoff.
+    filters.startDay = performance.value.start_date || filters.startDay;
+    filters.endDay = performance.value.end_date || filters.endDay;
     rows.value = collectionRows(response.data);
     state.value = rows.value.length ? 'ready' : 'empty';
   } catch (error) {
