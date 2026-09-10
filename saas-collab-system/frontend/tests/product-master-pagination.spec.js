@@ -20,6 +20,10 @@ describe('商品主数据列表分页与 SKU 展示契约', () => {
     expect(page).toContain('page.value = 1');
   });
 
+  it('首次挂载并行加载商品列表和三类字典', () => {
+    expect(page).toContain('await Promise.all([loadCategories(), loadColors(), loadAttributes(), load()]);');
+  });
+
   it('使用受控 popover 展示可滚动 SKU 明细，且列名明确为 SPU 商品名称', () => {
     expect(page).toContain('label="SPU商品名称"');
     expect(page).toContain('<el-popover');

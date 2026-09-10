@@ -21,9 +21,10 @@ from .models import (
     ProductStatusTransition,
 )
 from .coding_services import (
-    SEASON_CODES,
+    ATTRIBUTE_CODES,
     allocate_legacy_sku_code,
     allocate_spu_code,
+    build_legacy_sku_code,
     build_sku_code,
     category_path,
 )
@@ -45,9 +46,25 @@ class ProductCategorySerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "tenant_id", "row_background_color", "created_at", "updated_at")
 
     def validate_parent(self, value):
-        if value and value.tenant_id != self.context["request"].user.tenant_id:
+        tenant_id = self._tenant_id()
+        if value and tenant_id is not None and value.tenant_id != tenant_id:
             raise serializers.ValidationError("Parent category does not belong to current tenant.")
         return value
+
+    def _tenant_id(self):
+        """Resolve the tenant boundary for both API and direct serializer use.
+
+        Category serializers are also used directly by a few management/test
+        callers, where DRF has no request in the serializer context.  The
+        instance still provides a reliable boundary for updates; API creates
+        use the authenticated request.
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        tenant_id = getattr(user, "tenant_id", None)
+        if tenant_id is not None:
+            return tenant_id
+        return getattr(self.instance, "tenant_id", None)
 
     def validate_spec_dimensions(self, value):
         if not isinstance(value, list):
@@ -77,11 +94,56 @@ class ProductCategorySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"row_background_color": "Row background color can only be configured on an L2 product category."}
             )
+
+        # ``parent`` is the one hierarchy field that may change after a
+        # category is created.  Keep level/code stable so a move only changes
+        # the ownership path; this preserves existing SPU/SKU identifiers.
+        tenant_id = self._tenant_id()
+        if parent is None:
+            if level != ProductCategory.Level.L1:
+                raise serializers.ValidationError(
+                    {"parent": f"L{level} category must belong to an L{level - 1} category."}
+                )
+        else:
+            if tenant_id is not None and parent.tenant_id != tenant_id:
+                raise serializers.ValidationError({"parent": "Parent category does not belong to current tenant."})
+            if level == ProductCategory.Level.L1:
+                raise serializers.ValidationError({"parent": "L1 category cannot have a parent."})
+            if parent.level != level - 1:
+                raise serializers.ValidationError(
+                    {"parent": f"L{level} category must belong to an L{level - 1} category."}
+                )
+
         if self.instance:
-            immutable = ("parent", "level", "code")
+            immutable = ("level", "code")
             changed = [field for field in immutable if field in attrs and attrs[field] != getattr(self.instance, field)]
             if changed:
                 raise serializers.ValidationError({field: "Category hierarchy codes are immutable." for field in changed})
+
+            if "parent" in attrs and parent != self.instance.parent:
+                if parent is not None:
+                    # The level check above makes this impossible for a
+                    # well-formed tree, but the explicit ancestor walk also
+                    # protects against malformed historical rows and keeps a
+                    # future hierarchy extension from introducing cycles.
+                    ancestor = parent
+                    visited = set()
+                    while ancestor is not None:
+                        if ancestor.pk == self.instance.pk:
+                            raise serializers.ValidationError({"parent": "A category cannot be moved below itself or its descendants."})
+                        if ancestor.pk in visited:
+                            raise serializers.ValidationError({"parent": "Category hierarchy contains a cycle."})
+                        visited.add(ancestor.pk)
+                        ancestor = ancestor.parent
+
+                duplicate = ProductCategory.objects.filter(
+                    tenant_id=self.instance.tenant_id,
+                    parent_id=getattr(parent, "pk", None),
+                    code=self.instance.code,
+                ).exclude(pk=self.instance.pk)
+                if duplicate.exists():
+                    raise serializers.ValidationError({"parent": "A category with this code already exists under the target parent."})
+
             if (
                 "spec_dimensions" in attrs
                 and attrs["spec_dimensions"] != self.instance.spec_dimensions
@@ -279,7 +341,7 @@ class ProductSPUSerializer(serializers.ModelSerializer):
             attrs["season_code"] = str(attrs.get("season_code") or "0")
             if not attrs.get("category_node"):
                 raise serializers.ValidationError({"category_node": "Category is required for automatic coding."})
-            if not re.fullmatch(r"[0-9]", str(attrs.get("season_code") or "")):
+            if str(attrs.get("season_code") or "") not in ATTRIBUTE_CODES:
                 raise serializers.ValidationError({"season_code": "Attribute code must be one digit."})
             try:
                 category_path(attrs["category_node"])
@@ -537,6 +599,27 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"spec_values": f"Unknown specification dimensions: {', '.join(sorted(extra))}."}
                 )
+            # Prior versions included optional sentinel values in generated
+            # codes (for example ``SPU-red-0``).  Do not create a second
+            # logical SKU when a direct create retries one of those rows; the
+            # old code remains untouched and the caller receives the normal
+            # validation/conflict response.  Legacy imports carry an explicit
+            # legacy_sku_code and intentionally use the allocator below to
+            # keep distinct source rows separate.
+            if not str(attrs.get("legacy_sku_code") or "").strip():
+                legacy_code = build_legacy_sku_code(
+                    spu=attrs["spu"],
+                    color_code=attrs["color_code"],
+                    spec_values=spec_values,
+                )
+                if legacy_code and ProductSKU.objects.filter(
+                    tenant=self.context["request"].user.tenant,
+                    spu=attrs["spu"],
+                    sku_code=legacy_code,
+                ).exists():
+                    raise serializers.ValidationError(
+                        {"sku_code": f"SKU 已存在（旧编码兼容）：{legacy_code}。"}
+                    )
         return attrs
 
     def create(self, validated_data):
@@ -874,6 +957,25 @@ class ProductDetailBulkUpdateSerializer(serializers.Serializer):
         attrs["clear_fields"] = clear_fields
         attrs["match_type"] = {"legacy_spu": "old_spu", "spu": "new_spu"}.get(attrs["match_type"], attrs["match_type"])
         return attrs
+
+
+class ProductBundleCreateComponentInputSerializer(serializers.Serializer):
+    component_sku = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class ProductBundleCreateInputSerializer(serializers.Serializer):
+    product_name = serializers.CharField(max_length=200)
+    category_node = serializers.IntegerField(min_value=1)
+    season_code = serializers.RegexField(r"^[0-9]$")
+    color_code = serializers.CharField(max_length=40)
+    components = ProductBundleCreateComponentInputSerializer(many=True, allow_empty=False, max_length=20)
+
+    def validate_components(self, value):
+        component_ids = [item["component_sku"] for item in value]
+        if len(component_ids) != len(set(component_ids)):
+            raise serializers.ValidationError("The same component SKU cannot be added twice.")
+        return value
 
 
 class ProductBundleComponentSerializer(serializers.ModelSerializer):

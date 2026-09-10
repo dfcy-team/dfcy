@@ -398,6 +398,33 @@ class RoleAdminSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Role code must be unique within the current tenant.")
         return value
 
+    def validate(self, attrs):
+        # Role codes are stable system identifiers.  Creation and the explicit
+        # copy endpoint accept a new code, but an existing role may only have
+        # its display name/description/status edited.
+        if self.instance is not None and "code" in attrs:
+            raise serializers.ValidationError({"code": "系统标识不可修改。"})
+        return attrs
+
+
+class RoleCopySerializer(serializers.Serializer):
+    """Validate the identity of a new custom role copied from an existing one.
+
+    Permissions and data scopes are intentionally not accepted from the
+    caller.  The copy endpoint always takes both from the tenant-local source
+    role after applying the delegation boundary in the view.
+    """
+
+    name = serializers.CharField(max_length=100, allow_blank=False, trim_whitespace=True)
+    code = serializers.SlugField(max_length=80, allow_blank=False, trim_whitespace=True)
+    description = serializers.CharField(max_length=10000, allow_blank=True, required=False)
+
+    def validate_code(self, value):
+        tenant = self.context.get("target_tenant") or self.context["request"].user.tenant
+        if Role.objects.filter(tenant=tenant, code=value).exists():
+            raise serializers.ValidationError("当前租户内的系统标识已存在，请换一个。")
+        return value
+
 
 class RoleOptionSerializer(serializers.ModelSerializer):
     class Meta:

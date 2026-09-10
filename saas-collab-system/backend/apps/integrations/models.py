@@ -975,6 +975,22 @@ class MarketplaceProductMapping(models.Model):
 
 
 class WarehouseAuthorization(models.Model):
+    class ValidationStatus(models.TextChoices):
+        INCOMPLETE = "incomplete", "待补充"
+        PENDING = "pending", "待校验"
+        VERIFIED = "verified", "校验通过"
+        FAILED = "failed", "校验失败"
+
+    email = models.EmailField(blank=True, default="")
+    # The one-use OMS token is a secret, not an OAuth access token. Only an
+    # opaque encrypted-custody reference is stored in the application DB.
+    bootstrap_credential_id = models.CharField(max_length=255, blank=True, default="")
+    bootstrap_consumed_at = models.DateTimeField(null=True, blank=True)
+    oauth_user_id = models.CharField(max_length=160, blank=True, default="")
+    oauth_expires_at = models.DateTimeField(null=True, blank=True)
+    validation_status = models.CharField(
+        max_length=20, choices=ValidationStatus.choices, default=ValidationStatus.INCOMPLETE,
+    )
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         ACTIVE = "active", "Active"
@@ -1003,7 +1019,7 @@ class WarehouseAuthorization(models.Model):
     external_warehouse_region = models.CharField(max_length=8, blank=True, default="")
     external_warehouse_identity_key = models.CharField(max_length=64, null=True, blank=True, default=None)
     credential_id = models.CharField(max_length=255)
-    token_id = models.CharField(max_length=255)
+    token_id = models.CharField(max_length=255, blank=True)
     credential_mask = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
     authorized_at = models.DateTimeField(null=True, blank=True)

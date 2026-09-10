@@ -192,6 +192,10 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
     country_code = serializers.CharField(source="site.country_code", read_only=True, allow_null=True)
     internal_sku_code = serializers.CharField(source="internal_sku.sku_code", read_only=True, allow_null=True)
     internal_legacy_sku_code = serializers.CharField(source="internal_sku.legacy_sku_code", read_only=True, allow_null=True)
+    # Platform detail rows do not own an image. Expose the image belonging to
+    # their tenant-scoped internal SKU so the platform view can render the
+    # same product image as the product-detail view without another request.
+    internal_sku_image_url = serializers.SerializerMethodField()
     mapping = serializers.SerializerMethodField()
 
     class Meta:
@@ -199,12 +203,24 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
         fields = (
             "id", "tenant", "platform", "platform_name", "platform_code", "store", "store_name", "store_code",
             "site", "site_code", "site_name", "country_code", "platform_product_id", "platform_variant_id", "platform_sku", "source_old_sku_code",
-            "internal_sku", "new_sku_code", "internal_sku_code", "internal_legacy_sku_code", "title", "variant",
+            "internal_sku", "new_sku_code", "internal_sku_code", "internal_legacy_sku_code", "internal_sku_image_url", "title", "variant",
             "category_l1", "category_l2", "category_l3", "sku_prefix", "shop_abbr", "sales_status",
             "owner", "leader", "platform_created_at", "platform_updated_at", "source", "created_at", "updated_at",
             "mapping",
         )
         read_only_fields = ("tenant", "created_at", "updated_at", "source")
+
+    def get_internal_sku_image_url(self, obj):
+        """Return only the linked SKU image inside this detail's tenant.
+
+        The collection view should select-related ``internal_sku``. Keeping
+        this as a serializer method also guards malformed legacy rows that
+        point to another tenant without exposing that SKU's image.
+        """
+        sku = getattr(obj, "internal_sku", None)
+        if sku is None or sku.tenant_id != obj.tenant_id:
+            return None
+        return sku.image_url or None
 
     def get_mapping(self, obj):
         """Expose mapping workflow state only inside its own permission scope."""

@@ -9,6 +9,7 @@ import {
   mockResearchDetail,
   mockResearchList
 } from '../mock/products';
+import { skuBatchCombinationCount } from '../utils/skuBatch';
 
 export const fetchResearchList = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/research/', params }, mockResearchList, 'products.research');
@@ -26,6 +27,30 @@ export const createProductSpu = (data = {}) =>
     message: '商品已创建（模拟）',
     data: { id: `mock-${Date.now()}`, product_name: data.product_name, category_node: data.category_node, spu_code: 'MOCK-SPU-NEW' }
   }), 'products.spus.create');
+
+export const createProductBundle = (data = {}) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/products/bundles/create/', data },
+    () => {
+      const stamp = Date.now();
+      const spu = {
+        id: `mock-bundle-spu-${stamp}`,
+        product_name: data.product_name,
+        category_node: data.category_node,
+        product_type: 'bundle',
+        spu_code: `MOCK-BUNDLE-${stamp}`,
+      };
+      const sku = { id: `mock-bundle-sku-${stamp}`, spu: spu.id, sku_code: `MOCK-BUNDLE-SKU-${stamp}` };
+      const components = (data.components || []).map((item, index) => ({
+        id: `mock-bundle-component-${stamp}-${index}`,
+        bundle_sku: sku.id,
+        component_sku: item.component_sku,
+        quantity: item.quantity,
+      }));
+      return { success: true, code: 'OK', message: '组合商品已原子创建（模拟）', data: { spu, sku, components } };
+    },
+    'products.bundles.create'
+  );
 
 export const fetchCodingOptions = () =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/coding-options/' }, () => ({
@@ -76,14 +101,38 @@ export const createProductSku = (data = {}) =>
     'products.skus.create'
   );
 
+export const createProductSkuBatch = (data = {}) =>
+  requestWithMockFallback(
+    { method: 'post', url: '/api/internal/products/skus/batch/', data, timeout: 120000 },
+    () => {
+      const total = skuBatchCombinationCount(data.color_codes, data.spec_values);
+      return {
+        success: true,
+        code: 'OK',
+        message: 'SKU 批量生成完成（模拟）',
+        data: { created: total, skipped: 0, total, results: [] }
+      };
+    },
+    'products.skus.batch_create'
+  );
+
 export const updateProductSpu = (id, data) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/products/spus/${id}/`, data }, {}, 'products.spus.update'
+);
+export const deleteProductSpu = (id) => requestWithMockFallback(
+  { method: 'delete', url: `/api/internal/products/spus/${id}/` }, {}, 'products.spus.delete'
+);
+export const updateProductSpuStatus = (id, data) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/spus/${id}/status/`, data }, {}, 'products.spus.status'
 );
 export const bulkUpdateProductSpus = (data) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/products/spus/bulk-update/', data }, {}, 'products.spus.bulk_update'
 );
 export const updateProductSku = (id, data) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/products/skus/${id}/`, data }, {}, 'products.skus.update'
+);
+export const updateProductSkuStatus = (id, data) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/skus/${id}/status/`, data }, {}, 'products.skus.status'
 );
 export const deleteProductSku = (id) => requestWithMockFallback(
   { method: 'delete', url: `/api/internal/products/skus/${id}/` }, {}, 'products.skus.delete'
@@ -106,7 +155,15 @@ export const fetchProductCategories = (params = {}) =>
 export const createProductCategory = (data) => requestWithMockFallback({ method: 'post', url: dictionaryApi('categories'), data }, {}, 'products.categories.create');
 export const updateProductCategory = (id, data) => requestWithMockFallback({ method: 'patch', url: `${dictionaryApi('categories')}${id}/`, data }, {}, 'products.categories.update');
 export const deleteProductCategory = (id) => requestWithMockFallback({ method: 'delete', url: `${dictionaryApi('categories')}${id}/` }, {}, 'products.categories.delete');
-export const updateProductAttributes = (id, attributes) => requestWithMockFallback({ method: 'put', url: `${dictionaryApi('categories')}${id}/attributes/`, data: { attributes } }, {}, 'products.categories.attributes');
+export const updateProductAttributes = (id, spec_dimensions) => requestWithMockFallback(
+  {
+    method: 'put',
+    url: `${dictionaryApi('categories')}${id}/attributes/`,
+    data: { spec_dimensions }
+  },
+  {},
+  'products.categories.attributes'
+);
 export const fetchProductCategoryBackgroundColors = () => requestWithMockFallback(
   { method: 'get', url: dictionaryApi('category-background-colors') }, [], 'products.category_background_colors'
 );
@@ -129,12 +186,19 @@ export const deleteProductAttribute = (id) => requestWithMockFallback({ method: 
 export const fetchLegacyProductItems = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: dictionaryApi('legacy-items'), params }, () => ({ success: true, data: [] }), 'products.legacy');
 
-export const importLegacyProductItems = (csv) =>
+export const importLegacyProductItems = (csv, mode = 'auto') =>
   requestWithMockFallback(
-    { method: 'post', url: dictionaryApi('legacy-items'), data: { csv_text: csv }, timeout: 120000 },
+    { method: 'post', url: dictionaryApi('legacy-items'), data: { csv_text: csv, mode }, timeout: 120000 },
     () => ({ success: false }),
     'products.legacy_items.import'
   );
+
+export const deleteLegacyProductItem = (id) => requestWithMockFallback(
+  { method: 'delete', url: `${dictionaryApi('legacy-items')}${id}/` }, {}, 'products.legacy_items.delete'
+);
+// Keep the resource-first name available to callers that mirror the backend
+// resource name while preserving the existing public helper above.
+export const deleteProductLegacyItem = deleteLegacyProductItem;
 
 export const updateLegacyProductItem = (id, data) =>
   requestWithMockFallback({ method: 'patch', url: `${dictionaryApi('legacy-items')}${id}/`, data }, () => ({ success: false }), 'products.legacy_items.update');
@@ -143,3 +207,10 @@ export const generateLegacyProductItem = (id) =>
   requestWithMockFallback({ method: 'post', url: `${dictionaryApi('legacy-items')}${id}/generate/` }, () => ({ success: false }), 'products.legacy_items.generate');
 
 export const createBundleComponent = (data) => requestWithMockFallback({ method: 'post', url: dictionaryApi('bundle-components'), data }, {}, 'products.bundle_components.create');
+
+export const fetchBundleComponents = (params = {}) =>
+  requestWithMockFallback(
+    { method: 'get', url: dictionaryApi('bundle-components'), params },
+    () => ({ success: true, data: [] }),
+    'products.bundle_components'
+  );

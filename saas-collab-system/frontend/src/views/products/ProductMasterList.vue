@@ -9,8 +9,8 @@
           <summary>商品 SKU 生成规则说明</summary>
           <div class="coding-guide-content">
             <p>
-              新建商品时，系统根据所选分类和一位季节码生成 SPU；季节码未填写时按
-              <code>0</code> 处理，同一分类和季节码组合内按 <code>001–999</code> 顺序编号。
+              新建商品时，系统根据所选分类和一位属性编码生成 SPU；属性编码未选择时按
+              <code>0</code> 处理，同一分类和属性编码组合内按 <code>001–999</code> 顺序编号。
             </p>
             <p>
               新增 SKU 时，编码格式为 <code>SPU编码-颜色编码[-规格值]</code>。颜色需选择启用的颜色字典；多个规格值按类目配置顺序以
@@ -184,6 +184,26 @@
                 >
                   生成 SKU
                 </el-button>
+                <el-button
+                  v-if="canManage"
+                  link
+                  type="primary"
+                  :disabled="!row.id"
+                  data-testid="product-master-status-button"
+                  @click="openStatusEdit(row)"
+                >
+                  变更状态
+                </el-button>
+                <el-button
+                  v-if="canManage"
+                  link
+                  type="danger"
+                  :disabled="!row.id"
+                  :data-testid="`product-master-delete-${row.id}`"
+                  @click="deleteMaster(row)"
+                >
+                  删除
+                </el-button>
               </div>
             </template>
           </el-table-column>
@@ -223,8 +243,32 @@
         <el-form-item label="品牌">
           <el-input v-model="createForm.brand" />
         </el-form-item>
-        <el-form-item label="季节编码">
-          <el-input v-model="createForm.season_code" placeholder="例如 0" />
+        <el-form-item label="属性编码">
+          <el-select
+            v-model="createForm.season_code"
+            class="form-control"
+            data-testid="product-attribute-code"
+            filterable
+            :loading="attributeLoading"
+            :disabled="attributeLoading"
+            placeholder="请选择属性编码（默认 0）"
+          >
+            <el-option label="未指定（0）" value="0" />
+            <el-option
+              v-for="attribute in activeAttributes"
+              :key="attribute.id || attribute.code"
+              :label="`${attribute.code} ${attribute.name}`"
+              :value="String(attribute.code)"
+            />
+          </el-select>
+          <small class="form-help">属性设置中维护的启用编码；未选择时按 0 处理。</small>
+          <el-alert
+            v-if="attributeLoadError"
+            :title="attributeLoadError"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -255,7 +299,14 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="skuCreateOpen" title="生成 SKU" width="min(600px, 94vw)">
+    <el-dialog
+      v-model="skuCreateOpen"
+      title="批量生成 SKU"
+      width="min(600px, 94vw)"
+      :close-on-click-modal="!skuSaving"
+      :close-on-press-escape="!skuSaving"
+      :show-close="!skuSaving"
+    >
       <el-alert
         v-if="skuTarget"
         :title="`${skuTarget.spu_code || ''} · ${skuTarget.product_name || ''}`"
@@ -266,17 +317,22 @@
       <el-form label-position="top" class="sku-form">
         <el-form-item label="启用颜色" required>
           <el-select
-            v-model="skuForm.color_code"
+            v-model="skuForm.color_codes"
             class="form-control"
             filterable
             clearable
-            placeholder="请选择启用的颜色"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            :disabled="skuSaving"
+            data-testid="batch-color"
+            placeholder="请选择启用的颜色（可多选）"
           >
             <el-option
               v-for="color in activeColors"
               :key="color.id || color.code"
               :label="`${color.name}（${color.code}）`"
-              :value="color.code"
+              :value="String(color.code)"
             />
           </el-select>
         </el-form-item>
@@ -287,13 +343,17 @@
             :label="dimension.name || dimension.code"
           >
             <el-select
-              v-if="Array.isArray(dimension.values) && dimension.values.length"
               v-model="skuForm.spec_values[dimension.code]"
               class="form-control"
               filterable
               clearable
               allow-create
               default-first-option
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              :disabled="skuSaving"
+              :data-testid="`batch-spec-${dimension.code}`"
               :placeholder="`请选择或填写${dimension.name || dimension.code}`"
             >
               <el-option
@@ -303,20 +363,25 @@
                 :value="value"
               />
             </el-select>
-            <el-input
-              v-else
-              v-model="skuForm.spec_values[dimension.code]"
-              class="form-control"
-              clearable
-              :placeholder="`填写${dimension.name || dimension.code}（可选）`"
-            />
           </el-form-item>
         </template>
         <el-empty v-else description="该分类未配置规格，可直接按颜色生成 SKU" :image-size="64" />
+        <div class="sku-batch-summary" data-testid="sku-batch-summary">
+          <span>预计生成 {{ skuCombinationCount }} 个 SKU</span>
+          <span v-if="skuCombinationCount > skuBatchLimit" class="sku-batch-limit">
+            单次最多生成 {{ skuBatchLimit }} 个，请减少颜色或规格选项
+          </span>
+        </div>
       </el-form>
       <template #footer>
-        <el-button @click="skuCreateOpen = false">取消</el-button>
-        <el-button type="primary" :loading="skuSaving" @click="saveSku">生成 SKU</el-button>
+        <el-button :disabled="skuSaving" @click="skuCreateOpen = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="skuSaving"
+          :disabled="!canSubmitSkuBatch"
+          data-testid="batch-submit"
+          @click="saveSku"
+        >生成 SKU</el-button>
       </template>
     </el-dialog>
 
@@ -375,25 +440,69 @@
         <el-button type="primary" :loading="moveCategorySaving" @click="saveMoveCategory">确认移动</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="statusVisible" title="变更商品状态" width="min(460px, 94vw)" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="生命周期" required>
+          <el-select v-model="statusForm.lifecycle_status" class="form-control" data-testid="product-master-lifecycle-status">
+            <el-option
+              v-for="option in lifecycleOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="销售状态" required>
+          <el-select v-model="statusForm.sales_status" class="form-control" data-testid="product-master-sales-status">
+            <el-option
+              v-for="option in salesStatusOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="statusVisible = false">取消</el-button>
+        <el-button type="primary" :loading="statusSaving" data-testid="product-master-save-status" @click="saveStatus">保存状态</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import {
-  createProductSku,
+  createProductSkuBatch,
   createProductSpu,
   fetchProductCategories,
+  fetchProductCategoryBackgroundColors,
   fetchProductColors,
+  fetchProductAttributes,
   fetchProductMasterList,
   updateProductSpu,
+  updateProductSpuStatus,
+  deleteProductSpu,
   bulkUpdateProductSpus
 } from '../../api/products';
 import { useAuthStore } from '../../stores/auth';
 import { apiState, collectionRows, collectionTotal, detailData, stateTagType } from '../../utils/businessResponse';
 import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
-import { buildCategoryTree, categoryRowClass, categoryRowStyle } from '../../utils/productCategoryPresentation';
+import {
+  buildCategoryTree,
+  categoryRowClass,
+  categoryRowStyle,
+  mergeCategoryBackgroundColors,
+} from '../../utils/productCategoryPresentation';
+import {
+  buildSkuBatchPayload,
+  normalizeBatchSelection,
+  skuBatchCombinationCount
+} from '../../utils/skuBatch';
+import { subscribeProductDictionaryCacheInvalidation } from '../../utils/productDictionaryCache';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
@@ -424,15 +533,22 @@ const categoryFilter = categorySearch;
 const categoryTreeRef = ref(null);
 const createOpen = ref(false);
 const saving = ref(false);
+const attributeLoading = ref(false);
+const attributeLoadError = ref('');
+let attributeRequestId = 0;
+// The API keeps the legacy season_code field for compatibility. Its value is
+// now the one-digit code maintained by the product attribute dictionary.
 const createForm = reactive({ product_name: '', category_node: null, brand: '', season_code: '0' });
 const editOpen = ref(false);
 const editSaving = ref(false);
 const editForm = reactive({ id: null, product_name: '', category_node: null });
 const colors = ref([]);
+const attributes = ref([]);
 const skuCreateOpen = ref(false);
 const skuSaving = ref(false);
 const skuTarget = ref(null);
-const skuForm = reactive({ color_code: '', spec_values: {} });
+const skuForm = reactive({ color_codes: [], spec_values: {} });
+const skuBatchLimit = 200;
 const skuPreviewLimit = 2;
 const skuPopoverId = ref(null);
 const selectedSkuTitle = ref('');
@@ -443,12 +559,31 @@ const bulkMasterForm = reactive({ product_name: '', category_node: null });
 const moveCategoryVisible = ref(false);
 const moveCategorySaving = ref(false);
 const moveCategoryNode = ref(null);
+const statusVisible = ref(false);
+const statusSaving = ref(false);
+const statusForm = reactive({ id: null, lifecycle_status: 'draft', sales_status: 'not_listed' });
+
+const lifecycleOptions = [
+  { value: 'draft', label: '草稿' },
+  { value: 'active', label: '启用' },
+  { value: 'discontinued', label: '停用' },
+];
+const salesStatusOptions = [
+  { value: 'not_listed', label: '未刊登' },
+  { value: 'on_sale', label: '销售中' },
+  { value: 'paused', label: '暂停' },
+  { value: 'stopped', label: '停止' },
+];
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
 const productRowStyle = ({ row }) => categoryRowStyle(row, categories.value);
 
 const activeColors = computed(() => colors.value.filter((item) => item?.is_active !== false));
+const activeAttributes = computed(() => attributes.value
+  .filter((item) => item?.is_active !== false && /^[1-9]$/.test(String(item?.code ?? '').trim()))
+  .map((item) => ({ ...item, code: String(item.code).trim() }))
+  .sort((left, right) => Number(left.code) - Number(right.code)));
 const skuCategory = computed(() => {
   const categoryId = skuTarget.value?.category_node;
   return categories.value.find((item) => String(item.id) === String(categoryId)) || null;
@@ -586,14 +721,53 @@ async function load() {
 }
 
 async function loadCategories() {
-  const response = await fetchProductCategories({ page: 1, page_size: 500 });
-  if (response.success) categories.value = collectionRows(response.data);
+  const [response, backgroundResponse] = await Promise.all([
+    fetchProductCategories({ page: 1, page_size: 500 }),
+    fetchProductCategoryBackgroundColors(),
+  ]);
+  if (response.success || backgroundResponse.success) {
+    categories.value = mergeCategoryBackgroundColors(
+      response.success ? collectionRows(response.data) : [],
+      backgroundResponse.success ? collectionRows(backgroundResponse.data) : [],
+    );
+  }
 }
+
+const stopDictionaryInvalidation = subscribeProductDictionaryCacheInvalidation(() => {
+  void loadCategories();
+});
 
 async function loadColors() {
   if (!canManage.value) return;
   const response = await fetchProductColors({ page: 1, page_size: 500 });
   if (response.success) colors.value = collectionRows(response.data);
+}
+
+async function loadAttributes({ notifyOnError = false } = {}) {
+  if (!canManage.value) return { success: false, data: [] };
+  const requestId = ++attributeRequestId;
+  attributeLoading.value = true;
+  attributeLoadError.value = '';
+  try {
+    const response = await fetchProductAttributes({ page: 1, page_size: 500 });
+    if (requestId !== attributeRequestId) return response;
+    if (response.success) {
+      attributes.value = collectionRows(response.data);
+      return response;
+    }
+    attributes.value = [];
+    attributeLoadError.value = response.message || '属性编码字典加载失败，请稍后重试';
+    if (notifyOnError) ElMessage.error(attributeLoadError.value);
+    return response;
+  } catch (error) {
+    if (requestId !== attributeRequestId) return { success: false, message: error?.message, data: [] };
+    attributes.value = [];
+    attributeLoadError.value = '属性编码字典加载失败，请稍后重试';
+    if (notifyOnError) ElMessage.error(attributeLoadError.value);
+    return { success: false, message: error?.message || attributeLoadError.value, data: [] };
+  } finally {
+    if (requestId === attributeRequestId) attributeLoading.value = false;
+  }
 }
 
 function search() {
@@ -697,10 +871,13 @@ async function saveMoveCategory() {
   }
 }
 
-function openCreate() {
+async function openCreate() {
   if (!canManage.value) return;
   Object.assign(createForm, { product_name: '', category_node: null, brand: '', season_code: '0' });
   createOpen.value = true;
+  // Refresh when the dialog opens so recently changed attribute settings are
+  // reflected and stale/deactivated codes cannot be submitted.
+  await loadAttributes({ notifyOnError: true });
 }
 
 async function saveProduct() {
@@ -708,7 +885,17 @@ async function saveProduct() {
   if (!createForm.product_name?.trim() || !isUsableCategory(createForm.category_node)) {
     return ElMessage.warning('请填写商品名称并选择末级分类');
   }
+  if (attributeLoading.value) {
+    return ElMessage.warning('属性编码字典加载中，请稍后重试');
+  }
+  const attributeCode = String(createForm.season_code ?? '').trim() || '0';
+  const isKnownAttribute = attributeCode === '0'
+    || activeAttributes.value.some((attribute) => attribute.code === attributeCode);
+  if (!/^[0-9]$/.test(attributeCode) || !isKnownAttribute) {
+    return ElMessage.warning('请选择属性设置中的启用属性编码，未选择时按 0 处理');
+  }
   if (saving.value) return;
+  createForm.season_code = attributeCode;
   saving.value = true;
   try {
     const response = await createProductSpu({
@@ -763,6 +950,99 @@ async function saveEdit() {
   }
 }
 
+function openStatusEdit(row) {
+  if (!canManage.value || !row?.id) return;
+  Object.assign(statusForm, {
+    id: row.id,
+    lifecycle_status: row.lifecycle_status || 'draft',
+    sales_status: row.sales_status || 'not_listed',
+  });
+  statusVisible.value = true;
+}
+
+async function saveStatus() {
+  if (!canManage.value || !statusForm.id || statusSaving.value) return;
+  if (!lifecycleOptions.some((option) => option.value === statusForm.lifecycle_status)
+    || !salesStatusOptions.some((option) => option.value === statusForm.sales_status)) {
+    ElMessage.warning('请选择有效的生命周期和销售状态');
+    return;
+  }
+  statusSaving.value = true;
+  try {
+    const response = await updateProductSpuStatus(statusForm.id, {
+      lifecycle_status: statusForm.lifecycle_status,
+      sales_status: statusForm.sales_status,
+    });
+    if (!response.success) {
+      ElMessage.error(response.message || '商品状态更新失败');
+      return;
+    }
+    statusVisible.value = false;
+    ElMessage.success('商品状态已更新');
+    await load();
+  } finally {
+    statusSaving.value = false;
+  }
+}
+
+function stateConflict(response) {
+  return response?.http_status === 409 || response?.code === 'STATE_CONFLICT';
+}
+
+function referenceDescription(response) {
+  const references = Array.isArray(response?.data?.references) ? response.data.references.filter(Boolean) : [];
+  return references.length ? references.join('、') : '其他业务数据';
+}
+
+async function deleteMaster(row) {
+  if (!canManage.value || !row?.id) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除商品主数据“${row.spu_code || row.product_name || row.id}”吗？删除后不可恢复。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+
+  const response = await deleteProductSpu(row.id);
+  if (response.success) {
+    ElMessage.success('商品主数据已删除');
+    await load();
+    return;
+  }
+  if (!stateConflict(response)) {
+    ElMessage.error(response.message || '商品主数据删除失败');
+    return;
+  }
+
+  if (!response.data?.can_deactivate) {
+    ElMessage.warning(`商品存在引用（${referenceDescription(response)}），当前只能保留并由业务流程处理。`);
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `该商品被以下数据引用：${referenceDescription(response)}。存在引用时不能删除，是否改为停用？`,
+      '存在业务引用',
+      { type: 'warning', confirmButtonText: '停用', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  const statusResponse = await updateProductSpuStatus(row.id, {
+    lifecycle_status: 'discontinued',
+    sales_status: 'stopped',
+    reason: '删除时存在业务引用，改为停用',
+  });
+  if (!statusResponse.success) {
+    ElMessage.error(statusResponse.message || '商品停用失败');
+    return;
+  }
+  ElMessage.success('商品存在引用，已改为停用');
+  await load();
+}
+
 function openSkuCreate(row) {
   if (!canManage.value || !row?.id) return;
   if (!isUsableCategory(row.category_node)) {
@@ -770,35 +1050,67 @@ function openSkuCreate(row) {
     return;
   }
   skuTarget.value = row;
-  skuForm.color_code = '';
-  skuForm.spec_values = Object.fromEntries(skuDimensions.value.map((dimension) => [dimension.code, '']));
+  skuForm.color_codes = [];
+  skuForm.spec_values = Object.fromEntries(skuDimensions.value.map((dimension) => [dimension.code, []]));
   skuCreateOpen.value = true;
+}
+
+function skuGenerationErrorMessage(response) {
+  const collect = (value, path = '') => {
+    if (value === null || value === undefined || value === '') return [];
+    if (Array.isArray(value)) return value.flatMap((item) => collect(item, path));
+    if (typeof value === 'object') {
+      return Object.entries(value).flatMap(([key, item]) => collect(item, path ? `${path}.${key}` : key));
+    }
+    const text = String(value).trim();
+    return text ? [path ? `${path}：${text}` : text] : [];
+  };
+  const detailMessages = collect(response?.data);
+  if (detailMessages.length) return [...new Set(detailMessages)].join('；');
+
+  const message = String(response?.message || response?.error?.message || '').trim();
+  const generic = /^(?:error message|sku\s*生成失败|request failed(?: with status code \d+)?|api request failed|network error)$/i;
+  return message && !generic.test(message) ? message : 'SKU 生成失败，请检查商品分类、颜色和规格配置。';
 }
 
 async function saveSku() {
   if (!canManage.value || skuSaving.value) return;
-  if (!skuTarget.value?.id || !skuForm.color_code) {
+  const colorCodes = normalizeBatchSelection(skuForm.color_codes);
+  if (!skuTarget.value?.id || !colorCodes.length) {
     ElMessage.warning('请选择启用的颜色');
     return;
   }
-  if (!activeColors.value.some((color) => color.code === skuForm.color_code)) {
+  if (!colorCodes.every((code) => activeColors.value.some((color) => String(color.code) === code))) {
     ElMessage.warning('请选择当前租户的启用颜色');
     return;
   }
+  if (skuCombinationCount.value > skuBatchLimit) {
+    ElMessage.warning(`单次最多生成 ${skuBatchLimit} 个 SKU，请减少颜色或规格选项`);
+    return;
+  }
+  const payload = buildSkuBatchPayload(
+    skuTarget.value.id,
+    colorCodes,
+    skuForm.spec_values,
+  );
   skuSaving.value = true;
   try {
-    const response = await createProductSku({
-      spu: skuTarget.value.id,
-      color_code: skuForm.color_code,
-      spec_values: { ...skuForm.spec_values }
-    });
+    const response = await createProductSkuBatch(payload);
     if (!response.success) {
-      ElMessage.error(response.message || 'SKU 生成失败');
+      ElMessage.error(skuGenerationErrorMessage(response));
       return;
     }
+    // Batch responses keep summary counters at the top level even when the
+    // response also includes per-SKU rows.  Do not use detailData here: it
+    // unwraps results[0] and loses the aggregate created/skipped counters.
+    const result = response.data || {};
+    const created = Number(result?.created || 0);
+    const skipped = Number(result?.skipped || 0);
     skuCreateOpen.value = false;
-    ElMessage.success(`SKU ${detailData(response.data)?.sku_code || ''} 已生成`);
+    ElMessage.success(`SKU 生成完成：新增 ${created} 个，已存在 ${skipped} 个`);
     await load();
+  } catch (error) {
+    ElMessage.error(skuGenerationErrorMessage(error?.response || error));
   } finally {
     skuSaving.value = false;
   }
@@ -806,11 +1118,22 @@ async function saveSku() {
 
 onMounted(async () => {
   document.addEventListener('click', handleDocumentClick, true);
-  await Promise.all([loadCategories(), loadColors()]);
-  await load();
+  await Promise.all([loadCategories(), loadColors(), loadAttributes(), load()]);
 });
 
+const skuCombinationCount = computed(() =>
+  skuBatchCombinationCount(skuForm.color_codes, skuForm.spec_values)
+);
+const canSubmitSkuBatch = computed(() =>
+  Boolean(skuTarget.value?.id) &&
+  normalizeBatchSelection(skuForm.color_codes).length > 0 &&
+  skuCombinationCount.value > 0 &&
+  skuCombinationCount.value <= skuBatchLimit &&
+  !skuSaving.value
+);
+
 onBeforeUnmount(() => {
+  stopDictionaryInvalidation();
   document.removeEventListener('click', handleDocumentClick, true);
 });
 </script>
@@ -1010,8 +1333,30 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
+.form-help {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .sku-form {
   margin-top: 16px;
+}
+
+.sku-batch-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.sku-batch-limit {
+  color: var(--el-color-danger);
 }
 
 .sku-summary {

@@ -68,7 +68,7 @@ export function adminRoleDisplayName(role) {
 }
 
 export function departmentDisplayName(name) {
-  return String(name || '').replace(/shopee/gi, '虾皮').replace(/tiktok/gi, '短视频');
+  return String(name || '');
 }
 
 export function tenantDisplayName(tenant, fallback = '当前租户') {

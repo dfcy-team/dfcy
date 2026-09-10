@@ -1,12 +1,9 @@
-import csv
-import io
 import hashlib
 import ipaddress
 import os
 import re
 import secrets
 import socket
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,15 +14,15 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.db import transaction
-from django.db.models import Q
 from django.core.paginator import Paginator
+from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
+from django.db.models import Case, DateTimeField, F, IntegerField, Q, Value, When
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 
 from apps.common.query import pagination_query
 from apps.common.error_codes import ErrorCode
-from apps.common.exceptions import StateConflict
 from apps.common.responses import error_response, paginated_data, success_response
 from apps.permissions.ui_p5_scopes import (
     filter_product_research,
@@ -65,6 +62,7 @@ from .permissions import (
     IsProductStatusViewer,
 )
 from .serializers import (
+    ProductBundleCreateInputSerializer,
     ProductBundleComponentSerializer,
     ProductCategorySerializer,
     ProductCategoryBackgroundColorBulkSerializer,
@@ -486,7 +484,22 @@ def product_category_detail(request, pk):
         return success_response(ProductCategorySerializer(item).data)
     serializer = ProductCategorySerializer(item, data=request.data, partial=True, context=_serializer_context(request))
     serializer.is_valid(raise_exception=True)
-    item = serializer.save()
+    try:
+        with transaction.atomic():
+            item = serializer.save()
+    except DjangoValidationError as exc:
+        return error_response(
+            ErrorCode.VALIDATION_ERROR,
+            "分类层级或编码无效。",
+            data=getattr(exc, "message_dict", None) or {"detail": exc.messages},
+            status=400,
+        )
+    except IntegrityError:
+        return error_response(
+            ErrorCode.STATE_CONFLICT,
+            "目标上级下已存在相同分类编码。",
+            status=409,
+        )
     return success_response(ProductCategorySerializer(item).data)
 
 
@@ -519,13 +532,24 @@ def product_category_background_colors(request):
     return success_response(ProductCategorySerializer(queryset, many=True).data)
 
 
-@api_view(["GET", "PATCH", "DELETE"])
+@api_view(["GET", "PUT", "PATCH"])
 @permission_classes([IsProductAttributeReadOrManage])
 def product_category_attributes(request, pk):
     item = get_object_or_404(ProductCategory, pk=pk, tenant=request.user.tenant)
-    try:
-        category_path(item)
-    except DjangoValidationError:
+    # A leaf L2 may own its specification dimensions until an L3 child is
+    # introduced.  Automatic SPU/SKU coding still requires a complete L1/L2/L3
+    # path and keeps using ``category_path`` for that stricter rule.
+    supports_spec_dimensions = False
+    if item.level == ProductCategory.Level.L3:
+        try:
+            category_path(item)
+        except DjangoValidationError:
+            pass
+        else:
+            supports_spec_dimensions = True
+    elif item.level == ProductCategory.Level.L2:
+        supports_spec_dimensions = bool(item.parent_id and not item.children.exists())
+    if not supports_spec_dimensions:
         return error_response(ErrorCode.VALIDATION_ERROR, "规格只能设置在 L3 分类或没有 L3 下级的 L2 分类。", status=400)
     if request.method == "GET":
         return success_response({"category_id": item.id, "spec_dimensions": item.spec_dimensions})
@@ -636,7 +660,7 @@ def product_spu_collection(request):
     if request.method == "GET":
         queryset = ProductSPU.objects.filter(tenant=request.user.tenant).select_related(
             "category_node", "category_node__parent"
-        ).prefetch_related("skus")
+        ).prefetch_related("skus").order_by("-updated_at", "-id")
         queryset = filter_product_spus(request.user, queryset, "products.master.view")
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("sales_status", "").strip()
@@ -775,10 +799,60 @@ def product_spu_detail(request, pk):
     ).prefetch_related("skus")
     item = get_object_or_404(filter_product_spus(request.user, queryset, permission_code), pk=pk)
     if request.method == "DELETE":
-        if item.skus.exists():
-            return error_response(ErrorCode.STATE_CONFLICT, "商品已存在 SKU，请先处理 SKU 或业务数据。", status=409)
-        item.delete()
-        return success_response({"deleted": True})
+        # Re-read under a row lock.  The initial scoped lookup is for
+        # authorization; the locked lookup makes the reference check and
+        # deletion one transaction and avoids deleting after a concurrent
+        # relation was created.
+        with transaction.atomic():
+            locked = get_object_or_404(
+                filter_product_spus(
+                    request.user,
+                    ProductSPU.objects.filter(tenant=request.user.tenant),
+                    "products.master.manage",
+                ).select_for_update(),
+                pk=pk,
+            )
+            references = _product_reverse_references(locked)
+            if references:
+                return error_response(
+                    ErrorCode.STATE_CONFLICT,
+                    "商品已被业务数据引用，不能删除，请改为停用。",
+                    data={"can_deactivate": True, "references": references},
+                    status=409,
+                )
+            spu_id = locked.pk
+            before = {
+                "spu_code": locked.spu_code,
+                "product_name": locked.product_name,
+                "lifecycle_status": locked.lifecycle_status,
+                "sales_status": locked.sales_status,
+            }
+            try:
+                locked.delete()
+            except (ProtectedError, IntegrityError):
+                # A relation may have been inserted between the generic
+                # probes and the database delete.  Some databases surface
+                # that race as a plain IntegrityError.  Do not query again
+                # inside the broken transaction; return a deterministic 409.
+                return error_response(
+                    ErrorCode.STATE_CONFLICT,
+                    "商品已被业务数据引用，不能删除，请改为停用。",
+                    data={"can_deactivate": True, "references": references or ["protected_relation"]},
+                    status=409,
+                )
+            from apps.audit.services import write_operation_log
+
+            write_operation_log(
+                tenant=request.user.tenant,
+                user=request.user,
+                module="products",
+                action="product_spu.delete",
+                object_type="ProductSPU",
+                object_id=spu_id,
+                before_data=before,
+                after_data={"deleted": True},
+            )
+            return success_response({"deleted": True, "id": spu_id})
     if request.method == "GET":
         return success_response(ProductSPUSerializer(item).data)
 
@@ -834,20 +908,49 @@ def product_sku_collection(request):
 
 
 def _sku_business_references(item):
+    """Return every reverse relation that would make a SKU unsafe to delete.
+
+    ProductSKU is consumed by several apps (orders, listings, inventory,
+    alerts, bundles, imported legacy rows, and status/lifecycle evidence).
+    Looking at ``_meta.related_objects`` keeps this check in sync when another
+    app adds a real ForeignKey/OneToOne relation.  In particular, accessing a
+    reverse one-to-one relation can raise ``DoesNotExist`` before a value is
+    available, so the lookup must be inside the guarded block.
+    """
     references = []
     for relation in item._meta.related_objects:
+        # Unmanaged models are read-only database projections.  They do not
+        # own persistent references and their backing views may be absent in
+        # lightweight/runtime databases, so probing them can turn a valid
+        # delete into an OperationalError/500.
+        if not relation.related_model._meta.managed:
+            continue
         accessor = relation.get_accessor_name()
-        related = getattr(item, accessor)
+        if not accessor:
+            continue
         if relation.one_to_one:
             try:
-                exists = related is not None
+                related = getattr(item, accessor)
             except relation.related_model.DoesNotExist:
-                exists = False
+                related = None
+            exists = related is not None
         else:
-            exists = related.exists()
+            related = getattr(item, accessor, None)
+            exists = bool(related is not None and related.exists())
         if exists:
             references.append(relation.related_model._meta.verbose_name)
     return sorted(set(references))
+
+
+def _product_reverse_references(item):
+    """Return all existing reverse FK/one-to-one references for a product.
+
+    SPUs and SKUs share the same deletion rule.  The helper intentionally
+    reports all reverse relations, including audit/status records and the
+    legacy bridge, because deleting a referenced product must never silently
+    leave an orphaned business or audit record.
+    """
+    return _sku_business_references(item)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -861,19 +964,74 @@ def product_sku_detail(request, pk):
     if request.method == "GET":
         return success_response(ProductSKUSerializer(item).data)
     if request.method == "DELETE":
-        references = _sku_business_references(item)
-        if references:
-            raise StateConflict("该 SKU 已存在业务关联，不能删除，请改为停用。")
-        sku_id = item.pk
-        old_image_url = item.image_url
-        item.delete()
-        _delete_product_image_if_unreferenced(old_image_url)
-        AttachmentFile.objects.filter(
-            tenant=request.user.tenant,
-            business_type="product_sku_image",
-            business_id=str(sku_id),
-        ).delete()
-        return success_response({"deleted": True, "id": sku_id})
+        with transaction.atomic():
+            # ``filter_product_skus`` uses ``distinct()`` for its custom
+            # SPU-or-SKU predicate. PostgreSQL disallows ``FOR UPDATE`` on a
+            # DISTINCT query, so resolve visibility in a subquery and lock
+            # only the tenant-scoped SKU base row.
+            visible_ids = filter_product_skus(
+                request.user,
+                ProductSKU.objects.filter(tenant=request.user.tenant),
+                "products.master.manage",
+            ).filter(pk=pk).values("pk")
+            locked = get_object_or_404(
+                ProductSKU.objects.filter(
+                    tenant=request.user.tenant,
+                    pk__in=visible_ids,
+                ).select_for_update(of=("self",)),
+                pk=pk,
+            )
+            references = _sku_business_references(locked)
+            if references:
+                return error_response(
+                    ErrorCode.STATE_CONFLICT,
+                    "该 SKU 已被业务数据引用，不能删除，请改为停用。",
+                    data={"can_deactivate": True, "references": references},
+                    status=409,
+                )
+            sku_id = locked.pk
+            old_image_url = locked.image_url
+            before = {
+                "sku_code": locked.sku_code,
+                "product_name": locked.product_name,
+                "is_active": locked.is_active,
+            }
+            try:
+                locked.delete()
+            except ProtectedError:
+                references = _sku_business_references(locked)
+                return error_response(
+                    ErrorCode.STATE_CONFLICT,
+                    "该 SKU 已被业务数据引用，不能删除，请改为停用。",
+                    data={"can_deactivate": True, "references": references or ["protected_relation"]},
+                    status=409,
+                )
+            from apps.audit.services import write_operation_log
+
+            write_operation_log(
+                tenant=request.user.tenant,
+                user=request.user,
+                module="products",
+                action="product_sku.delete",
+                object_type="ProductSKU",
+                object_id=sku_id,
+                before_data=before,
+                after_data={"deleted": True},
+            )
+
+            def cleanup_deleted_sku_media():
+                # Storage cleanup must run only after the transaction commits.
+                # If the audit write (or a later database operation) rolls the
+                # deletion back, the still-live SKU must retain its image.
+                _delete_product_image_if_unreferenced(old_image_url)
+                AttachmentFile.objects.filter(
+                    tenant=request.user.tenant,
+                    business_type="product_sku_image",
+                    business_id=str(sku_id),
+                ).delete()
+
+            transaction.on_commit(cleanup_deleted_sku_media)
+            return success_response({"deleted": True, "id": sku_id})
 
     serializer = ProductSKUSerializer(
         item,
@@ -1117,14 +1275,35 @@ def _product_detail_row_from_legacy(item):
 
     spu = getattr(item, "generated_spu", None)
     sku = getattr(item, "generated_sku", None)
+    # Legacy bridge FKs are nullable and historical data may contain a bad
+    # cross-tenant reference. Do not let a tenant-scoped detail response
+    # expose any generated product data (especially its image) in that case.
+    if spu is not None and spu.tenant_id != item.tenant_id:
+        spu = None
+    if sku is not None and sku.tenant_id != item.tenant_id:
+        sku = None
     effective_category = getattr(item, "category_node", None)
+    if effective_category is not None and effective_category.tenant_id != item.tenant_id:
+        effective_category = None
     if effective_category is None and spu is not None:
         effective_category = getattr(spu, "category_node", None)
+        if effective_category is not None and effective_category.tenant_id != item.tenant_id:
+            effective_category = None
     category_info = category_metadata(effective_category, spu=spu)
     # Pending imports do not have a ProductSKU yet.  Their source name is still
     # the SKU-level name users need to review before generating a code.
     sku_name = sku.product_name if sku is not None and sku.product_name else item.product_name
     sku_active = sku.is_active if sku is not None else None
+    # Generated rows are displayed through their current SKU identity.  The
+    # cache endpoint updates both sides of a generated legacy mapping, but
+    # older imports (and manually repaired records) may only have the image on
+    # the legacy item.  Prefer the SKU image when it exists and retain the
+    # legacy value as a compatibility fallback.
+    image_url = (
+        sku.image_url
+        if sku is not None and sku.image_url
+        else item.image_url
+    )
     conversion_status = {
         ProductLegacyItem.Status.PENDING: "待调整",
         ProductLegacyItem.Status.GENERATED: "已生成",
@@ -1143,6 +1322,7 @@ def _product_detail_row_from_legacy(item):
         "spu_product_name": spu.product_name if spu is not None else "",
         # Keep the old wire key for clients that still read it as an imported name.
         "product_name": item.product_name,
+        "image_url": image_url,
         "category_node": item.category_node_id,
         "category_name": item.category_node.name if item.category_node_id else "",
         **category_info,
@@ -1188,6 +1368,7 @@ def _product_detail_row_from_sku(sku):
         "sku_product_name": sku.product_name or "",
         "spu_product_name": spu.product_name,
         "product_name": sku.product_name or "",
+        "image_url": sku.image_url or None,
         "category_node": spu.category_node_id,
         "category_name": spu.category or (spu.category_node.name if spu.category_node_id else ""),
         **category_info,
@@ -1246,6 +1427,8 @@ def _filter_product_legacy_items(user, queryset, permission_code):
 
 def _attach_cached_product_image(item, relative_path, file_type, request, *, business_type):
     """Point one SKU/legacy row at a cached image and audit the attachment."""
+    if item.tenant_id != request.user.tenant_id:
+        raise ValueError("图片目标不属于当前租户，拒绝跨租户写入。")
     media_url = f"{str(settings.MEDIA_URL).rstrip('/')}/{relative_path.replace(os.sep, '/') }"
     if item.image_url == media_url:
         return False, media_url
@@ -1297,7 +1480,7 @@ def product_detail_bulk_cache_images(request):
     )
     sku_queryset = filter_product_skus(
         request.user,
-        ProductSKU.objects.filter(tenant=tenant).select_related("spu"),
+        ProductSKU.objects.filter(tenant=tenant, spu__tenant=tenant).select_related("spu"),
         "products.master.manage",
     )
     result = {"processed": len(raw_items), "cached": 0, "reused": 0, "updated": 0, "unchanged": 0, "error_count": 0, "errors": [], "results": []}
@@ -1325,6 +1508,10 @@ def product_detail_bulk_cache_images(request):
                 raise ValueError("新 SKU 不存在或不在当前数据范围内。")
             if legacy is None and sku is None:
                 raise ValueError("旧 SKU 或新 SKU 不存在或不在当前数据范围内。")
+            if legacy is not None and legacy.generated_sku_id:
+                generated_sku = legacy.generated_sku
+                if generated_sku is None or generated_sku.tenant_id != tenant.id:
+                    raise ValueError("旧 SKU 的生成关系不属于当前租户，拒绝跨租户写入。")
             if legacy is not None and sku is not None:
                 if legacy.generated_sku_id != sku.id:
                     raise ValueError("旧 SKU 与新 SKU 不属于同一条商品映射关系。")
@@ -1417,7 +1604,7 @@ def product_detail_collection(request):
     )
     sku_queryset = filter_product_skus(
         request.user,
-        ProductSKU.objects.filter(tenant=tenant).select_related(
+        ProductSKU.objects.filter(tenant=tenant, spu__tenant=tenant).select_related(
             "spu", "spu__category_node", "spu__category_node__parent"
         ),
         "products.master.view",
@@ -1481,18 +1668,58 @@ def product_detail_collection(request):
         legacy_queryset = legacy_queryset.filter(generated_sku__is_active=False)
         sku_queryset = sku_queryset.filter(is_active=False)
 
-    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-created_at", "id")]
-    linked_sku_ids = {item.generated_sku.id for item in legacy_queryset if item.generated_sku_id}
-    sku_rows = [
-        _product_detail_row_from_sku(sku)
-        for sku in sku_queryset.order_by("sku_code")
-        if sku.id not in linked_sku_ids
-    ]
-    rows = legacy_rows + sku_rows
-
     page, page_size = pagination_query(request)
-    paginator = Paginator(rows, page_size)
+    # Keep linked SKUs out of the standalone stream without materializing all
+    # legacy rows or serializing the entire tenant before slicing the page.
+    # The subquery also preserves the legacy/SKU visibility and filters.
+    linked_sku_ids = legacy_queryset.exclude(generated_sku_id=None).order_by().values("generated_sku_id")
+    standalone_skus = sku_queryset.exclude(pk__in=linked_sku_ids)
+
+    # Build one database-side key stream before paginating.  A CASE expression
+    # is used instead of Greatest() so the query remains portable across
+    # MySQL, SQLite and PostgreSQL (SQLite has no native GREATEST function).
+    # A generated legacy mapping is sorted by whichever same-tenant side was
+    # updated last; a malformed cross-tenant relation and an ungenerated legacy
+    # row both fall back to the legacy timestamp.
+    legacy_keys = legacy_queryset.order_by().annotate(
+        sort_time=Case(
+            When(
+                generated_sku__tenant_id=F("tenant_id"),
+                generated_sku__updated_at__gt=F("updated_at"),
+                then=F("generated_sku__updated_at"),
+            ),
+            default=F("updated_at"),
+            output_field=DateTimeField(),
+        ),
+        row_kind=Value(0, output_field=IntegerField()),
+    ).values("id", "sort_time", "row_kind")
+    sku_keys = standalone_skus.order_by().annotate(
+        sort_time=F("updated_at"),
+        row_kind=Value(1, output_field=IntegerField()),
+    ).values("id", "sort_time", "row_kind")
+    combined = legacy_keys.union(sku_keys, all=True).order_by("-sort_time", "-id", "row_kind")
+    paginator = Paginator(combined, page_size)
     page_obj = paginator.get_page(page)
+    page = page_obj.number
+    total_count = paginator.count
+    keys = list(page_obj.object_list)
+
+    # Rehydrate only the models represented on this page, retaining the
+    # select_related data needed by the row serializers and the union order.
+    legacy_ids = [key["id"] for key in keys if key["row_kind"] == 0]
+    sku_ids = [key["id"] for key in keys if key["row_kind"] == 1]
+    legacy_by_id = {
+        item.id: item for item in legacy_queryset.filter(pk__in=legacy_ids)
+    }
+    sku_by_id = {
+        item.id: item for item in standalone_skus.filter(pk__in=sku_ids)
+    }
+    rows = [
+        _product_detail_row_from_legacy(legacy_by_id[key["id"]])
+        if key["row_kind"] == 0
+        else _product_detail_row_from_sku(sku_by_id[key["id"]])
+        for key in keys
+    ]
 
     def page_url(target_page):
         if target_page is None:
@@ -1504,10 +1731,10 @@ def product_detail_collection(request):
 
     return success_response(
         {
-            "count": paginator.count,
+            "count": total_count,
             "next": page_url(page_obj.next_page_number()) if page_obj.has_next() else None,
             "previous": page_url(page_obj.previous_page_number()) if page_obj.has_previous() else None,
-            "results": list(page_obj.object_list),
+            "results": rows,
         }
     )
 
@@ -1576,14 +1803,14 @@ def product_detail_bulk_update(request):
         sku_filter["spu__spu_code"] = code
 
     legacy_items = list(
-        ProductLegacyItem.objects.select_for_update()
+        ProductLegacyItem.objects.select_for_update(of=("self",))
         .select_related("category_node", "generated_spu", "generated_sku")
         .filter(**legacy_filter)
         .order_by("id")
     )
     linked_sku_ids = {item.generated_sku_id for item in legacy_items if item.generated_sku_id}
     skus = list(
-        ProductSKU.objects.select_for_update()
+        ProductSKU.objects.select_for_update(of=("self",))
         .select_related("spu", "spu__category_node")
         .filter(**sku_filter)
         .exclude(pk__in=linked_sku_ids)
@@ -1647,6 +1874,26 @@ def product_detail_bulk_update(request):
     detail_values.update({field: None for field in clear_fields if field in detail_fields})
     for row_type, item in targets:
         try:
+            if (
+                row_type == "legacy"
+                and (
+                    (
+                        item.generated_spu_id
+                        and (
+                            item.generated_spu is None
+                            or item.generated_spu.tenant_id != tenant.id
+                        )
+                    )
+                    or (
+                        item.generated_sku_id
+                        and (
+                            item.generated_sku is None
+                            or item.generated_sku.tenant_id != tenant.id
+                        )
+                    )
+                )
+            ):
+                raise ValueError("生成商品关系不属于当前租户，拒绝跨租户更新。")
             if category is not None and (row_type == "sku" or item.generated_sku_id):
                 raise ValueError("已生成 SKU 的分类不可批量修改，以免破坏编码关系。")
             if status is not None and row_type == "legacy" and not item.generated_sku_id:
@@ -1721,248 +1968,107 @@ def product_legacy_collection(request):
             queryset = queryset.filter(status=status_value)
         return success_response(ProductLegacyItemSerializer(queryset, many=True).data)
 
+    # Keep the HTTP boundary in this view, while the CSV parsing and row-level
+    # transaction rules live in a dedicated service.  The import service is
+    # imported lazily to avoid making the large legacy view module part of its
+    # dependency graph.
+    from .import_service import import_legacy_product_items
+
     require_create_scope(request.user, "products.master.manage")
-    csv_text = str(request.data.get("csv_text") or "").lstrip("\ufeff")
-    if not csv_text.strip():
-        return error_response(ErrorCode.VALIDATION_ERROR, "请选择包含旧商品数据的 CSV 文件。", status=400)
-    reader = csv.DictReader(io.StringIO(csv_text))
-    aliases = {
-        "legacy_spu_code": ("旧SPU编码", "old_spu_code", "legacy_spu_code"),
-        "legacy_sku_code": ("旧SKU编码", "old_sku_code", "legacy_sku_code"),
-        "product_name": ("商品名称", "product_name"),
-        "category_code": ("完整类目编码", "分类编码", "category_code"),
-        "attribute_code": ("属性码", "attribute_code"),
-        "color_code": ("颜色英文编码", "颜色", "颜色编码", "color_code"),
-        "specification": ("规格", "specification"),
-        "purchase_price": ("采购价格", "采购价", "purchase_price", "purchase_cost"),
-        "unit": ("单位", "unit"),
-        "image_url": ("商品图片", "商品图片 URL", "图片URL", "图片 URL", "图片地址", "image_url", "image"),
-        "package_weight": ("重量(g)", "重量（g）", "重量", "package_weight", "weight_g"),
-        "package_volume": ("体积(m³)", "体积(m3)", "体积", "package_volume", "volume_m3"),
-        "package_length_cm": ("长(cm)", "长（cm）", "长度", "package_length_cm", "length_cm"),
-        "package_width_cm": ("宽(cm)", "宽（cm）", "宽度", "package_width_cm", "width_cm"),
-        "package_height_cm": ("高(cm)", "高（cm）", "高度", "package_height_cm", "height_cm"),
-        "origin_country": ("原产国", "原产地", "origin_country", "country_of_origin"),
-        "hs_code": ("HS编码", "HS码", "hs_code", "hs"),
-        "product_description": ("商品描述", "描述", "product_description", "description"),
-    }
-    def value(row, key):
-        return next((str(row.get(name) or "").strip() for name in aliases[key] if str(row.get(name) or "").strip()), "")
-    fieldnames = set(reader.fieldnames or [])
-
-    def has_column(key):
-        return any(name in fieldnames for name in aliases[key])
-
-    def optional_decimal(row, key, line_no, errors):
-        raw = value(row, key)
-        if not raw:
-            return None, True
-        try:
-            parsed = Decimal(raw.replace(",", ""))
-            digits = len(parsed.as_tuple().digits)
-            scale = max(0, -parsed.as_tuple().exponent)
-            if not parsed.is_finite() or parsed < 0 or digits > 10 or scale > 3:
-                raise InvalidOperation
-            return parsed, True
-        except (InvalidOperation, ValueError):
-            errors.append({"line": line_no, "message": f"{key} must be a non-negative number: {raw}"})
-            return None, False
-
-    started_at = time.monotonic()
-    created = updated = unchanged = skipped = generated = 0
-    errors = []
-    active_categories = list(
-        ProductCategory.objects.filter(tenant=request.user.tenant, level__in=(2, 3), is_active=True)
-        .select_related("parent__parent")
-    )
-
-    def resolve_category(category_code):
-        if not category_code:
-            return None
-        category = next(
-            (
-                leaf for leaf in active_categories
-                if leaf.parent_id and (
-                    (leaf.level == 2 and f"{leaf.parent.code}{leaf.code}" == category_code)
-                    or (
-                        leaf.level == 3
-                        and leaf.parent.parent_id
-                        and f"{leaf.parent.parent.code}{leaf.parent.code}{leaf.code}" == category_code
-                    )
-                )
-            ),
-            None,
+    try:
+        result, response_status = import_legacy_product_items(
+            request=request,
+            csv_text=request.data.get("csv_text"),
+            mode=request.data.get("mode", "auto"),
         )
-        if category is None:
-            matches = [leaf for leaf in active_categories if leaf.code == category_code]
-            category = matches[0] if len(matches) == 1 else None
-        return category
-
-    for line_no, row in enumerate(reader, 2):
-        old_sku = value(row, "legacy_sku_code")
-        name = value(row, "product_name")
-        if not old_sku or not name:
-            skipped += 1
-            errors.append({"line": line_no, "message": "旧SKU编码和商品名称不能为空"})
-            continue
-        attribute_code = value(row, "attribute_code")
-        if attribute_code and (len(attribute_code) != 1 or not attribute_code.isdigit()):
-            skipped += 1
-            errors.append({"line": line_no, "message": f"属性码必须为空或1位数字：{attribute_code}"})
-            continue
-        raw_price = value(row, "purchase_price")
-        purchase_price = None
-        if raw_price:
-            try:
-                purchase_price = Decimal(raw_price.replace(",", ""))
-                digits = len(purchase_price.as_tuple().digits)
-                scale = max(0, -purchase_price.as_tuple().exponent)
-                if not purchase_price.is_finite() or purchase_price < 0 or digits > 14 or scale > 4:
-                    raise InvalidOperation
-            except (InvalidOperation, ValueError):
-                skipped += 1
-                errors.append({"line": line_no, "message": f"采购价格格式无效：{raw_price}"})
-                continue
-        extended = {}
-        invalid_extended = False
-        for field in ("package_weight", "package_volume", "package_length_cm", "package_width_cm", "package_height_cm"):
-            if has_column(field):
-                extended[field], valid = optional_decimal(row, field, line_no, errors)
-                invalid_extended = invalid_extended or not valid
-        for field in ("unit", "image_url", "origin_country", "hs_code", "product_description"):
-            if has_column(field):
-                extended[field] = value(row, field) or None
-        if invalid_extended:
-            skipped += 1
-            continue
-        if "hs_code" in extended and extended["hs_code"]:
-            hs = extended["hs_code"]
-            if len(hs) < 2 or len(hs) > 20 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.\- ]*", hs):
-                skipped += 1
-                errors.append({"line": line_no, "message": f"HS code length/format is invalid: {hs}"})
-                continue
-        if "image_url" in extended and extended["image_url"]:
-            image_url = extended["image_url"]
-            if not ((image_url.startswith("/media/product-images/") and ".." not in image_url.split("/")) or re.match(r"^https?://[^\s]+$", image_url, flags=re.IGNORECASE)):
-                skipped += 1
-                errors.append({"line": line_no, "message": "image_url must be an http(s) URL or /media/ URL"})
-                continue
-
-        # Only fields represented by the uploaded header participate in an
-        # incremental update.  This prevents a shorter follow-up file from
-        # erasing data that was imported previously.
-        incoming = {"product_name": name}
-        if has_column("legacy_spu_code"):
-            incoming["legacy_spu_code"] = value(row, "legacy_spu_code")
-        if has_column("category_code"):
-            category_code = value(row, "category_code")
-            category = resolve_category(category_code)
-            if category_code and category is None:
-                skipped += 1
-                errors.append({"line": line_no, "message": f"未找到有效的完整类目编码：{category_code}"})
-                continue
-            incoming["category_node"] = category
-        if has_column("attribute_code"):
-            incoming["attribute_code"] = attribute_code or "0"
-        if has_column("color_code"):
-            incoming["color_code"] = value(row, "color_code").lower()
-        if has_column("specification"):
-            incoming["specification"] = value(row, "specification")
-        if has_column("purchase_price"):
-            incoming["purchase_price"] = purchase_price
-        incoming.update(extended)
-
-        item = ProductLegacyItem.objects.filter(
-            tenant=request.user.tenant, legacy_sku_code=old_sku
-        ).first()
-        if item is None:
-            incoming.setdefault("unit", "件")
-            incoming.update({"status": ProductLegacyItem.Status.PENDING, "error_message": ""})
-            create_data = dict(incoming)
-            # The stable business key is supplied explicitly below.
-            create_data.pop("legacy_sku_code", None)
-            ProductLegacyItem.objects.create(
-                tenant=request.user.tenant,
-                legacy_sku_code=old_sku,
-                **create_data,
-            )
-            created += 1
-            continue
-
-        if item.status == ProductLegacyItem.Status.GENERATED and item.generated_sku_id:
-            immutable_variant_fields = ("category_node", "attribute_code", "color_code", "specification")
-            immutable_changes = [
-                field for field in immutable_variant_fields
-                if field in incoming and getattr(item, field) != incoming[field]
-            ]
-            if immutable_changes:
-                skipped += 1
-                errors.append(
-                    {
-                        "line": line_no,
-                        "message": "已生成 SKU 的类目、属性码、颜色和规格不能通过导入修改："
-                        + "、".join(immutable_changes),
-                    }
-                )
-                continue
-
-        changed_fields = [
-            field for field, value_to_set in incoming.items()
-            if getattr(item, field) != value_to_set
-        ]
-        if not changed_fields:
-            unchanged += 1
-            continue
-        for field in changed_fields:
-            setattr(item, field, incoming[field])
-        # A correction to a failed row makes it eligible for the manual
-        # adjustment/generation workflow again; a generated row keeps its
-        # independent conversion state and SKU relation.
-        update_fields = list(changed_fields)
-        if item.status == ProductLegacyItem.Status.ERROR:
-            item.status = ProductLegacyItem.Status.PENDING
-            item.error_message = ""
-            update_fields.extend(["status", "error_message"])
-        item.save(update_fields=[*dict.fromkeys(update_fields), "updated_at"])
-        if item.status == ProductLegacyItem.Status.GENERATED and item.generated_sku_id:
-            generated_sku = ProductSKU.objects.filter(
-                pk=item.generated_sku_id, tenant=request.user.tenant
-            ).first()
-            if generated_sku is not None:
-                _sync_legacy_fields_to_sku(item, generated_sku)
-        updated += 1
-    return success_response(
-        {
-            "created": created,
-            "updated": updated,
-            "unchanged": unchanged,
-            "skipped": skipped,
-            "generated": generated,
-            "processed": created + updated + unchanged + skipped,
-            "error_count": len(errors),
-            "errors": errors,
-            "duration_ms": round((time.monotonic() - started_at) * 1000),
-        },
-        # A newly accepted import is a resource-creation operation.  Keep
-        # retries/updates idempotent with the normal 200 response while
-        # exposing 201 for a first insert.
-        status=201 if created else 200,
-    )
+    except ValueError as exc:
+        return error_response(ErrorCode.VALIDATION_ERROR, str(exc), status=400)
+    return success_response(result, status=response_status)
 
 
-@api_view(["PATCH"])
+
+@api_view(["PATCH", "DELETE"])
 @permission_classes([IsProductMasterReadOrManage])
 @transaction.atomic
 def product_legacy_detail(request, pk):
-    require_create_scope(request.user, "products.master.manage")
+    # Existing PATCH semantics intentionally remain restricted to all-tenant
+    # create scope.  DELETE is a scoped resource action and relies on the
+    # queryset below so a custom scope can delete only its configured rows.
+    if request.method == "PATCH":
+        require_create_scope(request.user, "products.master.manage")
+    # Custom legacy visibility is expressed as an OR plus ``distinct()``
+    # through the SKU/SPU scope helper. PostgreSQL disallows locking a
+    # DISTINCT query, so resolve the scoped primary key first and then lock
+    # only the tenant-scoped legacy base row.
+    visible_ids = _filter_product_legacy_items(
+        request.user,
+        ProductLegacyItem.objects.filter(tenant=request.user.tenant),
+        "products.master.manage",
+    ).filter(pk=pk).values("pk")
     item = get_object_or_404(
-        _filter_product_legacy_items(
-            request.user,
-            ProductLegacyItem.objects.select_for_update(),
-            "products.master.manage",
-        ),
+        ProductLegacyItem.objects.filter(
+            tenant=request.user.tenant,
+            pk__in=visible_ids,
+        ).select_for_update(of=("self",)),
         pk=pk,
     )
+    if request.method == "DELETE":
+        # A generated legacy row is the audit bridge for the generated SPU/SKU.
+        # Removing only the source row would leave the generated SKU orphaned
+        # from its import history, so it is a protected reference.  The UI can
+        # still deactivate the generated SKU through its status action.
+        references = _product_reverse_references(item)
+        if item.generated_sku_id:
+            references.append("generated_sku")
+        if item.generated_spu_id:
+            references.append("generated_spu")
+        references = sorted(set(references))
+        if references:
+            return error_response(
+                ErrorCode.STATE_CONFLICT,
+                "已生成商品的明细属于商品映射记录，不能删除，请改为停用对应 SKU。",
+                data={
+                    # A legacy row with only a generated SPU is malformed and
+                    # has no SKU status action to offer in the UI.
+                    "can_deactivate": bool(item.generated_sku_id),
+                    "references": references,
+                    "sku_id": item.generated_sku_id,
+                },
+                status=409,
+            )
+        item_id = item.pk
+        old_image_url = item.image_url
+        before = {
+            "legacy_sku_code": item.legacy_sku_code,
+            "product_name": item.product_name,
+            "status": item.status,
+        }
+        item.delete()
+        from apps.audit.services import write_operation_log
+
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="products",
+            action="product_legacy_item.delete",
+            object_type="ProductLegacyItem",
+            object_id=item_id,
+            before_data=before,
+            after_data={"deleted": True},
+        )
+
+        def cleanup_deleted_legacy_media():
+            # Defer physical storage cleanup until the delete and its audit
+            # record are committed, preserving the file on rollback.
+            _delete_product_image_if_unreferenced(old_image_url)
+            AttachmentFile.objects.filter(
+                tenant=request.user.tenant,
+                business_type="product_legacy_item_image",
+                business_id=str(item_id),
+            ).delete()
+
+        transaction.on_commit(cleanup_deleted_legacy_media)
+        return success_response({"deleted": True, "id": item_id})
     was_generated = item.status == ProductLegacyItem.Status.GENERATED and bool(item.generated_sku_id)
     generated_sku = None
     if was_generated:
@@ -2021,6 +2127,103 @@ def product_legacy_generate(request, pk):
         item.save(update_fields=["status", "error_message", "updated_at"])
         return error_response(ErrorCode.VALIDATION_ERROR, item.error_message, status=400)
     return success_response(ProductLegacyItemSerializer(item).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_create(request):
+    """Create one bundle SPU, its SKU, and all components atomically."""
+    _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
+    input_serializer = ProductBundleCreateInputSerializer(data=request.data)
+    input_serializer.is_valid(raise_exception=True)
+    payload = input_serializer.validated_data
+    tenant = request.user.tenant
+
+    category = ProductCategory.objects.filter(
+        pk=payload["category_node"], tenant=tenant, is_active=True,
+    ).first()
+    if category is None:
+        return error_response(ErrorCode.VALIDATION_ERROR, "请选择当前租户的启用末级分类。", status=400)
+    try:
+        category_path(category)
+    except DjangoValidationError:
+        return error_response(ErrorCode.VALIDATION_ERROR, "请选择当前租户的启用末级分类。", status=400)
+
+    color_code = payload["color_code"]
+    if not ProductColor.objects.filter(tenant=tenant, code=color_code, is_active=True).exists():
+        return error_response(ErrorCode.VALIDATION_ERROR, "请选择当前租户的启用颜色。", status=400)
+
+    component_payloads = payload["components"]
+    component_ids = [item["component_sku"] for item in component_payloads]
+    component_skus = {
+        item.id: item
+        for item in ProductSKU.objects.filter(
+            tenant=tenant,
+            id__in=component_ids,
+            is_active=True,
+        ).exclude(spu__product_type=ProductSPU.ProductType.BUNDLE).select_related("spu")
+    }
+    if len(component_skus) != len(component_ids):
+        return error_response(
+            ErrorCode.VALIDATION_ERROR,
+            "组成 SKU 必须是当前租户中启用的普通 SKU。",
+            status=400,
+        )
+
+    context = _serializer_context(request)
+    try:
+        with transaction.atomic():
+            spu_serializer = ProductSPUSerializer(
+                data={
+                    "product_name": payload["product_name"],
+                    "category_node": category.id,
+                    "season_code": payload["season_code"],
+                    "product_type": ProductSPU.ProductType.BUNDLE,
+                },
+                context=context,
+            )
+            spu_serializer.is_valid(raise_exception=True)
+            spu = spu_serializer.save(tenant=tenant)
+
+            spec_values = {
+                str(item["code"]): "组合"
+                for item in (category.spec_dimensions or [])
+                if isinstance(item, dict) and item.get("code")
+            }
+            sku_serializer = ProductSKUSerializer(
+                data={"spu": spu.id, "color_code": color_code, "spec_values": spec_values},
+                context=context,
+            )
+            sku_serializer.is_valid(raise_exception=True)
+            sku = sku_serializer.save(tenant=tenant)
+
+            components = []
+            for component_payload in component_payloads:
+                component_serializer = ProductBundleComponentSerializer(
+                    data={
+                        "bundle_sku": sku.id,
+                        "component_sku": component_payload["component_sku"],
+                        "quantity": component_payload["quantity"],
+                    },
+                    context=context,
+                )
+                component_serializer.is_valid(raise_exception=True)
+                components.append(component_serializer.save(tenant=tenant))
+    except IntegrityError:
+        return error_response(
+            ErrorCode.STATE_CONFLICT,
+            "组合商品编码或组成关系发生冲突，请刷新后重试。",
+            status=409,
+        )
+
+    return success_response(
+        {
+            "spu": ProductSPUSerializer(spu, context=context).data,
+            "sku": ProductSKUSerializer(sku, context=context).data,
+            "components": ProductBundleComponentSerializer(components, many=True, context=context).data,
+        },
+        status=201,
+    )
 
 
 @api_view(["GET", "POST"])

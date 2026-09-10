@@ -70,6 +70,7 @@ import { fetchProductCategoryBackgroundColors, updateProductCategoryBackgroundCo
 import { useAuthStore } from '../../stores/auth';
 import { collectionRows } from '../../utils/businessResponse';
 import { defaultCategoryBackgroundColor } from '../../utils/productCategoryPresentation';
+import { invalidateProductDictionaryCache } from '../../utils/productDictionaryCache';
 
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('masterdata.settings.manage'));
@@ -104,6 +105,7 @@ async function save() {
   })));
   saving.value = false;
   if (!response.success) return ElMessage.error(response.message || '保存失败');
+  invalidateProductDictionaryCache();
   ElMessage.success('商品分类背景颜色已保存');
   await load();
 }

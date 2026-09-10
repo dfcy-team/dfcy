@@ -14,7 +14,11 @@ SEASONS = (
     {"code": "4", "name": "冬", "english_name": "Winter"},
     {"code": "5", "name": "春秋", "english_name": "Spring & Autumn"},
 )
+# ``SEASONS`` remains the legacy display/options contract for older clients.
+# New product creation uses the tenant attribute dictionary, whose one-digit
+# namespace also reserves ``0`` for the default/unset value.
 SEASON_CODES = {item["code"] for item in SEASONS}
+ATTRIBUTE_CODES = {str(number) for number in range(10)}
 SPEC_VALUE_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)?(?:cm|mm|kg|m|inch)$", re.IGNORECASE)
 SKU_CODE_MAX_LENGTH = 80
 
@@ -31,8 +35,9 @@ def category_path(category):
 def allocate_spu_code(*, tenant, category, season_code):
     if category.tenant_id != tenant.id or not category.is_active:
         raise ValidationError("Category must be active and belong to the current tenant.")
-    if season_code not in SEASON_CODES:
-        raise ValidationError("Unsupported season code.")
+    season_code = str(season_code or "")
+    if season_code not in ATTRIBUTE_CODES:
+        raise ValidationError("Unsupported attribute code.")
     l1, l2, l3 = category_path(category)
     sequence, _ = ProductCodeSequence.objects.select_for_update().get_or_create(
         tenant=tenant,
@@ -42,9 +47,24 @@ def allocate_spu_code(*, tenant, category, season_code):
         season_code=season_code,
         defaults={"current_value": 0},
     )
-    next_value = sequence.current_value + 1
+    # A category can be moved after products have been created.  Existing
+    # products retain their original identifiers, while newly generated codes
+    # use the category's new path.  Synchronize the sequence with persisted
+    # SPU codes before incrementing so a stale/missing sequence row cannot
+    # recreate an already-used code (manual imports are covered too).
+    prefix = f"{l1.code}{l2.code}{l3.code}{season_code}"
+    highest_used = sequence.current_value
+    for existing_code in ProductSPU.objects.filter(
+        tenant=tenant,
+        spu_code__startswith=prefix,
+    ).values_list("spu_code", flat=True):
+        suffix = existing_code[len(prefix):]
+        if len(suffix) == 3 and suffix.isdigit():
+            highest_used = max(highest_used, int(suffix))
+
+    next_value = highest_used + 1
     if next_value > 999:
-        raise ValidationError("This category and season has exhausted its 001-999 SPU sequence.")
+        raise ValidationError("This category and attribute code has exhausted its 001-999 SPU sequence.")
     sequence.current_value = next_value
     sequence.save(update_fields=["current_value", "updated_at"])
     return f"{l1.code}{l2.code}{l3.code}{season_code}{next_value:03d}", (l1.code, l2.code, l3.code)
@@ -67,10 +87,30 @@ def build_specification(category, spec_values):
     for dimension in dimensions:
         code = dimension["code"]
         value = str(spec_values.get(code, "0")).strip()
-        if value != "0" and not SPEC_VALUE_PATTERN.fullmatch(value):
-            raise ValidationError(f"Specification value for {code} must include a supported unit.")
+        configured_values = {
+            str(item).strip()
+            for item in (dimension.get("values") or [])
+            if str(item).strip()
+        }
+        # Existing tenants may have legacy dictionary values such as
+        # ``90X200CM`` or ``2PCS-1``.  They are valid product specifications
+        # even though they are not expressible as a single numeric value with
+        # a unit.  Keep the unit-format fallback for new/custom values while
+        # accepting values explicitly configured on the category.
+        if (
+            value != "0"
+            and value not in configured_values
+            and not SPEC_VALUE_PATTERN.fullmatch(value)
+        ):
+            raise ValidationError(
+                f"Specification value for {code} must be a configured dictionary value or include a supported unit."
+            )
         normalized[code] = value
-        values.append(value)
+        # ``0`` is the persisted sentinel for an optional, unselected
+        # dimension. Keep it in ``normalized`` for compatibility, but do not
+        # expose it in the human-facing specification string or SKU code.
+        if value != "0":
+            values.append(value)
     return "×".join(values), normalized
 
 
@@ -78,7 +118,26 @@ def build_sku_code(*, spu, color_code, spec_values):
     if not spu.category_node_id:
         raise ValidationError("SPU has no structured category; SKU code cannot be generated automatically.")
     specification, normalized = build_specification(spu.category_node, spec_values)
-    return f"{spu.spu_code}-{color_code}-{specification}", specification, normalized
+    suffix = f"-{specification}" if specification else ""
+    return f"{spu.spu_code}-{color_code}{suffix}", specification, normalized
+
+
+def build_legacy_sku_code(*, spu, color_code, spec_values):
+    """Return the pre-2.44.80 code for the same optional-spec combination.
+
+    This is a lookup-only compatibility value.  It must never be written for
+    a new SKU: old rows keep codes such as ``SPU-red-0`` while new rows omit
+    the sentinel from their specification and code.
+    """
+
+    if not spu.category_node_id:
+        return None
+    dimensions = spu.category_node.spec_dimensions or []
+    codes = [item.get("code") for item in dimensions if isinstance(item, dict) and item.get("code")]
+    if not codes:
+        return None
+    values = [str((spec_values or {}).get(code, "0") or "0").strip() or "0" for code in codes]
+    return f"{spu.spu_code}-{color_code}-{'×'.join(values)}"
 
 
 def allocate_legacy_sku_code(*, tenant, base_code, legacy_sku_code, max_length=SKU_CODE_MAX_LENGTH):

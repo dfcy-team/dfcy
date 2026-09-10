@@ -178,9 +178,11 @@ def _warehouse_authorization_queryset(request, permission_code):
 def _warehouse_binding_request_data(request, *, current=None):
     if not isinstance(request.data, dict):
         raise ValidationError("仓库 API 接入请求必须是 JSON 对象。")
-    reject_raw_credential_fields(request.data)
+    reject_raw_credential_fields({key: value for key, value in request.data.items() if key != "token"})
     allowed_fields = {
         "warehouse_id",
+        "email",
+        "token",
         "integration_config_id",
         "external_warehouse_code",
         "replace",
@@ -220,6 +222,7 @@ def _warehouse_binding_request_data(request, *, current=None):
     return data
 
 
+@transaction.atomic
 def _perform_warehouse_binding(request, data):
     warehouse = get_object_or_404(
         WarehouseMaster.objects.filter(tenant=request.user.tenant),
@@ -259,7 +262,13 @@ def _perform_warehouse_binding(request, data):
         expected_authorization_id=data.get("expected_authorization_id"),
         idempotency_key=data.get("idempotency_key"),
         external_warehouse_code=data.get("external_warehouse_code"),
+        credential_payload={key: data[key] for key in ("email", "token") if key in data}
+        if "email" in data or "token" in data else None,
     )
+    if operation != "replay" and ("email" in data or "token" in data):
+        from .warehouse_credential_service import save_warehouse_credentials
+        authorization = save_warehouse_credentials(actor=request.user, authorization=authorization,
+            email=data.get("email", authorization.email), token=data.get("token", ""))
     return success_response(
         {
             "idempotent": idempotent,
@@ -877,6 +886,8 @@ def integration_config_detail(request, pk):
                 error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
             )
         config = serializer.save(config_version=config.config_version + 1)
+        from .warehouse_credential_service import invalidate_config_warehouses
+        invalidate_config_warehouses(config)
         _write_audit_log(
             config,
             request.user,

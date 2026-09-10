@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 
 from apps.accounts.models import CustomUser
@@ -351,6 +352,10 @@ class CountrySiteMasterSerializer(TenantOwnedSerializer):
 
 
 class WarehouseMasterSerializer(TenantOwnedSerializer):
+    api_integration_config_id = serializers.IntegerField(required=False, min_value=1, write_only=True)
+    api_email = serializers.EmailField(required=False, write_only=True)
+    api_token = serializers.CharField(required=False, write_only=True, allow_blank=True, max_length=4096, trim_whitespace=False)
+    api_external_warehouse_code = serializers.CharField(required=False, write_only=True, allow_blank=True, max_length=160)
     service_platform_id = serializers.PrimaryKeyRelatedField(
         source="service_platform",
         queryset=PlatformMaster.objects.none(),
@@ -372,6 +377,7 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
             "id", "tenant_id", "code", "name", "country_code", "warehouse_type", "status", "created_at", "updated_at",
             "service_platform_id", "service_platform_name", "service_platform_type", "service_platform_integration_key",
             "api_access_available", "api_connected", "site_code", "last_sync_at", "last_sync_status",
+            "api_integration_config_id", "api_email", "api_token", "api_external_warehouse_code",
         )
         read_only_fields = (
             "id", "tenant_id", "created_at", "updated_at", "api_connected", "site_code", "last_sync_at", "last_sync_status",
@@ -447,7 +453,83 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
                 raise serializers.ValidationError({"service_platform_id": "三方仓和平台仓必须绑定仓储服务平台。"})
         elif service_platform.platform_type != expected_platform_type:
             raise serializers.ValidationError({"service_platform_id": "仓储服务平台类型必须与仓库类型一致。"})
+        from apps.integrations.platform_schema_service import integration_platform_key
+        provider = integration_platform_key(platform_type=service_platform.platform_type, code=service_platform.code, name=service_platform.name) if service_platform else ""
+        if self.instance and any(attrs.get(key, getattr(self.instance, key)) != getattr(self.instance, key)
+                                 for key in ("service_platform", "country_code", "warehouse_type")):
+            from apps.integrations.models import WarehouseAuthorization
+            if WarehouseAuthorization.objects.filter(warehouse=self.instance, status="active").exists():
+                raise serializers.ValidationError("请先在 API 接入中撤销现有绑定，再更改仓库平台、国家或类型。")
+        if not self.instance and provider == "jifeng_wms":
+            missing = [key for key in ("api_integration_config_id", "api_email", "api_token") if not attrs.get(key)]
+            if missing:
+                raise serializers.ValidationError({key: "首次配置极风仓库时必填。" for key in missing})
+        if any(key.startswith("api_") for key in attrs) and provider != "jifeng_wms":
+            raise serializers.ValidationError("仅极风平台支持这组仓库 API 凭据。")
         return attrs
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["api_validation_status"] = "unconfigured"
+        from apps.integrations.models import WarehouseAuthorization
+        from apps.permissions.services import check_user_permission
+        from apps.permissions.ui_p6_scopes import filter_warehouse_authorizations
+
+        user = getattr(self.context.get("request"), "user", None)
+        if user and check_user_permission(user, "integrations.warehouse.view"):
+            query = WarehouseAuthorization.objects.filter(tenant_id=user.tenant_id, warehouse=instance, status="active")
+            record = filter_warehouse_authorizations(user, query, "integrations.warehouse.view").first()
+            if record:
+                data.update(api_integration_config_id=record.integration_config_id, api_email=record.email,
+                            api_external_warehouse_code=record.external_warehouse_code,
+                            api_validation_status=record.validation_status)
+        return data
+
+    def _save_api(self, instance, values):
+        from apps.integrations.models import PlatformIntegrationConfig, WarehouseAuthorization
+        from apps.integrations.warehouse_authorization_service import bind_warehouse_authorization
+        from apps.integrations.warehouse_credential_service import save_warehouse_credentials
+        from apps.permissions.services import check_user_permission
+        from apps.permissions.ui_p6_scopes import integration_values_allowed
+
+        if not values:
+            return
+        actor = self.context["request"].user
+        if not check_user_permission(actor, "integrations.warehouse.authorize"):
+            raise serializers.ValidationError("无权维护仓库 API 授权，仓库未保存。")
+        current = WarehouseAuthorization.objects.select_for_update().filter(tenant_id=actor.tenant_id, warehouse=instance, status="active").first()
+        config_id = values.get("api_integration_config_id") or (current.integration_config_id if current else None)
+        config = PlatformIntegrationConfig.objects.filter(tenant_id=actor.tenant_id, pk=config_id).first()
+        if not config:
+            raise serializers.ValidationError({"api_integration_config_id": "请选择当前租户的接入配置。"})
+        if (current and not current.email and not values.get("api_email") and not values.get("api_token")
+                and config.pk == current.integration_config_id
+                and values.get("api_external_warehouse_code", current.external_warehouse_code) == current.external_warehouse_code):
+            # Metadata-only edits must not force legacy credentials to be replaced.
+            return
+        if not integration_values_allowed(actor, "integrations.warehouse.authorize", platform=config.platform,
+                environment=config.environment, regions=config.regions or [instance.country_code], config_id=config.pk,
+                resource_type="inventory_snapshot", warehouse_id=instance.pk):
+            raise serializers.ValidationError("仓库 API 配置超出授权数据范围，仓库未保存。")
+        record, _, _ = bind_warehouse_authorization(actor=actor, warehouse=instance, integration_config=config,
+            replace=bool(current), expected_authorization_id=current.pk if current else None,
+            external_warehouse_code=values.get("api_external_warehouse_code", current.external_warehouse_code if current else ""))
+        save_warehouse_credentials(actor=actor, authorization=record,
+            email=values.get("api_email", record.email), token=values.get("api_token", ""))
+
+    @transaction.atomic
+    def create(self, validated_data):
+        values = {key: validated_data.pop(key) for key in list(validated_data) if key.startswith("api_")}
+        instance = super().create(validated_data)
+        self._save_api(instance, values)
+        return instance
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        values = {key: validated_data.pop(key) for key in list(validated_data) if key.startswith("api_")}
+        instance = super().update(instance, validated_data)
+        self._save_api(instance, values)
+        return instance
 
     def _latest_snapshot(self, obj):
         from apps.commerce.models import InventorySnapshot
@@ -467,6 +549,8 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
             tenant_id=obj.tenant_id,
             warehouse_id=obj.id,
             status__in=["authorized", WarehouseAuthorization.Status.ACTIVE],
+            validation_status=WarehouseAuthorization.ValidationStatus.VERIFIED,
+            last_verified_at__isnull=False,
         ).exists()
 
     def get_site_code(self, obj):

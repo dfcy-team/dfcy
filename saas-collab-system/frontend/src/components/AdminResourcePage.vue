@@ -163,13 +163,13 @@
 
     <el-dialog v-model="formOpen" :title="editingRow ? `编辑${entityLabel}` : `新建${entityLabel}`" width="min(760px, 94vw)" destroy-on-close>
       <el-alert
-        title="仅保存当前租户的档案信息；密钥、令牌、浏览器标识和会话内容不在此表单采集。"
+        :title="formNotice"
         type="info"
         :closable="false"
         show-icon
       />
       <el-form label-position="top" class="create-form" @submit.prevent="submitForm">
-        <el-form-item v-for="field in formFields" :key="field.key" :label="field.label" :required="field.required">
+        <el-form-item v-for="field in formFields.filter(item => !item.visible || item.visible(resourceForm))" :key="field.key" :label="field.label" :required="field.required">
           <el-select
             v-if="field.type === 'select'"
             v-model="resourceForm[field.key]"
@@ -237,6 +237,7 @@ const props = defineProps({
   loader: { type: Function, required: true },
   columns: { type: Array, default: () => [] },
   formFields: { type: Array, default: () => [] },
+  formNotice: { type: String, default: '仅保存当前租户的档案信息；密钥、令牌、浏览器标识和会话内容不在此表单采集。' },
   createHandler: { type: Function, default: null },
   editHandler: { type: Function, default: null },
   deleteHandler: { type: Function, default: null },
@@ -382,7 +383,7 @@ function openEdit(row) {
 async function submitForm() {
   const isEditing = Boolean(editingRow.value);
   if (isEditing ? (!manageAccess.value.allowed || !props.editHandler) : (!createAccess.value.allowed || !props.createHandler)) return;
-  const missing = props.formFields.find((field) => field.required && !resourceForm[field.key]);
+  const missing = props.formFields.find((field) => (!field.visible || field.visible(resourceForm)) && field.required && !resourceForm[field.key]);
   if (missing) {
     ElMessage.warning(`请填写${missing.label}`);
     return;

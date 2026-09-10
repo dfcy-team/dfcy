@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    product_bundle_create,
     product_bundle_component_collection,
     product_bundle_component_detail,
     product_category_collection,
@@ -35,6 +36,8 @@ from .views import (
     status_recommendation_detail,
     status_transition_collection,
 )
+from .action_views import product_sku_status_action, product_spu_status_action
+from .batch_views import product_sku_batch_create
 
 
 urlpatterns = [
@@ -53,9 +56,12 @@ urlpatterns = [
     path("spus/", product_spu_collection, name="product-spu-collection"),
     path("spus/bulk-update/", product_spu_bulk_update, name="product-spu-bulk-update"),
     path("spus/<int:pk>/", product_spu_detail, name="product-spu-detail"),
+    path("spus/<int:pk>/status/", product_spu_status_action, name="product-spu-status"),
     path("spus/<int:pk>/freeze-code/", freeze_product_spu_code, name="product-spu-freeze-code"),
     path("skus/", product_sku_collection, name="product-sku-collection"),
+    path("skus/batch/", product_sku_batch_create, name="product-sku-batch-create"),
     path("skus/<int:pk>/", product_sku_detail, name="product-sku-detail"),
+    path("skus/<int:pk>/status/", product_sku_status_action, name="product-sku-status"),
     path("skus/<int:pk>/image/", product_sku_image, name="product-sku-image"),
     path("details/", product_detail_collection, name="product-detail-collection"),
     path("details/bulk-update/", product_detail_bulk_update, name="product-detail-bulk-update"),
@@ -63,6 +69,7 @@ urlpatterns = [
     path("legacy-items/", product_legacy_collection, name="product-legacy-collection"),
     path("legacy-items/<int:pk>/", product_legacy_detail, name="product-legacy-detail"),
     path("legacy-items/<int:pk>/generate/", product_legacy_generate, name="product-legacy-generate"),
+    path("bundles/create/", product_bundle_create, name="product-bundle-create"),
     path("bundle-components/", product_bundle_component_collection, name="product-bundle-component-collection"),
     path("bundle-components/<int:pk>/", product_bundle_component_detail, name="product-bundle-component-detail"),
     path("status-recommendations/", status_recommendation_collection, name="product-status-recommendation-collection"),

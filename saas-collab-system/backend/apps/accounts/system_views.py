@@ -49,6 +49,7 @@ from .system_serializers import (
     DepartmentAdminSerializer,
     PermissionAdminSerializer,
     RoleAdminSerializer,
+    RoleCopySerializer,
     RoleOptionSerializer,
     RolePermissionUpdateSerializer,
     UserAdminSerializer,
@@ -853,6 +854,103 @@ class RoleCollectionView(APIView):
             after_data={**audit_context(request, target_tenant), "code": role.code, "status": role.status},
         )
         return success_response(RoleAdminSerializer(role, context={"request": request}).data, status=201)
+
+
+class RoleCopyView(APIView):
+    """Copy a tenant-local role into a new, editable custom role."""
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.roles.view"
+    write_permission_code = "system.roles.manage"
+
+    @transaction.atomic
+    def post(self, request, pk):
+        target_tenant = requested_tenant(request)
+        require_all_scope(request.user, self.write_permission_code)
+        source = get_object_or_404(
+            Role.objects.select_for_update().filter(tenant=target_tenant).prefetch_related("permissions", "data_scopes"),
+            pk=pk,
+        )
+
+        source_permission_codes = set(source.permissions.values_list("code", flat=True))
+        if not _is_platform_superuser(request.user) and not user_is_tenant_administrator(
+            request.user, target_tenant
+        ):
+            delegable_permissions = get_user_delegable_permission_codes(request.user)
+            denied_permissions = sorted(source_permission_codes - delegable_permissions)
+            if denied_permissions:
+                raise PermissionDenied(
+                    "不能复制包含当前用户无权委派权限的角色：" + ", ".join(denied_permissions)
+                )
+
+        serializer = RoleCopySerializer(
+            data=request.data,
+            context={"request": request, "target_tenant": target_tenant},
+        )
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+        try:
+            copied = Role.objects.create(
+                tenant=target_tenant,
+                name=validated["name"],
+                code=validated["code"],
+                description=validated.get("description", source.description),
+                role_type=Role.RoleType.CUSTOM,
+                is_protected=False,
+                status=Role.Status.ACTIVE,
+            )
+            copied.permissions.set(source.permissions.all())
+            # Restrict the copied scope rows to the resolved tenant even if a
+            # legacy database row was manually corrupted to point elsewhere.
+            source_scopes = list(
+                source.data_scopes.filter(tenant=target_tenant).values("scope_type", "config")
+            )
+            DataScope.objects.bulk_create([
+                DataScope(
+                    tenant=target_tenant,
+                    role=copied,
+                    scope_type=scope["scope_type"],
+                    config=scope["config"],
+                )
+                for scope in source_scopes
+            ])
+        except IntegrityError as exc:
+            raise ValidationError({"code": "当前租户内的系统标识已存在，请换一个。"}) from exc
+
+        write_operation_log(
+            tenant=target_tenant,
+            user=request.user,
+            module="system",
+            action="role_copy",
+            object_type="role",
+            object_id=copied.pk,
+            before_data={
+                **audit_context(request, target_tenant),
+                "source_role_id": source.pk,
+                "source_role_code": source.code,
+                "permissions": sorted(source_permission_codes),
+                "data_scopes": source_scopes,
+            },
+            after_data={
+                **audit_context(request, target_tenant),
+                "role_id": copied.pk,
+                "name": copied.name,
+                "code": copied.code,
+                "role_type": copied.role_type,
+                "is_protected": copied.is_protected,
+                "status": copied.status,
+                "permissions": sorted(source_permission_codes),
+                "data_scopes": source_scopes,
+            },
+        )
+        copied = Role.objects.prefetch_related("permissions", "data_scopes").get(pk=copied.pk)
+        return success_response(
+            RoleAdminSerializer(
+                copied,
+                context={"request": request, "target_tenant": target_tenant},
+            ).data,
+            status=201,
+        )
 
 
 class RoleScopeOptionsView(APIView):

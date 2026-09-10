@@ -60,7 +60,8 @@ const jifengInventoryConfig = {
   last_verified_at: '2026-09-01T09:00:00Z',
   updated_at: '2026-09-01T10:00:00Z',
   regions: ['MY'],
-  api_type: 'inventory'
+  // Match the production serializer: the effective API type is nested.
+  platform_config: { api_type: 'inventory' }
 };
 
 const configFixtures = [config, shopeeSandboxConfig, jifengInventoryConfig];
@@ -1155,7 +1156,7 @@ const mockWarehouseAuthorizationRows = [{
 const subjectApiConfig = (item) => ({
   id: item.id,
   platform: item.platform,
-  api_type: item.api_type,
+  api_type: item.api_type || item.platform_config?.api_type || (item.platform === 'jifeng_wms' ? 'inventory' : 'marketplace'),
   account_alias: item.account_alias,
   environment: item.environment,
   status: item.status,

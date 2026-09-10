@@ -8,8 +8,9 @@
     :loader="fetchWarehouses"
     :columns="columns"
     :form-fields="formFields"
-    :create-handler="(payload) => createMasterData('warehouses', payload)"
-    :edit-handler="(id, payload) => updateMasterData('warehouses', id, payload)"
+    form-notice="极风 API 配置保存到仓库授权；Token 加密保存且不回显。保存后请在 API 接入中完成首次授权，再执行只读校验。"
+    :create-handler="(payload) => createMasterData('warehouses', warehousePayload(payload))"
+    :edit-handler="(id, payload) => updateMasterData('warehouses', id, warehousePayload(payload))"
     :delete-handler="(id) => deleteMasterData('warehouses', id)"
     :status-handler="(row, status) => updateMasterDataStatus('warehouses', row.id, status)"
     create-permission="masterdata.manage"
@@ -63,10 +64,12 @@ import {
 } from '../../api/masterData';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
+import { fetchIntegrationConfigs } from '../../api/integrations';
 
 const auth = useAuthStore();
 const countryRows = ref([]);
 const platformRows = ref([]);
+const configRows = ref([]);
 const apiAccessOpen = ref(false);
 const selectedWarehouse = ref(null);
 const apiAccess = computed(() => {
@@ -109,6 +112,11 @@ const columns = [
   { prop: 'warehouse_type', label: '仓库类型', width: 150, options: warehouseTypes },
   { prop: 'service_platform_name', label: '仓储服务平台', width: 180 },
   { prop: 'status', label: '状态', type: 'status', width: 100 },
+  { prop: 'api_validation_status', label: 'API 校验', width: 120, options: [
+    { value: 'unconfigured', label: '未配置' },
+    { value: 'incomplete', label: '待补充' }, { value: 'pending', label: '待校验' },
+    { value: 'verified', label: '校验通过' }, { value: 'failed', label: '校验失败' },
+  ] },
 ];
 
 const formFields = computed(() => [
@@ -130,7 +138,23 @@ const formFields = computed(() => [
   { key: 'status', label: '状态', type: 'select', required: true, default: 'active', filterable: false, options: [
     { label: '启用', value: 'active' }, { label: '停用', value: 'inactive' },
   ] },
+  { key: 'api_integration_config_id', label: '极风 API 配置 · 接入配置', type: 'select', visible: isJifeng,
+    options: configRows.value.filter(row => row.platform === 'jifeng_wms').map(row => ({ value: row.id, label: row.account_alias })) },
+  { key: 'api_email', label: 'OMS Email', visible: isJifeng, placeholder: '填写该仓库 OMS 账号邮箱' },
+  { key: 'api_token', label: 'OMS 一次性授权 Token', type: 'password', visible: isJifeng,
+    placeholder: '首次必填；编辑留空保留，输入新值才替换' },
+  { key: 'api_external_warehouse_code', label: '服务商外部仓库编码', visible: isJifeng,
+    placeholder: '极风返回的仓库编号，不是本地仓库档案编码' },
 ]);
+
+function isJifeng(form) {
+  const platform = platformRows.value.find(row => String(row.id) === String(form.service_platform_id));
+  return platform?.connector_key === 'jifeng_wms';
+}
+
+function warehousePayload(form) {
+  return Object.fromEntries(Object.entries(form).filter(([key, value]) => !key.startsWith('api_') || (isJifeng(form) && (key === 'api_token' || value !== ''))));
+}
 
 async function loadCountryOptions() {
   const response = await fetchCountrySites({ status: 'active', page: 1, page_size: 100 });
@@ -182,5 +206,7 @@ function notifyApiAccessBlocked(row) {
     : '请先绑定启用且匹配仓库类型的仓储服务平台。');
 }
 
-onMounted(() => Promise.all([loadCountryOptions(), loadPlatformOptions()]));
+onMounted(() => Promise.all([loadCountryOptions(), loadPlatformOptions(), fetchIntegrationConfigs().then(response => {
+  if (response?.success) configRows.value = response.data?.results || (Array.isArray(response.data) ? response.data : []);
+})]));
 </script>

@@ -300,6 +300,7 @@ class PlatformProductDetailCollectionView(APIView):
                 | Q(internal_sku__sku_code__icontains=search)
                 | Q(internal_sku__legacy_sku_code__icontains=search)
             )
+        queryset = queryset.order_by("-updated_at", "-id")
         page, page_size = pagination_query(request)
         return success_response(
             paginated_data(

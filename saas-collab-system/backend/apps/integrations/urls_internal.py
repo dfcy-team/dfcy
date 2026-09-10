@@ -1,10 +1,17 @@
 from django.urls import path
 
 from . import views
+from .manual_callback import manual_store_callback
 from . import production_settings_api
+from . import warehouse_credential_views
 
 
 urlpatterns = [
+    path("warehouse-authorizations/<int:pk>/credentials/", warehouse_credential_views.warehouse_credentials),
+    path("warehouse-authorizations/<int:pk>/authorize/", warehouse_credential_views.warehouse_first_authorization),
+    path("warehouse-authorizations/<int:pk>/refresh/", warehouse_credential_views.warehouse_refresh_authorization),
+    path("warehouse-authorizations/<int:pk>/readonly-check/", warehouse_credential_views.warehouse_readonly_check),
+    path("store-authorizations/oauth/manual-callback/", manual_store_callback),
     path(
         "production-settings/",
         production_settings_api.production_settings_collection,
