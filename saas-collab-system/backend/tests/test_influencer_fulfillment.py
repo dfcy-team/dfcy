@@ -484,6 +484,86 @@ def test_non_all_scope_is_denied_even_with_permission():
     assert client.get("/api/internal/influencers/outreach-tasks/").status_code == 403
 
 
+def test_sample_fulfillment_list_orders_newest_created_first():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-created-order")
+    user, client = user_with_permissions(tenant, "sample-order-user", "influencers.fulfillment.manage")
+    store, influencer, task = base_records(tenant, user, "sample-order")
+    payload = {
+        "outreach_task": task.pk,
+        "influencer": influencer.pk,
+        "store": store.pk,
+        "owner": user.pk,
+        "items": [],
+    }
+
+    for number in ("SAMPLE-OLDER", "SAMPLE-NEWER"):
+        response = client.post(
+            "/api/internal/influencers/sample-fulfillments/",
+            {**payload, "fulfillment_no": number},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=f"sample-order-{number}",
+        )
+        assert response.status_code == 201
+
+    response = client.get("/api/internal/influencers/sample-fulfillments/")
+
+    assert response.status_code == 200
+    assert [row["fulfillment_no"] for row in response.data["data"]["results"]] == [
+        "SAMPLE-NEWER",
+        "SAMPLE-OLDER",
+    ]
+
+
+def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-owner-filter")
+    other_tenant = Tenant.objects.create(name="Other", code="sample-owner-filter-other")
+    user, client = user_with_permissions(tenant, "sample-owner-a", "influencers.fulfillment.manage")
+    other_owner = CustomUser.objects.create_user(
+        username="sample-owner-b",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    foreign_owner = CustomUser.objects.create_user(
+        username="sample-owner-foreign",
+        tenant=other_tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    store, influencer, task = base_records(tenant, user, "sample-owner")
+
+    for owner, number in ((user, "SAMPLE-OWNER-A"), (other_owner, "SAMPLE-OWNER-B")):
+        response = client.post(
+            "/api/internal/influencers/sample-fulfillments/",
+            {
+                "fulfillment_no": number,
+                "outreach_task": task.pk,
+                "influencer": influencer.pk,
+                "store": store.pk,
+                "owner": owner.pk,
+                "items": [],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=f"sample-owner-{owner.pk}",
+        )
+        assert response.status_code == 201
+
+    filtered = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"owner": other_owner.pk},
+    )
+    invalid = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"owner": "invalid"},
+    )
+    options = client.get("/api/internal/influencers/sample-fulfillment-options/")
+
+    assert filtered.status_code == 200
+    assert [row["fulfillment_no"] for row in filtered.data["data"]["results"]] == ["SAMPLE-OWNER-B"]
+    assert invalid.status_code == 400
+    assert options.status_code == 200
+    assert {owner["id"] for owner in options.data["data"]["owners"]} == {user.pk, other_owner.pk}
+    assert foreign_owner.pk not in {owner["id"] for owner in options.data["data"]["owners"]}
+
+
 def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
     tenant = Tenant.objects.create(name="Tenant", code="sample-idempotent")
     user, client = user_with_permissions(tenant, "sample-manager", "influencers.fulfillment.manage")

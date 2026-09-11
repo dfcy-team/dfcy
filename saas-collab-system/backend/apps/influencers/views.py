@@ -853,10 +853,25 @@ class OutreachTaskOptionsView(APIView):
 
 class SampleFulfillmentOptionsView(APIView):
     permission_classes = [DeclaredApplicationPermission]
-    read_permission_code = "influencers.fulfillment.manage"
+    read_permission_code = "influencers.fulfillment.view"
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
+        owners = CustomUser.objects.filter(
+            tenant=request.user.tenant,
+            owned_sample_fulfillments__tenant=request.user.tenant,
+            owned_sample_fulfillments__is_deleted=False,
+        ).distinct().order_by("full_name", "username")
+        owner_payload = [
+            {
+                "id": owner.id,
+                "username": owner.username,
+                "full_name": owner.full_name,
+            }
+            for owner in owners
+        ]
+        if _query_bool(request.query_params.get("owners_only", "false"), field="owners_only"):
+            return success_response({"owners": owner_payload})
         search = request.query_params.get("search", "").strip()
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         influencers = _with_open_sample_statuses(Influencer.objects.filter(
@@ -890,6 +905,7 @@ class SampleFulfillmentOptionsView(APIView):
                 for task in tasks
             ],
             "influencers": _influencer_candidates(influencers, limit=100, include_handle=True),
+            "owners": owner_payload,
         })
 
 
@@ -1212,6 +1228,14 @@ class SampleFulfillmentCollectionView(APIView):
         store_id = request.query_params.get("store", "").strip()
         if store_id:
             queryset = queryset.filter(store_id=store_id)
+        owner_id = request.query_params.get("owner", "").strip()
+        if owner_id:
+            if not owner_id.isdigit() or int(owner_id) < 1:
+                raise ValidationError({"owner": "owner must be a positive integer."})
+            queryset = queryset.filter(
+                owner_id=int(owner_id),
+                owner__tenant=request.user.tenant,
+            )
         search = request.query_params.get("search", "").strip()
         if search:
             search_filter = (
@@ -1228,6 +1252,7 @@ class SampleFulfillmentCollectionView(APIView):
             if is_valid_tiktok_username(normalized_handle):
                 search_filter |= Q(influencer__handle__icontains=normalized_handle)
             queryset = queryset.filter(search_filter)
+        queryset = queryset.order_by("-created_at", "-id")
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 

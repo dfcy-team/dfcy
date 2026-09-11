@@ -24,6 +24,9 @@
         <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
           <el-option v-for="(label, value) in FULFILLMENT_FILTER_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
+        <el-select v-model="filters.owner" clearable filterable placeholder="全部送样负责人" @change="applyFilters">
+          <el-option v-for="owner in ownerOptions" :key="owner.id" :label="owner.full_name || owner.username" :value="owner.id" />
+        </el-select>
         <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
@@ -264,6 +267,7 @@ const rows = ref([]);
 const tasks = ref([]);
 const storeOptions = ref([]);
 const influencerOptions = ref([]);
+const ownerOptions = ref([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -276,7 +280,7 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: '', store: null, includeDeleted: false });
+const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false });
 const form = reactive({ outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
@@ -320,7 +324,7 @@ const todayLabel = (() => {
 
 async function load() {
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store };
+  const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner };
   if (filters.includeDeleted) params.include_deleted = 'true';
   const r = await fetchSampleFulfillments(params);
   loading.value = false;
@@ -338,7 +342,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, includeDeleted: false });
+  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false });
   applyFilters();
 }
 
@@ -397,6 +401,7 @@ async function openCreate(selection = {}) {
   inheritedTask.value = null;
   items.value = [newItem()];
   draftKey.value = newKey();
+  visible.value = true;
   const [optionResponse, taskOptionResponse] = await Promise.all([
     fetchSampleFulfillmentOptions(),
     fetchOutreachTaskOptions()
@@ -404,7 +409,9 @@ async function openCreate(selection = {}) {
   tasks.value = optionResponse.success ? (optionResponse.data?.tasks || []) : [];
   storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
   influencerOptions.value = optionResponse.success ? (optionResponse.data?.influencers || []) : [];
-  if (!optionResponse.success) ElMessage.error(formatInfluencerError(optionResponse, '达人账号加载失败'));
+  ownerOptions.value = optionResponse.success ? (optionResponse.data?.owners || []) : [];
+  if (!optionResponse.success) ElMessage.error(formatInfluencerError(optionResponse, '送样选项加载失败，可稍后重试'));
+  if (!taskOptionResponse.success) ElMessage.error(formatInfluencerError(taskOptionResponse, '店铺选项加载失败，可稍后重试'));
   const routeSelection = querySelection();
   const requested = { ...routeSelection, ...(selection?.taskId ? selection : {}) };
   if (routeSelection.taskId) await consumeTaskQuery();
@@ -415,7 +422,11 @@ async function openCreate(selection = {}) {
       await selectTask(task.id);
     }
   }
-  visible.value = true;
+}
+
+async function loadOwnerOptions() {
+  const response = await fetchSampleFulfillmentOptions({ owners_only: 'true' });
+  if (response.success) ownerOptions.value = response.data?.owners || [];
 }
 
 async function selectTask(id) {
@@ -608,7 +619,7 @@ async function submitEdit() {
 }
 
 onMounted(async () => {
-  await load();
+  await Promise.all([load(), loadOwnerOptions()]);
   if (canManage.value) {
     const selection = querySelection();
     if (selection.taskId) await openCreate(selection);
