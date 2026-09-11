@@ -78,8 +78,7 @@
         </el-table-column>
         <el-table-column label="负责人" min-width="130">
           <template #default="{ row }">
-            <b>{{ displayValue(row.owner_name || row.owner) }}</b>
-            <small v-if="row.owner_name && hasValue(row.owner)">ID {{ row.owner }}</small>
+            <b>{{ displayValue(taskOwnerNames(row)) }}</b>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -166,7 +165,7 @@
         <el-form-item v-if="editingTask" label="开始时间"><el-input :model-value="formatTaskTime(form.started_at)" readonly /></el-form-item>
         <el-form-item v-if="editingTask" label="任务完成时间"><el-input :model-value="formatTaskTime(form.finalized_at)" readonly /></el-form-item>
         <el-form-item label="负责人（BD）" required>
-          <el-select v-model="form.owner" filterable placeholder="按姓名或账号搜索">
+          <el-select v-model="form.owners" multiple collapse-tags collapse-tags-tooltip filterable placeholder="按姓名或账号搜索，可选择多个负责人">
             <el-option v-for="user in bdOptions" :key="user.id" :label="`${user.full_name || user.username}（${user.username}）`" :value="user.id" />
           </el-select>
         </el-form-item>
@@ -332,7 +331,7 @@
               <div><span>SKU 前缀</span><b>{{ displayValue(detailTask.sku_prefix) }}</b></div>
               <div><span>优先级</span><b>{{ statusLabel(OUTREACH_PRIORITY_LABELS, detailTask.priority) }}</b></div>
               <div><span>目标进度</span><b>{{ detailProgressLabel }}</b></div>
-              <div><span>负责人</span><b>{{ displayValue(detailTask.owner_name || detailTask.owner) }}</b></div>
+              <div><span>负责人</span><b>{{ displayValue(taskOwnerNames(detailTask)) }}</b></div>
               <div><span>任务下发人</span><b>{{ displayValue(detailTask.dispatcher_name || detailTask.dispatcher_id) }}</b></div>
               <div><span>开始时间</span><b>{{ formatTaskTime(detailTask.started_at) }}</b></div>
               <div><span>下发时间</span><b>{{ formatTaskTime(detailTask.dispatch_time) }}</b></div>
@@ -456,7 +455,7 @@ const form = reactive({
   external_product_id: '',
   sku_prefix: '',
   target_count: 1,
-  owner: null,
+  owners: [],
   status: 'pending',
   started_at: null,
   finalized_at: null
@@ -502,6 +501,7 @@ const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const formatTaskTime = (value) => formatTaskDateTime(value);
 const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const sampleInfluencerName = (row) => creatorHandleFirst(row);
+const taskOwnerNames = (row) => (row?.owner_names?.length ? row.owner_names : [row?.owner_name]).filter(hasValue).join('、');
 
 const filterStoreOptions = computed(() => {
   const optionsById = new Map(storeOptions.value.map((store) => [store.id, store]));
@@ -647,7 +647,7 @@ async function openCreate() {
     external_product_id: '',
     sku_prefix: '',
     target_count: 1,
-    owner: null,
+    owners: [],
     status: 'pending',
     started_at: null,
     finalized_at: null
@@ -669,7 +669,7 @@ async function openEdit(row) {
     external_product_id: row.external_product_id || '',
     sku_prefix: row.sku_prefix || '',
     target_count: row.target_count ?? 0,
-    owner: row.owner ?? null,
+    owners: row.owners?.length ? [...row.owners] : (hasValue(row.owner) ? [row.owner] : []),
     status: row.status || 'pending',
     started_at: row.started_at || null,
     finalized_at: row.finalized_at || null
@@ -730,7 +730,7 @@ async function matchProduct() {
 
 async function submit() {
   if (editingTask.value) return submitEdit();
-  if (!form.task_name || !form.store || !form.owner) return ElMessage.warning('请填写必填字段');
+  if (!form.task_name || !form.store || !form.owners.length) return ElMessage.warning('请填写必填字段');
   saving.value = true;
   const {
     task_no: ignoredTaskNo,
@@ -748,7 +748,7 @@ async function submit() {
 }
 
 async function submitEdit() {
-  if (!form.task_name || !form.store || !form.owner) return ElMessage.warning('请填写必填字段');
+  if (!form.task_name || !form.store || !form.owners.length) return ElMessage.warning('请填写必填字段');
   if (requiresCancellationConfirmation(editingTask.value?.status, form.status)) {
     try {
       await ElMessageBox.confirm('取消后不可恢复，确认取消该任务吗？', '确认取消', { type: 'warning' });
@@ -764,7 +764,7 @@ async function submitEdit() {
     external_product_id: form.external_product_id,
     sku_prefix: form.sku_prefix,
     target_count: form.target_count,
-    owner: form.owner,
+    owners: form.owners,
     status: form.status
   };
   const r = await updateOutreachTask(editingTask.value.id, payload, editingTask.value.version);

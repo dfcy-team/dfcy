@@ -1213,14 +1213,23 @@ def create_outreach_task(*, user, validated_data):
         )
     # task_no is server-owned even for direct service callers that bypass the serializer.
     data.pop("task_no", None)
-    owner_value = data.get("owner")
-    if owner_value is None:
-        raise ValidationError({"owner": "Owner is required."})
-    owner = _tenant_user(user, _pk(owner_value), for_update=False)
+    owner_values = data.pop("owners", None)
+    if owner_values is None:
+        owner_values = [data.get("owner")] if data.get("owner") is not None else []
+    owner_ids = list(dict.fromkeys(_pk(value) for value in owner_values))
+    if not owner_ids:
+        raise ValidationError({"owners": "At least one owner is required."})
+    owner_map = {
+        owner_id: _tenant_user(user, owner_id, for_update=False)
+        for owner_id in sorted(owner_ids)
+    }
+    owners = [owner_map[owner_id] for owner_id in owner_ids]
+    for candidate in owners:
+        _assert_active_bd_owner(user, candidate)
+    owner = owners[0]
     store = _tenant_store(user, _pk(data["store"]), for_update=False)
     if store.status != "active":
         raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
-    _assert_active_bd_owner(user, owner)
     influencer = None
     if "influencer" in data and data["influencer"] is not None:
         influencer = _tenant_influencer(
@@ -1235,13 +1244,18 @@ def create_outreach_task(*, user, validated_data):
             code="conflict",
         )
         store = _locked_store(user, store.pk)
-        owner = _locked_user(user, owner.pk)
+        owner_map = {owner_id: _locked_user(user, owner_id) for owner_id in sorted(owner_ids)}
+        owners = [owner_map[owner_id] for owner_id in owner_ids]
+        owner = owners[0]
     else:
         store = _locked_store(user, store.pk)
-        owner = _locked_user(user, owner.pk)
+        owner_map = {owner_id: _locked_user(user, owner_id) for owner_id in sorted(owner_ids)}
+        owners = [owner_map[owner_id] for owner_id in owner_ids]
+        owner = owners[0]
     if store.status != "active":
         raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
-    _assert_active_bd_owner(user, owner)
+    for candidate in owners:
+        _assert_active_bd_owner(user, candidate)
     spu = _locked_spu(user, _pk(data["spu"])) if data.get("spu") is not None else None
     data["owner"] = owner
     data["store"] = store
@@ -1284,6 +1298,7 @@ def create_outreach_task(*, user, validated_data):
             {"task_no": "Unable to allocate a unique outreach task number."},
             code="conflict",
         )
+    task.owners.set(owners)
     if influencer is not None:
         add_outreach_target(user=user, task=task, influencer=influencer)
     _audit(
@@ -1330,6 +1345,18 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
     if not data:
         raise ValidationError({"detail": "At least one editable task field is required."})
+
+    owner_values = data.pop("owners", None)
+    owners = None
+    if owner_values is not None:
+        owner_ids = list(dict.fromkeys(_pk(value) for value in owner_values))
+        if not owner_ids:
+            raise ValidationError({"owners": "At least one owner is required."})
+        owner_map = {owner_id: _locked_user(user, owner_id) for owner_id in sorted(owner_ids)}
+        owners = [owner_map[owner_id] for owner_id in owner_ids]
+        for candidate in owners:
+            _assert_active_bd_owner(user, candidate)
+        data["owner"] = owners[0]
 
     changes = {}
     if "task_name" in data:
@@ -1413,6 +1440,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
             code="conflict",
         )
     task.refresh_from_db()
+    if owners is not None:
+        task.owners.set(owners)
     _audit(
         user,
         "outreach_update",

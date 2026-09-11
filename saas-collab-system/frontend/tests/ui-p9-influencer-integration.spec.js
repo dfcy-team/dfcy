@@ -231,7 +231,9 @@ describe('influencer integration workspace contracts', () => {
 
   it('aligns the outreach workspace with the BD task view and exposes the task detail loop', () => {
     const page = read('src/views/influencers/OutreachTaskList.vue');
-    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owner']) expect(page).toContain(field);
+    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owners']) expect(page).toContain(field);
+    expect(page).toContain('v-model="form.owners" multiple');
+    expect(page).toContain('taskOwnerNames');
     for (const contract of [
       'linked_count',
       'target_count',

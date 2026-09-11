@@ -1166,6 +1166,69 @@ def test_illegal_status_transition_and_stale_version_are_rejected():
     assert stale.status_code == 409
 
 
+def test_outreach_task_create_and_update_support_parallel_bd_owners():
+    tenant = Tenant.objects.create(name="Multi Owner Tenant", code="multi-owner-tenant")
+    other_tenant = Tenant.objects.create(name="Other Multi Owner", code="other-multi-owner")
+    user, client = user_with_permissions(
+        tenant,
+        "multi-owner-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    make_bd_owner(tenant, user)
+    second_owner = CustomUser.objects.create_user(
+        username="multi-owner-second",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+        full_name="Second BD",
+    )
+    make_bd_owner(tenant, second_owner)
+    foreign_owner = CustomUser.objects.create_user(
+        username="multi-owner-foreign",
+        tenant=other_tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    make_bd_owner(other_tenant, foreign_owner)
+    store = store_for(tenant, "multi-owner-store")
+
+    created = client.post(
+        "/api/internal/influencers/outreach-tasks/",
+        {
+            "task_name": "Parallel owner task",
+            "store": store.pk,
+            "target_count": 1,
+            "owners": [second_owner.pk, user.pk],
+        },
+        format="json",
+    )
+
+    assert created.status_code == 201
+    task = OutreachTask.objects.get(pk=created.data["data"]["id"])
+    assert set(task.owners.values_list("id", flat=True)) == {user.pk, second_owner.pk}
+    assert set(created.data["data"]["owners"]) == {user.pk, second_owner.pk}
+    assert set(created.data["data"]["owner_names"]) == {user.username, second_owner.full_name}
+    assert task.owner_id == second_owner.pk
+
+    updated = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"owners": [second_owner.pk]},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    rejected = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"owners": [foreign_owner.pk]},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+
+    assert updated.status_code == 200
+    task.refresh_from_db()
+    assert list(task.owners.values_list("id", flat=True)) == [second_owner.pk]
+    assert task.owner_id == second_owner.pk
+    assert rejected.status_code == 400
+
+
 def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
     tenant = Tenant.objects.create(name="Task Edit Tenant", code="task-edit-tenant")
     other_tenant = Tenant.objects.create(name="Other Task Edit Tenant", code="other-task-edit-tenant")

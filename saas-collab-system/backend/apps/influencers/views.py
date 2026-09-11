@@ -738,6 +738,7 @@ class OutreachTaskCollectionView(APIView):
         queryset = OutreachTask.objects.filter(
             tenant=request.user.tenant,
         ).select_related("influencer", "store", "owner", "dispatcher", "spu").prefetch_related(
+            "owners",
             active_samples,
             active_targets,
         )
@@ -765,7 +766,10 @@ class OutreachTaskCollectionView(APIView):
                 | Q(sku_prefix__icontains=search)
                 | Q(owner__full_name__icontains=search)
                 | Q(owner__username__icontains=search)
+                | Q(owners__full_name__icontains=search)
+                | Q(owners__username__icontains=search)
             )
+            queryset = queryset.distinct()
         queryset = queryset.order_by("-created_at", "-id")
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size))

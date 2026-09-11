@@ -423,6 +423,7 @@ class OutreachTask(StateMachineTenantModel):
     target_count = models.PositiveIntegerField(default=0)
     dispatcher = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="dispatched_outreach_tasks")
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="owned_outreach_tasks")
+    owners = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="assigned_outreach_tasks")
     # Historical names from the source export remain stable even if the live
     # user directory is renamed later.
     source_owner_name_snapshot = models.CharField(max_length=255, blank=True, default="")
