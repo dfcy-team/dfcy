@@ -374,7 +374,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     const wrapper = await mountDialog('warehouse');
     wrapper.vm.warehouseExternalCode = '';
     wrapper.vm.warehouseEmail = 'fake@example.test';
-    wrapper.vm.warehouseToken = 'FAKE_TOKEN';
+    wrapper.vm.warehouseToken = 'test-token';
     await wrapper.vm.authorizeWarehouse('inventory');
     await flushPromises();
     expect(api.rebindWarehouseAuthorization).toHaveBeenCalledWith(202, expect.objectContaining({
