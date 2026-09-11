@@ -303,7 +303,7 @@ class ProductLegacyItem(models.Model):
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="legacy_product_items")
     legacy_spu_code = models.CharField(max_length=120, blank=True)
-    legacy_sku_code = models.CharField(max_length=160)
+    legacy_sku_code = models.CharField(max_length=160, null=True, blank=True)
     product_name = models.CharField(max_length=200)
     category_node = models.ForeignKey(ProductCategory, on_delete=models.PROTECT, null=True, blank=True)
     attribute_code = models.CharField(max_length=1, default="0", blank=True)

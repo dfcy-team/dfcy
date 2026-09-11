@@ -526,7 +526,7 @@
       </el-steps>
       <el-progress class="import-progress" :percentage="importPercent" :indeterminate="importing" :duration="8" />
       <p class="import-status">{{ importStage }} · 已用时 {{ formatDuration(importElapsed) }}</p>
-      <p v-if="activeImportKind === 'create'" class="import-hint">新增导入只处理未存在的旧 SKU。导入成功后自动生成 SPU / SKU，并下载 BigSeller 商品SKU表。</p>
+      <p v-if="activeImportKind === 'create'" class="import-hint">旧 SPU / SKU 编码可留空；已填编码仍只处理未存在的商品。导入成功后自动生成 SPU / SKU，并下载 BigSeller 商品SKU表。</p>
       <p v-else class="import-hint">按“{{ legacyImportModeLabel }}”处理旧商品档案，不自动生成新编码或下载 BigSeller 表。</p>
     </el-dialog>
 
@@ -1493,10 +1493,15 @@ function normalizeGeneratedDetail(item) {
   };
 }
 
-async function generateImportedProducts(csvText, excludedLines = new Set()) {
+async function generateImportedProducts(csvText, excludedLines = new Set(), createdIds = []) {
   const generatedRows = [];
   const errors = [];
   const seen = new Set();
+  for (const id of createdIds) {
+    const generateResponse = await generateLegacyProductItem(id);
+    if (generateResponse.success) generatedRows.push(normalizeGeneratedDetail(detailData(generateResponse.data)));
+    else errors.push({ line: '-', message: generateResponse.message || `商品记录 ${id} 生成失败` });
+  }
   for (const target of importedSkuTargets(csvText)) {
     if (excludedLines.has(Number(target.line))) continue;
     const key = target.legacySkuCode || target.skuCode;
@@ -1550,7 +1555,7 @@ async function importFile(uploadedFile) {
     importStep.value = 3;
     if (response.success) {
       const rejectedLines = new Set((response.data?.errors || []).map((item) => Number(item.line)));
-      const generated = await generateImportedProducts(normalizedCsv, rejectedLines);
+      const generated = await generateImportedProducts(normalizedCsv, rejectedLines, response.data?.created_ids || []);
       importResult.value.generated = generated.generatedRows.length;
       importResult.value.errors.push(...generated.errors);
       importResult.value.error_count = importResult.value.errors.length;
@@ -1595,12 +1600,12 @@ function exportBigSellerProducts() {
 
 function downloadTemplate() {
   const headers = [
-    '*旧SPU编码', '*旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码',
+    '旧SPU编码', '旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码',
     '*颜色英文编码', '*规格', '采购价格', '单位', '商品图片', '重量(g)', '体积(m³)',
     '长(cm)', '宽(cm)', '高(cm)', '原产国', 'HS编码', '商品描述', '商品状态',
   ];
   const values = [
-    'OLD-SPU-001', 'OLD-SKU-001', '示例 SKU 商品', '10101', '0', 'navy',
+    '', '', '示例 SKU 商品', '10101', '0', 'navy',
     '150cm×220cm', '35.8000', '件', 'https://example.com/product.jpg', '1200.000',
     '0.045000', '150.000', '220.000', '20.000', '中国', '940490', '床品示例，空白字段不会覆盖原值', '',
   ];

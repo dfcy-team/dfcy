@@ -208,11 +208,6 @@ def _parse_row(row, headers, line_no):
             value = value.lower()
         parsed[key] = value
 
-    legacy_sku = parsed.get("legacy_sku_code", "")
-    new_sku = parsed.get("sku_code", "")
-    if not legacy_sku and not new_sku:
-        raise ImportRowError("旧SKU编码和新SKU编码至少填写一个。")
-
     if "attribute_code" in parsed:
         if not re.fullmatch(r"[0-9]", parsed["attribute_code"]):
             raise ImportRowError(f"属性码必须为空或 1 位数字：{parsed['attribute_code']}")
@@ -260,7 +255,62 @@ def _resolve_category(categories, code):
         category = matches[0] if len(matches) == 1 else None
     if category is None:
         raise ImportRowError(f"未找到有效的完整类目编码：{code}")
-    return category
+    # The category list is loaded once to resolve the user-facing composite
+    # code, but a large import can keep processing it for several seconds.
+    # Re-read and lock the selected path inside the row transaction so a
+    # category (or one of its parents) cannot be disabled between lookup and
+    # persistence.
+    locked = (
+        ProductCategory.objects.select_for_update(of=("self",))
+        .filter(pk=category.pk, tenant_id=category.tenant_id, is_active=True)
+        .first()
+    )
+    if locked is None:
+        raise ImportRowError(f"未找到有效的完整类目编码：{code}")
+
+    parent = None
+    grandparent = None
+    if locked.parent_id:
+        parent = (
+            ProductCategory.objects.select_for_update(of=("self",))
+            .filter(pk=locked.parent_id, tenant_id=locked.tenant_id, is_active=True)
+            .first()
+        )
+    if parent is not None and parent.parent_id:
+        grandparent = (
+            ProductCategory.objects.select_for_update(of=("self",))
+            .filter(pk=parent.parent_id, tenant_id=locked.tenant_id, is_active=True)
+            .first()
+        )
+    current_full_code = None
+    valid_path = (
+        locked.level == ProductCategory.Level.L2
+        and parent is not None
+        and parent.level == ProductCategory.Level.L1
+    ) or (
+        locked.level == ProductCategory.Level.L3
+        and parent is not None
+        and parent.level == ProductCategory.Level.L2
+        and grandparent is not None
+        and grandparent.level == ProductCategory.Level.L1
+    )
+    if locked.level == ProductCategory.Level.L2 and parent is not None:
+        current_full_code = f"{parent.code}{locked.code}"
+    elif locked.level == ProductCategory.Level.L3 and parent is not None and grandparent is not None:
+        current_full_code = f"{grandparent.code}{parent.code}{locked.code}"
+    simple_code_is_unique = (
+        code == locked.code
+        and ProductCategory.objects.filter(
+            tenant_id=locked.tenant_id,
+            level__in=(ProductCategory.Level.L2, ProductCategory.Level.L3),
+            code=code,
+            is_active=True,
+        ).count()
+        == 1
+    )
+    if not valid_path or (code != current_full_code and not simple_code_is_unique):
+        raise ImportRowError(f"未找到有效的完整类目编码：{code}")
+    return locked
 
 
 def _variant_value(item, field):
@@ -492,14 +542,14 @@ def _process_row(user, tenant, parsed, mode, categories):
     if not matched:
         # A new SKU key was already rejected above.  Only a legacy key can
         # create a staged row; generation remains an explicit user action.
-        if not old_code:
+        if not old_code and mode != "create":
             raise ImportRowError("新增旧商品必须填写旧 SKU 编码。")
         if not parsed.get("product_name"):
             raise ImportRowError("新增旧商品必须填写商品名称。")
         if "is_active" in parsed:
             raise ImportRowError("尚未生成 SKU 的记录不能修改商品状态。")
         values = _editable_values(parsed)
-        values["legacy_sku_code"] = old_code
+        values["legacy_sku_code"] = old_code or None
         values["legacy_spu_code"] = parsed.get("legacy_spu_code", "")
         if category is not None:
             values["category_node"] = category
@@ -511,14 +561,14 @@ def _process_row(user, tenant, parsed, mode, categories):
         values["tenant"] = tenant
         values["status"] = ProductLegacyItem.Status.PENDING
         values["error_message"] = ""
-        ProductLegacyItem.objects.create(**values)
-        return "created"
+        item = ProductLegacyItem.objects.create(**values)
+        return "created", item.pk
 
     if legacy is not None:
         changed = _apply_legacy(legacy, parsed, category)
         # When both keys match, _apply_legacy already updates the generated
         # SKU.  If the row is pending there is no SKU to update yet.
-        return "updated" if changed else "unchanged"
+        return ("updated", None) if changed else ("unchanged", None)
 
     bridge = (
         ProductLegacyItem.objects.select_for_update(of=("self",))
@@ -527,7 +577,7 @@ def _process_row(user, tenant, parsed, mode, categories):
         .first()
     )
     changed = _apply_sku(sku, parsed, category, legacy_item=bridge)
-    return "updated" if changed else "unchanged"
+    return ("updated", None) if changed else ("unchanged", None)
 
 
 def import_legacy_product_items(*, request, csv_text, mode="auto"):
@@ -553,6 +603,7 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
     categories = _active_categories(request.user.tenant)
     tenant = request.user.tenant
     created = updated = unchanged = skipped = generated = 0
+    created_ids = []
     errors = []
     seen = set()
     rows_seen = 0
@@ -568,11 +619,16 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             if any(key in seen for key in duplicate_keys):
                 raise ImportRowError("CSV 内存在重复的商品编码，未重复处理该行。")
             seen.update(duplicate_keys)
+            if mode != "create" and not duplicate_keys:
+                raise ImportRowError("旧SKU编码和新SKU编码至少填写一个。")
             with transaction.atomic():
                 outcome = _process_row(request.user, tenant, parsed, mode, categories)
-            if outcome == "created":
+            outcome_name, outcome_id = outcome
+            if outcome_name == "created":
                 created += 1
-            elif outcome == "updated":
+                if outcome_id and not duplicate_keys:
+                    created_ids.append(outcome_id)
+            elif outcome_name == "updated":
                 updated += 1
             else:
                 unchanged += 1
@@ -598,6 +654,7 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             "unchanged": unchanged,
             "skipped": skipped,
             "generated": generated,
+            "created_ids": created_ids,
             "processed": created + updated + unchanged + skipped,
             "error_count": len(errors),
             "errors": errors,

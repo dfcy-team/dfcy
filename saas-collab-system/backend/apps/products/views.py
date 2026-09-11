@@ -704,6 +704,51 @@ def _bulk_category_path(category):
     return category_path(category)
 
 
+def _lock_active_legacy_category(item, tenant):
+    """Lock and validate the complete category path used for generation."""
+
+    category = (
+        ProductCategory.objects.select_for_update(of=("self",))
+        .filter(pk=item.category_node_id, tenant=tenant, is_active=True)
+        .first()
+    )
+    if category is None or category.level not in {
+        ProductCategory.Level.L2,
+        ProductCategory.Level.L3,
+    }:
+        return None
+    parent = (
+        ProductCategory.objects.select_for_update(of=("self",))
+        .filter(pk=category.parent_id, tenant=tenant, is_active=True)
+        .first()
+        if category.parent_id
+        else None
+    )
+    grandparent = (
+        ProductCategory.objects.select_for_update(of=("self",))
+        .filter(pk=parent.parent_id, tenant=tenant, is_active=True)
+        .first()
+        if parent is not None and parent.parent_id
+        else None
+    )
+    if category.level == ProductCategory.Level.L2:
+        valid = parent is not None and parent.level == ProductCategory.Level.L1
+    else:
+        valid = (
+            parent is not None
+            and parent.level == ProductCategory.Level.L2
+            and grandparent is not None
+            and grandparent.level == ProductCategory.Level.L1
+        )
+    if not valid:
+        return None
+    if grandparent is not None:
+        parent.parent = grandparent
+    category.parent = parent
+    item.category_node = category
+    return category
+
+
 @api_view(["POST"])
 @permission_classes([IsProductMasterReadOrManage])
 @transaction.atomic
@@ -1141,6 +1186,8 @@ def _sync_legacy_fields_to_sku(item, sku=None):
     changed = []
     for field in LEGACY_SKU_SYNC_FIELDS:
         value = getattr(item, field)
+        if field == "legacy_sku_code":
+            value = value or ""
         if getattr(sku, field) != value:
             setattr(sku, field, value)
             changed.append(field)
@@ -1233,7 +1280,7 @@ def _generate_legacy_item(item, request):
             "product_name": item.product_name,
             "color_code": item.color_code,
             "spec_values": spec_values,
-            "legacy_sku_code": item.legacy_sku_code,
+            "legacy_sku_code": item.legacy_sku_code or "",
             "purchase_price": item.purchase_price,
             "unit": item.unit,
             "image_url": item.image_url,
@@ -1314,7 +1361,7 @@ def _product_detail_row_from_legacy(item):
         "sku_id": sku.id if sku is not None else None,
         "row_type": "legacy",
         "legacy_spu_code": item.legacy_spu_code or "",
-        "legacy_sku_code": item.legacy_sku_code,
+        "legacy_sku_code": item.legacy_sku_code or "",
         "spu_code": spu.spu_code if spu is not None else "",
         "sku_code": sku.sku_code if sku is not None else "",
         # Do not use the SPU name here.  The page is an SKU detail page.
@@ -2097,21 +2144,25 @@ def product_legacy_detail(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsProductMasterReadOrManage])
+@transaction.atomic
 def product_legacy_generate(request, pk):
     require_create_scope(request.user, "products.master.manage")
-    item = get_object_or_404(ProductLegacyItem, pk=pk, tenant=request.user.tenant)
-    category = item.category_node
+    # Serialize generation for one staged row.  Without locking the bridge,
+    # concurrent requests can both observe an empty generated_sku_id and
+    # allocate separate SPU/SKU records before the last writer wins.
+    item = get_object_or_404(
+        ProductLegacyItem.objects.select_for_update(of=("self",)),
+        pk=pk,
+        tenant=request.user.tenant,
+    )
+    category = _lock_active_legacy_category(item, request.user.tenant)
     try:
         # Automatic coding requires an L3 leaf, but legacy data commonly has
         # only an active L2 owner.  The compatibility generator supports both
         # levels; `_generate_legacy_item` uses a deterministic LEGACY SPU code
         # for L2 rows while retaining normal L3 coding for new catalog data.
         valid_category = bool(
-            category
-            and category.tenant_id == request.user.tenant_id
-            and category.is_active
-            and category.level in {ProductCategory.Level.L2, ProductCategory.Level.L3}
-            and _bulk_category_path(category)
+            category and _bulk_category_path(category)
         )
     except DjangoValidationError:
         valid_category = False
