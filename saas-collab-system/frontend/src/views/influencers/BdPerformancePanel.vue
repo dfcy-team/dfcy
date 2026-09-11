@@ -38,7 +38,7 @@
       <div v-else-if="state === 'empty'" class="panel-state" data-test="performance-empty">当前筛选条件下暂无绩效数据</div>
       <template v-else>
         <el-alert v-if="sourceMessage" class="source-alert" type="info" show-icon :closable="false" :title="sourceMessage" />
-        <el-table v-loading="loading" :data="rows" empty-text="暂无绩效数据">
+        <el-table ref="performanceTable" v-loading="loading" :data="rows" empty-text="暂无绩效数据">
           <el-table-column type="expand" width="52">
             <template #default="{ row }">
               <div class="country-breakdown">
@@ -56,11 +56,19 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column label="币种明细" width="105">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="toggleCountry(row)">查看明细</el-button>
+            </template>
+          </el-table-column>
           <el-table-column prop="owner" label="BD 成员" min-width="140" />
           <el-table-column prop="task_count" label="建联任务" min-width="110" />
           <el-table-column prop="sample_count" label="送样记录" min-width="110" />
           <el-table-column prop="valid_order_count" label="有效订单" min-width="110" />
           <el-table-column prop="gmv" label="合作单 GMV" min-width="145"><template #default="{ row }">{{ formatMoney(row.gmv) }}</template></el-table-column>
+          <el-table-column prop="gmv_php" label="PHP GMV" min-width="140"><template #default="{ row }">{{ formatNativeMoney(row.gmv_php, 'PHP') }}</template></el-table-column>
+          <el-table-column prop="gmv_myr" label="MYR GMV" min-width="140"><template #default="{ row }">{{ formatNativeMoney(row.gmv_myr, 'MYR') }}</template></el-table-column>
+          <el-table-column prop="gmv_thb" label="THB GMV" min-width="140"><template #default="{ row }">{{ formatNativeMoney(row.gmv_thb, 'THB') }}</template></el-table-column>
           <el-table-column prop="investment" label="合作单投入" min-width="145"><template #default="{ row }">{{ formatMoney(row.investment) }}</template></el-table-column>
           <el-table-column prop="roi" label="合作单 ROI" min-width="120"><template #default="{ row }">{{ formatRoi(row.roi) }}</template></el-table-column>
           <template v-if="filters.metrics === 'full'">
@@ -86,6 +94,7 @@ import { collectionRows } from '../../utils/businessResponse';
 // default can be newer than the latest imported affiliate-order partition.
 const filters = reactive({ startDay: '', endDay: '', currency: 'CNY', attribution: 'strict', metrics: 'core' });
 const rows = ref([]);
+const performanceTable = ref();
 const performance = ref({});
 const loading = ref(false);
 const state = ref('loading');
@@ -98,6 +107,10 @@ const sourceMessage = computed(() => ({
   awaiting_fulfillment_data: '等待送样履约数据完成归属，当前不展示推算金额。',
   empty: '当前日期范围暂无可归属的绩效记录。'
 }[performance.value?.source_status] || ''));
+
+function toggleCountry(row) {
+  performanceTable.value?.toggleRowExpansion(row);
+}
 
 function totalMetric(name, fallback) { return totals.value[name] ?? fallback; }
 function displayCount(value) {
