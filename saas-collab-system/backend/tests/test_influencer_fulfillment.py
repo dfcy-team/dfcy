@@ -514,6 +514,46 @@ def test_sample_fulfillment_list_orders_newest_created_first():
     ]
 
 
+def test_sample_fulfillment_list_searches_outreach_task_number_and_name():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-task-search")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-task-search-user",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "sample-task-search")
+    task.task_name = "September TK3PH Tablecloth"
+    task.save(update_fields=["task_name", "updated_at"])
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SAMPLE-TASK-SEARCH",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "owner": user.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="sample-task-search",
+    )
+    assert response.status_code == 201
+
+    by_number = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"search": task.task_no.lower()},
+    )
+    by_name = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"search": "tk3ph tablecloth"},
+    )
+
+    assert by_number.status_code == 200
+    assert [row["fulfillment_no"] for row in by_number.data["data"]["results"]] == ["SAMPLE-TASK-SEARCH"]
+    assert by_name.status_code == 200
+    assert [row["fulfillment_no"] for row in by_name.data["data"]["results"]] == ["SAMPLE-TASK-SEARCH"]
+
+
 def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped():
     tenant = Tenant.objects.create(name="Tenant", code="sample-owner-filter")
     other_tenant = Tenant.objects.create(name="Other", code="sample-owner-filter-other")
