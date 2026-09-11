@@ -260,11 +260,12 @@
             default-first-option
             reserve-keyword
             :loading="sampleInfluencerLoading"
+            :filter-method="filterSampleInfluencers"
             @change="resolveSelectedSampleInfluencer"
             placeholder="选择或输入达人昵称"
           >
             <el-option
-              v-for="influencer in influencerOptions"
+              v-for="influencer in sampleInfluencerOptions"
               :key="influencer.id"
               :label="influencerOptionLabel(influencer)"
               :value="influencer.id"
@@ -472,6 +473,7 @@ const productMatchSeq = ref(0);
 const sampleVisible = ref(false);
 const sampleSaving = ref(false);
 const sampleInfluencerLoading = ref(false);
+const sampleInfluencerQuery = ref('');
 const sampleRequestKey = ref('');
 const sampleContext = ref(null);
 const sampleTargetInfluencerId = ref(null);
@@ -488,6 +490,11 @@ const sampleForm = reactive({
   quantity: 1
 });
 const selectedSampleInfluencer = computed(() => influencerOptions.value.find((item) => String(item.id) === String(sampleForm.influencer)) || null);
+const sampleInfluencerOptions = computed(() => {
+  const query = sampleInfluencerQuery.value.toLowerCase();
+  if (!query) return influencerOptions.value;
+  return influencerOptions.value.filter((item) => influencerOptionLabel(item).toLowerCase().includes(query));
+});
 const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedSampleInfluencer.value));
 
 const hasValue = (value) => value !== undefined && value !== null && value !== '';
@@ -965,6 +972,10 @@ async function resolveSelectedSampleInfluencer() {
   return resolved;
 }
 
+function filterSampleInfluencers(query) {
+  sampleInfluencerQuery.value = String(query || '').trim();
+}
+
 async function openSampleCreate(task, target = null) {
   if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
   if (target && (!target.id || target.is_deleted)) return;
@@ -988,6 +999,7 @@ async function openSampleCreate(task, target = null) {
     quantity: 1
   });
   sampleTargetInfluencerId.value = target?.influencer ?? null;
+  sampleInfluencerQuery.value = '';
   await refreshSampleInfluencer(sampleForm.influencer);
   sampleRequestKey.value = newRequestKey();
   sampleVisible.value = true;
@@ -1004,7 +1016,13 @@ function createSampleFromDetail() {
 
 async function submitSample() {
   if (!canCreateFulfillment.value) return;
-  if (!sampleForm.outreach_task || !sampleForm.influencer || !sampleForm.store) {
+  if (!sampleForm.outreach_task || !sampleForm.store) {
+    return ElMessage.warning('当前建联任务缺少店铺，不能创建送样');
+  }
+  if (!sampleForm.influencer && sampleInfluencerQuery.value) {
+    sampleForm.influencer = sampleInfluencerQuery.value;
+  }
+  if (!sampleForm.influencer) {
     return ElMessage.warning('请先选择送样达人');
   }
   const resolvedInfluencer = await resolveSelectedSampleInfluencer();
