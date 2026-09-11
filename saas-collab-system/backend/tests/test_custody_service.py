@@ -59,6 +59,14 @@ def test_healthz_is_public_and_does_not_disclose_configuration(service):
     assert response["body"] == {"status": "ok"}
 
 
+def test_authenticated_missing_secret_lookup_is_distinct_from_service_failure(service):
+    response = _request(service, '/secrets/resolve', payload={'reference_id': 'cred_missing'})
+    assert response['status'] == 200
+    assert response['body'] == {'found': False}
+    unauthenticated = _request(service, '/secrets/resolve', token=None, payload={'reference_id': 'cred_missing'})
+    assert unauthenticated['status'] == 401
+
+
 def test_sidecar_requires_bearer_auth_and_json(service):
     unauthenticated = _request(service, "/tokens", token=None, payload={"app_secret": "secret"})
     wrong_content_type = _request(

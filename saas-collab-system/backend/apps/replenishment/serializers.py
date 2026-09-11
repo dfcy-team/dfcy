@@ -39,6 +39,17 @@ class ReplenishmentReviewSerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=1000, trim_whitespace=True)
 
 
+class FactPreviewSerializer(serializers.Serializer):
+    sku_id = serializers.IntegerField(min_value=1)
+    store_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), allow_empty=False, max_length=50)
+    warehouse_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), allow_empty=False, max_length=50)
+
+    def validate(self, attrs):
+        if set(self.initial_data) - set(self.fields):
+            raise serializers.ValidationError("Unknown fact preview parameter.")
+        return attrs
+
+
 class ReplenishmentQuerySerializer(serializers.Serializer):
     page = serializers.IntegerField(min_value=1, default=1)
     page_size = serializers.IntegerField(min_value=1, max_value=100, default=50)

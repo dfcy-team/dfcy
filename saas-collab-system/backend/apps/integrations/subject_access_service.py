@@ -301,6 +301,7 @@ def _warehouse_bindings(user, subject, config_map):
             "email": row.email,
             "token_configured": bool(row.bootstrap_credential_id),
             "bootstrap_consumed_at": row.bootstrap_consumed_at,
+            "oauth_token_available": bool(row.token_id and row.oauth_user_id and row.oauth_expires_at),
             "validation_status": row.validation_status,
             "status": row.status,
             "authorized_at": row.authorized_at,

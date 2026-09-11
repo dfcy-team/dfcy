@@ -82,6 +82,7 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
                 "oauth_redirect_allowlist": ["https://app.example.com/oauth/callback"],
             },
             "platforms": {
+                "jifeng_wms": {"contract_approved": True},
                 "lazada": {
                     "contract_approved": True,
                     "redirect_uri": "https://app.example.com/oauth/callback",
@@ -104,6 +105,7 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
     assert response.json()["data"]["version"]["change_reason"] == "启用 Lazada 生产只读配置"
     version = TenantConfigVersion.objects.get(pk=version_id)
     assert version.status == TenantConfigVersion.Status.PENDING_APPROVAL
+    assert get_runtime_platform_config("jifeng_wms")["contract_approved"] is False
     assert _client(viewer).get("/api/internal/integrations/production-settings/versions/").status_code == 200
     assert _client(creator).post(
         f"/api/internal/integrations/production-settings/versions/{version_id}/",
@@ -125,6 +127,7 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
     assert body["effective_version"] == 1
     assert body["masked_status"]["credentials_stored"] is False
     assert body["config"]["network"]["mode"] == "approved-live-test"
+    assert body["config"]["platforms"]["jifeng_wms"] == {"contract_approved": True}
     assert body["current_version"]["change_reason"] == "启用 Lazada 生产只读配置"
 
     rollback = _user(tenant, "runtime-rollback")

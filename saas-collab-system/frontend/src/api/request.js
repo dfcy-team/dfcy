@@ -80,9 +80,14 @@ request.interceptors.response.use(
   async (error) => {
     const original = error?.config;
     const isAuthenticationRequest = /\/api\/internal\/auth\/(login|refresh)\//.test(original?.url || '');
+    const isOneTimeCallback = /\/store-authorizations\/oauth\/manual-callback\/$/.test(original?.url || '');
     const refresh = getRefreshToken();
+    // Provider OAuth failures also use HTTP 401, but must never replay a
+    // one-time authorization callback or invalidate the local login.
+    const loginRejected = error?.response?.status === 401
+      && (!isApiEnvelope(error.response.data) || error.response.data.code === 'AUTH_REQUIRED');
 
-    if (error?.response?.status === 401 && original && !original._authRetried && !isAuthenticationRequest && refresh) {
+    if (loginRejected && original && !original._authRetried && !isAuthenticationRequest && !isOneTimeCallback && refresh) {
       original._authRetried = true;
       refreshPromise ||= axios
         .post(`${apiBaseUrl}/api/internal/auth/refresh/`, { refresh })
@@ -105,7 +110,7 @@ request.interceptors.response.use(
       }
     }
 
-    if (error?.response?.status === 401 && !isAuthenticationRequest) {
+    if (loginRejected && !isAuthenticationRequest) {
       clearAuthSession();
       authenticationExpiredHandler?.();
     }

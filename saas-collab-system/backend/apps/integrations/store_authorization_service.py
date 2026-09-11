@@ -83,6 +83,7 @@ def create_store_authorization(
     token_id,
     credential_mask=None,
     allow_live_references=False,
+    expires_at=None,
     scopes,
     actor,
 ):
@@ -114,6 +115,7 @@ def create_store_authorization(
         credential_mask=metadata["credential_mask"],
         credential_reference_version=metadata["credential_reference_version"],
         status=MarketplaceStoreAuthorization.Status.PENDING,
+        expires_at=expires_at,
         scopes=list(scopes or []),
         created_by=actor,
         updated_by=actor,
@@ -192,6 +194,7 @@ def rotate_store_authorization_references(
     credential_mask=None,
     allow_live_references=False,
     new_reference_revoker=None,
+    defer_previous_revocation=False,
 ):
     _validate_actor_tenant(actor, record.tenant_id)
     metadata = build_reference_metadata(
@@ -209,6 +212,7 @@ def rotate_store_authorization_references(
             expires_at=expires_at,
             previous_revoker=revoker,
             new_revoker=new_reference_revoker,
+            defer_previous_revocation=defer_previous_revocation,
         )
     failed = None
     with transaction.atomic():
@@ -278,6 +282,7 @@ def _rotate_live_store_authorization_references(
     expires_at,
     previous_revoker,
     new_revoker,
+    defer_previous_revocation=False,
 ):
     """Commit a live reference once, then reconcile external revocation.
 
@@ -331,6 +336,16 @@ def _rotate_live_store_authorization_references(
             {"credential_id": metadata["credential_id"], "token_id": metadata["token_id"]},
         )
         raise
+
+    if defer_previous_revocation:
+        def cleanup_previous():
+            revocation = _revoke_old_references(previous_revoker, previous)
+            _audit(locked, actor, "oauth_previous_reference_cleanup",
+                   result=IntegrationAuditLog.Result.FAILED if revocation["status"] == "failed" else IntegrationAuditLog.Result.SUCCESS,
+                   extra={"revocation": revocation, "previous_reference": previous})
+        # A failed cleanup must not roll back/revoke the already committed new authorization.
+        transaction.on_commit(cleanup_previous, robust=True)
+        return locked
 
     revocation = _revoke_old_references(previous_revoker, previous)
     if revocation["status"] == "failed":

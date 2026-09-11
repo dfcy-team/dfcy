@@ -460,7 +460,7 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
             from apps.integrations.models import WarehouseAuthorization
             if WarehouseAuthorization.objects.filter(warehouse=self.instance, status="active").exists():
                 raise serializers.ValidationError("请先在 API 接入中撤销现有绑定，再更改仓库平台、国家或类型。")
-        if not self.instance and provider == "jifeng_wms":
+        if not self.instance and provider == "jifeng_wms" and any(key.startswith("api_") for key in attrs):
             missing = [key for key in ("api_integration_config_id", "api_email", "api_token") if not attrs.get(key)]
             if missing:
                 raise serializers.ValidationError({key: "首次配置极风仓库时必填。" for key in missing})

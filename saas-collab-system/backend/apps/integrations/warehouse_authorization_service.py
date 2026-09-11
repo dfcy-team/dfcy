@@ -77,23 +77,13 @@ def resolve_external_warehouse_identity(*, warehouse, integration_config, provid
     credential may be shared by several warehouses and therefore must not be
     used as the warehouse's external identity.  Existing Jifeng configs may
     still carry the legacy ``platform_config.warehouse_code`` value; it is
-    accepted as a compatibility fallback, but newly bound production UI
-    requests should send the explicit field.
+    accepted only when the field is omitted by a legacy caller. An explicit
+    empty value leaves identity unresolved until inventory validation.
     """
 
     requested = str(external_warehouse_code or "").strip()
     legacy = str((integration_config.platform_config or {}).get("warehouse_code") or "").strip()
-    code = requested or legacy
-    # Jifeng's readonly contract requires the warehouse query parameter.  Do
-    # not silently substitute the local archive code when neither the binding
-    # nor the managed config contains the provider-issued code.
-    if provider == "jifeng_wms" and integration_config.environment in {
-        PlatformIntegrationConfig.Environment.PILOT,
-        PlatformIntegrationConfig.Environment.PRODUCTION,
-    } and (integration_config.platform_config or {}).get("contract_approved") and not code:
-        raise ValidationError({
-            "external_warehouse_code": "生产库存 API 必须填写服务商返回的外部仓库编码，不能使用本地仓库编码代替。"
-        })
+    code = requested if external_warehouse_code is not None else legacy
     configured_region = str((integration_config.platform_config or {}).get("site_code") or "").strip().upper()
     warehouse_region = str(warehouse.country_code or "").strip().upper()
     if configured_region and warehouse_region and configured_region != warehouse_region:

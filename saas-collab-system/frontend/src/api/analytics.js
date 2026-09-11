@@ -1,6 +1,8 @@
 import { requestApi, requestWithMockFallback } from './request';
 import { mockBusinessOverview, mockInventoryAnalysis, mockSalesAnalysis } from '../mock/analytics';
-import { buildAnalyticsQuery, normalizeAnalyticsResponse } from './uiP6Adapters';
+import { buildAnalyticsQuery, normalizeAnalyticsResponse, normalizeInventoryAnalysisResponse } from './uiP6Adapters';
+
+export const fetchBusinessFilters = () => requestApi({ method: 'get', url: '/api/internal/analytics/filters/' });
 
 const analyticsRequest = async (config, mockHandler, moduleName) =>
   normalizeAnalyticsResponse(
@@ -31,9 +33,9 @@ export const fetchSalesAnalysis = (params = {}) =>
     'analytics.sales'
   );
 
-export const fetchInventoryAnalysis = (params = {}) =>
-  analyticsRequest(
-    { method: 'get', url: '/api/internal/analytics/inventory/', params },
+export const fetchInventoryAnalysis = async (params = {}) =>
+  normalizeInventoryAnalysisResponse(await requestWithMockFallback(
+    { method: 'get', url: '/api/internal/analytics/inventory/', params: buildAnalyticsQuery(params) },
     mockInventoryAnalysis,
     'analytics.inventory'
-  );
+  ));

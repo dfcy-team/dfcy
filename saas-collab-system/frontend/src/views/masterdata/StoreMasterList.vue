@@ -10,8 +10,8 @@
     :loader="fetchStores"
     :columns="columns"
     :form-fields="formFields"
-    :create-handler="(payload) => createMasterData('stores', payload)"
-    :edit-handler="(id, payload) => updateMasterData('stores', id, payload)"
+    :create-handler="(payload) => createMasterData('stores', storePayload(payload))"
+    :edit-handler="(id, payload) => updateMasterData('stores', id, storePayload(payload))"
     :delete-handler="(id) => deleteMasterData('stores', id)"
     :status-handler="(row, status) => updateMasterDataStatus('stores', row.id, status)"
     create-permission="masterdata.manage"
@@ -655,6 +655,12 @@ function downloadTemplate() {
   URL.revokeObjectURL(url);
 }
 
+function storePayload(payload) {
+  const data = { ...payload };
+  if (data.platform_site_id === '') data.platform_site_id = null;
+  return data;
+}
+
 const formFields = computed(() => [
   { key: 'platform_id', label: '平台', type: 'select', required: true, default: platformOptions.value[0]?.value || '', options: platformOptions.value, onChange: applyPlatform },
   { key: 'platform_site_id', label: '平台站点', type: 'select', options: platformSiteOptions.value, onChange: applyPlatformSite, placeholder: '可选；旧店铺可继续使用国家档案' },
@@ -662,12 +668,12 @@ const formFields = computed(() => [
   { key: 'platform_store_name', label: '平台店铺名' },
   { key: 'external_store_id', label: '外部店铺 ID' }, { key: 'seller_entity_id', label: '经营主体 ID' },
   { key: 'business_model', label: '业务模式', type: 'select', default: 'other', options: [{ label: '本土店', value: 'local' }, { label: '跨境店', value: 'cross_border' }, { label: '全托管', value: 'full_managed' }, { label: '半托管', value: 'semi_managed' }, { label: '其他', value: 'other' }] },
-  { key: 'fulfillment_modes', label: '履约模式', type: 'select', multiple: true, options: [{ label: '平台履约', value: 'platform_fulfillment' }, { label: '第三方仓', value: 'third_party_warehouse' }, { label: '本地自发货', value: 'local_self_fulfillment' }, { label: '跨境直发', value: 'cross_border_direct' }, { label: '混合', value: 'hybrid' }] },
+  { key: 'fulfillment_modes', label: '履约模式', type: 'select', multiple: true, default: [], options: [{ label: '平台履约', value: 'platform_fulfillment' }, { label: '第三方仓', value: 'third_party_warehouse' }, { label: '本地自发货', value: 'local_self_fulfillment' }, { label: '跨境直发', value: 'cross_border_direct' }, { label: '混合', value: 'hybrid' }] },
   { key: 'category_id', label: '类目（大类）', type: 'select', options: categoryOptions.value },
   { key: 'operator_id', label: '负责运营', type: 'select', options: userOptions.value },
   { key: 'bd_id', label: 'BD', type: 'select', options: userOptions.value },
   { key: 'leader_id', label: '组长', type: 'select', options: userOptions.value },
-  { key: 'is_connected', label: '是否建联', type: 'select', options: [{ label: '否', value: false }, { label: '是', value: true }] },
+  { key: 'is_connected', label: '是否建联', type: 'select', default: false, options: [{ label: '否', value: false }, { label: '是', value: true }] },
   { key: 'tactical_client', label: '战斧客户端' },
   { key: 'country_code', label: '国家', type: 'select', required: true, options: countryOptions.value, placeholder: '请选择国家档案', onChange: applyCountryDefaults },
   { key: 'currency', label: '币种', required: true, placeholder: '例如 SGD' }, { key: 'settlement_currency', label: '结算币种', placeholder: '例如 SGD' }, { key: 'timezone', label: '时区', required: true, default: 'UTC' },

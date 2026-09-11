@@ -15,15 +15,18 @@ from .live_providers import integration_config_oauth_blockers
 from .platform_schema_service import get_platform_schema
 from .platform_capabilities import get_platform_capability
 from .production_settings import get_runtime_platform_config, get_runtime_setting
+from .warehouse_readiness import WAREHOUSE_BLOCKER_LABELS, warehouse_config_blockers
 
 
 MARKETPLACE_PLATFORMS = (
     ("lazada", "Lazada"),
     ("shopee", "Shopee"),
     ("tiktok", "TikTok Shop"),
+    ("jifeng_wms", "极风 WMS · 仓库"),
 )
 
 BLOCKER_LABELS = {
+    **WAREHOUSE_BLOCKER_LABELS,
     "config_missing": "尚未创建接入配置",
     "platform_mismatch": "配置平台不匹配",
     "environment_not_live": "配置不是试运行或生产环境",
@@ -127,7 +130,7 @@ def _config_action(code, config, *, available, blocker_codes=()):
 
 def _config_readiness(config):
     """Build a non-secret, actionable readiness row for one config."""
-    provider_blockers = list(
+    provider_blockers = warehouse_config_blockers(config) if config.platform == "jifeng_wms" else list(
         integration_config_oauth_blockers(
             str(getattr(config, "platform", "") or "").lower(),
             config,
@@ -152,10 +155,10 @@ def _config_readiness(config):
     approval_blockers = [
         code
         for code in provider_blockers
-        if code != "network_not_approved"
+        if code not in {"network_not_approved", "readonly_not_approved"}
     ]
     approve_available = bool(
-        str(getattr(config, "platform", "") or "").lower() in {"lazada", "shopee", "tiktok"}
+        str(getattr(config, "platform", "") or "").lower() in {"lazada", "shopee", "tiktok", "jifeng_wms"}
         and not readonly_approved
         and not approval_blockers
     )
@@ -184,6 +187,9 @@ def _config_readiness(config):
     ]
     return {
         "id": config.id,
+        "platform_code": config.platform,
+        "subject_type": "warehouse" if config.platform == "jifeng_wms" else "store",
+        "contract_approved": bool(get_runtime_platform_config(config.platform).get("contract_approved", False)),
         "account_alias": config.account_alias,
         "environment": config.environment,
         "status": config.status,

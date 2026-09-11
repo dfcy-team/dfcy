@@ -2,6 +2,7 @@ import { requestApi, requestWithMockFallback } from './request';
 
 // Credential/auth operations never fall back to simulated success.
 export const authorizeJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/authorize/`, data: { confirmed: true } });
+export const discoverJifengWarehouses = (id, data = {}) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/warehouses/`, data });
 export const refreshJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/refresh/`, data: {} });
 export const checkJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/readonly-check/`, data: {} });
 export const completeManualStoreCallback = (data) => requestApi({
@@ -392,6 +393,7 @@ export const runSyncJob = (id, idempotencyKey) =>
     {
       method: 'post',
       url: `/api/internal/integrations/sync-jobs/${id}/run/`,
+      noMockFallback: true,
       data: idempotencyKey ? { idempotency_key: idempotencyKey } : {}
     },
     mockSyncRunDetail,

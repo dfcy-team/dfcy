@@ -18,6 +18,12 @@ from .net_guard import PlatformHttpClient
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 
 
+class ReadonlyConfigurationError(ValidationError):
+    """A missing approved configuration cannot be repaired by retrying."""
+
+    default_code = "SYNC_CONFIGURATION_MISSING"
+
+
 def _required(value, name):
     text = str(value or "").strip()
     if not text or text.startswith("REPLACE_ME"):
@@ -120,11 +126,22 @@ class ReadonlyClientBase:
             raise ValidationError("API data integration module is disabled.")
         require_live_mode(f"{self.config.platform} readonly synchronization")
         if not get_runtime_setting("network", "readonly_sync_enabled", default=False):
-            raise ValidationError("Production readonly synchronization feature flag is disabled.")
+            raise ValidationError("系统尚未启用真实只读同步，请在生产环境配置中完成只读同步审批。")
         if self.config.environment not in {"pilot", "production"}:
             raise ValidationError("Readonly production synchronization requires pilot or production environment.")
         if self.config.status not in {"verified", "active"}:
             raise ValidationError("Integration config is not verified and active.")
+        if self.config.platform == "jifeng_wms":
+            from .readiness_service import BLOCKER_LABELS
+            from .warehouse_readiness import warehouse_config_blockers
+
+            labels = {**BLOCKER_LABELS, "network_not_approved": "网络访问未审批",
+                "platform_contract_not_enabled": "接口合同未确认"}
+            blockers = [labels[code] for code in warehouse_config_blockers(self.config)]
+            if blockers:
+                raise ValidationError({"detail": "极风接入配置尚未就绪：" + "、".join(blockers)
+                    + "。请联系接入配置管理员完成审批后重试；本次未调用极风接口。"})
+            return
         if not self.config.network_enabled or not self.config.sync_read_enabled:
             raise ValidationError("Integration config readonly network capability is disabled.")
         contract_key = (
@@ -132,13 +149,12 @@ class ReadonlyClientBase:
             if self.resource_type == "platform_product"
             else "contract_approved"
         )
-        # Product contract approval is a system-admin versioned runtime
-        # setting.  It is intentionally independent from the tenant config's
-        # legacy order/return contract flag.  Existing resources retain their
-        # historical check below.
+        # Shopee and TikTok use the versioned production approvals.
+        # Tenant credential metadata must not shadow or grant that approval.
+        # Other providers retain their existing order/return contract policy.
         approval_config = (
             get_runtime_platform_config(str(getattr(self.config, "platform", "") or "").lower())
-            if contract_key == "product_contract_approved"
+            if contract_key == "product_contract_approved" or self.config.platform in {"shopee", "tiktok"}
             else self.platform_config
         )
         if not approval_config.get(contract_key):
@@ -180,7 +196,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             raise ValidationError("Shopee store authorization is not active.")
         if authorization.expires_at and authorization.expires_at <= self.now():
             raise ValidationError("SHOPEE_TOKEN_REFRESH_REQUIRED")
-        host = _required(self.platform_config.get("api_host"), "shopee.api_host")
+        host = _required(get_runtime_platform_config("shopee").get("api_host"), "shopee.api_host").rstrip("/")
         partner_id = _required(self.platform_config.get("partner_id"), "shopee.partner_id")
         secret_reference = self.config.credential_id or self.platform_config.get("app_secret_reference")
         partner_key = self.custody.retrieve_secret(_required(secret_reference, "shopee.app_secret_reference"))
@@ -420,6 +436,19 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         }
     )
 
+    def _api_host(self):
+        host = str(get_runtime_platform_config("tiktok").get("api_host") or "").strip()
+        if not host or host.startswith("REPLACE_ME"):
+            raise ReadonlyConfigurationError(
+                "TikTok 同步缺少已批准的 API 域名（tiktok.api_host），"
+                "请在生产环境配置中检查；本次未调用平台接口，无需重新授权。"
+            )
+        return host
+
+    def preflight(self):
+        super().preflight()
+        self._api_host()
+
     def _request(self, path, *, query=None, body=None, method="GET"):
         self.preflight()
         authorization = self.authorization
@@ -427,7 +456,7 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             raise ValidationError("TikTok Shop store authorization is not active.")
         if authorization.expires_at and authorization.expires_at <= self.now():
             raise ValidationError("TOKEN_EXPIRED_REAUTH_REQUIRED")
-        host = _required(self.platform_config.get("api_host"), "tiktok.api_host")
+        host = self._api_host()
         app_key = _required(self.platform_config.get("app_key"), "tiktok.app_key")
         secret_reference = self.config.credential_id or self.platform_config.get("app_secret_reference")
         app_secret = self.custody.retrieve_secret(_required(secret_reference, "tiktok.app_secret_reference"))
@@ -651,8 +680,9 @@ class TikTokReadonlyClient(ReadonlyClientBase):
 
 class JifengWmsReadonlyClient(ReadonlyClientBase):
     INVENTORY_PATH = settings.LIVE_JIFENG_WMS_INVENTORY_PATH
+    WAREHOUSE_LIST_PATH = "/api/warehouse/getList"
 
-    def fetch_inventory(self, cursor, scope):
+    def _signed_post(self, path, body):
         self.preflight()
         authorization = self.authorization
         if authorization is None or authorization.status != authorization.Status.ACTIVE:
@@ -671,14 +701,6 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
             raise ValidationError("仓库授权待补充：缺少 Email。")
         if not authorization.oauth_expires_at or authorization.oauth_expires_at <= self.now():
             raise ValidationError("仓库 AccessToken 已过期，请刷新授权后再校验。")
-        # The warehouse query parameter belongs to the selected binding, not
-        # to the shared API config.  Keep a legacy config fallback for older
-        # pilot records, while production bindings should carry the explicit
-        # provider-issued code.
-        warehouse_code = _required(
-            getattr(authorization, "external_warehouse_code", "") or self.platform_config.get("warehouse_code"),
-            "jifeng_wms.external_warehouse_code",
-        )
         client_secret = self.custody.retrieve_secret(_required(self.config.credential_id, "jifeng_wms.credential_id"))
         access_token = self.custody.retrieve_access_token(_required(authorization.token_id, "仓库 AccessToken"))
         timestamp = str(int(self.now().timestamp() * 1000))
@@ -689,17 +711,15 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
             "method": "post",
             "nonce": nonce,
             "timestamp": timestamp,
-            "url": self.INVENTORY_PATH,
+            "url": path,
             "userId": user_id,
         }
         sign_input = "&".join(f"{key}={sign_values[key]}" for key in sorted(sign_values))
         signature = hmac.new(client_secret.encode(), sign_input.encode(), hashlib.sha256).hexdigest()
-        page_no = int(cursor or 1)
-        body = {"pageNo": page_no, "pageSize": min(300, max(1, int(scope["page_size"]))), "warehouse": warehouse_code}
         from .warehouse_credential_service import jifeng_api_url
         response = self.http.request(
             "POST",
-            jifeng_api_url(host, self.INVENTORY_PATH),
+            jifeng_api_url(host, path),
             headers={
                 "Content-Type": "application/json",
                 "Accept-Language": "zh_CN",
@@ -714,7 +734,44 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
             connect_timeout=self.config.connect_timeout_seconds,
             read_timeout=self.config.read_timeout_seconds,
         )
-        payload = self._response_json(response)
+        return self._response_json(response)
+
+    def fetch_warehouses(self):
+        # The documented endpoint returns all accessible warehouses without
+        # codeList. Do not forward contact details or raw provider responses.
+        payload = self._signed_post(self.WAREHOUSE_LIST_PATH, {})
+        if str(payload.get("code")) != "0":
+            raise ValidationError("极风拒绝仓库列表查询，请核对仓库授权和网络白名单。")
+        rows = payload.get("data")
+        if not isinstance(rows, list):
+            raise ValidationError("极风仓库列表响应格式不完整，未关联仓库。")
+        warehouses = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValidationError("极风仓库列表响应格式不完整，未关联仓库。")
+            code = row.get("code")
+            country = row.get("country")
+            if (not isinstance(code, str) or not code.strip() or len(code) > 160
+                    or any(ord(char) < 32 for char in code)
+                    or not isinstance(country, str) or len(country.strip()) != 2
+                    or not isinstance(row.get("isAuth"), bool) or code.strip() in seen):
+                raise ValidationError("极风仓库编号、国家或授权标识缺失或重复，未自动关联。")
+            seen.add(code.strip())
+            warehouses.append({"code": code.strip(), "name": row["name"][:160] if isinstance(row.get("name"), str) else "",
+                "country": country.strip().upper(), "is_authorized": row["isAuth"]})
+        return warehouses
+
+    def fetch_inventory(self, cursor, scope):
+        # Inventory must remain binding-scoped; discovery alone is not an
+        # inventory check and cannot fall back to a shared/local warehouse.
+        warehouse_code = _required(
+            getattr(self.authorization, "external_warehouse_code", ""),
+            "jifeng_wms.external_warehouse_code",
+        )
+        page_no = int(cursor or 1)
+        body = {"pageNo": page_no, "pageSize": min(300, max(1, int(scope["page_size"]))), "warehouse": warehouse_code}
+        payload = self._signed_post(self.INVENTORY_PATH, body)
         code = str(payload.get("code"))
         if code != "0":
             if code in {"10041", "10042", "10050", "10051"}:

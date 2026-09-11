@@ -4,6 +4,7 @@ from . import views
 
 
 urlpatterns = [
+    path("facts-preview/", views.preview_facts, name="replenishment-facts-preview"),
     path("recommendations/", views.recommendation_list, name="replenishment-list"),
     path("recommendations/<int:pk>/", views.recommendation_detail, name="replenishment-detail"),
     path("evaluate-mock/", views.evaluate_mock, name="replenishment-evaluate-mock"),

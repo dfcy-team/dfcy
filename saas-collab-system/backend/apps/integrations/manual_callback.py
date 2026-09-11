@@ -5,13 +5,15 @@ from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from apps.common.responses import success_response
+from apps.common.responses import error_response, success_response
 from apps.permissions.api_permissions import IsMarketplaceStoreAuthorizer
 from apps.permissions.ui_p6_scopes import integration_values_allowed
 
 from .marketplace_oauth_service import complete_marketplace_oauth_callback
 from .models import OAuthStateSession
+from .oauth_errors import OAuthFlowError
 from .oauth_state_service import oauth_state_digest
+from .oauth_diagnostics import callback_url_key
 from .serializers import MarketplaceStoreAuthorizationSerializer
 
 
@@ -43,7 +45,7 @@ def validate_manual_callback(*, actor, callback_url, store_id, integration_confi
             environment=config.environment, regions=[session.region], config_id=config.pk, store_id=session.store_id):
         raise PermissionDenied("当前店铺授权超出可操作数据范围。")
     expected = urlsplit(session.redirect_uri)
-    if ((url.scheme, url.netloc, url.path) != (expected.scheme, expected.netloc, expected.path)
+    if (callback_url_key(callback_url)[:3] != callback_url_key(session.redirect_uri)[:3]
             or any(params.get(key) != value for key, value in parse_qsl(expected.query, keep_blank_values=True))):
         raise ValidationError("回调域名或路径与本次授权登记地址不一致。")
     return session.platform, params
@@ -57,5 +59,13 @@ def manual_store_callback(request):
     platform, params = validate_manual_callback(actor=request.user, **serializer.validated_data)
     # Existing service atomically consumes state and checks expiry, platform,
     # provider parameters and the returned shop identity. No bypass or retry.
-    authorization = complete_marketplace_oauth_callback(platform=platform, query_params=params)
+    try:
+        authorization = complete_marketplace_oauth_callback(platform=platform, query_params=params)
+    except OAuthFlowError as exc:
+        # Expose only the controlled reason, never provider details or the URL.
+        # A consumed state remains a conflict, not an inferred success.
+        return error_response(exc.error_code, f"OAuth flow rejected: {exc.controlled_code}",
+                              data={"reason_code": exc.controlled_code,
+                                    **({"diagnostic": exc.diagnostic} if hasattr(exc, "diagnostic") else {})},
+                              status=exc.status_code)
     return success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)

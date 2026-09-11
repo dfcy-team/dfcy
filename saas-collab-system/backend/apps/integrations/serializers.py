@@ -24,6 +24,7 @@ from .audit_sanitizer import (
 from .platform_schema_service import get_platform_schema, validate_platform_config
 from .platform_capabilities import supports_resource
 from .production_settings import get_runtime_platform_config, get_runtime_setting
+from .oauth_diagnostics import callback_url_key
 
 
 PILOT_LOOPBACK_CALLBACKS = {
@@ -64,9 +65,9 @@ def validate_marketplace_callback_url(callback_url, *, environment, platform):
         )
     redirect_allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
     expected_callback = (get_runtime_platform_config(str(platform or "").lower()) or {}).get("redirect_uri", "")
-    if expected_callback and callback_url != expected_callback:
+    if expected_callback and callback_url_key(callback_url) != callback_url_key(expected_callback):
         raise serializers.ValidationError("Callback URL does not match the platform registration.")
-    if redirect_allowlist and callback_url not in redirect_allowlist:
+    if redirect_allowlist and callback_url_key(callback_url) not in {callback_url_key(url) for url in redirect_allowlist}:
         raise serializers.ValidationError("Callback URL is not in the approved allowlist.")
     if (
         environment

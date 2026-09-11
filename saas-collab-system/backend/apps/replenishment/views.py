@@ -19,6 +19,44 @@ from .serializers import (
 from .services import evaluate_replenishment, review_recommendation
 
 
+@api_view(["POST"])
+@permission_classes([IsReplenishmentEvaluator])
+def preview_facts(request):
+    from apps.commerce.decision_metrics import collect_decision_metrics
+    from apps.masterdata.models import StoreMaster, WarehouseMaster
+    from apps.permissions.services import get_permission_data_scopes
+    from .serializers import FactPreviewSerializer
+
+    serializer = FactPreviewSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    values = serializer.validated_data
+    sku = get_object_or_404(ProductSKU, pk=values["sku_id"], tenant=request.user.tenant)
+    stores = list(StoreMaster.objects.filter(tenant=request.user.tenant, pk__in=values["store_ids"]))
+    warehouses = list(WarehouseMaster.objects.filter(tenant=request.user.tenant, pk__in=values["warehouse_ids"]))
+    if len(stores) != len(set(values["store_ids"])) or len(warehouses) != len(set(values["warehouse_ids"])):
+        raise PermissionDenied("Fact subjects are outside the requested tenant.")
+    scopes = get_permission_data_scopes(request.user, "replenishment.evaluate")
+    allowed = request.user.is_superuser or any(s["scope_type"] == "all" for s in scopes)
+    for scope in scopes:
+        config = scope.get("config") or {}
+        if scope["scope_type"] != "custom":
+            continue
+        # Aggregates must fit a single permission-specific scope in every
+        # dimension. SKU access alone must not reveal other stores' sales.
+        product_allowed = (sku.id in config.get("sku_ids", []) or sku.spu_id in config.get("spu_ids", []))
+        if config.get("sku_ids") and sku.id not in config["sku_ids"]:
+            product_allowed = False
+        if config.get("spu_ids") and sku.spu_id not in config["spu_ids"]:
+            product_allowed = False
+        allowed |= (product_allowed and set(values["store_ids"]) <= set(config.get("store_ids", []))
+                    and set(values["warehouse_ids"]) <= set(config.get("warehouse_ids", [])))
+    if not allowed:
+        raise PermissionDenied("Fact preview requires explicit product, store and warehouse data scope.")
+    return success_response(collect_decision_metrics(
+        tenant=request.user.tenant, sku=sku, stores=stores, warehouses=warehouses,
+    ))
+
+
 def _queryset(request):
     return filter_recommendations(
         request.user,

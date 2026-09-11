@@ -17,6 +17,14 @@ const readiness = read('src/views/settings/PlatformIntegrationReadiness.vue');
 const workspace = read('src/views/integrations/IntegrationWorkspace.vue');
 
 describe('系统管理员生产环境 API 配置闭环', () => {
+  it('仓库合同走版本审批，不复制公共配置或仓库凭据', () => {
+    expect(page).toContain("jifeng_wms: ['contract_approved']");
+    expect(page).toContain('极风 WMS · 仓库');
+    expect(page).toContain("v-if=\"platform !== 'jifeng_wms'\" class=\"advanced-endpoints\"");
+    expect(page).toContain('极风无需 OAuth 回调地址');
+    expect(page).toContain("router.push('/master-data/warehouses')");
+    expect(page).toContain("router.push('/integrations/readiness')");
+  });
   it('registers a system-admin-only menu and route', () => {
     expect(menu).toContain("path: '/integrations/production-settings', label: '生产环境配置', permissions: ['config.system.manage'], allPermissions: ['config.view']");
     expect(menu).toContain("{ path: '/integrations/production-settings', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] }");

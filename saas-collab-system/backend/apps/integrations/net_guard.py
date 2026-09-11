@@ -21,6 +21,7 @@ from .oauth_errors import (
     OAuthFlowError,
 )
 from .production_settings import get_runtime_setting
+from .oauth_diagnostics import response_metadata
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -214,6 +215,8 @@ class PlatformHttpClient:
         headers=None,
         connect_timeout=None,
         read_timeout=None,
+        retry=True,
+        diagnostic_platform="",
     ):
         assert_host_allowed(url)
         data = None
@@ -240,7 +243,8 @@ class PlatformHttpClient:
 
         waited = 0.0
         last_error = OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Platform request failed.")
-        for attempt in range(self.max_retries + 1):
+        retries = self.max_retries if retry else 0
+        for attempt in range(retries + 1):
             response = None
             try:
                 response = self._transport(
@@ -253,27 +257,36 @@ class PlatformHttpClient:
                 )
             except (socket.timeout, TimeoutError):
                 last_error = OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Platform request timed out.")
+                last_error.category = "timeout_uncertain"
             except ssl.SSLError:
                 last_error = OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "TLS validation failed.")
+                last_error.category = "tls_failure"
             except (socket.gaierror, ConnectionError, ConnectionResetError, OSError):
                 last_error = OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Platform network request failed.")
+                last_error.category = "network_uncertain"
             except OAuthFlowError:
                 raise
 
             if response is not None:
                 status = response.status_code
-                if 200 <= status < 400:
+                if 200 <= status < 300:
                     return response
                 if status == 429:
                     last_error = OAuthFlowError(OAUTH_RATE_LIMITED, "Platform rate limit reached.")
                 elif 500 <= status <= 599:
                     last_error = OAuthFlowError(OAUTH_PROVIDER_ERROR, "Platform service error.")
+                    last_error.category = "service_uncertain"
                 elif status in (401, 403):
-                    raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Platform rejected authorization.")
+                    last_error = OAuthFlowError(OAUTH_AUTH_REJECTED, "Platform rejected authorization.")
+                    last_error.category = "authentication_rejected"
                 else:
-                    raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Platform rejected the request.")
+                    last_error = OAuthFlowError(OAUTH_PROVIDER_ERROR, "Platform rejected the request.")
+                for key, value in response_metadata(response, diagnostic_platform).items():
+                    setattr(last_error, key, value)
+                if status != 429 and status < 500:
+                    raise last_error
 
-            if attempt >= self.max_retries or waited >= self.max_total_wait:
+            if attempt >= retries or waited >= self.max_total_wait:
                 raise last_error
             delay = self._delay(attempt, response=response, waited=waited)
             if delay <= 0:

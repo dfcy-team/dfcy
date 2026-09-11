@@ -22,6 +22,7 @@ from .oauth_errors import (
 from .provider_helpers import ProviderRequestId
 from .platform_schema_service import get_platform_schema
 from .production_settings import get_runtime_platform_config, get_runtime_setting
+from .oauth_diagnostics import callback_url_key, oauth_stage, response_metadata
 
 PLACEHOLDER = "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY"
 
@@ -70,7 +71,8 @@ class LiveOAuthProviderBase:
     def __init__(self, provider_config, secret_resolver=None, http_client=None, custody=None):
         self.config = dict(provider_config)
         self.http = http_client or PlatformHttpClient()
-        self.custody = custody or get_custody_backend()
+        with oauth_stage("read_developer_secret"):
+            self.custody = custody or get_custody_backend()
         self.secret_resolver = secret_resolver
 
     def _preflight(self, operation):
@@ -84,7 +86,7 @@ class LiveOAuthProviderBase:
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, f"{self.platform} platform contract is not approved.")
         redirect_uri = _required(self.config.get("redirect_uri"), f"{self.platform}.redirect_uri")
         allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
-        if redirect_uri not in allowlist:
+        if callback_url_key(redirect_uri) not in {callback_url_key(url) for url in allowlist}:
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "OAuth redirect URI is not approved.")
 
     def _app_id(self):
@@ -92,9 +94,10 @@ class LiveOAuthProviderBase:
 
     def validate_start_configuration(self, redirect_uri):
         self._preflight("authorization")
-        if redirect_uri != self.config["redirect_uri"]:
+        if callback_url_key(redirect_uri) != callback_url_key(self.config["redirect_uri"]):
             raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "OAuth redirect URI does not match the approved value.")
 
+    @oauth_stage("read_developer_secret")
     def _app_secret(self):
         if self.secret_resolver is not None:
             resolved = self.secret_resolver(self.platform)
@@ -103,17 +106,35 @@ class LiveOAuthProviderBase:
         reference = _required(self.config.get("app_secret_reference"), f"{self.platform}.app_secret_reference")
         return self.custody.retrieve_secret(reference)
 
-    def _request_json(self, method, url, *, headers=None, query=None, json_body=None):
+    def _request_json(self, method, url, *, headers=None, query=None, json_body=None, retry=True):
         if query:
             url = f"{url}?{urllib.parse.urlencode(query)}"
-        response = self.http.request(method, url, headers=headers, json_body=json_body)
+        response = self.http.request(method, url, headers=headers, json_body=json_body,
+                                     retry=retry, diagnostic_platform=self.platform)
+        self._response_metadata = response_metadata(response, self.platform)
         try:
             payload = response.json()
         except (json.JSONDecodeError, TypeError, ValueError):
-            raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Platform returned an invalid response.")
+            self._platform_rejected()
         if not isinstance(payload, dict):
-            raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Platform returned an invalid response.")
+            self._platform_rejected()
         return payload
+
+    def _platform_rejected(self):
+        metadata = getattr(self, "_response_metadata", {})
+        code = metadata.get("platform_error_code")
+        rejected = code in {"error_auth", "error_sign", "error_permission", "error_perm"}
+        exc = OAuthFlowError(OAUTH_AUTH_REJECTED if rejected else OAUTH_PROVIDER_ERROR, "Platform rejected the request.")
+        exc.category = "authentication_rejected" if rejected else "platform_error"
+        if code in {"error_network", "error_server", "error_inner"}:
+            exc.category = "service_uncertain"
+        for key, value in metadata.items():
+            setattr(exc, key, value)
+        raise exc
+
+    @oauth_stage("save_token")
+    def _store_tokens(self, **kwargs):
+        return self.custody.store_secrets(**kwargs)
 
     @staticmethod
     def _reject_unknown(params, allowed):
@@ -176,6 +197,7 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
             "scopes": list(context.get("scopes") or []),
         }
 
+    @oauth_stage("exchange_token")
     def exchange_authorization_code(self, payload):
         self._preflight("token exchange")
         path = _required(self.config.get("token_path"), "shopee.token_path")
@@ -186,15 +208,16 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
             f"{self._host()}{path}",
             query=query,
             json_body={"code": payload["code"], "shop_id": int(shop_id), "partner_id": int(self._app_id())},
+            retry=False,
         )
         if data.get("error"):
-            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Shopee rejected the authorization code.")
+            self._platform_rejected()
         access_token = data.get("access_token")
         refresh_token = data.get("refresh_token")
         if not access_token or not refresh_token:
             raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Shopee token response is incomplete.")
         expires_at = _expiry(data.get("expire_in"), default_seconds=0)
-        stored = self.custody.store_secrets(
+        stored = self._store_tokens(
             credential_type="shopee",
             reference_version=1,
             access_token=access_token,
@@ -202,10 +225,23 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
             expires_at=expires_at.isoformat(),
             metadata={"platform": "shopee", "shop_id": shop_id},
         )
+        scope = data.get("shop_id_list")
+        if scope is None:
+            scope_evidence = "not_provided"
+        elif not isinstance(scope, list) or any(type(value) not in (str, int) for value in scope):
+            scope_evidence = "invalid_shape"
+        else:
+            scope_evidence = ("contains_callback_shop" if str(shop_id) in {str(value) for value in scope}
+                              else "does_not_contain_callback_shop")
         try:
-            shop = self._fetch_shop_with_token(shop_id, stored["token_id"])
-        except Exception:
-            self.custody.revoke(stored["credential_id"], stored["token_id"])
+            shop = self._fetch_shop_with_token(shop_id, stored["token_id"], token_scope_evidence=scope_evidence)
+        except Exception as exc:
+            if isinstance(exc, OAuthFlowError):
+                exc.token_scope_evidence = scope_evidence
+            try:
+                self.custody.revoke(stored["credential_id"], stored["token_id"])
+            except Exception:
+                pass
             raise
         return {
             **stored,
@@ -220,16 +256,37 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
             "previous_reference_revoker": self.custody.revoke,
         }
 
-    def _fetch_shop_with_token(self, shop_id, token_id):
+    @oauth_stage("verify_store")
+    def _fetch_shop_with_token(self, shop_id, token_id, *, token_scope_evidence="not_provided"):
         path = _required(self.config.get("shop_path"), "shopee.shop_path")
         access_token = self.custody.retrieve_access_token(token_id)
         data = self._request_json("GET", f"{self._host()}{path}", query=self._signed_shop_query(path, access_token, shop_id))
         if data.get("error"):
-            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Shopee shop identity verification failed.")
-        response = data.get("response") or data.get("shop_info") or {}
-        response_shop_id = str(response.get("shop_id") or shop_id)
-        if response_shop_id != str(shop_id):
-            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shopee shop identity did not match callback subject.")
+            self._platform_rejected()
+        response = data.get("response", data.get("shop_info", data))
+        response_shop_id = str(response.get("shop_id") or "") if isinstance(response, dict) else ""
+        identity_error = None
+        if token_scope_evidence == "invalid_shape":
+            identity_error = "invalid_token_scope"
+        elif token_scope_evidence == "does_not_contain_callback_shop":
+            identity_error = "token_scope_mismatch"
+        elif not isinstance(response, dict):
+            identity_error = "invalid_shop_response"
+        elif response_shop_id and response_shop_id != str(shop_id):
+            identity_error = "shop_id_mismatch"
+        elif not response_shop_id:
+            # The token endpoint supplies the authorized shop scope. Shop info
+            # may omit shop_id; still require actual shop data, not just HTTP 200.
+            has_shop_info = all(isinstance(response.get(key), str) and response[key].strip()
+                                for key in ("shop_name", "region"))
+            if token_scope_evidence != "contains_callback_shop" or not has_shop_info:
+                identity_error = "shop_id_missing"
+        if identity_error:
+            exc = OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shopee shop identity did not match callback subject.")
+            exc.identity_evidence = identity_error
+            for key, value in getattr(self, "_response_metadata", {}).items():
+                setattr(exc, key, value)
+            raise exc
         return {"platform_store_id": str(shop_id), "shop_cipher": "", "region": self.config.get("region", "")}
 
     def refresh_authorization(self, authorization):
@@ -334,17 +391,19 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
             "scopes": list(context.get("scopes") or []),
         }
 
-    def _token_request(self, path, extra):
+    def _token_request(self, path, extra, *, retry=True):
         payload = self._request_json(
             "POST",
             f"{self._host()}{path}",
             query=self._signed_query(path, extra),
+            retry=retry,
         )
         if self._response_error(payload):
-            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Lazada rejected the token request.")
+            self._platform_rejected()
         return payload
 
     @staticmethod
+    @oauth_stage("verify_store")
     def _store_record(payload, expected_region):
         countries = payload.get("country_user_info") or []
         if not isinstance(countries, list):
@@ -366,17 +425,18 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
             "merchant_subject_id": str(matched.get("user_id") or store_id),
         }
 
+    @oauth_stage("exchange_token")
     def exchange_authorization_code(self, payload):
         self._preflight("token exchange")
         path = _required(self.config.get("token_path"), "lazada.token_path")
-        data = self._token_request(path, {"code": payload["code"]})
+        data = self._token_request(path, {"code": payload["code"]}, retry=False)
         access_token = data.get("access_token")
         refresh_token = data.get("refresh_token")
         if not access_token or not refresh_token:
             raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Lazada token response is incomplete.")
         store = self._store_record(data, payload.get("region"))
         expires_at = _expiry(data.get("expires_in"))
-        stored = self.custody.store_secrets(
+        stored = self._store_tokens(
             credential_type="lazada",
             reference_version=1,
             access_token=access_token,
@@ -465,15 +525,24 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
 
     def validate_callback(self, params, context):
         self._preflight("callback")
-        self._reject_unknown(params, {"code", "state", "error"})
+        self._reject_unknown(params, {"code", "state", "error", "app_key", "locale", "shop_region"})
         if params.get("error") or not str(params.get("code") or "").strip():
             raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorization was rejected.")
+        if "app_key" in params and str(params["app_key"]) != self._app_id():
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok callback app does not match the selected configuration.")
+        if "shop_region" in params and (
+            not context.get("region")
+            or not str(params["shop_region"])
+            or str(params["shop_region"]).upper() != str(context["region"]).upper()
+        ):
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok callback region does not match the selected store.")
+        # Locale is presentation metadata; never use it to select a store or exchange tokens.
         return {"code": str(params["code"]), "region": context.get("region", ""), "scopes": context.get("scopes", [])}
 
-    def _token_request(self, path, params):
-        payload = self._request_json("GET", f"{_required(self.config.get('token_host'), 'tiktok.token_host')}{path}", query=params)
+    def _token_request(self, path, params, *, retry=True):
+        payload = self._request_json("GET", f"{_required(self.config.get('token_host'), 'tiktok.token_host')}{path}", query=params, retry=retry)
         if payload.get("code") != 0:
-            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok rejected the token request.")
+            self._platform_rejected()
         data = payload.get("data") or {}
         if "user_type" in data and str(data.get("user_type")) != "0":
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok authorization is not a seller authorization.")
@@ -485,6 +554,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         params["sign"] = _tiktok_sign(path, params, self._app_secret())
         return params
 
+    @oauth_stage("verify_store", operation="get_authorized_shops")
     def _authorized_shops(self, token_id):
         path = _required(self.config.get("authorized_shops_path"), "tiktok.authorized_shops_path")
         access_token = self.custody.retrieve_access_token(token_id)
@@ -507,18 +577,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
         return {"platform_store_id": shop_id, "shop_cipher": cipher, "region": region}
 
-    def _verify_metadata(self, token_id, shop):
-        path = _required(self.config.get("metadata_path"), "tiktok.metadata_path")
-        access_token = self.custody.retrieve_access_token(token_id)
-        payload = self._request_json(
-            "GET",
-            f"{self._open_host()}{path}",
-            query=self._signed_open_query(path, {"shop_cipher": shop["shop_cipher"]}),
-            headers={"Content-Type": "application/json", "x-tts-access-token": access_token},
-        )
-        if payload.get("code") != 0:
-            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok minimal metadata verification failed.")
-
+    @oauth_stage("exchange_token")
     def exchange_authorization_code(self, payload):
         self._preflight("token exchange")
         data, request_id = self._token_request(
@@ -529,6 +588,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
                 "auth_code": payload["code"],
                 "grant_type": "authorized_code",
             },
+            retry=False,
         )
         if not data.get("access_token") or not data.get("refresh_token") or not data.get("open_id"):
             raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "TikTok token response is incomplete.")
@@ -537,7 +597,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         if not required_scopes.issubset(set(scopes)):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok granted scopes are incomplete.")
         expires_at = _expiry(data.get("access_token_expire_in"))
-        stored = self.custody.store_secrets(
+        stored = self._store_tokens(
             credential_type="tiktok",
             reference_version=1,
             access_token=data["access_token"],
@@ -546,13 +606,16 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             metadata={"platform": "tiktok", "market": self._market()},
         )
         try:
-            shop = self._authorized_shops(stored["token_id"])
-            expected_region = str(payload.get("region") or "").upper()
-            if expected_region and shop["region"] != expected_region:
-                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok shop region did not match OAuth context.")
-            self._verify_metadata(stored["token_id"], shop)
+            with oauth_stage("verify_store"):
+                shop = self._authorized_shops(stored["token_id"])
+                expected_region = str(payload.get("region") or "").upper()
+                if expected_region and shop["region"] != expected_region:
+                    raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok shop region did not match OAuth context.")
         except Exception:
-            self.custody.revoke(stored["credential_id"], stored["token_id"])
+            try:
+                self.custody.revoke(stored["credential_id"], stored["token_id"])
+            except Exception:
+                pass
             raise
         return {
             **stored,
@@ -624,8 +687,8 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
 
     def fetch_authorized_stores(self, authorization):
         self._preflight("authorized-shop verification")
+        # Seller permissions describe cross-border capabilities, not shop identity.
         shop = self._authorized_shops(authorization.token_id)
-        self._verify_metadata(authorization.token_id, shop)
         return [shop]
 
 
@@ -678,9 +741,9 @@ def integration_config_oauth_blockers(platform, integration_config):
         blockers.append("callback_missing")
     elif not allowlist:
         blockers.append("callback_allowlist_missing")
-    elif expected_callback and callback_url != expected_callback:
+    elif expected_callback and callback_url_key(callback_url) != callback_url_key(expected_callback):
         blockers.append("callback_mismatch")
-    elif allowlist and callback_url not in allowlist:
+    elif allowlist and callback_url_key(callback_url) not in {callback_url_key(url) for url in allowlist}:
         blockers.append("callback_not_allowlisted")
     public_app_id = (
         values.get("partner_id") or runtime_platform.get("app_id")

@@ -78,8 +78,16 @@ def test_drf_validation_exception_uses_unified_format():
     assert response.status_code == 400
     assert response.data["success"] is False
     assert response.data["code"] == ErrorCode.VALIDATION_ERROR
-    assert response.data["message"] == "error message"
+    assert response.data["message"] == "提交内容校验失败，请检查字段提示。"
     assert "name" in response.data["data"]
+
+
+def test_list_validation_error_preserves_the_actionable_message():
+    from apps.common.exceptions import custom_exception_handler
+    error = serializers.ValidationError("仓库凭据加密保存失败，原配置未更改。")
+    response = custom_exception_handler(error, {})
+    assert response.data["message"] == "仓库凭据加密保存失败，原配置未更改。"
+    assert list(response.data["data"]) == [response.data["message"]]
 
 
 @pytest.mark.parametrize(

@@ -3,13 +3,15 @@
     eyebrow="API DATA INTEGRATION"
     title="同步任务"
     subtitle="查看内部同步调度、任务健康和最近一次运行结果。"
-    boundary-note="任务健康来自内部 workspace 汇总；运行模拟任务仅写入 Mock 运行记录，停用任务仅停用内部任务，不连接真实平台。"
+    boundary-note="启用任务不会立即执行；点击“执行一次真实同步”后，仅读取平台数据并写入本地数据库，不修改平台商品、价格或库存。提交不代表成功，请查看运行记录。模拟运行仅限独立 Mock 任务。"
     :capability="capability"
   >
     <template #action>
+      <el-button plain @click="router.push('/integrations/sync-runs')">查看运行记录</el-button>
       <el-button plain :loading="loading" @click="load">刷新</el-button>
     </template>
 
+    <MissingSyncJobsPreview v-if="auth.hasPermission('integrations.manage') && !productSyncContext" />
     <AppState v-if="state !== 'ready' && state !== 'empty'" :status="state" :detail="errorMessage" @action="load" />
     <template v-else>
       <section class="sync-summary" aria-label="同步任务健康摘要">
@@ -135,23 +137,39 @@
         <el-table-column prop="next_run_at" label="下次运行" min-width="180">
           <template #default="{ row }">{{ row.next_run_at || '未安排' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="actionAccess(actionConfigs[0]).visible"
+              v-if="!row.is_enabled && actionAccess(actionConfigs[2]).visible"
+              link type="primary"
+              :disabled="actionAccess(actionConfigs[2]).disabled || !!taskBusyReason(row) || !!actionLoading"
+              :title="actionAccess(actionConfigs[2]).reason || taskBusyReason(row) || '校验配置并启用，不立即执行'"
+              :loading="actionLoading === `enable:${row.id}`"
+              @click.stop="runAction(actionConfigs[2], row)"
+            >启用任务</el-button>
+            <el-button
+              v-if="['pilot', 'production'].includes(row.environment) && actionAccess(actionConfigs[3]).visible"
+              link type="primary"
+              :disabled="actionAccess(actionConfigs[3]).disabled || !!liveRunReason(row) || !!actionLoading"
+              :title="actionAccess(actionConfigs[3]).reason || liveRunReason(row) || '读取平台数据并写入本地数据库'"
+              :loading="actionLoading === `run-live:${row.id}`"
+              @click.stop="runAction(actionConfigs[3], row)"
+            >执行一次真实同步</el-button>
+            <el-button
+              v-if="row.environment === 'mock' && actionAccess(actionConfigs[0]).visible"
               link
               type="primary"
-              :disabled="actionAccess(actionConfigs[0]).disabled"
-              :title="actionAccess(actionConfigs[0]).reason"
+              :disabled="actionAccess(actionConfigs[0]).disabled || !!mockRunReason(row) || !!actionLoading"
+              :title="actionAccess(actionConfigs[0]).reason || mockRunReason(row)"
               :loading="actionLoading === `${actionConfigs[0].label}:${row.id}`"
               @click.stop="runAction(actionConfigs[0], row)"
             >运行模拟任务</el-button>
             <el-button
-              v-if="actionAccess(actionConfigs[1]).visible"
+              v-if="row.is_enabled && actionAccess(actionConfigs[1]).visible"
               link
               type="danger"
-              :disabled="actionAccess(actionConfigs[1]).disabled"
-              :title="actionAccess(actionConfigs[1]).reason"
+              :disabled="actionAccess(actionConfigs[1]).disabled || !!taskBusyReason(row) || !!actionLoading"
+              :title="actionAccess(actionConfigs[1]).reason || taskBusyReason(row)"
               :loading="actionLoading === `${actionConfigs[1].label}:${row.id}`"
               @click.stop="runAction(actionConfigs[1], row)"
             >停用任务</el-button>
@@ -253,6 +271,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
+import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
 import { useMock } from '../../api/request';
 import { fetchUsers } from '../../api/systemAdmin';
 import {
@@ -262,7 +281,9 @@ import {
   fetchSyncAlertIncidents,
   fetchSyncJobs,
   retrySyncAlertIncident,
-  runSyncJobMock
+  runSyncJobMock,
+  runSyncJob,
+  toggleSyncJob
 } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -273,14 +294,24 @@ const actionConfigs = [
     label: 'run-mock',
     permission: 'integrations.run',
     type: 'primary',
-    handler: ({ row }) => runSyncJobMock(row?.id || 1)
+    handler: ({ row }) => runSyncJobMock(row.id)
   },
   {
     label: 'disable',
     permission: 'integrations.manage',
     type: 'danger',
-    confirmMessage: '仅禁用阶段2同步任务，不连接真实平台。',
-    handler: ({ row }) => disableSyncJob(row?.id || 1)
+    confirmMessage: '停止后续执行，保留已有同步数据和运行记录。',
+    handler: ({ row }) => disableSyncJob(row.id)
+  },
+  {
+    label: 'enable', permission: 'integrations.manage',
+    confirmMessage: '校验当前配置并启用任务，不立即执行。手动任务需另行点击执行；定时任务仅在调度服务开启后按计划执行。',
+    handler: ({ row }) => toggleSyncJob(row.id, true)
+  },
+  {
+    label: 'run-live', permission: 'integrations.run_live_readonly',
+    confirmMessage: '将访问真实平台，按任务范围读取数据并写入本地数据库，不修改平台业务数据。提交后请查看运行记录，不要连续提交。',
+    handler: ({ row }) => runSyncJob(row.id, liveRunKey(row))
   }
 ];
 
@@ -623,28 +654,77 @@ async function confirmRetry() {
   }
 }
 
+const liveRunKeys = new Map();
+function liveRunKey(row) {
+  const version = `${row.id}:${row.last_run_at || ''}`;
+  if (!liveRunKeys.has(version)) liveRunKeys.set(version, crypto.randomUUID());
+  return liveRunKeys.get(version);
+}
+
+function taskBusyReason(row) {
+  if (!row?.id) return '任务信息不完整，请刷新后重试。';
+  return row.status === 'running' || row.schedule_state === 'running' ? '任务正在运行，请勿重复提交或切换状态。' : '';
+}
+
+function liveRunReason(row) {
+  if (taskBusyReason(row)) return taskBusyReason(row);
+  if (!row.is_enabled || row.status === 'disabled') return '任务已停用，请先启用任务。';
+  if (!['pilot', 'production'].includes(row.environment)) return '该任务不是实际平台只读任务。';
+  if (row.capability_state && !['ready', 'not_required'].includes(row.capability_state)) return '只读能力未就绪，请检查能力矩阵及授权来源。';
+  return row.blocked_reason || '';
+}
+
+function mockRunReason(row) {
+  if (!row?.id) return '任务信息不完整，请刷新后重试。';
+  if (!row.is_enabled || row.status === 'disabled' || row.schedule_state === 'disabled') {
+    return '任务已停用，不能运行模拟任务。';
+  }
+  if (row.environment !== 'mock' || row.resource_type !== 'mock_record') {
+    return '仅独立 Mock 任务可运行模拟；真实平台任务请使用受控只读同步入口。';
+  }
+  if (row.status === 'running' || row.schedule_state === 'running') return '任务正在运行，请勿重复提交。';
+  return '';
+}
+
 async function runAction(action, row) {
   const access = actionAccess(action);
   if (!access.allowed) {
     ElMessage.warning(access.reason);
     return;
   }
+  if (action.label === 'run-mock') {
+    const reason = mockRunReason(row);
+    if (reason) {
+      ElMessage.warning(reason);
+      return;
+    }
+  }
+  if (actionLoading.value) return;
+  const blocked = action.label === 'run-live' ? liveRunReason(row) : taskBusyReason(row);
+  if (blocked) { ElMessage.warning(blocked); return; }
+  actionLoading.value = `${action.label}:${row.id}`;
+  const actionLabel = { disable: '停用任务', enable: '启用任务', 'run-live': '执行一次真实同步', 'run-mock': '运行模拟任务' }[action.label];
   try {
     if (action.confirmMessage) {
       await ElMessageBox.confirm(
-        `确认对同步任务“${row.id}”执行${action.label === 'disable' ? '停用任务' : '运行模拟任务'}？${action.confirmMessage}`,
+        `确认对同步任务“${row.id}”${actionLabel}？${action.confirmMessage}`,
         '同步任务操作确认',
         { type: 'warning' }
       );
     }
     actionLoading.value = `${action.label}:${row.id}`;
     const response = await action.handler({ row, rows: rows.value });
-    if (!response?.success) throw new Error(response?.message || `${action.label} 操作失败`);
-    ElMessage.success(response.message || `${action.label} 操作已提交`);
+    if (!response?.success) throw new Error(response?.message || `${actionLabel}失败`);
+    if (action.label === 'run-live') {
+      if (!response.data?.accepted) throw new Error('未获得队列受理确认，请检查运行记录，不要重复提交。');
+      ElMessage.success('同步请求已提交队列，不代表同步成功；请查看运行记录，确认任务服务已处理。');
+    } else {
+      ElMessage.success(action.label === 'enable' ? '任务已启用，尚未执行。' : `${actionLabel}已完成`);
+    }
     await load();
   } catch (error) {
-    if (error === 'cancel') return;
-    ElMessage.error(error?.message || `${action.label} 操作失败`);
+    if (error === 'cancel' || error === 'close') return;
+    ElMessage.error(error?.message || `${actionLabel}未完成，请刷新并检查运行记录；不要连续提交。`);
   } finally {
     actionLoading.value = '';
   }
