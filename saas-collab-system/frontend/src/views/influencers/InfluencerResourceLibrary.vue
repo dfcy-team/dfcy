@@ -25,15 +25,15 @@
       </div>
 
       <el-alert v-if="listError" type="error" :title="listError" show-icon :closable="false" class="list-error" />
-      <el-table v-loading="loading" :data="rows" :empty-text="listError ? '达人档案加载失败，请重试' : '暂无达人档案'" @row-click="openDetail">
+      <el-table v-loading="loading" :data="rows" :empty-text="listError ? '达人档案加载失败，请重试' : '暂无达人档案'" @row-click="openDetail" @sort-change="changeSort">
         <el-table-column label="达人" min-width="200" fixed="left"><template #default="{ row }"><b>{{ influencerDisplayName(row) }}</b><small>{{ profileValue(row, 'external_influencer_id') }} · {{ displayValue(row.platform) }}</small></template></el-table-column>
-        <el-table-column label="等级 / 粉丝" min-width="120"><template #default="{ row }"><b>{{ profileValue(row, 'level') }}</b><small>{{ formatCount(row.follower_count) }} 粉丝 · {{ profileValue(row, 'tier') }}</small></template></el-table-column>
-        <el-table-column label="平均播放" min-width="105"><template #default="{ row }">{{ formatCount(row.profile?.average_video_views) }}</template></el-table-column>
+        <el-table-column prop="follower_count" label="等级 / 粉丝" min-width="120" sortable="custom"><template #default="{ row }"><b>{{ profileValue(row, 'level') }}</b><small>{{ formatCount(row.follower_count) }} 粉丝 · {{ profileValue(row, 'tier') }}</small></template></el-table-column>
+        <el-table-column prop="average_video_views" label="平均播放" min-width="105" sortable="custom"><template #default="{ row }">{{ formatCount(row.profile?.average_video_views) }}</template></el-table-column>
         <el-table-column label="市场 / 赛道" min-width="145"><template #default="{ row }"><b>{{ profileValue(row, 'market') }}</b><small>{{ displayValue(row.category) }}</small></template></el-table-column>
         <el-table-column label="首次合作" min-width="115"><template #default="{ row }">{{ formatDate(row.profile?.first_cooperation_at) }}</template></el-table-column>
-        <el-table-column label="合作表现" min-width="125"><template #default="{ row }"><b>{{ formatCount(row.profile?.cooperation_count) }} 次合作</b><small>{{ formatCount(row.profile?.fulfilled_cooperation_count) }} 次履约</small></template></el-table-column>
-        <el-table-column label="历史 GMV" min-width="125"><template #default="{ row }"><b>{{ formatMoney(row.profile?.historical_gmv) }}</b><small>{{ formatCount(row.profile?.historical_orders) }} 个订单</small></template></el-table-column>
-        <el-table-column label="履约率" min-width="95"><template #default="{ row }">{{ formatRate(row.profile?.fulfillment_rate) }}</template></el-table-column>
+        <el-table-column prop="cooperation_count" label="合作表现" min-width="125" sortable="custom"><template #default="{ row }"><b>{{ formatCount(row.profile?.cooperation_count) }} 次合作</b><small>{{ formatCount(row.profile?.fulfilled_cooperation_count) }} 次履约</small></template></el-table-column>
+        <el-table-column prop="historical_gmv" label="历史 GMV" min-width="125" sortable="custom"><template #default="{ row }"><b>{{ formatMoney(row.profile?.historical_gmv) }}</b><small>{{ formatCount(row.profile?.historical_orders) }} 个订单</small></template></el-table-column>
+        <el-table-column prop="fulfillment_rate" label="履约率" min-width="95" sortable="custom"><template #default="{ row }">{{ formatRate(row.profile?.fulfillment_rate) }}</template></el-table-column>
         <el-table-column label="合作状态" width="110"><template #default="{ row }"><el-tag size="small" :type="cooperationTag(row.cooperation_status)">{{ cooperationLabel(row.cooperation_status) }}</el-tag></template></el-table-column>
         <el-table-column label="档案状态" width="95"><template #default="{ row }"><el-tag size="small" :type="row.is_blacklisted ? 'danger' : (row.status === 'active' ? 'success' : 'info')">{{ row.is_blacklisted ? '已拉黑' : (row.status === 'active' ? '正常' : '停用') }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="250" fixed="right"><template #default="{ row }"><el-button link @click.stop="openDetail(row)">详情</el-button><el-button link :disabled="!canManage" @click.stop="openEdit(row)">编辑</el-button><el-button link :type="row.is_blacklisted ? 'success' : 'danger'" :disabled="!canManage" @click.stop="toggleBlacklist(row)">{{ row.is_blacklisted ? '解除拉黑' : '加入黑名单' }}</el-button><el-button link :disabled="!canManage" @click.stop="changeStatus(row, row.status === 'active' ? 'inactive' : 'active')">{{ row.status === 'active' ? '停用' : '启用' }}</el-button></template></el-table-column>
@@ -158,6 +158,19 @@ async function load() {
 function applyFilters() { page.value = 1; load(); }
 function resetFilters() { Object.assign(filters, { search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
 function changePageSize() { page.value = 1; load(); }
+function changeSort({ prop, order }) {
+  const fields = {
+    follower_count: 'follower_count',
+    average_video_views: 'profile__average_video_views',
+    cooperation_count: 'profile__cooperation_count',
+    historical_gmv: 'profile__historical_gmv',
+    fulfillment_rate: 'profile__fulfillment_rate'
+  };
+  const field = fields[prop];
+  filters.ordering = field && order ? `${order === 'descending' ? '-' : ''}${field}` : '-updated_at';
+  page.value = 1;
+  load();
+}
 function resetForm() { Object.assign(form, blankForm()); }
 function addContact() { form.contacts.push(blankContact()); }
 function removeContact(index) { if (form.contacts.length === 1) return; form.contacts.splice(index, 1); }

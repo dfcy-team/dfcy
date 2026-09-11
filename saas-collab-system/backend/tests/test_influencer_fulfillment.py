@@ -24,6 +24,7 @@ from apps.influencers.models import (
     BdOrderAttributionSnapshot,
     BdSampleAttributionSnapshot,
     Influencer,
+    InfluencerProfile,
     InfluencerRestriction,
     OutreachTarget,
     OutreachTask,
@@ -1343,6 +1344,39 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
     )
     assert first.status_code == 200
     assert stale.status_code == 409
+
+
+def test_influencer_list_orders_all_pages_by_cooperation_count_and_fulfillment_rate():
+    tenant = Tenant.objects.create(name="Tenant", code="profile-ordering")
+    _, client = user_with_permissions(tenant, "profile-viewer", "influencers.view")
+    lower = Influencer.objects.create(tenant=tenant, code="lower", name="Lower")
+    higher = Influencer.objects.create(tenant=tenant, code="higher", name="Higher")
+    InfluencerProfile.objects.create(
+        tenant=tenant,
+        influencer=lower,
+        cooperation_count=2,
+        fulfillment_rate=Decimal("0.2500"),
+    )
+    InfluencerProfile.objects.create(
+        tenant=tenant,
+        influencer=higher,
+        cooperation_count=9,
+        fulfillment_rate=Decimal("0.9000"),
+    )
+
+    by_cooperation = client.get(
+        "/api/internal/influencers/",
+        {"ordering": "-profile__cooperation_count", "page_size": 1},
+    )
+    by_fulfillment = client.get(
+        "/api/internal/influencers/",
+        {"ordering": "profile__fulfillment_rate", "page_size": 1},
+    )
+
+    assert by_cooperation.status_code == 200
+    assert by_cooperation.data["data"]["results"][0]["id"] == higher.id
+    assert by_fulfillment.status_code == 200
+    assert by_fulfillment.data["data"]["results"][0]["id"] == lower.id
 
 
 def test_outreach_task_supports_multiple_targets_linked_count_and_soft_delete():

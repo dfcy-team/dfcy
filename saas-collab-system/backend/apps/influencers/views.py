@@ -318,6 +318,8 @@ class InfluencerCollectionView(APIView):
             "profile__tier", "-profile__tier", "profile__market", "-profile__market",
             "profile__average_video_views", "-profile__average_video_views",
             "profile__historical_gmv", "-profile__historical_gmv",
+            "profile__cooperation_count", "-profile__cooperation_count",
+            "profile__fulfillment_rate", "-profile__fulfillment_rate",
         }
         if ordering not in allowed_ordering:
             raise ValidationError({"ordering": "Unsupported ordering field."})
