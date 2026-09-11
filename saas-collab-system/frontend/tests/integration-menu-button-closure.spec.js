@@ -24,8 +24,12 @@ describe('API 数据接入菜单与按钮闭环', () => {
     expect(page).toContain('>保存备注</el-button>');
     expect(page).toContain('>解决事件</el-button>');
     expect(page).toContain('>受控重试预览</el-button>');
-    expect(page).toContain('运行模拟任务仅写入 Mock 运行记录，停用任务仅停用内部任务');
-    expect(page).toContain("action.label === 'disable' ? '停用任务' : '运行模拟任务'");
+    expect(page).toContain('启用任务不会立即执行');
+    expect(page).toContain('不修改平台商品、价格或库存');
+    expect(page).toContain('模拟运行仅限独立 Mock 任务');
+    expect(page).toContain('>执行一次真实同步</el-button>');
+    expect(page).toContain("'run-live': '执行一次真实同步'");
+    expect(page).toContain("'run-mock': '运行模拟任务'");
     expect(page).not.toContain('>run-mock</el-button>');
     expect(page).not.toContain('>disable</el-button>');
     expect(page).not.toContain('run-mock 仅写入');
