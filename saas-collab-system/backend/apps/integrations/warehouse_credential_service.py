@@ -9,9 +9,10 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .custody import CustodyError, get_custody_backend
+from .custody import get_custody_backend
 from .models import PlatformIntegrationConfig, SyncJob, WarehouseAuthorization
 from .net_guard import PlatformHttpClient
+from .oauth_errors import OAuthFlowError
 
 
 def invalidate_config_warehouses(config):
@@ -64,9 +65,9 @@ def save_warehouse_credentials(*, actor, authorization, email, token="", custody
         try:
             metadata = (custody or get_custody_backend()).store_secrets(
                 secret=token,
-                metadata={"tenant_id": actor.tenant_id, "warehouse_authorization_id": record.pk},
+                metadata={"tenant_id": actor.tenant_id, "warehouse_binding_id": record.pk},
             )
-        except CustodyError:
+        except OAuthFlowError:
             raise ValidationError("仓库凭据加密保存失败，原配置未更改。") from None
         reference = metadata.get("credential_id")
         if not isinstance(reference, str) or not reference:
@@ -160,7 +161,7 @@ def authorize_warehouse(*, actor, authorization, http=None, custody=None):
         expires_at = timezone.now() + timedelta(hours=24)
         metadata = custody.store_secrets(
             access_token=data["accessToken"], refresh_token=data["refreshToken"],
-            metadata={"tenant_id": record.tenant_id, "warehouse_authorization_id": record.pk},
+            metadata={"tenant_id": record.tenant_id, "warehouse_binding_id": record.pk},
         )
         if not metadata.get("token_id"):
             raise ValueError("missing custody reference")
@@ -214,7 +215,7 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
                 or str(data["userId"]) != record.oauth_user_id):
             raise ValueError("invalid refresh response")
         metadata = custody.store_secrets(access_token=data["accessToken"], refresh_token=data["refreshToken"],
-            metadata={"tenant_id": actor.tenant_id, "warehouse_authorization_id": record.pk})
+            metadata={"tenant_id": actor.tenant_id, "warehouse_binding_id": record.pk})
         if not metadata.get("token_id"):
             raise ValueError("missing custody reference")
     except Exception:

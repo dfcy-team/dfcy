@@ -79,6 +79,7 @@ SAFE_DEFAULTS = {
         "max_batch_size": 20,
     },
     "platforms": {
+        "jifeng_wms": {"contract_approved": False},
         "lazada": {
             "contract_approved": False,
             "product_contract_approved": False,
@@ -165,7 +166,7 @@ _FORBIDDEN_KEY_PARTS = (
 _ASSIGNMENT_PATTERN = re.compile(
     r"(?i)(password|passwd|access[_-]?token|refresh[_-]?token|api[_-]?secret|client[_-]?secret|app[_-]?secret)\s*[:=]"
 )
-_PLATFORM_KEYS = {"lazada", "shopee", "tiktok"}
+_PLATFORM_KEYS = {"lazada", "shopee", "tiktok", "jifeng_wms"}
 _TOP_LEVEL_KEYS = {"modules", "network", "connection", "custody", "listing_write", "platforms"}
 _MODULE_KEYS = set(MODULE_CODES)
 _NETWORK_KEYS = {
@@ -197,6 +198,7 @@ _PLATFORM_COMMON_KEYS = {
     "contract_approved", "product_contract_approved", "app_id", "service_id", "redirect_uri", "market",
 }
 _PLATFORM_KEYS_BY_NAME = {
+    "jifeng_wms": {"contract_approved"},
     "lazada": _PLATFORM_COMMON_KEYS | {"auth_url", "api_host", "token_path", "refresh_path"},
         "shopee": _PLATFORM_COMMON_KEYS | {
         "auth_url", "api_host", "token_path", "refresh_path", "revoke_path", "shop_path", "region",

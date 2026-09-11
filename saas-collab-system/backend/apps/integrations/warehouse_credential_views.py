@@ -5,7 +5,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsWarehouseAuthorizationAuthorizer, IsIntegrationLiveReadonlyRunner
-from apps.common.exceptions import get_scoped_object_or_404
+from apps.common.exceptions import get_scoped_object_or_404, StateConflict
 from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p6_scopes import integration_values_allowed
 
@@ -16,6 +16,7 @@ from .readonly_clients import JifengWmsReadonlyClient
 from .serializers import WarehouseAuthorizationSerializer
 from .views import _warehouse_authorization_queryset, _get_config_for_user
 from .warehouse_credential_service import save_warehouse_credentials, authorize_warehouse, refresh_warehouse_authorization
+from .warehouse_discovery_service import discover_warehouse
 
 
 class WarehouseCredentialsInput(serializers.Serializer):
@@ -43,7 +44,40 @@ def warehouse_first_authorization(request, pk):
         raise ValidationError("首次授权将消耗一次性 Token，请明确确认。")
     record = get_scoped_object_or_404(_warehouse_authorization_queryset(request, "integrations.warehouse.authorize"), pk=pk)
     record = authorize_warehouse(actor=request.user, authorization=record)
-    return success_response({"authorization": WarehouseAuthorizationSerializer(record).data, "connected": False})
+    # OAuth has committed. A list/mapping failure must not undo it or invite
+    # the browser to replay the one-use token exchange.
+    return _warehouse_discovery_response(request, record)
+
+
+def _warehouse_discovery_response(request, record, external_warehouse_code=None):
+    try:
+        record, discovery = discover_warehouse(actor=request.user, authorization=record,
+            external_warehouse_code=external_warehouse_code)
+    except (ValidationError, StateConflict) as exc:
+        # Only our controlled validation messages; provider bodies and
+        # network/custody exception strings are never exposed.
+        detail = exc.detail
+        message = "；".join(str(item) for item in detail) if isinstance(detail, list) else str(detail)
+        discovery = {"status": "failed", "warehouses": [],
+            "message": message + " 现有授权未清除；请处理后重试获取仓库，不要重复兑换一次性 Token。"}
+    except Exception:
+        discovery = {"status": "failed", "warehouses": [],
+            "message": "仓库列表读取或关联未完成，现有授权未清除。请重试获取仓库；不需要重新兑换一次性 Token。"}
+    return success_response({"authorization": WarehouseAuthorizationSerializer(record).data,
+        "connected": False, "warehouse_discovery": discovery})
+
+
+class WarehouseDiscoveryInput(serializers.Serializer):
+    external_warehouse_code = serializers.CharField(required=False, allow_blank=False, max_length=160)
+
+
+@api_view(["POST"])
+@permission_classes([IsWarehouseAuthorizationAuthorizer])
+def warehouse_discovery(request, pk):
+    record = get_scoped_object_or_404(_warehouse_authorization_queryset(request, "integrations.warehouse.authorize"), pk=pk)
+    serializer = WarehouseDiscoveryInput(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    return _warehouse_discovery_response(request, record, **serializer.validated_data)
 
 
 @api_view(["POST"])

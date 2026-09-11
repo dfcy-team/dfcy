@@ -130,5 +130,6 @@ def test_automatic_callback_rechecks_scope_changed_after_start(lazada_context, m
     assert 'OAUTH_CALLBACK_REJECTED' in str(result.data)
     assert not MarketplaceStoreAuthorization.objects.exists()
     assert OAuthStateSession.objects.get().status == 'failed'
-    new_revoke.assert_called_once()
+    # Permissions are now checked before exchanging any code.
+    new_revoke.assert_not_called()
     previous_revoke.assert_not_called()

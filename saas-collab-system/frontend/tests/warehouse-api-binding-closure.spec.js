@@ -10,7 +10,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 describe('仓库 API 接入操作闭环', () => {
   it('exposes explicit bind, rebind, revoke, readonly and sync task actions', () => {
     const dialog = read('src/components/SubjectApiAccessDialog.vue');
-    for (const label of ['绑定此配置', '更换绑定', '解除绑定', '执行只读检查', '创建库存同步任务', '查看同步任务', '维护接入凭据']) {
+    for (const label of ['确认授权', '确认重新授权', '解除绑定', '执行只读检查', '创建库存同步任务', '查看同步任务', '维护接入凭据']) {
       expect(dialog).toContain(label);
     }
     for (const permission of ['integrations.warehouse.view', 'integrations.warehouse.authorize', 'integrations.warehouse.revoke']) {
@@ -34,7 +34,7 @@ describe('仓库 API 接入操作闭环', () => {
     expect(dialog).toContain('selectedConfig(apiType) && credentialMaintenanceAccess.visible');
     expect(dialog).toContain('await load();');
     const warehouseActionOrder = [
-      '@click="bindWarehouse(apiType)"',
+      '@click="authorizeWarehouse(apiType)"',
       '@click="createInventorySyncJob(primaryBinding(apiType))"',
       '@click="checkToken(primaryBinding(apiType))"',
       '@click="viewSyncJobs(apiType)"',

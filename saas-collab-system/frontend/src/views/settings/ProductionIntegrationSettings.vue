@@ -185,14 +185,21 @@
               <el-switch v-model="form.platforms[platform].product_contract_approved" active-text="已批准" inactive-text="未批准" />
               <small class="field-help">独立于订单/退款合同；未完成该平台商品接口证据核验时保持关闭。</small>
             </el-form-item>
-            <div class="form-grid compact">
+            <div v-if="platform === 'jifeng_wms'" class="warehouse-settings">
+              <p class="section-note">此处只维护极风授权与库存只读接口的合同审批，须提交版本并由另一位有权限的管理员审批后生效。合同审批不代表仓库已授权或库存已连通。</p>
+              <p class="section-note">API Base URL、Domain、Client ID、Client Secret 在连接配置维护；API 域名须加入上方出站白名单。Email、一次性 Token 仅在仓库档案 → API 接入维护，极风无需 OAuth 回调地址。</p>
+              <el-button link :disabled="!auth.hasPermission('integrations.config.view')" @click="router.push({ path: '/integrations/configs', query: { platform: 'jifeng_wms' } })">维护极风公共配置</el-button>
+              <el-button link :disabled="!auth.hasPermission('integrations.view')" @click="router.push('/integrations/readiness')">前往生产准入审批仓库只读网络</el-button>
+              <el-button link :disabled="!auth.hasPermission('masterdata.view')" @click="router.push('/master-data/warehouses')">仓库档案 · API 接入</el-button>
+            </div>
+            <div v-else class="form-grid compact">
               <el-form-item label="公开 App ID *"><el-input v-model="form.platforms[platform].app_id" autocomplete="off" placeholder="填写平台公开应用 ID" /></el-form-item>
               <el-form-item v-if="platform === 'tiktok'" label="Service ID"><el-input v-model="form.platforms[platform].service_id" autocomplete="off" placeholder="TikTok Shop Service ID" /></el-form-item>
               <el-form-item label="OAuth redirect_uri *"><el-input v-model="form.platforms[platform].redirect_uri" type="url" autocomplete="off" placeholder="https://.../callback" /></el-form-item>
               <el-form-item label="market *"><el-input v-model="form.platforms[platform].market" maxlength="40" placeholder="SG" /></el-form-item>
               <el-form-item v-if="platform === 'shopee'" label="region"><el-input v-model="form.platforms[platform].region" maxlength="40" placeholder="SG" /></el-form-item>
             </div>
-            <details class="advanced-endpoints" :open="openEndpointPlatform === platform">
+            <details v-if="platform !== 'jifeng_wms'" class="advanced-endpoints" :open="openEndpointPlatform === platform">
               <summary>高级 endpoint / path 配置（{{ platformEndpointFields[platform].length }} 项）</summary>
               <div class="form-grid compact endpoint-grid">
                 <el-form-item v-for="field in platformEndpointFields[platform]" :key="field.key" :label="field.label">
@@ -267,7 +274,7 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   approveProductionIntegrationSettingsVersion,
   createProductionIntegrationSettingsVersion,
@@ -278,6 +285,7 @@ import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
 const route = useRoute();
+const router = useRouter();
 const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
@@ -300,9 +308,9 @@ const writeOverview = ref(null);
 const platformSectionRefs = ref({});
 const openEndpointPlatform = ref('');
 
-const platformKeys = ['lazada', 'shopee', 'tiktok'];
-const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop' };
-const platformDescriptions = { lazada: 'Lazada Open Platform', shopee: 'Shopee Partner API', tiktok: 'TikTok Shop Open API' };
+const platformKeys = ['lazada', 'shopee', 'tiktok', 'jifeng_wms'];
+const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS · 仓库' };
+const platformDescriptions = { lazada: 'Lazada Open Platform', shopee: 'Shopee Partner API', tiktok: 'TikTok Shop Open API', jifeng_wms: '仓库独立授权与库存只读接入' };
 const platformEndpointFields = {
   lazada: [
     { key: 'auth_url', label: '授权地址 auth_url', kind: 'url', placeholder: 'https://auth.lazada.com/oauth/authorize' },
@@ -344,6 +352,7 @@ const platformEndpointFields = {
   ]
 };
 const platformPayloadKeys = {
+  jifeng_wms: ['contract_approved'],
   lazada: ['contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'market'],
   shopee: ['contract_approved', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'market', 'region'],
   tiktok: ['contract_approved', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path']
@@ -462,6 +471,7 @@ function runtimeReady(config, maskedStatus = {}) {
       && custodyMask.token_available
       && platformKeys.every((platform) => {
         const item = platforms[platform] || {};
+        if (platform === 'jifeng_wms') return item.contract_approved;
         return item.contract_approved && item.app_id && item.redirect_uri && (item.api_host || Object.keys(item.api_hosts || {}).length) && item.market;
       })
   );

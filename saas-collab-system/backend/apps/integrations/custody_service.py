@@ -28,6 +28,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from .file_custody import (
     FileCredentialStore,
     FileCustodyError,
+    FileCustodyNotFoundError,
     _canonical_json,
 )
 
@@ -468,7 +469,11 @@ class CustodyService:
             return {"value": value}
         if path == "/secrets/resolve":
             reference_id = self._required_text(payload, "reference_id")
-            return {"value": self._store.retrieve_secret(reference_id)}
+            try:
+                return {"value": self._store.retrieve_secret(reference_id)}
+            except FileCustodyNotFoundError:
+                # Authenticated lookup completed; absence is not an outage.
+                return {"found": False}
         if path == "/tokens/revoke":
             credential_id = str(payload.get("credential_id") or "").strip()
             token_id = str(payload.get("token_id") or "").strip()

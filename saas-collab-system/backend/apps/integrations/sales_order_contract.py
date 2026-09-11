@@ -79,6 +79,9 @@ def normalize_sales_order_record(platform, record):
         "lines": [
             {
                 "source_line_id": str(_required(item, "source_line_id")),
+                "platform_product_id": str(item.get("platform_product_id") or ""),
+                "platform_variant_id": str(item.get("platform_variant_id") or ""),
+                "raw_line_status": str(item.get("raw_line_status") or ""),
                 "spu": str(item.get("spu") or ""),
                 "sku": str(_required(item, "sku")),
                 "product_name": str(item.get("product_name") or ""),

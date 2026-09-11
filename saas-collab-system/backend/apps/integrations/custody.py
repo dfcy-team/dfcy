@@ -14,7 +14,7 @@ import urllib.parse
 
 from django.conf import settings
 
-from .file_custody import FileCredentialStore, FileCustodyError
+from .file_custody import FileCredentialStore, FileCustodyError, FileCustodyNotFoundError
 from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE, OAuthFlowError
 from .production_settings import get_runtime_config, get_runtime_setting
 
@@ -22,6 +22,10 @@ from .production_settings import get_runtime_config, get_runtime_setting
 class CustodyError(OAuthFlowError):
     def __init__(self, detail=None):
         super().__init__(OAUTH_PROVIDER_UNAVAILABLE, detail or "Credential custody operation failed.")
+
+
+class CustodyReferenceNotFound(CustodyError):
+    """The authenticated custody store confirmed that a reference is absent."""
 
 
 MAX_SERVICE_TOKEN_FILE_BYTES = 4096
@@ -213,6 +217,8 @@ class HttpCustodyBackend(CustodyBackend):
 
     def retrieve_secret(self, reference_id):
         payload = self._request_json("POST", "/secrets/resolve", body={"reference_id": reference_id})
+        if payload == {"found": False}:
+            raise CustodyReferenceNotFound("Credential reference was not found in the current custody service.")
         value = payload.get("value")
         if not isinstance(value, str) or not value:
             raise CustodyError("Custody could not resolve the requested secret reference.")
@@ -291,6 +297,8 @@ class FileCustodyBackend(CustodyBackend):
     def _values(self, identifier, *, allow_expired=False):
         try:
             return self._store._resolve_credentials(identifier, allow_expired=allow_expired)
+        except FileCustodyNotFoundError:
+            raise CustodyReferenceNotFound("Credential reference was not found in the current custody service.") from None
         except FileCustodyError as exc:
             raise CustodyError(str(exc)) from None
 

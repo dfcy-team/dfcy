@@ -146,6 +146,56 @@ def grant_readiness_actions(user):
 
 
 @pytest.mark.django_db
+@override_settings(DEBUG=False, PLATFORM_NETWORK_MODE="approved-live-test", LIVE_READONLY_SYNC_ENABLED=True,
+    LIVE_PLATFORM_SECURITY_APPROVED=True, LIVE_PLATFORM_ALLOWED_HOSTS=["wms.example.test"])
+def test_warehouse_readonly_approval_permissions_gates_idempotency_and_revoke(monkeypatch):
+    tenant = Tenant.objects.create(name="Warehouse readiness", code="warehouse-readiness")
+    user = CustomUser.objects.create_user(username="warehouse-operator", tenant=tenant, user_type="internal")
+    grant_view(user)
+    config = create_config(tenant, user, platform="jifeng_wms", callback_url="", contract_version="legacy",
+        network_enabled=False, sync_read_enabled=False,
+        platform_config={"api_host": "https://wms.example.test/api", "domain": "test", "client_id": "test"})
+    monkeypatch.setattr("apps.integrations.warehouse_readiness.is_module_enabled", lambda *args: True)
+    monkeypatch.setattr("apps.integrations.warehouse_readiness.approved_custody_configured", lambda: True)
+    runtime = {"contract_approved": False}
+    monkeypatch.setattr("apps.integrations.warehouse_readiness.get_runtime_platform_config", lambda *args: runtime)
+    client = client_for(user)
+    path = f"/api/internal/integrations/readiness/configs/{config.id}/readonly-approval/"
+    payload = {"approved": True, "confirm": True, "expected_version": 1, "reason": "核对极风仓库只读安全门"}
+    assert client.post(path, payload, format="json").status_code == 403
+    grant_readiness_actions(user)
+    client = client_for(CustomUser.objects.get(pk=user.pk))
+    denied = client.post(path, payload, format="json")
+    assert denied.status_code == 400
+    assert "platform_contract_not_enabled" in denied.json()["data"]["blocker_codes"]
+    config.refresh_from_db()
+    assert not config.network_enabled and config.config_version == 1
+    runtime["contract_approved"] = True
+    assert client.post(path, {**payload, "confirm": False}, format="json").status_code == 400
+    assert client.post(path, {**payload, "expected_version": 99}, format="json").status_code == 409
+    approved = client.post(path, payload, format="json")
+    assert approved.status_code == 200, approved.json()
+    config.refresh_from_db()
+    assert config.network_enabled and config.sync_read_enabled and not config.sync_write_enabled
+    assert config.config_version == 2
+    assert config.platform_config.get("contract_approved") is None  # No legacy flag / credential rewrite.
+    assert client.post(path, payload, format="json").json()["data"]["idempotent_replay"] is True
+    other = Tenant.objects.create(name="Other", code="warehouse-other")
+    outsider = CustomUser.objects.create_user(username="warehouse-outsider", tenant=other, user_type="internal")
+    grant_readiness_actions(outsider)
+    assert client_for(outsider).post(path, payload, format="json").status_code == 404
+    from apps.integrations.models import IntegrationAuditLog
+    audit = IntegrationAuditLog.objects.filter(integration_config=config, action="approve_platform_readonly").first()
+    assert audit is not None
+    assert audit.actor_id == user.id
+    runtime["contract_approved"] = False  # Revocation remains possible when global gates are closed.
+    revoked = client.post(path, {**payload, "approved": False, "expected_version": 2}, format="json")
+    assert revoked.status_code == 200
+    config.refresh_from_db()
+    assert not config.network_enabled and not config.sync_read_enabled and not config.sync_write_enabled
+
+
+@pytest.mark.django_db
 @override_settings(
     DEBUG=False,
     PLATFORM_NETWORK_MODE="approved-live-test",

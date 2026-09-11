@@ -5,6 +5,9 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.integrations.models import WarehouseAuthorization
+from apps.integrations.custody import CustodyError
+from apps.integrations.custody_service import EncryptedFileCustodyBackend
+from apps.integrations.oauth_errors import OAuthFlowError
 from apps.integrations.platform_schema_service import integration_platform_key
 from apps.integrations.serializers import WarehouseAuthorizationSerializer
 from apps.integrations.warehouse_authorization_service import bind_warehouse_authorization
@@ -34,6 +37,10 @@ def test_token_is_stored_as_secret_and_never_serialized():
     updated = save_warehouse_credentials(actor=actor, authorization=record, email="demo@example.test", token="test-bootstrap-token", custody=custody)
     assert custody.store_secrets.call_args.kwargs["secret"] == "test-bootstrap-token"
     assert "access_token" not in custody.store_secrets.call_args.kwargs
+    metadata = custody.store_secrets.call_args.kwargs["metadata"]
+    assert EncryptedFileCustodyBackend._metadata({"metadata": metadata}) == {
+        "tenant_id": actor.tenant_id, "warehouse_binding_id": record.pk,
+    }
     assert updated.bootstrap_credential_id == "opaque-warehouse-1"
     assert updated.validation_status == "pending"
     assert updated.token_id == ""
@@ -97,14 +104,18 @@ def test_unverified_legacy_binding_cannot_create_live_job():
     assert "Email" in str(response.data)
 
 
-def test_warehouse_and_credentials_save_roll_back_together(monkeypatch):
+@pytest.mark.parametrize("failure", [
+    CustodyError("storage failure"),
+    OAuthFlowError("OAUTH_PROVIDER_ERROR", "Platform rejected the request. FAKE_SECRET"),
+    OAuthFlowError("OAUTH_AUTH_REJECTED", "FAKE_SECRET"),
+])
+def test_warehouse_and_credentials_save_roll_back_together(monkeypatch, failure):
     from rest_framework.test import APIClient
     from apps.masterdata.models import WarehouseMaster
     from apps.integrations import warehouse_credential_service
-    from apps.integrations.custody import CustodyError
     actor, warehouse, config, _ = _fixture()
     custody = Mock()
-    custody.store_secrets.side_effect = CustodyError("storage failure")
+    custody.store_secrets.side_effect = failure
     monkeypatch.setattr(warehouse_credential_service, "get_custody_backend", lambda: custody)
     client = APIClient()
     client.force_authenticate(actor)
@@ -116,8 +127,39 @@ def test_warehouse_and_credentials_save_roll_back_together(monkeypatch):
     assert response.status_code == 400
     custody.store_secrets.assert_called_once()
     assert "加密保存失败" in str(response.data)
+    assert "Platform rejected" not in str(response.data)
+    assert "FAKE_SECRET" not in str(response.data)
     assert not WarehouseMaster.objects.filter(code="NEW-FAIL").exists()
     assert not WarehouseAuthorization.objects.exists()
+
+
+def test_warehouse_edit_custody_http_failure_preserves_warehouse_and_authorization(monkeypatch):
+    from rest_framework.test import APIClient
+    from apps.integrations import warehouse_credential_service
+    actor, record = binding()
+    record.email = "before@example.test"
+    record.bootstrap_credential_id = "fake-existing-bootstrap"
+    record.validation_status = "verified"
+    record.last_verified_at = timezone.now()
+    record.save()
+    warehouse = record.warehouse
+    before_name = warehouse.name
+    before_authorization = WarehouseAuthorization.objects.filter(pk=record.pk).values().get()
+    custody = Mock()
+    custody.store_secrets.side_effect = OAuthFlowError("OAUTH_PROVIDER_ERROR", "FAKE_SECRET")
+    monkeypatch.setattr(warehouse_credential_service, "get_custody_backend", lambda: custody)
+    client = APIClient()
+    client.force_authenticate(actor)
+    result = client.patch(f"/api/internal/master-data/warehouses/{warehouse.pk}/", {
+        "name": "Must roll back", "api_integration_config_id": record.integration_config_id,
+        "api_email": "after@example.test", "api_token": "FAKE_NEW_TOKEN",
+    }, format="json")
+    assert result.status_code == 400
+    assert "加密保存失败" in str(result.data)
+    assert "FAKE_" not in str(result.data)
+    warehouse.refresh_from_db()
+    assert warehouse.name == before_name
+    assert WarehouseAuthorization.objects.filter(pk=record.pk).values().get() == before_authorization
 
 
 def test_one_use_token_is_not_retried_after_network_timeout(monkeypatch):
@@ -189,13 +231,16 @@ def test_api_dialog_accepts_credentials_and_blank_preserves_token(monkeypatch):
     from rest_framework.test import APIClient
     from apps.integrations import warehouse_credential_service
     actor, warehouse, config, _ = _fixture()
+    config.environment = "production"
+    config.platform_config = {"api_type": "inventory", "contract_approved": True}
+    config.save(update_fields=["environment", "platform_config"])
     custody = Mock()
     custody.store_secrets.return_value = {"credential_id": "opaque-warehouse"}
     monkeypatch.setattr(warehouse_credential_service, "get_custody_backend", lambda: custody)
     client = APIClient()
     client.force_authenticate(actor)
     payload = {"warehouse_id": warehouse.pk, "integration_config_id": config.pk,
-               "email": "demo@example.test", "token": "FAKE_TOKEN"}
+               "email": "demo@example.test", "token": "FAKE_TOKEN", "external_warehouse_code": ""}
     response = client.post("/api/internal/integrations/warehouse-authorizations/", payload, format="json")
     assert response.status_code == 201, response.data
     assert "FAKE_TOKEN" not in str(response.data)
@@ -204,6 +249,20 @@ def test_api_dialog_accepts_credentials_and_blank_preserves_token(monkeypatch):
     assert response.status_code == 200, response.data
     custody.store_secrets.assert_called_once()
     assert WarehouseAuthorization.objects.get().bootstrap_credential_id == "opaque-warehouse"
+    assert WarehouseAuthorization.objects.get().external_warehouse_code == ""
+
+
+def test_archive_creation_without_api_fields_does_not_create_authorization():
+    from rest_framework.test import APIClient
+    actor, warehouse, _, _ = _fixture()
+    client = APIClient()
+    client.force_authenticate(actor)
+    result = client.post("/api/internal/master-data/warehouses/", {
+        "code": "ARCHIVE-ONLY", "name": "Archive only", "country_code": "MY",
+        "warehouse_type": "third_party", "status": "active", "service_platform_id": warehouse.service_platform_id,
+    }, format="json")
+    assert result.status_code == 201
+    assert not WarehouseAuthorization.objects.exists()
 
 
 def test_refresh_uses_only_warehouse_refresh_token_and_requires_recheck(monkeypatch):
@@ -235,6 +294,10 @@ def test_refresh_uses_only_warehouse_refresh_token_and_requires_recheck(monkeypa
     assert refreshed.last_verified_at is None
     assert "/api/oauth/refreshToken?" in http.request.call_args.args[1]
     assert "email=" not in http.request.call_args.args[1]
+    metadata = custody.store_secrets.call_args.kwargs["metadata"]
+    assert EncryptedFileCustodyBackend._metadata({"metadata": metadata}) == {
+        "tenant_id": actor.tenant_id, "warehouse_binding_id": record.pk,
+    }
 
 
 def test_failed_readonly_check_never_marks_connected(monkeypatch):
@@ -282,6 +345,10 @@ def test_first_authorization_uses_no_retry_transport_and_stores_distinct_oauth(m
     assert authorized.bootstrap_consumed_at is not None
     assert authorized.validation_status == "pending"
     assert authorized.last_verified_at is None
+    metadata = custody.store_secrets.call_args.kwargs["metadata"]
+    assert EncryptedFileCustodyBackend._metadata({"metadata": metadata}) == {
+        "tenant_id": actor.tenant_id, "warehouse_binding_id": record.pk,
+    }
 
 
 def test_legacy_warehouse_metadata_edit_keeps_missing_credentials():

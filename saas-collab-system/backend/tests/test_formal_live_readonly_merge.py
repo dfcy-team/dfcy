@@ -9,7 +9,7 @@ from rest_framework.exceptions import ValidationError
 from apps.accounts.models import CustomUser
 from apps.commerce.models import InventorySnapshot, RefundReturn, SalesOrder
 from apps.commerce.services import upsert_inventory_snapshot
-from apps.integrations.adapters import PlatformAdapter
+from apps.integrations.adapters import MarketplaceOrderAdapter, PlatformAdapter
 from apps.integrations.inventory_snapshot_contract import normalize_inventory_snapshot_record
 from apps.integrations.models import PlatformIntegrationConfig, SyncJob, SyncRun
 from apps.integrations.readonly_clients import TikTokReadonlyClient
@@ -87,6 +87,30 @@ def test_contracts_reject_credentials_and_normalize_sites():
     )
     assert inventory["site_code"] == "PH"
     assert inventory["available_qty"] == 2
+
+
+@pytest.mark.django_db
+def test_shopee_adapter_persists_order_lines_without_duplicates():
+    tenant, user, store, _warehouse = _scope("shopee-order-lines")
+    job, run = _run(tenant, user, "sales_order", "shopee")
+    adapter = MarketplaceOrderAdapter(job.integration_config)
+    adapter.authorization = SimpleNamespace(store=store, region="PH")
+    adapter.bind_run(run)
+    record = adapter.normalize_record({
+        "order_sn": "SYNTHETIC-ORDER", "order_status": "COMPLETED",
+        "create_time": int(NOW.timestamp()), "update_time": int(NOW.timestamp()),
+        "total_amount": 20, "item_list": [{"item_id": 123, "model_id": 456,
+            "model_sku": "SYNTHETIC-SKU", "model_quantity_purchased": 2,
+            "model_discounted_price": 10}],
+    })
+    assert adapter.persist_record(job, record)["action"] == "created"
+    assert adapter.persist_record(job, record)["action"] == "skipped"
+    order = SalesOrder.objects.get(tenant=tenant, external_order_id="SYNTHETIC-ORDER")
+    line = order.items.get()
+    assert line.platform_product_id == "123"
+    assert line.platform_variant_id == "456"
+    assert line.quantity == 2
+    assert line.line_total_amount == 20
 
 
 @pytest.mark.django_db
@@ -237,6 +261,8 @@ class _NoCredentialAccess:
     LIVE_CUSTODY_SERVICE_HOST="custody.example.test",
     LIVE_CUSTODY_SERVICE_TOKEN="test-custody-token",
     LIVE_READONLY_SYNC_ENABLED=True,
+    LIVE_TIKTOK_CONTRACT_APPROVED=True,
+    LIVE_TIKTOK_DEFAULT_OPEN_HOST="https://open-api.example.test",
 )
 def test_tiktok_expiry_fails_without_implicit_refresh_or_token_resolution(tmp_path):
     config = SimpleNamespace(
@@ -246,7 +272,7 @@ def test_tiktok_expiry_fails_without_implicit_refresh_or_token_resolution(tmp_pa
         network_enabled=True,
         sync_read_enabled=True,
         sync_write_enabled=False,
-        platform_config={"contract_approved": True},
+        platform_config={},
     )
     authorization = SimpleNamespace(
         status="active",

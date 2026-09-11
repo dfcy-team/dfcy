@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from kombu.exceptions import OperationalError as QueueOperationalError
 from collections import defaultdict
 
 from django.conf import settings
@@ -145,6 +146,7 @@ except ImportError:  # pragma: no cover - removed once the permission catalog is
     IsMarketplaceProductMappingManager = IsMarketplaceStoreMappingManager
 from .sync_alerts import acknowledge_incident, add_incident_note, assign_incident, resolve_incident
 from .production_settings import get_runtime_setting
+from .sync_services import validate_manual_sync_job
 
 
 def health_response(service):
@@ -512,8 +514,10 @@ def _readiness_action_response(config, *, operation, replay=False, target_contra
     return data
 
 
-def _require_marketplace_readiness_config(config):
+def _require_marketplace_readiness_config(config, *, allow_warehouse=False):
     platform = str(config.platform or "").lower()
+    if allow_warehouse and platform == PlatformChoices.JIFENG_WMS:
+        return ""
     if platform not in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
         raise ValidationError({"platform": "当前页面动作仅适用于 Lazada、Shopee 或 TikTok Shop 接入配置。"})
     try:
@@ -615,7 +619,7 @@ def set_readiness_readonly_approval(request, pk):
     if len(reason) < 5:
         raise ValidationError({"reason": "请填写至少 5 个字符的审批或撤销原因。"})
     payload["reason"] = reason
-    target_contract = _require_marketplace_readiness_config(config)
+    target_contract = _require_marketplace_readiness_config(config, allow_warehouse=True)
     action = "approve_platform_readonly" if payload["approved"] else "revoke_platform_readonly"
     operation_digest, payload_digest = _readiness_operation_identity(request, action, config, payload)
 
@@ -992,7 +996,7 @@ def _credential_update_parts(config, values):
         if values.get("ads_secret"):
             secret_values["api_secret"] = values["ads_secret"]
     elif config.platform == PlatformChoices.TIKTOK:
-        unsupported = set(values) - {"app_key", "service_id", "app_secret"}
+        unsupported = set(values) - {"app_key", "service_id", "app_secret", "redirect_uri"}
         if unsupported:
             raise ValidationError("TikTok Shop 凭据字段与当前配置不匹配。")
         app_key = str(values.get("app_key") or platform_config.get("app_key") or identity).strip()
@@ -1000,6 +1004,13 @@ def _credential_update_parts(config, values):
         if not app_key or not service_id:
             raise ValidationError("App Key 和 Service ID 不能为空。")
         platform_config.update({"app_key": app_key, "service_id": service_id})
+        redirect_uri = str(values.get("redirect_uri") or "").strip()
+        if redirect_uri:
+            callback_url = validate_marketplace_callback_url(
+                redirect_uri,
+                environment=config.environment,
+                platform=config.platform,
+            )
         if values.get("app_secret"):
             secret_values["app_secret"] = values["app_secret"]
     elif config.platform == PlatformChoices.JIFENG_WMS:
@@ -2372,6 +2383,15 @@ def sync_job_collection(request):
     return success_response(SyncJobSerializer(job, context={"request": request}).data, status=201)
 
 
+@api_view(["GET"])
+@permission_classes([IsIntegrationManager])
+def missing_sync_jobs_preview(request):
+    from .missing_jobs import preview_missing_jobs
+    if request.query_params:
+        raise ValidationError("Unknown missing-task preview parameter.")
+    return success_response(preview_missing_jobs(request.user))
+
+
 def _scoped_sync_job(request, pk, permission_code="integrations.manage"):
     return get_scoped_object_or_404(
         filter_sync_jobs(
@@ -2511,21 +2531,26 @@ def sync_job_detail(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsIntegrationManager])
+@transaction.atomic
 def toggle_sync_job(request, pk):
     if not is_module_enabled("api_integrations"):
         raise ValidationError("API data integration module is disabled.")
     job = _scoped_sync_job(request, pk)
+    job = SyncJob.objects.select_for_update().select_related("integration_config").get(pk=job.pk)
     if job.status == SyncJob.Status.RUNNING:
         raise ValidationError("运行中的同步任务不能切换启用状态。")
-    enabled = request.data.get("enabled") is True
+    if not isinstance(request.data, dict) or type(request.data.get("enabled")) is not bool:
+        raise ValidationError("enabled 必须明确为 true 或 false。")
+    enabled = request.data["enabled"]
     if enabled:
         if job.integration_config.status == PlatformIntegrationConfig.Status.DISABLED:
             raise ValidationError("关联接入配置已禁用。")
-        if not job.integration_config.credential_id or job.integration_config.credential_status in {
+        if job.integration_config.environment != "mock" and (not job.integration_config.credential_id or job.integration_config.credential_status in {
             PlatformIntegrationConfig.CredentialStatus.UNCONFIGURED,
             PlatformIntegrationConfig.CredentialStatus.REVOKED,
-        }:
+        }):
             raise ValidationError("开发者凭据尚未就绪。")
+        validate_manual_sync_job(job)
     job.is_enabled = enabled
     job.status = SyncJob.Status.IDLE if enabled else SyncJob.Status.DISABLED
     job.next_run_at = None
@@ -2790,7 +2815,18 @@ def run_mock_sync_job(request, pk):
         ),
         pk=pk,
     )
-    run, created = run_sync_job(sync_job, idempotency_key=request.data.get("idempotency_key"))
+    if not sync_job.is_enabled or sync_job.status == SyncJob.Status.DISABLED:
+        raise ValidationError("任务已停用，不能运行模拟任务。")
+    if (
+        sync_job.integration_config.environment != "mock"
+        or sync_job.resource_type != SyncJob.ResourceType.MOCK_RECORD
+        or sync_job.store_authorization_id
+        or sync_job.warehouse_authorization_id
+    ):
+        raise ValidationError("仅独立 Mock 任务可运行模拟；真实平台任务请使用受控只读同步入口。")
+    run, created = run_sync_job(
+        sync_job, adapter=MockPlatformAdapter(), idempotency_key=request.data.get("idempotency_key")
+    )
     return success_response({"created": created, "run": SyncRunSerializer(run).data})
 
 
@@ -2810,7 +2846,13 @@ def enqueue_sync_job(request, pk):
     idempotency_key = str(request.data.get("idempotency_key") or "").strip() or None
     if idempotency_key and len(idempotency_key) > 160:
         raise ValidationError({"idempotency_key": "Idempotency key cannot exceed 160 characters."})
-    task = run_readonly_sync_job.delay(sync_job.id, idempotency_key)
+    if not sync_job.is_enabled or sync_job.status == SyncJob.Status.DISABLED:
+        raise ValidationError("任务已停用，请先启用任务。")
+    validate_manual_sync_job(sync_job, live_only=True)
+    try:
+        task = run_readonly_sync_job.delay(sync_job.id, idempotency_key)
+    except QueueOperationalError:
+        raise ValidationError("同步队列连接异常，提交结果尚不能确认；请检查运行记录和本地任务服务，不要连续重试。") from None
     return success_response({"accepted": True, "task_id": task.id}, status=202)
 
 
@@ -2825,6 +2867,8 @@ def disable_sync_job(request, pk):
         ),
         pk=pk,
     )
+    if sync_job.status == SyncJob.Status.RUNNING:
+        raise ValidationError("任务正在运行，请等待当前运行结束后停用。")
     sync_job.is_enabled = False
     sync_job.status = SyncJob.Status.DISABLED
     sync_job.save(update_fields=["is_enabled", "status", "updated_at"])

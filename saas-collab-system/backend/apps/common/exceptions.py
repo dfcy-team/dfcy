@@ -105,10 +105,11 @@ def _get_message(response):
         detail = response.data.get("detail")
         if detail:
             return str(detail)
-        return "error message"
+        return "提交内容校验失败，请检查字段提示。"
     if isinstance(response.data, list):
-        return "error message"
-    return str(response.data) if response.data else "error message"
+        messages = [str(item) for item in response.data if isinstance(item, str) and item]
+        return "；".join(messages) if messages else "请求未完成，请检查错误详情。"
+    return str(response.data) if response.data else "请求未完成，请检查错误详情。"
 
 
 def custom_exception_handler(exc, context):
@@ -135,4 +136,7 @@ def custom_exception_handler(exc, context):
         "message": _get_message(response),
         "data": original_data if isinstance(exc, exceptions.ValidationError) else None,
     }
+    if getattr(exc, "diagnostic", None) is not None:
+        response.data["message"] = "OAuth flow rejected: " + exc.controlled_code
+        response.data["data"] = {"reason_code": exc.controlled_code, "diagnostic": exc.diagnostic}
     return response

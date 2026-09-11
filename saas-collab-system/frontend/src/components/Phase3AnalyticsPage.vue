@@ -11,7 +11,7 @@
 
     <el-alert v-if="boundaryNote" :title="boundaryNote" type="warning" show-icon :closable="false" />
 
-    <el-form class="analytics-filters" :model="query" inline @submit.prevent="loadData">
+    <el-form class="analytics-filters" :model="query" inline @submit.prevent="search">
       <el-form-item v-for="filter in filters" :key="filter.key" :label="filter.label">
         <el-date-picker
           v-if="filter.type === 'daterange'"
@@ -36,18 +36,19 @@
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
 
     <div v-loading="loading" class="analytics-content">
-      <section class="quality-rail" aria-label="数据可信度">
+      <section class="quality-rail" :aria-label="qualityLabel">
         <div>
-          <span>数据可信度</span>
-          <strong>{{ quality.score ?? '--' }}<small v-if="quality.score !== undefined">%</small></strong>
+          <span>{{ qualityLabel }}</span>
+          <strong>{{ quality.score ?? '--' }}<small v-if="quality.score != null">%</small></strong>
         </div>
         <el-progress :percentage="quality.score || 0" :stroke-width="8" :show-text="false" :status="qualityProgressStatus" />
         <dl>
-          <div><dt>质量状态</dt><dd>{{ quality.status || 'unknown' }}</dd></div>
+          <div><dt>状态</dt><dd>{{ quality.status_label || quality.status || 'unknown' }}</dd></div>
           <div><dt>口径版本</dt><dd>{{ quality.metric_version || '--' }}</dd></div>
           <div><dt>刷新时间</dt><dd>{{ quality.refreshed_at || '--' }}</dd></div>
         </dl>
       </section>
+      <p v-if="quality.note" class="quality-note">{{ quality.note }}</p>
 
       <section v-if="metrics.length" class="metric-grid" aria-label="核心经营指标">
         <article v-for="metric in metrics" :key="metric.code" class="metric-card">
@@ -62,12 +63,13 @@
         </article>
       </section>
 
-      <section v-if="trend.length" class="analytics-panel trend-panel">
+      <section v-if="trend.length || trendEmptyText" class="analytics-panel trend-panel">
         <div class="panel-heading">
           <div><h2>{{ trendTitle }}</h2><p>{{ trendNote }}</p></div>
           <span>{{ trendUnit }}</span>
         </div>
-        <div class="bar-chart" role="img" :aria-label="trendTitle">
+        <p v-if="!trend.length">{{ trendMessage || trendEmptyText }}</p>
+        <div v-else class="bar-chart" role="img" :aria-label="trendTitle">
           <div v-for="point in trend" :key="point.label" class="bar-column">
             <span class="bar-value">{{ point.value }}</span>
             <div class="bar-track"><i :style="{ height: barHeight(point.value) }" /></div>
@@ -81,13 +83,14 @@
           <div><h2>{{ tableTitle }}</h2><p>{{ tableNote }}</p></div>
           <el-tag effect="plain">{{ items.length }} 条</el-tag>
         </div>
-        <el-table :data="items" :empty-text="emptyText" stripe>
+        <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort">
           <el-table-column
             v-for="column in columns"
             :key="column.prop"
             :prop="column.prop"
             :label="column.label"
             :min-width="column.width || 120"
+            :sortable="column.sortable || false"
             show-overflow-tooltip
           >
             <template #default="{ row }">
@@ -129,6 +132,8 @@ const props = defineProps({
   trendTitle: { type: String, default: '趋势' },
   trendNote: { type: String, default: '' },
   trendUnit: { type: String, default: '' },
+  trendEmptyText: { type: String, default: '' },
+  qualityLabel: { type: String, default: '数据可信度' },
   tableTitle: { type: String, default: '明细' },
   tableNote: { type: String, default: '' },
   emptyText: { type: String, default: '当前筛选条件下暂无数据' }
@@ -141,9 +146,13 @@ const apiStatus = ref('mock');
 const quality = ref({});
 const metrics = ref([]);
 const trend = ref([]);
+const trendMessage = ref('');
 const items = ref([]);
 const total = ref(0);
 const currentPage = ref(1);
+const tableRef = ref(null);
+const ordering = ref('');
+let loadSequence = 0;
 const pageSize = 20;
 
 const apiStatusLabel = computed(() => ({
@@ -170,6 +179,17 @@ function initializeFilters() {
 
 function resetFilters() {
   initializeFilters();
+  ordering.value = '';
+  tableRef.value?.clearSort?.();
+  loadData();
+}
+
+function changeSort({ prop, order }) {
+  if (order && !props.columns.some(column => column.prop === prop && column.sortable === 'custom')) return;
+  const next = order ? `${order === 'descending' ? '-' : ''}${prop}` : '';
+  if (next === ordering.value) return;
+  ordering.value = next;
+  currentPage.value = 1;
   loadData();
 }
 
@@ -178,8 +198,13 @@ function changePage(page) {
   loadData();
 }
 
+function search() {
+  currentPage.value = 1;
+  loadData();
+}
+
 function barHeight(value) {
-  return `${Math.max(8, ((Number(value) || 0) / maxTrendValue.value) * 100)}%`;
+  return `${Math.max(0, ((Number(value) || 0) / maxTrendValue.value) * 100)}%`;
 }
 
 function formatValue(value) {
@@ -206,10 +231,13 @@ function statusType(value) {
 }
 
 async function loadData() {
+  const sequence = ++loadSequence;
   loading.value = true;
   errorMessage.value = '';
+  trendMessage.value = '';
   try {
-    const response = await props.loader({ ...query, page: currentPage.value, page_size: pageSize });
+    const response = await props.loader({ ...query, ...(ordering.value ? { ordering: ordering.value } : {}), page: currentPage.value, page_size: pageSize });
+    if (sequence !== loadSequence) return;
     if (!response?.success) {
       apiStatus.value = 'pending';
       errorMessage.value = formatApiError(response);
@@ -225,10 +253,12 @@ async function loadData() {
     quality.value = data.quality || {};
     metrics.value = Array.isArray(data.metrics) ? data.metrics : [];
     trend.value = Array.isArray(data.trend) ? data.trend : [];
+    trendMessage.value = data.trend_message || '';
     items.value = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
     total.value = Number(data.count ?? items.value.length);
     if (['fallback', 'degraded'].includes(data.api_status)) errorMessage.value = response.message || data.api_error || '接口异常，已显示降级数据';
   } catch (error) {
+    if (sequence !== loadSequence) return;
     apiStatus.value = 'pending';
     errorMessage.value = formatApiError(error?.response || { message: error?.message });
     quality.value = {};
@@ -237,7 +267,7 @@ async function loadData() {
     items.value = [];
     total.value = 0;
   } finally {
-    loading.value = false;
+    if (sequence === loadSequence) loading.value = false;
   }
 }
 
@@ -254,6 +284,7 @@ onMounted(loadData);
 .analytics-filters { padding: 12px 14px 0; border: 1px solid #dce3ec; border-radius: 8px; background: #fff; }
 .analytics-filters :deep(.el-select) { width: 150px; }
 .analytics-content { display: grid; gap: 16px; min-height: 220px; }
+.quality-note { margin: 0; color: #475569; font-size: 13px; line-height: 1.6; }
 .quality-rail { display: grid; grid-template-columns: 150px minmax(180px, 1fr) minmax(420px, 1.6fr); align-items: center; gap: 20px; padding: 14px 16px; border: 1px solid #cfd9e6; border-left: 4px solid #0f766e; border-radius: 6px; background: #fff; }
 .quality-rail > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #475569; font-size: 13px; }
 .quality-rail strong { color: #0f766e; font-size: 22px; }

@@ -169,7 +169,7 @@
         show-icon
       />
       <el-form label-position="top" class="create-form" @submit.prevent="submitForm">
-        <el-form-item v-for="field in formFields.filter(item => !item.visible || item.visible(resourceForm))" :key="field.key" :label="field.label" :required="field.required">
+        <el-form-item v-for="field in formFields.filter(item => !item.visible || item.visible(resourceForm))" :key="field.key" :label="field.label" :required="field.required" :error="fieldErrors[field.key]">
           <el-select
             v-if="field.type === 'select'"
             v-model="resourceForm[field.key]"
@@ -264,6 +264,7 @@ const formOpen = ref(false);
 const editingRow = ref(null);
 const selectedRow = ref({});
 const resourceForm = reactive({});
+const fieldErrors = ref({});
 // Keep the callback contract explicit: field.onChange?.($event, resourceForm)
 // is invoked through handleFieldChange so every form uses the same guard.
 const createForm = resourceForm;
@@ -362,6 +363,7 @@ function openCreate(defaults = {}) {
 }
 
 function fillForm(row = {}) {
+  fieldErrors.value = {};
   for (const key of Object.keys(resourceForm)) delete resourceForm[key];
   for (const field of props.formFields) resourceForm[field.key] = row[field.key] ?? field.default ?? '';
 }
@@ -381,10 +383,13 @@ function openEdit(row) {
 }
 
 async function submitForm() {
+  if (submitting.value) return;
+  fieldErrors.value = {};
   const isEditing = Boolean(editingRow.value);
   if (isEditing ? (!manageAccess.value.allowed || !props.editHandler) : (!createAccess.value.allowed || !props.createHandler)) return;
   const missing = props.formFields.find((field) => (!field.visible || field.visible(resourceForm)) && field.required && !resourceForm[field.key]);
   if (missing) {
+    fieldErrors.value[missing.key] = `请填写${missing.label}`;
     ElMessage.warning(`请填写${missing.label}`);
     return;
   }
@@ -393,7 +398,17 @@ async function submitForm() {
     const response = isEditing
       ? await props.editHandler(editingRow.value.id, { ...resourceForm })
       : await props.createHandler({ ...resourceForm });
-    if (!response?.success) throw new Error(response?.message || '保存失败');
+    if (!response?.success) {
+      if (response?.code === 'VALIDATION_ERROR' || response?.code === 'BUSINESS_RULE_VIOLATION') {
+        for (const field of props.formFields) {
+          const errors = response?.data?.[field.key];
+          const messages = Array.isArray(errors) ? errors : [errors];
+          const message = messages.filter(value => typeof value === 'string').join('；');
+          if (message) fieldErrors.value[field.key] = message;
+        }
+      }
+      throw new Error(Object.keys(fieldErrors.value).length ? '请检查标记的字段后重试' : response?.message || '保存失败');
+    }
     ElMessage.success(response.message || '保存成功');
     formOpen.value = false;
     await loadData();

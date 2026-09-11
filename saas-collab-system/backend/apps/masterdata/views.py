@@ -6,8 +6,9 @@ from xml.etree import ElementTree
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.db.models.deletion import ProtectedError, RestrictedError
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
 from rest_framework.views import APIView
 
 from apps.audit.services import write_operation_log
@@ -342,6 +343,27 @@ class MasterDataDetailView(APIView):
             after_data={"code": _instance_code(instance), "status": instance.status},
         )
         return success_response(serializer.data)
+
+    @transaction.atomic
+    def delete(self, request, resource, pk):
+        if resource != "platforms":
+            raise MethodNotAllowed("DELETE")
+        instance = self.get_object(request, resource, pk)
+        instance = PlatformMaster.objects.select_for_update().get(pk=instance.pk)
+        # Also protect nullable/cascading references, not only PROTECT FKs.
+        for relation in instance._meta.related_objects:
+            if relation.related_model._base_manager.filter(**{relation.field.name: instance}).exists():
+                raise StateConflict("平台存在关联数据，请保留档案并按业务规则停用。")
+        before = {"code": instance.code, "status": instance.status}
+        try:
+            instance.delete()
+        except (ProtectedError, RestrictedError) as exc:
+            raise StateConflict("平台存在关联数据，不能删除。") from exc
+        write_operation_log(
+            tenant=request.user.tenant, user=request.user, module="masterdata",
+            action="delete", object_type=resource, object_id=pk, before_data=before,
+        )
+        return success_response({"id": pk, "deleted": True})
 
 
 class MasterDataStatusView(APIView):

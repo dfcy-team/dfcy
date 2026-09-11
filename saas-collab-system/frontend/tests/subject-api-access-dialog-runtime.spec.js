@@ -7,6 +7,7 @@ const authContext = vi.hoisted(() => ({ allowed: true, manage: true }));
 const api = vi.hoisted(() => ({
   bindWarehouseAuthorization: vi.fn(),
   authorizeJifengWarehouse: vi.fn(),
+  discoverJifengWarehouses: vi.fn(),
   refreshJifengWarehouse: vi.fn(),
   checkJifengWarehouse: vi.fn(),
   checkIntegrationReadonlyConnection: vi.fn(),
@@ -135,12 +136,98 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(wrapper.emitted('changed')).toBeTruthy();
   });
 
+  it('shows a consumed callback as a conflict, never as new authorization success', async () => {
+    const wrapper = await mountDialog('store');
+    api.completeManualStoreCallback.mockResolvedValue({ success: false, code: 'STATE_CONFLICT',
+      data: { reason_code: 'OAUTH_STATE_CONSUMED' } });
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/callback?state=FAKE_STATE&code=FAKE_CODE';
+    await wrapper.vm.submitManualCallback('marketplace');
+    await nextTick();
+    expect(wrapper.text()).toContain('本次回调已使用');
+    expect(ElMessage.success).not.toHaveBeenCalled();
+    expect(api.completeManualStoreCallback).toHaveBeenCalledTimes(1);
+    expect(wrapper.vm.manualCallbackUrls.marketplace).toBe('');
+  });
+
+  it('explains manual processing in the current backend', async () => {
+    const wrapper = await mountDialog('store');
+    expect(wrapper.text()).toContain('当前页面连接的后端');
+    expect(wrapper.text()).toContain('不会访问粘贴地址');
+    expect(wrapper.text()).not.toContain('加密写入并绑定 SaaS MySQL');
+  });
+
+  it('rejects duplicate callback parameters before submitting', async () => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/callback?state=ONE&state=TWO&code=TEST';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid callback input without sending it', async () => {
     const wrapper = await mountDialog('store');
     wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/start';
     await wrapper.vm.submitManualCallback('marketplace');
     expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
     expect(ElMessage.warning).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['OAUTH_STATE_EXPIRED', '授权会话已过期'],
+    ['OAUTH_AUTH_REJECTED', '不是本系统登录过期'],
+    ['OAUTH_DATABASE_FAILURE', '保存失败'],
+  ])('keeps a safe persistent message for %s', async (reason, text) => {
+    const wrapper = await mountDialog('store');
+    api.completeManualStoreCallback.mockResolvedValue({ success: false, message: 'TEST_SECRET_NOT_FOR_DISPLAY',
+      data: { reason_code: reason } });
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?state=TEST&code=TEST';
+    await wrapper.vm.submitManualCallback('marketplace');
+    await nextTick();
+    expect(wrapper.text()).toContain(text);
+    expect(wrapper.text()).not.toContain('TEST_SECRET_NOT_FOR_DISPLAY');
+    expect(ElMessage.success).not.toHaveBeenCalled();
+    expect(wrapper.vm.busy).toBe('');
+  });
+
+  it.each([
+    ['exchange_token', 'timeout_uncertain', '结果尚不能确认'],
+    ['exchange_token', 'ip_allowlist_rejected', 'Shopee 开发者后台'],
+    ['read_developer_secret', 'custody_authentication_rejected', '本地托管服务认证失败'],
+    ['save_authorization', 'database_failure', 'Token 已取得'],
+  ])('shows safe stage diagnostics for %s', async (stage, category, expected) => {
+    const wrapper = await mountDialog('store');
+    api.completeManualStoreCallback.mockResolvedValue({ success: false, message: 'FAKE_SECRET',
+      data: { reason_code: 'OAUTH_PROVIDER_UNAVAILABLE', diagnostic: {
+        diagnostic_id: '0123456789abcdef0123456789abcdef', platform: 'shopee', stage, category,
+        platform_error_code: 'UNCLASSIFIED',
+      } } });
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?state=TEST&code=TEST';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(wrapper.text()).toContain(expected);
+    expect(wrapper.text()).toContain('0123456789abcdef0123456789abcdef');
+    expect(wrapper.text()).toContain('未分类平台错误');
+    expect(wrapper.text()).not.toContain('FAKE_SECRET');
+    expect(ElMessage.success).not.toHaveBeenCalled();
+  });
+
+  it('does not submit a callback twice while the first request is pending', async () => {
+    const wrapper = await mountDialog('store');
+    let finish;
+    api.completeManualStoreCallback.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?state=TEST&code=TEST';
+    const pending = wrapper.vm.submitManualCallback('marketplace');
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeManualStoreCallback).toHaveBeenCalledTimes(1);
+    finish({ success: true });
+    await pending;
+  });
+
+  it('creates warehouse tasks disabled without running a platform check', async () => {
+    const wrapper = await mountDialog('warehouse');
+    await wrapper.vm.createInventorySyncJob({ id: 202, integration_config_id: 3 });
+    expect(api.createSyncJob).toHaveBeenCalledWith(expect.objectContaining({
+      warehouse_authorization_id: 202, is_enabled: false, schedule_type: 'manual',
+    }));
+    expect(api.checkJifengWarehouse).not.toHaveBeenCalled();
   });
 
   it('clears failed callback input and does not echo server details', async () => {
@@ -187,7 +274,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
       store_authorization_id: 201,
       resource_type: 'refund_return',
       schedule_type: 'manual',
-      is_enabled: true,
+      is_enabled: false,
     }));
   });
 
@@ -257,13 +344,16 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     api.rebindWarehouseAuthorization.mockResolvedValue({
       success: true,
       code: 'OK',
-      data: { idempotent: false, operation: 'warehouse_rebind' },
+      data: { authorization: { id: 303 }, idempotent: false, operation: 'warehouse_rebind' },
     });
     const wrapper = await mountDialog('warehouse');
     expect(wrapper.vm.warehouseExternalCode).toBe('MY-JIFENG-01');
 
     wrapper.vm.warehouseExternalCode = 'MY-JIFENG-02';
-    await wrapper.vm.bindWarehouse('inventory');
+    wrapper.vm.warehouseEmail = 'fake@example.test';
+    wrapper.vm.warehouseToken = 'test-token';
+    api.authorizeJifengWarehouse.mockResolvedValue({ success: true });
+    await wrapper.vm.authorizeWarehouse('inventory');
     await flushPromises();
 
     expect(api.rebindWarehouseAuthorization).toHaveBeenCalledWith(
@@ -278,6 +368,27 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     );
   });
 
+  it('saves then authorizes with an optional empty external code', async () => {
+    api.rebindWarehouseAuthorization.mockResolvedValue({ success: true, data: { authorization: { id: 303 } } });
+    api.authorizeJifengWarehouse.mockResolvedValue({ success: true });
+    const wrapper = await mountDialog('warehouse');
+    wrapper.vm.warehouseExternalCode = '';
+    wrapper.vm.warehouseEmail = 'fake@example.test';
+    wrapper.vm.warehouseToken = 'test-token';
+    await wrapper.vm.authorizeWarehouse('inventory');
+    await flushPromises();
+    expect(api.rebindWarehouseAuthorization).toHaveBeenCalledWith(202, expect.objectContaining({
+      external_warehouse_code: '', email: 'fake@example.test', token: 'test-token',
+    }));
+    expect(api.authorizeJifengWarehouse).toHaveBeenCalledExactlyOnceWith(303);
+    expect(api.rebindWarehouseAuthorization.mock.invocationCallOrder[0]).toBeLessThan(api.authorizeJifengWarehouse.mock.invocationCallOrder[0]);
+    expect(wrapper.text()).not.toContain('保存仓库 API 配置');
+    expect(wrapper.findAll('button').filter(button => button.text() === '重新授权')).toHaveLength(1);
+    const externalCodeField = wrapper.find('label[label="服务商外部仓库编码（选填）"]');
+    expect(externalCodeField.exists()).toBe(true);
+    expect(externalCodeField.attributes('required')).toBeUndefined();
+  });
+
   it('keeps a long warehouse authorization history inside a local scroll container', async () => {
     const wrapper = await mountDialog('warehouse');
     expect(wrapper.find('.authorization-history-table').exists()).toBe(true);
@@ -289,13 +400,71 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     const button = wrapper.findAll('button').find(item => item.text().includes('创建库存同步任务'));
     expect(button).toBeDefined();
     expect(button.attributes('disabled')).toBeDefined();
-    expect(wrapper.text()).toContain('保存不代表连通');
+    expect(wrapper.text()).toContain('授权成功后仍需只读校验');
+    Object.assign(wrapper.vm.primaryBinding('inventory'), {email: 'fake@example.test', token_configured: true});
+    wrapper.vm.warehouseEmail = 'fake@example.test';
     api.authorizeJifengWarehouse.mockResolvedValue({ success: true });
-    await wrapper.vm.firstWarehouseAuthorization({ id: 202 });
+    await wrapper.vm.authorizeWarehouse('inventory');
     expect(ElMessageBox.confirm).toHaveBeenCalled();
     expect(api.authorizeJifengWarehouse).toHaveBeenCalledWith(202);
     expect(api.checkJifengWarehouse).not.toHaveBeenCalled();
     expect(api.createSyncJob).not.toHaveBeenCalled();
+    expect(api.rebindWarehouseAuthorization).not.toHaveBeenCalled();
+  });
+
+  it('uses one authorization button for a new warehouse and binds before exchanging', async () => {
+    const wrapper = await mountDialog('warehouse');
+    wrapper.vm.access.bindings = [];
+    wrapper.vm.warehouseEmail = 'fake@example.test';
+    wrapper.vm.warehouseToken = 'FAKE_TOKEN';
+    await nextTick();
+    expect(wrapper.findAll('button').filter(button => button.text() === '授权')).toHaveLength(1);
+    expect(wrapper.text()).not.toContain('保存仓库 API 配置');
+    api.bindWarehouseAuthorization.mockResolvedValue({success: true, data: {authorization: {id: 304}}});
+    api.authorizeJifengWarehouse.mockResolvedValue({success: true});
+    await wrapper.vm.authorizeWarehouse('inventory');
+    expect(api.bindWarehouseAuthorization).toHaveBeenCalledTimes(1);
+    expect(api.authorizeJifengWarehouse).toHaveBeenCalledExactlyOnceWith(304);
+    expect(api.rebindWarehouseAuthorization).not.toHaveBeenCalled();
+  });
+
+  it('stops on save failure without exchanging or showing success', async () => {
+    const wrapper = await mountDialog('warehouse');
+    wrapper.vm.warehouseEmail = 'fake@example.test';
+    wrapper.vm.warehouseToken = 'FAKE_TOKEN';
+    api.rebindWarehouseAuthorization.mockResolvedValue({success: false, message: '保存失败'});
+    await wrapper.vm.authorizeWarehouse('inventory');
+    expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+    expect(ElMessage.success).not.toHaveBeenCalled();
+    expect(wrapper.vm.busy).toBe('');
+  });
+
+  it('requires a new token for consumed authorizations and cancellation has no writes', async () => {
+    const wrapper = await mountDialog('warehouse');
+    wrapper.vm.warehouseEmail = 'fake@example.test';
+    Object.assign(wrapper.vm.primaryBinding('inventory'), {token_configured: true, bootstrap_consumed_at: '2026-09-10T00:00:00Z'});
+    await wrapper.vm.authorizeWarehouse('inventory');
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('填写新的 Token'));
+    expect(api.rebindWarehouseAuthorization).not.toHaveBeenCalled();
+    wrapper.vm.warehouseToken = 'NEW_FAKE_TOKEN';
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel');
+    await wrapper.vm.authorizeWarehouse('inventory');
+    expect(api.rebindWarehouseAuthorization).not.toHaveBeenCalled();
+    expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+    expect(wrapper.vm.busy).toBe('');
+  });
+
+  it('blocks double clicks and never retries an uncertain exchange', async () => {
+    const wrapper = await mountDialog('warehouse');
+    wrapper.vm.warehouseEmail = 'fake@example.test';
+    wrapper.vm.warehouseToken = 'FAKE_TOKEN';
+    api.rebindWarehouseAuthorization.mockResolvedValue({success: true, data: {authorization: {id: 305}}});
+    api.authorizeJifengWarehouse.mockRejectedValue(new Error('授权结果未能确认'));
+    await Promise.all([wrapper.vm.authorizeWarehouse('inventory'), wrapper.vm.authorizeWarehouse('inventory')]);
+    expect(api.rebindWarehouseAuthorization).toHaveBeenCalledTimes(1);
+    expect(api.authorizeJifengWarehouse).toHaveBeenCalledExactlyOnceWith(305);
+    expect(ElMessage.success).not.toHaveBeenCalled();
+    expect(wrapper.vm.busy).toBe('');
   });
 
   it('allows readonly validation before a sync job exists', async () => {
@@ -314,5 +483,71 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(api.refreshJifengWarehouse).toHaveBeenCalledWith(202);
     expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('重新执行只读校验'));
+  });
+
+  it('shows post-authorization discovery failure without repeating the exchange or claiming success', async () => {
+    const wrapper = await mountDialog('warehouse');
+    Object.assign(wrapper.vm.primaryBinding('inventory'), { email: 'fake@example.test', token_configured: true });
+    wrapper.vm.warehouseEmail = 'fake@example.test';
+    api.authorizeJifengWarehouse.mockResolvedValue({ success: true, data: { warehouse_discovery: {
+      status: 'failed', warehouses: [], message: '现有授权未清除，请重试获取仓库',
+    } } });
+    await wrapper.vm.authorizeWarehouse('inventory');
+    expect(api.authorizeJifengWarehouse).toHaveBeenCalledExactlyOnceWith(202);
+    expect(ElMessage.success).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('现有授权未清除');
+    expect(api.discoverJifengWarehouses).not.toHaveBeenCalled();
+  });
+
+  it('fetches warehouse codes with an existing authorization without saving credentials or exchanging again', async () => {
+    const wrapper = await mountDialog('warehouse');
+    Object.assign(wrapper.vm.primaryBinding('inventory'), { oauth_token_available: true });
+    api.discoverJifengWarehouses.mockResolvedValue({ success: true, data: { warehouse_discovery: {
+      status: 'linked', warehouses: [], message: '仓库编号已关联；尚未完成库存只读校验。',
+    } } });
+    await wrapper.vm.getWarehouseCodes();
+    expect(api.discoverJifengWarehouses).toHaveBeenCalledExactlyOnceWith(202, {});
+    expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+    expect(api.rebindWarehouseAuthorization).not.toHaveBeenCalled();
+    expect(api.checkJifengWarehouse).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('尚未完成库存只读校验');
+  });
+
+  it('requires an explicit warehouse choice and confirmation when several warehouses are returned', async () => {
+    const wrapper = await mountDialog('warehouse');
+    Object.assign(wrapper.vm.primaryBinding('inventory'), { oauth_token_available: true });
+    api.discoverJifengWarehouses.mockResolvedValue({ success: true, data: { warehouse_discovery: {
+      status: 'selection_required', message: '请选择仓库', warehouses: [
+        { code: 'REMOTE-1', name: 'One', country: 'MY', selectable: true },
+        { code: 'REMOTE-2', name: 'Two', country: 'MY', selectable: true },
+      ],
+    } } });
+    await wrapper.vm.getWarehouseCodes();
+    expect(wrapper.vm.warehouseChoice).toBe('');
+    expect(wrapper.text()).toContain('确认关联仓库');
+    expect(api.discoverJifengWarehouses).toHaveBeenCalledTimes(1);
+    Object.assign(wrapper.vm.primaryBinding('inventory'), { oauth_token_available: true });
+    wrapper.vm.warehouseChoice = 'REMOTE-2';
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel');
+    await wrapper.vm.getWarehouseCodes(true);
+    expect(api.discoverJifengWarehouses).toHaveBeenCalledTimes(1);
+    await wrapper.vm.getWarehouseCodes(true);
+    expect(api.discoverJifengWarehouses).toHaveBeenLastCalledWith(202, { external_warehouse_code: 'REMOTE-2' });
+    expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+  });
+
+  it('recovers from warehouse discovery network errors and prevents repeated clicks', async () => {
+    const wrapper = await mountDialog('warehouse');
+    Object.assign(wrapper.vm.primaryBinding('inventory'), { oauth_token_available: true });
+    api.discoverJifengWarehouses.mockRejectedValue(new Error('网络超时'));
+    await Promise.all([wrapper.vm.getWarehouseCodes(), wrapper.vm.getWarehouseCodes()]);
+    expect(api.discoverJifengWarehouses).toHaveBeenCalledTimes(1);
+    expect(wrapper.vm.busy).toBe('');
+    expect(wrapper.vm.warehouseDiscovery.status).toBe('failed');
+    expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+    authContext.allowed = false;
+    const denied = await mountDialog('warehouse');
+    await denied.vm.getWarehouseCodes();
+    expect(api.discoverJifengWarehouses).toHaveBeenCalledTimes(1);
   });
 });

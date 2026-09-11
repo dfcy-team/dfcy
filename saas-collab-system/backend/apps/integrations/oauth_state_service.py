@@ -1,4 +1,5 @@
 import hashlib
+import json
 import secrets
 from datetime import timedelta
 
@@ -7,6 +8,8 @@ from django.utils import timezone
 
 from .models import OAuthStateSession, PlatformChoices, oauth_state_service_write
 from .oauth_errors import (
+    OAUTH_CONFIGURATION_CHANGED,
+    OAuthFlowError,
     OAUTH_PLATFORM_MISMATCH,
     OAUTH_SESSION_MISMATCH,
     OAUTH_STATE_CONSUMED,
@@ -14,6 +17,30 @@ from .oauth_errors import (
     OAUTH_STATE_INVALID,
     raise_oauth_error,
 )
+from .oauth_diagnostics import callback_url_key
+from .production_settings import get_effective_runtime_version, get_runtime_platform_config
+
+
+def configuration_digest(config):
+    version = get_effective_runtime_version()
+    fields = (
+        "config_version", "credential_reference_version", "credential_key_version",
+        "credential_fingerprint", "credential_id", "credential_status", "callback_url",
+        "platform_config", "environment", "contract_version", "scopes", "regions",
+        "network_enabled", "status", "deleted_at",
+    )
+    values = {field: getattr(config, field) for field in fields}
+    values["runtime_version"] = version.pk if version else None
+    values["runtime_platform"] = get_runtime_platform_config(config.platform)
+    return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def require_unchanged_configuration(session):
+    session.integration_config.refresh_from_db()
+    if not session.configuration_digest or session.configuration_digest != configuration_digest(session.integration_config):
+        exc = OAuthFlowError(OAUTH_CONFIGURATION_CHANGED, "Configuration changed; start a new authorization.")
+        exc.category = "configuration_changed"
+        raise exc
 
 
 ALLOWED_OAUTH_PLATFORMS = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
@@ -71,6 +98,7 @@ def create_oauth_state(
         redirect_uri=redirect_uri,
         requested_scopes=list(scopes or []),
         session_binding=_session_binding(actor, state_plaintext),
+        configuration_digest=configuration_digest(integration_config),
         status=OAuthStateSession.Status.PENDING,
         expires_at=timezone.now() + requested_ttl,
     )
@@ -113,7 +141,7 @@ def consume_oauth_state(state_plaintext, *, platform, redirect_uri=None):
     if session.platform != platform:
         _mark_failed(session, OAUTH_PLATFORM_MISMATCH)
         raise_oauth_error(OAUTH_PLATFORM_MISMATCH)
-    if redirect_uri is not None and session.redirect_uri != str(redirect_uri):
+    if redirect_uri is not None and callback_url_key(session.redirect_uri) != callback_url_key(redirect_uri):
         _mark_failed(session, OAUTH_SESSION_MISMATCH)
         raise_oauth_error(OAUTH_SESSION_MISMATCH)
     return session

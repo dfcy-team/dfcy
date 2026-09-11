@@ -632,6 +632,7 @@ class OAuthStateSession(models.Model):
     redirect_uri = models.CharField(max_length=500)
     requested_scopes = models.JSONField(default=list, blank=True)
     session_binding = models.CharField(max_length=128)
+    configuration_digest = models.CharField(max_length=64, blank=True, default="")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)

@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.common.exceptions import StateConflict
 
-from .custody import CustodyError, get_custody_backend
+from .custody import CustodyError, CustodyReferenceNotFound, get_custody_backend
 from .models import (
     CredentialMutationRequest,
     IntegrationAuditLog,
@@ -291,7 +291,9 @@ def rotate_config_secrets(
             if had_previous_reference:
                 try:
                     custody.retrieve_secret(previous_reference)
-                except CustodyError:
+                except CustodyReferenceNotFound:
+                    if not credentials:
+                        raise CustodyError("旧凭据不在当前托管服务中，请重新填写密钥后保存。") from None
                     had_previous_reference = False
             next_reference_version = locked.credential_reference_version + 1
             custody_payload = {

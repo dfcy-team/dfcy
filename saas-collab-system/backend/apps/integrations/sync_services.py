@@ -13,6 +13,7 @@ from rest_framework.exceptions import ValidationError
 from .adapters import get_adapter_for_config
 from .models import SyncCheckpoint, SyncCursor, SyncJob, SyncRun, WebhookEvent
 from .raw_services import archive_raw_page, archive_webhook_payload
+from .readonly_clients import ReadonlyConfigurationError
 from .scheduler import calculate_next_run_at
 from .capability_gate import record_sync_source_decision, require_sync_read_capability
 from .security import sanitize_payload, sanitize_text
@@ -89,6 +90,29 @@ def _renew_lease(sync_job, run, not_before=None):
     sync_job.lock_heartbeat_at = now
 
 
+def validate_manual_sync_job(sync_job, *, live_only=False):
+    """Read configuration only; never fetch data or retrieve credentials."""
+    if sync_job.status == SyncJob.Status.RUNNING or (
+        sync_job.lock_expires_at and sync_job.lock_expires_at > timezone.now()
+    ):
+        raise ValidationError("任务正在运行，请勿重复提交或切换状态。")
+    adapter = get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
+    mode = getattr(adapter, "execution_mode", "unsupported")
+    if mode not in ({"live_readonly"} if live_only else {"mock", "live_readonly"}):
+        raise ValidationError("该任务不支持真实只读同步。" if live_only else "该任务没有可执行的同步适配器。")
+    if mode == "live_readonly":
+        authorization = sync_job.store_authorization or sync_job.warehouse_authorization
+        if authorization:
+            expires_at = (getattr(authorization, "expires_at", None)
+                          or getattr(authorization, "oauth_expires_at", None))
+            if expires_at and expires_at <= timezone.now():
+                raise ValidationError("主体授权已过期，请先到店铺或仓库 API 接入刷新授权。")
+            if not authorization.token_id:
+                raise ValidationError("主体授权缺少 Token 托管引用，请先完成授权。")
+        require_sync_read_capability(sync_job, mode)
+    adapter.validate_configuration(sync_job)
+
+
 def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
     retry_wait = retry_wait or default_retry_wait
     adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
@@ -107,7 +131,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
             .get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
         )
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
-            raise ValidationError("Sync job is disabled.")
+            raise ValidationError("任务已停用，不能执行同步。")
 
         selected_capability = require_sync_read_capability(
             locked_job,
@@ -166,6 +190,20 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
 
     sync_job = locked_job
     adapter.bind_run(run)
+    # Record the actual resolved query, not the mutable job policy. This is
+    # diagnostic evidence only: cursor exhaustion does not certify coverage.
+    decision_source = None
+    if getattr(adapter, "execution_mode", "") == "live_readonly":
+        scope = getattr(adapter, "scope", {})
+        decision_source = {
+            "version": "decision-source-v1",
+            "resource_type": sync_job.resource_type,
+            "platform": sync_job.integration_config.platform,
+            "time_from": scope.get("time_from"),
+            "time_to": scope.get("time_to"),
+            "started_from_initial_cursor": not bool(cursor.cursor_value),
+            "coverage_certified": False,
+        }
 
     last_retry_error = ""
     while True:
@@ -236,6 +274,11 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                         "last_retry_error": last_retry_error,
                         "checkpoint": {"version": checkpoint.version, "advanced": True},
                         "raw_evidence": raw_evidence,
+                        **({"decision_source": {
+                            **decision_source,
+                            "ended_without_cursor": not bool(cursor.cursor_value),
+                            "all_records_valid": run.failed_count == 0,
+                        }} if decision_source else {}),
                     }
                 )
                 sync_job.status = SyncJob.Status.IDLE
@@ -260,8 +303,11 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
             cursor.refresh_from_db()
             run.refresh_from_db()
             sync_job.refresh_from_db()
-            last_retry_error = sanitize_text(str(exc))
-            if run.retry_count < sync_job.max_retry_count:
+            configuration_error = isinstance(exc, ReadonlyConfigurationError)
+            last_retry_error = sanitize_text(
+                " ".join(str(item) for item in exc.detail) if configuration_error else str(exc)
+            )
+            if not configuration_error and run.retry_count < sync_job.max_retry_count:
                 with transaction.atomic():
                     delay_seconds = calculate_backoff_seconds(
                         run.retry_count,
@@ -295,7 +341,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                 continue
 
             with transaction.atomic():
-                run.error_code = "MAX_RETRY_EXCEEDED"
+                run.error_code = "SYNC_CONFIGURATION_MISSING" if configuration_error else "MAX_RETRY_EXCEEDED"
                 run.masked_error_message = last_retry_error
                 run.status = SyncRun.Status.FAILED
                 run.failed_count += 1

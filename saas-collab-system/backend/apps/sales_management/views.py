@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import Count, F, Max, OuterRef, Q, Subquery, Sum
+from django.db.models import Case, Count, F, Max, OuterRef, Q, Subquery, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -29,6 +29,7 @@ from .scopes import (
     filter_sales_queryset,
     filter_sync_job_queryset,
 )
+from .reporting import business_daily_rows, order_daily_rows, order_report_groups, sku_report
 from .serializers import (
     DataQualityIssueSerializer,
     InventorySnapshotSerializer,
@@ -84,6 +85,14 @@ def _parse_date(value, field_name):
 
 
 def _apply_dimensions(queryset, request, *, date_field=None, region_field="region"):
+    platforms = [value.strip() for value in request.query_params.get("platforms", "").split(",") if value.strip()]
+    store_ids = [value.strip() for value in request.query_params.get("store_ids", "").split(",") if value.strip()]
+    if any(not value.isascii() or not value.isdecimal() or int(value) <= 0 or int(value) > 9223372036854775807 for value in store_ids):
+        raise ValidationError({"store_ids": "Store IDs must be positive integers separated by commas."})
+    if platforms:
+        queryset = queryset.filter(platform__platform_type__in=platforms)
+    if store_ids:
+        queryset = queryset.filter(store_id__in=store_ids)
     if request.query_params.get("platform"):
         queryset = queryset.filter(platform__platform_type=request.query_params["platform"])
     region = request.query_params.get("region") or request.query_params.get("country")
@@ -107,6 +116,8 @@ def _apply_dimensions(queryset, request, *, date_field=None, region_field="regio
     if not start_date and not end_date:
         return queryset
     stores = StoreMaster.objects.filter(tenant=request.user.tenant)
+    if store_ids:
+        stores = stores.filter(pk__in=store_ids)
     if request.query_params.get("store_id"):
         stores = stores.filter(pk=request.query_params["store_id"])
     date_scope = Q(pk__in=[])
@@ -248,6 +259,9 @@ def _store_rows(orders, refunds, original_dimensions=False):
     for row in orders.values(*dimensions).annotate(
         gross_sales=Coalesce(gross_sales, ZERO),
         order_count=Count("id"),
+        valid_order_count=Count("id", filter=~Q(normalized_status="cancelled")),
+        cancelled_order_count=Count("id", filter=Q(normalized_status="cancelled")),
+        cancelled_amount=Coalesce(Sum("order_total_amount", filter=Q(normalized_status="cancelled")), ZERO),
         source_alias=Max("authorization__account_alias"),
         source_updated_at=Max("updated_at_utc"),
     ):
@@ -276,6 +290,7 @@ def _store_rows(orders, refunds, original_dimensions=False):
         "currency",
     ).annotate(
         refund_amount=Coalesce(Sum("refund_amount"), ZERO),
+        refund_case_count=Count("id"),
         source_updated_at=Max("updated_at_utc"),
     ):
         region = row["sales_order__region"] or row["store__country_code"]
@@ -305,7 +320,8 @@ def _store_rows(orders, refunds, original_dimensions=False):
                 "source_updated_at": row["source_updated_at"],
             },
         )
-        target["refund_amount"] = row["refund_amount"]
+        target["refund_amount"] += row["refund_amount"]
+        target["refund_case_count"] = target.get("refund_case_count", 0) + row["refund_case_count"]
         target["has_refund"] = True
         target["source_updated_at"] = max(
             filter(None, (target["source_updated_at"], row["source_updated_at"])),
@@ -327,6 +343,10 @@ def _store_rows(orders, refunds, original_dimensions=False):
             "gross_sales": _decimal_string(gross),
             "net_sales": _decimal_string(gross - refund),
             "order_count": orders_count,
+            "valid_order_count": row.get("valid_order_count", 0),
+            "cancelled_order_count": row.get("cancelled_order_count", 0),
+            "cancelled_amount": _decimal_string(row.get("cancelled_amount", ZERO)),
+            "refund_case_count": row.get("refund_case_count", 0),
             "units_sold": int(row["units_sold"] or 0),
             "average_order_value": _decimal_string(
                 (gross if original_dimensions else gross - refund) / orders_count
@@ -357,6 +377,7 @@ def _sku_rows(orders, refunds, original_dimensions=False):
     rows = {}
     items = SalesOrderItem.objects.filter(sales_order__in=orders)
     for row in items.values(
+        "sales_order_id",
         "sales_order__store_id",
         "sales_order__store__name",
         "sales_order__platform__platform_type",
@@ -371,7 +392,7 @@ def _sku_rows(orders, refunds, original_dimensions=False):
     ).annotate(units_sold=Sum("quantity"), gross_sales=Coalesce(Sum("line_total_amount"), ZERO), order_count=Count("sales_order_id", distinct=True)):
         sku = row["internal_sku__sku_code"] or row["seller_sku"]
         key = (row["sales_order__store_id"], sku, row["currency"])
-        rows[key] = {
+        entry = {
             "spu": row["internal_spu__spu_code"] or "",
             "sku": sku,
             "internal_sku": row["internal_sku__sku_code"],
@@ -391,6 +412,17 @@ def _sku_rows(orders, refunds, original_dimensions=False):
             "refund_units": 0,
             "refund_amount": ZERO,
         }
+        if key not in rows:
+            rows[key] = {**entry, "_order_ids": set(), "_seller_skus": set()}
+        else:
+            rows[key]["units_sold"] += entry["units_sold"]
+            rows[key]["gross_sales"] += entry["gross_sales"]
+            for field in ("seller_sku", "platform_product_id", "platform_variant_id", "product_name"):
+                if rows[key][field] != entry[field]:
+                    rows[key][field] = ""
+        rows[key]["_order_ids"].add(row["sales_order_id"])
+        rows[key]["_seller_skus"].add(row["seller_sku"])
+        rows[key]["order_count"] = len(rows[key]["_order_ids"])
     refund_facts = refunds if original_dimensions else refunds.filter(normalized_status="completed")
     refund_items = RefundReturnItem.objects.filter(refund_return__in=refund_facts)
     for row in refund_items.values(
@@ -432,10 +464,13 @@ def _sku_rows(orders, refunds, original_dimensions=False):
                 "refund_amount": ZERO,
             },
         )
-        target["refund_units"] = row["refund_units"] or 0
-        target["refund_amount"] = row["refund_amount"]
+        target["refund_units"] += row["refund_units"] or 0
+        target["refund_amount"] += row["refund_amount"]
+        target.setdefault("_seller_skus", set()).add(row["seller_sku"])
     output = []
     for row in rows.values():
+        row.pop("_order_ids", None)
+        row["seller_sku"] = " / ".join(sorted(filter(None, row.pop("_seller_skus", ()))))
         gross = Decimal(row["gross_sales"] or 0)
         refund_amount = Decimal(row["refund_amount"] or 0)
         units = int(row["units_sold"] or 0)
@@ -769,6 +804,7 @@ def commerce_overview_payload(
     ]
     single = currency_groups[0] if len(currency_groups) == 1 else None
     store_rows = _store_rows(orders, refunds, original_dimensions=original_dimensions)
+    daily = order_daily_rows(orders, refunds) if sales_management else []
     return {
         "api_status": "connected",
         "dashboard_type": dashboard_type,
@@ -792,6 +828,8 @@ def commerce_overview_payload(
         "results": store_rows[:50],
         "count": len(store_rows),
         "fact_count": orders.count(),
+        **({"metric_daily": business_daily_rows(orders, refunds)} if dashboard_type == "overview" and not sales_management and original_dimensions else {}),
+        **({"order_daily": daily, "order_currency_groups": order_report_groups(daily)} if sales_management else {}),
     }
 
 
@@ -902,8 +940,42 @@ class StoreSalesCollectionView(APIView):
     def get(self, request):
         orders = _scoped_orders(request, self.read_permission_code)
         refunds = _scoped_refunds(request, self.read_permission_code)
-        data = _paginated_rows(request, _store_rows(orders, refunds, original_dimensions=True))
+        rows = _store_rows(orders, refunds, original_dimensions=True)
+        numeric_fields = {"gross_sales", "net_sales", "refund_amount", "order_count", "valid_order_count",
+                          "cancelled_order_count", "cancelled_amount", "refund_case_count", "units_sold",
+                          "average_order_value", "refund_rate"}
+        ordering = request.query_params.get("ordering", "")
+        if ordering:
+            field = ordering.lstrip("-")
+            if field not in numeric_fields | {"store_name", "store_code", "platform", "region", "currency", "source_updated_at"}:
+                raise ValidationError({"ordering": "Unsupported store report ordering."})
+            present = [row for row in rows if row.get(field) is not None]
+            present.sort(key=lambda row: Decimal(str(row[field])) if field in numeric_fields else str(row[field]),
+                         reverse=ordering.startswith("-"))
+            rows = present + [row for row in rows if row.get(field) is None]
+        data = _paginated_rows(request, rows)
         data.update(_sales_page_context(orders, refunds))
+        groups = []
+        for currency in sorted({row["currency"] for row in rows}):
+            selected = [row for row in rows if row["currency"] == currency]
+            metrics = []
+            for code, label, unit, definition in (
+                ("order_count", "订单总量", "orders", "包含取消订单，按订单去重"),
+                ("valid_order_count", "非取消订单数", "orders", "不含已取消订单"),
+                ("gross_sales", "非取消订单销售额", currency, "非取消订单的订单总金额"),
+                ("net_sales", "净销售额", currency, "非取消订单销售额减全部筛选退款事实金额"),
+                ("units_sold", "产品销量", "units", "全部订单商品行数量，包含取消订单"),
+                ("refund_amount", "退款金额", currency, "全部筛选退款事实金额，未按状态扣除"),
+                ("refund_case_count", "退款售后单数", "orders", "退款事实单据数，不等同于去重订单数"),
+                ("cancelled_order_count", "取消订单数", "orders", "已取消状态订单数"),
+                ("cancelled_amount", "取消订单金额", currency, "取消订单总金额，不视作退款"),
+            ):
+                metrics.append({"code": code, "label": label, "unit": unit, "definition": definition,
+                                "value": _decimal_string(sum((Decimal(str(row.get(code) or 0)) for row in selected), ZERO))})
+            groups.append({"currency": currency, "metrics": metrics})
+        data["currency_groups"] = groups
+        data["trend"] = _analytics_trend_rows(orders, refunds)
+        data["metric_daily"] = business_daily_rows(orders, refunds)
         return success_response(data)
 
 
@@ -914,11 +986,25 @@ class SKUSalesCollectionView(APIView):
     def get(self, request):
         orders = _scoped_orders(request, self.read_permission_code)
         refunds = _scoped_refunds(request, self.read_permission_code)
+        if request.query_params.get("report") == "true":
+            rows, groups, trend = sku_report(orders, refunds, request.query_params.get("grouping", "store"), request.query_params.get("sku", ""))
+            ordering = request.query_params.get("ordering", "-gross_sales")
+            field = ordering.lstrip("-")
+            numeric = {"gross_sales", "total_sales", "net_sales", "refund_amount", "refund_units", "units_sold", "total_units", "order_count", "valid_order_count", "cancelled_amount", "cancelled_units", "cancelled_order_count", "average_price"}
+            if field not in numeric | {"sku", "seller_sku", "store_name", "currency"}:
+                raise ValidationError({"ordering": "Unsupported SKU report ordering."})
+            present = [row for row in rows if row.get(field) is not None]
+            present.sort(key=lambda row: row[field], reverse=ordering.startswith("-"))
+            data = _paginated_rows(request, present + [row for row in rows if row.get(field) is None])
+            data.update(_sales_page_context(orders, refunds))
+            data.update(currency_groups=groups, trend=trend)
+            return success_response(data)
         rows = _sku_rows(orders, refunds, original_dimensions=True)
         for field in ("sku", "spu"):
             if request.query_params.get(field):
                 value = request.query_params[field].lower()
-                rows = [row for row in rows if value in str(row[field]).lower()]
+                rows = [row for row in rows if value in str(row[field]).lower()
+                        or (field == "sku" and value in str(row["seller_sku"]).lower())]
         data = _paginated_rows(request, rows)
         data.update(_sales_page_context(orders, refunds))
         return success_response(data)
@@ -939,10 +1025,32 @@ def commerce_inventory_payload(request, permission_code):
         source_run__sync_job__resource_type="inventory_snapshot",
     ).select_related("warehouse", "internal_sku", "internal_sku__spu")
     queryset = filter_inventory_queryset(request.user, permission_code, queryset)
+    warehouse_options = [
+        {"value": row["warehouse_id"], "label": f'{row["warehouse__name"]}（{row["warehouse__code"]}）'}
+        for row in queryset.order_by("warehouse__code").values(
+            "warehouse_id", "warehouse__name", "warehouse__code"
+        ).distinct()
+    ]
+    start = _parse_date(request.query_params.get("period_start") or request.query_params.get("date_from"), "period_start")
+    end = _parse_date(request.query_params.get("period_end") or request.query_params.get("date_to"), "period_end")
+    if start and end and start > end:
+        raise ValidationError("开始日期不能晚于结束日期。")
+    time_filters = {}
+    if start:
+        time_filters["snapshot_at_utc__gte"] = datetime.combine(start, time.min, tzinfo=UTC)
+    if end:
+        time_filters["snapshot_at_utc__lt"] = datetime.combine(end + timedelta(days=1), time.min, tzinfo=UTC)
+    queryset = queryset.filter(**time_filters)
     if request.query_params.get("site_code"):
         queryset = queryset.filter(site_code=request.query_params["site_code"])
     if request.query_params.get("warehouse_id"):
-        queryset = queryset.filter(warehouse_id=request.query_params["warehouse_id"])
+        try:
+            warehouse_id = int(request.query_params["warehouse_id"])
+            if warehouse_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValidationError({"warehouse_id": "仓库 ID 必须为正整数。"}) from None
+        queryset = queryset.filter(warehouse_id=warehouse_id)
     if request.query_params.get("sku") or request.query_params.get("sku_id"):
         value = request.query_params.get("sku") or request.query_params["sku_id"]
         queryset = queryset.filter(
@@ -958,19 +1066,26 @@ def commerce_inventory_payload(request, permission_code):
         source_sku=OuterRef("source_sku"),
         source_run__sync_job__integration_config__platform="jifeng_wms",
         source_run__sync_job__resource_type="inventory_snapshot",
-    ).order_by("-snapshot_at_utc", "-id")
+    ).filter(**time_filters).order_by("-snapshot_at_utc", "-id")
     queryset = queryset.filter(pk=Subquery(latest_snapshot.values("pk")[:1])).order_by(
         "site_code", "warehouse_id", "source_sku"
     )
     risk = request.query_params.get("risk") or request.query_params.get("risk_level")
-    if risk == "out":
-        queryset = queryset.filter(available_qty__lte=0)
-    elif risk == "low":
-        queryset = queryset.filter(available_qty__gt=0, available_qty__lte=5, reserved_qty__lte=F("available_qty"))
-    elif risk == "locked":
-        queryset = queryset.filter(reserved_qty__gt=F("available_qty"), available_qty__gt=0)
-    elif risk == "healthy":
-        queryset = queryset.filter(available_qty__gt=5, reserved_qty__lte=F("available_qty"))
+    risk_conditions = {
+        "out": Q(available_qty__lte=0),
+        "low": Q(available_qty__gt=0, available_qty__lte=5, reserved_qty__lte=F("available_qty")),
+        "locked": Q(reserved_qty__gt=F("available_qty"), available_qty__gt=0),
+        "healthy": Q(available_qty__gt=5, reserved_qty__lte=F("available_qty")),
+    }
+    if risk and risk not in risk_conditions:
+        raise ValidationError({"risk": "请选择缺货、低库存、锁定偏高或正常。"})
+    condition = risk_conditions.get(risk, Q())
+    queryset = queryset.filter(condition)
+    # Inventory is a stock, not a flow: retain only each SKU's last snapshot per UTC day.
+    daily_latest = latest_snapshot.filter(snapshot_at_utc__date=OuterRef("date"))
+    trend_queryset = trend_queryset.annotate(date=TruncDate("snapshot_at_utc", tzinfo=UTC)).filter(
+        pk=Subquery(daily_latest.values("pk")[:1])
+    ).filter(condition)
 
     aggregates = queryset.aggregate(
         total=Coalesce(Sum("on_hand_qty"), 0),
@@ -990,8 +1105,7 @@ def commerce_inventory_payload(request, permission_code):
         reserved_qty__lte=F("available_qty"),
     ).count()
     trend = list(
-        trend_queryset.annotate(date=TruncDate("snapshot_at_utc"))
-        .values("date")
+        trend_queryset.values("date")
         .annotate(
             total=Coalesce(Sum("on_hand_qty"), 0),
             available_qty=Coalesce(Sum("available_qty"), 0),
@@ -1000,12 +1114,38 @@ def commerce_inventory_payload(request, permission_code):
         .order_by("-date")[:14]
     )
     trend.reverse()
+    ordering = request.query_params.get("ordering", "")
+    sort_fields = {
+        "source_sku": "source_sku", "internal_sku": "internal_sku__sku_code",
+        "warehouse_name": "warehouse__name", "warehouse_code": "warehouse__code",
+        "on_hand_qty": "on_hand_qty", "available_qty": "available_qty",
+        "reserved_qty": "reserved_qty", "in_transit_qty": "in_transit_qty",
+        "snapshot_time": "snapshot_at_utc", "risk_label": "risk_rank", "mapping_status": "mapping_rank",
+    }
+    if ordering:
+        sort_key = ordering[1:] if ordering.startswith("-") else ordering
+        if sort_key not in sort_fields:
+            raise ValidationError({"ordering": "请选择库存明细中支持排序的列。"})
+        if sort_key == "risk_label":
+            queryset = queryset.annotate(risk_rank=Case(
+                When(risk_conditions["out"], then=Value(0)),
+                When(risk_conditions["locked"], then=Value(1)),
+                When(risk_conditions["low"], then=Value(2)), default=Value(3),
+            ))
+        elif sort_key == "mapping_status":
+            queryset = queryset.annotate(mapping_rank=Case(
+                When(internal_sku__isnull=True, then=Value(0)), default=Value(1),
+            ))
+        field = F(sort_fields[sort_key])
+        direction = field.desc(nulls_last=True) if ordering.startswith("-") else field.asc(nulls_last=True)
+        queryset = queryset.order_by(direction, "id")
     page, page_size = _pagination(request)
     data = paginated_data(request, queryset, InventorySnapshotSerializer, page=page, page_size=page_size)
     data.update({
         "api_status": "connected",
         "dashboard_type": "inventory",
         "source_status": "ready" if data["count"] else "pending",
+        "warehouse_options": warehouse_options,
         "refreshed_at": aggregates["refreshed_at"],
         "metrics": [
             _metric("inventory_total", "在手库存", aggregates["total"], "件", "最新极风 WMS 快照在手数量。"),
@@ -1058,6 +1198,8 @@ def commerce_inventory_payload(request, permission_code):
         ],
         "quality": {
             "score": round(mapped_count * 100 / result_count) if result_count else 0,
+            "mapped_count": mapped_count,
+            "total_count": result_count,
             "status": "healthy" if result_count and mapped_count == result_count else ("warning" if result_count else "pending"),
             "metric_version": "inventory_snapshot.v1",
             "refreshed_at": aggregates["refreshed_at"],

@@ -6,10 +6,11 @@ from django.db import transaction
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
 
-from apps.integrations.models import PlatformChoices, SyncRun
+from apps.integrations.models import IntegrationAuditLog, PlatformChoices, SyncRun
 from apps.masterdata.models import WarehouseMaster
 
 from .models import InventorySnapshot
+from .inventory_sku_mapping import resolve_inventory_sku
 
 
 def _canonical_hash(payload):
@@ -29,13 +30,18 @@ def upsert_inventory_snapshot(*, tenant, payload, source_run):
     if not isinstance(source_run, SyncRun) or source_run.tenant_id != tenant.id:
         raise ValidationError({"source_run": "A same-tenant SyncRun is required."})
     job = source_run.sync_job
+    config = job.integration_config
+    if job.tenant_id != tenant.id or config.tenant_id != tenant.id or config.created_by.tenant_id != tenant.id:
+        raise ValidationError({"source_run": "Sync job, configuration and owner must belong to the tenant."})
     if job.resource_type != "inventory_snapshot":
         raise ValidationError({"source_run": "SyncRun must use the inventory_snapshot resource type."})
     if job.integration_config.platform != PlatformChoices.JIFENG_WMS:
         raise ValidationError({"source_run": "Inventory snapshots require a Jifeng WMS sync run."})
 
     warehouse_reference = payload.get("warehouse_id") or payload.get("warehouse_code")
-    warehouses = WarehouseMaster.objects.filter(tenant=tenant)
+    # Serialize ingestion for a warehouse so parallel runs cannot create
+    # competing initial links for the same source SKU.
+    warehouses = WarehouseMaster.objects.select_for_update().filter(tenant=tenant)
     warehouse = (
         warehouses.filter(pk=warehouse_reference).first()
         if str(warehouse_reference).isdigit()
@@ -73,4 +79,22 @@ def upsert_inventory_snapshot(*, tenant, payload, source_run):
             "payload_hash": str(payload.get("payload_hash") or _canonical_hash(payload)),
         },
     )
+    if snapshot.internal_sku_id is None:
+        sku_id, rule = resolve_inventory_sku(
+            tenant=tenant, warehouse=warehouse, source_sku=source_sku, seller_sku=snapshot.seller_sku,
+        )
+        if sku_id is not None:
+            snapshot.internal_sku_id = sku_id
+            snapshot.save(update_fields=["internal_sku"])
+        if sku_id is not None or _created:
+            IntegrationAuditLog.objects.create(
+                tenant=tenant, integration_config=config, actor=config.created_by,
+                action="inventory_auto_sku_link",
+                result=IntegrationAuditLog.Result.SUCCESS if sku_id is not None else IntegrationAuditLog.Result.BLOCKED,
+                masked_detail={
+                    "automatic": True, "actor_basis": "configuration_owner", "rule": rule,
+                    "snapshot_id": snapshot.id, "warehouse_id": warehouse.id, "source_run_id": source_run.id,
+                    "before_internal_sku_id": None, "after_internal_sku_id": sku_id,
+                },
+            )
     return snapshot

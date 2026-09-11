@@ -16,6 +16,8 @@ from apps.permissions.ui_p6_scopes import integration_values_allowed
 from .credential_service import RAW_CREDENTIAL_FIELDS
 from .marketplace_providers import get_oauth_provider
 from .models import marketplace_identity_key
+from .oauth_diagnostics import oauth_stage, failure_diagnostic
+from .oauth_state_service import require_unchanged_configuration
 
 CALLBACK_FORBIDDEN_CONTEXT_FIELDS = {
     "tenant",
@@ -74,7 +76,13 @@ def start_marketplace_oauth(*, actor, platform, integration_config, store, regio
         "redirect_uri": session.redirect_uri,
         "store_code": store.code,
     }
-    url_payload = provider.build_authorization_url(provider_context)
+    try:
+        with oauth_stage("validate_callback"):
+            url_payload = provider.build_authorization_url(provider_context)
+    except OAuthFlowError as exc:
+        diagnostic = failure_diagnostic(exc, session)
+        _callback_audit(session, actor, IntegrationAuditLog.Result.BLOCKED, exc.controlled_code, diagnostic=diagnostic)
+        raise
     result = {
         "platform": platform,
         "authorization_url": url_payload["url"],
@@ -88,7 +96,7 @@ def start_marketplace_oauth(*, actor, platform, integration_config, store, regio
     return result
 
 
-def _callback_audit(session, actor, result, result_code, authorization=None):
+def _callback_audit(session, actor, result, result_code, authorization=None, diagnostic=None):
     IntegrationAuditLog.objects.create(
         tenant=session.tenant,
         integration_config=session.integration_config,
@@ -97,6 +105,7 @@ def _callback_audit(session, actor, result, result_code, authorization=None):
         actor=actor,
         result=result,
         masked_detail={
+            **({"diagnostic": diagnostic} if diagnostic else {}),
             "result_code": result_code,
             "platform": session.platform,
             "store_id": str(session.store_id),
@@ -160,6 +169,7 @@ def _apply_exchange_result(session, exchange_result):
             allow_live_references=exchange_result.get("reference_kind") == "custody",
             revoker=exchange_result.get("previous_reference_revoker"),
             new_reference_revoker=exchange_result.get("new_reference_revoker"),
+            defer_previous_revocation=True,
         )
         if record.status in {
             MarketplaceStoreAuthorization.Status.PENDING,
@@ -189,6 +199,7 @@ def _create_authorization_from_exchange(session, exchange_result, store_record):
         credential_mask=exchange_result.get("credential_mask"),
         allow_live_references=exchange_result.get("reference_kind") == "custody",
         scopes=exchange_result["authorized_scopes"],
+        expires_at=exchange_result["expires_at"],
         actor=actor,
     )
     return transition_store_authorization(record, target_status=MarketplaceStoreAuthorization.Status.ACTIVE, actor=actor)
@@ -215,14 +226,23 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
         fail_oauth_state(session, OAUTH_CALLBACK_REJECTED)
         _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED, OAUTH_CALLBACK_REJECTED)
         raise_oauth_error(OAUTH_CALLBACK_REJECTED, "Callback must not carry raw credential parameters.")
-    provider = resolve_oauth_provider(session.platform, session.integration_config)
     context = {"state": state_plaintext, "region": session.region, "scopes": session.requested_scopes}
     try:
-        payload = provider.validate_callback(query_params, context)
+        with oauth_stage("validate_callback"):
+            require_unchanged_configuration(session)
+            _require_callback_target_scope(session, store_id=session.store_id, integration_config=session.integration_config)
+            provider = resolve_oauth_provider(session.platform, session.integration_config)
+            payload = provider.validate_callback(query_params, context)
         payload["scopes"] = session.requested_scopes
-        exchange_result = provider.exchange_authorization_code(payload)
+        with oauth_stage("exchange_token"):
+            exchange_result = provider.exchange_authorization_code(payload)
         try:
-            authorization = _apply_exchange_result(session, exchange_result)
+            with oauth_stage("save_authorization"), transaction.atomic():
+                # Hold the selected config row until the authorization and its audit commit.
+                type(session.integration_config).objects.select_for_update().get(pk=session.integration_config_id)
+                require_unchanged_configuration(session)
+                authorization = _apply_exchange_result(session, exchange_result)
+                _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.SUCCESS, "", authorization=authorization)
         except OAuthFlowError:
             _revoke_uncommitted_exchange(exchange_result)
             raise
@@ -230,10 +250,14 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
             _revoke_uncommitted_exchange(exchange_result)
             raise_oauth_error(OAUTH_DATABASE_FAILURE, "Authorization persistence failed.")
     except OAuthFlowError as exc:
-        fail_oauth_state(session, exc.controlled_code)
-        _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED, exc.controlled_code)
+        diagnostic = failure_diagnostic(exc, session)
+        try:
+            fail_oauth_state(session, exc.controlled_code)
+            _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED, exc.controlled_code, diagnostic=diagnostic)
+        except Exception:
+            # The safe diagnostic is already logged; do not mask a DB outage or replay state.
+            pass
         raise
-    _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.SUCCESS, "", authorization=authorization)
     return authorization
 
 

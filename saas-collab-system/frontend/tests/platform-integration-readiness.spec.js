@@ -6,6 +6,14 @@ const page = fs.readFileSync(path.resolve(process.cwd(), 'src/views/settings/Pla
 const api = fs.readFileSync(path.resolve(process.cwd(), 'src/api/integrations.js'), 'utf8');
 
 describe('平台接入真实准备度契约', () => {
+  it('提供仓库专用合同、审批与授权入口，不要求商城回调', () => {
+    expect(page).toContain("row.platform_code === 'jifeng_wms'");
+    expect(page).toContain("v-if=\"row.platform_code !== 'jifeng_wms'\" label=\"回调地址\"");
+    expect(page).toContain('到仓库档案维护授权 / 连接校验');
+    expect(page).toContain("path: '/master-data/warehouses'");
+    expect(page).toContain('warehouse_host_not_allowlisted');
+    expect(page).toContain('审批就绪不代表授权或连接校验通过');
+  });
   it('读取租户范围内的后端真实准备度，不再读取静态 Mock', () => {
     expect(page).toContain('fetchPlatformIntegrationReadiness');
     expect(page).not.toContain('mockPlatformIntegrationReadiness');

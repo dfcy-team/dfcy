@@ -9,6 +9,7 @@ from . import warehouse_credential_views
 urlpatterns = [
     path("warehouse-authorizations/<int:pk>/credentials/", warehouse_credential_views.warehouse_credentials),
     path("warehouse-authorizations/<int:pk>/authorize/", warehouse_credential_views.warehouse_first_authorization),
+    path("warehouse-authorizations/<int:pk>/warehouses/", warehouse_credential_views.warehouse_discovery),
     path("warehouse-authorizations/<int:pk>/refresh/", warehouse_credential_views.warehouse_refresh_authorization),
     path("warehouse-authorizations/<int:pk>/readonly-check/", warehouse_credential_views.warehouse_readonly_check),
     path("store-authorizations/oauth/manual-callback/", manual_store_callback),
@@ -148,6 +149,7 @@ urlpatterns = [
     path("product-mappings/", views.product_mapping_collection, name="product-mapping-collection"),
     path("product-mappings/<int:pk>/", views.product_mapping_detail, name="product-mapping-detail"),
     path("sync-jobs/", views.sync_job_collection, name="sync-job-collection"),
+    path("sync-jobs/missing-preview/", views.missing_sync_jobs_preview, name="sync-job-missing-preview"),
     path("sync-jobs/<int:pk>/", views.sync_job_detail, name="sync-job-detail"),
     path("sync-jobs/<int:pk>/toggle/", views.toggle_sync_job, name="sync-job-toggle"),
     path("sync-jobs/<int:pk>/delete/", views.sync_job_delete, name="sync-job-delete"),

@@ -589,7 +589,8 @@ class JifengInventoryAdapter(ProductionReadonlyAdapter):
         ).first()
         before_hash = existing.payload_hash if existing else ""
         saved = upsert_inventory_snapshot(tenant=sync_job.tenant, payload=record, source_run=run)
-        action = "created" if existing is None else "skipped" if before_hash == saved.payload_hash else "updated"
+        unchanged = existing is not None and before_hash == saved.payload_hash and existing.internal_sku_id == saved.internal_sku_id
+        action = "created" if existing is None else "skipped" if unchanged else "updated"
         return {"action": action, "idempotency_key": f"{sync_job.id}:{saved.id}"}
 
 

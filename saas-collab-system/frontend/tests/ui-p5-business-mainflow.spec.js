@@ -46,7 +46,7 @@ describe('UI-P5 API and permission boundaries', () => {
     const purchase = read('src/views/purchasing/PurchaseOrderList.vue');
     expect(pending).toMatch(/<el-button\s+v-for="action in actions"[^>]+disabled>/);
     expect(listing).toContain('生成 RPA 任务（禁用）');
-    expect(pricing).toContain('提交价格审批（禁用）');
+    expect(pricing).toMatch(/<el-button disabled>提交价格审批（待接入）<\/el-button>/);
     expect(purchase).toContain('不自动采购');
   });
 });

@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   fetchSyncJobs: vi.fn(),
   retrySyncAlertIncident: vi.fn(),
   runSyncJobMock: vi.fn(),
+  runSyncJob: vi.fn(),
+  toggleSyncJob: vi.fn(),
 }));
 const routeState = vi.hoisted(() => ({
   query: {
@@ -20,6 +22,9 @@ const routeState = vi.hoisted(() => ({
   },
 }));
 const router = vi.hoisted(() => ({ push: vi.fn() }));
+const messages = vi.hoisted(() => ({ warning: vi.fn(), success: vi.fn(), error: vi.fn() }));
+const confirm = vi.hoisted(() => vi.fn());
+vi.mock('element-plus', async (importOriginal) => ({ ...(await importOriginal()), ElMessage: messages, ElMessageBox: { confirm } }));
 const permissions = vi.hoisted(() => new Set([
   'integrations.view',
   'integrations.store.view',
@@ -29,7 +34,7 @@ const permissions = vi.hoisted(() => new Set([
 ]));
 
 vi.mock('../src/api/integrations', () => api);
-vi.mock('../src/api/request', () => ({ useMock: true }));
+vi.mock('../src/api/request', () => ({ useMock: true, requestApi: vi.fn() }));
 vi.mock('../src/api/systemAdmin', () => ({ fetchUsers: vi.fn() }));
 vi.mock('../src/stores/auth', () => ({
   useAuthStore: () => ({ hasPermission: (permission) => permissions.has(permission) }),
@@ -42,6 +47,7 @@ import SyncJobList from '../src/views/integrations/SyncJobList.vue';
 const stubs = {
   AppPage: { template: '<main><slot name="action" /><slot /></main>' },
   AppState: { template: '<div class="app-state"><slot /></div>' },
+  MissingSyncJobsPreview: { template: '<section class="missing-preview" />' },
   'el-alert': { props: { title: String }, template: '<div class="alert"><strong>{{ title }}</strong><slot /></div>' },
   'el-button': { props: { disabled: Boolean, loading: Boolean }, emits: ['click'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
   'el-select': { template: '<select><slot /></select>' },
@@ -61,9 +67,12 @@ const stubs = {
 describe('平台商品同步任务上下文闭环', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    confirm.mockResolvedValue('confirm');
+    permissions.add('integrations.run_live_readonly');
     permissions.add('masterdata.view');
     permissions.add('integrations.view');
     permissions.add('integrations.store.view');
+    permissions.add('integrations.manage');
     routeState.query = {
       platform: 'shopee',
       api_type: 'marketplace',
@@ -73,6 +82,63 @@ describe('平台商品同步任务上下文闭环', () => {
     };
     api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'mock', summary: {}, results: [] } });
     api.fetchSyncAlertIncidents.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it.each([
+    [{ id: 9, is_enabled: false, status: 'idle', environment: 'production' }, '任务已停用'],
+    [{ id: 9, is_enabled: true, status: 'disabled', environment: 'mock' }, '任务已停用'],
+    [{ id: 9, is_enabled: true, status: 'idle', environment: 'production' }, '独立 Mock 任务'],
+    [{ id: 9, is_enabled: true, status: 'idle', environment: 'mock', resource_type: 'sales_order' }, '独立 Mock 任务'],
+    [{ id: 9, is_enabled: true, status: 'running', environment: 'mock', resource_type: 'mock_record' }, '正在运行'],
+  ])('blocks invalid mock runs before submitting (%j)', async (row, reason) => {
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.vm.mockRunReason(row)).toContain(reason);
+    await wrapper.vm.runAction(wrapper.vm.actionConfigs[0], row);
+    expect(api.runSyncJobMock).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('allows only an enabled independent Mock task', async () => {
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.vm.mockRunReason({ id: 1, is_enabled: true, status: 'idle',
+      environment: 'mock', resource_type: 'mock_record' })).toBe('');
+    wrapper.unmount();
+  });
+
+  it('enables an existing job only after confirmation, without running it', async () => {
+    api.toggleSyncJob.mockResolvedValue({ success: true });
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    await wrapper.vm.runAction(wrapper.vm.actionConfigs[2], { id: 9, is_enabled: false, status: 'idle' });
+    expect(confirm).toHaveBeenCalled();
+    expect(api.toggleSyncJob).toHaveBeenCalledWith(9, true);
+    expect(api.runSyncJob).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('submits a real readonly run once, with confirmation and an idempotency key', async () => {
+    api.runSyncJob.mockResolvedValue({ success: true, data: { accepted: true, task_id: 'fake-task' } });
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    const row = { id: 9, is_enabled: true, status: 'idle', environment: 'production' };
+    await Promise.all([wrapper.vm.runAction(wrapper.vm.actionConfigs[3], row), wrapper.vm.runAction(wrapper.vm.actionConfigs[3], row)]);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(api.runSyncJob).toHaveBeenCalledTimes(1);
+    expect(api.runSyncJob).toHaveBeenCalledWith(9, expect.any(String));
+    expect(messages.success).toHaveBeenCalledWith(expect.stringContaining('不代表同步成功'));
+    wrapper.unmount();
+  });
+
+  it.each(['disabled', 'permission', 'cancel'])('never submits a real run when blocked by %s', async (blocker) => {
+    if (blocker === 'permission') permissions.delete('integrations.run_live_readonly');
+    if (blocker === 'cancel') confirm.mockRejectedValue('cancel');
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    await wrapper.vm.runAction(wrapper.vm.actionConfigs[3], { id: 9, is_enabled: blocker !== 'disabled', status: 'idle', environment: 'production' });
+    expect(api.runSyncJob).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it('passes store context to tasks and incidents, then guides an authorized role back to the store API drawer', async () => {
@@ -105,5 +171,29 @@ describe('平台商品同步任务上下文闭环', () => {
 
     expect(wrapper.vm.canOpenStoreApiConfig).toBe(false);
     expect(wrapper.findAll('button').some((button) => button.text().includes('去店铺配置并创建商品同步任务'))).toBe(false);
+  });
+
+  it.each([{ results: [] }, { results: [{ id: 1 }] }])('keeps the task body beside the administrator preview for $results', async ({ results }) => {
+    routeState.query = {};
+    api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'mock', summary: {}, results } });
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.find('.missing-preview').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="同步任务健康摘要"]').exists()).toBe(true);
+    expect(wrapper.find('.app-state').exists()).toBe(false);
+    expect(wrapper.find('.empty').exists()).toBe(results.length === 0);
+    wrapper.unmount();
+  });
+
+  it.each([true, false])('does not render a successful task body after failure (manager=%s)', async (manager) => {
+    routeState.query = {};
+    if (!manager) permissions.delete('integrations.manage');
+    api.fetchSyncJobs.mockResolvedValue({ success: false, message: '无权限' });
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.find('.app-state').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="同步任务健康摘要"]').exists()).toBe(false);
+    expect(wrapper.find('.missing-preview').exists()).toBe(manager);
+    wrapper.unmount();
   });
 });

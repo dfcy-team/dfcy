@@ -72,8 +72,12 @@
               <el-table :data="row.configs || []" size="small" empty-text="尚未创建接入配置">
                 <el-table-column label="配置名称" prop="account_alias" min-width="150" />
                 <el-table-column label="环境" min-width="90"><template #default="scope">{{ environmentLabel(scope.row.environment) }}</template></el-table-column>
-                <el-table-column label="合同版本" prop="contract_version" min-width="110" />
-                <el-table-column label="回调地址" min-width="260"><template #default="scope"><span class="callback">{{ scope.row.callback_url || '未填写' }}</span></template></el-table-column>
+                <el-table-column v-if="row.platform_code !== 'jifeng_wms'" label="合同版本" prop="contract_version" min-width="110" />
+                <el-table-column v-if="row.platform_code !== 'jifeng_wms'" label="回调地址" min-width="260"><template #default="scope"><span class="callback">{{ scope.row.callback_url || '未填写' }}</span></template></el-table-column>
+                <el-table-column v-else label="仓库接口合同" min-width="180"><template #default="scope">
+                  <el-tag :type="scope.row.contract_approved ? 'success' : 'warning'">{{ scope.row.contract_approved ? '已审批' : '未审批' }}</el-tag>
+                  <el-button link :disabled="!systemConfigAccess.allowed" @click="router.push({ path: '/integrations/production-settings', query: { platform: 'jifeng_wms' } })">管理合同</el-button>
+                </template></el-table-column>
                 <el-table-column label="只读审批" min-width="110"><template #default="scope"><el-tag :type="scope.row.readonly_approved ? 'success' : 'info'">{{ scope.row.readonly_approved ? '已审批' : '未审批' }}</el-tag></template></el-table-column>
                 <el-table-column label="待处理项" min-width="360">
                   <template #default="scope">
@@ -91,15 +95,17 @@
                     <el-button v-if="scope.row.can_repair_contract" link type="warning" :loading="repairingId === scope.row.id" :disabled="!canRepair || saving" @click="repairContract(scope.row)">修复合同版本</el-button>
                     <el-button v-if="!scope.row.readonly_approved" link type="primary" :disabled="!canApprove || !scope.row.can_approve_readonly" @click="openApproval(scope.row, true)">审批生产只读</el-button>
                     <el-button v-else link type="danger" :disabled="!canApprove" @click="openApproval(scope.row, false)">撤销只读审批</el-button>
-                    <el-button v-if="scope.row.callback_url" link @click="copyCallback(scope.row.callback_url)">复制回调地址</el-button>
+                    <el-button v-if="row.platform_code !== 'jifeng_wms' && scope.row.callback_url" link @click="copyCallback(scope.row.callback_url)">复制回调地址</el-button>
                   </template>
                 </el-table-column>
               </el-table>
               <div class="next-actions">
                 <el-button link :disabled="!configViewAccess.allowed" :title="configViewAccess.allowed ? '维护凭据并执行检查' : configViewAccess.reason" @click="openConfigWorkspace(row, 'credentials')">维护凭据并执行检查</el-button>
-                <el-button link :disabled="!storeMasterViewAccess.allowed" :title="storeMasterViewAccess.allowed ? '进入店铺档案的 API 接入' : storeMasterViewAccess.reason" @click="openStoreApiAccess">到店铺档案授权 {{ row.platform || row.platform_code }}</el-button>
+                <el-button v-if="row.platform_code === 'jifeng_wms'" link :disabled="!storeMasterViewAccess.allowed" :title="storeMasterViewAccess.reason" @click="openWarehouseApiAccess">到仓库档案维护授权 / 连接校验</el-button>
+                <el-button v-else link :disabled="!storeMasterViewAccess.allowed" :title="storeMasterViewAccess.allowed ? '进入店铺档案的 API 接入' : storeMasterViewAccess.reason" @click="openStoreApiAccess">到店铺档案授权 {{ row.platform || row.platform_code }}</el-button>
                 <el-button link :disabled="!syncViewAccess.allowed" :title="syncViewAccess.allowed ? '配置生产只读同步任务' : syncViewAccess.reason" @click="openSyncJobs(row)">配置生产只读同步任务</el-button>
               </div>
+              <p v-if="row.platform_code === 'jifeng_wms'" class="resource-gate-note">此处审批公共配置的网络与只读能力；Email、一次性 Token 和选填外部仓库编码在仓库档案 → API 接入维护。审批就绪不代表授权或连接校验通过；读取指定仓库库存前须补齐外部仓库编码。</p>
             </section>
           </template>
         </el-table-column>
@@ -118,7 +124,7 @@
             <span v-else>无</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作提示" min-width="150"><template #default="{ row }">{{ row.production_status === 'production_readonly_ready' ? '可进入店铺授权/只读任务' : '展开后逐项处理' }}</template></el-table-column>
+        <el-table-column label="操作提示" min-width="150"><template #default="{ row }">{{ row.production_status === 'production_readonly_ready' ? (row.platform_code === 'jifeng_wms' ? '可进入仓库授权/只读任务' : '可进入店铺授权/只读任务') : '展开后逐项处理' }}</template></el-table-column>
       </el-table>
     </section>
 
@@ -132,7 +138,7 @@
       <el-form label-position="top" class="approval-form">
         <el-form-item label="配置"><el-input :model-value="activeConfig?.account_alias || ''" disabled /></el-form-item>
         <el-form-item label="审批/撤销原因"><el-input v-model="approvalForm.reason" type="textarea" :rows="3" maxlength="240" show-word-limit /></el-form-item>
-        <el-checkbox v-model="approvalForm.confirmed">我已核对安全门、凭据、合同版本和回调地址，确认仅启用生产只读。</el-checkbox>
+        <el-checkbox v-model="approvalForm.confirmed">{{ activeConfig?.platform_code === 'jifeng_wms' ? '我已核对安全门、公共凭据、极风接口合同及出站域名，确认仅启用仓库授权和库存只读，不开放库存写入。' : '我已核对安全门、凭据、合同版本和回调地址，确认仅启用生产只读。' }}</el-checkbox>
       </el-form>
       <template #footer><el-button @click="approvalVisible = false">取消</el-button><el-button :type="approvalForm.approved ? 'primary' : 'danger'" :loading="saving" :disabled="!approvalReady" @click="submitApproval">确认</el-button></template>
     </el-dialog>
@@ -186,6 +192,9 @@ const globalGates = computed(() => {
 });
 
 const BLOCKER_LABELS = {
+  integration_module_disabled: 'API 数据接入模块未启用', debug_enabled: '当前后端启用了 DEBUG，不能进行真实授权',
+  warehouse_api_url_invalid: '极风 API Base URL 未填写或格式不正确', warehouse_host_not_allowlisted: '极风 API 域名未加入出站白名单',
+  warehouse_domain_missing: '极风公共配置缺少 Domain', warehouse_client_id_missing: '极风公共配置缺少 Client ID',
   config_missing: '尚未创建接入配置', platform_mismatch: '配置平台不匹配', environment_not_live: '配置不是试运行或生产环境',
   platform_network_mode_disabled: '生产平台只读网络模式未启用', platform_security_not_approved: '生产平台安全审批未通过',
   credential_custody_not_approved: '密钥托管服务未通过检查', outbound_host_allowlist_missing: '平台出站域名白名单未配置',
@@ -199,6 +208,10 @@ const BLOCKER_LABELS = {
 };
 
 const BLOCKER_ACTIONS = {
+  warehouse_api_url_invalid: { actionLabel: '维护公共配置', route: '/integrations/configs', action: 'credentials', permission: 'integrations.config.view', actionHint: '填写极风 HTTPS API Base URL' },
+  warehouse_host_not_allowlisted: { actionLabel: '配置出站白名单', route: '/integrations/production-settings', permission: ['config.system.manage', 'config.view'], actionHint: '将当前极风 API 域名加入出站白名单' },
+  warehouse_domain_missing: { actionLabel: '维护公共配置', route: '/integrations/configs', action: 'credentials', permission: 'integrations.config.view', actionHint: '填写极风 Domain' },
+  warehouse_client_id_missing: { actionLabel: '维护公共配置', route: '/integrations/configs', action: 'credentials', permission: 'integrations.config.view', actionHint: '填写极风 Client ID' },
   config_missing: { actionLabel: '新建接入配置', route: '/integrations/configs', action: 'create', permission: 'integrations.config.view', actionHint: '进入连接配置并创建平台配置' },
   platform_mismatch: { actionLabel: '检查配置', route: '/integrations/configs', action: 'verify', permission: 'integrations.config.view', actionHint: '进入连接配置检查平台配置' },
   environment_not_live: { actionLabel: '调整配置', route: '/integrations/configs', action: 'verify', permission: 'integrations.config.view', actionHint: '进入连接配置检查环境' },
@@ -208,7 +221,7 @@ const BLOCKER_ACTIONS = {
   outbound_host_allowlist_missing: { actionLabel: '去配置', route: '/integrations/production-settings', permission: ['config.system.manage', 'config.view'], actionHint: '配置平台出站域名白名单' },
   platform_contract_not_enabled: { actionLabel: '去配置', route: '/integrations/production-settings', permission: ['config.system.manage', 'config.view'], actionHint: '配置平台合同开关' },
   readonly_sync_feature_disabled: { actionLabel: '去配置', route: '/integrations/production-settings', permission: ['config.system.manage', 'config.view'], actionHint: '启用生产只读同步开关' },
-  network_not_approved: { actionLabel: '检查配置', route: '/integrations/configs', action: 'verify', permission: 'integrations.config.view', actionHint: '检查租户接入配置网络审批状态' },
+  network_not_approved: { actionLabel: '审批只读', action: 'approve_readonly', permission: 'integrations.config.verify', actionHint: '在生产准入页审批当前配置的只读网络访问' },
   write_sync_enabled: { actionLabel: '去配置', route: '/integrations/production-settings', permission: ['config.system.manage', 'config.view'], actionHint: '确认生产写入保护保持关闭' },
   config_not_approved: { actionLabel: '检查配置', route: '/integrations/configs', action: 'verify', permission: 'integrations.config.view', actionHint: '检查接入配置并执行验证' },
   credential_not_configured: { actionLabel: '维护凭据', route: '/integrations/configs', action: 'credentials', permission: 'integrations.config.view', actionHint: '进入连接配置维护开发者凭据' },
@@ -266,6 +279,11 @@ function openStoreApiAccess() {
   router.push({ path: '/master-data/stores' });
 }
 
+function openWarehouseApiAccess() {
+  if (!storeMasterViewAccess.value.allowed) return ElMessage.warning(storeMasterViewAccess.value.reason);
+  router.push({ path: '/master-data/warehouses' });
+}
+
 function openSyncJobs(row) {
   if (!syncViewAccess.value.allowed) return ElMessage.warning(syncViewAccess.value.reason);
   router.push({ path: '/integrations/sync-jobs', query: { platform: row.platform_code } });
@@ -275,6 +293,7 @@ function openBlockerAction(row, item) {
   if (!item.access.allowed) return ElMessage.warning(item.access.reason);
   if (item.action === 'approve_readonly') {
     const config = configForRow(row);
+    if (!config?.can_approve_readonly) return ElMessage.warning('请先处理该配置其余阻塞项，再审批只读网络。');
     if (config?.id) return openApproval(config, true);
   }
   if (!item.route) return;

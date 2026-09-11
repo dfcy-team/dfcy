@@ -38,8 +38,9 @@ describe('IntegrationWorkspace production action permissions', () => {
     }
     expect(workspace).toContain(':loading="operating" :disabled="!configCreateAccess.allowed || operating"');
     expect(workspace).toContain(':loading="operating" :disabled="!credentialRotateAccess.allowed || operating"');
-    expect(workspace).toContain("'确认加密保存凭据'");
-    expect(workspace).toContain('页面不会回显或再次展示密钥原文');
+    expect(workspace).toContain("'确认保存凭据'");
+    expect(workspace).toContain('生产凭据须使用加密托管');
+    expect(workspace).toContain('页面不回显密钥');
     expect(workspace).toContain('secretCredentialFields.forEach');
     expect(workspace).toContain("configActionLoading.value = configActionKey('verify', row)");
     expect(workspace).toContain("configActionLoading.value = configActionKey('consistency', row)");

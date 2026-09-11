@@ -19,23 +19,20 @@ vi.mock('../src/api/integrations', () => ({
 
 import WarehouseMasterList from '../src/views/masterdata/WarehouseMasterList.vue';
 import AdminResourcePage from '../src/components/AdminResourcePage.vue';
+import { createMasterData, updateMasterData } from '../src/api/masterData';
 
 describe('Jifeng warehouse form', () => {
-  it('uses existing form components and shows credentials only for the canonical connector', async () => {
+  it('keeps the archive form free of API credentials and directs users to API access', async () => {
     const wrapper = shallowMount(WarehouseMasterList);
     await flushPromises();
     const fields = wrapper.findComponent(AdminResourcePage).props('formFields');
-    const credentials = fields.filter(field => field.key.startsWith('api_'));
-    expect(credentials.map(field => field.key)).toEqual([
-      'api_integration_config_id', 'api_email', 'api_token', 'api_external_warehouse_code',
-    ]);
-    for (const field of credentials) {
-      expect(field.label).toBeTruthy();
-      expect(field.visible({ service_platform_id: 7 })).toBe(true);
-      expect(field.visible({ service_platform_id: 8 })).toBe(false);
-    }
-    expect(credentials.find(field => field.key === 'api_token').type).toBe('password');
-    expect(credentials.find(field => field.key === 'api_token').placeholder).toContain('留空保留');
-    expect(credentials[0].options).toEqual([{ value: 12, label: '公共配置' }]);
+    expect(fields.some(field => field.key.startsWith('api_'))).toBe(false);
+    const page = wrapper.findComponent(AdminResourcePage);
+    expect(page.props('formNotice')).toContain('API 接入');
+    const payload = { code: 'TEST', service_platform_id: 7, api_email: 'fake@example.test', api_token: 'test-token', api_integration_config_id: 12 };
+    await page.props('createHandler')(payload);
+    await page.props('editHandler')(9, payload);
+    expect(createMasterData).toHaveBeenCalledWith('warehouses', { code: 'TEST', service_platform_id: 7 });
+    expect(updateMasterData).toHaveBeenCalledWith('warehouses', 9, { code: 'TEST', service_platform_id: 7 });
   });
 });

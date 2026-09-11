@@ -155,7 +155,7 @@
                 link
                 type="primary"
                 :disabled="!credentialRotateAccess.allowed || configActionBusy(row)"
-                :title="credentialRotateAccess.allowed ? '维护并加密保存开发者凭据' : credentialRotateAccess.reason"
+                :title="credentialRotateAccess.allowed ? '通过托管服务维护开发者凭据' : credentialRotateAccess.reason"
                 @click="openCredential(row)"
               >维护凭据</el-button>
               <el-button
@@ -313,6 +313,10 @@
           <el-form-item label="App Key"><el-input v-model="credentialForm.app_key" maxlength="255" placeholder="留空保留现值" /></el-form-item>
           <el-form-item label="Service ID"><el-input v-model="credentialForm.service_id" maxlength="255" placeholder="留空保留现值" /></el-form-item>
           <el-form-item label="App Secret" class="wide"><el-input v-model="credentialForm.app_secret" type="password" autocomplete="new-password" placeholder="输入新的 App Secret" /></el-form-item>
+          <el-form-item label="授权回调地址" class="wide">
+            <el-input v-model="credentialForm.redirect_uri" type="url" maxlength="500" aria-describedby="tiktok-callback-help" placeholder="https://your-domain.example/callback" />
+            <span id="tiktok-callback-help" class="safe-note">填写 TikTok Shop 开放平台登记的固定 HTTPS 回调地址，不是授权完成后带 code/state 的地址。留空保留现有配置；保存仍需通过服务端登记值和白名单校验。</span>
+          </el-form-item>
         </template>
         <template v-else-if="activeConfig?.platform === 'jifeng_wms'">
           <el-form-item label="API Base URL" class="wide"><el-input v-model="credentialForm.api_base_url" type="url" maxlength="500" placeholder="https://api.example.com" /></el-form-item>
@@ -321,8 +325,8 @@
           <el-form-item label="Client Secret" class="wide"><el-input v-model="credentialForm.client_secret" type="password" autocomplete="new-password" placeholder="输入新的 Client Secret" /></el-form-item>
         </template>
       </el-form>
-      <p class="safe-note">密文由服务端安全保管；同表只记录引用、指纹和审计信息，接口不会返回明文。店铺或仓库 Token 仍在对应基础档案授权中维护。</p>
-      <template #footer><el-button @click="credentialDialog = false">取消</el-button><el-button class="handoff-action" :loading="operating" :disabled="!credentialRotateAccess.allowed || operating" :title="credentialRotateAccess.allowed ? '确认后加密保存开发者凭据，不回显明文' : credentialRotateAccess.reason" @click="saveCredential">加密保存</el-button></template>
+      <p class="safe-note">凭据由托管服务保管；数据库记录引用、指纹和审计信息，接口不回显密钥。生产凭据须使用加密托管，本地文件托管仅用于合成测试。店铺或仓库 Token 在对应基础档案授权中维护。</p>
+      <template #footer><el-button @click="credentialDialog = false">取消</el-button><el-button class="handoff-action" :loading="operating" :disabled="!credentialRotateAccess.allowed || operating" :title="credentialRotateAccess.allowed ? '确认后将开发者凭据交由托管服务保存，不回显明文' : credentialRotateAccess.reason" @click="saveCredential">保存凭据</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="jobDetailDialog" width="min(700px, 94vw)" class="job-detail-dialog">
@@ -518,7 +522,7 @@ const integrationManageAccess = computed(() => getActionAccess(auth, { permissio
 const contracts = {
   configs: {
     title: '平台接入配置', note: '管理平台开发者配置和调用能力；店铺授权与仓库 Token 分别在对应档案中维护。',
-    risk: 'Partner Key、App Secret 等开发者凭据经服务端加密后写入 SaaS MySQL；页面只显示状态和指纹，不回显明文。', empty: '暂无平台接入配置',
+    risk: 'Partner Key、App Secret 等开发者凭据由托管服务保管，数据库记录引用、指纹和状态；保存配置不代表授权或连通。生产凭据须使用加密托管。', empty: '暂无平台接入配置',
     filters: [{ key: 'platform', label: '平台' }, { key: 'api_type', label: 'API 类型' }, { key: 'environment', label: '环境' }, { key: 'status', label: '状态' }]
   },
   'sync-jobs': {
@@ -753,6 +757,9 @@ function openCredential(row) {
   if (actionDenied(credentialRotateAccess.value) || operating.value || configActionBusy(row)) return;
   activeConfig.value = row;
   clearCredentialForm();
+  if (row.platform === 'tiktok' && row.api_type !== 'advertising') {
+    credentialForm.redirect_uri = row.callback_url || '';
+  }
   credentialDialog.value = true;
 }
 function credentialPayload() {
@@ -766,7 +773,7 @@ function credentialPayload() {
       ? ['api_base_url', 'domain', 'client_id', 'client_secret']
       : apiType === 'advertising'
         ? ['ads_app_id', 'ads_secret', 'redirect_uri']
-        : ['app_key', 'service_id', 'app_secret'];
+        : ['app_key', 'service_id', 'app_secret', 'redirect_uri'];
   return Object.fromEntries(keys.filter(key => credentialForm[key] !== '').map(key => [key, credentialForm[key]]));
 }
 async function saveCredential() {
@@ -776,8 +783,8 @@ async function saveCredential() {
   operating.value = true;
   try {
     await ElMessageBox.confirm(
-      '将把已填写的开发者凭据加密保存到服务端；页面不会回显或再次展示密钥原文，并会写入集成审计。是否继续？',
-      '确认加密保存凭据',
+      '将把已填写的开发者凭据交由当前配置的托管服务保存，并记录集成审计。生产凭据须使用加密托管，本地文件托管仅用于合成测试；页面不回显密钥。是否继续？',
+      '确认保存凭据',
       { type: 'warning', confirmButtonText: '确认保存', cancelButtonText: '取消' }
     );
     const idempotencyKey = globalThis.crypto?.randomUUID?.() || `credential-${Date.now()}-${activeConfig.value.id}`;
