@@ -1,4 +1,6 @@
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
@@ -157,6 +159,59 @@ def test_me_all_scope_permissions_include_menu_implied_view_but_not_write_action
     assert "system.users.view" in payload["action_permission_codes"]
     assert "system.users.view" in payload["all_scope_permission_codes"]
     assert "system.users.manage" not in payload["all_scope_permission_codes"]
+
+
+@pytest.mark.django_db
+def test_current_user_capability_snapshot_has_a_bounded_query_budget():
+    tenant = Tenant.objects.create(name="Snapshot tenant", code="auth-me-snapshot")
+    user = CustomUser.objects.create_user(
+        username="snapshot-user",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    role = Role.objects.create(tenant=tenant, name="Snapshot role", code="snapshot-role")
+    permission = Permission.objects.create(
+        code="snapshot.view",
+        name="Snapshot view",
+        module="snapshot",
+        action="view",
+    )
+    role.permissions.add(permission)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(
+        tenant=tenant,
+        role=role,
+        scope_type=DataScope.ScopeType.ALL,
+        config={"all": True},
+    )
+
+    from apps.accounts.serializers import CurrentUserSerializer
+
+    with CaptureQueriesContext(connection) as queries:
+        payload = CurrentUserSerializer(user).data
+
+    assert payload["roles"] == ["snapshot-role"]
+    assert payload["action_permission_codes"] == ["snapshot.view"]
+    assert payload["all_scope_permission_codes"] == ["snapshot.view"]
+    assert len(queries) <= 3
+
+
+@pytest.mark.django_db
+def test_superuser_capability_snapshot_reads_permission_catalog_once():
+    tenant = Tenant.objects.create(name="Root tenant", code="auth-me-root-snapshot")
+    user = CustomUser.objects.create_superuser(
+        username="snapshot-root",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+
+    from apps.accounts.serializers import CurrentUserSerializer
+
+    with CaptureQueriesContext(connection) as queries:
+        payload = CurrentUserSerializer(user).data
+
+    assert payload["role_labels"] == ["平台超级管理员"]
+    assert len(queries) <= 1
 
 
 @pytest.mark.django_db

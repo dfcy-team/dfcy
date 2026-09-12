@@ -72,11 +72,15 @@ def positive_int(value, default, maximum=100):
     return parsed
 
 
-def pagination(request):
+def pagination(request, *, maximum=100):
     return (
-        positive_int(request.query_params.get("page", 1), 1),
-        positive_int(request.query_params.get("page_size", 20), 20),
+        positive_int(request.query_params.get("page", 1), 1, maximum=maximum),
+        positive_int(request.query_params.get("page_size", 20), 20, maximum=maximum),
     )
+
+
+def _permission_cache(request):
+    return getattr(request, "_permission_resolution_cache", None)
 
 
 def _query_bool(value):
@@ -160,15 +164,16 @@ def _safe_department_tree(departments):
 
 def _department_user_counts(request, tenant, nodes, descendant_ids):
     users_permission = "system.users.view"
-    if not check_user_permission(request.user, users_permission):
+    cache = _permission_cache(request)
+    if not check_user_permission(request.user, users_permission, cache=cache):
         return {department_id: None for department_id in nodes}
-    if not get_permission_data_scopes(request.user, users_permission):
+    if not get_permission_data_scopes(request.user, users_permission, cache=cache):
         return {department_id: None for department_id in nodes}
 
     users = CustomUser.objects.filter(tenant=tenant).prefetch_related(
         "internal_profile__departments",
     )
-    users = filter_system_users(request.user, users, users_permission)
+    users = filter_system_users(request.user, users, users_permission, cache)
     assignments = []
     visible_ids = set(nodes)
     for user in users:
@@ -202,6 +207,7 @@ def _department_filter_ids(request, raw_department_id, include_descendants):
         request.user,
         all_departments,
         "system.organization.view",
+        _permission_cache(request),
     )
     if not visible_departments.filter(pk=department_id).exists():
         from rest_framework.exceptions import NotFound
@@ -411,7 +417,9 @@ class DepartmentCollectionView(APIView):
 
     def get(self, request):
         queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent")
-        queryset = filter_departments(request.user, queryset, self.read_permission_code)
+        queryset = filter_departments(
+            request.user, queryset, self.read_permission_code, _permission_cache(request)
+        )
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(name__icontains=search)
@@ -449,6 +457,7 @@ class DepartmentTreeView(APIView):
             request.user,
             Department.objects.filter(tenant=tenant).select_related("parent"),
             self.read_permission_code,
+            _permission_cache(request),
         )
         roots, nodes, descendant_ids = _safe_department_tree(departments)
         counts = _department_user_counts(request, tenant, nodes, descendant_ids)
@@ -532,7 +541,9 @@ class UserCollectionView(APIView):
             "user_roles__role",
             "internal_profile__departments",
         )
-        queryset = filter_system_users(request.user, queryset, self.read_permission_code)
+        queryset = filter_system_users(
+            request.user, queryset, self.read_permission_code, _permission_cache(request)
+        )
         raw_department_id = request.query_params.get("department_id")
         if raw_department_id not in (None, ""):
             department_ids = _department_filter_ids(
@@ -872,7 +883,9 @@ class UserRoleOptionCollectionView(APIView):
         if _is_platform_superuser(request.user):
             queryset = queryset
         else:
-            queryset = filter_assignable_roles(request.user, queryset, self.read_permission_code)
+            queryset = filter_assignable_roles(
+                request.user, queryset, self.read_permission_code, _permission_cache(request)
+            )
             if not user_is_tenant_administrator(request.user, target_tenant):
                 queryset = queryset.exclude(code=TENANT_ADMIN_ROLE_CODE)
         search = request.query_params.get("search", "").strip()
@@ -897,7 +910,9 @@ class RoleCollectionView(APIView):
             # tenant; they are not constrained by the actor tenant's scopes.
             pass
         else:
-            queryset = filter_roles(request.user, queryset, self.read_permission_code)
+            queryset = filter_roles(
+                request.user, queryset, self.read_permission_code, _permission_cache(request)
+            )
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(Q(name__icontains=search) | Q(code__icontains=search))
@@ -1323,7 +1338,7 @@ class PermissionCollectionView(APIView):
             queryset = queryset.filter(module=module)
         if permission_type in {choice.value for choice in Permission.PermissionType}:
             queryset = queryset.filter(permission_type=permission_type)
-        page, page_size = pagination(request)
+        page, page_size = pagination(request, maximum=500)
         return success_response(
             paginated_data(request, queryset, PermissionAdminSerializer, page=page, page_size=page_size)
         )

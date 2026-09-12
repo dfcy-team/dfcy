@@ -185,7 +185,7 @@ export async function fetchAllPermissions(loader = fetchPermissions) {
   let page = 1;
   let response = null;
   while (page <= 1000) {
-    response = await loader({ page, page_size: 100 });
+    response = await loader({ page, page_size: 500 });
     if (!response?.success) return { response, rows };
     rows.push(...(response.data?.results || response.data?.items || []));
     const count = Number(response.data?.count);

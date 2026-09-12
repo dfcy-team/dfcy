@@ -23,7 +23,7 @@ describe('system administration tenant and permission surfaces', () => {
       };
     });
 
-    expect(calls).toEqual([{ page: 1, page_size: 100 }, { page: 2, page_size: 100 }]);
+    expect(calls).toEqual([{ page: 1, page_size: 500 }, { page: 2, page_size: 500 }]);
     expect(result.rows).toHaveLength(155);
   });
 

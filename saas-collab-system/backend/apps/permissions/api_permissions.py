@@ -32,6 +32,10 @@ class DeclaredApplicationPermission(BasePermission):
     """Authorize an internal endpoint using permission codes declared by its view."""
 
     def has_permission(self, request, view):
+        cache = getattr(request, "_permission_resolution_cache", None)
+        if cache is None:
+            cache = {}
+            request._permission_resolution_cache = cache
         permission_code = (
             getattr(view, "read_permission_code", None)
             if request.method in SAFE_METHODS
@@ -42,8 +46,8 @@ class DeclaredApplicationPermission(BasePermission):
             and request.user
             and request.user.is_authenticated
             and request.user.user_type == CustomUser.UserType.INTERNAL
-            and check_user_permission(request.user, permission_code)
-            and bool(get_permission_data_scopes(request.user, permission_code))
+            and check_user_permission(request.user, permission_code, cache=cache)
+            and bool(get_permission_data_scopes(request.user, permission_code, cache=cache))
         )
 
 

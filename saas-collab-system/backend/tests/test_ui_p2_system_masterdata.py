@@ -114,6 +114,37 @@ def test_tenant_administrator_directory_is_complete_and_query_count_is_page_boun
     assert len(full_page_queries) <= len(one_row_queries) + 2
 
 
+def test_system_permission_resolution_cache_never_survives_the_request():
+    tenant = Tenant.objects.create(name="Cache tenant", code="ui-p2-request-cache")
+    viewer = create_user(tenant, "request-cache-viewer")
+    role = grant(viewer, "system.users.view")
+    client = client_for(viewer)
+
+    with CaptureQueriesContext(connection) as queries:
+        first = client.get("/api/internal/system/users/?page_size=1")
+
+    assert first.status_code == 200
+    data_scope_queries = [
+        query["sql"] for query in queries if "permissions_datascope" in query["sql"].lower()
+    ]
+    assert len(data_scope_queries) == 1
+
+    role.permissions.clear()
+    second = client.get("/api/internal/system/users/?page_size=1")
+
+    assert second.status_code == 403
+
+
+def test_permission_catalog_accepts_the_optimized_page_size_only_up_to_500():
+    tenant = Tenant.objects.create(name="Catalog tenant", code="ui-p2-catalog-page-size")
+    viewer = create_user(tenant, "catalog-viewer")
+    grant(viewer, "system.roles.view")
+    client = client_for(viewer)
+
+    assert client.get("/api/internal/system/permissions/?page_size=500").status_code == 200
+    assert client.get("/api/internal/system/permissions/?page_size=501").status_code == 400
+
+
 def test_system_user_create_edit_masks_contacts_and_protects_business_links():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-user-contract")
     manager = create_user(tenant, "contract-manager")

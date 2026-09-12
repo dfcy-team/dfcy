@@ -6,7 +6,7 @@ from rest_framework import serializers
 from apps.permissions.catalog import permission_display_name
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.packages import expand_package_selections, is_high_risk_permission
-from apps.permissions.services import has_field_permission
+from apps.permissions.services import get_field_permission_map
 from apps.tenants.models import Department, Tenant
 from apps.rpa.models import RPAAgent
 from apps.masterdata.models import (
@@ -52,7 +52,7 @@ class TenantAdminSerializer(serializers.ModelSerializer):
 
 
 class DepartmentAdminSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     parent_id = serializers.IntegerField(required=False, allow_null=True)
     parent_name = serializers.CharField(source="parent.name", read_only=True)
 
@@ -239,10 +239,10 @@ class UserAdminSerializer(serializers.ModelSerializer):
             # hundreds of database queries and can exceed the frontend timeout.
             field_permission_cache = getattr(self, "_field_permission_cache", None)
             if field_permission_cache is None:
-                field_permission_cache = {
-                    permission_code: has_field_permission(request.user, permission_code)
-                    for permission_code in set(field_map.values())
-                }
+                field_permission_cache = get_field_permission_map(
+                    request.user,
+                    set(field_map.values()),
+                )
                 self._field_permission_cache = field_permission_cache
             for field, permission_code in field_map.items():
                 if not field_permission_cache[permission_code]:
@@ -356,7 +356,7 @@ class PermissionAdminSerializer(serializers.ModelSerializer):
 
 
 class RoleAdminSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     permission_codes = serializers.SerializerMethodField()
     menu_permission_codes = serializers.SerializerMethodField()
     action_permission_codes = serializers.SerializerMethodField()

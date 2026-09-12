@@ -11,12 +11,8 @@ from .external_auth import (
     resolve_supplier_web_binding,
     stamp_supplier_web_claims,
 )
-from apps.permissions.models import DataScope
-from apps.permissions.services import (
-    get_user_all_scope_permission_codes,
-    get_user_data_scope,
-    get_user_permission_categories,
-)
+from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.permissions.services import MENU_ACTION_FALLBACKS
 
 from .models import CustomUser
 
@@ -73,7 +69,7 @@ class SupplierWebTokenRefreshSerializer(TokenRefreshSerializer):
 
 
 class CurrentUserSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     full_name = serializers.CharField(read_only=True)
     phone = serializers.CharField(read_only=True)
     roles = serializers.SerializerMethodField()
@@ -110,53 +106,153 @@ class CurrentUserSerializer(serializers.ModelSerializer):
 
     user_id = serializers.IntegerField(source="id", read_only=True)
 
-    def get_roles(self, obj):
-        return list(
-            obj.user_roles.filter(tenant=obj.tenant, role__status="active")
-            .select_related("role")
-            .values_list("role__code", flat=True)
-            .distinct()
+    @staticmethod
+    def _menu_action_codes(row):
+        metadata = row.get("metadata") or {}
+        action_codes = metadata.get("action_codes") or []
+        if action_codes:
+            return action_codes
+        menu_code = metadata.get("code") or row.get("code") or ""
+        return MENU_ACTION_FALLBACKS.get(
+            menu_code,
+            (str(menu_code).removeprefix("menu."),),
         )
+
+    def _authorization_snapshot(self, obj):
+        """Resolve all /auth/me role capabilities in a bounded query set.
+
+        Serializer instances are request-scoped, so this snapshot never
+        survives a request and cannot hide role or scope revocations.
+        """
+        cached = getattr(self, "_authorization_snapshot_cache", None)
+        if cached is not None:
+            return cached
+
+        if obj.is_superuser:
+            permission_rows = list(
+                Permission.objects.order_by("code").values(
+                    "code", "permission_type", "metadata"
+                )
+            )
+            categories = {
+                permission_type: [
+                    row["code"]
+                    for row in permission_rows
+                    if row["permission_type"] == permission_type
+                ]
+                for permission_type in (
+                    Permission.PermissionType.MENU,
+                    Permission.PermissionType.ACTION,
+                    Permission.PermissionType.FIELD,
+                )
+            }
+            snapshot = {
+                "roles": [],
+                "role_labels": ["平台超级管理员"],
+                "permissions": [row["code"] for row in permission_rows],
+                "categories": categories,
+                "data_scope": [
+                    {"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}
+                ],
+                "all_scope_permission_codes": [row["code"] for row in permission_rows],
+            }
+            self._authorization_snapshot_cache = snapshot
+            return snapshot
+
+        role_rows = list(
+            UserRole.objects.filter(
+                tenant_id=obj.tenant_id,
+                user=obj,
+                role__status=Role.Status.ACTIVE,
+            )
+            .order_by("role__name", "role_id")
+            .values("role_id", "role__code", "role__name")
+        )
+        role_ids = [row["role_id"] for row in role_rows]
+        permission_rows = list(
+            Permission.objects.filter(roles__id__in=role_ids)
+            .order_by("code", "roles__id")
+            .values("roles__id", "code", "permission_type", "metadata")
+        )
+        data_scope = list(
+            DataScope.objects.filter(
+                tenant_id=obj.tenant_id,
+                role_id__in=role_ids,
+                role__status=Role.Status.ACTIVE,
+            ).values("scope_type", "config", "role_id")
+        )
+
+        explicit_codes = {row["code"] for row in permission_rows}
+        menu_codes = {
+            row["code"]
+            for row in permission_rows
+            if row["permission_type"] == Permission.PermissionType.MENU
+        }
+        action_codes = {
+            row["code"]
+            for row in permission_rows
+            if row["permission_type"] == Permission.PermissionType.ACTION
+        }
+        field_codes = {
+            row["code"]
+            for row in permission_rows
+            if row["permission_type"] == Permission.PermissionType.FIELD
+        }
+        action_codes.update(
+            action_code
+            for row in permission_rows
+            if row["permission_type"] == Permission.PermissionType.MENU
+            for action_code in self._menu_action_codes(row)
+            if str(action_code).endswith(".view")
+        )
+        all_scope_role_ids = {
+            row["role_id"]
+            for row in data_scope
+            if row["scope_type"] == DataScope.ScopeType.ALL
+        }
+        all_scope_codes = {
+            row["code"]
+            for row in permission_rows
+            if row["roles__id"] in all_scope_role_ids
+        }
+        all_scope_codes.update(
+            action_code
+            for row in permission_rows
+            if row["roles__id"] in all_scope_role_ids
+            and row["permission_type"] == Permission.PermissionType.MENU
+            for action_code in self._menu_action_codes(row)
+            if str(action_code).endswith(".view")
+        )
+        snapshot = {
+            "roles": [row["role__code"] for row in role_rows],
+            "role_labels": [row["role__name"] for row in role_rows],
+            "permissions": sorted(explicit_codes),
+            "categories": {
+                "menu": sorted(menu_codes),
+                "action": sorted(action_codes),
+                "field": sorted(field_codes),
+            },
+            "data_scope": data_scope,
+            "all_scope_permission_codes": sorted(all_scope_codes),
+        }
+        self._authorization_snapshot_cache = snapshot
+        return snapshot
+
+    def get_roles(self, obj):
+        return self._authorization_snapshot(obj)["roles"]
 
     def get_role_labels(self, obj):
-        if obj.is_superuser:
-            return ["平台超级管理员"]
-        return list(
-            obj.user_roles.filter(tenant=obj.tenant, role__status="active")
-            .select_related("role")
-            .order_by("role__name")
-            .values_list("role__name", flat=True)
-            .distinct()
-        )
+        return self._authorization_snapshot(obj)["role_labels"]
 
     def get_identity_label(self, obj):
-        if obj.is_superuser:
-            return "平台超级管理员"
-        labels = self.get_role_labels(obj)
+        labels = self._authorization_snapshot(obj)["role_labels"]
         return " / ".join(labels) if labels else "未分配角色"
 
     def get_permissions(self, obj):
-        if obj.is_superuser:
-            categories = self._permission_categories(obj)
-            return sorted({code for values in categories.values() for code in values})
-        return list(
-            obj.user_roles.filter(tenant=obj.tenant, role__status="active")
-            .select_related("role")
-            .prefetch_related("role__permissions")
-            .values_list("role__permissions__code", flat=True)
-            .exclude(role__permissions__code__isnull=True)
-            .distinct()
-        )
+        return self._authorization_snapshot(obj)["permissions"]
 
     def _permission_categories(self, obj):
-        # Avoid performing three independent role traversals for one /me
-        # response.  The serializer instance is request-scoped and safe to
-        # cache for the duration of this representation.
-        categories = getattr(obj, "_permission_categories", None)
-        if categories is None:
-            categories = get_user_permission_categories(obj)
-            setattr(obj, "_permission_categories", categories)
-        return categories
+        return self._authorization_snapshot(obj)["categories"]
 
     def get_menu_permission_codes(self, obj):
         return self._permission_categories(obj)["menu"]
@@ -168,13 +264,11 @@ class CurrentUserSerializer(serializers.ModelSerializer):
         return self._permission_categories(obj)["field"]
 
     def get_data_scope(self, obj):
-        if obj.is_superuser:
-            return [{"scope_type": "all", "config": {"all": True}, "role_id": None}]
-        return get_user_data_scope(obj)
+        return self._authorization_snapshot(obj)["data_scope"]
 
     def get_all_scope_permission_codes(self, obj):
         """Expose permission-specific all-scope grants for UI capability gating."""
-        return sorted(get_user_all_scope_permission_codes(obj))
+        return self._authorization_snapshot(obj)["all_scope_permission_codes"]
 
 
 class CurrentUserProfileSerializer(serializers.ModelSerializer):
