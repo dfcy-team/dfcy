@@ -94,6 +94,26 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(userPage).toMatch(/async function saveRoleAssignment\(\) \{\s+if \(!roleAccess\.value\.allowed/);
   });
 
+  it('prepares user creation fields from the organization tree and assignable roles', () => {
+    const userPage = read('src/views/system/UserDirectory.vue');
+    const resourcePage = read('src/components/AdminResourcePage.vue');
+    const systemApi = read('src/api/systemAdmin.js');
+    for (const field of ["key: 'full_name'", "key: 'email'", "key: 'phone'", "key: 'department_id'", "key: 'role_codes'"]) {
+      expect(userPage).toContain(field);
+    }
+    expect(userPage).toContain(':before-create="prepareCreateForm"');
+    expect(userPage).toContain('const treeReady = await loadTree()');
+    expect(userPage).toContain('const rolesReady = roleAccess.value.allowed ? await loadAssignableRoles() : true');
+    expect(userPage).toContain('新建用户所需的组织或角色选项加载失败');
+    expect(resourcePage).toContain('beforeCreate: { type: Function, default: null }');
+    expect(resourcePage).toContain('const ready = await props.beforeCreate(defaults)');
+    expect(userPage).toContain(':edit-handler="handleUserEdit"');
+    expect(userPage).toContain(':delete-handler="deleteUser"');
+    expect(userPage).toContain('重置密码');
+    expect(userPage).toContain('resetUserPassword');
+    expect(systemApi).toContain('/api/internal/system/users/${id}/password-reset/');
+  });
+
   it('loads platform type options from the backend catalog and exposes connector state', () => {
     const platformPage = read('src/views/masterdata/PlatformMasterList.vue');
     expect(platformPage).toContain('fetchPlatformCatalog');

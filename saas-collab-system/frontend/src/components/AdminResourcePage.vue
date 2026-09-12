@@ -13,6 +13,7 @@
         v-if="createHandler && createAccess.visible"
         type="primary"
         :disabled="createAccess.disabled"
+        :loading="preparingCreate"
         :title="createAccess.reason"
         @click="openCreate"
       >
@@ -169,7 +170,7 @@
         show-icon
       />
       <el-form label-position="top" class="create-form" @submit.prevent="submitForm">
-        <el-form-item v-for="field in formFields.filter(item => !item.visible || item.visible(resourceForm))" :key="field.key" :label="field.label" :required="field.required" :error="fieldErrors[field.key]">
+        <el-form-item v-for="field in visibleFormFields" :key="field.key" :label="field.label" :required="field.required" :error="fieldErrors[field.key]">
           <el-select
             v-if="field.type === 'select'"
             v-model="resourceForm[field.key]"
@@ -179,6 +180,7 @@
             :placeholder="field.placeholder || '请选择'"
             :filterable="field.filterable !== false"
             :clearable="field.clearable === true"
+            :loading="typeof field.loading === 'function' ? field.loading(resourceForm) : field.loading === true"
             :aria-describedby="fieldHelpText(field) ? `${field.key}-help` : undefined"
             @change="handleFieldChange(field, $event)"
           >
@@ -203,6 +205,7 @@
             :type="field.type === 'password' ? 'password' : 'text'"
             :show-password="field.type === 'password'"
             :autocomplete="field.type === 'password' ? 'new-password' : 'off'"
+            :readonly="typeof field.readonly === 'function' ? field.readonly(resourceForm, Boolean(editingRow)) : field.readonly === true"
             :placeholder="field.placeholder || `请输入${field.label}`"
             :aria-describedby="fieldHelpText(field) ? `${field.key}-help` : undefined"
           />
@@ -239,6 +242,7 @@ const props = defineProps({
   formFields: { type: Array, default: () => [] },
   formNotice: { type: String, default: '仅保存当前租户的档案信息；密钥、令牌、浏览器标识和会话内容不在此表单采集。' },
   createHandler: { type: Function, default: null },
+  beforeCreate: { type: Function, default: null },
   editHandler: { type: Function, default: null },
   deleteHandler: { type: Function, default: null },
   statusHandler: { type: Function, default: null },
@@ -269,10 +273,18 @@ const fieldErrors = ref({});
 // is invoked through handleFieldChange so every form uses the same guard.
 const createForm = resourceForm;
 const submitting = ref(false);
+const preparingCreate = ref(false);
 const filters = reactive({ search: '', status: '', page: 1, page_size: 20 });
 
 const createAccess = computed(() => getActionAccess(auth, { permission: props.createPermission }));
 const manageAccess = computed(() => getActionAccess(auth, { permission: props.managePermission }));
+const visibleFormFields = computed(() => {
+  const isEditing = Boolean(editingRow.value);
+  return props.formFields.filter((field) => (
+    (!field.createOnly || !isEditing)
+    && (!field.visible || field.visible(resourceForm, isEditing))
+  ));
+});
 const activeCount = computed(() => rows.value.filter((row) => rowStatus(row) === 'active').length);
 const inactiveCount = computed(() => rows.value.filter((row) => rowStatus(row) === 'inactive').length);
 
@@ -306,7 +318,7 @@ function columnValue(column, value, row = {}) {
 }
 
 function fieldHelpText(field) {
-  if (typeof field.helpText === 'function') return field.helpText(resourceForm);
+  if (typeof field.helpText === 'function') return field.helpText(resourceForm, Boolean(editingRow.value));
   return field.helpText || field.help_text || '';
 }
 
@@ -352,10 +364,23 @@ function openDetail(row) {
   detailOpen.value = true;
 }
 
-function openCreate(defaults = {}) {
+async function openCreate(defaults = {}) {
   if (!createAccess.value.allowed) {
     ElMessage.warning(createAccess.value.reason);
     return;
+  }
+  if (props.beforeCreate) {
+    if (preparingCreate.value) return;
+    preparingCreate.value = true;
+    try {
+      const ready = await props.beforeCreate(defaults);
+      if (ready === false) return;
+    } catch (error) {
+      ElMessage.error(error?.message || '新建表单选项加载失败');
+      return;
+    } finally {
+      preparingCreate.value = false;
+    }
   }
   editingRow.value = null;
   fillForm(defaults);
@@ -387,7 +412,7 @@ async function submitForm() {
   fieldErrors.value = {};
   const isEditing = Boolean(editingRow.value);
   if (isEditing ? (!manageAccess.value.allowed || !props.editHandler) : (!createAccess.value.allowed || !props.createHandler)) return;
-  const missing = props.formFields.find((field) => (!field.visible || field.visible(resourceForm)) && field.required && !resourceForm[field.key]);
+  const missing = visibleFormFields.value.find((field) => field.required && !resourceForm[field.key]);
   if (missing) {
     fieldErrors.value[missing.key] = `请填写${missing.label}`;
     ElMessage.warning(`请填写${missing.label}`);
@@ -395,9 +420,12 @@ async function submitForm() {
   }
   submitting.value = true;
   try {
+    const payload = Object.fromEntries(
+      visibleFormFields.value.map((field) => [field.key, resourceForm[field.key]]),
+    );
     const response = isEditing
-      ? await props.editHandler(editingRow.value.id, { ...resourceForm })
-      : await props.createHandler({ ...resourceForm });
+      ? await props.editHandler(editingRow.value.id, payload)
+      : await props.createHandler(payload);
     if (!response?.success) {
       if (response?.code === 'VALIDATION_ERROR' || response?.code === 'BUSINESS_RULE_VIOLATION') {
         for (const field of props.formFields) {

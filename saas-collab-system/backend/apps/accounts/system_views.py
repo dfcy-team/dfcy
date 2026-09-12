@@ -1,6 +1,7 @@
 import json
 
 from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -649,12 +650,18 @@ class UserDetailView(APIView):
             primary_department_id = profile.department_id if profile is not None else None
         before = {
             "full_name": user.full_name,
+            "email_masked": UserAdminSerializer(user).data.get("email_masked", ""),
+            "phone_masked": UserAdminSerializer(user).data.get("phone_masked", ""),
             "department_id": profile.department_id if profile is not None else None,
             "department_ids": current_department_ids,
         }
-        if "full_name" in serializer.validated_data:
-            user.full_name = serializer.validated_data["full_name"]
-            user.save(update_fields=["full_name", "updated_at"])
+        user_updates = []
+        for field in ("full_name", "email", "phone"):
+            if field in serializer.validated_data:
+                setattr(user, field, serializer.validated_data[field])
+                user_updates.append(field)
+        if user_updates:
+            user.save(update_fields=[*user_updates, "updated_at"])
         if department_update:
             profile.departments.set(department_ids)
             profile.department_id = primary_department_id
@@ -664,12 +671,48 @@ class UserDetailView(APIView):
             object_type="user", object_id=user.pk, before_data=before,
             after_data={
                 "full_name": user.full_name,
+                "email_masked": UserAdminSerializer(user).data.get("email_masked", ""),
+                "phone_masked": UserAdminSerializer(user).data.get("phone_masked", ""),
                 "department_id": profile.department_id if profile is not None else None,
                 "department_ids": list(profile.departments.values_list("id", flat=True))
                 if profile is not None else [],
             },
         )
         return success_response(UserAdminSerializer(user, context={"request": request}).data)
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        target_tenant = requested_tenant(request)
+        queryset = CustomUser.objects.filter(tenant=target_tenant)
+        user = get_object_or_404(
+            (
+                queryset
+                if _is_platform_superuser(request.user)
+                else filter_system_users(request.user, queryset, self.write_permission_code)
+            ).select_for_update(),
+            pk=pk,
+        )
+        if user.pk == request.user.pk:
+            raise StateConflict("当前登录用户不能删除自己的账号，请先停用或交接。")
+        ensure_not_last_tenant_administrator(target_tenant, user, role_codes=[])
+        user_id = user.pk
+        username = user.username
+        try:
+            user.delete()
+        except ProtectedError as exc:
+            blocker_names = sorted({
+                str(getattr(obj._meta, "verbose_name", "业务数据"))
+                for obj in exc.protected_objects
+            })
+            detail = "、".join(blocker_names[:3])
+            suffix = f"（{detail}）" if detail else ""
+            raise StateConflict(f"用户存在业务数据关联{suffix}，无法删除，只能停用。") from exc
+        write_operation_log(
+            tenant=target_tenant, user=request.user, module="system", action="user_delete",
+            object_type="user", object_id=user_id,
+            before_data={**audit_context(request, target_tenant), "username": username},
+        )
+        return success_response({"deleted": True, "id": user_id, "username": username})
 
 
 class UserStatusView(APIView):

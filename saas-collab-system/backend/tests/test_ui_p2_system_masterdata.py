@@ -3,6 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.audit.models import OperationLog
+from apps.finance.models import FinanceAuditLog
 from apps.integrations.credential_service import reference_fingerprint, rotate_config_references
 from apps.integrations.models import PlatformIntegrationConfig
 from apps.masterdata.models import (
@@ -75,6 +76,70 @@ def test_system_user_directory_is_tenant_filtered_and_masked():
     assert visible["email_masked"] == "v***@example.com"
     assert visible["phone_masked"] == "***8000"
     assert "email" not in visible and "phone" not in visible
+
+
+def test_system_user_create_edit_masks_contacts_and_protects_business_links():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-user-contract")
+    manager = create_user(tenant, "contract-manager")
+    department = Department.objects.create(tenant=tenant, name="运营部")
+    other_department = Department.objects.create(tenant=tenant, name="客服部")
+    grant(manager, "system.users.manage")
+    client = client_for(manager)
+
+    response = client.post(
+        "/api/internal/system/users/",
+        {
+            "username": "contract-user",
+            "full_name": "张三",
+            "email": "zhangsan@example.com",
+            "phone": "13800138000",
+            "initial_password": "not-a-real-password",
+            "user_type": CustomUser.UserType.INTERNAL,
+            "department_id": department.pk,
+            "department_ids": [department.pk, other_department.pk],
+        },
+        format="json",
+    )
+    assert response.status_code == 201
+    user = CustomUser.objects.get(username="contract-user")
+    assert response.data["data"]["email_masked"] == "z***@example.com"
+    assert response.data["data"]["phone_masked"] == "***8000"
+    assert "email" not in response.data["data"] and "phone" not in response.data["data"]
+
+    response = client.patch(
+        f"/api/internal/system/users/{user.pk}/",
+        {"full_name": "李四", "email": "lisi@example.com", "phone": "13900139000"},
+        format="json",
+    )
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert (user.full_name, user.email, user.phone) == ("李四", "lisi@example.com", "13900139000")
+    assert response.data["data"]["email_masked"] == "l***@example.com"
+    assert response.data["data"]["phone_masked"] == "***9000"
+
+    FinanceAuditLog.objects.create(
+        tenant=tenant, actor=user, action="test", object_type="test", object_id="1"
+    )
+    response = client.delete(f"/api/internal/system/users/{user.pk}/")
+    assert response.status_code == 409
+    assert CustomUser.objects.filter(pk=user.pk).exists()
+
+    deletable = create_user(tenant, "contract-deletable")
+    response = client.delete(f"/api/internal/system/users/{deletable.pk}/")
+    assert response.status_code == 200
+    assert not CustomUser.objects.filter(pk=deletable.pk).exists()
+    assert OperationLog.objects.filter(
+        tenant=tenant,
+        user=manager,
+        module="system",
+        action="user_delete",
+        object_type="user",
+        object_id=str(deletable.pk),
+    ).exists()
+
+    response = client.delete(f"/api/internal/system/users/{manager.pk}/")
+    assert response.status_code == 409
+    assert CustomUser.objects.filter(pk=manager.pk).exists()
 
 
 def test_system_user_directory_enforces_permission_bound_own_scope():

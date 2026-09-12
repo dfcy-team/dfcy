@@ -862,6 +862,23 @@
       }
     },
     {
+      "code": "menu.sales_management.pricing_prices.view",
+      "name": "价格中心",
+      "module": "sales_management",
+      "action": "pricing_prices.view",
+      "description": "显示价格中心入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/pricing/prices",
+        "route": "/pricing/prices",
+        "resource": "pricing_prices",
+        "parent": "销售管理",
+        "action_codes": [],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.influencers.influencers.view",
       "name": "达人档案",
       "module": "influencers",
@@ -2642,6 +2659,9 @@
       "path": "/pricing/prices",
       "userTypes": [
         "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.pricing_prices.view"
       ]
     },
     {

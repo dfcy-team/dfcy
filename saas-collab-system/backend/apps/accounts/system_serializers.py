@@ -104,6 +104,10 @@ class DepartmentAdminSerializer(serializers.ModelSerializer):
 
 class UserAdminSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    # Contacts may be submitted when provisioning/editing, but responses only
+    # expose their masked forms through the fields below.
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    phone = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=32)
     email_masked = serializers.SerializerMethodField()
     phone_masked = serializers.SerializerMethodField()
     department_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
@@ -130,7 +134,7 @@ class UserAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = (
-            "id", "tenant_id", "username", "full_name", "email_masked", "phone_masked", "user_type", "is_active",
+            "id", "tenant_id", "username", "full_name", "email", "phone", "email_masked", "phone_masked", "user_type", "is_active",
             "department_id", "department_ids", "department_name", "department_names",
             "role_codes", "roles", "role_labels", "initial_password", "created_at", "updated_at",
         )
@@ -285,6 +289,8 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
 class UserProfileUpdateSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
     department_id = serializers.IntegerField(required=False, allow_null=True)
     department_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, allow_empty=True
