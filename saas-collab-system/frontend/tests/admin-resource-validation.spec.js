@@ -51,4 +51,31 @@ describe('master-data form validation recovery', () => {
     expect(handler).toHaveBeenLastCalledWith({ code: 'acceptance-fixed' });
     await vi.waitFor(() => expect(wrapper.vm.formOpen).toBe(false));
   });
+
+  it('does not submit create-only or permission-hidden fields while editing', async () => {
+    const editHandler = vi.fn().mockResolvedValue({ success: true });
+    wrapper = mount(AdminResourcePage, {
+      attachTo: document.body,
+      props: {
+        title: '用户目录', entityLabel: '用户', editHandler,
+        loader: async () => ({ success: true, data: { results: [], count: 0 } }),
+        formFields: [
+          { key: 'full_name', label: '姓名' },
+          { key: 'initial_password', label: '初始密码', createOnly: true },
+          { key: 'department_id', label: '主部门', visible: () => false },
+        ],
+      },
+      global: { plugins: [ElementPlus], stubs: {
+        AppPage: { template: '<main><slot name="action"/><slot/></main>' },
+        AppState: true, teleport: true, ElSelect: true, ElPagination: true,
+      } },
+    });
+    wrapper.vm.openEdit({ id: 7, full_name: '旧姓名', initial_password: 'secret', department_id: 12 });
+    await flushPromises();
+    expect(wrapper.findAll('.el-dialog input')).toHaveLength(1);
+    await wrapper.find('.el-dialog input').setValue('新姓名');
+    await wrapper.find('.el-dialog__footer .el-button--primary').trigger('click');
+    await flushPromises();
+    expect(editHandler).toHaveBeenCalledWith(7, { full_name: '新姓名' });
+  });
 });

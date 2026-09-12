@@ -96,7 +96,10 @@ export const menuItems = [
         label: '数据同步与质量',
         permissions: ['sales_management.data_quality.view', 'sales_management.sync.view']
       },
-      { path: '/pricing/prices', label: '价格中心', internal: true }
+      {
+        path: '/pricing/prices', label: '价格中心', internal: true,
+        menuPermissions: ['menu.sales_management.pricing_prices.view']
+      }
     ]
   },
   {
@@ -532,6 +535,13 @@ function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   // even when its action grant is intentionally configured separately.
   // Deep-link/route checks below accept menu-implied view grants only.
   if (menuEntry && hasMenuSurface && requiredMenu.length) {
+    return requiredMenu.some((code) => menuPermissions.has(code));
+  }
+  // A registered read-only/pending page may intentionally have no action
+  // permission yet. In the split-surface model its menu grant is therefore
+  // the complete route gate; legacy sessions without a menu surface retain
+  // their previous compatibility behaviour below.
+  if (!menuEntry && hasMenuSurface && requiredMenu.length && !requiredActions.length) {
     return requiredMenu.some((code) => menuPermissions.has(code));
   }
   // If a declaration has no registered menu code (for example an internal

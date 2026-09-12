@@ -29,6 +29,9 @@
       <span>权限目录 {{ permissions.length }} 项</span>
     </section>
 
+    <el-alert v-if="registryDrift.length" class="permission-drift" type="warning" :closable="false" show-icon
+      title="权限目录与注册菜单存在差异"
+      :description="`以下菜单尚未登记到 API 目录，不能提交其权限：${registryDrift.map((item) => `${item.name}（${item.code}）`).join('、')}`" />
     <AppState v-if="state !== 'ready'" :status="state" :detail="errorMessage" @action="load" />
     <el-table v-else :data="roles" border table-layout="fixed">
       <el-table-column v-if="showRoleField('name')" label="角色名称" min-width="140">
@@ -246,19 +249,20 @@
                   </template>
                   <div class="permission-tree__modules">
                     <section
-                      v-for="module in menu.children"
-                      :key="`${surface.key}-${module.key}`"
+                      v-for="menuItem in menu.children"
+                      :key="`${surface.key}-${menuItem.key}`"
                       class="permission-tree__module permission-tree__module--advanced"
                     >
-                      <strong>{{ module.label }}</strong>
+                      <div class="permission-tree__module-heading">
+                        <strong>{{ menuItem.label }}</strong>
+                        <small v-if="menuItem.path">{{ menuItem.path }}</small>
+                      </div>
                       <div class="permission-tree__items">
                         <el-checkbox
-                          v-for="permission in permissionItemsForModule(module.module, surface.type)"
+                          v-for="permission in menuItem.permissions"
                           :key="permission.code"
                           :value="permission.code"
-                        >
-                          {{ adminPermissionLabel(permission) }}
-                        </el-checkbox>
+                        >{{ adminPermissionLabel(permission) }}</el-checkbox>
                       </div>
                     </section>
                   </div>
@@ -346,7 +350,7 @@ import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
 import { adminPermissionLabel, adminRoleDisplayName, tenantDisplayName } from '../../utils/adminDisplayLabels';
-import { buildPermissionTree } from '../../utils/permissionTree';
+import { buildPermissionTree, buildRegisteredMenuTree, detectMenuRegistryDrift } from '../../utils/permissionTree';
 import { statusFromApiResponse } from '../../utils/uiState';
 
 const auth = useAuthStore();
@@ -356,6 +360,7 @@ const permissions = ref([]);
 const state = ref('loading');
 const capability = ref(useMock ? 'mock' : 'pending');
 const errorMessage = ref('');
+const registryDrift = ref([]);
 const search = ref('');
 const page = ref(1);
 const pageSize = 20;
@@ -462,6 +467,7 @@ const permissionTree = computed(() => buildPermissionTree({
   modules: packageCatalog.value.map((item) => item.module),
   permissions: permissions.value,
 }));
+const registeredMenuTree = computed(() => buildRegisteredMenuTree());
 const packageByModule = computed(() => new Map(packageCatalog.value.map((item) => [item.module, item])));
 
 function packageForModule(module) {
@@ -475,16 +481,54 @@ function permissionItemsForModule(module, type) {
 }
 
 function permissionCountForMenu(menu, type) {
-  return menu.children.reduce((count, module) => count + permissionItemsForModule(module.module, type).length, 0);
+  return menu.children.reduce((count, item) => count + (item.permissions?.length || 0), 0);
 }
 
 function permissionTreeForSurface(type) {
-  return permissionTree.value
-    .map((menu) => ({
-      ...menu,
-      children: menu.children.filter((module) => permissionItemsForModule(module.module, type).length),
-    }))
-    .filter((menu) => menu.children.length);
+  const catalog = permissions.value.filter((permission) => (
+    (permission.permission_type || 'action') === type
+  ));
+  const byCode = new Map(catalog.map((permission) => [permission.code, permission]));
+  const claimed = new Set();
+  const groups = registeredMenuTree.value.map((menu) => ({
+    ...menu,
+    children: menu.children.map((item) => {
+      const codes = type === 'menu' ? [item.code] : type === 'action' ? item.action_codes : [];
+      const itemPermissions = codes
+        .filter((code) => !claimed.has(code) && byCode.has(code))
+        .map((code) => {
+          claimed.add(code);
+          return byCode.get(code);
+        });
+      return { ...item, permissions: itemPermissions };
+    }).filter((item) => item.permissions.length),
+  })).filter((menu) => menu.children.length);
+
+  const fallbackByModule = new Map();
+  for (const permission of catalog) {
+    if (claimed.has(permission.code)) continue;
+    const module = permission.module || permission.code.split('.')[0] || 'other';
+    if (!fallbackByModule.has(module)) fallbackByModule.set(module, []);
+    fallbackByModule.get(module).push(permission);
+  }
+  if (fallbackByModule.size) {
+    groups.push({
+      key: `registered-menu:other:${type}`,
+      type: 'registered-menu-group',
+      label: '其他权限',
+      children: [...fallbackByModule.entries()].map(([module, modulePermissions]) => ({
+        key: `registered-menu-item:other:${type}:${module}`,
+        type: 'registered-menu-item',
+        code: '',
+        label: adminModuleLabel(module),
+        path: '',
+        module,
+        action_codes: [],
+        permissions: modulePermissions,
+      })),
+    });
+  }
+  return groups;
 }
 
 watch(permissionTree, (tree) => {
@@ -687,6 +731,7 @@ async function load() {
   roles.value = unpack(roleResponse);
   total.value = Number.isFinite(roleResponse.data?.count) ? roleResponse.data.count : roles.value.length;
   permissions.value = permissionResult.rows;
+  registryDrift.value = detectMenuRegistryDrift({ permissions: permissions.value });
   packageCatalog.value = packageResponse.data?.packages || [];
   packageLevels.value = packageResponse.data?.levels || packageLevels.value;
   targetTenant.value = roleResponse.data?.tenant || targetTenant.value || {

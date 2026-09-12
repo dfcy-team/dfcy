@@ -10,10 +10,13 @@
     :columns="columns"
     :form-fields="formFields"
     :create-handler="createUser"
+    :before-create="prepareCreateForm"
+    :edit-handler="handleUserEdit"
+    :delete-handler="deleteUser"
     :status-handler="handleStatus"
     create-permission="system.users.manage"
     manage-permission="system.users.manage"
-    :operation-width="320"
+    :operation-width="420"
   >
     <template #sidebar>
       <DepartmentTree
@@ -69,6 +72,7 @@
         :title="roleAccess.reason"
         @click.stop="openRoleAssignment(row)"
       >分配角色</el-button>
+      <el-button v-if="roleAccess.visible" link type="warning" :disabled="roleAccess.disabled" :title="roleAccess.reason" @click.stop="openPasswordReset(row)">重置密码</el-button>
     </template>
   </AdminResourcePage>
 
@@ -111,6 +115,19 @@
     </template>
   </el-dialog>
 
+  <el-dialog v-model="passwordDialogOpen" title="重置用户密码" width="min(480px, 94vw)" destroy-on-close>
+    <p class="role-user">用户：<strong>{{ selectedUser.username }}</strong></p>
+    <el-alert title="新密码至少12位，提交后不会回显；操作会写入审计日志。" type="warning" :closable="false" show-icon />
+    <el-form label-position="top" class="password-form" @submit.prevent="savePasswordReset">
+      <el-form-item label="新密码" required><el-input v-model="passwordForm.new_password" type="password" show-password autocomplete="new-password" placeholder="至少12位" /></el-form-item>
+      <el-form-item label="确认新密码" required><el-input v-model="passwordForm.confirm_password" type="password" show-password autocomplete="new-password" placeholder="再次输入新密码" /></el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="passwordDialogOpen = false">取消</el-button>
+      <el-button type="primary" :loading="passwordSaving" :disabled="roleAccess.disabled" @click="savePasswordReset">保存密码</el-button>
+    </template>
+  </el-dialog>
+
   <el-dialog v-model="roleDialogOpen" title="分配用户角色" width="min(520px, 94vw)">
     <p class="role-user">用户：<strong>{{ selectedUser.username }}</strong></p>
     <el-form label-position="top">
@@ -146,7 +163,8 @@ import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import DepartmentTree from '../../components/DepartmentTree.vue';
 import {
   createUser, fetchAssignableRoles, fetchDepartmentTree, fetchUsers,
-  updateUserDepartments, updateUserRoles, updateUserStatus
+  updateUserDepartments, updateUserRoles, updateUserStatus, updateUserProfile,
+  resetUserPassword, deleteUser
 } from '../../api/systemAdmin';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -162,6 +180,9 @@ const departmentSaving = ref(false);
 const roleDialogOpen = ref(false);
 const roleOptionsLoading = ref(false);
 const roleSaving = ref(false);
+const passwordDialogOpen = ref(false);
+const passwordSaving = ref(false);
+const passwordForm = reactive({ new_password: '', confirm_password: '' });
 const roleOptions = ref([]);
 const selectedRoleCodes = ref([]);
 const selectedDepartmentId = ref(null);
@@ -206,9 +227,40 @@ const columns = computed(() => [
 ]);
 
 const formFields = [
-  { key: 'username', label: '用户名', required: true, placeholder: '仅使用工作账号标识' },
-  { key: 'initial_password', label: '初始密码', type: 'password', required: true, placeholder: '至少12位，提交后不回显' },
-  { key: 'user_type', label: '用户类型', type: 'select', default: 'internal', options: [{ label: '内部用户', value: 'internal' }] }
+  { key: 'full_name', label: '姓名', placeholder: '请输入真实姓名' },
+  { key: 'username', label: '用户名', required: true, placeholder: '仅使用工作账号标识', readonly: (_form, editing) => Boolean(editing) },
+  { key: 'email', label: '邮箱', placeholder: '请输入工作邮箱（可选）', helpText: (_form, editing) => editing ? '编辑时留空表示不修改。' : '' },
+  { key: 'phone', label: '手机号', placeholder: '请输入手机号（可选）', helpText: (_form, editing) => editing ? '编辑时留空表示不修改。' : '' },
+  { key: 'initial_password', label: '初始密码', type: 'password', required: true, createOnly: true, placeholder: '至少12位，提交后不回显' },
+  {
+    key: 'user_type', label: '用户类型', type: 'select', default: 'internal', createOnly: true,
+    options: [{ label: '内部用户', value: 'internal' }, { label: '自动化用户', value: 'rpa' }],
+  },
+  {
+    key: 'department_id',
+    label: '主部门',
+    type: 'select',
+    default: null,
+    options: () => departmentOptions.value,
+    visible: (form) => departmentFieldVisible.value && form.user_type === 'internal',
+    clearable: true,
+    placeholder: '请选择主部门（可稍后调整）',
+    helpText: '主部门用于组织归属和下级数据范围计算。',
+    loading: () => treeLoading.value,
+  },
+  {
+    key: 'role_codes',
+    label: '角色',
+    type: 'select',
+    createOnly: true,
+    multiple: true,
+    default: [],
+    options: () => roleOptions.value.map((role) => ({ label: adminRoleDisplayName(role), value: role.code })),
+    visible: () => roleAccess.value.allowed,
+    placeholder: '可多选角色（可稍后分配）',
+    helpText: '仅显示当前账号有权分配的当前租户角色。',
+    loading: () => roleOptionsLoading.value,
+  },
 ];
 
 function flattenTree(nodes, result = []) {
@@ -230,7 +282,7 @@ async function loadTree() {
     treeLoading.value = false;
     treeError.value = '';
     treeNodes.value = [];
-    return;
+    return true;
   }
   treeLoading.value = true;
   treeError.value = '';
@@ -239,9 +291,33 @@ async function loadTree() {
   if (!response?.success) {
     treeError.value = response?.message || '组织树加载失败';
     treeNodes.value = [];
-    return;
+    return false;
   }
   treeNodes.value = unpackTree(response);
+  return true;
+}
+
+async function loadAssignableRoles() {
+  roleOptionsLoading.value = true;
+  const response = await fetchAssignableRoles({ page: 1, page_size: 100 });
+  roleOptionsLoading.value = false;
+  if (!response?.success) {
+    roleOptions.value = [];
+    ElMessage.error(response?.message || '角色目录加载失败');
+    return false;
+  }
+  roleOptions.value = response.data?.results || [];
+  return true;
+}
+
+async function prepareCreateForm() {
+  const treeReady = await loadTree();
+  const rolesReady = roleAccess.value.allowed ? await loadAssignableRoles() : true;
+  if (!treeReady || !rolesReady) {
+    ElMessage.error('新建用户所需的组织或角色选项加载失败，请重试');
+    return false;
+  }
+  return true;
 }
 
 function selectDepartment(node) {
@@ -305,6 +381,48 @@ async function saveDepartmentAssignment() {
 
 const handleStatus = (row, status) => updateUserStatus(row.id, status === 'active');
 
+function handleUserEdit(id, payload) {
+  const next = { ...payload };
+  if (!String(next.email || '').trim()) delete next.email;
+  if (!String(next.phone || '').trim()) delete next.phone;
+  delete next.initial_password;
+  delete next.role_codes;
+  delete next.user_type;
+  return updateUserProfile(id, next);
+}
+
+function openPasswordReset(row) {
+  if (!roleAccess.value.allowed) {
+    ElMessage.warning(roleAccess.value.reason || '无权重置密码');
+    return;
+  }
+  selectedUser.value = row;
+  passwordForm.new_password = '';
+  passwordForm.confirm_password = '';
+  passwordDialogOpen.value = true;
+}
+
+async function savePasswordReset() {
+  if (!roleAccess.value.allowed || !selectedUser.value.id) return;
+  if (passwordForm.new_password.length < 12) {
+    ElMessage.warning('新密码至少需要12位。');
+    return;
+  }
+  if (passwordForm.new_password !== passwordForm.confirm_password) {
+    ElMessage.warning('两次输入的密码不一致。');
+    return;
+  }
+  passwordSaving.value = true;
+  const response = await resetUserPassword(selectedUser.value.id, { ...passwordForm });
+  passwordSaving.value = false;
+  if (!response?.success) {
+    ElMessage.error(response?.message || '密码重置失败');
+    return;
+  }
+  ElMessage.success('用户密码已重置并记录审计');
+  passwordDialogOpen.value = false;
+}
+
 async function openRoleAssignment(row) {
   if (!roleAccess.value.allowed) {
     ElMessage.warning(roleAccess.value.reason);
@@ -352,4 +470,5 @@ watch(departmentTreeVisible, (visible) => {
 .directory-scope small { color: #64748b; font-size: 11px; line-height: 1.5; }
 .role-user { margin: 0 0 16px; color: #475569; }
 .department-form { margin-top: 16px; }
+.password-form { margin-top: 16px; }
 </style>

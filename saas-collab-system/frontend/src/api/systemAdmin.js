@@ -55,12 +55,16 @@ export const updateUserProfile = (id, payload) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/system/users/${id}/`, data: payload },
   () => mockUpdateUserProfile(id, payload), 'system.users.update'
 );
+export const deleteUser = (id) => requestWithMockFallback(
+  { method: 'delete', url: `/api/internal/system/users/${id}/` },
+  mockWrite({ id, deleted: true }), 'system.users.delete'
+);
 export const updateUserDepartments = (id, department_id, department_ids) => updateUserProfile(id, {
   department_id,
   department_ids,
 });
 export const resetUserPassword = (id, payload) => requestWithMockFallback(
-  { method: 'post', url: `/api/internal/system/users/${id}/reset-password/`, data: payload },
+  { method: 'post', url: `/api/internal/system/users/${id}/password-reset/`, data: payload },
   mockWrite({ id }), 'system.users.reset_password'
 );
 export const fetchAssignableRoles = (params = {}) => requestWithMockFallback(
