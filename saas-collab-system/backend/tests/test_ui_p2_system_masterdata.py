@@ -16,6 +16,7 @@ from apps.masterdata.models import (
     WarehouseMaster,
 )
 from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.permissions.role_catalog import sync_tenant_administrator_role
 from apps.permissions.ui_p2_scopes import filter_master_data
 from apps.suppliers.models import SupplierTask
 from apps.tenants.models import Department, Tenant
@@ -140,6 +141,64 @@ def test_system_user_create_edit_masks_contacts_and_protects_business_links():
     response = client.delete(f"/api/internal/system/users/{manager.pk}/")
     assert response.status_code == 409
     assert CustomUser.objects.filter(pk=manager.pk).exists()
+
+
+def test_user_manager_cannot_control_tenant_admin_but_platform_can_cross_tenant():
+    actor_tenant = Tenant.objects.create(name="Platform tenant", code="ui-p2-privileged-platform")
+    target_tenant = Tenant.objects.create(name="Target tenant", code="ui-p2-privileged-target")
+    manager = create_user(target_tenant, "privileged-manager")
+    target_admin = create_user(target_tenant, "privileged-admin")
+    retained_admin = create_user(target_tenant, "privileged-retained-admin")
+    admin_role = sync_tenant_administrator_role(target_tenant)
+    UserRole.objects.create(tenant=target_tenant, user=target_admin, role=admin_role)
+    UserRole.objects.create(tenant=target_tenant, user=retained_admin, role=admin_role)
+    grant(manager, "system.users.manage")
+    platform = create_user(actor_tenant, "privileged-platform", is_superuser=True)
+    manager_client = client_for(manager)
+    target_url = f"?tenant_id={target_tenant.pk}"
+
+    assert manager_client.post(
+        f"/api/internal/system/users/{target_admin.pk}/password-reset/",
+        {"new_password": "another-valid-password", "confirm_password": "another-valid-password"},
+        format="json",
+    ).status_code == 403
+    assert manager_client.post(
+        f"/api/internal/system/users/{target_admin.pk}/status/",
+        {"is_active": False},
+        format="json",
+    ).status_code == 403
+    assert manager_client.delete(f"/api/internal/system/users/{target_admin.pk}/").status_code == 403
+
+    tenant_admin_client = client_for(retained_admin)
+    same_tenant_reset = tenant_admin_client.post(
+        f"/api/internal/system/users/{target_admin.pk}/password-reset/",
+        {"new_password": "tenant-admin-reset-password", "confirm_password": "tenant-admin-reset-password"},
+        format="json",
+    )
+    assert same_tenant_reset.status_code == 200
+    target_admin.refresh_from_db()
+    assert target_admin.check_password("tenant-admin-reset-password")
+
+    platform_client = client_for(platform)
+    reset = platform_client.post(
+        f"/api/internal/system/users/{target_admin.pk}/password-reset/{target_url}",
+        {"new_password": "another-valid-password", "confirm_password": "another-valid-password"},
+        format="json",
+    )
+    assert reset.status_code == 200
+    target_admin.refresh_from_db()
+    assert target_admin.check_password("another-valid-password")
+    deactivated = platform_client.post(
+        f"/api/internal/system/users/{target_admin.pk}/status/{target_url}",
+        {"is_active": False},
+        format="json",
+    )
+    assert deactivated.status_code == 200
+    deleted = platform_client.delete(
+        f"/api/internal/system/users/{target_admin.pk}/{target_url}"
+    )
+    assert deleted.status_code == 200
+    assert not CustomUser.objects.filter(pk=target_admin.pk).exists()
 
 
 def test_system_user_directory_enforces_permission_bound_own_scope():

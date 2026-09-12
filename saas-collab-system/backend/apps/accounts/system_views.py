@@ -293,6 +293,22 @@ def ensure_admin_role_assignment_allowed(request, target_tenant, role_codes, bef
         raise PermissionDenied("只有平台超级管理员或目标租户管理员可以授予管理员角色。")
 
 
+def ensure_privileged_target_action(request, target_tenant, target_user):
+    """Keep ordinary user managers from controlling tenant administrators."""
+    is_target_administrator = UserRole.objects.filter(
+        tenant=target_tenant,
+        user=target_user,
+        role__tenant=target_tenant,
+        role__code=TENANT_ADMIN_ROLE_CODE,
+        role__status=Role.Status.ACTIVE,
+    ).exists()
+    if is_target_administrator and not (
+        _is_platform_superuser(request.user)
+        or user_is_tenant_administrator(request.user, target_tenant)
+    ):
+        raise PermissionDenied("只有平台超级管理员或目标租户管理员可以操作租户管理员账号。")
+
+
 def ensure_roles_delegable(request, roles):
     """Reject any role whose effective permissions exceed the actor's grant."""
     denied_codes = sorted(get_undelegable_role_permission_codes(request.user, roles))
@@ -692,6 +708,7 @@ class UserDetailView(APIView):
             ).select_for_update(),
             pk=pk,
         )
+        ensure_privileged_target_action(request, target_tenant, user)
         if user.pk == request.user.pk:
             raise StateConflict("当前登录用户不能删除自己的账号，请先停用或交接。")
         ensure_not_last_tenant_administrator(target_tenant, user, role_codes=[])
@@ -732,6 +749,7 @@ class UserStatusView(APIView):
             ).select_for_update(),
             pk=pk,
         )
+        ensure_privileged_target_action(request, target_tenant, user)
         is_active = request.data.get("is_active")
         if not isinstance(is_active, bool):
             raise ValidationError({"is_active": "A boolean value is required."})
@@ -757,17 +775,23 @@ class UserPasswordResetView(APIView):
 
     @transaction.atomic
     def post(self, request, pk):
-        queryset = CustomUser.objects.filter(tenant=request.user.tenant)
+        target_tenant = requested_tenant(request)
+        queryset = CustomUser.objects.filter(tenant=target_tenant)
         user = get_object_or_404(
-            filter_system_users(request.user, queryset, self.write_permission_code).select_for_update(),
+            (
+                queryset
+                if _is_platform_superuser(request.user)
+                else filter_system_users(request.user, queryset, self.write_permission_code)
+            ).select_for_update(),
             pk=pk,
         )
+        ensure_privileged_target_action(request, target_tenant, user)
         serializer = UserPasswordResetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user.set_password(serializer.validated_data["new_password"])
         user.save(update_fields=["password", "updated_at"])
         write_operation_log(
-            tenant=request.user.tenant,
+            tenant=target_tenant,
             user=request.user,
             module="system",
             action="user_password_reset",
