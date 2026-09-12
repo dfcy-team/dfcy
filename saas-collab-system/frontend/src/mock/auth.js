@@ -93,7 +93,8 @@ export const mockAuthUser = {
     'pilot.performance.record', 'pilot.performance.cancel', 'pilot.performance.execute', 'pilot.entry.view', 'pilot.entry.plan', 'pilot.entry.review'
   ],
   field_permission_codes: [],
-  data_scope: []
+  data_scope: [],
+  all_scope_permission_codes: ['system.roles.view', 'system.roles.manage']
 };
 
 // Mirror the release sync's additive compatibility migration: a mock user

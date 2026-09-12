@@ -68,27 +68,32 @@ def filter_system_users(user, queryset, permission_code):
 
     allowed = Q(pk__in=[])
     department_id = _current_department_id(user)
+    allowed_department_ids = set()
     for scope in scopes:
         scope_type = scope["scope_type"]
         if scope_type == DataScope.ScopeType.OWN:
             allowed |= Q(pk=user.pk)
         elif scope_type == DataScope.ScopeType.DEPARTMENT and department_id:
-            allowed |= Q(internal_profile__department_id=department_id)
+            allowed_department_ids.add(department_id)
         elif scope_type == DataScope.ScopeType.DEPARTMENT_TREE and department_id:
             from apps.tenants.models import Department
 
-            allowed_department_ids = department_tree_ids(
+            allowed_department_ids.update(department_tree_ids(
                 Department.objects.filter(tenant=user.tenant),
                 {department_id},
-            )
-            allowed |= Q(internal_profile__department_id__in=allowed_department_ids)
+            ))
         elif scope_type == DataScope.ScopeType.CUSTOM:
             user_ids = _configured_ids(scope, "user_ids")
             department_ids = _configured_ids(scope, "department_ids")
             if user_ids:
                 allowed |= Q(pk__in=user_ids)
             if department_ids:
-                allowed |= Q(internal_profile__department_id__in=department_ids)
+                allowed_department_ids.update(department_ids)
+    if allowed_department_ids:
+        allowed |= (
+            Q(internal_profile__department_id__in=allowed_department_ids)
+            | Q(internal_profile__departments__id__in=allowed_department_ids)
+        )
     return queryset.filter(allowed).distinct()
 
 
@@ -177,9 +182,64 @@ def filter_master_data(user, queryset, permission_code, resource):
 
     key = MASTER_DATA_SCOPE_KEYS[resource]
     allowed_ids = set()
+    platform_ids = set()
+    platform_site_ids = set()
+    site_ids = set()
     for scope in scopes:
         if scope["scope_type"] == DataScope.ScopeType.CUSTOM:
             allowed_ids.update(_configured_ids(scope, key))
+            platform_ids.update(_configured_ids(scope, "platform_ids"))
+            platform_site_ids.update(_configured_ids(scope, "platform_site_ids"))
+            site_ids.update(_configured_ids(scope, "site_ids"))
+
+    # Business master-data scopes are hierarchical.  A parent selection must
+    # include tenant-local descendants so users do not need to enumerate every
+    # store/warehouse manually.  Direct IDs remain valid for every resource.
+    if resource in {"platform-sites", "stores"} and platform_ids:
+        from apps.masterdata.models import PlatformSiteMaster, StoreMaster
+
+        if resource == "platform-sites":
+            allowed_ids.update(
+                PlatformSiteMaster.objects.filter(
+                    tenant=user.tenant, platform_id__in=platform_ids
+                ).values_list("pk", flat=True)
+            )
+        else:
+            allowed_ids.update(
+                StoreMaster.objects.filter(
+                    tenant=user.tenant, platform_id__in=platform_ids
+                ).values_list("pk", flat=True)
+            )
+    if resource == "stores" and platform_site_ids:
+        from apps.masterdata.models import StoreMaster
+
+        allowed_ids.update(
+            StoreMaster.objects.filter(
+                tenant=user.tenant, platform_site_id__in=platform_site_ids
+            ).values_list("pk", flat=True)
+        )
+    if resource == "warehouses" and platform_ids:
+        from apps.masterdata.models import WarehouseMaster
+
+        allowed_ids.update(
+            WarehouseMaster.objects.filter(
+                tenant=user.tenant, service_platform_id__in=platform_ids
+            ).values_list("pk", flat=True)
+        )
+    if resource in {"stores", "warehouses"} and site_ids:
+        from apps.masterdata.models import CountrySiteMaster, StoreMaster, WarehouseMaster
+
+        country_codes = set(
+            CountrySiteMaster.objects.filter(
+                tenant=user.tenant, pk__in=site_ids
+            ).values_list("country_code", flat=True)
+        )
+        model = StoreMaster if resource == "stores" else WarehouseMaster
+        allowed_ids.update(
+            model.objects.filter(
+                tenant=user.tenant, country_code__in=country_codes
+            ).values_list("pk", flat=True)
+        )
     return queryset.filter(pk__in=allowed_ids)
 
 

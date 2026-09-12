@@ -39,7 +39,7 @@ def test_permission_catalog_exposes_separate_menu_action_and_field_surfaces():
     assert field.metadata["resource"] == "users"
 
 
-def test_menu_grant_alone_cannot_authorize_system_api():
+def test_menu_grant_allows_read_only_system_api_but_not_manage_action():
     tenant = Tenant.objects.create(name="Menu tenant", code="menu-tenant")
     user = create_internal(tenant, "menu-only")
     grant_role(user, "menu-reader", ["menu.system.users.view"])
@@ -48,8 +48,46 @@ def test_menu_grant_alone_cannot_authorize_system_api():
     client.force_authenticate(user)
     response = client.get("/api/internal/system/users/")
 
-    assert response.status_code == 403
-    assert check_user_permission(user, "system.users.view") is False
+    assert response.status_code == 200
+    assert check_user_permission(user, "system.users.view") is True
+    assert check_user_permission(user, "system.users.manage") is False
+
+
+def test_advanced_permission_surfaces_persist_each_category():
+    tenant = Tenant.objects.create(name="Advanced tenant", code="advanced-tenant")
+    manager = create_internal(tenant, "advanced-manager")
+    grant_role(manager, "role-manager", [
+        "system.roles.view",
+        "system.roles.manage",
+        "menu.system.users.view",
+        "system.users.view",
+        "field.system.users.full_name.view",
+    ])
+    target = Role.objects.create(tenant=tenant, name="用户查看员", code="user-reader")
+
+    client = APIClient()
+    client.force_authenticate(manager)
+    response = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {
+            "menu_permission_codes": ["menu.system.users.view"],
+            "action_permission_codes": ["system.users.view"],
+            "field_permission_codes": ["field.system.users.full_name.view"],
+            "scope_type": "all",
+            "scope_config": {},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.content
+    assert response.json()["data"]["menu_permission_codes"] == ["menu.system.users.view"]
+    assert response.json()["data"]["action_permission_codes"] == ["system.users.view"]
+    assert response.json()["data"]["field_permission_codes"] == ["field.system.users.full_name.view"]
+    assert set(target.permissions.values_list("code", flat=True)) == {
+        "menu.system.users.view",
+        "system.users.view",
+        "field.system.users.full_name.view",
+    }
 
 
 def test_field_compatibility_is_scoped_to_the_requested_resource():

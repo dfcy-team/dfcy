@@ -120,7 +120,11 @@ def internal_performance_detail(request, supplier_id):
 def internal_performance_calculate_mock(request):
     serializer = SupplierPerformanceCalculationSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    if not can_access_supplier_performance(request.user, serializer.validated_data["supplier_id"]):
+    if not can_access_supplier_performance(
+        request.user,
+        serializer.validated_data["supplier_id"],
+        "suppliers.performance.calculate",
+    ):
         raise PermissionDenied("Supplier performance is outside the authorized data scope.")
     snapshot = calculate_supplier_performance(
         tenant=request.user.tenant,

@@ -2,7 +2,7 @@ from rest_framework.permissions import BasePermission
 
 from apps.accounts.models import CustomUser
 from apps.permissions.models import DataScope
-from apps.permissions.services import check_user_permission, get_user_data_scope
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 
 class IsSupplierPerformanceViewer(BasePermission):
@@ -31,11 +31,11 @@ class IsSupplierPerformanceCalculator(BasePermission):
         )
 
 
-def get_supplier_performance_scope(user):
+def get_supplier_performance_scope(user, permission_code="suppliers.performance.view"):
     if getattr(user, "is_superuser", False):
         return None
 
-    scopes = get_user_data_scope(user)
+    scopes = get_permission_data_scopes(user, permission_code)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return None
 
@@ -48,6 +48,6 @@ def get_supplier_performance_scope(user):
     return supplier_ids
 
 
-def can_access_supplier_performance(user, supplier_id):
-    allowed_supplier_ids = get_supplier_performance_scope(user)
+def can_access_supplier_performance(user, supplier_id, permission_code="suppliers.performance.view"):
+    allowed_supplier_ids = get_supplier_performance_scope(user, permission_code)
     return allowed_supplier_ids is None or supplier_id in allowed_supplier_ids

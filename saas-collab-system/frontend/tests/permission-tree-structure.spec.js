@@ -44,6 +44,19 @@ describe('角色权限模块树', () => {
     expect(canAccessPath({ ...menuOnlyUser, action_permission_codes: ['config.view', 'config.system.manage'] }, productionPath)).toBe(true);
   });
 
+  it('菜单授权可进入对应只读页面，但不能替代写操作权限', () => {
+    const rolesPath = '/system/roles';
+    const rolesMenu = menuPermissionRegistry.find((item) => item.metadata.path === rolesPath);
+    const menuOnlyUser = {
+      user_type: 'internal',
+      menu_permission_codes: [rolesMenu.code],
+      action_permission_codes: [],
+      permissions: [],
+    };
+    expect(canAccessPath(menuOnlyUser, rolesPath)).toBe(true);
+    expect(menuOnlyUser.action_permission_codes).not.toContain('system.roles.manage');
+  });
+
   it('父菜单跟随可见子菜单显示，不要求先额外授予父菜单码', () => {
     const childPath = '/development/requirements';
     const childMenu = menuPermissionRegistry.find((item) => item.metadata.path === childPath);

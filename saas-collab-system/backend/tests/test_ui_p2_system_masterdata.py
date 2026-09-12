@@ -8,12 +8,14 @@ from apps.integrations.models import PlatformIntegrationConfig
 from apps.masterdata.models import (
     CountrySiteMaster,
     PlatformMaster,
+    PlatformSiteMaster,
     StatusChoices,
     StoreMaster,
     SupplierMaster,
     WarehouseMaster,
 )
 from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.permissions.ui_p2_scopes import filter_master_data
 from apps.suppliers.models import SupplierTask
 from apps.tenants.models import Department, Tenant
 
@@ -109,14 +111,18 @@ def test_department_and_role_queries_enforce_department_scope():
     other_department = Department.objects.create(tenant=tenant, name="Other department")
     viewer = create_user(tenant, "department-viewer")
     coworker = create_user(tenant, "department-coworker")
+    secondary_only = create_user(tenant, "department-secondary-only")
     outsider = create_user(tenant, "department-outsider")
     InternalUserProfile.objects.create(tenant=tenant, user=viewer, department=department)
     InternalUserProfile.objects.create(tenant=tenant, user=coworker, department=department)
+    secondary_profile = InternalUserProfile.objects.create(tenant=tenant, user=secondary_only)
+    secondary_profile.departments.set([department])
     InternalUserProfile.objects.create(tenant=tenant, user=outsider, department=other_department)
     grant(
         viewer,
         "system.organization.view",
         "system.roles.view",
+        "system.users.view",
         scope_type=DataScope.ScopeType.DEPARTMENT,
     )
     allowed_role = Role.objects.create(tenant=tenant, name="Allowed role", code="allowed-role")
@@ -131,6 +137,9 @@ def test_department_and_role_queries_enforce_department_scope():
     role_codes = {item["code"] for item in roles}
     assert "allowed-role" in role_codes
     assert "blocked-role" not in role_codes
+    users = client.get("/api/internal/system/users/").data["data"]["results"]
+    assert {item["username"] for item in users} >= {"department-coworker", "department-secondary-only"}
+    assert "department-outsider" not in {item["username"] for item in users}
 
 
 def test_security_operations_requires_all_scope():
@@ -220,6 +229,31 @@ def test_role_permission_and_data_scope_update_is_audited():
     assert audit.after_data["data_scopes"] == [
         {"scope_type": "all", "config": {}}
     ]
+
+
+def test_role_permission_update_rejects_permissions_the_manager_cannot_delegate():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-role-delegation")
+    manager = create_user(tenant, "role-delegation-manager")
+    grant(manager, "system.roles.view", "system.roles.manage")
+    target = Role.objects.create(tenant=tenant, name="Buyer", code="buyer-delegation")
+    restricted_permission, _ = Permission.objects.get_or_create(
+        code="integrations.credential.rotate",
+        defaults={"name": "Rotate credentials", "module": "integrations", "action": "credential.rotate"},
+    )
+    target.permissions.add(restricted_permission)
+
+    response = client_for(manager).put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {
+            "permission_codes": [],
+            "scope_type": "all",
+            "scope_config": {},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert target.permissions.filter(code="integrations.credential.rotate").exists()
 
 
 @pytest.mark.parametrize("legacy_scope_type", ["department", "department_tree", "own"])
@@ -508,6 +542,39 @@ def test_store_rejects_platform_outside_tenant_scope():
     )
 
     assert response.status_code == 400
+
+
+def test_parent_business_scope_includes_platform_site_store_and_warehouse_descendants():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-parent-scope")
+    manager = create_user(tenant, "parent-scope-manager")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="parent", name="Parent", platform_type="other")
+    platform_site = PlatformSiteMaster.objects.create(
+        tenant=tenant, platform=platform, site_code="sg", name="Singapore", country_code="SG"
+    )
+    store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, platform_site=platform_site,
+        code="parent-store", name="Store", country_code="SG", currency="SGD",
+    )
+    warehouse = WarehouseMaster.objects.create(
+        tenant=tenant, service_platform=platform, code="parent-warehouse", name="Warehouse",
+        country_code="SG", warehouse_type="platform",
+    )
+    grant(
+        manager,
+        "masterdata.view",
+        scope_type=DataScope.ScopeType.CUSTOM,
+        scope_config={"platform_ids": [platform.pk]},
+    )
+
+    assert filter_master_data(
+        manager, PlatformSiteMaster.objects.all(), "masterdata.view", "platform-sites"
+    ).filter(pk=platform_site.pk).exists()
+    assert filter_master_data(
+        manager, StoreMaster.objects.all(), "masterdata.view", "stores"
+    ).filter(pk=store.pk).exists()
+    assert filter_master_data(
+        manager, WarehouseMaster.objects.all(), "masterdata.view", "warehouses"
+    ).filter(pk=warehouse.pk).exists()
 
 
 def test_platform_with_active_store_cannot_be_disabled():

@@ -40,6 +40,71 @@ INTEGRATION_PERMISSION_CODES = (
 )
 
 INTEGRATION_ROLE_CODES = {"integration_admin", "tech_admin", "admin"}
+MENU_ACTION_FALLBACKS = {
+    "menu.system.security_operations.view": ("security.operations.view",),
+}
+
+
+def _is_view_permission(permission_code):
+    return str(permission_code or "").endswith(".view")
+
+
+def _active_role_ids(user):
+    return list(
+        UserRole.objects.filter(
+            tenant=user.tenant,
+            user=user,
+            role__status=Role.Status.ACTIVE,
+        ).values_list("role_id", flat=True)
+    )
+
+
+def _menu_implied_view_role_ids(user, permission_code, role_ids):
+    """Return roles whose menu grant explicitly exposes a view action.
+
+    Menu grants are intentionally read-only.  The generated menu registry
+    stores the action codes behind each menu entry; only ``*.view`` actions
+    are allowed to flow through this compatibility bridge.
+    """
+    if not _is_view_permission(permission_code) or not role_ids:
+        return set()
+    rows = Permission.objects.filter(
+        permission_type=Permission.PermissionType.MENU,
+        roles__id__in=role_ids,
+    ).values("roles__id", "metadata", "code")
+    return {
+        row["roles__id"]
+        for row in rows
+        if permission_code in _menu_action_codes(row)
+    }
+
+
+def _menu_implied_view_codes(user, role_ids=None):
+    role_ids = _active_role_ids(user) if role_ids is None else role_ids
+    if not role_ids:
+        return set()
+    rows = Permission.objects.filter(
+        permission_type=Permission.PermissionType.MENU,
+        roles__id__in=role_ids,
+    ).values("metadata", "code")
+    return {
+        code
+        for row in rows
+        for code in _menu_action_codes(row)
+        if _is_view_permission(code)
+    }
+
+
+def _menu_action_codes(row):
+    metadata = row.get("metadata") or {}
+    action_codes = metadata.get("action_codes") or []
+    if action_codes:
+        return action_codes
+    # Older split-surface migrations did not yet persist the generated
+    # registry's action_codes.  Preserve read-only compatibility for those
+    # rows while keeping operation permissions explicit.
+    menu_code = metadata.get("code") or row.get("code") or ""
+    return MENU_ACTION_FALLBACKS.get(menu_code, (str(menu_code).removeprefix("menu."),))
 
 
 def check_user_permission(user, permission_code):
@@ -49,19 +114,17 @@ def check_user_permission(user, permission_code):
     if getattr(user, "is_superuser", False):
         return True
 
-    role_ids = UserRole.objects.filter(
-        tenant=user.tenant,
-        user=user,
-        role__status=Role.Status.ACTIVE,
-    ).values("role_id")
+    role_ids = _active_role_ids(user)
 
-    # Endpoint declarations represent button/API operations.  A menu or
-    # field grant can never satisfy an action authorization check.
-    return Permission.objects.filter(
+    # Endpoint declarations represent API operations.  A menu grant can only
+    # satisfy the corresponding read/view action; mutations remain explicit.
+    if Permission.objects.filter(
         code=permission_code,
         permission_type=Permission.PermissionType.ACTION,
         roles__id__in=role_ids,
-    ).exists()
+    ).exists():
+        return True
+    return bool(_menu_implied_view_role_ids(user, permission_code, role_ids))
 
 
 def get_user_permission_codes(user, permission_type=None):
@@ -140,9 +203,17 @@ def get_user_permission_categories(user):
             "action": list(permissions.filter(permission_type=Permission.PermissionType.ACTION).values_list("code", flat=True)),
             "field": list(permissions.filter(permission_type=Permission.PermissionType.FIELD).values_list("code", flat=True)),
         }
+    role_ids = _active_role_ids(user)
+    action_codes = set(
+        Permission.objects.filter(
+            permission_type=Permission.PermissionType.ACTION,
+            roles__id__in=role_ids,
+        ).values_list("code", flat=True)
+    )
+    action_codes.update(_menu_implied_view_codes(user, role_ids))
     return {
         "menu": get_user_permission_codes(user, Permission.PermissionType.MENU),
-        "action": get_user_permission_codes(user, Permission.PermissionType.ACTION),
+        "action": sorted(action_codes),
         "field": get_user_permission_codes(user, Permission.PermissionType.FIELD),
     }
 
@@ -192,13 +263,16 @@ def get_permission_data_scopes(user, permission_code):
     if getattr(user, "is_superuser", False):
         return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
 
-    role_ids = UserRole.objects.filter(
-        tenant=user.tenant,
-        user=user,
-        role__status=Role.Status.ACTIVE,
-        role__permissions__code=permission_code,
-        role__permissions__permission_type=Permission.PermissionType.ACTION,
-    ).values("role_id")
+    role_ids = set(
+        UserRole.objects.filter(
+            tenant=user.tenant,
+            user=user,
+            role__status=Role.Status.ACTIVE,
+            role__permissions__code=permission_code,
+            role__permissions__permission_type=Permission.PermissionType.ACTION,
+        ).values_list("role_id", flat=True)
+    )
+    role_ids.update(_menu_implied_view_role_ids(user, permission_code, role_ids=_active_role_ids(user)))
 
     return list(
         DataScope.objects.filter(
@@ -215,6 +289,11 @@ def user_has_finance_access(user):
         return False
 
     if getattr(user, "is_superuser", False):
+        return True
+
+    # A menu grant is sufficient to open a read-only finance page.  Mutating
+    # finance actions still require their explicit action permission below.
+    if check_user_permission(user, "finance.view"):
         return True
 
     role_ids = UserRole.objects.filter(
@@ -246,6 +325,9 @@ def user_has_finance_permission(user, permission_code):
     if getattr(user, "is_superuser", False):
         return True
 
+    if check_user_permission(user, permission_code):
+        return True
+
     role_ids = UserRole.objects.filter(
         tenant=user.tenant,
         user=user,
@@ -271,6 +353,9 @@ def user_has_integration_access(user):
         return False
 
     if getattr(user, "is_superuser", False):
+        return True
+
+    if check_user_permission(user, "integrations.view"):
         return True
 
     role_ids = UserRole.objects.filter(
@@ -300,6 +385,9 @@ def user_has_integration_permission(user, permission_code):
         return False
 
     if getattr(user, "is_superuser", False):
+        return True
+
+    if check_user_permission(user, permission_code):
         return True
 
     role_ids = UserRole.objects.filter(
