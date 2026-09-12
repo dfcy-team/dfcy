@@ -1307,12 +1307,16 @@ class PermissionCollectionView(APIView):
             # Permission catalog is global; accepting tenant_id here would
             # imply a tenant-specific catalog and make client context unsafe.
             requested_tenant(request)
-        queryset = Permission.objects.exclude(
-            Q(
-                permission_type=Permission.PermissionType.MENU,
-                metadata__registry_status="inactive",
-            )
-        )
+        # Keep the JSON lookup in a positive subquery.  On MySQL, negating a
+        # JSON-path equality also excludes rows where that path is missing
+        # because the comparison evaluates to NULL.  Active menu definitions
+        # intentionally omit registry_status, so the former compound
+        # ``exclude`` hid every active menu from the permission directory.
+        inactive_menu_ids = Permission.objects.filter(
+            permission_type=Permission.PermissionType.MENU,
+            metadata__registry_status="inactive",
+        ).values_list("pk", flat=True)
+        queryset = Permission.objects.exclude(pk__in=inactive_menu_ids)
         module = request.query_params.get("module", "").strip()
         permission_type = request.query_params.get("permission_type", "").strip()
         if module:

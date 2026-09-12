@@ -86,6 +86,11 @@ def test_retired_menu_is_hidden_from_directory_and_preserved_by_role_edit():
         permission_type=Permission.PermissionType.MENU,
         metadata={"registry_status": "inactive", "status": "inactive"},
     )
+    active = Permission.objects.create(
+        code="menu.legacy.active.view", name="活动菜单", module="legacy", action="active.view",
+        permission_type=Permission.PermissionType.MENU,
+        metadata={"status": "active"},
+    )
     role.permissions.add(retired, Permission.objects.get(code="reports.view"))
     DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
@@ -93,7 +98,9 @@ def test_retired_menu_is_hidden_from_directory_and_preserved_by_role_edit():
     client.force_authenticate(actor)
     directory = client.get("/api/internal/system/permissions/?module=legacy")
     assert directory.status_code == 200
-    assert retired.code not in {item["code"] for item in directory.json()["data"]["results"]}
+    directory_codes = {item["code"] for item in directory.json()["data"]["results"]}
+    assert active.code in directory_codes
+    assert retired.code not in directory_codes
 
     response = client.put(
         f"/api/internal/system/roles/{role.pk}/permissions/",
