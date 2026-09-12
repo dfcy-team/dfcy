@@ -169,6 +169,16 @@ def test_user_manager_cannot_control_tenant_admin_but_platform_can_cross_tenant(
     ).status_code == 403
     assert manager_client.delete(f"/api/internal/system/users/{target_admin.pk}/").status_code == 403
 
+    tenant_admin_client = client_for(retained_admin)
+    same_tenant_reset = tenant_admin_client.post(
+        f"/api/internal/system/users/{target_admin.pk}/password-reset/",
+        {"new_password": "tenant-admin-reset-password", "confirm_password": "tenant-admin-reset-password"},
+        format="json",
+    )
+    assert same_tenant_reset.status_code == 200
+    target_admin.refresh_from_db()
+    assert target_admin.check_password("tenant-admin-reset-password")
+
     platform_client = client_for(platform)
     reset = platform_client.post(
         f"/api/internal/system/users/{target_admin.pk}/password-reset/{target_url}",
