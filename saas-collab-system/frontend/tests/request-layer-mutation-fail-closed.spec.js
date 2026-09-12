@@ -24,6 +24,7 @@ vi.mock('axios', () => {
 let requestWithMockFallback;
 let completeSyntheticStoreAuthorization;
 let mappingReads;
+let fetchUsers;
 
 beforeAll(async () => {
   // This suite exercises production-like network failure handling even when
@@ -32,6 +33,7 @@ beforeAll(async () => {
   vi.resetModules();
   ({ requestWithMockFallback } = await import('../src/api/request'));
   ({ completeSyntheticStoreAuthorization } = await import('../src/api/integrations'));
+  ({ fetchUsers } = await import('../src/api/systemAdmin'));
   const integrationApi = await import('../src/api/integrations');
   mappingReads = [integrationApi.fetchStoreMappings, integrationApi.fetchProductMappings,
     integrationApi.fetchStoreMappingOptions, integrationApi.fetchProductMappingOptions];
@@ -93,5 +95,14 @@ describe('requestWithMockFallback mutation safety', () => {
       expect(response.code).toBe('HTTP_NETWORK_ERROR');
       expect(response.data).toBeNull();
     }
+  });
+
+  it('never presents rehearsal users as the tenant directory when production reads fail', async () => {
+    const response = await fetchUsers({ page: 1, page_size: 20 });
+
+    expect(response.success).toBe(false);
+    expect(response.code).toBe('HTTP_NETWORK_ERROR');
+    expect(response.data).toBeNull();
+    expect(JSON.stringify(response)).not.toMatch(/demo-(operator|finance|unassigned)/);
   });
 });

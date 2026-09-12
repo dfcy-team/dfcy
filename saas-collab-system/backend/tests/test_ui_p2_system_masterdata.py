@@ -1,4 +1,6 @@
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser, InternalUserProfile
@@ -77,6 +79,39 @@ def test_system_user_directory_is_tenant_filtered_and_masked():
     assert visible["email_masked"] == "v***@example.com"
     assert visible["phone_masked"] == "***8000"
     assert "email" not in visible and "phone" not in visible
+
+
+def test_tenant_administrator_directory_is_complete_and_query_count_is_page_bounded():
+    tenant = Tenant.objects.create(name="Admin tenant", code="ui-p2-admin-directory")
+    other = Tenant.objects.create(name="Other tenant", code="ui-p2-admin-directory-other")
+    Permission.objects.update_or_create(
+        code="system.users.view",
+        defaults={"name": "View users", "module": "system", "action": "users.view"},
+    )
+    administrator = create_user(tenant, "tenant-directory-admin")
+    administrator_role = sync_tenant_administrator_role(tenant)
+    UserRole.objects.create(tenant=tenant, user=administrator, role=administrator_role)
+    for index in range(24):
+        create_user(tenant, f"tenant-directory-user-{index:02d}")
+    create_user(other, "foreign-directory-user")
+    client = client_for(administrator)
+
+    with CaptureQueriesContext(connection) as one_row_queries:
+        one_row = client.get("/api/internal/system/users/?page=1&page_size=1")
+    with CaptureQueriesContext(connection) as full_page_queries:
+        full_page = client.get("/api/internal/system/users/?page=1&page_size=100")
+
+    assert one_row.status_code == 200
+    assert full_page.status_code == 200
+    usernames = {item["username"] for item in full_page.data["data"]["results"]}
+    assert full_page.data["data"]["count"] == 25
+    assert "tenant-directory-admin" in usernames
+    assert "tenant-directory-user-23" in usernames
+    assert "foreign-directory-user" not in usernames
+    # Page size may change the amount of serialized data, but it must not add
+    # permission queries per row. Allow a small backend-specific margin while
+    # keeping the regression independent from an exact SQL count.
+    assert len(full_page_queries) <= len(one_row_queries) + 2
 
 
 def test_system_user_create_edit_masks_contacts_and_protects_business_links():

@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { explicitMockMode, requestApi, requestWithMockFallback } from './request';
 import {
   mockDepartments,
   mockDepartmentTree,
@@ -37,9 +37,15 @@ export const deleteDepartment = (id) => requestWithMockFallback(
   mockWrite({ id, deleted: true }), 'system.departments.delete'
 );
 
-export const fetchUsers = (params = {}) => requestWithMockFallback(
-  { method: 'get', url: '/api/internal/system/users/', params }, mockUsers, 'system.users'
-);
+// Identity directories must never substitute rehearsal accounts when the
+// production API times out or disconnects. Explicit VITE_USE_MOCK=true builds
+// still use fixtures, while production-like builds fail closed with the real
+// network error so operators cannot mistake demo identities for tenant users.
+export const fetchUsers = (params = {}) => explicitMockMode
+  ? requestWithMockFallback(
+    { method: 'get', url: '/api/internal/system/users/', params }, mockUsers, 'system.users'
+  )
+  : requestApi({ method: 'get', url: '/api/internal/system/users/', params });
 export const createUser = (payload) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/system/users/', data: payload }, mockWrite(payload), 'system.users.create'
 );

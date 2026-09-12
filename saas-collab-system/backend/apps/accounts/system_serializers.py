@@ -103,7 +103,10 @@ class DepartmentAdminSerializer(serializers.ModelSerializer):
 
 
 class UserAdminSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    # Read the concrete foreign-key column. Traversing ``tenant.id`` performs
+    # one lazy relation query per row when the collection did not select the
+    # tenant object, even though the identifier is already on CustomUser.
+    tenant_id = serializers.IntegerField(read_only=True)
     # Contacts may be submitted when provisioning/editing, but responses only
     # expose their masked forms through the fields below.
     email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
@@ -229,8 +232,20 @@ class UserAdminSerializer(serializers.ModelSerializer):
                 "role_labels": "field.system.users.roles.view",
                 "is_active": "field.system.users.status.view",
             }
+            # DRF reuses the child serializer for every row in a paginated
+            # collection. Resolve each field policy once per serializer
+            # instead of repeating the same role/permission queries for every
+            # user; tenant administrators otherwise amplify a 20-row page into
+            # hundreds of database queries and can exceed the frontend timeout.
+            field_permission_cache = getattr(self, "_field_permission_cache", None)
+            if field_permission_cache is None:
+                field_permission_cache = {
+                    permission_code: has_field_permission(request.user, permission_code)
+                    for permission_code in set(field_map.values())
+                }
+                self._field_permission_cache = field_permission_cache
             for field, permission_code in field_map.items():
-                if not has_field_permission(request.user, permission_code):
+                if not field_permission_cache[permission_code]:
                     representation.pop(field, None)
         return representation
     def validate(self, attrs):
