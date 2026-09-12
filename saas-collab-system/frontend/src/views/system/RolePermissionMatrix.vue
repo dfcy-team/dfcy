@@ -404,6 +404,9 @@ const scopeStores = ref([]);
 const scopeWarehouses = ref([]);
 const scopeSuppliers = ref([]);
 const legacyScopeType = ref('');
+// Keep custom business scope while the editor temporarily switches to the
+// all-scope template. The API contract forbids sending custom keys for all.
+const preservedCustomScopeConfig = ref({});
 const manageAccess = computed(() => {
   const actionAccess = getActionAccess(auth, { permission: 'system.roles.manage' });
   const allScopeAllowed = auth.hasAllDataScopeFor('system.roles.manage');
@@ -569,9 +572,10 @@ async function applyRoleTemplate(templateCode) {
     Object.entries(roleForm.scope_config || {}).map(([key, values]) => [key, Array.isArray(values) ? [...values] : values]),
   );
   if ((currentScopeType === 'custom' || legacyScopeType.value) && template.scope_type === 'all') {
+    if (currentScopeType === 'custom') preservedCustomScopeConfig.value = cloneScopeConfig(currentScopeConfig);
     try {
       await ElMessageBox.confirm(
-        '此模板使用“租户内全部数据”范围。确认后将扩大当前角色的数据可见范围，并清空已有业务范围配置。',
+        '此模板使用“租户内全部数据”范围。确认后将扩大当前角色的数据可见范围；已有业务范围会暂存，切回“按业务范围限制”时可恢复。',
         '确认扩大数据范围',
         { type: 'warning', confirmButtonText: '确认扩大', cancelButtonText: '保留当前范围' },
       );
@@ -601,8 +605,8 @@ async function applyRoleTemplate(templateCode) {
   // Applying a template must not silently erase an existing custom scope.
   // A custom template keeps the current selection; an all-scope template has
   // already received an explicit confirmation above.
-  roleForm.scope_config = roleForm.scope_type === 'custom' && currentScopeType === 'custom'
-    ? currentScopeConfig
+  roleForm.scope_config = roleForm.scope_type === 'custom'
+    ? cloneScopeConfig(currentScopeType === 'custom' ? currentScopeConfig : preservedCustomScopeConfig.value)
     : {};
   if (roleForm.scope_type === 'custom') ensureCustomScopeShape();
 }
@@ -727,6 +731,9 @@ function openRole(role) {
   legacyScopeType.value = isLegacy ? savedType : '';
   roleForm.scope_type = isLegacy ? '' : (savedType === 'custom' ? 'custom' : 'all');
   roleForm.scope_config = isLegacy ? {} : savedConfig;
+  preservedCustomScopeConfig.value = roleForm.scope_type === 'custom' || isLegacy
+    ? cloneScopeConfig(savedConfig)
+    : {};
   if (roleForm.scope_type === 'custom') ensureCustomScopeShape();
   drawerOpen.value = true;
   loadScopeOptions();
@@ -779,9 +786,21 @@ function ensureCustomScopeShape() {
   );
 }
 
+function cloneScopeConfig(config) {
+  return Object.fromEntries(
+    Object.entries(config || {}).map(([key, values]) => [key, Array.isArray(values) ? [...values] : values]),
+  );
+}
+
 function onScopeTypeChange(value) {
+  if (value !== 'custom' && Object.keys(roleForm.scope_config || {}).length) {
+    preservedCustomScopeConfig.value = cloneScopeConfig(roleForm.scope_config);
+  }
   legacyScopeType.value = '';
-  if (value === 'custom') ensureCustomScopeShape();
+  if (value === 'custom') {
+    roleForm.scope_config = cloneScopeConfig(preservedCustomScopeConfig.value);
+    ensureCustomScopeShape();
+  }
   else roleForm.scope_config = {};
 }
 
@@ -862,8 +881,10 @@ async function saveRole() {
   saving.value = false;
   if (!response.success) return ElMessage.error(response.message || '保存失败');
   ElMessage.success('角色权限已保存并记录审计');
+  const refreshResponse = await auth.refreshCurrentUser();
+  if (!refreshResponse?.success) ElMessage.warning('角色已保存，但当前会话权限刷新失败，请稍后重试');
   drawerOpen.value = false;
-  load();
+  await load();
 }
 
 async function toggleRoleStatus(row) {
@@ -878,7 +899,9 @@ async function toggleRoleStatus(row) {
     const response = await updateRoleStatus(row.id, next, targetTenantId.value || undefined);
     if (!response?.success) throw new Error(response?.message || '角色状态变更失败');
     ElMessage.success('角色状态已更新并记录审计');
-    load();
+    const refreshResponse = await auth.refreshCurrentUser();
+    if (!refreshResponse?.success) ElMessage.warning('角色状态已更新，但当前会话权限刷新失败，请稍后重试');
+    await load();
   } catch (error) {
     if (error === 'cancel' || error === 'close') return;
     ElMessage.error(error?.message || '角色状态变更失败');

@@ -44,6 +44,10 @@ def filter_recommendations(user, queryset, permission_code="replenishment.view")
         if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
             continue
         config = scope.get("config") or {}
+        # Recommendations carry only product references.  The current
+        # business scope dimensions have no trustworthy relation to a SKU/SPU,
+        # so a new custom scope grants no rows rather than broadening access.
+        # Product ids are retained only for pre-split, validated scope rows.
         sku_ids = config.get("sku_ids", [])
         spu_ids = config.get("spu_ids", [])
         if not sku_ids and not spu_ids:

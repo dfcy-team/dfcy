@@ -5,7 +5,11 @@ from apps.accounts.models import CustomUser
 from apps.audit.models import OperationLog
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.role_catalog import sync_tenant_administrator_role
-from apps.permissions.services import check_user_permission, has_field_permission
+from apps.permissions.services import (
+    check_user_permission,
+    get_user_delegable_permission_codes,
+    has_field_permission,
+)
 from apps.tenants.models import Tenant
 
 
@@ -238,3 +242,57 @@ def test_only_platform_or_existing_administrator_can_grant_or_revoke_administrat
         format="json",
     )
     assert deactivate_last.status_code == 409
+
+
+def test_role_assignment_creation_and_activation_require_delegable_permissions():
+    tenant = Tenant.objects.create(name="Delegation tenant", code="delegation-guard")
+    manager = create_internal(tenant, "delegation-manager")
+    grant_role(manager, "role-manager", [
+        "system.users.view", "system.users.manage", "system.roles.view", "system.roles.manage",
+    ])
+    target = create_internal(tenant, "delegation-target")
+    restricted = Role.objects.create(tenant=tenant, name="Restricted", code="restricted")
+    restricted.permissions.add(Permission.objects.get(code="integrations.credential.rotate"))
+    inactive = Role.objects.create(
+        tenant=tenant, name="Inactive restricted", code="inactive-restricted", status=Role.Status.INACTIVE,
+    )
+    inactive.permissions.add(Permission.objects.get(code="integrations.credential.rotate"))
+    client = APIClient()
+    client.force_authenticate(manager)
+
+    assigned = client.put(
+        f"/api/internal/system/users/{target.pk}/roles/", {"role_codes": [restricted.code]}, format="json",
+    )
+    assert assigned.status_code == 403
+    assert not UserRole.objects.filter(tenant=tenant, user=target).exists()
+
+    created = client.post(
+        "/api/internal/system/users/",
+        {
+            "username": "blocked-delegation-user",
+            "user_type": CustomUser.UserType.INTERNAL,
+            "initial_password": "test-password-123",
+            "role_codes": [restricted.code],
+        },
+        format="json",
+    )
+    assert created.status_code == 403, created.content
+    assert not CustomUser.objects.filter(tenant=tenant, username="blocked-delegation-user").exists()
+
+    enabled = client.post(
+        f"/api/internal/system/roles/{inactive.pk}/status/", {"status": "active"}, format="json",
+    )
+    assert enabled.status_code == 403
+    inactive.refresh_from_db()
+    assert inactive.status == Role.Status.INACTIVE
+
+
+def test_all_scope_menu_grant_delegates_only_its_explicit_view_actions():
+    tenant = Tenant.objects.create(name="Menu delegation tenant", code="menu-delegation")
+    manager = create_internal(tenant, "menu-delegation-manager")
+    grant_role(manager, "menu-role-manager", ["menu.system.users.view"])
+
+    delegable = get_user_delegable_permission_codes(manager)
+
+    assert "system.users.view" in delegable
+    assert "system.users.manage" not in delegable

@@ -44,8 +44,22 @@ def filter_inventory_alerts(user, queryset, permission_code="alerts.view"):
         if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
             continue
         config = scope.get("config") or {}
+        # ``sku_ids`` and ``warehouse_codes`` are read-only compatibility for
+        # historical scope rows.  New role APIs only accept business master
+        # data ids.  InventoryAlert has no platform/site/store/supplier FK, so
+        # those dimensions cannot safely be inferred and deliberately grant
+        # nothing here.
         sku_ids = config.get("sku_ids", [])
         warehouse_codes = config.get("warehouse_codes", [])
+        warehouse_ids = config.get("warehouse_ids", [])
+        if warehouse_ids:
+            from apps.masterdata.models import WarehouseMaster
+
+            warehouse_codes = list(warehouse_codes) + list(
+                WarehouseMaster.objects.filter(
+                    tenant=user.tenant, pk__in=warehouse_ids
+                ).values_list("code", flat=True)
+            )
         if not sku_ids and not warehouse_codes:
             continue
         scope_filter = Q()
@@ -70,6 +84,10 @@ def filter_business_alerts(user, queryset, permission_code="alerts.view"):
             allowed |= Q(assigned_to=user)
         elif scope["scope_type"] == DataScope.ScopeType.CUSTOM:
             config = scope.get("config") or {}
+            # BusinessAlert intentionally has only an opaque business target.
+            # New master-data scope keys cannot be mapped to it without a
+            # trusted relation, so they fail closed.  These two keys are only
+            # retained for validated rows created before the scope API split.
             business_types = config.get("business_types", [])
             business_ids = [str(value) for value in config.get("business_ids", [])]
             if not business_types and not business_ids:

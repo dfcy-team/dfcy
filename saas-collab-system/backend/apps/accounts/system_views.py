@@ -19,6 +19,7 @@ from apps.permissions.services import (
     check_user_permission,
     get_permission_data_scopes,
     get_user_delegable_permission_codes,
+    get_undelegable_role_permission_codes,
 )
 from apps.permissions.role_catalog import (
     TENANT_ADMIN_ROLE_CODE,
@@ -291,6 +292,15 @@ def ensure_admin_role_assignment_allowed(request, target_tenant, role_codes, bef
         raise PermissionDenied("只有平台超级管理员或目标租户管理员可以授予管理员角色。")
 
 
+def ensure_roles_delegable(request, roles):
+    """Reject any role whose effective permissions exceed the actor's grant."""
+    denied_codes = sorted(get_undelegable_role_permission_codes(request.user, roles))
+    if denied_codes:
+        raise PermissionDenied(
+            f"Roles contain permissions outside the delegable grant: {', '.join(denied_codes)}"
+        )
+
+
 def ensure_not_last_tenant_administrator(target_tenant, target_user, role_codes=None, is_active=None):
     """Protect the last enabled tenant administrator during replacement."""
     current_admin = UserRole.objects.filter(
@@ -560,6 +570,8 @@ class UserCollectionView(APIView):
             raise PermissionDenied(
                 f"Roles outside the assignable data scope: {', '.join(denied_role_codes)}"
             )
+        roles = list(assignable_roles.filter(code__in=role_codes))
+        ensure_roles_delegable(request, roles)
         ensure_admin_role_assignment_allowed(
             request,
             request.user.tenant,
@@ -758,6 +770,7 @@ class UserRoleView(APIView):
         denied_codes = sorted(set(role_codes) - allowed_codes)
         if denied_codes:
             raise PermissionDenied(f"Roles outside the assignable data scope: {', '.join(denied_codes)}")
+        ensure_roles_delegable(request, roles)
         before = list(user.user_roles.filter(tenant=target_tenant).values_list("role__code", flat=True))
         ensure_admin_role_assignment_allowed(
             request,
@@ -1203,6 +1216,8 @@ class RoleStatusView(APIView):
             raise ValidationError({"status": "status must be active or inactive."})
         if role.status == status:
             raise StateConflict("Role is already in the requested status.")
+        if status == Role.Status.ACTIVE:
+            ensure_roles_delegable(request, [role])
         before = role.status
         role.status = status
         role.save(update_fields=["status", "updated_at"])

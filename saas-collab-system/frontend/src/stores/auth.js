@@ -98,6 +98,25 @@ export const useAuthStore = defineStore('auth', {
       this.isAuthenticated = Boolean(user);
       this.errorMessage = '';
     },
+    async refreshCurrentUser() {
+      const previousUser = this.currentUser;
+      try {
+        const response = useMock
+          ? { success: true, code: 'OK', message: 'success', data: mockCurrentUser }
+          : await getCurrentUser();
+        if (response?.success) {
+          this.setCurrentUser(response.data);
+        } else if (!this.currentUser && previousUser) {
+          this.setCurrentUser(previousUser);
+        }
+        // A failed refresh must not invalidate the currently usable session.
+        // Callers can surface the failure while retaining existing permissions.
+        return response || { success: false, message: '当前用户信息刷新失败' };
+      } catch (error) {
+        if (!this.currentUser && previousUser) this.setCurrentUser(previousUser);
+        return { success: false, code: 'AUTH_REFRESH_FAILED', message: error?.message || '当前用户信息刷新失败', data: null };
+      }
+    },
     clearAuthentication(message = '') {
       clearAuthSession();
       this.currentUser = null;

@@ -126,8 +126,10 @@ def test_department_and_role_queries_enforce_department_scope():
         scope_type=DataScope.ScopeType.DEPARTMENT,
     )
     allowed_role = Role.objects.create(tenant=tenant, name="Allowed role", code="allowed-role")
+    secondary_role = Role.objects.create(tenant=tenant, name="Secondary role", code="secondary-role")
     blocked_role = Role.objects.create(tenant=tenant, name="Blocked role", code="blocked-role")
     UserRole.objects.create(tenant=tenant, user=coworker, role=allowed_role)
+    UserRole.objects.create(tenant=tenant, user=secondary_only, role=secondary_role)
     UserRole.objects.create(tenant=tenant, user=outsider, role=blocked_role)
     client = client_for(viewer)
 
@@ -136,6 +138,7 @@ def test_department_and_role_queries_enforce_department_scope():
     roles = client.get("/api/internal/system/roles/").data["data"]["results"]
     role_codes = {item["code"] for item in roles}
     assert "allowed-role" in role_codes
+    assert "secondary-role" in role_codes
     assert "blocked-role" not in role_codes
     users = client.get("/api/internal/system/users/").data["data"]["results"]
     assert {item["username"] for item in users} >= {"department-coworker", "department-secondary-only"}
@@ -575,6 +578,33 @@ def test_parent_business_scope_includes_platform_site_store_and_warehouse_descen
     assert filter_master_data(
         manager, WarehouseMaster.objects.all(), "masterdata.view", "warehouses"
     ).filter(pk=warehouse.pk).exists()
+
+
+def test_site_scope_includes_matching_platform_sites():
+    tenant = Tenant.objects.create(name="Tenant", code="ui-p2-site-platform-site")
+    manager = create_user(tenant, "site-platform-site-manager")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="site-parent", name="Parent", platform_type="other")
+    site = CountrySiteMaster.objects.create(
+        tenant=tenant, code="sg", name="Singapore", country_code="SG", currency="SGD",
+    )
+    matching = PlatformSiteMaster.objects.create(
+        tenant=tenant, platform=platform, site_code="sg", name="Singapore", country_code="SG",
+    )
+    blocked = PlatformSiteMaster.objects.create(
+        tenant=tenant, platform=platform, site_code="us", name="United States", country_code="US",
+    )
+    grant(
+        manager,
+        "masterdata.view",
+        scope_type=DataScope.ScopeType.CUSTOM,
+        scope_config={"site_ids": [site.pk]},
+    )
+
+    visible_ids = set(filter_master_data(
+        manager, PlatformSiteMaster.objects.all(), "masterdata.view", "platform-sites"
+    ).values_list("pk", flat=True))
+    assert matching.pk in visible_ids
+    assert blocked.pk not in visible_ids
 
 
 def test_platform_with_active_store_cannot_be_disabled():
