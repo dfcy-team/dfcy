@@ -349,7 +349,7 @@ import {
 import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
-import { adminPermissionLabel, adminRoleDisplayName, tenantDisplayName } from '../../utils/adminDisplayLabels';
+import { adminModuleLabel, adminPermissionLabel, adminRoleDisplayName, tenantDisplayName } from '../../utils/adminDisplayLabels';
 import { buildPermissionTree, buildRegisteredMenuTree, detectMenuRegistryDrift } from '../../utils/permissionTree';
 import { statusFromApiResponse } from '../../utils/uiState';
 

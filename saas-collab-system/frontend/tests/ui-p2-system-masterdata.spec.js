@@ -89,6 +89,8 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(resourcePage).toContain("ref(useMock ? 'mock' : 'pending')");
     expect(resourcePage).toContain("apiStatus === 'fallback' ? 'degraded' : apiStatus");
     expect(rolePage).toMatch(/async function submitRole\(\) \{\s+if \(!manageAccess\.value\.allowed\)/);
+    expect(rolePage).toContain('import { adminModuleLabel, adminPermissionLabel');
+    expect(rolePage).toContain('label: adminModuleLabel(module)');
     expect(userPage).toContain('fetchAssignableRoles({ page: 1, page_size: 100 })');
     expect(userPage).toContain('updateUserRoles(selectedUser.value.id, selectedRoleCodes.value)');
     expect(userPage).toMatch(/async function saveRoleAssignment\(\) \{\s+if \(!roleAccess\.value\.allowed/);
