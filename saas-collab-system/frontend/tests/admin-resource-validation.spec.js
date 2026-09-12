@@ -70,7 +70,7 @@ describe('master-data form validation recovery', () => {
         AppState: true, teleport: true, ElSelect: true, ElPagination: true,
       } },
     });
-    wrapper.vm.openEdit({ id: 7, full_name: '旧姓名', initial_password: 'secret', department_id: 12 });
+    wrapper.vm.openEdit({ id: 7, full_name: '旧姓名', department_id: 12 });
     await flushPromises();
     expect(wrapper.findAll('.el-dialog input')).toHaveLength(1);
     await wrapper.find('.el-dialog input').setValue('新姓名');
