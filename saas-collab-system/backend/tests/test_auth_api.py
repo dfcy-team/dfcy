@@ -3,7 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.audit.models import OperationLog
-from apps.permissions.models import Permission, Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
@@ -130,6 +130,33 @@ def test_me_exposes_trusted_superuser_and_all_scope():
     assert response.json()["data"]["data_scope"] == [
         {"scope_type": "all", "config": {"all": True}, "role_id": None}
     ]
+
+
+@pytest.mark.django_db
+def test_me_all_scope_permissions_include_menu_implied_view_but_not_write_actions():
+    tenant = Tenant.objects.create(name="Tenant", code="menu-all-scope")
+    user = CustomUser.objects.create_user(
+        username="menu-viewer",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    role = Role.objects.create(tenant=tenant, name="Menu viewer", code="menu-viewer")
+    role.permissions.add(Permission.objects.get(code="menu.system.users.view"))
+    DataScope.objects.create(
+        tenant=tenant,
+        role=role,
+        scope_type=DataScope.ScopeType.ALL,
+        config={"all": True},
+    )
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    payload = client.get("/api/internal/auth/me/").json()["data"]
+
+    assert "system.users.view" in payload["action_permission_codes"]
+    assert "system.users.view" in payload["all_scope_permission_codes"]
+    assert "system.users.manage" not in payload["all_scope_permission_codes"]
 
 
 @pytest.mark.django_db

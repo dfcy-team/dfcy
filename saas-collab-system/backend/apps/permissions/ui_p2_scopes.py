@@ -138,6 +138,9 @@ def filter_roles(user, queryset, permission_code):
             allowed |= Q(
                 user_roles__tenant=user.tenant,
                 user_roles__user__internal_profile__department_id=department_id,
+            ) | Q(
+                user_roles__tenant=user.tenant,
+                user_roles__user__internal_profile__departments__id=department_id,
             )
         elif scope_type == DataScope.ScopeType.DEPARTMENT_TREE and department_id:
             from apps.tenants.models import Department
@@ -149,6 +152,9 @@ def filter_roles(user, queryset, permission_code):
             allowed |= Q(
                 user_roles__tenant=user.tenant,
                 user_roles__user__internal_profile__department_id__in=allowed_department_ids,
+            ) | Q(
+                user_roles__tenant=user.tenant,
+                user_roles__user__internal_profile__departments__id__in=allowed_department_ids,
             )
         elif scope_type == DataScope.ScopeType.CUSTOM:
             role_ids = _configured_ids(scope, "role_ids")
@@ -210,6 +216,19 @@ def filter_master_data(user, queryset, permission_code, resource):
                     tenant=user.tenant, platform_id__in=platform_ids
                 ).values_list("pk", flat=True)
             )
+    if resource == "platform-sites" and site_ids:
+        from apps.masterdata.models import CountrySiteMaster, PlatformSiteMaster
+
+        country_codes = set(
+            CountrySiteMaster.objects.filter(
+                tenant=user.tenant, pk__in=site_ids
+            ).values_list("country_code", flat=True)
+        )
+        allowed_ids.update(
+            PlatformSiteMaster.objects.filter(
+                tenant=user.tenant, country_code__in=country_codes
+            ).values_list("pk", flat=True)
+        )
     if resource == "stores" and platform_site_ids:
         from apps.masterdata.models import StoreMaster
 

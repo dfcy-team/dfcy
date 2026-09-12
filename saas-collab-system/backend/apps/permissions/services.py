@@ -148,6 +148,40 @@ def get_user_permission_codes(user, permission_type=None):
     return list(queryset.order_by("code").values_list("code", flat=True).distinct())
 
 
+def get_user_all_scope_permission_codes(user):
+    """Return effective permissions granted through an all-tenant role.
+
+    The result follows the same menu compatibility rule as runtime checks:
+    menu grants may contribute only their explicitly declared ``*.view``
+    actions. This keeps ``/auth/me`` capability data and delegation decisions
+    aligned with the permissions the actor can actually exercise.
+    """
+    if not user or not getattr(user, "is_active", False):
+        return set()
+    if getattr(user, "is_superuser", False):
+        return set(Permission.objects.values_list("code", flat=True))
+
+    all_scope_role_ids = list(DataScope.objects.filter(
+        tenant=user.tenant,
+        role__tenant=user.tenant,
+        role__status=Role.Status.ACTIVE,
+        role__user_roles__tenant=user.tenant,
+        role__user_roles__user=user,
+        scope_type=DataScope.ScopeType.ALL,
+    ).values_list("role_id", flat=True))
+    codes = set(
+        Permission.objects.filter(
+            roles__tenant=user.tenant,
+            roles__status=Role.Status.ACTIVE,
+            roles__id__in=all_scope_role_ids,
+        )
+        .values_list("code", flat=True)
+        .distinct()
+    )
+    codes.update(_menu_implied_view_codes(user, all_scope_role_ids))
+    return codes
+
+
 def get_user_delegable_permission_codes(user):
     """Return permissions that ``user`` may safely delegate to another role.
 
@@ -162,28 +196,24 @@ def get_user_delegable_permission_codes(user):
     Platform superusers are principals outside tenant roles and may operate
     on an explicitly selected tenant, so they retain the complete catalog.
     """
-    if not user or not getattr(user, "is_active", False):
-        return set()
-    if getattr(user, "is_superuser", False):
-        return set(Permission.objects.values_list("code", flat=True))
+    return get_user_all_scope_permission_codes(user)
 
-    all_scope_role_ids = DataScope.objects.filter(
-        tenant=user.tenant,
-        role__tenant=user.tenant,
-        role__status=Role.Status.ACTIVE,
-        role__user_roles__tenant=user.tenant,
-        role__user_roles__user=user,
-        scope_type=DataScope.ScopeType.ALL,
-    ).values("role_id")
-    return set(
-        Permission.objects.filter(
-            roles__tenant=user.tenant,
-            roles__status=Role.Status.ACTIVE,
-            roles__id__in=all_scope_role_ids,
-        )
-        .values_list("code", flat=True)
-        .distinct()
+
+def get_undelegable_role_permission_codes(user, roles):
+    """Return target-role permissions the actor is not allowed to delegate.
+
+    This is deliberately usable by both assignment and activation paths.  A
+    disabled role can contain privileges that a manager cannot create, and
+    re-enabling it is equivalent to assigning those privileges to every bound
+    user.
+    """
+    roles = list(roles)
+    if not roles:
+        return set()
+    target_codes = set(
+        Permission.objects.filter(roles__in=roles).values_list("code", flat=True).distinct()
     )
+    return target_codes - get_user_delegable_permission_codes(user)
 
 
 def get_user_permission_categories(user):

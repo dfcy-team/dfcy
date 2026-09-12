@@ -19,6 +19,7 @@ from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import ProductSKU, ProductSPU
 from apps.purchasing.models import PurchaseOrder
 from apps.rpa.models import RPATask
+from apps.masterdata.models import WarehouseMaster
 from apps.tenants.models import Tenant
 
 
@@ -213,6 +214,28 @@ def test_inventory_alert_api_tenant_data_scope_and_action_permissions():
     assert client_for(manager).post(
         f"/api/internal/alerts/inventory/{visible.id}/close/", {"reason": "Reviewed"}, format="json"
     ).status_code == 200
+
+
+@pytest.mark.django_db
+def test_inventory_alert_business_scope_uses_warehouse_ids_and_fails_closed_for_unmappable_dimensions():
+    tenant = Tenant.objects.create(name="Tenant", code="inventory-warehouse-scope")
+    sku = create_sku(tenant, "WAREHOUSE")
+    rule = create_rule(tenant)
+    warehouse = WarehouseMaster.objects.create(
+        tenant=tenant, code="ALLOWED-WH", name="Allowed warehouse", country_code="SG", warehouse_type="owned",
+    )
+    allowed, _ = evaluate(rule, sku, warehouse_code=warehouse.code)
+    evaluate(rule, sku, warehouse_code="BLOCKED-WH")
+    viewer = create_user(tenant, "warehouse-viewer")
+    grant(viewer, "alerts.view", DataScope.ScopeType.CUSTOM, {"warehouse_ids": [warehouse.pk]})
+
+    response = client_for(viewer).get("/api/internal/alerts/inventory/")
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["data"]["results"]] == [allowed.id]
+
+    unmappable = create_user(tenant, "unmappable-viewer")
+    grant(unmappable, "alerts.view", DataScope.ScopeType.CUSTOM, {"platform_ids": [999999]})
+    assert client_for(unmappable).get("/api/internal/alerts/inventory/").json()["data"]["count"] == 0
 
 
 @pytest.mark.django_db

@@ -12,7 +12,11 @@ from .external_auth import (
     stamp_supplier_web_claims,
 )
 from apps.permissions.models import DataScope
-from apps.permissions.services import get_user_data_scope, get_user_permission_categories
+from apps.permissions.services import (
+    get_user_all_scope_permission_codes,
+    get_user_data_scope,
+    get_user_permission_categories,
+)
 
 from .models import CustomUser
 
@@ -170,20 +174,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
 
     def get_all_scope_permission_codes(self, obj):
         """Expose permission-specific all-scope grants for UI capability gating."""
-        if obj.is_superuser:
-            return self._permission_categories(obj)["action"]
-        return sorted(set(
-            DataScope.objects.filter(
-                tenant=obj.tenant,
-                role__tenant=obj.tenant,
-                role__status="active",
-                role__user_roles__tenant=obj.tenant,
-                role__user_roles__user=obj,
-                scope_type=DataScope.ScopeType.ALL,
-            )
-            .values_list("role__permissions__code", flat=True)
-            .exclude(role__permissions__code__isnull=True)
-        ))
+        return sorted(get_user_all_scope_permission_codes(obj))
 
 
 class CurrentUserProfileSerializer(serializers.ModelSerializer):

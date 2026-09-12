@@ -88,6 +88,16 @@ describe('角色快速分配与内置身份契约', () => {
     expect(authStore).toContain('all_scope_permission_codes');
   });
 
+  it('切换 all 模板时保留自定义范围，并在角色变更后刷新当前会话', () => {
+    const page = read('src/views/system/RolePermissionMatrix.vue');
+    const authStore = read('src/stores/auth.js');
+    expect(page).toContain('preservedCustomScopeConfig');
+    expect(page).toContain('cloneScopeConfig(preservedCustomScopeConfig.value)');
+    expect(page).toContain('await auth.refreshCurrentUser()');
+    expect(authStore).toContain('async refreshCurrentUser()');
+    expect(authStore).toContain('return response || { success: false');
+  });
+
   it('显示平台超级管理员与租户管理员的稳定标签', () => {
     const layout = read('src/layouts/MainLayout.vue');
     const drawer = read('src/components/UserSettingsDrawer.vue');
