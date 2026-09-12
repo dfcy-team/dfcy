@@ -15,8 +15,8 @@ MASTER_DATA_SCOPE_KEYS = {
 }
 
 
-def _permission_scopes(user, permission_code):
-    return get_permission_data_scopes(user, permission_code)
+def _permission_scopes(user, permission_code, permission_cache=None):
+    return get_permission_data_scopes(user, permission_code, cache=permission_cache)
 
 
 def _has_all_scope(scopes):
@@ -55,14 +55,14 @@ def department_tree_ids(queryset, root_ids):
     return result
 
 
-def require_all_scope(user, permission_code):
-    scopes = _permission_scopes(user, permission_code)
+def require_all_scope(user, permission_code, permission_cache=None):
+    scopes = _permission_scopes(user, permission_code, permission_cache)
     if not _has_all_scope(scopes):
         raise PermissionDenied("This operation requires all-tenant data scope for the declared permission.")
 
 
-def filter_system_users(user, queryset, permission_code):
-    scopes = _permission_scopes(user, permission_code)
+def filter_system_users(user, queryset, permission_code, permission_cache=None):
+    scopes = _permission_scopes(user, permission_code, permission_cache)
     if _has_all_scope(scopes):
         return queryset
 
@@ -97,8 +97,8 @@ def filter_system_users(user, queryset, permission_code):
     return queryset.filter(allowed).distinct()
 
 
-def filter_departments(user, queryset, permission_code):
-    scopes = _permission_scopes(user, permission_code)
+def filter_departments(user, queryset, permission_code, permission_cache=None):
+    scopes = _permission_scopes(user, permission_code, permission_cache)
     if _has_all_scope(scopes):
         return queryset
 
@@ -123,8 +123,8 @@ def filter_departments(user, queryset, permission_code):
     return queryset.filter(pk__in=allowed_ids)
 
 
-def filter_roles(user, queryset, permission_code):
-    scopes = _permission_scopes(user, permission_code)
+def filter_roles(user, queryset, permission_code, permission_cache=None):
+    scopes = _permission_scopes(user, permission_code, permission_cache)
     if _has_all_scope(scopes):
         return queryset
 
@@ -163,14 +163,14 @@ def filter_roles(user, queryset, permission_code):
     return queryset.filter(allowed).distinct()
 
 
-def filter_assignable_roles(user, queryset, permission_code):
+def filter_assignable_roles(user, queryset, permission_code, permission_cache=None):
     """Limit role binding to explicitly authorized tenant roles.
 
     An all scope may assign any tenant role. A custom scope must declare
     role_ids. Own and department scopes control target users, but do not by
     themselves grant privilege-escalating role assignment rights.
     """
-    scopes = _permission_scopes(user, permission_code)
+    scopes = _permission_scopes(user, permission_code, permission_cache)
     if _has_all_scope(scopes):
         return queryset
 

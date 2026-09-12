@@ -32,6 +32,9 @@
     <el-alert v-if="registryDrift.length" class="permission-drift" type="warning" :closable="false" show-icon
       title="权限目录与注册菜单存在差异"
       :description="`以下菜单尚未登记到 API 目录，不能提交其权限：${registryDrift.map((item) => `${item.name}（${item.code}）`).join('、')}`" />
+    <el-alert v-if="permissionCatalogError" class="permission-drift" type="warning" :closable="false" show-icon
+      title="角色列表已加载，权限目录暂不可用"
+      :description="permissionCatalogError" />
     <AppState v-if="state !== 'ready'" :status="state" :detail="errorMessage" @action="load" />
     <el-table v-else :data="roles" border table-layout="fixed">
       <el-table-column v-if="showRoleField('name')" label="角色名称" min-width="140">
@@ -350,6 +353,7 @@ import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
 import { adminModuleLabel, adminPermissionLabel, adminRoleDisplayName, tenantDisplayName } from '../../utils/adminDisplayLabels';
+import { createRequestSequence, createSuccessfulAsyncCache } from '../../utils/asyncRequestControl';
 import { buildPermissionTree, buildRegisteredMenuTree, detectMenuRegistryDrift } from '../../utils/permissionTree';
 import { statusFromApiResponse } from '../../utils/uiState';
 
@@ -376,6 +380,16 @@ const pendingCopiedRole = ref(null);
 const targetTenant = ref(null);
 const assignmentMode = ref('quick');
 const packageCatalog = ref([]);
+const permissionCatalogError = ref('');
+const permissionDirectoryCache = createSuccessfulAsyncCache(
+  fetchAllPermissions,
+  (result) => Boolean(result?.response?.success),
+);
+const permissionPackageCache = createSuccessfulAsyncCache(
+  fetchPermissionPackages,
+  (result) => Boolean(result?.success),
+);
+const roleLoads = createRequestSequence();
 const expandedTree = reactive({ quick: [], menu: [], action: [], field: [] });
 const packageLevels = ref([
   { code: 'none', name: '无权限' },
@@ -713,16 +727,17 @@ function scopeOptionLabel(item) {
 }
 
 async function load() {
+  const loadToken = roleLoads.begin();
   state.value = 'loading';
+  errorMessage.value = '';
   const tenantParams = targetTenantId.value ? { tenant_id: targetTenantId.value } : {};
-  const [roleResponse, permissionResult, packageResponse] = await Promise.all([
-    fetchRoles({ ...tenantParams, search: search.value.trim(), page: page.value, page_size: pageSize }),
-    fetchAllPermissions(),
-    fetchPermissionPackages(tenantParams),
-  ]);
-  const permissionResponse = permissionResult.response;
-  if (!roleResponse.success || !permissionResponse.success || !packageResponse.success) {
-    const failed = !roleResponse.success ? roleResponse : (!permissionResponse.success ? permissionResponse : packageResponse);
+  // The role table is the primary page content. Start metadata loading in the
+  // background, but do not make a slow permission catalog block the first row.
+  void loadPermissionCatalog(tenantParams);
+  const roleResponse = await fetchRoles({ ...tenantParams, search: search.value.trim(), page: page.value, page_size: pageSize });
+  if (!loadToken.isCurrent()) return;
+  if (!roleResponse.success) {
+    const failed = roleResponse;
     state.value = statusFromApiResponse(failed, navigator.onLine);
     errorMessage.value = failed.message;
     capability.value = responseCapability(failed);
@@ -730,10 +745,6 @@ async function load() {
   }
   roles.value = unpack(roleResponse);
   total.value = Number.isFinite(roleResponse.data?.count) ? roleResponse.data.count : roles.value.length;
-  permissions.value = permissionResult.rows;
-  registryDrift.value = detectMenuRegistryDrift({ permissions: permissions.value });
-  packageCatalog.value = packageResponse.data?.packages || [];
-  packageLevels.value = packageResponse.data?.levels || packageLevels.value;
   targetTenant.value = roleResponse.data?.tenant || targetTenant.value || {
     id: targetTenantId.value || auth.currentUser?.tenant_id,
     name: targetTenantId.value ? '' : '当前租户',
@@ -741,6 +752,55 @@ async function load() {
   };
   capability.value = responseCapability(roleResponse);
   state.value = roles.value.length ? 'ready' : 'empty';
+}
+
+async function loadPermissionDirectory() {
+  let result;
+  try {
+    result = await permissionDirectoryCache.get('global');
+  } catch (error) {
+    return { response: { success: false, message: error?.message || '权限目录加载失败' }, rows: [] };
+  }
+  if (!result?.response?.success) {
+    return result;
+  }
+  permissions.value = result.rows;
+  registryDrift.value = detectMenuRegistryDrift({ permissions: permissions.value });
+  return result;
+}
+
+async function loadPermissionPackages(tenantParams) {
+  const key = String(tenantParams.tenant_id || 'current');
+  return permissionPackageCache.get(key, tenantParams);
+}
+
+async function loadPermissionCatalog(tenantParams) {
+  const key = String(tenantParams.tenant_id || 'current');
+  let directoryResult;
+  let packageResponse;
+  try {
+    [directoryResult, packageResponse] = await Promise.all([
+      loadPermissionDirectory(),
+      loadPermissionPackages(tenantParams),
+    ]);
+  } catch (error) {
+    if (key === String(targetTenantId.value || 'current')) {
+      permissionCatalogError.value = error?.message || '权限目录加载失败';
+    }
+    return { directoryResult, packageResponse };
+  }
+  const currentKey = String(targetTenantId.value || 'current');
+  if (key !== currentKey) return { directoryResult, packageResponse };
+  if (directoryResult?.response?.success && packageResponse?.success) {
+    packageCatalog.value = packageResponse.data?.packages || [];
+    packageLevels.value = packageResponse.data?.levels || packageLevels.value;
+    permissionCatalogError.value = '';
+  } else {
+    permissionCatalogError.value = directoryResult?.response?.message
+      || packageResponse?.message
+      || '权限目录加载失败';
+  }
+  return { directoryResult, packageResponse };
 }
 function searchRoles() {
   page.value = 1;
@@ -752,7 +812,17 @@ watch(targetTenantId, () => {
   targetTenant.value = null;
   load();
 });
-function openRole(role) {
+async function openRole(role) {
+  // A drawer opened while the background preload is still pending must wait
+  // for the same in-flight requests, so its selections are never inferred
+  // from a partially loaded catalog.
+  const tenantKey = String(targetTenantId.value || 'current');
+  const catalog = await loadPermissionCatalog(targetTenantId.value ? { tenant_id: targetTenantId.value } : {});
+  if (tenantKey !== String(targetTenantId.value || 'current')) return;
+  if (!catalog.directoryResult?.response?.success || !catalog.packageResponse?.success) {
+    ElMessage.error(permissionCatalogError.value || '权限目录加载失败，请稍后重试');
+    return;
+  }
   selectedRole.value = role;
   originalPermissionCodes.value = [...new Set(role.permission_codes || [])];
   assignmentMode.value = 'quick';
