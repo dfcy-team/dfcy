@@ -77,6 +77,17 @@ describe('角色快速分配与内置身份契约', () => {
     expect(page).toContain('quickTouchedModules.value.has(permissionModuleForCode(code))');
   });
 
+  it('扩大模板范围需要确认，并且角色管理要求全部数据范围', () => {
+    const page = read('src/views/system/RolePermissionMatrix.vue');
+    const authStore = read('src/stores/auth.js');
+    expect(page).toContain('确认扩大数据范围');
+    expect(page).toContain('保留当前范围');
+    expect(page).toContain("auth.hasAllDataScopeFor('system.roles.manage')");
+    expect(page).toContain('角色管理需要“租户内全部数据”范围');
+    expect(authStore).toContain('hasAllDataScopeFor(...codes)');
+    expect(authStore).toContain('all_scope_permission_codes');
+  });
+
   it('显示平台超级管理员与租户管理员的稳定标签', () => {
     const layout = read('src/layouts/MainLayout.vue');
     const drawer = read('src/components/UserSettingsDrawer.vue');

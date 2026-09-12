@@ -3,7 +3,7 @@ from rest_framework.permissions import BasePermission
 
 from apps.accounts.models import CustomUser
 from apps.permissions.models import DataScope
-from apps.permissions.services import check_user_permission, get_user_data_scope
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
 
 class ReplenishmentActionPermission(BasePermission):
@@ -32,11 +32,11 @@ class IsReplenishmentReviewer(ReplenishmentActionPermission):
     permission_code = "replenishment.review"
 
 
-def filter_recommendations(user, queryset):
+def filter_recommendations(user, queryset, permission_code="replenishment.view"):
     queryset = queryset.filter(tenant=user.tenant)
     if user.is_superuser:
         return queryset
-    scopes = get_user_data_scope(user)
+    scopes = get_permission_data_scopes(user, permission_code)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return queryset
     allowed = Q(pk__in=[])

@@ -57,10 +57,11 @@ def preview_facts(request):
     ))
 
 
-def _queryset(request):
+def _queryset(request, permission_code="replenishment.view"):
     return filter_recommendations(
         request.user,
         ReplenishmentRecommendation.objects.select_related("spu", "sku", "reviewed_by"),
+        permission_code=permission_code,
     )
 
 
@@ -100,7 +101,12 @@ def evaluate_mock(request):
     spu_id = values.pop("spu_id", None)
     sku = get_object_or_404(ProductSKU, pk=sku_id, tenant=request.user.tenant) if sku_id else None
     spu = get_object_or_404(ProductSPU, pk=spu_id, tenant=request.user.tenant) if spu_id else None
-    if not custom_scope_allows_product(request.user, sku=sku, spu=spu):
+    if not custom_scope_allows_product(
+        request.user,
+        sku=sku,
+        spu=spu,
+        permission_code="replenishment.evaluate",
+    ):
         raise PermissionDenied("Replenishment target is outside the authorized data scope.")
     recommendation = evaluate_replenishment(tenant=request.user.tenant, sku=sku, spu=spu, **values)
     return success_response({"recommendation": ReplenishmentRecommendationSerializer(recommendation).data, "mode": "mock"}, status=201)
@@ -109,7 +115,7 @@ def evaluate_mock(request):
 def _review(request, pk, decision):
     serializer = ReplenishmentReviewSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    recommendation = get_object_or_404(_queryset(request), pk=pk)
+    recommendation = get_object_or_404(_queryset(request, "replenishment.review"), pk=pk)
     try:
         recommendation = review_recommendation(
             recommendation=recommendation,

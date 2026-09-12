@@ -473,38 +473,75 @@ export function hasRouteCapability(path) {
   return Boolean(findRouteCapability(path));
 }
 
-function canAccessCapability(user, capability) {
+function findMenuEntry(path, items = menuItems) {
+  for (const item of items) {
+    if (item.path === path) return item;
+    if (item.children) {
+      const match = findMenuEntry(path, item.children);
+      if (match) return match;
+    }
+  }
+  return null;
+}
+
+function isViewPermission(code) {
+  return String(code || '').endsWith('.view');
+}
+
+function menuGrantedViewPermissions(user, capability) {
+  if (!Array.isArray(user?.menu_permission_codes) || !capability?.path) return new Set();
+  const entry = findMenuEntry(capability.path);
+  const grantedMenus = new Set(user.menu_permission_codes);
+  const menuCodes = new Set(capability.menuPermissions || entry?.menuPermissions || []);
+  return new Set(
+    menuPermissionRegistry
+      .filter((definition) => menuCodes.has(definition.code) && grantedMenus.has(definition.code))
+      .flatMap((definition) => (definition.metadata?.action_codes || []).filter(isViewPermission)),
+  );
+}
+
+function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   if (!user || !capability) return false;
-  const moduleCode = capability.module_code || moduleCodeForMenuLabel(capability.label);
+  const moduleCode = capability.module_code
+    || moduleCodeForMenuLabel(capability.label)
+    || moduleCodeForPath(capability.path);
   if (moduleCode && !isModuleVisible(user, moduleCode)) return false;
   if (capability.userTypes?.length && !capability.userTypes.includes(user.user_type)) return false;
   if (capability.internal && user.user_type !== 'internal') return false;
   if (capability.superuserOnly) return user.user_type === 'internal' && Boolean(user.is_superuser);
   if (user.is_superuser) return true;
 
-  // Keep the two authorization surfaces independent.  A menu grant is only
-  // an entry-point grant; it must never satisfy an action/allPermissions
-  // requirement (and vice versa).  Older sessions only expose ``permissions``
-  // so they continue to work against the legacy union as a compatibility
-  // fallback.
-  // An explicitly populated menu surface is authoritative.  An empty menu
-  // array is retained by older sessions during the rollout and must continue
-  // to use the legacy action/permissions route check until it is refreshed.
-  const hasMenuSurface = Array.isArray(user.menu_permission_codes) && user.menu_permission_codes.length > 0;
+  // Keep the two authorization surfaces independent. A menu grant can open
+  // the corresponding page in read-only mode (for ``*.view`` actions), but
+  // it must never satisfy an operation requirement. Older sessions only
+  // expose ``permissions`` so they continue to work against the legacy
+  // union as a compatibility fallback.
+  const hasMenuSurface = Array.isArray(user.menu_permission_codes);
   const hasActionSurface = Array.isArray(user.action_permission_codes);
   const menuPermissions = new Set(hasMenuSurface ? user.menu_permission_codes : (user.permissions || []));
   const actionPermissions = new Set(hasActionSurface ? user.action_permission_codes : (user.permissions || []));
-  const requiredMenu = capability.menuPermissions || [];
+  const requiredMenu = capability.menuPermissions?.length
+    ? capability.menuPermissions
+    : (menuEntry ? menuPermissionCodesForItem(capability) : []);
   const requiredActions = capability.permissions || [];
-  // Sessions created before the surface split do not expose
-  // menu_permission_codes.  Preserve their action-based access until the
-  // session refreshes; new sessions must satisfy the independent menu grant.
-  if (hasMenuSurface && requiredMenu.length && !requiredMenu.some((code) => menuPermissions.has(code))) return false;
-  if (capability.allPermissions?.length && !capability.allPermissions.every((code) => actionPermissions.has(code))) {
+  const menuViewPermissions = menuEntry ? new Set() : menuGrantedViewPermissions(user, capability);
+  const hasEffectiveAction = (code) => actionPermissions.has(code)
+    || (isViewPermission(code) && menuViewPermissions.has(code));
+  // Menu entries use only the menu surface. This is important for the new
+  // model: checking a concrete menu item must make that entry discoverable
+  // even when its action grant is intentionally configured separately.
+  // Deep-link/route checks below accept menu-implied view grants only.
+  if (menuEntry && hasMenuSurface && requiredMenu.length) {
+    return requiredMenu.some((code) => menuPermissions.has(code));
+  }
+  // If a declaration has no registered menu code (for example an internal
+  // utility entry), retain its legacy action-based visibility behavior.
+  if (menuEntry && !requiredActions.length) return true;
+  if (capability.allPermissions?.length && !capability.allPermissions.every(hasEffectiveAction)) {
     return false;
   }
   if (!requiredActions.length) return true;
-  return requiredActions.some((code) => actionPermissions.has(code));
+  return requiredActions.some(hasEffectiveAction);
 }
 
 // Keep the existing menu and permission surfaces stable while allowing the
@@ -581,18 +618,7 @@ function isModuleVisible(user, code) {
 }
 
 export function canAccessMenuItem(user, item) {
-  // Once a session carries categorized menu permissions, sidebar entries are
-  // controlled by the menu surface.  Action-only legacy sessions continue to
-  // use the existing action permission fallback.
-  if (Array.isArray(user?.menu_permission_codes)) {
-    const required = item?.menuPermissions?.length
-      ? item.menuPermissions
-      : menuPermissionCodesForItem(item);
-    if (required.length) {
-      return required.some((code) => user.menu_permission_codes.includes(code));
-    }
-  }
-  return canAccessCapability(user, item);
+  return canAccessCapability(user, item, { menuEntry: true });
 }
 
 export function filterMenuItems(user, items = menuItems) {

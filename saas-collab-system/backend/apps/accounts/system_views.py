@@ -1014,6 +1014,16 @@ class RolePermissionView(APIView):
             context={"request": request, "target_tenant": target_tenant},
         )
         serializer.is_valid(raise_exception=True)
+        requested_permission_codes = set(serializer.validated_data["permission_codes"])
+        if not _is_platform_superuser(request.user) and not user_is_tenant_administrator(
+            request.user, target_tenant
+        ):
+            delegable_permissions = get_user_delegable_permission_codes(request.user)
+            denied_permissions = sorted(requested_permission_codes - delegable_permissions)
+            if denied_permissions:
+                raise PermissionDenied(
+                    "不能配置当前用户无权委派的权限：" + ", ".join(denied_permissions)
+                )
         before = list(role.permissions.values_list("code", flat=True))
         before_scopes = list(role.data_scopes.values("scope_type", "config"))
         permission_codes = set(serializer.validated_data["permission_codes"])

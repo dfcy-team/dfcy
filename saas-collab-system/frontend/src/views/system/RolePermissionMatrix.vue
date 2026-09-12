@@ -404,7 +404,18 @@ const scopeStores = ref([]);
 const scopeWarehouses = ref([]);
 const scopeSuppliers = ref([]);
 const legacyScopeType = ref('');
-const manageAccess = computed(() => getActionAccess(auth, { permission: 'system.roles.manage' }));
+const manageAccess = computed(() => {
+  const actionAccess = getActionAccess(auth, { permission: 'system.roles.manage' });
+  const allScopeAllowed = auth.hasAllDataScopeFor('system.roles.manage');
+  return {
+    ...actionAccess,
+    allowed: actionAccess.allowed && allScopeAllowed,
+    disabled: actionAccess.disabled || !allScopeAllowed,
+    reason: actionAccess.allowed && !allScopeAllowed
+      ? '角色管理需要“租户内全部数据”范围'
+      : actionAccess.reason,
+  };
+});
 const isBuiltInAdministrator = computed(() => selectedRole.value?.code === 'administrator');
 const targetTenantId = computed(() => {
   const value = route.query.tenant_id;
@@ -550,9 +561,25 @@ function inferQuickSelection(role) {
   quickExtraPermissionCodes.value = (role?.permission_codes || []).filter((code) => highRisk.has(code));
 }
 
-function applyRoleTemplate(templateCode) {
+async function applyRoleTemplate(templateCode) {
   const template = roleTemplates.find((item) => item.code === templateCode);
   if (!template) return;
+  const currentScopeType = roleForm.scope_type;
+  const currentScopeConfig = Object.fromEntries(
+    Object.entries(roleForm.scope_config || {}).map(([key, values]) => [key, Array.isArray(values) ? [...values] : values]),
+  );
+  if ((currentScopeType === 'custom' || legacyScopeType.value) && template.scope_type === 'all') {
+    try {
+      await ElMessageBox.confirm(
+        '此模板使用“租户内全部数据”范围。确认后将扩大当前角色的数据可见范围，并清空已有业务范围配置。',
+        '确认扩大数据范围',
+        { type: 'warning', confirmButtonText: '确认扩大', cancelButtonText: '保留当前范围' },
+      );
+    } catch {
+      selectedTemplate.value = '';
+      return;
+    }
+  }
   templateHint.value = '';
   const selectedModules = packageCatalog.value
     .filter((item) => quickSelections[item.module] && quickSelections[item.module] !== 'none')
@@ -571,7 +598,12 @@ function applyRoleTemplate(templateCode) {
   }
   roleForm.scope_type = template.scope_type;
   legacyScopeType.value = '';
-  roleForm.scope_config = {};
+  // Applying a template must not silently erase an existing custom scope.
+  // A custom template keeps the current selection; an all-scope template has
+  // already received an explicit confirmation above.
+  roleForm.scope_config = roleForm.scope_type === 'custom' && currentScopeType === 'custom'
+    ? currentScopeConfig
+    : {};
   if (roleForm.scope_type === 'custom') ensureCustomScopeShape();
 }
 

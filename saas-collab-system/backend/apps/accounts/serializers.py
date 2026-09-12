@@ -11,6 +11,7 @@ from .external_auth import (
     resolve_supplier_web_binding,
     stamp_supplier_web_claims,
 )
+from apps.permissions.models import DataScope
 from apps.permissions.services import get_user_data_scope, get_user_permission_categories
 
 from .models import CustomUser
@@ -79,6 +80,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
     action_permission_codes = serializers.SerializerMethodField()
     field_permission_codes = serializers.SerializerMethodField()
     data_scope = serializers.SerializerMethodField()
+    all_scope_permission_codes = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomUser
@@ -99,6 +101,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             "action_permission_codes",
             "field_permission_codes",
             "data_scope",
+            "all_scope_permission_codes",
         )
 
     user_id = serializers.IntegerField(source="id", read_only=True)
@@ -164,6 +167,23 @@ class CurrentUserSerializer(serializers.ModelSerializer):
         if obj.is_superuser:
             return [{"scope_type": "all", "config": {"all": True}, "role_id": None}]
         return get_user_data_scope(obj)
+
+    def get_all_scope_permission_codes(self, obj):
+        """Expose permission-specific all-scope grants for UI capability gating."""
+        if obj.is_superuser:
+            return self._permission_categories(obj)["action"]
+        return sorted(set(
+            DataScope.objects.filter(
+                tenant=obj.tenant,
+                role__tenant=obj.tenant,
+                role__status="active",
+                role__user_roles__tenant=obj.tenant,
+                role__user_roles__user=obj,
+                scope_type=DataScope.ScopeType.ALL,
+            )
+            .values_list("role__permissions__code", flat=True)
+            .exclude(role__permissions__code__isnull=True)
+        ))
 
 
 class CurrentUserProfileSerializer(serializers.ModelSerializer):

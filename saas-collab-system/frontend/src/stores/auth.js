@@ -33,7 +33,9 @@ export const useAuthStore = defineStore('auth', {
       const user = state.currentUser;
       return Array.isArray(user?.action_permission_codes)
         ? new Set(user.action_permission_codes)
-        : new Set(user?.permissions || []);
+        : new Set((user?.permissions || []).filter((code) => (
+          !String(code).startsWith('menu.') && !String(code).startsWith('field.')
+        )));
     },
     fieldPermissionSet: (state) => {
       const user = state.currentUser;
@@ -109,7 +111,7 @@ export const useAuthStore = defineStore('auth', {
     },
     hasPermission(...codes) {
       if (this.isSuperuser) return true;
-      return codes.some((code) => this.permissionSet.has(code));
+      return codes.some((code) => this.actionPermissionSet.has(code));
     },
     hasMenuPermission(...codes) {
       if (this.isSuperuser) return true;
@@ -119,6 +121,11 @@ export const useAuthStore = defineStore('auth', {
     hasActionPermission(...codes) {
       if (this.isSuperuser) return true;
       return codes.some((code) => this.actionPermissionSet.has(code));
+    },
+    hasAllDataScopeFor(...codes) {
+      if (this.isSuperuser) return true;
+      const granted = new Set(this.currentUser?.all_scope_permission_codes || []);
+      return codes.some((code) => granted.has(code));
     },
     hasFieldPermission(...codes) {
       if (this.isSuperuser) return true;

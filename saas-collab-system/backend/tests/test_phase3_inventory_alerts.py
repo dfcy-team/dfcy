@@ -46,7 +46,11 @@ def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
 
 def grant(user, permission_code, scope_type=DataScope.ScopeType.ALL, config=None):
     role = Role.objects.create(tenant=user.tenant, name=permission_code, code=f"{permission_code}-{user.id}")
-    role.permissions.add(Permission.objects.get(code=permission_code))
+    permission, _ = Permission.objects.get_or_create(
+        code=permission_code,
+        defaults={"name": permission_code, "module": permission_code.split(".")[0], "action": permission_code.split(".", 1)[1]},
+    )
+    role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
     DataScope.objects.create(tenant=user.tenant, role=role, scope_type=scope_type, config=config or {})
 
@@ -174,6 +178,14 @@ def test_inventory_alert_api_tenant_data_scope_and_action_permissions():
         DataScope.ScopeType.CUSTOM,
         {"sku_ids": [sku.id], "warehouse_codes": ["DEMO-WH"]},
     )
+    unrelated_permission, _ = Permission.objects.get_or_create(
+        code="reports.view",
+        defaults={"name": "View reports", "module": "reports", "action": "view"},
+    )
+    unrelated_role = Role.objects.create(tenant=tenant, name="Unrelated all", code="unrelated-alert-scope")
+    unrelated_role.permissions.add(unrelated_permission)
+    UserRole.objects.create(tenant=tenant, user=viewer, role=unrelated_role)
+    DataScope.objects.create(tenant=tenant, role=unrelated_role, scope_type=DataScope.ScopeType.ALL, config={})
     grant(
         evaluator,
         "alerts.evaluate",
