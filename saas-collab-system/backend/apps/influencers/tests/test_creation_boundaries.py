@@ -1580,7 +1580,7 @@ def test_existing_target_payload_remains_compatible():
     assert fulfillment.influencer_id == second_influencer.pk
 
 
-def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task_fields(monkeypatch):
+def test_fulfillment_options_require_view_permission_tenant_scope_and_minimal_task_fields(monkeypatch):
     tenant, user, store, influencer = _records("fulfillment-options")
     role = user.user_roles.get().role
     client = APIClient()
@@ -1589,6 +1589,10 @@ def test_fulfillment_options_use_manage_permission_tenant_scope_and_minimal_task
     assert denied.status_code == 403
 
     _grant_all_scope(role, "influencers.fulfillment.manage")
+    manage_only = client.get("/api/internal/influencers/sample-fulfillment-options/")
+    assert manage_only.status_code == 403
+
+    _grant_all_scope(role, "influencers.fulfillment.view")
     influencer.handle = "option.creator"
     influencer.save(update_fields=["handle"])
     task = _task(
@@ -1653,6 +1657,7 @@ def test_fulfillment_options_do_not_merge_same_handle_across_platforms():
     tenant, user, _, influencer = _records("option-platform-scope")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
+    _grant_all_scope(role, "influencers.fulfillment.view")
     influencer.handle = "shared.creator"
     influencer.save(update_fields=["handle"])
     instagram = Influencer.objects.create(
@@ -1676,6 +1681,7 @@ def test_fulfillment_options_warn_for_open_samples_without_cross_tenant_or_delet
     tenant, user, store, influencer = _records("option-open-samples")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
+    _grant_all_scope(role, "influencers.fulfillment.view")
     influencer.handle = "open.sample.creator"
     influencer.save(update_fields=["handle"])
     duplicate = Influencer.objects.create(
@@ -1748,6 +1754,7 @@ def test_empty_tiktok_handles_do_not_share_open_sample_warnings():
     tenant, user, store, first = _records("empty-handle-open-samples")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
+    _grant_all_scope(role, "influencers.fulfillment.view")
     second = Influencer.objects.create(
         tenant=tenant,
         code="empty-handle-open-samples-second",

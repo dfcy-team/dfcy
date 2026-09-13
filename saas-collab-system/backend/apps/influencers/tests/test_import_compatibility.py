@@ -190,6 +190,7 @@ def test_task_snapshot_uses_source_dates_and_does_not_fabricate_completion(sampl
     assert task.started_at == start_time
     assert task.outreach_at == start_time
     assert task.finalized_at is None
+    assert list(task.owners.values_list("id", flat=True)) == [records["user"].pk]
     assert OperationLog.objects.filter(
         tenant=records["tenant"],
         action="feishu_import_task_status",
@@ -224,6 +225,61 @@ def test_task_snapshot_uses_source_dates_and_does_not_fabricate_completion(sampl
     assert replay["task"].pk == task.pk
     assert replay["outcome"] == "noop"
     assert replay["changed"] is False
+    assert list(task.owners.values_list("id", flat=True)) == [records["user"].pk]
+
+
+def test_task_snapshot_owner_change_synchronizes_assigned_owners(sample_records):
+    records = sample_records
+    dispatch_time = datetime(2026, 2, 1, 8, 0, tzinfo=dt_timezone.utc)
+    task, created = import_outreach_task_snapshot(
+        status="pending",
+        event={"source": FEISHU_FULL_SAMPLE_STATUS_SOURCE, "external_id": "TASK-OWNER-SYNC"},
+        user=records["user"],
+        tenant=records["tenant"],
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        source_row={
+            "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            "external_id": "TASK-OWNER-SYNC",
+            "dispatch_time": dispatch_time,
+        },
+        validated_data={
+            "store": records["store"],
+            "owner": records["user"],
+            "dispatcher": records["executor"],
+        },
+        **_personnel_kwargs(records["user"], records["executor"]),
+        actor=records["user"],
+    )
+    assert created is True
+    task.owners.add(records["executor"])
+
+    revised = import_outreach_task_snapshot(
+        status="pending",
+        event={"source": FEISHU_FULL_SAMPLE_STATUS_SOURCE, "external_id": "TASK-OWNER-SYNC"},
+        user=records["user"],
+        tenant=records["tenant"],
+        task=task,
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        source_row={
+            "source": FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+            "external_id": "TASK-OWNER-SYNC",
+            "dispatch_time": dispatch_time,
+        },
+        validated_data={
+            "store": records["store"],
+            "owner": records["executor"],
+            "dispatcher": records["executor"],
+        },
+        **_personnel_kwargs(records["executor"], records["executor"]),
+        actor=records["user"],
+        return_metadata=True,
+    )
+
+    task.refresh_from_db()
+    assert revised["outcome"] == "updated"
+    assert "owners" in revised["changed_fields"]
+    assert task.owner_id == records["executor"].pk
+    assert list(task.owners.values_list("id", flat=True)) == [records["executor"].pk]
 
 
 def test_task_snapshot_chronology_revision_is_audited_and_exact_replay_is_noop(sample_records):

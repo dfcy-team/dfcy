@@ -471,20 +471,21 @@ def _lock_task_relations(
     if store_id is not None and _pk(store_id) != store.pk:
         raise ValidationError({"store": "Store must match the outreach task."})
 
-    if (
-        owner_id is not None
-        and _pk(owner_id) != task.owner_id
-        and source != FEISHU_FULL_SAMPLE_STATUS_SOURCE
-    ):
+    requested_owner_id = _pk(owner_id) if owner_id is not None else task.owner_id
+    owner_is_assigned = (
+        requested_owner_id == task.owner_id
+        or task.owners.filter(pk=requested_owner_id).exists()
+    )
+    if not owner_is_assigned and source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
         raise ValidationError(
-            {"owner": "Sample owner must match the outreach task owner for this source."},
+            {"owner": "Sample owner must be assigned to the outreach task for this source."},
             code="conflict",
         )
 
-    # The outreach task owner is the relationship owner.  The controlled
-    # Feishu snapshot may carry a different same-tenant executor; every other
-    # source keeps the historical owner-match rule above.
-    owner = _locked_user(user, _pk(owner_id) if owner_id is not None else task.owner_id)
+    # Any assigned owner may execute a multi-owner task. The legacy primary
+    # owner remains accepted before/after backfill; the controlled Feishu
+    # snapshot may carry a different same-tenant executor.
+    owner = _locked_user(user, requested_owner_id)
 
     task_product_id = (task.external_product_id or "").strip()
     supplied_product_id = (str(external_product_id).strip() if external_product_id is not None else "")
@@ -1213,14 +1214,23 @@ def create_outreach_task(*, user, validated_data):
         )
     # task_no is server-owned even for direct service callers that bypass the serializer.
     data.pop("task_no", None)
-    owner_value = data.get("owner")
-    if owner_value is None:
-        raise ValidationError({"owner": "Owner is required."})
-    owner = _tenant_user(user, _pk(owner_value), for_update=False)
+    owner_values = data.pop("owners", None)
+    if owner_values is None:
+        owner_values = [data.get("owner")] if data.get("owner") is not None else []
+    owner_ids = list(dict.fromkeys(_pk(value) for value in owner_values))
+    if not owner_ids:
+        raise ValidationError({"owners": "At least one owner is required."})
+    owner_map = {
+        owner_id: _tenant_user(user, owner_id, for_update=False)
+        for owner_id in sorted(owner_ids)
+    }
+    owners = [owner_map[owner_id] for owner_id in owner_ids]
+    for candidate in owners:
+        _assert_active_bd_owner(user, candidate)
+    owner = owners[0]
     store = _tenant_store(user, _pk(data["store"]), for_update=False)
     if store.status != "active":
         raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
-    _assert_active_bd_owner(user, owner)
     influencer = None
     if "influencer" in data and data["influencer"] is not None:
         influencer = _tenant_influencer(
@@ -1235,13 +1245,18 @@ def create_outreach_task(*, user, validated_data):
             code="conflict",
         )
         store = _locked_store(user, store.pk)
-        owner = _locked_user(user, owner.pk)
+        owner_map = {owner_id: _locked_user(user, owner_id) for owner_id in sorted(owner_ids)}
+        owners = [owner_map[owner_id] for owner_id in owner_ids]
+        owner = owners[0]
     else:
         store = _locked_store(user, store.pk)
-        owner = _locked_user(user, owner.pk)
+        owner_map = {owner_id: _locked_user(user, owner_id) for owner_id in sorted(owner_ids)}
+        owners = [owner_map[owner_id] for owner_id in owner_ids]
+        owner = owners[0]
     if store.status != "active":
         raise ValidationError({"store": "Only active stores can be assigned to outreach tasks."})
-    _assert_active_bd_owner(user, owner)
+    for candidate in owners:
+        _assert_active_bd_owner(user, candidate)
     spu = _locked_spu(user, _pk(data["spu"])) if data.get("spu") is not None else None
     data["owner"] = owner
     data["store"] = store
@@ -1284,6 +1299,7 @@ def create_outreach_task(*, user, validated_data):
             {"task_no": "Unable to allocate a unique outreach task number."},
             code="conflict",
         )
+    task.owners.set(owners)
     if influencer is not None:
         add_outreach_target(user=user, task=task, influencer=influencer)
     _audit(
@@ -1330,6 +1346,21 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
     if not data:
         raise ValidationError({"detail": "At least one editable task field is required."})
+
+    owner_values = data.pop("owners", None)
+    if owner_values is None and data.get("owner") is not None:
+        # Keep legacy API clients coherent with the new M2M relation.
+        owner_values = [data["owner"]]
+    owners = None
+    if owner_values is not None:
+        owner_ids = list(dict.fromkeys(_pk(value) for value in owner_values))
+        if not owner_ids:
+            raise ValidationError({"owners": "At least one owner is required."})
+        owner_map = {owner_id: _locked_user(user, owner_id) for owner_id in sorted(owner_ids)}
+        owners = [owner_map[owner_id] for owner_id in owner_ids]
+        for candidate in owners:
+            _assert_active_bd_owner(user, candidate)
+        data["owner"] = owners[0]
 
     changes = {}
     if "task_name" in data:
@@ -1413,6 +1444,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
             code="conflict",
         )
     task.refresh_from_db()
+    if owners is not None:
+        task.owners.set(owners)
     _audit(
         user,
         "outreach_update",
@@ -3295,6 +3328,7 @@ def import_outreach_task_snapshot(
             **source_values,
         )
         _save(locked_task)
+        locked_task.owners.set([owner])
         create_audit = {
             "source": source,
             "external_id": external_id,
@@ -3346,6 +3380,9 @@ def import_outreach_task_snapshot(
                 "source_dispatcher_name_snapshot",
             )
         }
+        before_owner_ids = set(
+            locked_task.owners.values_list("id", flat=True)
+        )
         desired_facts = {
             "task_no": task_no,
             "task_name": task_name,
@@ -3434,7 +3471,17 @@ def import_outreach_task_snapshot(
         if updated != 1:
             raise ValidationError({"version": "Task was changed by another request."}, code="conflict")
         locked_task.refresh_from_db()
-    if (fact_changes or chronology_changes) and not created:
+    owners_changed = False
+    desired_owner_ids = set()
+    if not created:
+        desired_owner_ids = set(before_owner_ids)
+        if before_facts["owner_id"] != owner.pk:
+            desired_owner_ids.discard(before_facts["owner_id"])
+        desired_owner_ids.add(owner.pk)
+        owners_changed = desired_owner_ids != before_owner_ids
+        if owners_changed:
+            locked_task.owners.set(sorted(desired_owner_ids))
+    if (fact_changes or chronology_changes or owners_changed) and not created:
         update_after = {
             **{
                 key: str(getattr(locked_task, key))
@@ -3445,6 +3492,14 @@ def import_outreach_task_snapshot(
             "source_event_id": source_event_id,
             "version": locked_task.version,
         }
+        update_before = {
+            key: str(value)
+            for key, value in before_facts.items()
+            if key in fact_changes or key in chronology_changes or key in {"source", "external_id"}
+        }
+        if owners_changed:
+            update_before["owners"] = sorted(before_owner_ids)
+            update_after["owners"] = sorted(desired_owner_ids)
         if personnel is not None:
             update_after.update(_personnel_audit_data(personnel=personnel, task=locked_task))
         _audit(
@@ -3452,11 +3507,7 @@ def import_outreach_task_snapshot(
             "feishu_import_task_update",
             "outreach_task",
             locked_task,
-            before={
-                key: str(value)
-                for key, value in before_facts.items()
-                if key in fact_changes or key in chronology_changes or key in {"source", "external_id"}
-            },
+            before=update_before,
             after=update_after,
         )
 
@@ -3499,6 +3550,8 @@ def import_outreach_task_snapshot(
             changed_fields.append("restore")
         if fact_changes:
             changed_fields.append("fields")
+        if owners_changed:
+            changed_fields.append("owners")
         if target_status != before_status:
             changed_fields.append("status")
         if parsed_started is not None and parsed_started != before_facts.get("started_at"):

@@ -378,7 +378,7 @@ export const resolveOrCreateInfluencerNickname = (nickname, requestKey = '') => 
 
 export const fetchSampleFulfillmentOptions = (params = {}) => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/sample-fulfillment-options/`, params },
-  () => ({ success: true, data: { tasks: [], influencers: [] } }),
+  () => ({ success: true, data: { tasks: [], influencers: [], owners: [] } }),
   'influencers.fulfillment.options'
 );
 
