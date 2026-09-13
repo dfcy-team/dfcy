@@ -231,7 +231,9 @@ describe('influencer integration workspace contracts', () => {
 
   it('aligns the outreach workspace with the BD task view and exposes the task detail loop', () => {
     const page = read('src/views/influencers/OutreachTaskList.vue');
-    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owner']) expect(page).toContain(field);
+    for (const field of ['task_name', 'store', 'external_product_id', 'sku_prefix', 'target_count', 'owners']) expect(page).toContain(field);
+    expect(page).toContain('v-model="form.owners" multiple');
+    expect(page).toContain('taskOwnerNames');
     for (const contract of [
       'linked_count',
       'target_count',
@@ -310,7 +312,9 @@ describe('influencer integration workspace contracts', () => {
   it('matches the BD fulfillment columns and keeps the two-column create form contracts', () => {
     const page = read('src/views/influencers/SampleFulfillmentList.vue');
     for (const field of ['form.link_type', 'form.influencer', 'form.store', 'form.external_product_id', 'inheritedTask?.sku_prefix', 'requested_sku', 'quantity', 'sample_order_no', 'notes']) expect(page).toContain(field);
-    for (const label of ['搜索达人/送样编号/建联编号/产品/订单', '全部店铺', '全部状态', '新增送样', '送样 / 建联编号', '任务 ID', '达人', '店铺', '产品 / SKU / 数量', '商品 ID', '样品订单', '成本', '状态', '备注', '建联日期', '操作']) expect(page).toContain(label);
+    for (const label of ['搜索达人/送样编号/建联编号/产品/订单', '全部店铺', '全部状态', '全部送样负责人', '新增送样', '送样 / 建联编号', '任务 ID', '达人', '店铺', '产品 / SKU / 数量', '商品 ID', '样品订单', '成本', '状态', '备注', '建联日期', '操作']) expect(page).toContain(label);
+    expect(page).toContain('owner: filters.owner');
+    expect(page.indexOf('visible.value = true;', page.indexOf('async function openCreate'))).toBeLessThan(page.indexOf('await Promise.all', page.indexOf('async function openCreate')));
     for (const field of ['送样履约', '新增送样记录', '送样日期', '达人昵称', '系统档案 ID', '产品 ID', '待发样', 'SKU 与数量', '保存送样']) expect(page).toContain(field);
     const dialog = page.slice(page.indexOf('<el-dialog v-model="visible"'));
     const dialogOrder = ['送样类型', '送样日期', '达人昵称', '系统档案 ID', '店铺', '样品订单', '产品 ID', '状态', 'SKU 与数量', '备注'];

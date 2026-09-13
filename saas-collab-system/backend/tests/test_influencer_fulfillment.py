@@ -483,6 +483,145 @@ def test_non_all_scope_is_denied_even_with_permission():
     assert client.get("/api/internal/influencers/outreach-tasks/").status_code == 403
 
 
+def test_sample_fulfillment_list_orders_newest_created_first():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-created-order")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-order-user",
+        "influencers.fulfillment.view",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "sample-order")
+    payload = {
+        "outreach_task": task.pk,
+        "influencer": influencer.pk,
+        "store": store.pk,
+        "owner": user.pk,
+        "items": [],
+    }
+
+    for number in ("SAMPLE-OLDER", "SAMPLE-NEWER"):
+        response = client.post(
+            "/api/internal/influencers/sample-fulfillments/",
+            {**payload, "fulfillment_no": number},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=f"sample-order-{number}",
+        )
+        assert response.status_code == 201
+
+    response = client.get("/api/internal/influencers/sample-fulfillments/")
+
+    assert response.status_code == 200
+    assert [row["fulfillment_no"] for row in response.data["data"]["results"]] == [
+        "SAMPLE-NEWER",
+        "SAMPLE-OLDER",
+    ]
+
+
+def test_sample_fulfillment_list_searches_outreach_task_number_and_name():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-task-search")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-task-search-user",
+        "influencers.fulfillment.view",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "sample-task-search")
+    task.task_name = "September TK3PH Tablecloth"
+    task.save(update_fields=["task_name", "updated_at"])
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SAMPLE-TASK-SEARCH",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "owner": user.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="sample-task-search",
+    )
+    assert response.status_code == 201
+
+    by_number = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"search": task.task_no.lower()},
+    )
+    by_name = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"search": "tk3ph tablecloth"},
+    )
+
+    assert by_number.status_code == 200
+    assert [row["fulfillment_no"] for row in by_number.data["data"]["results"]] == ["SAMPLE-TASK-SEARCH"]
+    assert by_name.status_code == 200
+    assert [row["fulfillment_no"] for row in by_name.data["data"]["results"]] == ["SAMPLE-TASK-SEARCH"]
+
+
+def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-owner-filter")
+    other_tenant = Tenant.objects.create(name="Other", code="sample-owner-filter-other")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-owner-a",
+        "influencers.fulfillment.view",
+        "influencers.fulfillment.manage",
+    )
+    other_owner = CustomUser.objects.create_user(
+        username="sample-owner-b",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    foreign_owner = CustomUser.objects.create_user(
+        username="sample-owner-foreign",
+        tenant=other_tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    store, influencer, task = base_records(tenant, user, "sample-owner")
+    other_store, other_influencer, other_task = base_records(
+        tenant,
+        other_owner,
+        "sample-owner-b",
+    )
+
+    for owner, number, sample_store, sample_influencer, sample_task in (
+        (user, "SAMPLE-OWNER-A", store, influencer, task),
+        (other_owner, "SAMPLE-OWNER-B", other_store, other_influencer, other_task),
+    ):
+        response = client.post(
+            "/api/internal/influencers/sample-fulfillments/",
+            {
+                "fulfillment_no": number,
+                "outreach_task": sample_task.pk,
+                "influencer": sample_influencer.pk,
+                "store": sample_store.pk,
+                "owner": owner.pk,
+                "items": [],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=f"sample-owner-{owner.pk}",
+        )
+        assert response.status_code == 201
+
+    filtered = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"owner": other_owner.pk},
+    )
+    invalid = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"owner": "invalid"},
+    )
+    options = client.get("/api/internal/influencers/sample-fulfillment-options/")
+
+    assert filtered.status_code == 200
+    assert [row["fulfillment_no"] for row in filtered.data["data"]["results"]] == ["SAMPLE-OWNER-B"]
+    assert invalid.status_code == 400
+    assert options.status_code == 200
+    assert {owner["id"] for owner in options.data["data"]["owners"]} == {user.pk, other_owner.pk}
+    assert foreign_owner.pk not in {owner["id"] for owner in options.data["data"]["owners"]}
+
+
 def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
     tenant = Tenant.objects.create(name="Tenant", code="sample-idempotent")
     user, client = user_with_permissions(tenant, "sample-manager", "influencers.fulfillment.manage")
@@ -1083,6 +1222,149 @@ def test_illegal_status_transition_and_stale_version_are_rejected():
     assert illegal.status_code == 400
     assert started.status_code == 200
     assert stale.status_code == 409
+
+
+def test_outreach_task_create_and_update_support_parallel_bd_owners():
+    tenant = Tenant.objects.create(name="Multi Owner Tenant", code="multi-owner-tenant")
+    other_tenant = Tenant.objects.create(name="Other Multi Owner", code="other-multi-owner")
+    user, client = user_with_permissions(
+        tenant,
+        "multi-owner-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    make_bd_owner(tenant, user)
+    second_owner = CustomUser.objects.create_user(
+        username="multi-owner-second",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+        full_name="Second BD",
+    )
+    make_bd_owner(tenant, second_owner)
+    foreign_owner = CustomUser.objects.create_user(
+        username="multi-owner-foreign",
+        tenant=other_tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    make_bd_owner(other_tenant, foreign_owner)
+    store = store_for(tenant, "multi-owner-store")
+
+    created = client.post(
+        "/api/internal/influencers/outreach-tasks/",
+        {
+            "task_name": "Parallel owner task",
+            "store": store.pk,
+            "target_count": 1,
+            "owners": [second_owner.pk, user.pk],
+        },
+        format="json",
+    )
+
+    assert created.status_code == 201
+    task = OutreachTask.objects.get(pk=created.data["data"]["id"])
+    assert set(task.owners.values_list("id", flat=True)) == {user.pk, second_owner.pk}
+    assert set(created.data["data"]["owners"]) == {user.pk, second_owner.pk}
+    assert set(created.data["data"]["owner_names"]) == {user.username, second_owner.full_name}
+    assert task.owner_id == second_owner.pk
+
+    updated = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"owners": [second_owner.pk]},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    rejected = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"owners": [foreign_owner.pk]},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+
+    assert updated.status_code == 200
+    task.refresh_from_db()
+    assert list(task.owners.values_list("id", flat=True)) == [second_owner.pk]
+    assert task.owner_id == second_owner.pk
+    assert rejected.status_code == 400
+
+    legacy_updated = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"owner": user.pk},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+
+    assert legacy_updated.status_code == 200
+    task.refresh_from_db()
+    assert list(task.owners.values_list("id", flat=True)) == [user.pk]
+    assert task.owner_id == user.pk
+
+
+def test_sample_accepts_any_assigned_outreach_task_owner():
+    tenant = Tenant.objects.create(name="Assigned Owner Tenant", code="assigned-owner")
+    user, client = user_with_permissions(
+        tenant,
+        "assigned-owner-manager",
+        "influencers.outreach.manage",
+        "influencers.fulfillment.manage",
+    )
+    make_bd_owner(tenant, user)
+    primary_owner = CustomUser.objects.create_user(
+        username="assigned-owner-primary",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    make_bd_owner(tenant, primary_owner)
+    store = store_for(tenant, "assigned-owner-store")
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_name": "Assigned owner sample task",
+            "store": store,
+            "owners": [primary_owner, user],
+        },
+    )
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="assigned-owner-creator",
+        name="Assigned owner creator",
+        platform="tiktok",
+    )
+
+    sample = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "ASSIGNED-OWNER-SAMPLE",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "owner": user.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="assigned-owner-sample",
+    )
+
+    assert sample.status_code == 201, sample.data
+    assert sample.data["data"]["owner"] == user.pk
+
+
+def test_outreach_owner_migration_backfills_primary_owner_idempotently():
+    tenant = Tenant.objects.create(name="Migration Tenant", code="owner-migration")
+    user = CustomUser.objects.create_user(
+        username="owner-migration-primary",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    _, _, task = base_records(tenant, user, "owner-migration")
+    task.owners.clear()
+    migration = importlib.import_module(
+        "apps.influencers.migrations.0019_outreachtask_owners"
+    )
+
+    migration.copy_primary_owner(django_apps, None)
+    migration.copy_primary_owner(django_apps, None)
+
+    assert list(task.owners.values_list("id", flat=True)) == [user.pk]
 
 
 def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
