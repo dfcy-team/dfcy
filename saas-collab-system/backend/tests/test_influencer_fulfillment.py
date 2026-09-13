@@ -24,6 +24,7 @@ from apps.influencers.models import (
     BdOrderAttributionSnapshot,
     BdSampleAttributionSnapshot,
     Influencer,
+    InfluencerProfile,
     InfluencerRestriction,
     OutreachTarget,
     OutreachTask,
@@ -481,6 +482,126 @@ def test_non_all_scope_is_denied_even_with_permission():
     )
 
     assert client.get("/api/internal/influencers/outreach-tasks/").status_code == 403
+
+
+def test_sample_fulfillment_list_orders_newest_created_first():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-created-order")
+    user, client = user_with_permissions(tenant, "sample-order-user", "influencers.fulfillment.manage")
+    store, influencer, task = base_records(tenant, user, "sample-order")
+    payload = {
+        "outreach_task": task.pk,
+        "influencer": influencer.pk,
+        "store": store.pk,
+        "owner": user.pk,
+        "items": [],
+    }
+
+    for number in ("SAMPLE-OLDER", "SAMPLE-NEWER"):
+        response = client.post(
+            "/api/internal/influencers/sample-fulfillments/",
+            {**payload, "fulfillment_no": number},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=f"sample-order-{number}",
+        )
+        assert response.status_code == 201
+
+    response = client.get("/api/internal/influencers/sample-fulfillments/")
+
+    assert response.status_code == 200
+    assert [row["fulfillment_no"] for row in response.data["data"]["results"]] == [
+        "SAMPLE-NEWER",
+        "SAMPLE-OLDER",
+    ]
+
+
+def test_sample_fulfillment_list_searches_outreach_task_number_and_name():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-task-search")
+    user, client = user_with_permissions(
+        tenant,
+        "sample-task-search-user",
+        "influencers.fulfillment.manage",
+    )
+    store, influencer, task = base_records(tenant, user, "sample-task-search")
+    task.task_name = "September TK3PH Tablecloth"
+    task.save(update_fields=["task_name", "updated_at"])
+    response = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SAMPLE-TASK-SEARCH",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "owner": user.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="sample-task-search",
+    )
+    assert response.status_code == 201
+
+    by_number = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"search": task.task_no.lower()},
+    )
+    by_name = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"search": "tk3ph tablecloth"},
+    )
+
+    assert by_number.status_code == 200
+    assert [row["fulfillment_no"] for row in by_number.data["data"]["results"]] == ["SAMPLE-TASK-SEARCH"]
+    assert by_name.status_code == 200
+    assert [row["fulfillment_no"] for row in by_name.data["data"]["results"]] == ["SAMPLE-TASK-SEARCH"]
+
+
+def test_sample_fulfillment_list_filters_by_owner_and_options_are_tenant_scoped():
+    tenant = Tenant.objects.create(name="Tenant", code="sample-owner-filter")
+    other_tenant = Tenant.objects.create(name="Other", code="sample-owner-filter-other")
+    user, client = user_with_permissions(tenant, "sample-owner-a", "influencers.fulfillment.manage")
+    other_owner = CustomUser.objects.create_user(
+        username="sample-owner-b",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    foreign_owner = CustomUser.objects.create_user(
+        username="sample-owner-foreign",
+        tenant=other_tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    store, influencer, task = base_records(tenant, user, "sample-owner")
+
+    for owner, number in ((user, "SAMPLE-OWNER-A"), (other_owner, "SAMPLE-OWNER-B")):
+        response = client.post(
+            "/api/internal/influencers/sample-fulfillments/",
+            {
+                "fulfillment_no": number,
+                "outreach_task": task.pk,
+                "influencer": influencer.pk,
+                "store": store.pk,
+                "owner": owner.pk,
+                "items": [],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=f"sample-owner-{owner.pk}",
+        )
+        assert response.status_code == 201
+
+    filtered = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"owner": other_owner.pk},
+    )
+    invalid = client.get(
+        "/api/internal/influencers/sample-fulfillments/",
+        {"owner": "invalid"},
+    )
+    options = client.get("/api/internal/influencers/sample-fulfillment-options/")
+
+    assert filtered.status_code == 200
+    assert [row["fulfillment_no"] for row in filtered.data["data"]["results"]] == ["SAMPLE-OWNER-B"]
+    assert invalid.status_code == 400
+    assert options.status_code == 200
+    assert {owner["id"] for owner in options.data["data"]["owners"]} == {user.pk, other_owner.pk}
+    assert foreign_owner.pk not in {owner["id"] for owner in options.data["data"]["owners"]}
 
 
 def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
@@ -1085,6 +1206,69 @@ def test_illegal_status_transition_and_stale_version_are_rejected():
     assert stale.status_code == 409
 
 
+def test_outreach_task_create_and_update_support_parallel_bd_owners():
+    tenant = Tenant.objects.create(name="Multi Owner Tenant", code="multi-owner-tenant")
+    other_tenant = Tenant.objects.create(name="Other Multi Owner", code="other-multi-owner")
+    user, client = user_with_permissions(
+        tenant,
+        "multi-owner-manager",
+        "influencers.outreach.view",
+        "influencers.outreach.manage",
+    )
+    make_bd_owner(tenant, user)
+    second_owner = CustomUser.objects.create_user(
+        username="multi-owner-second",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+        full_name="Second BD",
+    )
+    make_bd_owner(tenant, second_owner)
+    foreign_owner = CustomUser.objects.create_user(
+        username="multi-owner-foreign",
+        tenant=other_tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    make_bd_owner(other_tenant, foreign_owner)
+    store = store_for(tenant, "multi-owner-store")
+
+    created = client.post(
+        "/api/internal/influencers/outreach-tasks/",
+        {
+            "task_name": "Parallel owner task",
+            "store": store.pk,
+            "target_count": 1,
+            "owners": [second_owner.pk, user.pk],
+        },
+        format="json",
+    )
+
+    assert created.status_code == 201
+    task = OutreachTask.objects.get(pk=created.data["data"]["id"])
+    assert set(task.owners.values_list("id", flat=True)) == {user.pk, second_owner.pk}
+    assert set(created.data["data"]["owners"]) == {user.pk, second_owner.pk}
+    assert set(created.data["data"]["owner_names"]) == {user.username, second_owner.full_name}
+    assert task.owner_id == second_owner.pk
+
+    updated = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"owners": [second_owner.pk]},
+        format="json",
+        HTTP_IF_MATCH='"1"',
+    )
+    rejected = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+        {"owners": [foreign_owner.pk]},
+        format="json",
+        HTTP_IF_MATCH='"2"',
+    )
+
+    assert updated.status_code == 200
+    task.refresh_from_db()
+    assert list(task.owners.values_list("id", flat=True)) == [second_owner.pk]
+    assert task.owner_id == second_owner.pk
+    assert rejected.status_code == 400
+
+
 def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
     tenant = Tenant.objects.create(name="Task Edit Tenant", code="task-edit-tenant")
     other_tenant = Tenant.objects.create(name="Other Task Edit Tenant", code="other-task-edit-tenant")
@@ -1343,6 +1527,39 @@ def test_influencer_sensitive_fields_are_not_returned_or_searchable_and_status_i
     )
     assert first.status_code == 200
     assert stale.status_code == 409
+
+
+def test_influencer_list_orders_all_pages_by_cooperation_count_and_fulfillment_rate():
+    tenant = Tenant.objects.create(name="Tenant", code="profile-ordering")
+    _, client = user_with_permissions(tenant, "profile-viewer", "influencers.view")
+    lower = Influencer.objects.create(tenant=tenant, code="lower", name="Lower")
+    higher = Influencer.objects.create(tenant=tenant, code="higher", name="Higher")
+    InfluencerProfile.objects.create(
+        tenant=tenant,
+        influencer=lower,
+        cooperation_count=2,
+        fulfillment_rate=Decimal("0.2500"),
+    )
+    InfluencerProfile.objects.create(
+        tenant=tenant,
+        influencer=higher,
+        cooperation_count=9,
+        fulfillment_rate=Decimal("0.9000"),
+    )
+
+    by_cooperation = client.get(
+        "/api/internal/influencers/",
+        {"ordering": "-profile__cooperation_count", "page_size": 1},
+    )
+    by_fulfillment = client.get(
+        "/api/internal/influencers/",
+        {"ordering": "profile__fulfillment_rate", "page_size": 1},
+    )
+
+    assert by_cooperation.status_code == 200
+    assert by_cooperation.data["data"]["results"][0]["id"] == higher.id
+    assert by_fulfillment.status_code == 200
+    assert by_fulfillment.data["data"]["results"][0]["id"] == lower.id
 
 
 def test_outreach_task_supports_multiple_targets_linked_count_and_soft_delete():
@@ -1850,6 +2067,30 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.order_id == order.order_id
     assert attribution.sku_id == order.sku_id
 
+    performance = build_bd_performance(
+        tenant=tenant,
+        start_date=order_time.date(),
+        end_date=order_time.date(),
+        attribution="strict",
+        currency="CNY",
+    )
+    assert performance["totals"]["gmv_php"] == "1000.0000"
+    assert performance["totals"]["gmv_myr"] == "0.0000"
+    assert performance["totals"]["gmv_thb"] == "0.0000"
+    philippines = next(
+        country for country in performance["rows"][0]["country_breakdown"]
+        if country["country_code"] == "PH"
+    )
+    assert philippines == {
+        "country_code": "PH",
+        "country": "菲律宾",
+        "currency": "PHP",
+        "sample_count": 1,
+        "shipped_count": 0,
+        "valid_order_count": 1,
+        "gmv": "1000.0000",
+    }
+
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():
     tenant = Tenant.objects.create(name="Performance tenant", code="performance-empty")
@@ -1926,7 +2167,6 @@ def test_bd_performance_rejects_today_and_future_end_dates(days_from_today):
 
     assert response.status_code == 400
     assert response.data["data"]["end_date"] == "end_date must not exceed yesterday."
-
 
 def test_bd_performance_export_and_zero_gmv_diagnostic_are_authorized_and_safe():
     tenant = Tenant.objects.create(name="Performance export tenant", code="performance-export")

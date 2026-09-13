@@ -38,12 +38,37 @@
       <div v-else-if="state === 'empty'" class="panel-state" data-test="performance-empty">当前筛选条件下暂无绩效数据</div>
       <template v-else>
         <el-alert v-if="sourceMessage" class="source-alert" type="info" show-icon :closable="false" :title="sourceMessage" />
-        <el-table v-loading="loading" :data="rows" empty-text="暂无绩效数据">
+        <el-table ref="performanceTable" v-loading="loading" :data="rows" empty-text="暂无绩效数据">
+          <el-table-column type="expand" width="52">
+            <template #default="{ row }">
+              <div class="country-breakdown">
+                <p>仅展示已归因到该 BD 送样记录的联盟订单；本币 GMV 不跨国家相加。</p>
+                <el-table :data="row.country_breakdown || []" size="small" border>
+                  <el-table-column prop="country" label="国家" min-width="120" />
+                  <el-table-column prop="currency" label="本币" min-width="100" />
+                  <el-table-column prop="sample_count" label="对应送样" min-width="120" />
+                  <el-table-column prop="shipped_count" label="已发货送样" min-width="130" />
+                  <el-table-column prop="valid_order_count" label="有效订单" min-width="120" />
+                  <el-table-column prop="gmv" label="本币 GMV" min-width="160">
+                    <template #default="{ row: country }">{{ formatNativeMoney(country.gmv, country.currency) }}</template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="币种明细" width="105">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="toggleCountry(row)">查看明细</el-button>
+            </template>
+          </el-table-column>
           <el-table-column prop="owner" label="BD 成员" min-width="140" />
           <el-table-column prop="task_count" label="建联任务" min-width="110" />
           <el-table-column prop="sample_count" label="送样记录" min-width="110" />
           <el-table-column prop="valid_order_count" label="有效订单" min-width="110" />
           <el-table-column prop="gmv" label="合作单 GMV" min-width="145"><template #default="{ row }">{{ formatMoney(row.gmv) }}</template></el-table-column>
+          <el-table-column prop="gmv_php" label="PHP GMV" min-width="140"><template #default="{ row }">{{ formatNativeMoney(row.gmv_php, 'PHP') }}</template></el-table-column>
+          <el-table-column prop="gmv_myr" label="MYR GMV" min-width="140"><template #default="{ row }">{{ formatNativeMoney(row.gmv_myr, 'MYR') }}</template></el-table-column>
+          <el-table-column prop="gmv_thb" label="THB GMV" min-width="140"><template #default="{ row }">{{ formatNativeMoney(row.gmv_thb, 'THB') }}</template></el-table-column>
           <el-table-column prop="investment" label="合作单投入" min-width="145"><template #default="{ row }">{{ formatMoney(row.investment) }}</template></el-table-column>
           <el-table-column prop="roi" label="合作单 ROI" min-width="120"><template #default="{ row }">{{ formatRoi(row.roi) }}</template></el-table-column>
           <template v-if="filters.metrics === 'full'">
@@ -64,10 +89,12 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { BD_PERFORMANCE_CURRENCIES, fetchBdPerformance, formatInfluencerError } from '../../api/influencers';
 import { collectionRows } from '../../utils/businessResponse';
-import { defaultCompletedDateRange } from './performanceDate';
 
-const filters = reactive({ ...defaultCompletedDateRange(), currency: 'CNY', attribution: 'strict', metrics: 'core' });
+// Let the API select its data-aware default on the first load. A calendar-only
+// default can be newer than the latest imported affiliate-order partition.
+const filters = reactive({ startDay: '', endDay: '', currency: 'CNY', attribution: 'strict', metrics: 'core' });
 const rows = ref([]);
+const performanceTable = ref();
 const performance = ref({});
 const loading = ref(false);
 const state = ref('loading');
@@ -81,6 +108,10 @@ const sourceMessage = computed(() => ({
   empty: '当前日期范围暂无可归属的绩效记录。'
 }[performance.value?.source_status] || ''));
 
+function toggleCountry(row) {
+  performanceTable.value?.toggleRowExpansion(row);
+}
+
 function totalMetric(name, fallback) { return totals.value[name] ?? fallback; }
 function displayCount(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -91,6 +122,11 @@ function formatMoney(value) {
   if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
   return Number.isFinite(number) ? `${filters.currency} ${number.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : String(value);
+}
+function formatNativeMoney(value, currency) {
+  if (value === null || value === undefined || value === '') return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? `${currency} ${number.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : String(value);
 }
 function formatRoi(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -108,6 +144,7 @@ function formatVideo(row) {
   return row.video_count ?? row.video_results ?? row.videos ?? '—';
 }
 function validateDates() {
+  if (!filters.startDay && !filters.endDay) return '';
   if (!filters.startDay || !filters.endDay) return '请选择完整日期范围';
   if (filters.startDay > filters.endDay) return '开始日期不能晚于结束日期';
   return '';
@@ -137,7 +174,7 @@ async function load({ includeDateRange = true } = {}) {
 function csvEscape(value) { return `"${String(value ?? '').replaceAll('"', '""')}"`; }
 function downloadCsv() {
   if (!rows.value.length) return;
-  const columns = [['BD 成员', 'owner'], ['建联任务', 'task_count'], ['送样记录', 'sample_count'], ['有效订单', 'valid_order_count'], ['合作单 GMV', 'gmv'], ['合作单投入', 'investment'], ['合作单 ROI', 'roi']];
+  const columns = [['BD 成员', 'owner'], ['建联任务', 'task_count'], ['送样记录', 'sample_count'], ['有效订单', 'valid_order_count'], ['合作单 GMV', 'gmv'], ['PH GMV (PHP)', 'gmv_php'], ['MY GMV (MYR)', 'gmv_myr'], ['TH GMV (THB)', 'gmv_thb'], ['合作单投入', 'investment'], ['合作单 ROI', 'roi']];
   if (filters.metrics === 'full') columns.push(['已建联', 'linked_count'], ['已送达', 'shipped_count'], ['商品件数', 'item_quantity'], ['佣金', 'commission'], ['视频结果', 'video']);
   const lines = [
     ['统计开始日期', filters.startDay, '统计结束日期', filters.endDay, '币种', filters.currency, '归属方式', filters.attribution].map(csvEscape).join(','),
@@ -171,6 +208,8 @@ onMounted(() => load({ includeDateRange: false }));
 .button-group button.active { background: #eaf6f2; color: #087657; box-shadow: inset 0 0 0 1px #14936f; }
 .scope-bar { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 12px; color: #768690; font-size: 12px; }
 .source-alert { margin-bottom: 12px; }
+.country-breakdown { padding: 8px 18px 16px 52px; background: #f7faf9; }
+.country-breakdown p { margin: 0 0 8px; color: #6b7b86; font-size: 12px; }
 .panel-state { display: grid; min-height: 150px; place-items: center; border: 1px dashed #dce4e9; color: #768690; }
 @media (max-width: 1100px) { .toolbar { flex-wrap: wrap; overflow: visible; } }
 @media (max-width: 760px) {

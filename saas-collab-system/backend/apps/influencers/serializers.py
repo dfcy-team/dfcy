@@ -184,6 +184,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
     completion_validation = serializers.SerializerMethodField()
     store_name = serializers.CharField(source="store.name", read_only=True)
     owner_name = serializers.SerializerMethodField()
+    owner_names = serializers.SerializerMethodField()
     dispatcher_name = serializers.SerializerMethodField()
 
     @staticmethod
@@ -192,6 +193,9 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
 
     def get_owner_name(self, obj):
         return self._user_name(obj.owner)
+
+    def get_owner_names(self, obj):
+        return [self._user_name(owner) for owner in obj.owners.all()]
 
     def get_dispatcher_name(self, obj):
         return self._user_name(obj.dispatcher)
@@ -323,7 +327,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "id", "tenant_id", "task_no", "task_name", "influencer", "store", "store_name", "spu",
             "external_product_id", "sku_prefix", "product_name_snapshot", "product_match_status",
             "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
-            "owner", "owner_name", "dispatcher_name", "source_owner_name_snapshot", "source_dispatcher_name_snapshot",
+            "owner", "owner_name", "owners", "owner_names", "dispatcher_name", "source_owner_name_snapshot", "source_dispatcher_name_snapshot",
             "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
             "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
             "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
@@ -344,6 +348,8 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "sku_prefix": {"required": False, "allow_blank": True},
             "target_count": {"required": False, "min_value": 0},
             "notes": {"required": False, "allow_blank": True},
+            "owner": {"required": False},
+            "owners": {"required": False, "allow_empty": False},
         }
 
     def validate_external_id(self, value):
@@ -369,12 +375,14 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
             "sku_prefix",
             "target_count",
             "owner",
+            "owners",
         )
         extra_kwargs = {
             "task_name": {"required": False, "allow_blank": True},
             "external_product_id": {"required": False, "allow_blank": True},
             "sku_prefix": {"required": False, "allow_blank": True},
             "target_count": {"required": False, "min_value": 0},
+            "owners": {"required": False, "allow_empty": False},
         }
 
     def validate_priority(self, value):
