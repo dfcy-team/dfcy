@@ -7,7 +7,7 @@ from collections import defaultdict
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.paginator import Paginator
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -147,6 +147,24 @@ except ImportError:  # pragma: no cover - removed once the permission catalog is
 from .sync_alerts import acknowledge_incident, add_incident_note, assign_incident, resolve_incident
 from .production_settings import get_runtime_setting
 from .sync_services import validate_manual_sync_job
+
+
+def _is_active_config_key_conflict(exc):
+    """Identify only the active configuration key constraint."""
+    message = str(exc).lower()
+    if "uniq_active_platform_integration_per_tenant" in message:
+        return True
+    return all(
+        token in message
+        for token in (
+            "integrations_platformintegrationconfig",
+            "tenant_id",
+            "platform",
+            "account_alias",
+            "environment",
+            "active_uniqueness_marker",
+        )
+    )
 
 
 def health_response(service):
@@ -747,18 +765,24 @@ def integration_config_collection(request):
             "Integration configuration is outside the authorized data scope.",
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
         )
-    config = serializer.save(tenant=request.user.tenant, created_by=request.user)
-    _write_audit_log(
-        config,
-        request.user,
-        "create",
-        detail={
-            "platform": config.platform,
-            "account_alias": config.account_alias,
-            "environment": config.environment,
-            "credential_mask": config.credential_mask,
-        },
-    )
+    try:
+        with transaction.atomic():
+            config = serializer.save(tenant=request.user.tenant, created_by=request.user)
+            _write_audit_log(
+                config,
+                request.user,
+                "create",
+                detail={
+                    "platform": config.platform,
+                    "account_alias": config.account_alias,
+                    "environment": config.environment,
+                    "credential_mask": config.credential_mask,
+                },
+            )
+    except IntegrityError as exc:
+        if _is_active_config_key_conflict(exc):
+            raise StateConflict("相同平台、名称和环境的配置已被其他操作创建，请刷新后重试。") from exc
+        raise
     return success_response(PlatformIntegrationConfigSerializer(config).data, status=201)
 
 
@@ -823,30 +847,35 @@ def create_handoff_integration_config(request):
         environment=environment,
     ).exists():
         raise ValidationError("相同平台、名称和环境的配置已存在。")
-    with transaction.atomic():
-        config = PlatformIntegrationConfig.objects.create(
-            tenant=request.user.tenant,
-            platform=platform,
-            account_alias=alias,
-            environment=environment,
-            status=PlatformIntegrationConfig.Status.PENDING_REVIEW,
-            regions=regions,
-            contract_version=(
-                get_platform_schema(platform, environment=environment)["contract_versions"][0]
-                if platform in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
-                else "shopapi-local-v1"
-            ),
-            platform_config={"api_type": api_type},
-            created_by=request.user,
-        )
-        with connection.cursor() as cursor:
-            columns = {column.name for column in connection.introspection.get_table_description(cursor, PlatformIntegrationConfig._meta.db_table)}
-            if "api_type" in columns:
-                cursor.execute(
-                    f"UPDATE {PlatformIntegrationConfig._meta.db_table} SET api_type=%s WHERE id=%s AND tenant_id=%s",
-                    [api_type, config.id, request.user.tenant_id],
-                )
-        _write_audit_log(config, request.user, "create_integration_config", detail={"platform": platform, "api_type": api_type, "environment": environment, "regions": regions, "credential_source": "none"})
+    try:
+        with transaction.atomic():
+            config = PlatformIntegrationConfig.objects.create(
+                tenant=request.user.tenant,
+                platform=platform,
+                account_alias=alias,
+                environment=environment,
+                status=PlatformIntegrationConfig.Status.PENDING_REVIEW,
+                regions=regions,
+                contract_version=(
+                    get_platform_schema(platform, environment=environment)["contract_versions"][0]
+                    if platform in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+                    else "shopapi-local-v1"
+                ),
+                platform_config={"api_type": api_type},
+                created_by=request.user,
+            )
+            with connection.cursor() as cursor:
+                columns = {column.name for column in connection.introspection.get_table_description(cursor, PlatformIntegrationConfig._meta.db_table)}
+                if "api_type" in columns:
+                    cursor.execute(
+                        f"UPDATE {PlatformIntegrationConfig._meta.db_table} SET api_type=%s WHERE id=%s AND tenant_id=%s",
+                        [api_type, config.id, request.user.tenant_id],
+                    )
+            _write_audit_log(config, request.user, "create_integration_config", detail={"platform": platform, "api_type": api_type, "environment": environment, "regions": regions, "credential_source": "none"})
+    except IntegrityError as exc:
+        if _is_active_config_key_conflict(exc):
+            raise StateConflict("相同平台、名称和环境的配置已被其他操作创建，请刷新后重试。") from exc
+        raise
     return success_response(PlatformIntegrationConfigSerializer(config).data, status=201)
 
 
@@ -867,42 +896,47 @@ def integration_config_detail(request, pk):
     except (TypeError, ValueError):
         raise ValidationError({"version": "Configuration version must be an integer."})
     payload = {key: value for key, value in request.data.items() if key != "version"}
-    with transaction.atomic():
-        config = PlatformIntegrationConfig.objects.select_for_update().get(
-            pk=config.pk,
-            tenant=request.user.tenant,
-        )
-        if expected_version != config.config_version:
-            raise StateConflict("The configuration version changed; reload before saving.")
-        serializer = PlatformIntegrationConfigSerializer(config, data=payload, partial=True)
-        serializer.is_valid(raise_exception=True)
-        candidate_platform = serializer.validated_data.get("platform", config.platform)
-        if not integration_values_allowed(
-            request.user,
-            "integrations.config.update",
-            platform=candidate_platform,
-            environment=serializer.validated_data.get("environment", config.environment),
-            regions=serializer.validated_data.get("regions", config.regions),
-            config_id=config.id,
-        ):
-            raise DataScopeDenied(
-                "Integration configuration update is outside the authorized data scope.",
-                error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+    try:
+        with transaction.atomic():
+            config = PlatformIntegrationConfig.objects.select_for_update().get(
+                pk=config.pk,
+                tenant=request.user.tenant,
             )
-        config = serializer.save(config_version=config.config_version + 1)
-        from .warehouse_credential_service import invalidate_config_warehouses
-        invalidate_config_warehouses(config)
-        _write_audit_log(
-            config,
-            request.user,
-            "update_non_secret",
-            detail={
-                "platform": config.platform,
-                "account_alias": config.account_alias,
-                "environment": config.environment,
-                "status": config.status,
-            },
-        )
+            if expected_version != config.config_version:
+                raise StateConflict("The configuration version changed; reload before saving.")
+            serializer = PlatformIntegrationConfigSerializer(config, data=payload, partial=True)
+            serializer.is_valid(raise_exception=True)
+            candidate_platform = serializer.validated_data.get("platform", config.platform)
+            if not integration_values_allowed(
+                request.user,
+                "integrations.config.update",
+                platform=candidate_platform,
+                environment=serializer.validated_data.get("environment", config.environment),
+                regions=serializer.validated_data.get("regions", config.regions),
+                config_id=config.id,
+            ):
+                raise DataScopeDenied(
+                    "Integration configuration update is outside the authorized data scope.",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
+            config = serializer.save(config_version=config.config_version + 1)
+            from .warehouse_credential_service import invalidate_config_warehouses
+            invalidate_config_warehouses(config)
+            _write_audit_log(
+                config,
+                request.user,
+                "update_non_secret",
+                detail={
+                    "platform": config.platform,
+                    "account_alias": config.account_alias,
+                    "environment": config.environment,
+                    "status": config.status,
+                },
+            )
+    except IntegrityError as exc:
+        if _is_active_config_key_conflict(exc):
+            raise StateConflict("相同平台、名称和环境的配置已存在，请刷新后重试。") from exc
+        raise
     return success_response(PlatformIntegrationConfigSerializer(config).data)
 
 

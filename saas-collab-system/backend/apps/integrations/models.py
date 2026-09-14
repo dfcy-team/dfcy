@@ -5,6 +5,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Case, Value, When
 
 from apps.tenants.models import Tenant
 from django.conf import settings
@@ -173,6 +174,14 @@ class PlatformIntegrationConfig(models.Model):
     last_rotated_at = models.DateTimeField(null=True, blank=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+    active_uniqueness_marker = models.GeneratedField(
+        expression=Case(
+            When(deleted_at__isnull=True, then=Value(1)),
+            default=Value(None),
+        ),
+        output_field=models.PositiveSmallIntegerField(null=True),
+        db_persist=True,
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -188,8 +197,14 @@ class PlatformIntegrationConfig(models.Model):
         ordering = ["tenant_id", "platform", "account_alias"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "platform", "account_alias", "environment"],
-                name="uniq_platform_integration_per_tenant",
+                fields=[
+                    "tenant",
+                    "platform",
+                    "account_alias",
+                    "environment",
+                    "active_uniqueness_marker",
+                ],
+                name="uniq_active_platform_integration_per_tenant",
             ),
         ]
 
