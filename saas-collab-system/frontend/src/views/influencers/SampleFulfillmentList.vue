@@ -55,13 +55,15 @@
         </el-table-column>
         <el-table-column label="产品 / SKU / 数量" min-width="220">
           <template #default="{ row }">
-            <template v-if="row.item_preview">
-              <div class="sku-match">
-                <small>{{ displayValue(row.item_preview.requested_sku || row.item_preview.matched_sku_code) }} × {{ displayValue(row.item_preview.quantity) }}</small>
-                <div><el-tag size="small" :type="matchTagType(row.item_preview.cost_match_status)">{{ statusLabel(COST_MATCH_STATUS_LABELS, row.item_preview.cost_match_status) }}</el-tag></div>
+            <template v-if="row.items?.length">
+              <div v-for="item in row.items" :key="item.id || item.requested_sku" class="sku-match">
+                <small>{{ displayValue(item.requested_sku || item.matched_sku_code) }} × {{ displayValue(item.quantity) }}</small>
+                <div>
+                  <el-tag size="small" :type="matchTagType(item.cost_match_status)">{{ statusLabel(COST_MATCH_STATUS_LABELS, item.cost_match_status) }}</el-tag>
+                </div>
               </div>
             </template>
-            <small>总数量 {{ displayValue(row.sku_quantity) }}</small>
+            <small v-else>数量 {{ displayValue(row.sku_quantity) }}</small>
           </template>
         </el-table-column>
         <el-table-column prop="external_product_id" label="商品 ID" min-width="155">
@@ -105,11 +107,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div v-if="rows.length || hasPrevious || hasNext" class="page-controls">
-        <el-button :disabled="!hasPrevious || loading" @click="goToPage(page - 1)">上一页</el-button>
-        <span>第 {{ page }} 页</span>
-        <el-button :disabled="!hasNext || loading" @click="goToPage(page + 1)">下一页</el-button>
-      </div>
+      <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="load" />
     </el-card>
 
     <el-dialog v-model="visible" class="sample-dialog" width="720px" @closed="discardDraft">
@@ -260,7 +258,7 @@ import {
   updateSampleFulfillment
 } from '../../api/influencers';
 import { creatorHandleFirst } from './creatorLabel';
-import { collectionRows, detailData } from '../../utils/businessResponse';
+import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -273,8 +271,6 @@ const ownerOptions = ref([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
-const hasNext = ref(false);
-const hasPrevious = ref(false);
 const loading = ref(false);
 const saving = ref(false);
 const influencerLoading = ref(false);
@@ -328,26 +324,16 @@ const todayLabel = (() => {
 
 async function load() {
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value, include_count: false, include_items: false, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner };
+  const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner };
   if (filters.includeDeleted) params.include_deleted = 'true';
   const r = await fetchSampleFulfillments(params);
   loading.value = false;
   if (r.success) {
     rows.value = collectionRows(r.data);
-    total.value = Number.isFinite(r.data?.count) && r.data?.count_exact !== false ? r.data.count : null;
-    hasNext.value = Boolean(r.data?.next);
-    hasPrevious.value = Boolean(r.data?.previous);
+    total.value = collectionTotal(r.data);
   } else {
-    hasNext.value = false;
-    hasPrevious.value = false;
     ElMessage.error(formatInfluencerError(r, '送样列表加载失败'));
   }
-}
-
-function goToPage(nextPage) {
-  if (nextPage < 1 || loading.value) return;
-  page.value = nextPage;
-  load();
 }
 
 function applyFilters() {
@@ -497,7 +483,7 @@ function outreachDate(row) {
 }
 
 function costMatchLabel(row) {
-  const statuses = [row?.item_preview?.cost_match_status].filter(hasValue);
+  const statuses = (row?.items || []).map((item) => item.cost_match_status).filter(hasValue);
   if (!statuses.length) return '采购成本待匹配';
   const unmatched = statuses.find((status) => !String(status).startsWith('matched'));
   return statusLabel(COST_MATCH_STATUS_LABELS, unmatched || statuses[0]);
@@ -518,35 +504,29 @@ async function openDetail(row) {
 
 async function openEdit(row) {
   if (!canManage.value || row.is_deleted) return;
-  const response = await fetchSampleFulfillment(row.id, { include_deleted: row.is_deleted ? 'true' : undefined });
-  if (!response.success) {
-    ElMessage.error(formatInfluencerError(response, '送样详情加载失败，无法打开编辑'));
-    return;
-  }
-  const record = { ...row, ...detailData(response.data) };
-  editingSample.value = record;
+  editingSample.value = { ...row };
   Object.assign(form, {
-    outreach_task: record.outreach_task,
-    influencer: record.influencer,
-    store: record.store,
-    product_name_snapshot: record.product_name_snapshot || '',
-    external_product_id: record.external_product_id || '',
-    sample_order_no: record.sample_order_no || '',
-    notes: record.notes || '',
-    link_type: record.link_type || 'DRJL',
-    quick_tags: [...(record.quick_tags || [])],
+    outreach_task: row.outreach_task,
+    influencer: row.influencer,
+    store: row.store,
+    product_name_snapshot: row.product_name_snapshot || '',
+    external_product_id: row.external_product_id || '',
+    sample_order_no: row.sample_order_no || '',
+    notes: row.notes || '',
+    link_type: row.link_type || 'DRJL',
+    quick_tags: [...(row.quick_tags || [])],
     status: ''
   });
   influencerOptions.value = [{
-    id: record.influencer,
-    name: record.influencer_name,
-    code: record.influencer_code,
-    handle: record.influencer_handle,
-    platform: record.influencer_platform,
-    is_blacklisted: record.is_blacklisted
+    id: row.influencer,
+    name: row.influencer_name,
+    code: row.influencer_code,
+    handle: row.influencer_handle,
+    platform: row.influencer_platform,
+    is_blacklisted: row.is_blacklisted
   }];
-  inheritedTask.value = record;
-  items.value = record.items?.length ? record.items.map((item) => ({ ...item })) : [newItem()];
+  inheritedTask.value = row;
+  items.value = row.items?.length ? row.items.map((item) => ({ ...item })) : [newItem()];
   visible.value = true;
 }
 
@@ -664,7 +644,7 @@ onMounted(async () => {
 .toolbar .el-button { flex: 0 0 auto; }
 .sku-match { display: grid; gap: 4px; margin-bottom: 6px; }
 .sku-match .el-tag + .el-tag { margin-left: 5px; }
-.page-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.el-pagination { margin-top: 16px; justify-content: flex-end; }
 .dialog-heading span { display: block; color: #167d68; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 .dialog-heading h2 { margin: 5px 0 0; color: #1f2937; font-size: 22px; }
 .sample-form { padding: 0 8px; }

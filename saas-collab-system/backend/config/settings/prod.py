@@ -60,12 +60,3 @@ if INTEGRATION_ENCRYPTION_PROVIDER == "test-only":
 
 # UI-P4 only defines a mock callback contract. Production enablement requires a separate review.
 UI_P4_COLLABORATION_MODE = "disabled"
-
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": os.getenv("DJANGO_CACHE_URL", REDIS_URL),
-        "KEY_PREFIX": "dfcy-production",
-        "TIMEOUT": INFLUENCER_BD_PERFORMANCE_CACHE_TTL_SECONDS,
-    }
-}

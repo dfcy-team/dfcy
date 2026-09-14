@@ -68,7 +68,7 @@ const resourceLibraryStubs = {
     emits: ['update:modelValue'],
     template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
   },
-  'el-select': { props: { modelValue: [String, Number] }, template: '<select />' },
+  'el-select': { props: { modelValue: String }, template: '<select />' },
   'el-option': { template: '<option />' },
   'el-input-number': { props: { modelValue: Number }, template: '<input />' }
 };
@@ -127,19 +127,17 @@ describe('influencer integration workspace contracts', () => {
     confirm.mockRestore();
   });
 
-  it('uses count-free next and previous pagination on all influencer workspaces', () => {
+  it('requests and renders pagination on all influencer workspaces', () => {
     for (const path of [
       'src/views/influencers/InfluencerResourceLibrary.vue',
       'src/views/influencers/OutreachTaskList.vue',
       'src/views/influencers/SampleFulfillmentList.vue'
     ]) {
       const source = read(path);
+      expect(source, path).toContain('v-model:current-page="page"');
+      expect(source, path).toContain('v-model:page-size="pageSize"');
       expect(source, path).toMatch(/page:\s*page\.value,\s*page_size:\s*pageSize\.value/);
-      expect(source, path).toContain('include_count: false');
-      expect(source, path).toContain('hasNext');
-      expect(source, path).toContain('hasPrevious');
-      expect(source, path).toContain('goToPage');
-      expect(source, path).not.toContain('collectionTotal');
+      expect(source, path).toContain('collectionTotal');
     }
   });
 
@@ -176,11 +174,11 @@ describe('influencer integration workspace contracts', () => {
     for (const label of ['推荐与合作资源', '推荐商品', '合作店铺', '历史经营指标', '月 GMV', '客单价', '历史 ROI', '视频总播放']) {
       expect(library).toContain(label);
     }
-    expect(library).toContain('const profileResponse = await fetchInfluencer(row.id)');
+    expect(library).toContain("fetchInfluencer(row.id, { include_relations: 'false' })");
     expect(library).toMatch(/label="平均视频播放"[^\n]+disabled/);
     expect(library).toMatch(/label="平均直播观看"[^\n]+disabled/);
     expect(library).not.toMatch(/function profilePayload\(\)[^\n]+average_video_views/);
-    expect(library).not.toContain('fetchInfluencerContacts,');
+    expect(library).toContain("联系方式加载失败，已取消编辑以保护现有数据");
     expect(performancePage).toContain('<h1>BD 绩效</h1>');
     expect(performancePage).toContain('按日期范围查看达人开拓、送样投入与合作产出。');
     expect(performancePage).toContain('<BdPerformancePanel />');
