@@ -404,11 +404,11 @@ async function openCreate(selection = {}) {
   visible.value = true;
   const [optionResponse, taskOptionResponse] = await Promise.all([
     fetchSampleFulfillmentOptions(),
-    fetchOutreachTaskOptions()
+    fetchOutreachTaskOptions({ include_influencers: 'false' })
   ]);
   tasks.value = optionResponse.success ? (optionResponse.data?.tasks || []) : [];
   storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
-  influencerOptions.value = optionResponse.success ? (optionResponse.data?.influencers || []) : [];
+  influencerOptions.value = [];
   ownerOptions.value = optionResponse.success ? (optionResponse.data?.owners || []) : [];
   if (!optionResponse.success) ElMessage.error(formatInfluencerError(optionResponse, '送样选项加载失败，可稍后重试'));
   if (!taskOptionResponse.success) ElMessage.error(formatInfluencerError(taskOptionResponse, '店铺选项加载失败，可稍后重试'));
@@ -450,7 +450,7 @@ async function searchInfluencers(search) {
   influencerLoading.value = true;
   const response = await fetchInfluencerResolve(String(search || '').trim());
   influencerLoading.value = false;
-  if (!response.success) return ElMessage.error(formatInfluencerError(response, '达人账号搜索失败'));
+  if (!response.success) return ElMessage.error(formatInfluencerError(response, '达人信息查询失败'));
   influencerOptions.value = response.data?.candidates || response.data?.results || [];
 }
 

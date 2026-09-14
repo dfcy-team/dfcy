@@ -552,9 +552,16 @@ class InfluencerResolveView(APIView):
             platform__iexact="TikTok",
             status=Influencer.Status.ACTIVE,
         ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant)
-        if query and is_valid_tiktok_username(query):
-            queryset = queryset.filter(handle__icontains=query)
-        rows = _influencer_candidates(queryset, limit=50, include_handle=True)
+        if not raw_query:
+            queryset = queryset.none()
+        else:
+            identity_filter = Q(name__iexact=raw_query) | Q(profile__display_name__iexact=raw_query)
+            if raw_query.isdigit():
+                identity_filter |= Q(pk=int(raw_query))
+            if query and is_valid_tiktok_username(query):
+                identity_filter |= Q(handle__iexact=query)
+            queryset = queryset.filter(identity_filter).distinct()
+        rows = _influencer_candidates(queryset, limit=20, include_handle=True)
         return success_response({"query": query, "candidates": rows, "results": rows})
 
     @transaction.atomic
@@ -791,11 +798,9 @@ class OutreachTaskOptionsView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        raw_include_influencers = request.query_params.get("include_influencers")
-        include_influencers = (
-            True
-            if raw_include_influencers is None
-            else _query_bool(raw_include_influencers, field="include_influencers")
+        include_influencers = _query_bool(
+            request.query_params.get("include_influencers", "false"),
+            field="include_influencers",
         )
         stores = StoreMaster.objects.filter(
             tenant=request.user.tenant,
@@ -874,18 +879,6 @@ class SampleFulfillmentOptionsView(APIView):
         ]
         if _query_bool(request.query_params.get("owners_only", "false"), field="owners_only"):
             return success_response({"owners": owner_payload})
-        search = request.query_params.get("search", "").strip()
-        blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
-        influencers = _with_open_sample_statuses(Influencer.objects.filter(
-            tenant=request.user.tenant,
-            status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant)
-        normalized_search = normalize_tiktok_username(search)
-        if search:
-            if is_valid_tiktok_username(normalized_search):
-                influencers = influencers.filter(handle__icontains=normalized_search)
-            else:
-                influencers = influencers.none()
         tasks = OutreachTask.objects.filter(
             tenant=request.user.tenant,
             is_deleted=False,
@@ -906,7 +899,6 @@ class SampleFulfillmentOptionsView(APIView):
                 }
                 for task in tasks
             ],
-            "influencers": _influencer_candidates(influencers, limit=100, include_handle=True),
             "owners": owner_payload,
         })
 

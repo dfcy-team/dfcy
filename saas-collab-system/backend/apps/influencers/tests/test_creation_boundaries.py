@@ -1612,8 +1612,7 @@ def test_fulfillment_options_require_view_permission_tenant_scope_and_minimal_ta
     payload = response.json()["data"]
     assert {item["id"] for item in payload["tasks"]} == {task.id}
     assert other_task.id not in {item["id"] for item in payload["tasks"]}
-    assert {item["id"] for item in payload["influencers"]} == {influencer.id}
-    assert payload["influencers"][0]["handle"] == "option.creator"
+    assert "influencers" not in payload
     assert set(payload["tasks"][0]) == {
         "id",
         "task_no",
@@ -1636,8 +1635,15 @@ def test_fulfillment_options_require_view_permission_tenant_scope_and_minimal_ta
     outreach_response = client.get("/api/internal/influencers/outreach-task-options/")
     assert outreach_response.status_code == 200
     outreach_payload = outreach_response.json()["data"]
-    assert {item["id"] for item in outreach_payload["influencers"]} == {influencer.id}
-    assert outreach_payload["influencers"][0]["handle"] == "option.creator"
+    assert "influencers" not in outreach_payload
+
+    outreach_with_influencers = client.get(
+        "/api/internal/influencers/outreach-task-options/?include_influencers=true"
+    )
+    assert outreach_with_influencers.status_code == 200
+    candidates = outreach_with_influencers.json()["data"]["influencers"]
+    assert {item["id"] for item in candidates} == {influencer.id}
+    assert candidates[0]["handle"] == "option.creator"
 
     def reject_influencer_scan(*args, **kwargs):
         raise AssertionError("Core outreach task options must not scan influencers or blacklist state.")
@@ -1653,7 +1659,7 @@ def test_fulfillment_options_require_view_permission_tenant_scope_and_minimal_ta
     assert {item["id"] for item in edit_options_payload["bd_users"]} == {user.id}
 
 
-def test_fulfillment_options_do_not_merge_same_handle_across_platforms():
+def test_fulfillment_options_do_not_scan_influencers():
     tenant, user, _, influencer = _records("option-platform-scope")
     role = user.user_roles.get().role
     _grant_all_scope(role, "influencers.fulfillment.manage")
@@ -1673,8 +1679,7 @@ def test_fulfillment_options_do_not_merge_same_handle_across_platforms():
     response = client.get("/api/internal/influencers/sample-fulfillment-options/")
 
     assert response.status_code == 200
-    candidate_ids = {item["id"] for item in response.json()["data"]["influencers"]}
-    assert {influencer.id, instagram.id}.issubset(candidate_ids)
+    assert "influencers" not in response.json()["data"]
 
 
 def test_fulfillment_options_warn_for_open_samples_without_cross_tenant_or_deleted_leaks():
@@ -1740,11 +1745,11 @@ def test_fulfillment_options_warn_for_open_samples_without_cross_tenant_or_delet
     client = APIClient()
     client.force_authenticate(user)
 
-    response = client.get("/api/internal/influencers/sample-fulfillment-options/")
+    response = client.get("/api/internal/influencers/resolve/", {"q": influencer.handle})
 
     assert response.status_code == 200
     candidate = next(
-        item for item in response.json()["data"]["influencers"]
+        item for item in response.json()["data"]["candidates"]
         if item["id"] == influencer.id
     )
     assert candidate["open_sample_statuses"] == ["pending", "shipped", "overdue"]
@@ -1776,12 +1781,12 @@ def test_empty_tiktok_handles_do_not_share_open_sample_warnings():
     client = APIClient()
     client.force_authenticate(user)
 
-    response = client.get("/api/internal/influencers/sample-fulfillment-options/")
+    response = client.get("/api/internal/influencers/resolve/", {"q": str(first.id)})
 
     assert response.status_code == 200
-    candidates = {item["id"]: item for item in response.json()["data"]["influencers"]}
+    candidates = {item["id"]: item for item in response.json()["data"]["candidates"]}
     assert candidates[first.id]["open_sample_statuses"] == ["pending"]
-    assert candidates[second.id]["open_sample_statuses"] == []
+    assert second.id not in candidates
 
 
 def test_blacklist_cascade_requires_profile_and_fulfillment_manage_permissions():
@@ -2477,6 +2482,34 @@ def test_outreach_manager_search_normalizes_tiktok_handle_alias():
     assert response.status_code == 200
     assert response.json()["data"]["query"] == "mhaine_94"
     assert response.json()["data"]["candidates"][0]["id"] == influencer.id
+
+
+def test_influencer_lookup_requires_exact_identity_and_accepts_database_id():
+    tenant, user, _, influencer = _records("resolve-exact-only")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    influencer.name = "Exact Creator"
+    influencer.handle = "exact.creator"
+    influencer.save(update_fields=["name", "handle"])
+    other = Influencer.objects.create(
+        tenant=tenant,
+        code="resolve-exact-only-other",
+        name="Exact Creator Shop",
+        handle="exact.creator.shop",
+        platform="TikTok",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+
+    partial = client.get("/api/internal/influencers/resolve/", {"q": "exact"})
+    by_name = client.get("/api/internal/influencers/resolve/", {"q": "Exact Creator"})
+    by_id = client.get("/api/internal/influencers/resolve/", {"q": str(influencer.id)})
+
+    assert partial.status_code == 200
+    assert partial.json()["data"]["candidates"] == []
+    assert [item["id"] for item in by_name.json()["data"]["candidates"]] == [influencer.id]
+    assert [item["id"] for item in by_id.json()["data"]["candidates"]] == [influencer.id]
+    assert other.id not in {item["id"] for item in by_name.json()["data"]["candidates"]}
 
 
 def test_candidate_resolver_fills_limit_after_normalized_handle_dedup():

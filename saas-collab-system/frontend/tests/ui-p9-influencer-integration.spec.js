@@ -361,6 +361,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).not.toContain('outreach_target: form.outreach_target');
     expect(page).toContain('querySelection');
     expect(page).toContain('influencerLabel');
+    expect(page).toContain("fetchOutreachTaskOptions({ include_influencers: 'false' })");
+    expect(page).toContain('influencerOptions.value = [];');
     expect(page).toContain('allow-create');
     expect(page).toContain('@change="resolveSelectedInfluencer"');
     expect(page).toContain('!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)');
