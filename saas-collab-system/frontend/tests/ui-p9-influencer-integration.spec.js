@@ -68,7 +68,7 @@ const resourceLibraryStubs = {
     emits: ['update:modelValue'],
     template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
   },
-  'el-select': { props: { modelValue: String }, template: '<select />' },
+  'el-select': { props: { modelValue: [String, Number] }, template: '<select />' },
   'el-option': { template: '<option />' },
   'el-input-number': { props: { modelValue: Number }, template: '<input />' }
 };
@@ -127,17 +127,19 @@ describe('influencer integration workspace contracts', () => {
     confirm.mockRestore();
   });
 
-  it('requests and renders pagination on all influencer workspaces', () => {
+  it('uses count-free next and previous pagination on all influencer workspaces', () => {
     for (const path of [
       'src/views/influencers/InfluencerResourceLibrary.vue',
       'src/views/influencers/OutreachTaskList.vue',
       'src/views/influencers/SampleFulfillmentList.vue'
     ]) {
       const source = read(path);
-      expect(source, path).toContain('v-model:current-page="page"');
-      expect(source, path).toContain('v-model:page-size="pageSize"');
       expect(source, path).toMatch(/page:\s*page\.value,\s*page_size:\s*pageSize\.value/);
-      expect(source, path).toContain('collectionTotal');
+      expect(source, path).toContain('include_count: false');
+      expect(source, path).toContain('hasNext');
+      expect(source, path).toContain('hasPrevious');
+      expect(source, path).toContain('goToPage');
+      expect(source, path).not.toContain('collectionTotal');
     }
   });
 

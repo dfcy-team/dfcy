@@ -490,6 +490,9 @@ class OutreachTask(StateMachineTenantModel):
 
     @property
     def linked_count(self):
+        annotated = getattr(self, "_linked_count", None)
+        if annotated is not None:
+            return int(annotated)
         if not self.pk:
             return 0
         prefetched_targets = getattr(self, "_active_targets", None)

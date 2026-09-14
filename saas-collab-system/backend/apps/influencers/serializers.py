@@ -619,10 +619,35 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
 class SampleFulfillmentListSerializer(SampleFulfillmentSerializer):
     """List payload without detail-only video objects."""
 
+    item_preview = serializers.SerializerMethodField()
+
+    class Meta(SampleFulfillmentSerializer.Meta):
+        fields = tuple(
+            field
+            for field in SampleFulfillmentSerializer.Meta.fields
+            if field != "video_matches"
+        ) + ("item_preview",)
+        read_only_fields = SampleFulfillmentSerializer.Meta.read_only_fields + (
+            "item_preview",
+        )
+
     def get_fields(self):
         fields = super().get_fields()
-        fields.pop("video_matches", None)
+        if not self.context.get("include_items", True):
+            fields.pop("items", None)
         return fields
+
+    def get_item_preview(self, obj):
+        item_id = getattr(obj, "item_preview_id", None)
+        if item_id is None:
+            return None
+        return {
+            "id": item_id,
+            "requested_sku": getattr(obj, "item_preview_requested_sku", None),
+            "matched_sku_code": getattr(obj, "item_preview_matched_sku", ""),
+            "quantity": getattr(obj, "item_preview_quantity", 0),
+            "cost_match_status": getattr(obj, "item_preview_cost_status", ""),
+        }
 
 
 class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):

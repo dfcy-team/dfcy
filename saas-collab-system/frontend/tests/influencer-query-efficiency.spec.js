@@ -20,4 +20,12 @@ describe('influencer query efficiency', () => {
     expect(page).toContain('fetchSampleFulfillments({ outreach_task: taskId');
     expect(page).not.toContain('fetchSampleFulfillments({ search: task.task_no');
   });
+
+  it('keeps fulfillment items out of the fast list and loads them before editing', () => {
+    const page = read('src/views/influencers/SampleFulfillmentList.vue');
+
+    expect(page).toContain('include_items: false');
+    expect(page).toContain('row.item_preview');
+    expect(page).toMatch(/async function openEdit\(row\)[\s\S]+?await fetchSampleFulfillment\(row\.id/);
+  });
 });
