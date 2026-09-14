@@ -92,10 +92,6 @@ class Influencer(models.Model):
     class Meta:
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant")]
-        indexes = [
-            models.Index(fields=["tenant", "-updated_at", "-id"], name="idx_inf_tenant_updated"),
-            models.Index(fields=["tenant", "status", "-updated_at"], name="idx_inf_tenant_status"),
-        ]
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
@@ -465,14 +461,6 @@ class OutreachTask(StateMachineTenantModel):
         ]
         indexes = [
             models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status"),
-            models.Index(
-                fields=["tenant", "is_deleted", "-created_at", "-id"],
-                name="idx_outreach_tenant_list",
-            ),
-            models.Index(
-                fields=["tenant", "status", "is_deleted", "-created_at"],
-                name="idx_outreach_tenant_state",
-            ),
         ]
 
     def clean(self):
@@ -490,6 +478,9 @@ class OutreachTask(StateMachineTenantModel):
 
     @property
     def linked_count(self):
+        annotated = getattr(self, "_linked_count", None)
+        if annotated is not None:
+            return int(annotated)
         if not self.pk:
             return 0
         prefetched_targets = getattr(self, "_active_targets", None)
@@ -713,14 +704,6 @@ class SampleFulfillment(StateMachineTenantModel):
             models.Index(
                 fields=["tenant", "is_deleted", "video_deadline_at"],
                 name="idx_sample_deadline",
-            ),
-            models.Index(
-                fields=["tenant", "is_deleted", "-created_at", "-id"],
-                name="idx_sample_tenant_list",
-            ),
-            models.Index(
-                fields=["tenant", "status", "is_deleted", "-created_at"],
-                name="idx_sample_tenant_state",
             ),
         ]
 
@@ -1161,7 +1144,6 @@ class BdSampleAttributionSnapshot(TenantValidatedModel):
                 name="idx_bd_sample_match",
             ),
             models.Index(fields=["tenant", "owner", "sampled_at"], name="idx_bd_sample_owner_date"),
-            models.Index(fields=["tenant", "sampled_at", "owner"], name="idx_bd_sample_date_owner"),
         ]
 
     @property

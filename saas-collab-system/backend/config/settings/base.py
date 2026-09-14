@@ -321,6 +321,10 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+INFLUENCER_BD_PERFORMANCE_CACHE_TTL_SECONDS = max(
+    5,
+    min(int(os.getenv("INFLUENCER_BD_PERFORMANCE_CACHE_TTL_SECONDS", "30")), 300),
+)
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_ACCEPT_CONTENT = ["json"]

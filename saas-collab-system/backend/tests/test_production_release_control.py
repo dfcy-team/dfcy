@@ -62,6 +62,18 @@ def test_candidate_overlay_is_last_and_restores_full_migration_command():
     assert overlay.count("${PRODUCTION_FRONTEND_IMAGE") == 1
     assert overlay.count("${PRODUCTION_REDIS_IMAGE") == 1
     assert "- migrate\n      - --noinput" in overlay
+    assert '- --verbosity\n      - "2"' in overlay
+
+
+def test_database_migration_has_bounded_runtime_and_visible_output():
+    script = _deploy_script()
+
+    assert "require_command timeout" in script
+    assert "PRODUCTION_MIGRATION_TIMEOUT_SECONDS:-1200" in script
+    assert "timeout --foreground --signal=TERM --kill-after=30s" in script
+    assert 'run --rm --name "$migration_container" "$migration_service"' in script
+    assert 'docker rm -f "$migration_container"' in script
+    assert 'run --rm "$migration_service" >/dev/null' not in script
 
 
 def test_baseline_tracks_control_environment_and_its_compose_override():

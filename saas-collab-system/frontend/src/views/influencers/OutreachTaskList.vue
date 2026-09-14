@@ -111,14 +111,11 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination
-        v-if="visibleTotal"
-        v-model:current-page="page"
-        v-model:page-size="pageSize"
-        :total="visibleTotal"
-        layout="total, prev, pager, next"
-        @current-change="load"
-      />
+      <div v-if="rows.length || hasPrevious || hasNext" class="page-controls">
+        <el-button :disabled="!hasPrevious || loading" @click="goToPage(page - 1)">上一页</el-button>
+        <span>第 {{ page }} 页</span>
+        <el-button :disabled="!hasNext || loading" @click="goToPage(page + 1)">下一页</el-button>
+      </div>
     </el-card>
 
     <el-dialog
@@ -413,13 +410,15 @@ import { applyProductCandidate } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
 import { fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
-import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
+import { collectionRows, detailData } from '../../utils/businessResponse';
 
 const auth = useAuthStore();
 const rows = ref([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
+const hasNext = ref(false);
+const hasPrevious = ref(false);
 const loading = ref(false);
 const saving = ref(false);
 const createVisible = ref(false);
@@ -564,7 +563,6 @@ const visibleRows = computed(() => rows.value.filter((row) => {
   const matchesNormal = !filters.normalOnly || row.priority === 'normal';
   return matchesDispatcher && matchesNormal;
 }));
-const visibleTotal = computed(() => filters.dispatcher || filters.normalOnly ? visibleRows.value.length : total.value);
 const taskStats = computed(() => {
   const linkedValues = rows.value.map((row) => row.linked_count).filter(hasValue);
   const fulfillmentValues = rows.value
@@ -583,7 +581,7 @@ const detailProgressLabel = computed(() => {
 
 async function load() {
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value };
+  const params = { page: page.value, page_size: pageSize.value, include_count: false };
   if (filters.search.trim()) params.search = filters.search.trim();
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
@@ -592,10 +590,20 @@ async function load() {
   loading.value = false;
   if (r.success) {
     rows.value = collectionRows(r.data);
-    total.value = collectionTotal(r.data);
+    total.value = Number.isFinite(r.data?.count) && r.data?.count_exact !== false ? r.data.count : null;
+    hasNext.value = Boolean(r.data?.next);
+    hasPrevious.value = Boolean(r.data?.previous);
   } else {
+    hasNext.value = false;
+    hasPrevious.value = false;
     ElMessage.error(formatInfluencerError(r, '任务加载失败'));
   }
+}
+
+function goToPage(nextPage) {
+  if (nextPage < 1 || loading.value) return;
+  page.value = nextPage;
+  load();
 }
 
 function applyFilters() {
@@ -817,7 +825,7 @@ async function loadDetailData(task, showLoading = true) {
   const taskId = task.id;
   if (showLoading) detailLoading.value = true;
   const sampleRequest = canViewFulfillment.value
-    ? fetchSampleFulfillments({ outreach_task: taskId, page: 1, page_size: 100 })
+    ? fetchSampleFulfillments({ outreach_task: taskId, page: 1, page_size: 100, include_count: false })
     : Promise.resolve(null);
   const [taskResponse, progressResponse, sampleResponse] = await Promise.all([
     fetchOutreachTask(taskId, { include_deleted: task.is_deleted ? 'true' : undefined }),
@@ -1152,7 +1160,7 @@ onMounted(async () => {
 .toolbar .el-checkbox, .toolbar .el-button { flex: 0 0 auto; }
 .target-bar { display: flex; gap: 10px; margin-bottom: 14px; }
 .target-bar .el-input, .target-bar .el-select { max-width: 320px; flex: 1; }
-.el-pagination { margin-top: 16px; justify-content: flex-end; }
+.page-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .clickable-task-row { cursor: pointer; }
 .drawer-body { min-height: 100%; padding: 4px 2px 22px; }
 .drawer-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding-bottom: 18px; border-bottom: 1px solid #eef0f3; }
