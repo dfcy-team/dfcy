@@ -38,12 +38,7 @@
         <el-table-column label="档案状态" width="95"><template #default="{ row }"><el-tag size="small" :type="row.is_blacklisted ? 'danger' : (row.status === 'active' ? 'success' : 'info')">{{ row.is_blacklisted ? '已拉黑' : (row.status === 'active' ? '正常' : '停用') }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="250" fixed="right"><template #default="{ row }"><el-button link @click.stop="openDetail(row)">详情</el-button><el-button link :disabled="!canManage" @click.stop="openEdit(row)">编辑</el-button><el-button link :type="row.is_blacklisted ? 'success' : 'danger'" :disabled="!canManage" @click.stop="toggleBlacklist(row)">{{ row.is_blacklisted ? '解除拉黑' : '加入黑名单' }}</el-button><el-button link :disabled="!canManage" @click.stop="changeStatus(row, row.status === 'active' ? 'inactive' : 'active')">{{ row.status === 'active' ? '停用' : '启用' }}</el-button></template></el-table-column>
       </el-table>
-      <div v-if="rows.length || hasPrevious || hasNext" class="page-controls">
-        <el-button :disabled="!hasPrevious || loading" @click="goToPage(page - 1)">上一页</el-button>
-        <span>第 {{ page }} 页</span>
-        <el-button :disabled="!hasNext || loading" @click="goToPage(page + 1)">下一页</el-button>
-        <el-select v-model="pageSize" size="small" class="page-size" @change="changePageSize"><el-option v-for="size in [20, 50, 100]" :key="size" :label="`${size} 条/页`" :value="size" /></el-select>
-      </div>
+      <el-pagination v-if="total > 0" v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[20, 50, 100]" :total="total" layout="total, sizes, prev, pager, next" @current-change="load" @size-change="changePageSize" />
     </el-card>
 
     <el-dialog v-model="editVisible" :title="editing ? '编辑达人档案' : '新建达人档案'" width="760px" @closed="resetForm">
@@ -111,13 +106,15 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { collectionRows } from '../../utils/businessResponse';
+import { collectionRows, collectionTotal } from '../../utils/businessResponse';
 import { useAuthStore } from '../../stores/auth';
 import {
   INFLUENCER_CONTACT_CHANNEL_LABELS,
   INFLUENCER_COOPERATION_STATUS_LABELS,
   createInfluencer,
   fetchInfluencer,
+  fetchInfluencerBlacklistHistory,
+  fetchInfluencerContacts,
   fetchInfluencers,
   updateInfluencer,
   updateInfluencerBlacklist,
@@ -126,7 +123,7 @@ import {
 } from '../../api/influencers';
 
 const auth = useAuthStore();
-const rows = ref([]); const total = ref(null); const page = ref(1); const pageSize = ref(20); const hasNext = ref(false); const hasPrevious = ref(false); const loading = ref(false); const saving = ref(false); const listError = ref('');
+const rows = ref([]); const total = ref(null); const page = ref(1); const pageSize = ref(20); const loading = ref(false); const saving = ref(false); const listError = ref('');
 const editVisible = ref(false); const detailVisible = ref(false); const detailLoading = ref(false); const detailError = ref(''); const detail = ref(null); const editing = ref(null);
 const blankProfile = () => ({ display_name: '', external_influencer_id: '', level: '', tier: '', average_video_views: 0, average_live_views: 0, is_active: true, market: '', platforms: '', content_types: '', profile_url: '', duplicate_reason: '', product_cooperation_count: 0, first_cooperation_at: null, cooperation_count: 0, completed_cooperation_count: 0, fulfilled_cooperation_count: 0, fulfillment_rate: null, content_completion_rate: null, historical_gmv: '0.0000', historical_orders: 0, historical_performance: {}, profile_notes: '' });
 const filters = reactive({ search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' });
@@ -153,25 +150,28 @@ const formatTime = (value) => value ? new Date(value).toLocaleString('zh-CN', { 
 
 async function load() {
   loading.value = true; listError.value = '';
-  const params = { page: page.value, page_size: pageSize.value, include_count: false, ordering: filters.ordering, ...(filters.search.trim() ? { search: filters.search.trim() } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.platform ? { platform: filters.platform } : {}), ...(filters.cooperation_status ? { cooperation_status: filters.cooperation_status } : {}), ...(filters.level ? { level: filters.level } : {}), ...(filters.market.trim() ? { market: filters.market.trim() } : {}), ...(filters.tier.trim() ? { tier: filters.tier.trim() } : {}), ...(filters.is_blacklisted ? { is_blacklisted: filters.is_blacklisted } : {}) };
+  const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering, ...(filters.search.trim() ? { search: filters.search.trim() } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.platform ? { platform: filters.platform } : {}), ...(filters.cooperation_status ? { cooperation_status: filters.cooperation_status } : {}), ...(filters.level ? { level: filters.level } : {}), ...(filters.market.trim() ? { market: filters.market.trim() } : {}), ...(filters.tier.trim() ? { tier: filters.tier.trim() } : {}), ...(filters.is_blacklisted ? { is_blacklisted: filters.is_blacklisted } : {}) };
   const response = await fetchInfluencers(params); loading.value = false;
-  if (!response?.success) { rows.value = []; total.value = null; hasNext.value = false; hasPrevious.value = false; listError.value = response?.message || '达人档案加载失败，请稍后重试'; return; }
-  rows.value = collectionRows(response.data); total.value = Number.isFinite(response.data?.count) && response.data?.count_exact !== false ? response.data.count : null; hasNext.value = Boolean(response.data?.next); hasPrevious.value = Boolean(response.data?.previous);
+  if (!response?.success) { rows.value = []; total.value = null; listError.value = response?.message || '达人档案加载失败，请稍后重试'; return; }
+  rows.value = collectionRows(response.data); total.value = collectionTotal(response.data);
 }
 function applyFilters() { page.value = 1; load(); }
 function resetFilters() { Object.assign(filters, { search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
 function changePageSize() { page.value = 1; load(); }
-function goToPage(nextPage) { if (nextPage < 1 || loading.value) return; page.value = nextPage; load(); }
 function resetForm() { Object.assign(form, blankForm()); }
 function addContact() { form.contacts.push(blankContact()); }
 function removeContact(index) { if (form.contacts.length === 1) return; form.contacts.splice(index, 1); }
 function openCreate() { if (!canManage.value) return; editing.value = null; resetForm(); editVisible.value = true; }
 async function openEdit(row) {
   if (!canManage.value) return;
-  const profileResponse = await fetchInfluencer(row.id);
+  const [profileResponse, contactsResponse] = await Promise.all([
+    fetchInfluencer(row.id, { include_relations: 'false' }),
+    fetchInfluencerContacts(row.id)
+  ]);
   if (!profileResponse?.success) return ElMessage.error(profileResponse?.message || '达人档案加载失败');
+  if (!contactsResponse?.success) return ElMessage.error(contactsResponse?.message || '联系方式加载失败，已取消编辑以保护现有数据');
   const record = profileResponse.data || row;
-  const contacts = Array.isArray(record.contacts) ? record.contacts : [];
+  const contacts = collectionRows(contactsResponse?.data || []);
   editing.value = record;
   Object.assign(form, { ...blankForm(), ...record, profile: profileForm(record.profile), contacts: (contacts.length ? contacts : [blankContact()]).map((contact) => ({ ...contact, key: contact.id || `${contact.channel}-${contact.value}` })) });
   editVisible.value = true;
@@ -198,12 +198,16 @@ async function save() {
   editVisible.value = false; ElMessage.success(wasEditing ? '达人档案已更新' : '达人档案已创建'); await load();
 }
 async function openDetail(row) {
-  detailVisible.value = true; detailLoading.value = true; detailError.value = ''; detail.value = { ...row };
-  const profileResponse = await fetchInfluencer(row.id);
+  detailVisible.value = true; detailLoading.value = true; detailError.value = ''; detail.value = { ...row, contacts: row.contacts || [], blacklist_history: row.blacklist_history || [] };
+  const [profileResponse, contactsResponse, historyResponse] = await Promise.all([
+    fetchInfluencer(row.id, { include_relations: 'false' }),
+    fetchInfluencerContacts(row.id),
+    fetchInfluencerBlacklistHistory(row.id)
+  ]);
   detailLoading.value = false;
   if (!profileResponse?.success) { detailError.value = profileResponse?.message || '达人详情加载失败'; return; }
   const profile = profileResponse.data || {};
-  detail.value = { ...detail.value, ...profile, contacts: profile.contacts || [], blacklist_history: profile.blacklist_history || [] };
+  detail.value = { ...detail.value, ...profile, contacts: collectionRows(contactsResponse?.data || profile.contacts || detail.value.contacts), blacklist_history: collectionRows(historyResponse?.data || profile.blacklist_history || detail.value.blacklist_history) };
 }
 async function toggleBlacklist(row) {
   if (!canManage.value) return;
@@ -227,7 +231,7 @@ onMounted(load);
 .list-error { margin-bottom: 12px; }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid #dce4e9; border-radius: 9px; background: #fff; }
 .metrics > div { display: grid; gap: 5px; min-height: 86px; padding: 15px 16px; border-right: 1px solid #e2e8ec; }.metrics > div:last-child { border-right: 0; box-shadow: inset 3px 0 #14936f; }.metrics span, .metrics small { color: #6b7b86; font-size: 12px; }.metrics strong { color: #15232e; font-size: 24px; line-height: 1; }
-.workspace-card { border-color: #dce4e9; }.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }.toolbar .el-input { flex: 1 1 260px; min-width: 220px; }.toolbar .el-select { width: 140px; }.toolbar .el-button { flex: 0 0 auto; }.el-table b, .el-table small { display: block; }.el-table small { margin-top: 3px; color: #7a8993; }.page-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; }.page-size { width: 110px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }.form-grid .el-input-number, .form-grid .el-select { width: 100%; }.full-field { grid-column: 1 / -1; }.contact-row { display: grid; grid-template-columns: 130px 1fr 130px auto auto; align-items: center; gap: 8px; margin-bottom: 8px; }.contact-list { display: grid; gap: 8px; }.contact-list div { display: grid; grid-template-columns: 110px 1fr auto; gap: 8px; align-items: center; padding: 9px 10px; border: 1px solid #e6ecef; border-radius: 6px; }.contact-list small, .muted { color: #7a8993; }.drawer-actions { display: flex; gap: 8px; margin-bottom: 14px; }.drawer-state { min-height: 180px; display: grid; place-items: center; color: #768690; }.resource-library h3 { margin: 20px 0 10px; color: #20313d; font-size: 14px; }
+.workspace-card { border-color: #dce4e9; }.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }.toolbar .el-input { flex: 1 1 260px; min-width: 220px; }.toolbar .el-select { width: 140px; }.toolbar .el-button { flex: 0 0 auto; }.el-table b, .el-table small { display: block; }.el-table small { margin-top: 3px; color: #7a8993; }.el-pagination { justify-content: flex-end; margin-top: 14px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }.form-grid .el-input-number, .form-grid .el-select { width: 100%; }.full-field { grid-column: 1 / -1; }.contact-row { display: grid; grid-template-columns: 130px 1fr 130px auto auto; align-items: center; gap: 8px; margin-bottom: 8px; }.contact-list { display: grid; gap: 8px; }.contact-list div { display: grid; grid-template-columns: 110px 1fr auto; gap: 8px; align-items: center; padding: 9px 10px; border: 1px solid #e6ecef; border-radius: 6px; }.contact-list small, .muted { color: #7a8993; }.drawer-actions { display: flex; gap: 8px; margin-bottom: 14px; }.drawer-state { min-height: 180px; display: grid; place-items: center; color: #768690; }.resource-library h3 { margin: 20px 0 10px; color: #20313d; font-size: 14px; }
 @media (max-width: 900px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.toolbar .el-input, .toolbar .el-select { flex: 1 1 180px; width: auto; min-width: 160px; } }
 @media (max-width: 620px) { .metrics, .form-grid { grid-template-columns: 1fr; }.metrics > div { border-right: 0; border-bottom: 1px solid #e2e8ec; }.contact-row { grid-template-columns: 1fr 1fr; }.full-field { grid-column: auto; } }
 </style>
