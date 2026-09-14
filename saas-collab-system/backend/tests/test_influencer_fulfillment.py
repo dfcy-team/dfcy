@@ -223,7 +223,14 @@ def test_outreach_options_return_active_stores_and_bd_users_only():
         "full_name": "李烨君",
     }]
     assert other_user.id not in {item["id"] for item in response.data["data"]["bd_users"]}
-    assert response.data["data"]["influencers"] == [{
+    assert "influencers" not in response.data["data"]
+
+    response_with_influencers = client.get(
+        "/api/internal/influencers/outreach-task-options/",
+        {"include_influencers": "true"},
+    )
+    assert response_with_influencers.status_code == 200
+    assert response_with_influencers.data["data"]["influencers"] == [{
         "id": influencer.id,
         "code": "creator-active",
         "name": "Active Creator",

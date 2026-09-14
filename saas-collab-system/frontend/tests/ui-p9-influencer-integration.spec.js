@@ -361,6 +361,8 @@ describe('influencer integration workspace contracts', () => {
     expect(page).not.toContain('outreach_target: form.outreach_target');
     expect(page).toContain('querySelection');
     expect(page).toContain('influencerLabel');
+    expect(page).toContain("fetchOutreachTaskOptions({ include_influencers: 'false' })");
+    expect(page).toContain('influencerOptions.value = [];');
     expect(page).toContain('allow-create');
     expect(page).toContain('@change="resolveSelectedInfluencer"');
     expect(page).toContain('!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)');
@@ -388,6 +390,11 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('await refreshActiveTask()');
     expect(page).toContain(':disabled="!canCreateFulfillment || isCancelled(detailTask)"');
     expect(page).toContain('isCancelled(task)');
+    expect(page).not.toContain(':disabled="!canCreateFulfillment || isTerminal(detailTask)"');
+
+    const fulfillmentPage = read('src/views/influencers/SampleFulfillmentList.vue');
+    expect(fulfillmentPage).toContain("if (!task.id || task.status === 'cancelled') return null;");
+    expect(fulfillmentPage).not.toContain("['completed', 'cancelled'].includes(task.status)");
   });
 
   it('keeps priority values and fulfillment transitions aligned with backend contracts', () => {
