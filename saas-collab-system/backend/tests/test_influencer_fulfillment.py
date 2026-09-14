@@ -368,6 +368,26 @@ def base_records(tenant, user, suffix="a"):
     return store, influencer, task
 
 
+def test_outreach_task_list_returns_existing_rows():
+    tenant = Tenant.objects.create(name="Task list tenant", code="task-list-visible")
+    user, client = user_with_permissions(
+        tenant,
+        "task-list-viewer",
+        "influencers.outreach.view",
+    )
+    _, _, task = base_records(tenant, user, "visible")
+
+    response = client.get(
+        "/api/internal/influencers/outreach-tasks/",
+        {"page": 1, "page_size": 20},
+    )
+
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["count"] == 1
+    assert [row["id"] for row in payload["results"]] == [task.id]
+
+
 def test_sample_pricing_data_migration_backfills_historical_values():
     tenant = Tenant.objects.create(name="Backfill Tenant", code="backfill-tenant")
     user = CustomUser.objects.create_user(username="backfill-user", tenant=tenant)

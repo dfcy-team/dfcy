@@ -242,9 +242,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             ]
             sample_ids = [sample_id for sample_id, *_ in sample_rows]
             matched_videos = sum(
-                getattr(sample, "published_video_count", None)
-                if getattr(sample, "published_video_count", None) is not None
-                else len(getattr(sample, "_published_video_results", []))
+                len(getattr(sample, "_published_video_results", []))
                 for sample in prefetched_samples
             )
         completion_statuses = {
@@ -510,9 +508,6 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         return cached
 
     def get_video_match_count(self, obj):
-        annotated = getattr(obj, "published_video_count", None)
-        if annotated is not None:
-            return int(annotated)
         return len(self._published_videos(obj))
 
     def get_video_matches(self, obj):
@@ -529,6 +524,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             }
             for video in self._published_videos(obj)
         ]
+
     def validate(self, attrs):
         # Creation payloads must include these relations, while partial
         # updates may intentionally omit them.  Fall back to the instance so
@@ -614,40 +610,6 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         if len(normalized) > 20:
             raise serializers.ValidationError("At most 20 quick tags are allowed.")
         return normalized
-
-
-class SampleFulfillmentListSerializer(SampleFulfillmentSerializer):
-    """List payload without detail-only video objects."""
-
-    item_preview = serializers.SerializerMethodField()
-
-    class Meta(SampleFulfillmentSerializer.Meta):
-        fields = tuple(
-            field
-            for field in SampleFulfillmentSerializer.Meta.fields
-            if field != "video_matches"
-        ) + ("item_preview",)
-        read_only_fields = SampleFulfillmentSerializer.Meta.read_only_fields + (
-            "item_preview",
-        )
-
-    def get_fields(self):
-        fields = super().get_fields()
-        if not self.context.get("include_items", True):
-            fields.pop("items", None)
-        return fields
-
-    def get_item_preview(self, obj):
-        item_id = getattr(obj, "item_preview_id", None)
-        if item_id is None:
-            return None
-        return {
-            "id": item_id,
-            "requested_sku": getattr(obj, "item_preview_requested_sku", None),
-            "matched_sku_code": getattr(obj, "item_preview_matched_sku", ""),
-            "quantity": getattr(obj, "item_preview_quantity", 0),
-            "cost_match_status": getattr(obj, "item_preview_cost_status", ""),
-        }
 
 
 class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):

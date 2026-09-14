@@ -3,25 +3,8 @@ import hashlib
 from io import StringIO
 from datetime import timedelta
 
-from django.conf import settings
-from django.core.cache import cache
 from django.db import IntegrityError, models, transaction
-from django.db.models import (
-    BooleanField,
-    Case,
-    CharField,
-    Count,
-    Exists,
-    IntegerField,
-    Max,
-    OuterRef,
-    Prefetch,
-    Q,
-    Subquery,
-    Value,
-    When,
-)
-from django.db.models.functions import Cast, Coalesce, Concat, Lower
+from django.db.models import BooleanField, Case, Exists, OuterRef, Prefetch, Q, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -54,7 +37,6 @@ from .models import (
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
-    SampleItem,
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
@@ -73,7 +55,6 @@ from .serializers import (
     OutreachTaskSerializer,
     OutreachTaskUpdateSerializer,
     SampleFulfillmentSerializer,
-    SampleFulfillmentListSerializer,
     SampleFulfillmentUpdateSerializer,
     SkuPriceSnapshotSerializer,
 )
@@ -110,102 +91,6 @@ RESOLVE_READ_PERMISSION_CODES = (
     "influencers.outreach.manage",
     "influencers.fulfillment.manage",
 )
-
-
-def _published_video_count(tenant):
-    return Coalesce(
-        Subquery(
-            VideoResult.objects.filter(
-                tenant=tenant,
-                sample_fulfillment_id=OuterRef("pk"),
-                published_at__isnull=False,
-            )
-            .values("sample_fulfillment_id")
-            .annotate(total=Count("id"))
-            .values("total")[:1],
-            output_field=IntegerField(),
-        ),
-        Value(0),
-    )
-
-
-def _influencer_identity_expression():
-    return Case(
-        When(
-            influencer__platform__iexact="TikTok",
-            influencer__handle__gt="",
-            then=Concat(Value("tiktok:"), Lower("influencer__handle")),
-        ),
-        default=Concat(Value("id:"), Cast("influencer_id", CharField())),
-        output_field=CharField(),
-    )
-
-
-def _prepare_outreach_task_summaries(tasks, tenant):
-    task_ids = [task.pk for task in tasks]
-    if not task_ids:
-        return
-
-    linked_by_task = {
-        row["task_id"]: row["total"]
-        for row in OutreachTarget.objects.filter(
-            tenant=tenant,
-            task_id__in=task_ids,
-            is_deleted=False,
-        )
-        .values("task_id")
-        .annotate(total=Count(_influencer_identity_expression(), distinct=True))
-    }
-    completion_statuses = (
-        SampleFulfillment.Status.PUBLISHED,
-        SampleFulfillment.Status.COMPLETED,
-        SampleFulfillment.Status.LIVE_CREATOR,
-    )
-    sample_annotations = {
-        "total": Count("id"),
-        "influencer_count": Count(_influencer_identity_expression(), distinct=True),
-        "completed": Count(
-            _influencer_identity_expression(),
-            distinct=True,
-            filter=Q(status__in=completion_statuses),
-        ),
-    }
-    for status in SampleFulfillment.Status.values:
-        sample_annotations[f"status_{status}"] = Count("id", filter=Q(status=status))
-    sample_rows = SampleFulfillment.objects.filter(
-        tenant=tenant,
-        outreach_task_id__in=task_ids,
-        is_deleted=False,
-    ).values("outreach_task_id").annotate(**sample_annotations)
-    sample_by_task = {row["outreach_task_id"]: row for row in sample_rows}
-    videos_by_task = {
-        row["sample_fulfillment__outreach_task_id"]: row["total"]
-        for row in VideoResult.objects.filter(
-            tenant=tenant,
-            published_at__isnull=False,
-            sample_fulfillment__outreach_task_id__in=task_ids,
-            sample_fulfillment__is_deleted=False,
-        )
-        .values("sample_fulfillment__outreach_task_id")
-        .annotate(total=Count("id"))
-    }
-    for task in tasks:
-        row = sample_by_task.get(task.pk, {})
-        counts = {
-            status: int(row.get(f"status_{status}", 0) or 0)
-            for status in SampleFulfillment.Status.values
-        }
-        task._linked_count = int(linked_by_task.get(task.pk, 0) or 0)
-        task._sample_status_summary = {
-            "counts": counts,
-            "status_counts": counts,
-            "total": int(row.get("total", 0) or 0),
-            "influencer_count": int(row.get("influencer_count", 0) or 0),
-            "completed": int(row.get("completed", 0) or 0),
-            "video_match_count": int(videos_by_task.get(task.pk, 0) or 0),
-        }
-
-
 BLACKLIST_PERMISSION_CODES = (
     "influencers.manage",
     "influencers.fulfillment.manage",
@@ -445,10 +330,6 @@ class InfluencerCollectionView(APIView):
             page=page,
             page_size=page_size,
             serializer_context={"request": request, "include_relations": False},
-            include_count=_query_bool(
-                request.query_params.get("include_count", "true"),
-                field="include_count",
-            ),
         ))
 
     @transaction.atomic
@@ -834,10 +715,37 @@ class OutreachTaskCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
+        active_samples = Prefetch(
+            "sample_fulfillments",
+            queryset=SampleFulfillment.objects.filter(
+                tenant=request.user.tenant,
+                is_deleted=False,
+            ).select_related("influencer").prefetch_related(
+                Prefetch(
+                    "video_results",
+                    queryset=VideoResult.objects.filter(
+                        tenant=request.user.tenant,
+                        published_at__isnull=False,
+                    ),
+                    to_attr="_published_video_results",
+                )
+            ),
+            to_attr="_active_samples",
+        )
+        active_targets = Prefetch(
+            "targets",
+            queryset=OutreachTarget.objects.filter(
+                tenant=request.user.tenant,
+                is_deleted=False,
+            ).select_related("influencer"),
+            to_attr="_active_targets",
+        )
         queryset = OutreachTask.objects.filter(
             tenant=request.user.tenant,
         ).select_related("influencer", "store", "owner", "dispatcher", "spu").prefetch_related(
             "owners",
+            active_samples,
+            active_targets,
         )
         if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
             raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
@@ -869,21 +777,7 @@ class OutreachTaskCollectionView(APIView):
             queryset = queryset.distinct()
         queryset = queryset.order_by("-created_at", "-id")
         page, page_size = _pagination(request)
-        return success_response(paginated_data(
-            request,
-            queryset,
-            OutreachTaskSerializer,
-            page=page,
-            page_size=page_size,
-            include_count=_query_bool(
-                request.query_params.get("include_count", "true"),
-                field="include_count",
-            ),
-            prepare_page=lambda rows: _prepare_outreach_task_summaries(
-                rows,
-                request.user.tenant,
-            ),
-        ))
+        return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size))
 
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
@@ -1291,26 +1185,19 @@ class SampleFulfillmentCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
-        include_items = _query_bool(
-            request.query_params.get("include_items", "true"),
-            field="include_items",
-        )
-        first_item = SampleItem.objects.filter(
-            tenant=request.user.tenant,
-            fulfillment_id=OuterRef("pk"),
-        ).order_by("id")
         queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).select_related(
             "outreach_task", "influencer", "influencer__profile", "store", "owner", "deleted_by"
-        ).annotate(
-            published_video_count=_published_video_count(request.user.tenant),
-            item_preview_id=Subquery(first_item.values("id")[:1]),
-            item_preview_requested_sku=Subquery(first_item.values("requested_sku")[:1]),
-            item_preview_matched_sku=Subquery(first_item.values("matched_sku_code")[:1]),
-            item_preview_quantity=Subquery(first_item.values("quantity")[:1]),
-            item_preview_cost_status=Subquery(first_item.values("cost_match_status")[:1]),
+        ).prefetch_related(
+            "items",
+            Prefetch(
+                "video_results",
+                queryset=VideoResult.objects.filter(
+                    tenant=request.user.tenant,
+                    published_at__isnull=False,
+                ).order_by("-published_at", "-id"),
+                to_attr="_published_video_results",
+            ),
         )
-        if include_items:
-            queryset = queryset.prefetch_related("items")
         if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
             raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
         deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")
@@ -1361,18 +1248,7 @@ class SampleFulfillmentCollectionView(APIView):
             queryset = queryset.filter(search_filter)
         queryset = queryset.order_by("-created_at", "-id")
         page, page_size = _pagination(request)
-        return success_response(paginated_data(
-            request,
-            queryset,
-            SampleFulfillmentListSerializer,
-            page=page,
-            page_size=page_size,
-            include_count=_query_bool(
-                request.query_params.get("include_count", "true"),
-                field="include_count",
-            ),
-            serializer_context={"include_items": include_items},
-        ))
+        return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
@@ -1616,13 +1492,7 @@ class BdPerformanceView(APIView):
             raise PermissionDenied("Both outreach and fulfillment view permissions are required.")
         require_all_scope(request.user, fulfillment_permission)
 
-        max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=request.user.tenant).aggregate(
-            max_data_time=Max("data_time")
-        )["max_data_time"]
-        default_start, default_end = default_performance_dates(
-            tenant=request.user.tenant,
-            max_data_time=max_data_time,
-        )
+        default_start, default_end = default_performance_dates(tenant=request.user.tenant)
         start_date = parse_performance_date(
             request.query_params.get("start_date") or default_start.isoformat(),
             field="start_date",
@@ -1642,34 +1512,13 @@ class BdPerformanceView(APIView):
             raise ValidationError({"date": "start_date must not be after end_date."})
         if (end_date - start_date).days > 30:
             raise ValidationError({"date": "The date range must not exceed 31 days."})
-        attribution = (request.query_params.get("attribution") or "strict").strip().lower()
-        currency = (request.query_params.get("currency") or "CNY").strip().upper()
-        cache_key = ":".join((
-            "influencers",
-            "bd-performance",
-            str(request.user.tenant_id),
-            request.user.tenant.code,
-            start_date.isoformat(),
-            end_date.isoformat(),
-            attribution,
-            currency,
-            max_data_time.isoformat() if max_data_time else "none",
-        ))
-        payload = cache.get(cache_key)
-        if payload is None:
-            payload = build_bd_performance(
-                tenant=request.user.tenant,
-                start_date=start_date,
-                end_date=end_date,
-                attribution=attribution,
-                currency=currency,
-                max_data_time=max_data_time,
-            )
-            cache.set(
-                cache_key,
-                payload,
-                timeout=settings.INFLUENCER_BD_PERFORMANCE_CACHE_TTL_SECONDS,
-            )
+        payload = build_bd_performance(
+            tenant=request.user.tenant,
+            start_date=start_date,
+            end_date=end_date,
+            attribution=(request.query_params.get("attribution") or "strict").strip().lower(),
+            currency=(request.query_params.get("currency") or "CNY").strip().upper(),
+        )
         return success_response(payload)
 
 
