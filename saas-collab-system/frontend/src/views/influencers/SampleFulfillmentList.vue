@@ -380,7 +380,7 @@ async function findTask(taskId) {
   const r = await fetchOutreachTask(taskId);
   if (!r.success) return null;
   task = detailData(r.data);
-  if (!task.id || ['completed', 'cancelled'].includes(task.status)) return null;
+  if (!task.id || task.status === 'cancelled') return null;
   tasks.value = [task, ...tasks.value];
   return task;
 }
