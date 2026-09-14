@@ -92,6 +92,10 @@ class Influencer(models.Model):
     class Meta:
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant")]
+        indexes = [
+            models.Index(fields=["tenant", "-updated_at", "-id"], name="idx_inf_tenant_updated"),
+            models.Index(fields=["tenant", "status", "-updated_at"], name="idx_inf_tenant_status"),
+        ]
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
@@ -459,7 +463,17 @@ class OutreachTask(StateMachineTenantModel):
                 name="outreach_source_personnel_guard",
             ),
         ]
-        indexes = [models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status")]
+        indexes = [
+            models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status"),
+            models.Index(
+                fields=["tenant", "is_deleted", "-created_at", "-id"],
+                name="idx_outreach_tenant_list",
+            ),
+            models.Index(
+                fields=["tenant", "status", "is_deleted", "-created_at"],
+                name="idx_outreach_tenant_state",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -699,6 +713,14 @@ class SampleFulfillment(StateMachineTenantModel):
             models.Index(
                 fields=["tenant", "is_deleted", "video_deadline_at"],
                 name="idx_sample_deadline",
+            ),
+            models.Index(
+                fields=["tenant", "is_deleted", "-created_at", "-id"],
+                name="idx_sample_tenant_list",
+            ),
+            models.Index(
+                fields=["tenant", "status", "is_deleted", "-created_at"],
+                name="idx_sample_tenant_state",
             ),
         ]
 
@@ -1139,6 +1161,7 @@ class BdSampleAttributionSnapshot(TenantValidatedModel):
                 name="idx_bd_sample_match",
             ),
             models.Index(fields=["tenant", "owner", "sampled_at"], name="idx_bd_sample_owner_date"),
+            models.Index(fields=["tenant", "sampled_at", "owner"], name="idx_bd_sample_date_owner"),
         ]
 
     @property

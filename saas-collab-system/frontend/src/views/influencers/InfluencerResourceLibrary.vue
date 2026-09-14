@@ -113,8 +113,6 @@ import {
   INFLUENCER_COOPERATION_STATUS_LABELS,
   createInfluencer,
   fetchInfluencer,
-  fetchInfluencerBlacklistHistory,
-  fetchInfluencerContacts,
   fetchInfluencers,
   updateInfluencer,
   updateInfluencerBlacklist,
@@ -164,14 +162,10 @@ function removeContact(index) { if (form.contacts.length === 1) return; form.con
 function openCreate() { if (!canManage.value) return; editing.value = null; resetForm(); editVisible.value = true; }
 async function openEdit(row) {
   if (!canManage.value) return;
-  const [profileResponse, contactsResponse] = await Promise.all([
-    fetchInfluencer(row.id, { include_relations: 'false' }),
-    fetchInfluencerContacts(row.id)
-  ]);
+  const profileResponse = await fetchInfluencer(row.id);
   if (!profileResponse?.success) return ElMessage.error(profileResponse?.message || '达人档案加载失败');
-  if (!contactsResponse?.success) return ElMessage.error(contactsResponse?.message || '联系方式加载失败，已取消编辑以保护现有数据');
   const record = profileResponse.data || row;
-  const contacts = collectionRows(contactsResponse?.data || []);
+  const contacts = Array.isArray(record.contacts) ? record.contacts : [];
   editing.value = record;
   Object.assign(form, { ...blankForm(), ...record, profile: profileForm(record.profile), contacts: (contacts.length ? contacts : [blankContact()]).map((contact) => ({ ...contact, key: contact.id || `${contact.channel}-${contact.value}` })) });
   editVisible.value = true;
@@ -198,16 +192,12 @@ async function save() {
   editVisible.value = false; ElMessage.success(wasEditing ? '达人档案已更新' : '达人档案已创建'); await load();
 }
 async function openDetail(row) {
-  detailVisible.value = true; detailLoading.value = true; detailError.value = ''; detail.value = { ...row, contacts: row.contacts || [], blacklist_history: row.blacklist_history || [] };
-  const [profileResponse, contactsResponse, historyResponse] = await Promise.all([
-    fetchInfluencer(row.id, { include_relations: 'false' }),
-    fetchInfluencerContacts(row.id),
-    fetchInfluencerBlacklistHistory(row.id)
-  ]);
+  detailVisible.value = true; detailLoading.value = true; detailError.value = ''; detail.value = { ...row };
+  const profileResponse = await fetchInfluencer(row.id);
   detailLoading.value = false;
   if (!profileResponse?.success) { detailError.value = profileResponse?.message || '达人详情加载失败'; return; }
   const profile = profileResponse.data || {};
-  detail.value = { ...detail.value, ...profile, contacts: collectionRows(contactsResponse?.data || profile.contacts || detail.value.contacts), blacklist_history: collectionRows(historyResponse?.data || profile.blacklist_history || detail.value.blacklist_history) };
+  detail.value = { ...detail.value, ...profile, contacts: profile.contacts || [], blacklist_history: profile.blacklist_history || [] };
 }
 async function toggleBlacklist(row) {
   if (!canManage.value) return;

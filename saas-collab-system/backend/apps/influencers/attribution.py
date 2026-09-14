@@ -46,6 +46,7 @@ SHIPPED_SAMPLE_STATUSES = frozenset(
         SampleFulfillment.Status.LIVE_CREATOR,
     }
 )
+_MAX_DATA_TIME_UNSET = object()
 
 
 def normalize_account(value):
@@ -198,6 +199,15 @@ class _RateResolver:
         self._cache = {}
         self.used = {}
         self.missing = {}
+        self._rates_by_pair = defaultdict(list)
+        for row in ExchangeRate.objects.filter(
+            tenant=tenant,
+            is_active=True,
+        ).only(
+            "id", "base_currency", "quote_currency", "rate", "effective_from", "source"
+        ).order_by("base_currency", "quote_currency", "effective_from", "id"):
+            pair = (row.base_currency.strip().upper(), row.quote_currency.strip().upper())
+            self._rates_by_pair[pair].append(row)
 
     def _resolve(self, base_currency, quote_currency, on_date):
         base = str(base_currency or "").strip().upper()
@@ -217,13 +227,11 @@ class _RateResolver:
                 "version": "identity-cny-v1",
             })
         else:
-            row = ExchangeRate.objects.filter(
-                tenant=self.tenant,
-                base_currency=base,
-                quote_currency=quote,
-                effective_from__lte=on_date,
-                is_active=True,
-            ).order_by("-effective_from", "-id").first()
+            candidates = self._rates_by_pair.get((base, quote), ())
+            row = next(
+                (candidate for candidate in reversed(candidates) if candidate.effective_from <= on_date),
+                None,
+            )
             if row is not None:
                 result = (Decimal(row.rate), {
                     "source": "tenant_exchange_rate",
@@ -576,7 +584,10 @@ def _serialize_metrics(bucket, currency):
     }
 
 
-def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", currency="CNY"):
+def build_bd_performance(
+    *, tenant, start_date, end_date, attribution="strict", currency="CNY",
+    max_data_time=_MAX_DATA_TIME_UNSET,
+):
     if currency not in PERFORMANCE_CURRENCIES:
         raise ValidationError({"currency": "Currency must be CNY, PHP, MYR, THB or USD."})
     if attribution not in {"strict", "fallback"}:
@@ -605,18 +616,19 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
             created_at__gte=start_dt,
             created_at__lt=end_dt,
         )
+        .values("owner_id")
         .annotate(
+            task_count=Count("id", distinct=True),
             active_linked_count=Count(
                 "targets",
                 filter=Q(targets__tenant=tenant, targets__is_deleted=False),
                 distinct=True,
-            )
+            ),
         )
-        .values("owner_id", "active_linked_count")
     )
     for row in task_rows:
         bucket = buckets[row["owner_id"]]
-        bucket["task_count"] += 1
+        bucket["task_count"] += row["task_count"] or 0
         bucket["linked_count"] += row["active_linked_count"] or 0
         owner_ids.add(row["owner_id"])
 
@@ -671,7 +683,6 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
             Q(order_snapshot__order_status__iexact="completed")
             | Q(order_snapshot__order_status="已完成")
         )
-        .select_related("order_snapshot")
         .values(
             "owner_id",
             "order_snapshot_id",
@@ -780,7 +791,11 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
         total_bucket["order_ids"].update(bucket["order_ids"])
         total_bucket["missing_exchange_rates"].update(bucket["missing_exchange_rates"])
 
-    has_orders = AffiliateOrderSnapshot.objects.filter(tenant=tenant).exists()
+    if max_data_time is _MAX_DATA_TIME_UNSET:
+        max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=tenant).aggregate(
+            max_data_time=Max("data_time")
+        )["max_data_time"]
+    has_orders = max_data_time is not None
     has_samples = BdSampleAttributionSnapshot.objects.filter(
         tenant=tenant,
         fulfillment__tenant=tenant,
@@ -799,9 +814,6 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
     else:
         source_status = "ready"
 
-    max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=tenant).aggregate(
-        max_data_time=Max("data_time")
-    )["max_data_time"]
     data_as_of = timezone.localtime(max_data_time).date().isoformat() if max_data_time else None
     diagnostic_reasons = []
     if not has_orders:
@@ -865,12 +877,13 @@ def build_bd_performance(*, tenant, start_date, end_date, attribution="strict", 
     }
 
 
-def default_performance_dates(*, tenant):
+def default_performance_dates(*, tenant, max_data_time=_MAX_DATA_TIME_UNSET):
     today = timezone.localdate()
     yesterday = today - timedelta(days=1)
-    max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=tenant).aggregate(
-        max_data_time=Max("data_time")
-    )["max_data_time"]
+    if max_data_time is _MAX_DATA_TIME_UNSET:
+        max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=tenant).aggregate(
+            max_data_time=Max("data_time")
+        )["max_data_time"]
     max_date = timezone.localtime(max_data_time).date() if max_data_time else None
     end_date = min(yesterday, max_date) if max_date else yesterday
     return end_date - timedelta(days=6), end_date

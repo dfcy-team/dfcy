@@ -4,7 +4,21 @@ from io import StringIO
 from datetime import timedelta
 
 from django.db import IntegrityError, models, transaction
-from django.db.models import BooleanField, Case, Exists, OuterRef, Prefetch, Q, When
+from django.db.models import (
+    BooleanField,
+    Case,
+    Count,
+    Exists,
+    IntegerField,
+    Max,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Value,
+    When,
+)
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -37,6 +51,7 @@ from .models import (
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
+    SampleItem,
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
@@ -55,6 +70,7 @@ from .serializers import (
     OutreachTaskSerializer,
     OutreachTaskUpdateSerializer,
     SampleFulfillmentSerializer,
+    SampleFulfillmentListSerializer,
     SampleFulfillmentUpdateSerializer,
     SkuPriceSnapshotSerializer,
 )
@@ -91,6 +107,25 @@ RESOLVE_READ_PERMISSION_CODES = (
     "influencers.outreach.manage",
     "influencers.fulfillment.manage",
 )
+
+
+def _published_video_count(tenant):
+    return Coalesce(
+        Subquery(
+            VideoResult.objects.filter(
+                tenant=tenant,
+                sample_fulfillment_id=OuterRef("pk"),
+                published_at__isnull=False,
+            )
+            .values("sample_fulfillment_id")
+            .annotate(total=Count("id"))
+            .values("total")[:1],
+            output_field=IntegerField(),
+        ),
+        Value(0),
+    )
+
+
 BLACKLIST_PERMISSION_CODES = (
     "influencers.manage",
     "influencers.fulfillment.manage",
@@ -720,16 +755,10 @@ class OutreachTaskCollectionView(APIView):
             queryset=SampleFulfillment.objects.filter(
                 tenant=request.user.tenant,
                 is_deleted=False,
-            ).select_related("influencer").prefetch_related(
-                Prefetch(
-                    "video_results",
-                    queryset=VideoResult.objects.filter(
-                        tenant=request.user.tenant,
-                        published_at__isnull=False,
-                    ),
-                    to_attr="_published_video_results",
-                )
-            ),
+            ).select_related("influencer").only(
+                "id", "tenant_id", "outreach_task_id", "status", "influencer_id",
+                "influencer__platform", "influencer__handle",
+            ).annotate(published_video_count=_published_video_count(request.user.tenant)),
             to_attr="_active_samples",
         )
         active_targets = Prefetch(
@@ -737,7 +766,10 @@ class OutreachTaskCollectionView(APIView):
             queryset=OutreachTarget.objects.filter(
                 tenant=request.user.tenant,
                 is_deleted=False,
-            ).select_related("influencer"),
+            ).select_related("influencer").only(
+                "id", "tenant_id", "task_id", "influencer_id",
+                "influencer__platform", "influencer__handle",
+            ),
             to_attr="_active_targets",
         )
         queryset = OutreachTask.objects.filter(
@@ -1188,16 +1220,17 @@ class SampleFulfillmentCollectionView(APIView):
         queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).select_related(
             "outreach_task", "influencer", "influencer__profile", "store", "owner", "deleted_by"
         ).prefetch_related(
-            "items",
             Prefetch(
-                "video_results",
-                queryset=VideoResult.objects.filter(
-                    tenant=request.user.tenant,
-                    published_at__isnull=False,
-                ).order_by("-published_at", "-id"),
-                to_attr="_published_video_results",
+                "items",
+                queryset=SampleItem.objects.only(
+                    "id", "tenant_id", "fulfillment_id", "sku_id", "external_product_id",
+                    "site_code", "requested_sku", "normalized_sku", "matched_sku_code",
+                    "matched_legacy_sku_code", "product_name", "quantity", "cost_amount",
+                    "cost_match_status", "cost_source", "cost_snapshot_at", "match_notes",
+                    "created_at", "updated_at",
+                ).order_by("id"),
             ),
-        )
+        ).annotate(published_video_count=_published_video_count(request.user.tenant))
         if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
             raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
         deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")
@@ -1248,7 +1281,7 @@ class SampleFulfillmentCollectionView(APIView):
             queryset = queryset.filter(search_filter)
         queryset = queryset.order_by("-created_at", "-id")
         page, page_size = _pagination(request)
-        return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
+        return success_response(paginated_data(request, queryset, SampleFulfillmentListSerializer, page=page, page_size=page_size))
 
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
@@ -1492,7 +1525,13 @@ class BdPerformanceView(APIView):
             raise PermissionDenied("Both outreach and fulfillment view permissions are required.")
         require_all_scope(request.user, fulfillment_permission)
 
-        default_start, default_end = default_performance_dates(tenant=request.user.tenant)
+        max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=request.user.tenant).aggregate(
+            max_data_time=Max("data_time")
+        )["max_data_time"]
+        default_start, default_end = default_performance_dates(
+            tenant=request.user.tenant,
+            max_data_time=max_data_time,
+        )
         start_date = parse_performance_date(
             request.query_params.get("start_date") or default_start.isoformat(),
             field="start_date",
@@ -1518,6 +1557,7 @@ class BdPerformanceView(APIView):
             end_date=end_date,
             attribution=(request.query_params.get("attribution") or "strict").strip().lower(),
             currency=(request.query_params.get("currency") or "CNY").strip().upper(),
+            max_data_time=max_data_time,
         )
         return success_response(payload)
 

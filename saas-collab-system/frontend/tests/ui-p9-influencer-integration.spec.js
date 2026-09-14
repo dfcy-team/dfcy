@@ -174,11 +174,11 @@ describe('influencer integration workspace contracts', () => {
     for (const label of ['推荐与合作资源', '推荐商品', '合作店铺', '历史经营指标', '月 GMV', '客单价', '历史 ROI', '视频总播放']) {
       expect(library).toContain(label);
     }
-    expect(library).toContain("fetchInfluencer(row.id, { include_relations: 'false' })");
+    expect(library).toContain('const profileResponse = await fetchInfluencer(row.id)');
     expect(library).toMatch(/label="平均视频播放"[^\n]+disabled/);
     expect(library).toMatch(/label="平均直播观看"[^\n]+disabled/);
     expect(library).not.toMatch(/function profilePayload\(\)[^\n]+average_video_views/);
-    expect(library).toContain("联系方式加载失败，已取消编辑以保护现有数据");
+    expect(library).not.toContain('fetchInfluencerContacts,');
     expect(performancePage).toContain('<h1>BD 绩效</h1>');
     expect(performancePage).toContain('按日期范围查看达人开拓、送样投入与合作产出。');
     expect(performancePage).toContain('<BdPerformancePanel />');
