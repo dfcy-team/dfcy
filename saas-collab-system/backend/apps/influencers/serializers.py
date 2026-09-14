@@ -242,7 +242,9 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             ]
             sample_ids = [sample_id for sample_id, *_ in sample_rows]
             matched_videos = sum(
-                len(getattr(sample, "_published_video_results", []))
+                getattr(sample, "published_video_count", None)
+                if getattr(sample, "published_video_count", None) is not None
+                else len(getattr(sample, "_published_video_results", []))
                 for sample in prefetched_samples
             )
         completion_statuses = {
@@ -508,6 +510,9 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         return cached
 
     def get_video_match_count(self, obj):
+        annotated = getattr(obj, "published_video_count", None)
+        if annotated is not None:
+            return int(annotated)
         return len(self._published_videos(obj))
 
     def get_video_matches(self, obj):
@@ -524,7 +529,6 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             }
             for video in self._published_videos(obj)
         ]
-
     def validate(self, attrs):
         # Creation payloads must include these relations, while partial
         # updates may intentionally omit them.  Fall back to the instance so
@@ -610,6 +614,15 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
         if len(normalized) > 20:
             raise serializers.ValidationError("At most 20 quick tags are allowed.")
         return normalized
+
+
+class SampleFulfillmentListSerializer(SampleFulfillmentSerializer):
+    """List payload without detail-only video objects."""
+
+    def get_fields(self):
+        fields = super().get_fields()
+        fields.pop("video_matches", None)
+        return fields
 
 
 class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):

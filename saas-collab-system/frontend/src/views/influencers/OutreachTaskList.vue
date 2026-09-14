@@ -816,8 +816,8 @@ async function loadDetailData(task, showLoading = true) {
   if (!task?.id) return;
   const taskId = task.id;
   if (showLoading) detailLoading.value = true;
-  const sampleRequest = canViewFulfillment.value && task.id
-    ? fetchSampleFulfillments({ outreach_task: task.id, page: 1, page_size: 100 })
+  const sampleRequest = canViewFulfillment.value
+    ? fetchSampleFulfillments({ outreach_task: taskId, page: 1, page_size: 100 })
     : Promise.resolve(null);
   const [taskResponse, progressResponse, sampleResponse] = await Promise.all([
     fetchOutreachTask(taskId, { include_deleted: task.is_deleted ? 'true' : undefined }),
