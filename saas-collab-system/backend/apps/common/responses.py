@@ -71,10 +71,8 @@ def paginated_data(
     if prepare_page is not None:
         prepare_page(rows)
 
-    return {
+    payload = {
         "count": count,
-        "count_exact": include_count,
-        "has_next": has_next,
         "next": page_url(page + 1) if has_next else None,
         "previous": page_url(page - 1) if has_previous else None,
         "results": serializer_class(
@@ -83,3 +81,6 @@ def paginated_data(
             context=serializer_context or {},
         ).data,
     }
+    if not include_count:
+        payload.update({"count_exact": False, "has_next": has_next})
+    return payload
