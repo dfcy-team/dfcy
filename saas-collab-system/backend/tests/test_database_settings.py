@@ -14,6 +14,7 @@ def run_prod_settings_import(env_overrides, python_code=None):
         "DB_PASSWORD",
         "DB_HOST",
         "DB_PORT",
+        "DB_LOCK_WAIT_TIMEOUT_SECONDS",
         "DJANGO_SECRET_KEY",
         "DJANGO_ALLOWED_HOSTS",
         "INTEGRATION_ENCRYPTION_PROVIDER",
@@ -74,6 +75,48 @@ def test_prod_settings_accept_mysql_from_environment():
 
     assert result.returncode == 0
     assert result.stdout.strip() == "django.db.backends.mysql"
+
+
+def test_prod_mysql_sets_bounded_metadata_lock_wait():
+    result = run_prod_settings_import(
+        {
+            "DJANGO_SECRET_KEY": "test-secret-key",
+            "DJANGO_ALLOWED_HOSTS": "example.test",
+            "DB_ENGINE": "django.db.backends.mysql",
+            "DB_NAME": "saas_collab_prod",
+            "DB_USER": "saas_collab_user",
+            "DB_PASSWORD": "change-me-placeholder",
+            "DB_HOST": "mysql",
+            "DB_PORT": "3306",
+            "DB_LOCK_WAIT_TIMEOUT_SECONDS": "45",
+        },
+        (
+            "import config.settings.prod as prod; "
+            "print(prod.DATABASES['default']['OPTIONS']['init_command'])"
+        ),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "SET SESSION lock_wait_timeout = 45"
+
+
+def test_prod_settings_reject_invalid_metadata_lock_wait():
+    result = run_prod_settings_import(
+        {
+            "DJANGO_SECRET_KEY": "test-secret-key",
+            "DJANGO_ALLOWED_HOSTS": "example.test",
+            "DB_ENGINE": "django.db.backends.mysql",
+            "DB_NAME": "saas_collab_prod",
+            "DB_USER": "saas_collab_user",
+            "DB_PASSWORD": "change-me-placeholder",
+            "DB_HOST": "mysql",
+            "DB_PORT": "3306",
+            "DB_LOCK_WAIT_TIMEOUT_SECONDS": "600",
+        }
+    )
+
+    assert result.returncode != 0
+    assert "must be between 1 and 300 seconds" in result.stderr
 
 
 def test_prod_mysql_backend_loads_installed_driver():

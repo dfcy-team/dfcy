@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from importlib import import_module
 
 import pytest
 from django.db import connection
@@ -22,6 +23,14 @@ from apps.influencers.views import BdPerformanceView
 
 
 pytestmark = pytest.mark.django_db
+
+
+def test_query_efficiency_migration_has_no_table_index_ddl():
+    migration = import_module(
+        "apps.influencers.migrations.0020_influencer_query_efficiency"
+    )
+
+    assert migration.Migration.operations == []
 
 
 class _InfluencerIdSerializer(serializers.ModelSerializer):

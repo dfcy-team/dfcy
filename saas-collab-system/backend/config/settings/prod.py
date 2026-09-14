@@ -40,6 +40,17 @@ if missing_database_env:
         "Production MySQL configuration is incomplete. Missing: " + ", ".join(missing_database_env)
     )
 
+try:
+    DB_LOCK_WAIT_TIMEOUT_SECONDS = int(os.getenv("DB_LOCK_WAIT_TIMEOUT_SECONDS", "60"))
+except ValueError as exc:
+    raise ImproperlyConfigured("DB_LOCK_WAIT_TIMEOUT_SECONDS must be an integer.") from exc
+if not 1 <= DB_LOCK_WAIT_TIMEOUT_SECONDS <= 300:
+    raise ImproperlyConfigured("DB_LOCK_WAIT_TIMEOUT_SECONDS must be between 1 and 300 seconds.")
+if DATABASES["default"]["ENGINE"] == "django.db.backends.mysql":
+    DATABASES["default"].setdefault("OPTIONS", {})["init_command"] = (
+        f"SET SESSION lock_wait_timeout = {DB_LOCK_WAIT_TIMEOUT_SECONDS}"
+    )
+
 INTEGRATION_ENCRYPTION_PROVIDER = os.getenv(
     "INTEGRATION_ENCRYPTION_PROVIDER",
     "unconfigured-production",
