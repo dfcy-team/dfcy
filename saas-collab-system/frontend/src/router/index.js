@@ -9,6 +9,8 @@ const Dashboard = () => import('../views/dashboard/Index.vue');
 const BusinessOverview = () => import('../views/analytics/BusinessOverview.vue');
 const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
+const AdvertisingOverview = () => import('../views/analytics/AdvertisingOverview.vue');
+const AdvertisingPerformance = () => import('../views/analytics/AdvertisingPerformance.vue');
 const InventoryAlertList = () => import('../views/inventory/InventoryAlertList.vue');
 const ReplenishmentSuggestionList = () => import('../views/inventory/ReplenishmentSuggestionList.vue');
 const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList.vue');
@@ -94,6 +96,7 @@ const ReconciliationMatchList = () => import('../views/finance/ReconciliationMat
 const ReconciliationMatchDetail = () => import('../views/finance/ReconciliationMatchDetail.vue');
 const ReconciliationExceptionList = () => import('../views/finance/ReconciliationExceptionList.vue');
 const FinanceAnalyticsOverview = () => import('../views/finance/FinanceAnalyticsOverview.vue');
+const AdvertisingReconciliation = () => import('../views/finance/AdvertisingReconciliation.vue');
 const BasicReportIndex = () => import('../views/reports/BasicReportIndex.vue');
 const ReportExportCenter = () => import('../views/reports/ReportExportCenter.vue');
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
@@ -146,6 +149,8 @@ const routes = [
       { path: 'analytics/overview', component: BusinessOverview },
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
+      { path: 'analytics/advertising-overview', component: AdvertisingOverview },
+      { path: 'analytics/advertising-performance', component: AdvertisingPerformance },
       { path: 'decision/inventory/alerts', component: InventoryAlertList },
       { path: 'decision/inventory/replenishment', component: ReplenishmentSuggestionList },
       { path: 'decision/lifecycle/reviews', component: LifecycleReviewList },
@@ -283,6 +288,7 @@ const routes = [
       { path: 'finance/reconciliation/matches/:id', component: ReconciliationMatchDetail },
       { path: 'finance/reconciliation/exceptions', component: ReconciliationExceptionList },
       { path: 'finance/analytics', component: FinanceAnalyticsOverview },
+      { path: 'finance/advertising-reconciliation', component: AdvertisingReconciliation },
       { path: 'reports/basic', component: BasicReportIndex },
       { path: 'reports/exports', component: ReportExportCenter },
       { path: 'settings/platform-risk', component: PlatformAccessRisk },
