@@ -151,6 +151,7 @@ urlpatterns = [
     path("sync-jobs/", views.sync_job_collection, name="sync-job-collection"),
     path("sync-jobs/missing-preview/", views.missing_sync_jobs_preview, name="sync-job-missing-preview"),
     path("sync-jobs/<int:pk>/", views.sync_job_detail, name="sync-job-detail"),
+    path("sync-jobs/<int:pk>/schedule-preview/", views.preview_sync_schedule, name="sync-schedule-preview"),
     path("sync-jobs/<int:pk>/toggle/", views.toggle_sync_job, name="sync-job-toggle"),
     path("sync-jobs/<int:pk>/delete/", views.sync_job_delete, name="sync-job-delete"),
     path("sync-jobs/<int:pk>/run/", views.enqueue_sync_job, name="sync-job-run"),

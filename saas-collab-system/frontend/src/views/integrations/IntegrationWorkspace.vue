@@ -1,5 +1,6 @@
 <template>
-  <section class="integration-workspace">
+  <SyncExecutionRecords v-if="mode === 'sync-runs'" />
+  <section v-else class="integration-workspace">
     <header class="workspace-header">
       <div>
         <h1 class="page-title">{{ contract.title }}</h1>
@@ -423,6 +424,7 @@
 </template>
 
 <script setup>
+import SyncExecutionRecords from './SyncExecutionRecords.vue';
 import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -1043,8 +1045,8 @@ async function retryRun(row) {
 function openCreateJob(template = null) { if (actionDenied(integrationManageAccess.value) || operating.value) return; creatingJobTemplate.value = template; createJobDialog.value = true; }
 function closeCreateJob() { createJobDialog.value = false; creatingJobTemplate.value = null; }
 function go(path) { closeCreateJob(); router.push(path); }
-watch(() => route.query, () => { hydrateRouteFilters(); page.value = 1; load(); });
-onMounted(() => { hydrateRouteFilters(); load(); });
+watch(() => route.query, () => { if (props.mode === 'sync-runs') return; hydrateRouteFilters(); page.value = 1; load(); });
+onMounted(() => { if (props.mode === 'sync-runs') return; hydrateRouteFilters(); load(); });
 </script>
 
 <style scoped>

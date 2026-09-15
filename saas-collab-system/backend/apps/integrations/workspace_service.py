@@ -3,6 +3,7 @@ import json
 from django.db import connection
 from django.db.models import Count
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.audit.models import NotificationMessage
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
@@ -15,10 +16,13 @@ from .models import (
     SyncAlertIncident,
     SyncJob,
     SyncRun,
+    SyncScheduleDispatch,
     WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema, integration_platform_key, platform_api_type_options
 from .capability_gate import sync_source_health
+from .production_settings import get_runtime_platform_config, get_runtime_setting
+from .scheduler import paused_until, scheduler_health
 
 
 RESOURCE_DESTINATIONS = {
@@ -126,6 +130,7 @@ def _subject(job, stores, warehouse_auth, warehouse_master):
     if warehouse:
         return {
             "subject_type": "warehouse",
+            "warehouse_id": warehouse.id,
             "store_id": None,
             "subject_code": warehouse.code,
             "subject_name": warehouse.name,
@@ -148,12 +153,18 @@ def _schedule_state(job, latest_run):
     now = timezone.now()
     if not job.is_enabled or job.status == SyncJob.Status.DISABLED:
         return "disabled"
+    pause = paused_until(job)
+    if pause and pause > now:
+        return "paused"
+    if job.schedule_dispatches.filter(status="queued").exists():
+        return "queued"
+    retry_at = parse_datetime(str(_json_value(latest_run.masked_log).get("next_retry_at") or "")) if latest_run else None
+    if latest_run and latest_run.status == SyncRun.Status.RUNNING and retry_at and retry_at > now:
+        return "retry_waiting"
     if job.status == SyncJob.Status.RUNNING or (job.lock_expires_at and job.lock_expires_at > now):
         return "running"
     if job.status == SyncJob.Status.FAILED and not job.next_run_at:
         return "retry_exhausted"
-    if latest_run and latest_run.status == SyncRun.Status.FAILED and job.next_run_at and job.next_run_at > now:
-        return "retry_waiting"
     if job.schedule_type == SyncJob.ScheduleType.MANUAL:
         return "manual"
     if not job.next_run_at:
@@ -205,6 +216,8 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
     else:
         health_state = "healthy"
     blocked_reason = ""
+    if job.schedule_type == "cron":
+        blocked_reason = "Cron 尚未开放，请修改为间隔、每日或每周计划"
     if subject["subject_type"] == "unbound":
         blocked_reason = "任务尚未绑定店铺或仓库授权"
     elif not authorization_ready:
@@ -217,8 +230,20 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         blocked_reason = "当前任务授权不是最高优先级来源"
     elif source_health["state"] == "unsupported":
         blocked_reason = "资源类型没有可执行的能力映射"
+    if not blocked_reason and job.store_authorization_id:
+        expires_at = job.store_authorization.expires_at
+        if expires_at and expires_at <= timezone.now():
+            blocked_reason = "授权已过期，请更新店铺授权"
+    if not blocked_reason and job.integration_config.environment in {"pilot", "production"}:
+        if not get_runtime_setting("network", "readonly_sync_enabled", default=False):
+            blocked_reason = "系统只读准入未通过，请检查生产环境配置"
+        elif job.integration_config.platform in {"shopee", "tiktok"}:
+            contract = "product_contract_approved" if job.resource_type == "platform_product" else "contract_approved"
+            if not get_runtime_platform_config(job.integration_config.platform).get(contract):
+                blocked_reason = "平台只读准入未通过，请检查生产环境配置"
     row = {
         "id": job.id,
+        "integration_config_id": job.integration_config_id,
         "platform": job.integration_config.platform,
         "api_type": _api_type(job.integration_config, raw_config),
         "account_alias": job.integration_config.account_alias,
@@ -246,7 +271,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "local_time": str(schedule_scope.get("local_time") or scope.get("local_time") or "02:00"),
         "weekdays": schedule_scope.get("weekdays") or scope.get("weekdays") or [1, 2, 3, 4, 5, 6, 7],
         "timezone": str(schedule_scope.get("timezone") or scope.get("timezone") or "Asia/Shanghai"),
-        "catch_up": str(schedule_scope.get("catch_up") or scope.get("catch_up") or "run_once"),
+        "catch_up": str(schedule_scope.get("catch_up") or scope.get("catch_up") or "skip"),
         "pause_until": schedule_scope.get("pause_until") or scope.get("pause_until"),
         "query_statuses": query_scope.get("statuses") or scope.get("query_statuses") or [],
         "token_policy": "manual_no_refresh" if job.integration_config.platform == "tiktok" else "auto_refresh",
@@ -254,7 +279,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "data_table": destination[1],
         "last_run_at": _format_datetime(job.last_run_at),
         "next_run_at": _format_datetime(job.next_run_at),
-        "schedule_state": schedule_state,
+        "schedule_state": "blocked" if blocked_reason and job.is_enabled else schedule_state,
         "health_state": health_state,
         "blocked_reason": blocked_reason,
         "capability_state": source_health["state"],
@@ -263,6 +288,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "selected_authorization_id": source_health.get("selected_authorization_id"),
         "latest_run_status": latest_run.status if latest_run else "",
         "latest_run_id": latest_run.run_id if latest_run else "",
+        "latest_run_pk": latest_run.id if latest_run else None,
         "latest_started_at": _format_datetime(latest_run.started_at) if latest_run else None,
         "latest_finished_at": _format_datetime(latest_run.finished_at) if latest_run else None,
         "latest_fetched_count": latest_run.fetched_count if latest_run else 0,
@@ -324,6 +350,10 @@ def _workspace_rows(user):
     latest_by_job = {}
     for run in runs:
         latest_by_job.setdefault(run.sync_job_id, run)
+    successful_by_job = {}
+    for run in runs:
+        if run.status == SyncRun.Status.SUCCESS and _json_value(run.masked_log).get("execution_mode") == "live_readonly":
+            successful_by_job.setdefault(run.sync_job_id, run.finished_at)
     job_rows = {}
     for job in jobs:
         subject = _subject(job, stores, warehouse_auth, warehouse_master)
@@ -334,6 +364,8 @@ def _workspace_rows(user):
             latest_by_job.get(job.id),
             checkpoints.get(job.id),
         )
+        job_rows[job.id]["last_success_at"] = _format_datetime(successful_by_job.get(job.id))
+        job_rows[job.id]["subject_key"] = f'{subject["subject_type"]}:{subject.get("store_id") or subject.get("warehouse_id") or job.id}'
     return configs, config_raw, jobs, job_rows, runs, warehouse_auth
 
 
@@ -364,6 +396,7 @@ def _run_rows(runs, job_rows):
     rows = []
     for run in runs:
         job = job_rows.get(run.sync_job_id, {})
+        dispatch = getattr(run, "schedule_dispatch", None)
         log = _json_value(run.masked_log)
         checkpoint = _json_value(log.get("checkpoint"))
         archive_files = log.get("archive_files") if isinstance(log.get("archive_files"), list) else []
@@ -376,6 +409,14 @@ def _run_rows(runs, job_rows):
                 "id": run.id,
                 "run_id": run.run_id,
                 "sync_job_id": run.sync_job_id,
+                "job_enabled": run.sync_job.is_enabled,
+                "environment": run.sync_job.integration_config.environment,
+                "subject_key": job.get("subject_key", ""),
+                "integration_config_id": job.get("integration_config_id"),
+                "trigger_type": "retry" if log.get("retry_of") else log.get("trigger_type", ""),
+                "scheduled_at": _format_datetime(dispatch.scheduled_at) if dispatch else log.get("scheduled_at"),
+                "schedule_snapshot": dispatch.schedule_snapshot if dispatch else log.get("schedule_snapshot"),
+                "enqueued_at": _format_datetime(dispatch.enqueued_at) if dispatch else log.get("enqueued_at"),
                 "subject_name": job.get("subject_name", "历史未绑定"),
                 "subject_code": job.get("subject_code", ""),
                 "store_id": job.get("store_id"),
@@ -385,18 +426,18 @@ def _run_rows(runs, job_rows):
                 "resource_type": run.sync_job.resource_type,
                 "data_destination": destination[0],
                 "data_table": destination[1],
-                "execution_mode": log.get("execution_mode", "simulation"),
+                "execution_mode": log.get("execution_mode", ""),
                 "external_api_called": _boolean_value(log.get("external_api_called")),
                 "token_refreshed": _boolean_value(log.get("token_refreshed")),
                 "status": run.status,
                 "started_at": _format_datetime(run.started_at),
                 "finished_at": _format_datetime(run.finished_at),
                 "duration_seconds": duration,
-                "fetched_count": run.fetched_count,
-                "created_count": run.created_count,
-                "updated_count": run.updated_count,
-                "skipped_count": run.skipped_count,
-                "failed_count": run.failed_count,
+                "fetched_count": run.fetched_count if "fetched" in log or run.fetched_count else None,
+                "created_count": run.created_count if "fetched" in log or run.created_count else None,
+                "updated_count": run.updated_count if "fetched" in log or run.updated_count else None,
+                "skipped_count": run.skipped_count if "fetched" in log or run.skipped_count else None,
+                "failed_count": run.failed_count if "fetched" in log or run.failed_count else None,
                 "retry_count": run.retry_count,
                 "retry_of": str(log.get("retry_of") or "")[:80],
                 "next_retry_at": _format_datetime(log.get("next_retry_at")),
@@ -412,6 +453,24 @@ def _run_rows(runs, job_rows):
     return rows
 
 
+def _unexecuted_plan_rows(user, job_rows):
+    result = []
+    for dispatch in SyncScheduleDispatch.objects.filter(tenant=user.tenant, sync_job_id__in=job_rows, sync_run__isnull=True):
+        job = job_rows[dispatch.sync_job_id]
+        result.append({"id": f"plan-{dispatch.id}", "run_id": f"计划 #{dispatch.id}",
+                       "sync_job_id": dispatch.sync_job_id, "subject_name": job["subject_name"],
+                       "subject_key": job["subject_key"], "platform": job["platform"],
+                       "resource_type": job["resource_type"], "status": dispatch.status,
+                       "trigger_type": "scheduled", "execution_mode": "",
+                       "scheduled_at": _format_datetime(dispatch.scheduled_at),
+                       "enqueued_at": _format_datetime(dispatch.enqueued_at),
+                       "started_at": None, "finished_at": _format_datetime(dispatch.finished_at),
+                       "schedule_snapshot": dispatch.schedule_snapshot,
+                       "masked_error_message": dispatch.reason,
+                       "is_plan_only": True})
+    return result
+
+
 def _matches(row, params, mode):
     equality = {
         "platform": "platform",
@@ -420,10 +479,15 @@ def _matches(row, params, mode):
         "api_type": "api_type",
         "resource_type": "resource_type",
         "schedule_type": "schedule_type",
+        "sync_job_id": "sync_job_id" if mode == "sync-runs" else "id",
+        "subject_key": "subject_key",
+        "health_state": "health_state",
+        "trigger_type": "trigger_type",
+        "run_pk": "id",
     }
     for query_key, row_key in equality.items():
         expected = str(params.get(query_key, "")).strip().lower()
-        if expected and str(row.get(row_key, "")).lower() != expected:
+        if expected and str(row.get(row_key, "")).lower() not in expected.split(","):
             return False
     store_id = str(params.get("store_id", "")).strip()
     if store_id and str(row.get("store_id") or "") != store_id:
@@ -450,7 +514,7 @@ def _matches(row, params, mode):
         return False
     for query_key, compare in (("started_from", "from"), ("started_to", "to")):
         value = str(params.get(query_key, "")).strip()
-        started = str(row.get("started_at") or "")[:10]
+        started = str(row.get("started_at") or row.get("scheduled_at") or "")[:10]
         if value and ((compare == "from" and started < value) or (compare == "to" and started > value)):
             return False
     return True
@@ -466,6 +530,7 @@ def _options(rows):
         "api_types": values("api_type"),
         "resource_types": values("resource_type"),
         "schedule_types": values("schedule_type"),
+        "subjects": list({row.get("subject_key"): {"value": row.get("subject_key"), "label": row.get("subject_name")} for row in rows if row.get("subject_key")}.values()),
     }
 
 
@@ -545,9 +610,9 @@ def integration_workspace(user, mode, params):
         if mode == "configs"
         else list(job_rows.values())
         if mode == "sync-jobs"
-        else _run_rows(runs, job_rows)
+        else _run_rows(runs, job_rows) + _unexecuted_plan_rows(user, job_rows)
     )
-    all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("updated_at") or ""), row.get("id", 0)), reverse=True)
+    all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("scheduled_at") or row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
     filtered = [row for row in all_rows if _matches(row, params, mode)]
     page_size = min(max(int(params.get("page_size", 50)), 1), 100)
     page_count = max(1, (len(filtered) + page_size - 1) // page_size)
@@ -574,7 +639,7 @@ def integration_workspace(user, mode, params):
         "job_count": len(jobs),
         "enabled_job_count": sum(1 for job in jobs if job.is_enabled),
         "run_count": len(runs),
-        "successful_run_count": sum(1 for run in runs if run.status == SyncRun.Status.SUCCESS),
+        "successful_run_count": sum(1 for run in runs if run.status == SyncRun.Status.SUCCESS and _json_value(run.masked_log).get("execution_mode") == "live_readonly"),
         "failed_run_count": sum(1 for run in runs if run.status == SyncRun.Status.FAILED),
         "running_run_count": sum(1 for run in runs if run.status == SyncRun.Status.RUNNING),
         "due_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "due" and row["execution_mode"] == "simulation"),
@@ -605,7 +670,7 @@ def integration_workspace(user, mode, params):
         "mode": mode,
         "source_status": "ready",
         "summary": summary,
-        "scheduler": {"configured": True, "heartbeat_state": "scheduled", "execution_policy": "readonly_automatic"},
+        "scheduler": scheduler_health(),
         "scheduler_history": [],
         "options": _options(all_rows),
         "reference_options": reference_options,

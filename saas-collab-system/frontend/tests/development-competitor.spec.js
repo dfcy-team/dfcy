@@ -1,15 +1,13 @@
 import fs from 'node:fs';
 import nodePath from 'node:path';
-import { describe, expect, it } from 'vitest';
-import {
-  createRequirementCompetitorAssociation,
-  fetchCompetitorReportDetail,
-  fetchCompetitorReportEvidence,
-  fetchCompetitorReports,
-  fetchDevelopmentRequirements,
-  createDevelopmentRequirement,
-  fetchRequirementCompetitorAssociations
-} from '../src/api/development';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+let api;
+beforeAll(async () => {
+  vi.stubEnv('VITE_USE_MOCK', 'true');
+  vi.resetModules();
+  api = await import('../src/api/development');
+});
+afterAll(() => vi.unstubAllEnvs());
 
 const read = (path) => fs.readFileSync(nodePath.resolve(process.cwd(), path), 'utf8');
 
@@ -33,6 +31,7 @@ describe('development competitor report contract', () => {
   });
 
   it('returns explicitly labelled mock report data with screenshot-shaped sections', async () => {
+    const { fetchCompetitorReports, fetchCompetitorReportDetail, fetchCompetitorReportEvidence } = api;
     const list = await fetchCompetitorReports({ status: 'completed' });
     const report = list.data.items[0];
     expect(list.success).toBe(true);
@@ -52,6 +51,7 @@ describe('development competitor report contract', () => {
   });
 
   it('supports requirement creation before snapshot association in mock mode', async () => {
+    const { createDevelopmentRequirement, createRequirementCompetitorAssociation, fetchRequirementCompetitorAssociations } = api;
     const requirement = await createDevelopmentRequirement({ product_name: 'Mock requirement' });
     expect(requirement.data.id).toMatch(/^MOCK-REQUIREMENT-/);
     const link = await createRequirementCompetitorAssociation(requirement.data.id, {

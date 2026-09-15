@@ -7,15 +7,27 @@
     :capability="capability"
   >
     <template #action>
+      <el-button v-if="auth.hasPermission('integrations.manage')" type="primary" @click="createOpen = true">创建同步任务</el-button>
+      <el-button v-if="auth.hasPermission('integrations.manage')" @click="previewOpen = true">检查缺失任务</el-button>
       <el-button plain @click="router.push('/integrations/sync-runs')">查看运行记录</el-button>
       <el-button plain :loading="loading" @click="load">刷新</el-button>
     </template>
 
-    <MissingSyncJobsPreview v-if="auth.hasPermission('integrations.manage') && !productSyncContext" />
+
+    <p class="scheduler-health">调度心跳：{{ { recent: '最近已观测到', stale: '已超时，请检查调度服务', unknown: '未观测到，请检查调度服务' }[scheduler.heartbeat_state] || '未观测到' }} · {{ syncTime(scheduler.last_seen_at) }} UTC。心跳不代表队列消费者或同步执行成功。</p>
+    <el-form inline class="task-filters" label-position="top">
+      <el-form-item label="平台"><el-select v-model="filters.platforms" placeholder="全部平台" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="value in options.platforms || []" :key="value" :value="value" :label="value" /></el-select></el-form-item>
+      <el-form-item label="店铺／仓库"><el-select v-model="filters.subjects" placeholder="全部店铺／仓库" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="item in options.subjects || []" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
+      <el-form-item label="同步内容"><el-select v-model="filters.resource" placeholder="全部同步内容" clearable @change="search"><el-option v-for="value in options.resource_types || []" :key="value" :value="value" :label="resourceLabel(value)" /></el-select></el-form-item>
+      <el-form-item label="启停状态"><el-select v-model="filters.enabled" placeholder="全部状态" clearable @change="search"><el-option label="启用" value="enabled" /><el-option label="停用" value="disabled" /></el-select></el-form-item>
+      <el-form-item label="调度方式"><el-select v-model="filters.schedule" placeholder="全部调度方式" clearable @change="search"><el-option v-for="(label, value) in schedules" :key="value" :value="value" :label="label" /></el-select></el-form-item>
+      <el-form-item label="运行健康"><el-select v-model="filters.health" placeholder="全部健康状态" clearable @change="search"><el-option v-for="value in ['healthy','failed','running','authorization','configuration','capability','disabled']" :key="value" :value="value" :label="stateLabel(value)" /></el-select></el-form-item>
+    </el-form>
     <AppState v-if="state !== 'ready' && state !== 'empty'" :status="state" :detail="errorMessage" @action="load" />
     <template v-else>
       <section class="sync-summary" aria-label="同步任务健康摘要">
-        <article v-for="item in summaryItems" :key="item.key" :class="['summary-card', item.tone]">
+        <header class="summary-heading"><span>任务与运行概况</span><small>当前权限范围 · 不随列表筛选变化</small></header>
+        <article v-for="item in summaryItems" :key="item.key" :class="['summary-card', item.value > 0 ? item.tone : '']">
           <span>{{ item.label }}</span>
           <strong>{{ item.value }}</strong>
         </article>
@@ -48,49 +60,11 @@
         :closable="false"
       />
 
-      <section class="incident-workbench" aria-label="同步事件工作台">
-        <header class="incident-header">
-          <div>
-            <h2>{{ productSyncContext ? '当前店铺同步事件' : '同步事件工作台' }}</h2>
-            <p>{{ productSyncContext ? '仅显示当前店铺的平台商品同步事件。' : '集中处理失败事件、负责人和脱敏备注；人工重试只允许 Mock/沙箱模拟运行。' }}</p>
-          </div>
-          <div class="incident-filters">
-            <el-select v-model="incidentStatus" clearable placeholder="全部事件" @change="loadIncidents">
-              <el-option label="未处理" value="open" />
-              <el-option label="已确认" value="acknowledged" />
-              <el-option label="已解决" value="resolved" />
-            </el-select>
-            <el-button plain :loading="incidentLoading" @click="loadIncidents">刷新事件</el-button>
-          </div>
-        </header>
-        <el-alert v-if="incidentError" :title="incidentError" type="error" show-icon :closable="false" />
-        <el-table v-loading="incidentLoading" :data="incidents" border empty-text="暂无同步事件">
-          <el-table-column prop="id" label="事件ID" width="90" />
-          <el-table-column prop="status" label="状态" width="110">
-            <template #default="{ row }">
-              <el-tag :type="incidentStatusType(row.status)" effect="plain">{{ incidentStatusLabel(row.status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="occurrence_count" label="发生次数" width="100" />
-          <el-table-column prop="assignee_name" label="负责人" min-width="140">
-            <template #default="{ row }">{{ row.assignee_name || '未指派' }}</template>
-          </el-table-column>
-          <el-table-column prop="last_error_code" label="错误码" min-width="170" />
-          <el-table-column prop="masked_message" label="脱敏错误" min-width="240" show-overflow-tooltip />
-          <el-table-column prop="resolution_note" label="备注" min-width="200" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.resolution_note || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openIncident(row)">查看/处理</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </section>
+      <div class="incident-link"><span>待处理异常：{{ (summary.open_sync_incident_count || 0) + (summary.acknowledged_sync_incident_count || 0) }}</span><el-button link type="primary" @click="router.push('/integrations/incidents')">前往同步异常</el-button></div>
 
       <el-empty v-if="state === 'empty'" description="暂无同步任务" />
       <el-table v-else v-loading="loading" :data="rows" border stripe empty-text="暂无同步任务">
-        <el-table-column prop="id" label="任务ID" width="90" />
+        <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}</template></el-table-column>
         <el-table-column prop="platform" label="平台" min-width="110" />
         <el-table-column prop="subject_name" label="业务主体" min-width="150">
           <template #default="{ row }">
@@ -111,31 +85,17 @@
             <el-tag :type="capabilityTagType(row.capability_state)" effect="plain">{{ capabilityLabel(row.capability_state) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="capability_code" label="能力代码" min-width="130">
-          <template #default="{ row }">{{ row.capability_code || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="source_priority" label="来源优先级" width="115">
-          <template #default="{ row }">{{ row.source_priority ?? '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="selected_authorization_id" label="选中授权ID" width="120">
-          <template #default="{ row }">{{ row.selected_authorization_id ?? '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="schedule_state" label="调度状态" min-width="130">
-          <template #default="{ row }">
-            <el-tag :type="stateTagType(row.schedule_state)" effect="plain">{{ scheduleLabel(row.schedule_state) }}</el-tag>
-          </template>
-        </el-table-column>
+        <el-table-column label="启停状态" width="100"><template #default="{ row }">{{ row.is_enabled ? '启用' : '停用' }}</template></el-table-column>
+        <el-table-column label="定时规则" min-width="185"><template #default="{ row }">{{ schedules[row.schedule_type] || '—' }}<small v-if="row.schedule_type !== 'manual'" class="schedule-rule">{{ row.schedule_type === 'interval' || row.schedule_type === 'hourly' ? `每 ${row.interval_minutes} 分钟` : `${row.local_time} · ${row.timezone}` }}{{ row.schedule_type === 'weekly' ? ` · 周 ${row.weekdays.join('、')}` : '' }}</small></template></el-table-column>
+        <el-table-column label="调度状态" min-width="110"><template #default="{ row }">{{ { disabled: '已停用', paused: '已暂停', queued: '排队中', running: '运行中', retry_waiting: '等待重试', blocked: '配置阻塞', due: '等待派发', scheduled: '等待执行', unscheduled: '未安排', manual: '手动', retry_exhausted: '重试耗尽' }[row.schedule_state] || '—' }}</template></el-table-column>
+        <el-table-column label="最近结果" width="110"><template #default="{ row }"><el-button v-if="row.latest_run_pk" link type="primary" @click="viewRuns(row, true)">{{ runStates[row.latest_run_status] || '—' }}</el-button><span v-else>尚未运行</span></template></el-table-column>
+        <el-table-column label="最近真实成功（UTC）" min-width="185"><template #default="{ row }">{{ syncTime(row.last_success_at) }}</template></el-table-column>
         <el-table-column prop="blocked_reason" label="阻塞原因" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.blocked_reason || '-' }}</template>
+          <template #default="{ row }">{{ row.blocked_reason || '—' }}<el-button v-if="row.blocked_reason" link type="primary" @click="configRow = row; configOpen = true">检查配置</el-button></template>
         </el-table-column>
-        <el-table-column label="最近错误" min-width="250" show-overflow-tooltip>
-          <template #default="{ row }">
-            <div>{{ row.latest_error_code || '-' }}</div>
-            <small>{{ row.latest_error_message || '无错误' }}</small>
-          </template>
-        </el-table-column>
-        <el-table-column prop="next_run_at" label="下次运行" min-width="180">
-          <template #default="{ row }">{{ row.next_run_at || '未安排' }}</template>
+
+        <el-table-column prop="next_run_at" label="下次执行（UTC）" min-width="180">
+          <template #default="{ row }">{{ syncTime(row.next_run_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
@@ -146,7 +106,7 @@
               :title="actionAccess(actionConfigs[2]).reason || taskBusyReason(row) || '校验配置并启用，不立即执行'"
               :loading="actionLoading === `enable:${row.id}`"
               @click.stop="runAction(actionConfigs[2], row)"
-            >启用任务</el-button>
+            >{{ row.schedule_type === 'manual' ? '启用任务' : '启用定时' }}</el-button>
             <el-button
               v-if="['pilot', 'production'].includes(row.environment) && actionAccess(actionConfigs[3]).visible"
               link type="primary"
@@ -173,114 +133,54 @@
               :loading="actionLoading === `${actionConfigs[1].label}:${row.id}`"
               @click.stop="runAction(actionConfigs[1], row)"
             >停用任务</el-button>
+            <el-button link type="primary" @click="viewRuns(row)">查看运行记录</el-button>
+            <el-button link type="primary" @click="configRow = row; configOpen = true">查看配置</el-button>
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination v-model:current-page="page" :page-size="50" :total="total" layout="total, prev, pager, next" @current-change="load" />
     </template>
 
-    <el-drawer v-model="incidentDrawerOpen" title="同步事件处理" size="min(580px, 94vw)" destroy-on-close>
-      <template v-if="selectedIncident.id">
-        <section class="incident-detail">
-          <el-descriptions :column="1" border>
-            <el-descriptions-item label="事件状态">
-              <el-tag :type="incidentStatusType(selectedIncident.status)" effect="plain">{{ incidentStatusLabel(selectedIncident.status) }}</el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="同步任务">#{{ selectedIncident.sync_job_id }} · {{ resourceLabel(selectedIncident.resource_type) }}</el-descriptions-item>
-            <el-descriptions-item label="发生次数">{{ selectedIncident.occurrence_count || 0 }}</el-descriptions-item>
-            <el-descriptions-item label="负责人">{{ selectedIncident.assignee_name || '未指派' }}</el-descriptions-item>
-            <el-descriptions-item label="错误码">{{ selectedIncident.last_error_code || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="脱敏错误">{{ selectedIncident.masked_message || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="备注">{{ selectedIncident.resolution_note || '-' }}</el-descriptions-item>
-          </el-descriptions>
-
-          <el-form label-position="top" class="incident-form">
-            <el-form-item label="指派当前 tenant 用户">
-              <el-select v-model="assigneeId" clearable filterable :loading="assigneeLoading" placeholder="选择负责人" style="width: 100%">
-                <el-option v-for="user in assigneeOptions" :key="user.id" :label="user.username || user.full_name" :value="user.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="备注（脱敏）">
-              <el-input v-model="incidentNote" type="textarea" :rows="3" maxlength="500" show-word-limit placeholder="填写排查或解决备注" />
-            </el-form-item>
-          </el-form>
-
-          <div class="incident-actions">
-            <el-button
-              v-if="selectedIncident.status === 'open'"
-              :disabled="!actionAccess(actionConfigs[1]).allowed"
-              :title="actionAccess(actionConfigs[1]).reason"
-              :loading="incidentActionLoading === 'acknowledge'"
-              @click="submitIncidentAction('acknowledge')"
-            >确认事件</el-button>
-            <el-button
-              :disabled="!actionAccess(actionConfigs[1]).allowed"
-              :title="actionAccess(actionConfigs[1]).reason"
-              :loading="incidentActionLoading === 'assign'"
-              @click="submitIncidentAction('assign')"
-            >指派负责人</el-button>
-            <el-button
-              :disabled="!actionAccess(actionConfigs[1]).allowed"
-              :title="actionAccess(actionConfigs[1]).reason"
-              :loading="incidentActionLoading === 'note'"
-              @click="submitIncidentAction('note')"
-            >保存备注</el-button>
-            <el-button
-              v-if="selectedIncident.status !== 'resolved'"
-              type="success"
-              :disabled="!actionAccess(actionConfigs[1]).allowed"
-              :title="actionAccess(actionConfigs[1]).reason"
-              :loading="incidentActionLoading === 'resolve'"
-              @click="submitIncidentAction('resolve')"
-            >解决事件</el-button>
-            <el-button
-              v-if="actionAccess(actionConfigs[0]).visible"
-              type="warning"
-              :disabled="!actionAccess(actionConfigs[0]).allowed || retryLoading"
-              :title="actionAccess(actionConfigs[0]).reason"
-              @click="loadRetryPreview"
-            >受控重试预览</el-button>
-          </div>
-
-          <el-alert
-            v-if="retryPreview"
-            class="retry-preview"
-            :type="retryPreview.allowed ? 'info' : 'error'"
-            :title="retryPreview.allowed ? '预览允许人工模拟重试' : (retryPreview.blocked_reason || '当前事件不可重试')"
-            show-icon
-            :closable="false"
-          >
-            <p>environment: {{ retryPreview.environment || '-' }}；execution_mode: {{ retryPreview.execution_mode || '-' }}</p>
-            <p>external_api_called: <strong>false</strong>；requires_confirmation: {{ retryPreview.requires_confirmation ? 'true' : 'false' }}</p>
-            <el-input v-model="retryIdempotencyKey" readonly aria-label="幂等键" />
-            <el-button
-              v-if="retryPreview.allowed"
-              type="primary"
-              :loading="retrySubmitting"
-              @click="confirmRetry"
-            >确认人工重试</el-button>
-          </el-alert>
-        </section>
-      </template>
+    <el-dialog v-model="createOpen" title="创建同步任务" width="min(640px, 94vw)" destroy-on-close :close-on-click-modal="false">
+      <CreateSyncJob v-if="createOpen" @created="created" @existing="showExisting" />
+    </el-dialog>
+    <el-dialog v-model="previewOpen" title="检查缺失任务" width="min(1000px, 94vw)" destroy-on-close>
+      <MissingSyncJobsPreview v-if="previewOpen" />
+    </el-dialog>
+    <el-drawer v-model="configOpen" title="任务配置与定时" size="min(560px, 94vw)">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="任务">#{{ configRow.id }} · {{ resourceLabel(configRow.resource_type) }}</el-descriptions-item>
+        <el-descriptions-item label="主体">{{ configRow.subject_name }}</el-descriptions-item>
+        <el-descriptions-item label="接入配置">{{ configRow.config_name || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="查询方式">{{ configRow.query_mode || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="查询范围（UTC）">{{ syncTime(configRow.range_start_at) }} 至 {{ syncTime(configRow.range_end_at) }}</el-descriptions-item>
+        <el-descriptions-item label="最大页数">{{ configRow.max_pages ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item label="最大记录数">{{ configRow.max_records ?? '—' }}</el-descriptions-item>
+      </el-descriptions>
+      <el-button @click="openSubjectConfig(configRow)">前往授权配置</el-button>
+      <el-button @click="router.push('/integrations/capabilities')">能力矩阵</el-button>
+      <el-button @click="router.push('/integrations/production-settings')">只读准入配置</el-button>
+      <SyncScheduleSettings :job="configRow" :can-manage="auth.hasPermission('integrations.manage')" @saved="configOpen = false; load()" />
     </el-drawer>
   </AppPage>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
+import CreateSyncJob from '../../components/CreateSyncJob.vue';
+import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
+import { syncTime, syncError, runStates, schedules } from '../../utils/syncPresentation';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
 import { useMock } from '../../api/request';
-import { fetchUsers } from '../../api/systemAdmin';
+
 import {
-  actOnSyncAlertIncident,
   disableSyncJob,
-  fetchSyncAlertIncidentRetryPreview,
-  fetchSyncAlertIncidents,
   fetchSyncJobs,
-  retrySyncAlertIncident,
   runSyncJobMock,
   runSyncJob,
   toggleSyncJob
@@ -319,27 +219,24 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const rows = ref([]);
+const createOpen = ref(false), previewOpen = ref(false), configOpen = ref(false), configRow = ref({});
+const page = ref(1), total = ref(0), options = ref({});
+const filters = reactive({ platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' });
+function search() { page.value = 1; load(); }
+function viewRuns(row, detail = false) { router.push({ path: '/integrations/sync-runs', query: { sync_job_id: String(row.id), ...(detail ? { detail: String(row.latest_run_pk) } : {}) } }); }
+function openSubjectConfig(row) { router.push({ path: row.subject_type === 'warehouse' ? '/master-data/warehouses' : '/master-data/stores', query: { ...(row.store_id ? { store_id: String(row.store_id) } : {}), ...(row.warehouse_id ? { warehouse_id: String(row.warehouse_id) } : {}), panel: 'api' } }); }
+function showExisting(id) { createOpen.value = false; Object.assign(filters, { platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' }); router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(id) } }); }
+function created(id) { ElMessage.success('任务已创建：手动、停用，尚未执行。'); showExisting(id); load(); }
+watch(() => route.query, () => { page.value = 1; load(); });
+
 const summary = ref({});
+const scheduler = ref({});
 const state = ref('loading');
 const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
 const actionLoading = ref('');
 const errorMessage = ref('');
-const incidents = ref([]);
-const incidentStatus = ref('');
-const incidentLoading = ref(false);
-const incidentError = ref('');
-const incidentDrawerOpen = ref(false);
-const selectedIncident = ref({});
-const assigneeOptions = ref([]);
-const assigneeLoading = ref(false);
-const assigneeId = ref(null);
-const incidentNote = ref('');
-const incidentActionLoading = ref('');
-const retryPreview = ref(null);
-const retryLoading = ref(false);
-const retrySubmitting = ref(false);
-const retryIdempotencyKey = ref('');
+
 
 const productSyncContext = computed(() => String(route.query.resource_type || '') === 'platform_product' && Boolean(route.query.store_id));
 const contextStoreLabel = computed(() => String(route.query.subject || route.query.store_name || route.query.store_id || '当前店铺'));
@@ -395,14 +292,6 @@ function resourceLabel(value) {
   })[value] || value || '-';
 }
 
-function incidentStatusLabel(value) {
-  return { open: '未处理', acknowledged: '已确认', resolved: '已解决' }[value] || value || '-';
-}
-
-function incidentStatusType(value) {
-  return { open: 'danger', acknowledged: 'warning', resolved: 'success' }[value] || 'info';
-}
-
 function capabilityLabel(value) {
   return {
     not_required: '无需能力',
@@ -414,18 +303,6 @@ function capabilityLabel(value) {
   }[value] || value || '-';
 }
 
-function scheduleLabel(value) {
-  return {
-    disabled: '已禁用',
-    running: '运行中',
-    retry_waiting: '重试等待',
-    retry_exhausted: '重试耗尽',
-    manual: '手动',
-    scheduled: '已排程',
-    unscheduled: '未排程',
-    due: '待执行'
-  }[value] || value || '-';
-}
 
 function stateTagType(value) {
   return {
@@ -470,9 +347,11 @@ async function load() {
   errorMessage.value = '';
   try {
     const response = await fetchSyncJobs({
-      platform: route.query.platform || '',
+      page: page.value, page_size: 50, subject_key: filters.subjects.join(','), job_state: filters.enabled,
+      schedule_type: filters.schedule, health_state: filters.health, sync_job_id: route.query.sync_job_id || '',
+      platform: filters.platforms.join(',') || route.query.platform || '',
       api_type: route.query.api_type || '',
-      resource_type: route.query.resource_type || '',
+      resource_type: filters.resource || route.query.resource_type || '',
       subject: route.query.subject || '',
       ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
     });
@@ -485,6 +364,10 @@ async function load() {
     const data = response.data || {};
     rows.value = responseRows(data);
     summary.value = data.summary || {};
+    scheduler.value = data.scheduler || {};
+    options.value = data.options || {};
+    total.value = data.pagination?.total ?? rows.value.length;
+    page.value = data.pagination?.page || page.value;
     const apiStatus = data.api_status || (useMock ? 'mock' : 'pending');
     capability.value = apiStatus === 'fallback' ? 'degraded' : apiStatus;
     state.value = rows.value.length ? 'ready' : 'empty';
@@ -494,163 +377,6 @@ async function load() {
     capability.value = 'degraded';
   } finally {
     loading.value = false;
-  }
-}
-
-function incidentRows(data) {
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.results)) return data.results;
-  if (Array.isArray(data?.items)) return data.items;
-  return [];
-}
-
-async function loadIncidents() {
-  incidentLoading.value = true;
-  incidentError.value = '';
-  try {
-    const response = await fetchSyncAlertIncidents({
-      status: incidentStatus.value,
-      ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
-      ...(route.query.resource_type ? { resource_type: route.query.resource_type } : {}),
-    });
-    if (!response?.success) throw new Error(response?.message || '同步事件加载失败');
-    incidents.value = incidentRows(response.data);
-  } catch (error) {
-    incidentError.value = error?.message || '同步事件加载失败';
-  } finally {
-    incidentLoading.value = false;
-  }
-}
-
-async function loadAssignees() {
-  if (assigneeOptions.value.length) return;
-  assigneeLoading.value = true;
-  try {
-    const response = await fetchUsers({ page: 1, page_size: 100, status: 'active' });
-    if (!response?.success) throw new Error(response?.message || '租户用户加载失败');
-    assigneeOptions.value = incidentRows(response.data).filter((user) => user.is_active !== false);
-  } catch (error) {
-    incidentError.value = error?.message || '租户用户加载失败';
-  } finally {
-    assigneeLoading.value = false;
-  }
-}
-
-async function openIncident(incident) {
-  selectedIncident.value = { ...incident };
-  assigneeId.value = incident.assignee || null;
-  incidentNote.value = '';
-  retryPreview.value = null;
-  retryIdempotencyKey.value = '';
-  incidentDrawerOpen.value = true;
-  await loadAssignees();
-}
-
-function generatedIdempotencyKey() {
-  const key = `incident-retry-${selectedIncident.value.id}-${Date.now()}`;
-  return key.length >= 8 ? key : `retry-${Date.now()}`;
-}
-
-async function submitIncidentAction(action) {
-  const access = actionAccess(actionConfigs[1]);
-  if (!access.allowed) {
-    ElMessage.warning(access.reason);
-    return;
-  }
-  if (action === 'assign' && !assigneeId.value) {
-    ElMessage.warning('请选择当前 tenant 用户');
-    return;
-  }
-  if (['note', 'resolve'].includes(action) && incidentNote.value.trim().length < 3) {
-    ElMessage.warning('请填写至少 3 个字符的处置备注');
-    return;
-  }
-  if (action === 'resolve') {
-    try {
-      await ElMessageBox.confirm('确认将此同步事件标记为已解决？', '解决事件确认', { type: 'warning' });
-    } catch { return; }
-  }
-  const payload = { action };
-  if (action === 'assign') payload.assignee_id = assigneeId.value;
-  if (incidentNote.value.trim()) payload.note = incidentNote.value.trim();
-  incidentActionLoading.value = action;
-  try {
-    const response = await actOnSyncAlertIncident(selectedIncident.value.id, payload);
-    if (!response?.success) throw new Error(response?.message || '同步事件操作失败');
-    selectedIncident.value = response.data || selectedIncident.value;
-    incidentNote.value = '';
-    ElMessage.success(response.message || '同步事件已更新');
-    await loadIncidents();
-  } catch (error) {
-    ElMessage.error(error?.message || '同步事件操作失败');
-  } finally {
-    incidentActionLoading.value = '';
-  }
-}
-
-async function loadRetryPreview() {
-  const access = actionAccess(actionConfigs[0]);
-  if (!access.allowed) {
-    ElMessage.warning(access.reason);
-    return;
-  }
-  retryLoading.value = true;
-  retryPreview.value = null;
-  try {
-    const response = await fetchSyncAlertIncidentRetryPreview(selectedIncident.value.id);
-    if (!response?.success) throw new Error(response?.message || '重试预览加载失败');
-    retryPreview.value = response.data || {};
-    retryIdempotencyKey.value = generatedIdempotencyKey();
-  } catch (error) {
-    ElMessage.error(error?.message || '重试预览加载失败');
-  } finally {
-    retryLoading.value = false;
-  }
-}
-
-async function confirmRetry() {
-  const access = actionAccess(actionConfigs[0]);
-  if (!access.allowed) {
-    ElMessage.warning(access.reason);
-    return;
-  }
-  if (!retryPreview.value) {
-    ElMessage.warning('请先加载重试预览');
-    return;
-  }
-  if (!retryPreview.value.allowed) {
-    ElMessage.warning(retryPreview.value.blocked_reason || '当前事件不可重试');
-    return;
-  }
-  const idempotencyKey = retryIdempotencyKey.value.trim();
-  if (idempotencyKey.length < 8) {
-    ElMessage.warning('幂等键至少需要 8 个字符');
-    return;
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认以幂等键 ${idempotencyKey} 执行人工模拟重试？external_api_called=false`,
-      '人工重试二次确认',
-      { type: 'warning' }
-    );
-  } catch (error) {
-    if (error === 'cancel') return;
-    ElMessage.error(error?.message || '重试确认失败');
-    return;
-  }
-  retrySubmitting.value = true;
-  try {
-    const response = await retrySyncAlertIncident(selectedIncident.value.id, idempotencyKey);
-    if (!response?.success) throw new Error(response?.message || '人工重试失败');
-    ElMessage.success('人工模拟重试已提交，external_api_called=false');
-    retryPreview.value = null;
-    retryIdempotencyKey.value = '';
-    await loadIncidents();
-    await load();
-  } catch (error) {
-    ElMessage.error(error?.message || '人工重试失败');
-  } finally {
-    retrySubmitting.value = false;
   }
 }
 
@@ -719,12 +445,12 @@ async function runAction(action, row) {
       if (!response.data?.accepted) throw new Error('未获得队列受理确认，请检查运行记录，不要重复提交。');
       ElMessage.success('同步请求已提交队列，不代表同步成功；请查看运行记录，确认任务服务已处理。');
     } else {
-      ElMessage.success(action.label === 'enable' ? '任务已启用，尚未执行。' : `${actionLabel}已完成`);
+      ElMessage.success(action.label === 'enable' ? '任务已启用，尚未执行。' : (action.label === 'run-mock' ? '模拟运行已提交，请查看运行记录。' : `${actionLabel}已完成`));
     }
     await load();
   } catch (error) {
     if (error === 'cancel' || error === 'close') return;
-    ElMessage.error(error?.message || `${actionLabel}未完成，请刷新并检查运行记录；不要连续提交。`);
+    ElMessage.error(syncError(error?.message) || `${actionLabel}未完成，请刷新并检查运行记录；不要连续提交。`);
   } finally {
     actionLoading.value = '';
   }
@@ -732,71 +458,80 @@ async function runAction(action, row) {
 
 onMounted(() => {
   load();
-  loadIncidents();
 });
 </script>
 
 <style scoped>
-.sync-summary {
+.scheduler-health { margin: 0 0 12px; color: #475569; font-size: 13px; }
+.schedule-rule { display: block; margin-top: 4px; }
+.task-filters {
   display: grid;
-  grid-template-columns: repeat(6, minmax(120px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.summary-card {
-  min-height: 84px;
-  padding: 14px 16px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 20px;
   border: 1px solid #dbe3ec;
-  border-left: 4px solid #64748b;
   border-radius: 8px;
   background: #fff;
 }
+.task-filters .el-form-item { margin: 0; min-width: 0; }
+.task-filters .el-select { width: 100%; }
+.task-filters :deep(.el-form-item__label) { margin-bottom: 8px; color: #475569; line-height: 20px; }
+.task-filters :deep(.el-select__placeholder) { color: #64748b; }
+.incident-link { display: flex; align-items: center; gap: 16px; margin: 12px 0; }
 
-.summary-card span,
-.summary-card strong {
-  display: block;
+.sync-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 20px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #e5eaf0;
 }
-
-.summary-card span { color: #64748b; font-size: 12px; }
-.summary-card strong { margin-top: 8px; color: #172033; font-size: 23px; }
-.summary-card--danger { border-left-color: #dc2626; }
-.summary-card--warning { border-left-color: #d97706; }
-.summary-card--success { border-left-color: #059669; }
+.summary-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 600;
+}
+.summary-heading small { font-weight: 400; }
+.summary-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 14px 16px;
+  background: #fff;
+}
+.summary-card span { color: #475569; font-size: 13px; line-height: 20px; }
+.summary-card strong { color: #172033; font-size: 24px; line-height: 30px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.summary-card--danger strong { color: #b91c1c; }
+.summary-card--warning strong { color: #92400e; }
+.summary-card--success strong { color: #047857; }
 .product-sync-context { margin-top: 16px; }
 .context-action { margin-left: 8px; font-weight: 600; }
 small { color: #64748b; font-size: 12px; }
 
-.incident-workbench {
-  display: grid;
-  gap: 12px;
-  margin-top: 16px;
-}
 
-.incident-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.incident-header h2 { margin: 0; color: #172033; font-size: 18px; }
-.incident-header p { margin: 5px 0 0; color: #64748b; font-size: 12px; }
-.incident-filters { display: flex; align-items: center; gap: 8px; }
-.incident-detail { display: grid; gap: 16px; }
-.incident-form { padding-top: 4px; border-top: 1px solid #e5eaf0; }
-.incident-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.retry-preview p { margin: 0 0 8px; line-height: 1.5; }
-.retry-preview .el-input { margin: 3px 0 10px; }
 
 @media (max-width: 1100px) {
-  .sync-summary { grid-template-columns: repeat(4, minmax(120px, 1fr)); }
+  .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .summary-card { flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; }
 }
 
 @media (max-width: 680px) {
-  .sync-summary { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
-  .incident-header { flex-direction: column; }
-  .incident-filters { width: 100%; }
-  .incident-filters .el-select { flex: 1; }
+  .task-filters, .sync-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .task-filters { gap: 12px; padding: 12px; }
 }
 </style>

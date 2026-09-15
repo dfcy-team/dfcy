@@ -20,10 +20,10 @@ describe('API 数据接入菜单与按钮闭环', () => {
 
     expect(page).toContain('>运行模拟任务</el-button>');
     expect(page).toContain('>停用任务</el-button>');
-    expect(page).toContain('>指派负责人</el-button>');
-    expect(page).toContain('>保存备注</el-button>');
-    expect(page).toContain('>解决事件</el-button>');
-    expect(page).toContain('>受控重试预览</el-button>');
+    expect(page).not.toContain('incident-workbench');
+    expect(page).toContain('前往同步异常');
+    expect(page).toContain('创建同步任务');
+    expect(page).toContain('检查缺失任务');
     expect(page).toContain('启用任务不会立即执行');
     expect(page).toContain('不修改平台商品、价格或库存');
     expect(page).toContain('模拟运行仅限独立 Mock 任务');
