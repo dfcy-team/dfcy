@@ -1108,7 +1108,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         end_date=today,
         currency="CNY",
     )
-    assert performance["totals"]["investment"] == "9.0000"
+    assert performance["totals"]["investment"] == "8.0000"
 
 
 def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():
@@ -2159,6 +2159,29 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.order_id == order.order_id
     assert attribution.sku_id == order.sku_id
 
+    corrected_owner = CustomUser.objects.create_user(
+        username="corrected-standalone-owner",
+        tenant=tenant,
+    )
+    make_bd_owner(tenant, corrected_owner)
+    QuerySet.update(
+        BdSampleAttributionSnapshot.objects.filter(pk=sample.pk),
+        owner=corrected_owner,
+    )
+    corrected = build_bd_performance(
+        tenant=tenant,
+        start_date=order_time.date(),
+        end_date=order_time.date(),
+        attribution="strict",
+        currency="CNY",
+    )
+    corrected_row = next(
+        row for row in corrected["rows"] if row["owner_id"] == corrected_owner.pk
+    )
+    assert corrected_row["valid_order_count"] == 1
+    attribution.refresh_from_db()
+    assert attribution.owner_id == user.pk
+
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():
     tenant = Tenant.objects.create(name="Performance tenant", code="performance-empty")
@@ -2523,7 +2546,7 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
     ).exists()
 
 
-def test_bd_performance_shipped_count_reads_current_fulfillment_fields():
+def test_bd_performance_shipped_count_reads_frozen_attribution_fields():
     tenant = Tenant.objects.create(name="Current shipment tenant", code="current-shipment")
     user, _ = user_with_permissions(tenant, "current-shipment-owner")
     make_bd_owner(tenant, user)
@@ -2566,7 +2589,7 @@ def test_bd_performance_shipped_count_reads_current_fulfillment_fields():
         end_date=report_date,
         currency="PHP",
     )
-    assert before_current_update["totals"]["shipped_count"] == 0
+    assert before_current_update["totals"]["shipped_count"] == 1
 
     fulfillment.sample_order_no = "CURRENT-SAMPLE-ORDER"
     fulfillment.save(update_fields=["sample_order_no"])
