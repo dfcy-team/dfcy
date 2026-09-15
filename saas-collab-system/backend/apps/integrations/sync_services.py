@@ -132,6 +132,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         )
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("任务已停用，不能执行同步。")
+        if dispatch:
+            from .scheduler import DISPATCH_START_TIMEOUT
+            dispatch.refresh_from_db()
+            if (dispatch.sync_job_id != locked_job.pk or dispatch.status != "running"
+                    or not dispatch.started_at or dispatch.started_at <= timezone.now() - DISPATCH_START_TIMEOUT):
+                raise ValidationError("计划派发已终止或启动超时，禁止迟到执行。")
 
         selected_capability = require_sync_read_capability(
             locked_job,

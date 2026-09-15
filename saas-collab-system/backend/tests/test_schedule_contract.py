@@ -84,9 +84,7 @@ def test_scheduled_worker_links_run_and_ignores_redelivery(context):
     queue = Mock()
     dispatch_due_jobs(queue, NOW)
     key = queue.call_args.args[1]
-    def execute(job, **kwargs):
-        return run_sync_job(job, adapter=MockPlatformAdapter(), **kwargs)
-    with patch('apps.integrations.tasks.validate_manual_sync_job'), patch('apps.integrations.tasks.run_sync_job', side_effect=execute) as execute_mock:
+    with patch('apps.integrations.tasks.run_sync_job', wraps=run_sync_job) as execute_mock:
         first = run_readonly_sync_job.run(job.id, key)
         second = run_readonly_sync_job.run(job.id, key)
     assert first['status'] == 'success' and not second['created']
@@ -97,6 +95,58 @@ def test_scheduled_worker_links_run_and_ignores_redelivery(context):
     assert dispatch.status == 'success'
     job.refresh_from_db()
     assert job.next_run_at == NOW + timedelta(hours=1)
+
+
+def test_crash_before_lease_recovers_and_fences_late_worker(context):
+    from rest_framework.exceptions import ValidationError
+    _, job = context
+    scheduled(job)
+    dispatch = SyncScheduleDispatch.objects.create(tenant=job.tenant, sync_job=job,
+        scheduled_at=NOW, status='queued')
+    with patch('apps.integrations.tasks.timezone.now', return_value=NOW), patch('apps.integrations.tasks.validate_manual_sync_job', side_effect=SystemExit('worker terminated')):
+        with pytest.raises(SystemExit):
+            run_readonly_sync_job.run(job.id, f'scheduled:{job.id}:{dispatch.id}')
+    job.refresh_from_db()
+    assert job.status == 'idle' and not job.lock_token
+    queue = Mock()
+    dispatch_due_jobs(queue, NOW + timedelta(minutes=6))
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'failed' and dispatch.finished_at is not None
+    assert '启动超时' in dispatch.reason
+    with pytest.raises(ValidationError, match='派发已终止'):
+        run_sync_job(job, adapter=MockPlatformAdapter(), dispatch=dispatch)
+    assert not SyncRun.objects.exists()
+    dispatch_due_jobs(queue, NOW + timedelta(hours=1))
+    assert queue.call_count == 1
+
+
+def test_recovery_preserves_active_lease(context):
+    _, job = context
+    scheduled(job)
+    dispatch = SyncScheduleDispatch.objects.create(tenant=job.tenant, sync_job=job,
+        scheduled_at=NOW, started_at=NOW, status='running')
+    job.lock_expires_at = NOW + timedelta(hours=1)
+    job.save()
+    queue = Mock()
+    dispatch_due_jobs(queue, NOW + timedelta(minutes=6))
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'running' and not queue.called
+
+
+@pytest.mark.parametrize('resource,environment', [('sales_order','mock'), ('mock_record','production')])
+def test_scheduled_worker_does_not_simulate_business_or_live_job(context, resource, environment):
+    _, job = context
+    scheduled(job)
+    job.resource_type = resource
+    job.save()
+    job.integration_config.environment = environment
+    job.integration_config.save()
+    dispatch = SyncScheduleDispatch.objects.create(tenant=job.tenant, sync_job=job,
+        scheduled_at=NOW, status='queued')
+    from rest_framework.exceptions import ValidationError
+    with pytest.raises(ValidationError):
+        run_readonly_sync_job.run(job.id, f'scheduled:{job.id}:{dispatch.id}')
+    assert not SyncRun.objects.exists()
 
 
 def test_disable_after_enqueue_prevents_execution(context):
