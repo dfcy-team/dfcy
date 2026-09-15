@@ -12,6 +12,7 @@ const stubs = {
   'el-form': { template: '<form><slot /></form>' },
   'el-form-item': { props: ['label'], template: '<label>{{ label }}<slot /></label>' },
   'el-button': { template: '<button><slot /></button>' },
+  'el-checkbox': { props: ['modelValue', 'disabled'], emits: ['update:modelValue', 'change'], template: '<label><input type="checkbox" :checked="modelValue" :disabled="disabled" @change="$emit(\'update:modelValue\', $event.target.checked); $emit(\'change\', $event.target.checked)" /><slot /></label>' },
   'el-select': { template: '<select><slot /></select>' },
   'el-option': { props: ['label', 'value'], template: '<option :value="value">{{ label }}</option>' },
   'el-date-picker': true, 'el-progress': true, 'el-pagination': true,
@@ -62,6 +63,26 @@ describe('库存分析真实页面', () => {
     const wrapper = mount(InventoryAnalysis, { global: { stubs } });
     await flushPromises();
     expect(wrapper.findComponent(Phase3AnalyticsPage).vm.barHeight(0)).toBe('0%');
+    wrapper.unmount();
+  });
+
+  it('toggles virtual products for the whole request and returns to page one', async () => {
+    const wrapper = mount(InventoryAnalysis, { global: { stubs } });
+    await flushPromises();
+    const checkbox = wrapper.find('.table-actions input[type="checkbox"]');
+    expect(checkbox.element.checked).toBe(true);
+    const page = wrapper.findComponent(Phase3AnalyticsPage);
+    page.vm.currentPage = 7;
+    page.vm.query.risk = 'low';
+    await checkbox.setValue(false);
+    await flushPromises();
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', include_virtual: false }));
+    page.vm.changePage(2);
+    await flushPromises();
+    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(false);
+    await checkbox.setValue(true);
+    await flushPromises();
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, include_virtual: true }));
     wrapper.unmount();
   });
 

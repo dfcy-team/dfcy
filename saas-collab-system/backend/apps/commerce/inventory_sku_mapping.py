@@ -8,9 +8,6 @@ from .models import InventorySnapshot
 
 
 def resolve_inventory_sku(*, tenant, warehouse, source_sku, seller_sku):
-    if seller_sku and seller_sku != source_sku:
-        return None, "seller_sku_conflict"
-
     # Reuse warehouse-scoped decisions, including explicitly approved aliases.
     # Compare strings in Python: MySQL's collation can ignore case.
     history = InventorySnapshot.objects.filter(
@@ -21,6 +18,9 @@ def resolve_inventory_sku(*, tenant, warehouse, source_sku, seller_sku):
     targets = {sku_id for code, sku_id in history if code == source_sku}
     if targets:
         return (next(iter(targets)), "warehouse_history") if len(targets) == 1 else (None, "history_conflict")
+
+    if seller_sku and seller_sku != source_sku:
+        return None, "seller_sku_conflict"
 
     catalogue = ProductSKU.objects.filter(tenant=tenant).filter(
         Q(sku_code=source_sku) | Q(legacy_sku_code=source_sku)

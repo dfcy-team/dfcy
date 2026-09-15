@@ -14,13 +14,22 @@
     trend-empty-text="暂无历史库存快照。"
     table-title="库存快照明细"
     table-note="每个仓库、来源 SKU 显示所选日期范围内的最新快照。点击表头升序、降序或取消排序，作用于全部筛选结果；风险升序为缺货、锁定偏高、低库存、正常；关联升序为未关联、已关联。"
-  />
+  >
+    <template #table-actions="{ search, loading }">
+      <el-checkbox v-model="includeVirtual" :disabled="loading" @change="search"
+        title="同时控制明细、库存汇总、风险统计和历史趋势；未设置属性或未关联的 SKU 仍保留。">
+        包含虚拟商品
+      </el-checkbox>
+    </template>
+  </Phase3AnalyticsPage>
 </template>
 
 <script setup>
 import { ref } from 'vue';
 import Phase3AnalyticsPage from '../../components/Phase3AnalyticsPage.vue';
 import { fetchInventoryAnalysis } from '../../api/analytics';
+
+const includeVirtual = ref(true);
 
 const filters = ref([
   { key: 'date_range', label: '快照日期（UTC）', type: 'daterange' },
@@ -29,7 +38,7 @@ const filters = ref([
 ]);
 
 async function loadInventory(params) {
-  const response = await fetchInventoryAnalysis(params);
+  const response = await fetchInventoryAnalysis({ ...params, include_virtual: includeVirtual.value });
   if (response?.success) filters.value[1].options = response.data.warehouse_options || [];
   return response;
 }

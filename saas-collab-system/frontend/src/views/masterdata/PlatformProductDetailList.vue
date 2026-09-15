@@ -7,7 +7,7 @@
     :capability="capability"
   >
     <template #action>
-      <template v-if="!mappingOnly">
+      <template v-if="!mappingOnly && sourceType === 'store'">
         <el-button class="template-button" @click="downloadTemplate">下载导入模板</el-button>
         <el-button class="format-button" @click="templateDialog = true">字段说明</el-button>
         <el-button v-if="canImport" class="import-button" type="primary" :loading="importing" :disabled="importing" @click="fileInput?.click()">{{ importing ? '正在导入' : '导入 CSV/XLSX' }}</el-button>
@@ -27,8 +27,14 @@
       @close="message = ''"
     />
 
+    <el-radio-group v-if="canViewMapping && integrationEnabled" v-model="sourceType" aria-label="商品来源">
+      <el-radio-button value="store">店铺商品</el-radio-button>
+      <el-radio-button value="warehouse">仓库 SKU</el-radio-button>
+    </el-radio-group>
+    <WarehouseSkuMappings v-if="sourceType === 'warehouse'" />
+
     <el-alert
-      v-if="!mappingOnly"
+      v-if="!mappingOnly && sourceType === 'store'"
       class="identity-guidance"
       title="平台商品来源与 SKU 归集规则"
       description="平台商品档案按店铺授权的商品/变体身份幂等更新；按平台 SKU 精确匹配内部新 SKU 或旧 SKU，同时提供新旧编码时必须指向同一条内部商品明细，满足条件则自动关联。缺失、重复或新旧编码不一致会保留平台明细并标记为待处理，不会静默覆盖已有人工确认。"
@@ -38,13 +44,13 @@
     />
 
     <ProductMappingPanel
-      v-if="mappingOnly"
+      v-if="mappingOnly && sourceType === 'store'"
       standalone
       :initial-variant-id="route.query.variant_id"
       :initial-store-id="route.query.store_id"
     />
 
-    <div v-else class="detail-workspace">
+    <div v-if="!mappingOnly && sourceType === 'store'" class="detail-workspace">
       <aside class="category-panel">
         <div class="panel-title">
           <strong>分类目录</strong>
@@ -153,7 +159,7 @@
         <el-table-column prop="country_code" label="国家代码" min-width="110" show-overflow-tooltip>
           <template #default="{ row }">{{ row.country_code || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="store_name" label="店铺" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="store_name" label="店铺/仓库" min-width="140" show-overflow-tooltip />
         <el-table-column prop="platform_product_id" label="平台商品 ID" min-width="150" show-overflow-tooltip />
         <el-table-column prop="platform_variant_id" label="变体 ID" min-width="140" show-overflow-tooltip />
         <el-table-column prop="platform_sku" label="平台 SKU" min-width="140" show-overflow-tooltip />
@@ -369,6 +375,7 @@ import { useRoute, useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import ProductMappingPanel from '../../components/ProductMappingPanel.vue';
+import WarehouseSkuMappings from '../../components/WarehouseSkuMappings.vue';
 import { fetchPlatforms, fetchStores } from '../../api/masterData';
 import { fetchPlatformProductDetails, importPlatformProductDetails, importPlatformProductIds, updatePlatformProductDetail, bulkUpdatePlatformProductDetails } from '../../api/platformProductDetails';
 import { fetchConnectionCapabilities, fetchSubjectApiAccess } from '../../api/integrations';
@@ -379,6 +386,7 @@ import { apiBaseUrl } from '../../api/baseUrl';
 import { statusFromApiResponse } from '../../utils/uiState';
 
 const fileInput = ref(null);
+const sourceType = ref('store');
 const variantProductIdFileInput = ref(null);
 const rows = ref([]);
 const allRows = ref([]);

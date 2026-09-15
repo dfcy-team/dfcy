@@ -81,7 +81,10 @@
       <section class="analytics-panel table-panel">
         <div class="panel-heading">
           <div><h2>{{ tableTitle }}</h2><p>{{ tableNote }}</p></div>
-          <el-tag effect="plain">{{ items.length }} 条</el-tag>
+          <div class="table-actions">
+            <slot name="table-actions" :search="search" :loading="loading" />
+            <el-tag effect="plain">{{ items.length }} 条</el-tag>
+          </div>
         </div>
         <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort">
           <el-table-column
@@ -313,6 +316,7 @@ onMounted(loadData);
 .bar-track { position: relative; overflow: hidden; border-radius: 3px 3px 0 0; background: #eef2f6; }
 .bar-track i { position: absolute; right: 0; bottom: 0; left: 0; border-radius: 3px 3px 0 0; background: #2563eb; }
 .table-panel :deep(.el-table) { width: 100%; }
+.table-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; flex-shrink: 0; }
 .table-panel :deep(.el-empty) { display: none; }
 .analytics-pagination { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 1050px) {

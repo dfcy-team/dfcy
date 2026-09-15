@@ -1019,6 +1019,9 @@ class InventoryCollectionView(APIView):
 
 
 def commerce_inventory_payload(request, permission_code):
+    include_virtual = str(request.query_params.get("include_virtual", "true")).lower()
+    if include_virtual not in ("true", "false"):
+        raise ValidationError({"include_virtual": "请选择是否包含虚拟商品。"})
     queryset = InventorySnapshot.objects.filter(
         tenant=request.user.tenant,
         source_run__sync_job__integration_config__platform="jifeng_wms",
@@ -1086,6 +1089,10 @@ def commerce_inventory_payload(request, permission_code):
     trend_queryset = trend_queryset.annotate(date=TruncDate("snapshot_at_utc", tzinfo=UTC)).filter(
         pk=Subquery(daily_latest.values("pk")[:1])
     ).filter(condition)
+    if include_virtual == "false":
+        # Filter after selecting latest snapshots so older rows cannot reappear.
+        queryset = queryset.exclude(internal_sku__inventory_type="virtual")
+        trend_queryset = trend_queryset.exclude(internal_sku__inventory_type="virtual")
 
     aggregates = queryset.aggregate(
         total=Coalesce(Sum("on_hand_qty"), 0),

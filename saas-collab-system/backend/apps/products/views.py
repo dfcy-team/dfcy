@@ -1166,6 +1166,7 @@ LEGACY_SKU_SYNC_FIELDS = (
     "package_height_cm",
     "origin_country",
     "hs_code",
+    "inventory_type",
     "product_description",
 )
 
@@ -1315,6 +1316,7 @@ def _generate_legacy_item(item, request):
             "package_height_cm": item.package_height_cm,
             "origin_country": item.origin_country,
             "hs_code": item.hs_code,
+            "inventory_type": item.inventory_type,
             "product_description": item.product_description,
         },
         context=_serializer_context(request),
@@ -1416,6 +1418,7 @@ def _product_detail_row_from_legacy(item):
         "package_height_cm": _detail_decimal(item.package_height_cm),
         "origin_country": item.origin_country,
         "hs_code": item.hs_code,
+        "inventory_type": item.inventory_type,
         "conversion_status": item.status,
         "conversion_status_name": conversion_status,
         "status": item.status,
@@ -1457,6 +1460,7 @@ def _product_detail_row_from_sku(sku):
         "package_height_cm": _detail_decimal(sku.package_height_cm),
         "origin_country": sku.origin_country,
         "hs_code": sku.hs_code,
+        "inventory_type": sku.inventory_type,
         "conversion_status": "sku",
         "conversion_status_name": "已生成",
         "status": "sku",
