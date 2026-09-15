@@ -1,8 +1,8 @@
 """Warehouse SKU mapping over existing inventory facts; no duplicate catalogue."""
 
 from django.db import connection, transaction
-from django.db.models import F, OuterRef, Q, Subquery
-from django.db.models.functions import Collate
+from django.db.models import F, Q, Window
+from django.db.models.functions import Collate, RowNumber
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
@@ -80,9 +80,19 @@ def _history(user, row):
     ]
 
 
-def _case_sensitive_skus(rows):
-    collations = {"mysql": "utf8mb4_bin", "postgresql": "C", "sqlite": "BINARY"}
-    return rows.annotate(_exact_source_sku=Collate(F("source_sku"), collations[connection.vendor]))
+def _latest_facts(rows):
+    """Select the newest row per case-sensitive warehouse SKU in one scan."""
+    exact_source_sku = Collate(
+        F("source_sku"),
+        {"mysql": "utf8mb4_bin", "postgresql": "C", "sqlite": "BINARY"}[connection.vendor],
+    )
+    return rows.annotate(
+        _latest_rank=Window(
+            expression=RowNumber(),
+            partition_by=[F("warehouse_id"), F("site_code"), exact_source_sku],
+            order_by=[F("snapshot_at_utc").desc(), F("id").desc()],
+        )
+    ).filter(_latest_rank=1)
 
 
 class WarehouseRowSerializer(serializers.ModelSerializer):
@@ -117,17 +127,7 @@ def warehouse_skus(request):
         .values("warehouse_id", "warehouse__name", "warehouse__code")
         .distinct()
     )
-    rows = _case_sensitive_skus(rows)
-    latest = (
-        _case_sensitive_skus(_facts(request.user))
-        .filter(
-            warehouse_id=OuterRef("warehouse_id"),
-            site_code=OuterRef("site_code"),
-            _exact_source_sku=OuterRef("_exact_source_sku"),
-        )
-        .order_by("-snapshot_at_utc", "-id")
-    )
-    rows = rows.filter(pk=Subquery(latest.values("pk")[:1]))
+    rows = _latest_facts(rows)
     warehouse = request.query_params.get("warehouse_id")
     if warehouse:
         if not str(warehouse).isdigit() or int(warehouse) <= 0:

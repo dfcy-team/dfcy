@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from apps.commerce.models import InventorySnapshot
+from apps.listings.warehouse_sku_views import _latest_facts
 from apps.integrations.models import IntegrationAuditLog
 from apps.permissions.models import DataScope
 from tests.test_inventory_auto_sku_links import inventory_link
@@ -48,6 +49,17 @@ def test_list_keeps_case_distinct_source_skus(inventory_link):
     data = viewer(tenant).get(URL).json()["data"]
     assert data["count"] == 2
     assert {row["id"] for row in data["results"]} == {upper.id, lower.id}
+
+
+def test_latest_rows_use_one_window_scan_not_a_correlated_subquery(inventory_link):
+    tenant, _, _, _, _, history = inventory_link
+    history("SKU-A", target=None, at=NOW - timedelta(minutes=2))
+    newest = history("SKU-A", target=None, at=NOW)
+    query = _latest_facts(InventorySnapshot.objects.filter(tenant=tenant))
+    sql = str(query.query).upper()
+    assert "ROW_NUMBER() OVER" in sql
+    assert "OUTERREF" not in sql
+    assert list(query.values_list("id", flat=True)) == [newest.id]
 
 
 def test_confirm_updates_links_only_and_future_sync_inherits(inventory_link):
