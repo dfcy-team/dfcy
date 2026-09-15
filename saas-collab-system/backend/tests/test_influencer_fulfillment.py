@@ -1355,6 +1355,55 @@ def test_sample_accepts_any_assigned_outreach_task_owner():
     assert sample.data["data"]["owner"] == user.pk
 
 
+def test_linked_sample_defaults_to_signed_in_assigned_owner():
+    tenant = Tenant.objects.create(name="Signed In Owner Tenant", code="signed-in-owner")
+    user, client = user_with_permissions(
+        tenant,
+        "signed-in-owner-manager",
+        "influencers.outreach.manage",
+        "influencers.fulfillment.manage",
+    )
+    make_bd_owner(tenant, user)
+    primary_owner = CustomUser.objects.create_user(
+        username="signed-in-owner-primary",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    make_bd_owner(tenant, primary_owner)
+    store = store_for(tenant, "signed-in-owner-store")
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_name": "Signed-in owner sample task",
+            "store": store,
+            "owners": [primary_owner, user],
+        },
+    )
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="signed-in-owner-creator",
+        name="Signed-in owner creator",
+        platform="tiktok",
+    )
+
+    sample = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "fulfillment_no": "SIGNED-IN-OWNER-SAMPLE",
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="signed-in-owner-sample",
+    )
+
+    assert sample.status_code == 201, sample.data
+    assert task.owner_id == primary_owner.pk
+    assert sample.data["data"]["owner"] == user.pk
+
+
 def test_outreach_owner_migration_backfills_primary_owner_idempotently():
     tenant = Tenant.objects.create(name="Migration Tenant", code="owner-migration")
     user = CustomUser.objects.create_user(
