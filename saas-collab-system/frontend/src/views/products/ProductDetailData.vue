@@ -526,7 +526,7 @@
       </el-steps>
       <el-progress class="import-progress" :percentage="importPercent" :indeterminate="importing" :duration="8" />
       <p class="import-status">{{ importStage }} · 已用时 {{ formatDuration(importElapsed) }}</p>
-      <p v-if="activeImportKind === 'create'" class="import-hint">旧 SPU / SKU 编码可留空；已填编码仍只处理未存在的商品。导入成功后自动生成 SPU / SKU，并下载 BigSeller 商品SKU表。</p>
+      <p v-if="activeImportKind === 'create'" class="import-hint">填写“新 SPU 编码”可向已有 SPU 增加不同颜色或规格的 SKU；留空则按商品编码规则自动生成新 SPU / SKU。</p>
       <p v-else class="import-hint">按“{{ legacyImportModeLabel }}”处理旧商品档案，不自动生成新编码或下载 BigSeller 表。</p>
     </el-dialog>
 
@@ -1600,12 +1600,12 @@ function exportBigSellerProducts() {
 
 function downloadTemplate() {
   const headers = [
-    '旧SPU编码', '旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码',
+    '旧SPU编码', '旧SKU编码', '新SPU编码', '*商品名称', '*完整类目编码', '*属性编码',
     '*颜色英文编码', '*规格', '采购价格', '单位', '商品图片', '重量(g)', '体积(m³)',
     '长(cm)', '宽(cm)', '高(cm)', '原产国', 'HS编码', '商品描述', '商品状态',
   ];
   const values = [
-    '', '', '示例 SKU 商品', '10101', '0', 'navy',
+    '', '', '', '示例 SKU 商品', '10101', '0', 'navy',
     '150cm×220cm', '35.8000', '件', 'https://example.com/product.jpg', '1200.000',
     '0.045000', '150.000', '220.000', '20.000', '中国', '940490', '床品示例，空白字段不会覆盖原值', '',
   ];

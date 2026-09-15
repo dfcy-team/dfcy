@@ -694,6 +694,7 @@ class ProductLegacyItemSerializer(ProductDetailEditMixin, serializers.ModelSeria
     category_name = serializers.CharField(source="category_node.name", read_only=True)
     generated_spu_code = serializers.CharField(source="generated_spu.spu_code", read_only=True)
     generated_sku_code = serializers.CharField(source="generated_sku.sku_code", read_only=True)
+    target_spu_code = serializers.CharField(source="target_spu.spu_code", read_only=True, allow_null=True)
     spu_product_name = serializers.SerializerMethodField()
     sku_product_name = serializers.SerializerMethodField()
     sku_is_active = serializers.SerializerMethodField()
@@ -715,7 +716,7 @@ class ProductLegacyItemSerializer(ProductDetailEditMixin, serializers.ModelSeria
 
     class Meta:
         model = ProductLegacyItem
-        fields = ("id", "legacy_spu_code", "legacy_sku_code", "product_name", "spu_product_name",
+        fields = ("id", "legacy_spu_code", "legacy_sku_code", "target_spu_code", "product_name", "spu_product_name",
                   "sku_product_name", "sku_is_active", "sku_status_name", "conversion_status_name",
                   "category_node", "category_name",
                   "attribute_code", "color_code", "specification", "purchase_price", "unit", "image_url",
@@ -731,7 +732,7 @@ class ProductLegacyItemSerializer(ProductDetailEditMixin, serializers.ModelSeria
         return "在售" if sku.is_active else "下架"
 
     def get_spu_product_name(self, obj):
-        spu = getattr(obj, "generated_spu", None)
+        spu = getattr(obj, "generated_spu", None) or getattr(obj, "target_spu", None)
         return spu.product_name if spu is not None else ""
 
     def get_sku_product_name(self, obj):

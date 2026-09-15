@@ -133,6 +133,117 @@ def test_create_import_without_legacy_codes_returns_id_and_generates_compatible_
 
 
 @pytest.mark.django_db
+def test_create_import_new_spu_code_adds_sku_to_existing_spu():
+    tenant = Tenant.objects.create(name="Import existing SPU", code="import-existing-spu")
+    client = _client(tenant)
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    l3 = ProductCategory.objects.create(
+        tenant=tenant,
+        parent=l2,
+        level=3,
+        code="08",
+        name="Mattress",
+        spec_dimensions=[{"code": "spec", "name": "Specification", "values": ["150cm", "180cm"]}],
+    )
+    ProductColor.objects.create(tenant=tenant, code="navy", name="Navy")
+    spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="101081001",
+        product_name="Existing family",
+        category="Mattress",
+        category_node=l3,
+        season_code="1",
+        l1_code="1",
+        l2_code="01",
+        l3_code="08",
+    )
+
+    response = client.post(
+        "/api/internal/products/legacy-items/",
+        {
+            "mode": "create",
+            "csv_text": (
+                "旧SPU编码,旧SKU编码,新SPU编码,商品名称,完整类目编码,属性编码,颜色英文编码,规格\n"
+                ",,101081001,Existing family navy 150,10108,1,navy,150cm\n"
+            ),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    item = ProductLegacyItem.objects.get(pk=response.json()["data"]["created_ids"][0])
+    assert item.target_spu_id == spu.id
+    pending = client.get("/api/internal/products/legacy-items/").json()["data"][0]
+    assert pending["target_spu_code"] == spu.spu_code
+    assert pending["spu_product_name"] == spu.product_name
+    detail_rows = client.get("/api/internal/products/details/", {"search": spu.spu_code}).json()["data"]["results"]
+    assert detail_rows[0]["spu_code"] == spu.spu_code
+    generated = client.post(f"/api/internal/products/legacy-items/{item.id}/generate/", format="json")
+    assert generated.status_code == 200
+    item.refresh_from_db()
+    assert item.generated_spu_id == spu.id
+    assert item.generated_sku.spu_id == spu.id
+    assert item.generated_sku.sku_code == "101081001-navy-150cm"
+    assert ProductSPU.objects.filter(tenant=tenant).count() == 1
+    retried = client.post(f"/api/internal/products/legacy-items/{item.id}/generate/", format="json")
+    assert retried.status_code == 200
+    assert ProductSKU.objects.filter(tenant=tenant, spu=spu).count() == 1
+
+
+@pytest.mark.django_db
+def test_create_import_rejects_unknown_cross_tenant_or_mismatched_new_spu_code():
+    tenant = Tenant.objects.create(name="Import target tenant", code="import-target")
+    other = Tenant.objects.create(name="Other target tenant", code="other-target")
+    client = _client(tenant)
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    l3 = ProductCategory.objects.create(tenant=tenant, parent=l2, level=3, code="08", name="Mattress")
+    other_l1 = ProductCategory.objects.create(tenant=other, level=1, code="1", name="Other home")
+    other_l2 = ProductCategory.objects.create(tenant=other, parent=other_l1, level=2, code="01", name="Other bedding")
+    other_l3 = ProductCategory.objects.create(tenant=other, parent=other_l2, level=3, code="08", name="Other mattress")
+    ProductSPU.objects.create(
+        tenant=other,
+        spu_code="CROSS-TENANT-SPU",
+        product_name="Other family",
+        category_node=other_l3,
+        season_code="1",
+    )
+    ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="WRONG-CATEGORY-SPU",
+        product_name="Wrong category family",
+        category_node=l2,
+        season_code="1",
+    )
+    ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="WRONG-ATTRIBUTE-SPU",
+        product_name="Wrong attribute family",
+        category_node=l3,
+        season_code="2",
+    )
+
+    for code in ("MISSING-SPU", "CROSS-TENANT-SPU", "WRONG-CATEGORY-SPU", "WRONG-ATTRIBUTE-SPU"):
+        response = client.post(
+            "/api/internal/products/legacy-items/",
+            {
+                "mode": "create",
+                "csv_text": (
+                    "旧SPU编码,旧SKU编码,新SPU编码,商品名称,完整类目编码,属性编码,颜色英文编码,规格\n"
+                    f",,{code},Rejected row,10108,1,navy,150cm\n"
+                ),
+            },
+            format="json",
+        )
+        assert response.status_code == 200
+        assert response.json()["data"]["created"] == 0
+        assert response.json()["data"]["error_count"] == 1
+
+    assert not ProductLegacyItem.objects.filter(tenant=tenant).exists()
+
+
+@pytest.mark.django_db
 def test_auto_and_update_imports_still_require_a_sku_key():
     tenant = Tenant.objects.create(name="Import keyed modes", code="import-keyed")
     client = _client(tenant)
