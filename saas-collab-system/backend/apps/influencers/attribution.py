@@ -643,21 +643,22 @@ def build_bd_performance(
         sampled_at__gte=start_dt,
         sampled_at__lt=end_dt,
     ).values(
-        "owner_id", "cost_amount", "currency",
-        "sampled_at", "sample_status", "shipped_at",
+        "owner_id", "fulfillment__calculated_cost",
+        "sampled_at", "fulfillment__status", "fulfillment__shipped_at", "fulfillment__sample_order_no",
     ).order_by("id")
     for row in sample_rows.iterator(chunk_size=1000):
         bucket = buckets[row["owner_id"]]
         bucket["sample_count"] += 1
         if (
-            row["sample_status"] in SHIPPED_SAMPLE_STATUSES
-            or row["shipped_at"] is not None
+            row["fulfillment__status"] in SHIPPED_SAMPLE_STATUSES
+            or row["fulfillment__shipped_at"] is not None
+            or str(row["fulfillment__sample_order_no"] or "").strip()
         ):
             bucket["shipped_count"] += 1
-        if row["cost_amount"] is not None:
+        if row["fulfillment__calculated_cost"] is not None:
             converted, details = rate_resolver.convert(
-                row["cost_amount"],
-                row["currency"],
+                row["fulfillment__calculated_cost"],
+                "CNY",
                 currency,
                 _local_date(row["sampled_at"]),
             )
@@ -683,7 +684,7 @@ def build_bd_performance(
             | Q(order_snapshot__order_status="已完成")
         )
         .values(
-            "sample_attribution__owner_id",
+            "owner_id",
             "order_snapshot_id",
             "order_snapshot__source",
             "order_snapshot__source_row_key",
@@ -723,12 +724,7 @@ def build_bd_performance(
         if line_key in seen_lines:
             continue
         seen_lines.add(line_key)
-        # The linked sample attribution is the authoritative frozen owner
-        # fact.  The denormalized order owner can temporarily lag after a
-        # controlled historical-owner correction, so reporting must not use
-        # that stale copy.
-        owner_id = row["sample_attribution__owner_id"]
-        bucket = buckets[owner_id]
+        bucket = buckets[row["owner_id"]]
         bucket["order_ids"].add(str(row["order_snapshot__order_id"] or "").strip())
         bucket["item_quantity"] += row["order_snapshot__quantity"] or 0
         source_currency = str(row["order_snapshot__currency"] or "").upper()
@@ -740,14 +736,14 @@ def build_bd_performance(
         )
         _record_rate_details(bucket, details)
         if converted is None:
-            owner_ids.add(owner_id)
+            owner_ids.add(row["owner_id"])
             continue
         bucket["gmv_cny"] += converted
         actual_raw = row["order_snapshot__actual_paid_commission"]
         estimated_raw = row["order_snapshot__estimated_paid_commission"]
         if actual_raw is None and estimated_raw is None:
             bucket["missing_commission_count"] += 1
-            owner_ids.add(owner_id)
+            owner_ids.add(row["owner_id"])
             continue
         actual = _money(actual_raw)
         commission = actual if actual_raw is not None and actual != 0 else _money(estimated_raw)
@@ -760,7 +756,7 @@ def build_bd_performance(
         _record_rate_details(bucket, commission_details)
         if commission_converted is not None:
             bucket["commission_cny"] += commission_converted
-        owner_ids.add(owner_id)
+        owner_ids.add(row["owner_id"])
 
     users = {
         row["id"]: row
