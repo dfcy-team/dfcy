@@ -17,7 +17,7 @@ from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import Case, DateTimeField, F, IntegerField, Q, Value, When
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 
@@ -1756,48 +1756,37 @@ def product_detail_collection(request):
         sku_queryset = sku_queryset.filter(is_active=False)
 
     page, page_size = pagination_query(request)
-    # Keep linked SKUs out of the standalone stream without materializing all
-    # legacy rows or serializing the entire tenant before slicing the page.
-    # The subquery also preserves the legacy/SKU visibility and filters.
-    linked_sku_ids = legacy_queryset.exclude(generated_sku_id=None).order_by().values("generated_sku_id")
-    standalone_skus = sku_queryset.exclude(pk__in=linked_sku_ids)
-
-    # Build one database-side key stream before paginating.  A CASE expression
-    # is used instead of Greatest() so the query remains portable across
-    # MySQL, SQLite and PostgreSQL (SQLite has no native GREATEST function).
-    # A generated legacy mapping is sorted by whichever same-tenant side was
-    # updated last; a malformed cross-tenant relation and an ungenerated legacy
-    # row both fall back to the legacy timestamp.
-    legacy_keys = legacy_queryset.order_by().annotate(
-        sort_time=Case(
-            When(
-                generated_sku__tenant_id=F("tenant_id"),
-                generated_sku__updated_at__gt=F("updated_at"),
-                then=F("generated_sku__updated_at"),
-            ),
-            default=F("updated_at"),
-            output_field=DateTimeField(),
-        ),
-        row_kind=Value(0, output_field=IntegerField()),
-    ).values("id", "sort_time", "row_kind")
-    sku_keys = standalone_skus.order_by().annotate(
-        sort_time=F("updated_at"),
-        row_kind=Value(1, output_field=IntegerField()),
-    ).values("id", "sort_time", "row_kind")
-    # Counting and sorting a UNION forces MySQL to materialize and filesort the
-    # complete tenant result, even when the caller only needs the first page.
-    # Count the two disjoint streams independently and fetch only the prefix
-    # needed to merge the requested page in memory.  This preserves the public
-    # page-number contract while making the common first pages index-friendly.
-    legacy_count = legacy_queryset.count()
-    sku_count = standalone_skus.count()
-    total_count = legacy_count + sku_count
+    # MySQL performs poorly when this mixed view is expressed as a UNION or as
+    # a NOT IN subquery followed by an associated-row filesort.  Fetch only the
+    # compact identity/timestamp keys (not full product rows), merge them in
+    # Python, then rehydrate the requested page.  On production this changes a
+    # multi-second database sort into two small sequential key reads while
+    # keeping response memory bounded to a few scalar values per visible row.
+    raw_legacy_keys = list(legacy_queryset.order_by().values(
+        "id", "tenant_id", "updated_at", "generated_sku_id",
+        "generated_sku__tenant_id", "generated_sku__updated_at",
+    ))
+    linked_sku_ids = {
+        key["generated_sku_id"] for key in raw_legacy_keys if key["generated_sku_id"] is not None
+    }
+    legacy_keys = []
+    for key in raw_legacy_keys:
+        generated_updated = key["generated_sku__updated_at"]
+        same_tenant = key["generated_sku__tenant_id"] == key["tenant_id"]
+        sort_time = max(key["updated_at"], generated_updated) if same_tenant and generated_updated else key["updated_at"]
+        legacy_keys.append({"id": key["id"], "sort_time": sort_time, "row_kind": 0})
+    sku_keys = [
+        {"id": key["id"], "sort_time": key["updated_at"], "row_kind": 1}
+        for key in sku_queryset.order_by().values("id", "updated_at")
+        if key["id"] not in linked_sku_ids
+    ]
+    standalone_skus = sku_queryset
+    total_count = len(legacy_keys) + len(sku_keys)
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     page = min(page, total_pages)
     start = (page - 1) * page_size
     end = start + page_size
-    candidate_keys = list(legacy_keys.order_by("-sort_time", "-id")[:end])
-    candidate_keys.extend(sku_keys.order_by("-sort_time", "-id")[:end])
+    candidate_keys = legacy_keys + sku_keys
     candidate_keys.sort(
         key=lambda key: (key["sort_time"], key["id"], -key["row_kind"]),
         reverse=True,
