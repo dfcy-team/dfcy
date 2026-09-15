@@ -979,7 +979,7 @@ function filterSampleInfluencers(query) {
 async function openSampleCreate(task, target = null) {
   if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
   if (target && (!target.id || target.is_deleted)) return;
-  if (!await loadTaskOptions(true, true)) return;
+  if (!await loadTaskOptions(true, false)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
   sampleContext.value = {
     ...task,
