@@ -183,6 +183,9 @@ describe('influencer integration workspace contracts', () => {
     expect(performancePage).toContain('按日期范围查看达人开拓、送样投入与合作产出。');
     expect(performancePage).toContain('<BdPerformancePanel />');
     expect(performance).toContain('fetchBdPerformance');
+    expect(api).toContain("url: `${API_ROOT}/bd-performance/`");
+    expect(api).toContain('timeout: 60000');
+    expect(api).toContain('noMockFallback: true');
     expect(performance).toContain('downloadCsv');
     expect(performance).toContain('待预计算');
     expect(performance).not.toMatch(/CN[¥￥]\s*[1-9]/);
