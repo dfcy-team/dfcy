@@ -234,6 +234,7 @@
         <el-descriptions-item label="高(cm)">{{ formatPhysical(selectedRow.package_height_cm, 3) }}</el-descriptions-item>
         <el-descriptions-item label="原产国">{{ selectedRow.origin_country || '-' }}</el-descriptions-item>
         <el-descriptions-item label="HS编码">{{ selectedRow.hs_code || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="商品库存属性">{{ { virtual: '虚拟商品', physical: '实体商品' }[selectedRow.inventory_type] || '未设置' }}</el-descriptions-item>
         <el-descriptions-item label="图片链接" :span="2">{{ selectedRow.image_url || selectedRow.image || '-' }}</el-descriptions-item>
         <el-descriptions-item label="商品状态">{{ selectedRow.sku_status_name || '未生成' }}</el-descriptions-item>
         <el-descriptions-item label="转换状态">{{ selectedRow.conversion_status_name || '-' }}</el-descriptions-item>
@@ -316,6 +317,15 @@
             <el-option label="在售（启用）" :value="true" />
             <el-option label="下架（停用）" :value="false" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="商品库存属性（可选）">
+          <div class="editable-detail-field">
+            <el-select v-model="editForm.inventory_type" :disabled="editForm.clearFields.includes('inventory_type')" placeholder="未设置（留空不覆盖）" style="width:100%">
+              <el-option label="虚拟商品" value="virtual" />
+              <el-option label="实体商品" value="physical" />
+            </el-select>
+            <el-checkbox v-model="editForm.clearFields" label="inventory_type">清空</el-checkbox>
+          </div>
         </el-form-item>
         <el-alert v-if="editForm.generated" title="已生成编码的 SKU 不允许修改编码、颜色、规格和分类。" type="info" :closable="false" />
       </el-form>
@@ -1141,6 +1151,7 @@ function openEdit(row) {
     package_height_cm: row.package_height_cm ?? '',
     origin_country: row.origin_country || '',
     hs_code: row.hs_code || '',
+    inventory_type: row.inventory_type || 'physical',
     image_url: row.image_url || row.image || '',
     clearFields: [],
     is_active: row.sku_is_active !== false,
@@ -1154,6 +1165,7 @@ function openEdit(row) {
 
 async function saveEdit() {
   const payload = {};
+  if (editForm.inventory_type && !editForm.clearFields.includes('inventory_type')) payload.inventory_type = editForm.inventory_type;
   if (editForm.product_name.trim()) payload.product_name = editForm.product_name.trim();
   if (!editForm.clearFields.includes('purchase_price') && editForm.purchase_price !== '' && editForm.purchase_price !== null && editForm.purchase_price !== undefined) {
     payload.purchase_price = editForm.purchase_price;

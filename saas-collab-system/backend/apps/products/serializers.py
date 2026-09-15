@@ -382,6 +382,7 @@ DETAIL_EDIT_CLEARABLE_FIELDS = {
     "package_height_cm",
     "origin_country",
     "hs_code",
+    "inventory_type",
     "unit",
     "image_url",
     "product_description",
@@ -523,6 +524,7 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             "package_height_cm",
             "origin_country",
             "hs_code",
+            "inventory_type",
             "product_description",
             "clear_fields",
             "is_code_frozen",
@@ -721,7 +723,7 @@ class ProductLegacyItemSerializer(ProductDetailEditMixin, serializers.ModelSeria
                   "category_node", "category_name",
                   "attribute_code", "color_code", "specification", "purchase_price", "unit", "image_url",
                   "package_weight", "package_volume", "package_length_cm", "package_width_cm", "package_height_cm",
-                  "origin_country", "hs_code", "product_description", "clear_fields", "status", "generated_spu_code",
+                  "origin_country", "hs_code", "inventory_type", "product_description", "clear_fields", "status", "generated_spu_code",
                   "generated_sku_code", "error_message", "created_at", "updated_at")
         read_only_fields = ("id", "status", "generated_spu_code", "generated_sku_code", "error_message", "created_at", "updated_at")
 

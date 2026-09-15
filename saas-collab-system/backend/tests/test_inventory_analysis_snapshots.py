@@ -50,7 +50,7 @@ def test_risk_filter_applies_after_latest_and_to_trend(inventory):
     assert [point['total'] for point in data['trend']] == [12]
 
 
-@pytest.mark.parametrize('query', [{'risk': 'high'}, {'warehouse_id': 'demo'},
+@pytest.mark.parametrize('query', [{'include_virtual': 'invalid'}, {'risk': 'high'}, {'warehouse_id': 'demo'},
     {'period_start': 'bad'}, {'period_start': '2026-08-19', 'period_end': '2026-08-17'}])
 def test_invalid_inventory_filters_fail_explicitly(inventory, query):
     client, _, _ = inventory
@@ -63,6 +63,35 @@ def test_empty_period_has_no_fabricated_inventory(inventory):
     assert data['count'] == 0
     assert data['trend'] == []
     assert data['quality']['total_count'] == 0
+
+
+def test_virtual_filter_controls_latest_rows_totals_trend_and_pagination(inventory):
+    from apps.products.models import ProductSKU, ProductSPU
+
+    client, warehouse, snapshot = inventory
+    spu = ProductSPU.objects.create(tenant=warehouse.tenant, spu_code='TYPE-SPU', product_name='Test')
+    for code, kind, qty in [('PHYSICAL', 'physical', 10), ('UNSET', None, 20), ('VIRTUAL', 'virtual', 100)]:
+        sku = ProductSKU.objects.create(tenant=warehouse.tenant, spu=spu, sku_code=code, inventory_type=kind)
+        # An older unlinked snapshot must not replace the latest virtual snapshot.
+        snapshot(code, NOW - timedelta(hours=1), 1)
+        row = snapshot(code, NOW, qty)
+        row.internal_sku = sku
+        row.save()
+    url = '/api/internal/analytics/inventory/'
+    included = client.get(url).json()['data']
+    assert included['count'] == 4
+    assert included['metrics'][0]['value'] == '133'
+    assert client.get(url, {'include_virtual': 'true'}).json()['data']['metrics'] == included['metrics']
+    query = {'include_virtual': 'false', 'page_size': 2, 'ordering': '-on_hand_qty'}
+    first = client.get(url, query).json()['data']
+    second = client.get(url, {**query, 'page': 2}).json()['data']
+    assert first['count'] == 3
+    assert [row['source_sku'] for row in first['results'] + second['results']] == ['UNSET', 'PHYSICAL', 'FAKE-SKU']
+    assert first['metrics'][0]['value'] == '33'
+    assert first['quality']['total_count'] == 3
+    assert first['quality']['mapped_count'] == 2
+    assert [point['total'] for point in first['trend']] == [42, 3]
+    assert first['metrics'] == second['metrics']
 
 
 def test_sorting_is_numeric_global_and_stable_across_pages(inventory):
