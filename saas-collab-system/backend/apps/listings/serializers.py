@@ -227,9 +227,11 @@ class PlatformProductDetailSerializer(serializers.ModelSerializer):
 
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        from apps.permissions.services import check_user_permission
-
-        if not check_user_permission(user, "integrations.product_mapping.view"):
+        can_view_mapping = self.context.get("can_view_mapping")
+        if can_view_mapping is None:
+            from apps.permissions.services import check_user_permission
+            can_view_mapping = check_user_permission(user, "integrations.product_mapping.view")
+        if not can_view_mapping:
             return None
         prefetched_sentinel = object()
         prefetched = getattr(obj, "_authorized_marketplace_mapping", prefetched_sentinel)

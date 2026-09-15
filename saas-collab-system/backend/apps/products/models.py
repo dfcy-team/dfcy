@@ -269,6 +269,10 @@ class ProductSKU(models.Model):
 
     class Meta:
         ordering = ["tenant_id", "sku_code"]
+        indexes = [
+            models.Index(fields=["tenant", "is_active", "updated_at", "id"], name="idx_sku_tenant_active_updated"),
+            models.Index(fields=["tenant", "updated_at", "id"], name="idx_sku_tenant_updated"),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "sku_code"], name="uniq_sku_code_per_tenant"),
             models.CheckConstraint(
@@ -340,6 +344,10 @@ class ProductLegacyItem(models.Model):
 
     class Meta:
         ordering = ["-created_at", "id"]
+        indexes = [
+            models.Index(fields=["tenant", "updated_at", "id"], name="idx_legacy_tenant_updated"),
+            models.Index(fields=["tenant", "generated_sku"], name="idx_legacy_tenant_generated"),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "legacy_sku_code"], name="uniq_legacy_sku_per_tenant"),
             models.CheckConstraint(
