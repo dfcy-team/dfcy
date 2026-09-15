@@ -1089,6 +1089,25 @@
       }
     },
     {
+      "code": "menu.finance.finance_advertising_reconciliation.view",
+      "name": "广告费用对账",
+      "module": "finance",
+      "action": "finance_advertising_reconciliation.view",
+      "description": "显示广告费用对账入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/advertising-reconciliation",
+        "route": "/finance/advertising-reconciliation",
+        "resource": "finance_advertising_reconciliation",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.analytics.analytics_overview.view",
       "name": "经营总览",
       "module": "analytics",
@@ -1137,6 +1156,44 @@
         "path": "/analytics/inventory",
         "route": "/analytics/inventory",
         "resource": "analytics_inventory",
+        "parent": "经营分析",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.analytics.analytics_advertising_overview.view",
+      "name": "广告总览",
+      "module": "analytics",
+      "action": "analytics_advertising_overview.view",
+      "description": "显示广告总览入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/analytics/advertising-overview",
+        "route": "/analytics/advertising-overview",
+        "resource": "analytics_advertising_overview",
+        "parent": "经营分析",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.analytics.analytics_advertising_performance.view",
+      "name": "广告投放分析",
+      "module": "analytics",
+      "action": "analytics_advertising_performance.view",
+      "description": "显示广告投放分析入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/analytics/advertising-performance",
+        "route": "/analytics/advertising-performance",
+        "resource": "analytics_advertising_performance",
         "parent": "经营分析",
         "action_codes": [
           "analytics.view"
@@ -2078,6 +2135,30 @@
       ]
     },
     {
+      "path": "/analytics/advertising-overview",
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.analytics.analytics_advertising_overview.view"
+      ]
+    },
+    {
+      "path": "/analytics/advertising-performance",
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.analytics.analytics_advertising_performance.view"
+      ]
+    },
+    {
       "path": "/decision/inventory/alerts",
       "permissions": [
         "alerts.view"
@@ -2989,6 +3070,18 @@
       ],
       "menuPermissions": [
         "menu.finance.finance_analytics.view"
+      ]
+    },
+    {
+      "path": "/finance/advertising-reconciliation",
+      "permissions": [
+        "finance.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_advertising_reconciliation.view"
       ]
     },
     {
