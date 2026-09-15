@@ -1473,9 +1473,8 @@ def _filter_product_legacy_items(user, queryset, permission_code):
     """Apply the same tenant/data-scope contract as SKU rows.
 
     A custom SKU/SPU scope can only expose generated legacy bridge rows that
-    point at an allowed SKU/SPU.  Pending imports have no generated identity
-    and therefore remain visible only to an all-scope role, which is also the
-    scope required for writes/imports.
+    point at an allowed SKU/SPU. Pending imports have no generated identity,
+    so custom scopes expose them through their configured target SPU.
     """
 
     scopes = get_permission_data_scopes(user, permission_code)
@@ -1484,6 +1483,11 @@ def _filter_product_legacy_items(user, queryset, permission_code):
     allowed_skus = filter_product_skus(
         user,
         ProductSKU.objects.filter(tenant=user.tenant),
+        permission_code,
+    )
+    allowed_spus = filter_product_spus(
+        user,
+        ProductSPU.objects.filter(tenant=user.tenant),
         permission_code,
     )
     allowed_ids = set()
@@ -1495,6 +1499,7 @@ def _filter_product_legacy_items(user, queryset, permission_code):
     return queryset.filter(
         Q(generated_sku_id__in=allowed_skus.values("id"))
         | Q(generated_spu_id__in=allowed_skus.values("spu_id"))
+        | Q(target_spu_id__in=allowed_spus.values("id"))
         | Q(pk__in=allowed_ids)
     ).distinct()
 
@@ -2038,7 +2043,11 @@ def product_detail_bulk_update(request):
 @permission_classes([IsProductMasterReadOrManage])
 def product_legacy_collection(request):
     if request.method == "GET":
-        queryset = ProductLegacyItem.objects.filter(tenant=request.user.tenant).select_related(
+        queryset = _filter_product_legacy_items(
+            request.user,
+            ProductLegacyItem.objects.filter(tenant=request.user.tenant),
+            "products.master.view",
+        ).select_related(
             "category_node", "target_spu", "generated_spu", "generated_sku"
         )
         status_value = request.query_params.get("status", "").strip()

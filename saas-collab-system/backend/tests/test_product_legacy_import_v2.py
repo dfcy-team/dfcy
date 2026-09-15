@@ -192,6 +192,49 @@ def test_create_import_new_spu_code_adds_sku_to_existing_spu():
 
 
 @pytest.mark.django_db
+def test_legacy_collection_custom_scope_only_exposes_pending_rows_for_allowed_target_spu():
+    tenant = Tenant.objects.create(name="Import scoped collection", code="import-scoped-collection")
+    user = CustomUser.objects.create_user(
+        username="legacy-import-scoped-collection",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    role = Role.objects.create(tenant=tenant, code="legacy-import-scoped-role", name="Scoped legacy reader")
+    role.permissions.add(Permission.objects.get(code="products.master.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(
+        tenant=tenant,
+        role=role,
+        scope_type=DataScope.ScopeType.CUSTOM,
+        config={"spu_ids": []},
+    )
+    allowed_spu = ProductSPU.objects.create(tenant=tenant, spu_code="SCOPED-ALLOWED", product_name="Allowed")
+    hidden_spu = ProductSPU.objects.create(tenant=tenant, spu_code="SCOPED-HIDDEN", product_name="Hidden")
+    DataScope.objects.filter(role=role).update(config={"spu_ids": [allowed_spu.id]})
+    ProductLegacyItem.objects.create(
+        tenant=tenant,
+        target_spu=allowed_spu,
+        product_name="Allowed pending row",
+        legacy_sku_code="PENDING-ALLOWED",
+    )
+    ProductLegacyItem.objects.create(
+        tenant=tenant,
+        target_spu=hidden_spu,
+        product_name="Hidden pending row",
+        legacy_sku_code="PENDING-HIDDEN",
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+    response = client.get("/api/internal/products/legacy-items/")
+
+    assert response.status_code == 200
+    rows = response.json()["data"]
+    assert [row["legacy_sku_code"] for row in rows] == ["PENDING-ALLOWED"]
+    assert rows[0]["target_spu_code"] == allowed_spu.spu_code
+
+
+@pytest.mark.django_db
 def test_create_import_rejects_unknown_cross_tenant_or_mismatched_new_spu_code():
     tenant = Tenant.objects.create(name="Import target tenant", code="import-target")
     other = Tenant.objects.create(name="Other target tenant", code="other-target")
