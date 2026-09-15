@@ -43,8 +43,8 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain("'商品新增导入' : '旧商品档案导入'");
     expect(page).toContain('importStage');
     expect(page).toContain('importElapsed');
-    expect(page).toContain('旧 SPU / SKU 编码可留空');
-    expect(page).toContain('导入成功后自动生成 SPU / SKU');
+    expect(page).toContain('填写“新 SPU 编码”可向已有 SPU 增加不同颜色或规格的 SKU');
+    expect(page).toContain('留空则按商品编码规则自动生成新 SPU / SKU');
     expect(page).toContain('importResult.created');
     expect(page).toContain('importResult.updated');
     expect(page).toContain('importResult.unchanged');
@@ -154,9 +154,10 @@ describe('商品明细数据页面契约', () => {
   });
 
   it('在新增导入模板允许旧 SPU/SKU 留空，其他生成必需字段保留星号', () => {
-    for (const header of ['旧SPU编码', '旧SKU编码', '*商品名称', '*完整类目编码', '*属性编码', '*颜色英文编码', '*规格']) {
+    for (const header of ['旧SPU编码', '旧SKU编码', '新SPU编码', '*商品名称', '*完整类目编码', '*属性编码', '*颜色英文编码', '*规格']) {
       expect(page).toContain(`'${header}'`);
     }
+    expect(page).toContain('填写“新 SPU 编码”可向已有 SPU 增加不同颜色或规格的 SKU');
     expect(page).toContain("value.replace(/^(\\uFEFF?)\\*/, '$1')");
     expect(page).toContain('data-testid="legacy-import-template"');
     expect(page).toContain('旧商品档案导入模板.csv');

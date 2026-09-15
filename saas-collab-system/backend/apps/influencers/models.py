@@ -459,7 +459,9 @@ class OutreachTask(StateMachineTenantModel):
                 name="outreach_source_personnel_guard",
             ),
         ]
-        indexes = [models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status")]
+        indexes = [
+            models.Index(fields=["tenant", "owner", "status"], name="idx_outreach_owner_status"),
+        ]
 
     def clean(self):
         super().clean()
@@ -476,6 +478,9 @@ class OutreachTask(StateMachineTenantModel):
 
     @property
     def linked_count(self):
+        annotated = getattr(self, "_linked_count", None)
+        if annotated is not None:
+            return int(annotated)
         if not self.pk:
             return 0
         prefetched_targets = getattr(self, "_active_targets", None)

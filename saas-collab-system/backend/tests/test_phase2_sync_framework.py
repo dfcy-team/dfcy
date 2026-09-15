@@ -307,9 +307,9 @@ def test_transient_sync_failures_retry_with_backoff_without_sleeping():
     assert created is True
     assert len(attempts) == 3
     assert attempts[0] is None
-    assert attempts[1] is not None
-    assert attempts[2] is not None
-    assert attempts[2] > attempts[1]
+    assert attempts[1] is None
+    assert attempts[2] is None
+    assert run.masked_log["next_retry_at"]
     assert retry_delays == [2, 4]
     assert run.status == SyncRun.Status.SUCCESS
     assert run.retry_count == 2

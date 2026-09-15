@@ -5,6 +5,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Case, Value, When
 
 from apps.tenants.models import Tenant
 from django.conf import settings
@@ -173,6 +174,14 @@ class PlatformIntegrationConfig(models.Model):
     last_rotated_at = models.DateTimeField(null=True, blank=True)
     last_verified_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+    active_uniqueness_marker = models.GeneratedField(
+        expression=Case(
+            When(deleted_at__isnull=True, then=Value(1)),
+            default=Value(None),
+        ),
+        output_field=models.PositiveSmallIntegerField(null=True),
+        db_persist=True,
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -188,8 +197,14 @@ class PlatformIntegrationConfig(models.Model):
         ordering = ["tenant_id", "platform", "account_alias"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "platform", "account_alias", "environment"],
-                name="uniq_platform_integration_per_tenant",
+                fields=[
+                    "tenant",
+                    "platform",
+                    "account_alias",
+                    "environment",
+                    "active_uniqueness_marker",
+                ],
+                name="uniq_active_platform_integration_per_tenant",
             ),
         ]
 
@@ -1213,6 +1228,29 @@ class SyncJob(models.Model):
                 errors["warehouse_authorization"] = "Warehouse authorization must match the sync job tenant and config."
         if errors:
             raise ValidationError(errors)
+
+
+class SyncScheduleDispatch(models.Model):
+    """Durable plan occurrence; skipped/blocked occurrences are not executions."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="schedule_dispatches")
+    scheduled_at = models.DateTimeField()
+    enqueued_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, default="queued")
+    reason = models.CharField(max_length=240, blank=True)
+    schedule_snapshot = models.JSONField(default=dict)
+    sync_run = models.OneToOneField("SyncRun", null=True, blank=True, on_delete=models.SET_NULL, related_name="schedule_dispatch")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["sync_job", "scheduled_at"], name="uniq_sync_plan_occurrence")]
+        indexes = [models.Index(fields=["sync_job", "status"], name="idx_sync_plan_status")]
+
+
+class SyncSchedulerHeartbeat(models.Model):
+    key = models.CharField(max_length=40, primary_key=True)
+    last_seen_at = models.DateTimeField()
 
 
 class SyncRun(models.Model):

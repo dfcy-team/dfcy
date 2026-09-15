@@ -14,7 +14,6 @@ from .adapters import get_adapter_for_config
 from .models import SyncCheckpoint, SyncCursor, SyncJob, SyncRun, WebhookEvent
 from .raw_services import archive_raw_page, archive_webhook_payload
 from .readonly_clients import ReadonlyConfigurationError
-from .scheduler import calculate_next_run_at
 from .capability_gate import record_sync_source_decision, require_sync_read_capability
 from .security import sanitize_payload, sanitize_text
 from .sync_alerts import resolve_sync_failure_alert, upsert_sync_failure_alert
@@ -43,14 +42,15 @@ def _has_expired_lease(sync_job, now):
 
 
 def _recover_expired_lease(sync_job, now):
-    SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING).update(
-        status=SyncRun.Status.FAILED,
-        finished_at=now,
-        failed_count=F("failed_count") + 1,
-        error_code="LEASE_EXPIRED",
-        masked_error_message="Sync run lease expired before completion.",
-        masked_log={"error": "lease_expired"},
-    )
+    for run in SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING):
+        SyncRun.objects.filter(pk=run.pk).update(
+            status=SyncRun.Status.FAILED,
+            finished_at=now,
+            failed_count=F("failed_count") + 1,
+            error_code="LEASE_EXPIRED",
+            masked_error_message="Sync run lease expired before completion.",
+            masked_log={**(run.masked_log or {}), "error": "lease_expired"},
+        )
     sync_job.status = SyncJob.Status.FAILED
     sync_job.lock_token = ""
     sync_job.lock_expires_at = None
@@ -113,7 +113,7 @@ def validate_manual_sync_job(sync_job, *, live_only=False):
     adapter.validate_configuration(sync_job)
 
 
-def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
+def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None):
     retry_wait = retry_wait or default_retry_wait
     adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
     if getattr(adapter, "execution_mode", "unsupported") not in {"mock", "live_readonly"}:
@@ -132,6 +132,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
         )
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("任务已停用，不能执行同步。")
+        if dispatch:
+            from .scheduler import DISPATCH_START_TIMEOUT
+            dispatch.refresh_from_db()
+            if (dispatch.sync_job_id != locked_job.pk or dispatch.status != "running"
+                    or not dispatch.started_at or dispatch.started_at <= timezone.now() - DISPATCH_START_TIMEOUT):
+                raise ValidationError("计划派发已终止或启动超时，禁止迟到执行。")
 
         selected_capability = require_sync_read_capability(
             locked_job,
@@ -184,7 +190,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
             idempotency_key=idempotency_key,
             status=SyncRun.Status.RUNNING,
             started_at=now,
+            masked_log={"execution_mode": "live_readonly" if adapter.execution_mode == "live_readonly" else "simulation",
+                        "trigger_type": "scheduled" if dispatch else "manual",
+                        **({"scheduled_at": dispatch.scheduled_at.isoformat(),
+                            "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
+                            "schedule_snapshot": dispatch.schedule_snapshot} if dispatch else {})},
         )
+        if dispatch:
+            dispatch.sync_run = run
+            dispatch.save(update_fields=["sync_run"])
         record_sync_source_decision(locked_job, run, selected_capability)
         locked_job.refresh_from_db()
 
@@ -268,6 +282,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                 )
                 run.masked_log = sanitize_payload(
                     {
+                        **(run.masked_log or {}),
                         "fetched": run.fetched_count,
                         "last_page_record_keys": sorted(records[0]) if records and isinstance(records[0], dict) else [],
                         "retry_count": run.retry_count,
@@ -282,14 +297,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                     }
                 )
                 sync_job.status = SyncJob.Status.IDLE
-                sync_job.next_run_at = calculate_next_run_at(sync_job, run.finished_at)
                 sync_job.lock_token = ""
                 sync_job.lock_expires_at = None
                 sync_job.lock_heartbeat_at = timezone.now()
                 sync_job.save(
                     update_fields=[
                         "status",
-                        "next_run_at",
                         "lock_token",
                         "lock_expires_at",
                         "lock_heartbeat_at",
@@ -318,14 +331,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                     run.masked_error_message = last_retry_error
                     run.masked_log = sanitize_payload(
                         {
+                            **(run.masked_log or {}),
                             "retry_count": run.retry_count,
                             "retry_delay_seconds": delay_seconds,
                             "error": last_retry_error,
                         }
                     )
-                    sync_job.next_run_at = timezone.now() + timedelta(seconds=delay_seconds)
-                    _renew_lease(sync_job, run, not_before=sync_job.next_run_at)
-                    sync_job.save(update_fields=["next_run_at", "updated_at"])
+                    next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
+                    run.masked_log["next_retry_at"] = next_retry_at.isoformat()
+                    _renew_lease(sync_job, run, not_before=next_retry_at)
                     run.save(
                         update_fields=[
                             "retry_count",
@@ -348,19 +362,18 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None):
                 run.finished_at = timezone.now()
                 run.masked_log = sanitize_payload(
                     {
+                        **(run.masked_log or {}),
                         "retry_count": run.retry_count,
                         "error": last_retry_error,
                     }
                 )
                 sync_job.status = SyncJob.Status.FAILED
-                sync_job.next_run_at = calculate_next_run_at(sync_job, run.finished_at)
                 sync_job.lock_token = ""
                 sync_job.lock_expires_at = None
                 sync_job.lock_heartbeat_at = timezone.now()
                 sync_job.save(
                     update_fields=[
                         "status",
-                        "next_run_at",
                         "lock_token",
                         "lock_expires_at",
                         "lock_heartbeat_at",

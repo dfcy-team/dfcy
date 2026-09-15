@@ -261,7 +261,12 @@ def test_warehouse_readonly_check_uses_the_selected_warehouse_binding(monkeypatc
     assert WarehouseAuthorization.objects.get(pk=authorization_id).last_verified_at is not None
 
 
-def test_configured_wms_credentials_keep_workspace_job_ready():
+@pytest.mark.parametrize('readonly_enabled', [False, True])
+def test_configured_wms_credentials_keep_workspace_job_ready(monkeypatch, readonly_enabled):
+    from apps.integrations import workspace_service
+    original_setting = workspace_service.get_runtime_setting
+    monkeypatch.setattr(workspace_service, 'get_runtime_setting',
+                        lambda *args, **kwargs: readonly_enabled if args[:2] == ('network', 'readonly_sync_enabled') else original_setting(*args, **kwargs))
     user, warehouse, config, _replacement = _fixture()
     client = APIClient()
     client.force_authenticate(user)
@@ -292,7 +297,7 @@ def test_configured_wms_credentials_keep_workspace_job_ready():
     row = response.data["data"]["results"][0]
     assert row["credential_status"] == PlatformIntegrationConfig.CredentialStatus.CONFIGURED
     assert row["health_state"] == "healthy"
-    assert row["blocked_reason"] == ""
+    assert row["blocked_reason"] == ("" if readonly_enabled else "系统只读准入未通过，请检查生产环境配置")
     assert response.data["data"]["previews"]["reconcile"]["eligible_subject_count"] == 1
 
 

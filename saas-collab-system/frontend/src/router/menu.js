@@ -58,7 +58,9 @@ export const menuItems = [
     children: [
       { path: '/analytics/overview', label: '经营总览', permissions: ['analytics.view'] },
       { path: '/analytics/sales', label: '销售分析', permissions: ['analytics.view'] },
-      { path: '/analytics/inventory', label: '库存分析', permissions: ['analytics.view'] }
+      { path: '/analytics/inventory', label: '库存分析', permissions: ['analytics.view'] },
+      { path: '/analytics/advertising-overview', label: '广告总览', permissions: ['analytics.view'] },
+      { path: '/analytics/advertising-performance', label: '广告投放分析', permissions: ['analytics.view'] }
     ]
   },
   {
@@ -165,7 +167,8 @@ export const menuItems = [
       { path: '/finance/withdrawals', label: '提现记录', permissions: ['finance.view'] },
       { path: '/finance/bank-receipts', label: '银行到账', permissions: ['finance.view'] },
       { path: '/finance/reconciliation/exceptions', label: '对账异常', permissions: ['finance.view'] },
-      { path: '/finance/reconciliation/matches', label: '对账差异', permissions: ['finance.view'] }
+      { path: '/finance/reconciliation/matches', label: '对账差异', permissions: ['finance.view'] },
+      { path: '/finance/advertising-reconciliation', label: '广告费用对账', permissions: ['finance.view'] }
     ]
   },
   {
@@ -309,6 +312,8 @@ export const routeCapabilities = [
   { path: '/analytics/overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/analytics/advertising-overview', permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/analytics/advertising-performance', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/decision/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/decision/inventory/replenishment', permissions: ['replenishment.view'], userTypes: ['internal'] },
   { path: '/decision/lifecycle/reviews', permissions: ['products.lifecycle.view'], userTypes: ['internal'] },
@@ -394,6 +399,7 @@ export const routeCapabilities = [
   { path: '/finance/reconciliation/matches', permissions: ['finance.view'], userTypes: ['internal'] },
   { path: '/finance/reconciliation/exceptions', permissions: ['finance.view'], userTypes: ['internal'] },
   { path: '/finance/analytics', permissions: ['finance.view'], userTypes: ['internal'] },
+  { path: '/finance/advertising-reconciliation', permissions: ['finance.view'], userTypes: ['internal'] },
   { path: '/reports/basic', permissions: ['reports.view'], userTypes: ['internal'] },
   { path: '/reports/exports', permissions: ['reports.view'], userTypes: ['internal'] },
   { path: '/settings/platform-risk', permissions: ['integrations.view'], userTypes: ['internal'] },

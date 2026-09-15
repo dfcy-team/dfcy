@@ -655,6 +655,11 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
 
 
 class SyncJobSerializer(serializers.ModelSerializer):
+    is_enabled = serializers.BooleanField(default=False)
+    def validate_schedule_type(self, value):
+        if value == "cron":
+            raise serializers.ValidationError("Cron 尚未开放，请使用间隔、每日或每周计划。")
+        return value
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     integration_config_id = serializers.IntegerField()
     store_authorization_id = serializers.IntegerField(required=False, allow_null=True)

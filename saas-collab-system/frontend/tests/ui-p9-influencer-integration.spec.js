@@ -183,6 +183,9 @@ describe('influencer integration workspace contracts', () => {
     expect(performancePage).toContain('按日期范围查看达人开拓、送样投入与合作产出。');
     expect(performancePage).toContain('<BdPerformancePanel />');
     expect(performance).toContain('fetchBdPerformance');
+    expect(api).toContain("url: `${API_ROOT}/bd-performance/`");
+    expect(api).toContain('timeout: 60000');
+    expect(api).toContain('noMockFallback: true');
     expect(performance).toContain('downloadCsv');
     expect(performance).toContain('待预计算');
     expect(performance).not.toMatch(/CN[¥￥]\s*[1-9]/);
@@ -261,7 +264,12 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('fetchOutreachTaskOptions');
     expect(page).toContain("include_influencers: includeInfluencers ? 'true' : 'false'");
     expect(page).toContain('loadTaskOptions(false, true)');
-    expect(page).toContain('loadTaskOptions(true, true)');
+    const sampleCreate = page.slice(
+      page.indexOf('async function openSampleCreate'),
+      page.indexOf('function openSampleFulfillment')
+    );
+    expect(sampleCreate).toContain('loadTaskOptions(true, false)');
+    expect(sampleCreate).not.toContain('loadTaskOptions(true, true)');
     expect(page).toContain('按店铺名称搜索');
     expect(page).toContain('目标人数');
     expect(page).toContain('按姓名或账号搜索');

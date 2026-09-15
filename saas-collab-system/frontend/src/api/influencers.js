@@ -209,7 +209,13 @@ const emptyPerformance = () => ({
 });
 
 export const fetchBdPerformance = (params = {}) => requestWithMockFallback(
-  { method: 'get', url: `${API_ROOT}/bd-performance/`, params },
+  {
+    method: 'get',
+    url: `${API_ROOT}/bd-performance/`,
+    params,
+    timeout: 60000,
+    noMockFallback: true
+  },
   emptyPerformance,
   'influencers.bd_performance'
 );

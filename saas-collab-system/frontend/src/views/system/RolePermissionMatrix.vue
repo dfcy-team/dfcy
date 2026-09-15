@@ -122,6 +122,15 @@
             <el-radio-button value="advanced">高级配置</el-radio-button>
           </el-radio-group>
         </el-form-item>
+        <el-alert
+          v-if="saveError"
+          class="role-save-error"
+          title="保存失败"
+          :description="saveError"
+          type="error"
+          :closable="false"
+          show-icon
+        />
         <section v-if="assignmentMode === 'quick'" class="quick-assignment">
           <el-alert
             title="按模块选择权限档位；未触及模块保留原有权限。高风险权限不会随档位自动授予。"
@@ -199,33 +208,37 @@
               :closable="false"
               show-icon
             />
+            <div v-if="scopeOptionsError" class="scope-options-error">
+              <el-alert :title="scopeOptionsError" type="error" :closable="false" show-icon />
+              <el-button size="small" :loading="scopeOptionsLoading" @click="loadScopeOptions">重新加载</el-button>
+            </div>
             <label>
               <span>平台</span>
-              <el-select v-model="roleForm.scope_config.platform_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选平台">
+              <el-select v-model="roleForm.scope_config.platform_ids" :loading="scopeOptionsLoading" :disabled="scopeOptionsLoading || Boolean(scopeOptionsError)" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选平台">
                 <el-option v-for="item in scopePlatforms" :key="item.id" :label="scopeOptionLabel(item)" :value="item.id" />
               </el-select>
             </label>
             <label>
               <span>国家/站点</span>
-              <el-select v-model="roleForm.scope_config.site_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选国家或站点">
+              <el-select v-model="roleForm.scope_config.site_ids" :loading="scopeOptionsLoading" :disabled="scopeOptionsLoading || Boolean(scopeOptionsError)" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选国家或站点">
                 <el-option v-for="item in scopeSites" :key="item.id" :label="scopeOptionLabel(item)" :value="item.id" />
               </el-select>
             </label>
             <label>
               <span>店铺</span>
-              <el-select v-model="roleForm.scope_config.store_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选店铺">
+              <el-select v-model="roleForm.scope_config.store_ids" :loading="scopeOptionsLoading" :disabled="scopeOptionsLoading || Boolean(scopeOptionsError)" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选店铺">
                 <el-option v-for="item in scopeStores" :key="item.id" :label="scopeOptionLabel(item)" :value="item.id" />
               </el-select>
             </label>
             <label>
               <span>仓库</span>
-              <el-select v-model="roleForm.scope_config.warehouse_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选仓库">
+              <el-select v-model="roleForm.scope_config.warehouse_ids" :loading="scopeOptionsLoading" :disabled="scopeOptionsLoading || Boolean(scopeOptionsError)" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选仓库">
                 <el-option v-for="item in scopeWarehouses" :key="item.id" :label="scopeOptionLabel(item)" :value="item.id" />
               </el-select>
             </label>
             <label>
               <span>供应商</span>
-              <el-select v-model="roleForm.scope_config.supplier_ids" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选供应商">
+              <el-select v-model="roleForm.scope_config.supplier_ids" :loading="scopeOptionsLoading" :disabled="scopeOptionsLoading || Boolean(scopeOptionsError)" multiple filterable collapse-tags collapse-tags-tooltip placeholder="可多选供应商">
                 <el-option v-for="item in scopeSuppliers" :key="item.id" :label="scopeOptionLabel(item)" :value="item.id" />
               </el-select>
             </label>
@@ -249,6 +262,9 @@
                   <template #title>
                     <span class="permission-tree__menu-title">{{ menu.label }}</span>
                     <small>{{ permissionCountForMenu(menu, surface.type) }} 项权限</small>
+                    <span class="permission-tree__selected-count">
+                      已选 {{ selectedPermissionCount(menu, roleForm[surface.key]) }} / {{ permissionCountForMenu(menu, surface.type) }}
+                    </span>
                   </template>
                   <div class="permission-tree__modules">
                     <section
@@ -277,7 +293,7 @@
       </el-form>
       <template #footer>
         <el-button @click="drawerOpen = false">关闭</el-button>
-        <el-button v-if="manageAccess.visible" type="primary" :disabled="!manageAccess.allowed" :loading="saving" @click="saveRole">保存配置</el-button>
+        <el-button v-if="manageAccess.visible" type="primary" :disabled="saveDisabled" :loading="saving" @click="saveRole">保存配置</el-button>
       </template>
     </el-drawer>
 
@@ -356,6 +372,7 @@ import { adminModuleLabel, adminPermissionLabel, adminRoleDisplayName, tenantDis
 import { createRequestSequence, createSuccessfulAsyncCache } from '../../utils/asyncRequestControl';
 import { buildPermissionTree, buildRegisteredMenuTree, detectMenuRegistryDrift } from '../../utils/permissionTree';
 import { statusFromApiResponse } from '../../utils/uiState';
+import { roleSaveErrorMessage, selectedPermissionCount } from '../../utils/rolePermissionFeedback';
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -374,6 +391,7 @@ const createOpen = ref(false);
 const editNameOpen = ref(false);
 const copyOpen = ref(false);
 const saving = ref(false);
+const saveError = ref('');
 const selectedRole = ref({});
 const copySourceRole = ref({});
 const pendingCopiedRole = ref(null);
@@ -390,6 +408,7 @@ const permissionPackageCache = createSuccessfulAsyncCache(
   (result) => Boolean(result?.success),
 );
 const roleLoads = createRequestSequence();
+const scopeOptionLoads = createRequestSequence();
 const expandedTree = reactive({ quick: [], menu: [], action: [], field: [] });
 const packageLevels = ref([
   { code: 'none', name: '无权限' },
@@ -422,6 +441,8 @@ const scopeSites = ref([]);
 const scopeStores = ref([]);
 const scopeWarehouses = ref([]);
 const scopeSuppliers = ref([]);
+const scopeOptionsLoading = ref(false);
+const scopeOptionsError = ref('');
 const legacyScopeType = ref('');
 // Keep custom business scope while the editor temporarily switches to the
 // all-scope template. The API contract forbids sending custom keys for all.
@@ -439,6 +460,11 @@ const manageAccess = computed(() => {
   };
 });
 const isBuiltInAdministrator = computed(() => selectedRole.value?.code === 'administrator');
+const saveDisabled = computed(() => (
+  !manageAccess.value.allowed
+  || saving.value
+  || (roleForm.scope_type === 'custom' && (scopeOptionsLoading.value || Boolean(scopeOptionsError.value)))
+));
 const targetTenantId = computed(() => {
   const value = route.query.tenant_id;
   return value === undefined || value === null || value === '' ? '' : String(value);
@@ -824,6 +850,7 @@ async function openRole(role) {
     return;
   }
   selectedRole.value = role;
+  saveError.value = '';
   originalPermissionCodes.value = [...new Set(role.permission_codes || [])];
   assignmentMode.value = 'quick';
   selectedTemplate.value = '';
@@ -920,13 +947,31 @@ function onScopeTypeChange(value) {
 }
 
 async function loadScopeOptions() {
-  const response = await fetchRoleScopeOptions(targetTenantId.value ? { tenant_id: targetTenantId.value } : {});
-  if (!response?.success) return;
-  scopePlatforms.value = response.data?.platforms || [];
-  scopeSites.value = response.data?.sites || [];
-  scopeStores.value = response.data?.stores || [];
-  scopeWarehouses.value = response.data?.warehouses || [];
-  scopeSuppliers.value = response.data?.suppliers || [];
+  const loadToken = scopeOptionLoads.begin();
+  scopeOptionsLoading.value = true;
+  scopeOptionsError.value = '';
+  scopePlatforms.value = [];
+  scopeSites.value = [];
+  scopeStores.value = [];
+  scopeWarehouses.value = [];
+  scopeSuppliers.value = [];
+  try {
+    const response = await fetchRoleScopeOptions(targetTenantId.value ? { tenant_id: targetTenantId.value } : {});
+    if (!loadToken.isCurrent()) return;
+    if (!response?.success) {
+      scopeOptionsError.value = response?.message || '业务范围选项加载失败，请重试。';
+      return;
+    }
+    scopePlatforms.value = response.data?.platforms || [];
+    scopeSites.value = response.data?.sites || [];
+    scopeStores.value = response.data?.stores || [];
+    scopeWarehouses.value = response.data?.warehouses || [];
+    scopeSuppliers.value = response.data?.suppliers || [];
+  } catch (error) {
+    if (loadToken.isCurrent()) scopeOptionsError.value = error?.message || '业务范围选项加载失败，请重试。';
+  } finally {
+    if (loadToken.isCurrent()) scopeOptionsLoading.value = false;
+  }
 }
 async function saveRole() {
   if (!manageAccess.value.allowed) return;
@@ -940,6 +985,10 @@ async function saveRole() {
   }
   if (!['all', 'custom'].includes(roleForm.scope_type)) {
     ElMessage.warning('请选择租户内全部数据或按业务范围限制。');
+    return;
+  }
+  if (roleForm.scope_type === 'custom' && (scopeOptionsLoading.value || scopeOptionsError.value)) {
+    ElMessage.warning(scopeOptionsLoading.value ? '业务范围选项正在加载，请稍后保存。' : '请先重新加载业务范围选项。');
     return;
   }
   let scopeConfig = {};
@@ -968,6 +1017,7 @@ async function saveRole() {
       return;
     }
   }
+  saveError.value = '';
   saving.value = true;
   const permissionCodes = [
     ...new Set([
@@ -988,13 +1038,22 @@ async function saveRole() {
         scope_config: scopeConfig,
       }
     : { ...roleForm, permission_codes: permissionCodes, scope_config: scopeConfig };
-  const response = await updateRolePermissions(
-    selectedRole.value.id,
-    payload,
-    targetTenantId.value || undefined,
-  );
-  saving.value = false;
-  if (!response.success) return ElMessage.error(response.message || '保存失败');
+  let response;
+  try {
+    response = await updateRolePermissions(
+      selectedRole.value.id,
+      payload,
+      targetTenantId.value || undefined,
+    );
+  } catch (error) {
+    response = { success: false, message: error?.message || '保存失败' };
+  } finally {
+    saving.value = false;
+  }
+  if (!response?.success) {
+    saveError.value = roleSaveErrorMessage(response);
+    return ElMessage.error({ message: `保存失败：${saveError.value}`, duration: 6000, showClose: true });
+  }
   ElMessage.success('角色权限已保存并记录审计');
   const refreshResponse = await auth.refreshCurrentUser();
   if (!refreshResponse?.success) ElMessage.warning('角色已保存，但当前会话权限刷新失败，请稍后重试');
@@ -1158,6 +1217,7 @@ load();
 .permission-tree :deep(.el-collapse-item__content) { min-width: 0; padding: 0 12px 12px; }
 .permission-tree__menu-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .permission-tree__menu-title + small { margin-left: auto; padding-left: 12px; color: #64748b; font-size: 11px; white-space: nowrap; }
+.permission-tree__selected-count { margin-left: 10px; padding: 2px 8px; border-radius: 999px; color: #1677ff; background: #eaf3ff; font-size: 11px; line-height: 18px; white-space: nowrap; }
 .permission-tree__modules { display: grid; gap: 8px; min-width: 0; }
 .permission-tree__module { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 220px); gap: 12px; align-items: center; min-width: 0; padding: 10px; border: 1px solid #e5eaf0; border-radius: 6px; background: #fbfdff; }
 .permission-tree__module-heading { display: grid; gap: 3px; min-width: 0; }
@@ -1186,6 +1246,9 @@ load();
 .scope-config-fields { display: grid; gap: 12px; width: 100%; }
 .scope-config-fields label { display: grid; gap: 6px; color: #475569; font-size: 12px; }
 .scope-config-fields :deep(.el-select) { width: 100%; }
+.role-save-error { margin-bottom: 16px; }
+.scope-options-error { display: grid; gap: 8px; }
+.scope-options-error .el-button { justify-self: start; }
 @media (max-width: 980px) { .access-layers { grid-template-columns: repeat(3, 1fr); } .access-layer:nth-child(3) { border-right: 0; } .access-layer:nth-child(-n + 3) { border-bottom: 1px solid #e5eaf0; } }
 @media (max-width: 640px) { .access-layers { grid-template-columns: repeat(2, 1fr); } .access-layer:nth-child(3) { border-right: 1px solid #e5eaf0; } .access-layer:nth-child(even) { border-right: 0; } .permission-tree__module, .permission-tree__module--advanced { grid-template-columns: 1fr; } .permission-tree__items { grid-template-columns: 1fr; } .permission-surface__heading { display: grid; gap: 4px; } .matrix-toolbar { grid-template-columns: 1fr auto; } .matrix-toolbar span { display: none; } }
 </style>

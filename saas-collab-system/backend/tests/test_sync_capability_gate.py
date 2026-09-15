@@ -132,7 +132,7 @@ def test_sync_failure_alert_is_deduplicated_and_resolved():
     assert second.status == NotificationMessage.Status.ARCHIVED
 
 
-def test_scheduler_enqueue_failure_restores_due_time_and_alerts_operator():
+def test_scheduler_enqueue_failure_does_not_redispatch_uncertain_slot_and_alerts_operator():
     job, _ = make_job()
     due_at = timezone.now()
     job.schedule_type = SyncJob.ScheduleType.INTERVAL
@@ -145,7 +145,8 @@ def test_scheduler_enqueue_failure_restores_due_time_and_alerts_operator():
     result = dispatch_due_jobs(fail_enqueue, now=due_at, limit=10)
     job.refresh_from_db()
     assert result["failed"] == 1
-    assert job.next_run_at == due_at
+    assert job.next_run_at > due_at
+    assert job.schedule_dispatches.get().status == 'dispatch_failed'
     alert = NotificationMessage.objects.get(message_type=f"sync_job_failure:{job.id}")
     assert "placeholder-token" not in alert.message
 

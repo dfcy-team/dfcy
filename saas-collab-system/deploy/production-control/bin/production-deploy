@@ -42,6 +42,8 @@ services:
       - manage.py
       - migrate
       - --noinput
+      - --verbosity
+      - "2"
   backend:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
   celery:
@@ -76,6 +78,7 @@ require_command jq
 require_command sha256sum
 require_command date
 require_command mktemp
+require_command timeout
 
 valid_sha40 "$release_sha" || die 'release SHA must be a full lowercase commit SHA.'
 validate_approved_images "$backend_image" "$frontend_image" "$redis_image"
@@ -144,14 +147,28 @@ if [[ "$required_backup" = true ]]; then
 fi
 
 migration_service=${PRODUCTION_MIGRATION_SERVICE:-migrate}
+migration_timeout_seconds=${PRODUCTION_MIGRATION_TIMEOUT_SECONDS:-1200}
 redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
 required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
 [[ "$migration_service" =~ ^[A-Za-z0-9_.-]+$ && "$redis_service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'Compose service names are invalid.'
+[[ "$migration_timeout_seconds" =~ ^[0-9]+$ ]] || die 'migration timeout must be an integer number of seconds.'
+(( migration_timeout_seconds >= 60 && migration_timeout_seconds <= 3600 )) || die 'migration timeout must be between 60 and 3600 seconds.'
 
 # Validate interpolation before changing any running container.
 "${COMPOSE[@]}" config --quiet >/dev/null
 "${COMPOSE[@]}" up -d --wait --wait-timeout 180 "$redis_service" >/dev/null
-"${COMPOSE[@]}" run --rm "$migration_service" >/dev/null
+migration_container="production-migrate-${release_sha}"
+log_info "running database migrations with a ${migration_timeout_seconds}s timeout."
+migration_status=0
+timeout --foreground --signal=TERM --kill-after=30s "${migration_timeout_seconds}s" \
+  "${COMPOSE[@]}" run --rm --name "$migration_container" "$migration_service" || migration_status=$?
+if (( migration_status != 0 )); then
+  docker rm -f "$migration_container" >/dev/null 2>&1 || true
+  if (( migration_status == 124 || migration_status == 137 )); then
+    die "database migration exceeded the ${migration_timeout_seconds}s timeout."
+  fi
+  die "database migration failed with status ${migration_status}."
+fi
 
 deployment_started=0
 rollback_attempted=0
