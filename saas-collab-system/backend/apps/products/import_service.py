@@ -31,9 +31,9 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
 
-from apps.permissions.ui_p5_scopes import filter_product_skus
+from apps.permissions.ui_p5_scopes import filter_product_skus, filter_product_spus
 
-from .models import ProductCategory, ProductLegacyItem, ProductSKU
+from .models import ProductCategory, ProductLegacyItem, ProductSKU, ProductSPU
 
 
 MODES = {"auto", "create", "update"}
@@ -41,6 +41,7 @@ MODES = {"auto", "create", "update"}
 FIELD_ALIASES = {
     "legacy_spu_code": ("旧SPU编码", "old_spu_code", "legacy_spu_code"),
     "legacy_sku_code": ("旧SKU编码", "旧SKU", "old_sku_code", "legacy_sku_code"),
+    "target_spu_code": ("新SPU编码", "已有SPU编码", "target_spu_code", "new_spu_code"),
     "sku_code": ("新SKU编码", "新SKU", "sku_code", "new_sku_code"),
     "product_name": ("商品名称", "商品名", "product_name", "sku_product_name"),
     "category_code": ("完整类目编码", "分类编码", "category_code"),
@@ -64,6 +65,7 @@ FIELD_ALIASES = {
 TEXT_LIMITS = {
     "legacy_spu_code": 120,
     "legacy_sku_code": 160,
+    "target_spu_code": 80,
     "sku_code": 80,
     "product_name": 200,
     "color_code": 40,
@@ -538,6 +540,38 @@ def _process_row(user, tenant, parsed, mode, categories):
         raise ImportRowError("更新模式要求旧 SKU 或新 SKU 编码已存在。")
 
     category = _resolve_category(categories, parsed.get("category_code")) if "category_code" in parsed else None
+    target_spu = None
+    target_spu_code = parsed.get("target_spu_code", "")
+    if target_spu_code:
+        if mode != "create":
+            raise ImportRowError("新 SPU 编码仅用于商品新增导入。")
+        visible_target_id = (
+            filter_product_spus(
+                user,
+                ProductSPU.objects.filter(tenant=tenant, spu_code=target_spu_code),
+                "products.master.manage",
+            )
+            .values_list("pk", flat=True)
+            .first()
+        )
+        target_spu = (
+            ProductSPU.objects.select_for_update(of=("self",))
+            .select_related("category_node")
+            .filter(tenant=tenant, pk=visible_target_id)
+            .first()
+        )
+        if target_spu is None:
+            raise ImportRowError(f"当前租户不存在新 SPU 编码：{target_spu_code}")
+        if target_spu.lifecycle_status == ProductSPU.LifecycleStatus.DISCONTINUED:
+            raise ImportRowError("已终止的 SPU 不能新增 SKU。")
+        if category is None or target_spu.category_node_id != category.pk:
+            raise ImportRowError("新 SPU 编码与完整类目编码不一致。")
+        attribute_code = parsed.get("attribute_code", "0")
+        if str(target_spu.season_code or "0") != str(attribute_code or "0"):
+            raise ImportRowError("新 SPU 编码与属性编码不一致。")
+        legacy_spu_code = parsed.get("legacy_spu_code", "")
+        if legacy_spu_code and target_spu.legacy_spu_code and legacy_spu_code != target_spu.legacy_spu_code:
+            raise ImportRowError("旧 SPU 编码与新 SPU 编码未指向同一商品主档。")
 
     if not matched:
         # A new SKU key was already rejected above.  Only a legacy key can
@@ -551,6 +585,7 @@ def _process_row(user, tenant, parsed, mode, categories):
         values = _editable_values(parsed)
         values["legacy_sku_code"] = old_code or None
         values["legacy_spu_code"] = parsed.get("legacy_spu_code", "")
+        values["target_spu"] = target_spu
         if category is not None:
             values["category_node"] = category
         values["attribute_code"] = parsed.get("attribute_code", "0")

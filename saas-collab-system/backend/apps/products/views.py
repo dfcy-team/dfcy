@@ -1234,7 +1234,31 @@ def _generate_legacy_item(item, request):
         return existing_sku
 
     spu = None
-    if item.legacy_spu_code:
+    if item.target_spu_id:
+        visible_target_id = (
+            filter_product_spus(
+                request.user,
+                ProductSPU.objects.filter(tenant=request.user.tenant, pk=item.target_spu_id),
+                "products.master.manage",
+            )
+            .values_list("pk", flat=True)
+            .first()
+        )
+        spu = (
+            ProductSPU.objects.select_for_update(of=("self",))
+            .select_related("category_node")
+            .filter(pk=visible_target_id, tenant=request.user.tenant)
+            .first()
+        )
+        if spu is None:
+            raise DjangoValidationError("Target SPU does not belong to the current tenant.")
+        if spu.lifecycle_status == ProductSPU.LifecycleStatus.DISCONTINUED:
+            raise DjangoValidationError("A discontinued SPU cannot receive a new SKU.")
+        if spu.category_node_id != item.category_node_id:
+            raise DjangoValidationError("Target SPU category no longer matches the imported row.")
+        if str(spu.season_code or "0") != str(item.attribute_code or "0"):
+            raise DjangoValidationError("Target SPU attribute code no longer matches the imported row.")
+    elif item.legacy_spu_code:
         spu = ProductSPU.objects.filter(
             tenant=request.user.tenant,
             legacy_spu_code=item.legacy_spu_code,
@@ -1322,6 +1346,7 @@ def _product_detail_row_from_legacy(item):
 
     spu = getattr(item, "generated_spu", None)
     sku = getattr(item, "generated_sku", None)
+    target_spu = getattr(item, "target_spu", None)
     # Legacy bridge FKs are nullable and historical data may contain a bad
     # cross-tenant reference. Do not let a tenant-scoped detail response
     # expose any generated product data (especially its image) in that case.
@@ -1329,6 +1354,8 @@ def _product_detail_row_from_legacy(item):
         spu = None
     if sku is not None and sku.tenant_id != item.tenant_id:
         sku = None
+    if target_spu is not None and target_spu.tenant_id != item.tenant_id:
+        target_spu = None
     effective_category = getattr(item, "category_node", None)
     if effective_category is not None and effective_category.tenant_id != item.tenant_id:
         effective_category = None
@@ -1362,11 +1389,11 @@ def _product_detail_row_from_legacy(item):
         "row_type": "legacy",
         "legacy_spu_code": item.legacy_spu_code or "",
         "legacy_sku_code": item.legacy_sku_code or "",
-        "spu_code": spu.spu_code if spu is not None else "",
+        "spu_code": spu.spu_code if spu is not None else (target_spu.spu_code if target_spu is not None else ""),
         "sku_code": sku.sku_code if sku is not None else "",
         # Do not use the SPU name here.  The page is an SKU detail page.
         "sku_product_name": sku_name,
-        "spu_product_name": spu.product_name if spu is not None else "",
+        "spu_product_name": spu.product_name if spu is not None else (target_spu.product_name if target_spu is not None else ""),
         # Keep the old wire key for clients that still read it as an imported name.
         "product_name": item.product_name,
         "image_url": image_url,
@@ -1446,9 +1473,8 @@ def _filter_product_legacy_items(user, queryset, permission_code):
     """Apply the same tenant/data-scope contract as SKU rows.
 
     A custom SKU/SPU scope can only expose generated legacy bridge rows that
-    point at an allowed SKU/SPU.  Pending imports have no generated identity
-    and therefore remain visible only to an all-scope role, which is also the
-    scope required for writes/imports.
+    point at an allowed SKU/SPU. Pending imports have no generated identity,
+    so custom scopes expose them through their configured target SPU.
     """
 
     scopes = get_permission_data_scopes(user, permission_code)
@@ -1457,6 +1483,11 @@ def _filter_product_legacy_items(user, queryset, permission_code):
     allowed_skus = filter_product_skus(
         user,
         ProductSKU.objects.filter(tenant=user.tenant),
+        permission_code,
+    )
+    allowed_spus = filter_product_spus(
+        user,
+        ProductSPU.objects.filter(tenant=user.tenant),
         permission_code,
     )
     allowed_ids = set()
@@ -1468,6 +1499,7 @@ def _filter_product_legacy_items(user, queryset, permission_code):
     return queryset.filter(
         Q(generated_sku_id__in=allowed_skus.values("id"))
         | Q(generated_spu_id__in=allowed_skus.values("spu_id"))
+        | Q(target_spu_id__in=allowed_spus.values("id"))
         | Q(pk__in=allowed_ids)
     ).distinct()
 
@@ -1645,6 +1677,7 @@ def product_detail_collection(request):
         "products.master.view",
     ).select_related(
         "category_node", "category_node__parent",
+        "target_spu", "target_spu__category_node", "target_spu__category_node__parent",
         "generated_spu", "generated_spu__category_node", "generated_spu__category_node__parent",
         "generated_sku", "generated_sku__spu", "generated_sku__spu__category_node",
         "generated_sku__spu__category_node__parent",
@@ -1665,10 +1698,13 @@ def product_detail_collection(request):
             | Q(product_name__icontains=search)
             | Q(generated_spu__spu_code__icontains=search)
             | Q(generated_spu__product_name__icontains=search)
+            | Q(target_spu__spu_code__icontains=search)
+            | Q(target_spu__product_name__icontains=search)
             | Q(generated_sku__sku_code__icontains=search)
             | Q(generated_sku__product_name__icontains=search)
             | Q(category_node__name__icontains=search)
             | Q(generated_spu__category_node__name__icontains=search)
+            | Q(target_spu__category_node__name__icontains=search)
             | Q(color_code__icontains=search)
             | Q(specification__icontains=search)
             | Q(purchase_price__icontains=search)
@@ -2007,8 +2043,12 @@ def product_detail_bulk_update(request):
 @permission_classes([IsProductMasterReadOrManage])
 def product_legacy_collection(request):
     if request.method == "GET":
-        queryset = ProductLegacyItem.objects.filter(tenant=request.user.tenant).select_related(
-            "category_node", "generated_spu", "generated_sku"
+        queryset = _filter_product_legacy_items(
+            request.user,
+            ProductLegacyItem.objects.filter(tenant=request.user.tenant),
+            "products.master.view",
+        ).select_related(
+            "category_node", "target_spu", "generated_spu", "generated_sku"
         )
         status_value = request.query_params.get("status", "").strip()
         if status_value:
@@ -2056,7 +2096,7 @@ def product_legacy_detail(request, pk):
         ProductLegacyItem.objects.filter(
             tenant=request.user.tenant,
             pk__in=visible_ids,
-        ).select_for_update(of=("self",)),
+        ).select_related("target_spu").select_for_update(of=("self",)),
         pk=pk,
     )
     if request.method == "DELETE":
