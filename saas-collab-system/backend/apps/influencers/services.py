@@ -471,7 +471,10 @@ def _lock_task_relations(
     if store_id is not None and _pk(store_id) != store.pk:
         raise ValidationError({"store": "Store must match the outreach task."})
 
-    requested_owner_id = _pk(owner_id) if owner_id is not None else task.owner_id
+    # Creating a fulfillment is an operational action: when the caller does
+    # not explicitly choose an owner, attribute it to the signed-in BD rather
+    # than silently falling back to the task's legacy primary owner.
+    requested_owner_id = _pk(owner_id) if owner_id is not None else user.pk
     owner_is_assigned = (
         requested_owner_id == task.owner_id
         or task.owners.filter(pk=requested_owner_id).exists()
