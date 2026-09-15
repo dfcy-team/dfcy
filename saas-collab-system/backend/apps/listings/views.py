@@ -237,6 +237,7 @@ class PlatformProductDetailCollectionView(APIView):
         return [CanViewPlatformProductDetails() if self.request.method == "GET" else CanManagePlatformProductDetails()]
 
     def get(self, request):
+        can_view_mapping = check_user_permission(request.user, MAPPING_VIEW_PERMISSION)
         queryset = PlatformProductDetail.objects.filter(tenant=request.user.tenant).select_related("platform", "store", "site", "internal_sku")
         # Detail visibility is independent from the mapping permission.  The
         # page must first be reduced to the caller's product-detail range;
@@ -251,7 +252,7 @@ class PlatformProductDetailCollectionView(APIView):
         if mapping_status:
             from apps.integrations.models import MarketplaceProductMapping
 
-            if not check_user_permission(request.user, MAPPING_VIEW_PERMISSION):
+            if not can_view_mapping:
                 raise PermissionDenied("缺少商品映射查看权限。")
             if mapping_status not in MarketplaceProductMapping.Status.values:
                 raise PermissionDenied("不支持的平台商品映射状态筛选。")
@@ -271,7 +272,7 @@ class PlatformProductDetailCollectionView(APIView):
                     status=mapping_status,
                 ).values_list("pk", flat=True)
                 queryset = queryset.filter(marketplace_mapping__pk__in=visible_mapping_ids)
-        if check_user_permission(request.user, MAPPING_VIEW_PERMISSION):
+        if can_view_mapping:
             queryset = queryset.prefetch_related(_authorized_mapping_prefetch(request.user))
         for field in ("platform_id", "store_id", "site_id", "internal_sku_id"):
             value = request.query_params.get(field)
@@ -309,6 +310,7 @@ class PlatformProductDetailCollectionView(APIView):
                 PlatformProductDetailSerializer,
                 page=page,
                 page_size=page_size,
+                serializer_context={"request": request, "can_view_mapping": can_view_mapping},
             )
         )
 

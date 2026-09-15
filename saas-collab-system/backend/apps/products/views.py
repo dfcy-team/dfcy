@@ -1784,12 +1784,25 @@ def product_detail_collection(request):
         sort_time=F("updated_at"),
         row_kind=Value(1, output_field=IntegerField()),
     ).values("id", "sort_time", "row_kind")
-    combined = legacy_keys.union(sku_keys, all=True).order_by("-sort_time", "-id", "row_kind")
-    paginator = Paginator(combined, page_size)
-    page_obj = paginator.get_page(page)
-    page = page_obj.number
-    total_count = paginator.count
-    keys = list(page_obj.object_list)
+    # Counting and sorting a UNION forces MySQL to materialize and filesort the
+    # complete tenant result, even when the caller only needs the first page.
+    # Count the two disjoint streams independently and fetch only the prefix
+    # needed to merge the requested page in memory.  This preserves the public
+    # page-number contract while making the common first pages index-friendly.
+    legacy_count = legacy_queryset.count()
+    sku_count = standalone_skus.count()
+    total_count = legacy_count + sku_count
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    start = (page - 1) * page_size
+    end = start + page_size
+    candidate_keys = list(legacy_keys.order_by("-sort_time", "-id")[:end])
+    candidate_keys.extend(sku_keys.order_by("-sort_time", "-id")[:end])
+    candidate_keys.sort(
+        key=lambda key: (key["sort_time"], key["id"], -key["row_kind"]),
+        reverse=True,
+    )
+    keys = candidate_keys[start:end]
 
     # Rehydrate only the models represented on this page, retaining the
     # select_related data needed by the row serializers and the union order.
@@ -1819,8 +1832,8 @@ def product_detail_collection(request):
     return success_response(
         {
             "count": total_count,
-            "next": page_url(page_obj.next_page_number()) if page_obj.has_next() else None,
-            "previous": page_url(page_obj.previous_page_number()) if page_obj.has_previous() else None,
+            "next": page_url(page + 1) if page < total_pages else None,
+            "previous": page_url(page - 1) if page > 1 else None,
             "results": rows,
         }
     )

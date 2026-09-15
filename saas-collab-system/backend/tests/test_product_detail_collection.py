@@ -2,6 +2,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -72,6 +74,23 @@ def test_product_detail_collection_flattens_rows_and_supports_pagination_and_glo
     price_search = client.get("/api/internal/products/details/", {"search": "7.25"})
     assert price_search.status_code == 200
     assert price_search.json()["data"]["results"][0]["sku_code"] == "NEW-SKU-001"
+
+
+@pytest.mark.django_db
+def test_product_detail_collection_does_not_count_or_sort_a_union():
+    tenant = Tenant.objects.create(name="Efficient detail tenant", code="efficient-detail")
+    user = _user(tenant)
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="PERF-SPU")
+    for index in range(4):
+        ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=f"PERF-SKU-{index}")
+        ProductLegacyItem.objects.create(tenant=tenant, legacy_sku_code=f"PERF-OLD-{index}", product_name="Perf")
+    client = APIClient()
+    client.force_authenticate(user=user)
+    with CaptureQueriesContext(connection) as captured:
+        response = client.get("/api/internal/products/details/", {"page": 1, "page_size": 2})
+    assert response.status_code == 200
+    assert response.json()["data"]["count"] == 8
+    assert all("UNION" not in query["sql"].upper() for query in captured.captured_queries)
 
 
 @pytest.mark.django_db

@@ -425,6 +425,9 @@ class PlatformProductDetail(models.Model):
             models.Index(fields=["tenant", "platform", "store"], name="idx_platform_product_store"),
             models.Index(fields=["tenant", "internal_sku"], name="idx_platform_product_sku"),
             models.Index(fields=["tenant", "sales_status"], name="idx_platform_product_status"),
+            models.Index(fields=["tenant", "updated_at", "id"], name="idx_platform_product_updated"),
+            models.Index(fields=["tenant", "platform", "updated_at", "id"], name="idx_platform_product_platform"),
+            models.Index(fields=["tenant", "store", "updated_at", "id"], name="idx_platform_product_store_upd"),
         ]
 
     def clean(self):

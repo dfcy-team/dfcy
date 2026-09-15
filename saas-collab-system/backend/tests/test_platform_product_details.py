@@ -273,6 +273,30 @@ def test_platform_product_detail_collection_is_paginated():
     assert too_large.status_code == 400
 
 
+def test_platform_product_detail_collection_checks_mapping_permission_once(monkeypatch):
+    tenant, platform, store, sku = fixture_data()
+    PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=store,
+        platform_variant_id="V-PERM-PERF", internal_sku=sku,
+    )
+    user = CustomUser.objects.get(username="detail-user")
+    role = Role.objects.create(tenant=tenant, code="detail-perf", name="Detail perf")
+    role.permissions.add(Permission.objects.get(code="listings.product_detail.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+    calls = []
+
+    def permission_check(_user, code):
+        calls.append(code)
+        return code != "integrations.product_mapping.view"
+
+    monkeypatch.setattr("apps.listings.views.check_user_permission", permission_check)
+    client = APIClient(); client.force_authenticate(user=user)
+    response = client.get("/api/internal/listings/product-details/", {"page_size": 20})
+    assert response.status_code == 200
+    assert calls.count("integrations.product_mapping.view") == 1
+
+
 def _grant_detail_manage(user, tenant):
     role = Role.objects.create(tenant=tenant, code=f"{user.username}-manage", name="Detail manage")
     role.permissions.add(Permission.objects.get(code="listings.product_detail.manage"))
