@@ -392,7 +392,7 @@ def integration_workspace_view(request):
     allowed_query = {
         "mode", "page", "page_size", "platform", "status", "environment", "api_type",
         "resource_type", "schedule_type", "job_state", "subject", "run_id", "started_from", "started_to",
-        "store_id",
+        "store_id", "sync_job_id", "subject_key", "health_state", "trigger_type", "run_pk",
     }
     if set(request.query_params) - allowed_query:
         raise ValidationError("Unknown integration workspace query parameter.")
@@ -2413,7 +2413,11 @@ def sync_job_collection(request):
                 {"idempotent": True, "sync_job": payload, "job": payload},
                 status=200,
             )
-    job = serializer.save(tenant=request.user.tenant)
+    job = serializer.save(
+        tenant=request.user.tenant,
+        status=SyncJob.Status.IDLE if serializer.validated_data.get("is_enabled", False) else SyncJob.Status.DISABLED,
+        sync_scope={"execution_mode": "live_readonly" if integration_config.environment in {"pilot", "production"} else "simulation"},
+    )
     return success_response(SyncJobSerializer(job, context={"request": request}).data, status=201)
 
 
@@ -2421,9 +2425,9 @@ def sync_job_collection(request):
 @permission_classes([IsIntegrationManager])
 def missing_sync_jobs_preview(request):
     from .missing_jobs import preview_missing_jobs
-    if request.query_params:
+    if set(request.query_params) - {"include_existing"}:
         raise ValidationError("Unknown missing-task preview parameter.")
-    return success_response(preview_missing_jobs(request.user))
+    return success_response(preview_missing_jobs(request.user, include_existing=request.query_params.get("include_existing") == "true"))
 
 
 def _scoped_sync_job(request, pk, permission_code="integrations.manage"):
@@ -2468,6 +2472,9 @@ def _set_job_scope(job, values):
 
 
 def _validated_job_policy(data):
+    from datetime import time
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from django.utils.dateparse import parse_datetime
     allowed = {
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
         "product_full_sync",
@@ -2479,7 +2486,7 @@ def _validated_job_policy(data):
         raise ValidationError("同步策略包含不支持的字段。")
     values = dict(data)
     choices = {
-        "schedule_type": {"manual", "hourly", "interval", "daily", "weekly", "cron"},
+        "schedule_type": {"manual", "hourly", "interval", "daily", "weekly"},
         "execution_mode": {"simulation", "live_readonly"},
         "catch_up": {"run_once", "skip"},
         "query_mode": {"incremental", "range"},
@@ -2533,9 +2540,42 @@ def _validated_job_policy(data):
         raise ValidationError({"weekdays": "每周任务必须选择执行日。"})
     if "timezone" in values and not values["timezone"].strip():
         raise ValidationError({"timezone": "执行时区不能为空。"})
+    if "timezone" in values:
+        try:
+            ZoneInfo(values["timezone"])
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValidationError({"timezone": "无效时区。"})
+    if "local_time" in values:
+        try:
+            time.fromisoformat(values["local_time"])
+            if len(values["local_time"]) != 5:
+                raise ValueError()
+        except (TypeError, ValueError):
+            raise ValidationError({"local_time": "执行时间须为 HH:MM。"})
+    if values.get("pause_until"):
+        try:
+            pause = parse_datetime(values["pause_until"])
+        except ValueError:
+            pause = None
+        if not pause or timezone.is_naive(pause):
+            raise ValidationError({"pause_until": "暂停时间须包含时区。"})
     if values.get("query_mode") == "range" and (not values.get("range_start_at") or not values.get("range_end_at")):
         raise ValidationError({"query_mode": "指定时间范围时必须填写开始和结束时间。"})
     return values
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationManager])
+def preview_sync_schedule(request, pk):
+    from .scheduler import preview_schedule
+    job = _scoped_sync_job(request, pk)
+    values = _validated_job_policy(request.data)
+    if "schedule_type" in values:
+        job.schedule_type = values["schedule_type"]
+    _set_job_scope(job, values)
+    return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
+                             "timezone": (job.sync_scope.get("schedule") or {}).get("timezone", "Asia/Shanghai"),
+                             "notice": "仅预览，未保存、启用或执行。超出计划时点 60 秒按漏跑策略处理。"})
 
 
 @api_view(["GET", "PATCH"])
@@ -2551,11 +2591,17 @@ def sync_job_detail(request, pk):
     core_fields = {"schedule_type", "max_retry_count", "backoff_base_seconds"}
     changed_core = [key for key in core_fields if key in values]
     with transaction.atomic():
+        job = SyncJob.objects.select_for_update().get(pk=job.pk)
+        if job.status == SyncJob.Status.RUNNING or job.schedule_dispatches.filter(status__in=["queued", "running"]).exists():
+            raise ValidationError("任务正在排队或运行，暂不能修改计划。")
+        from .scheduler import schedule_policy
+        previous = {"interval_minutes": 60, "local_time": "02:00", "weekdays": [1], "timezone": "Asia/Shanghai", **schedule_policy(job), "schedule_type": job.schedule_type}
+        plan_changed = any(key in values and values[key] != previous[key] for key in ("schedule_type", "interval_minutes", "local_time", "weekdays", "timezone"))
         for key in changed_core:
             setattr(job, key, values[key])
         _set_job_scope(job, values)
         update_fields = [*changed_core, "sync_scope"]
-        if {"schedule_type", "interval_minutes", "local_time", "weekdays", "timezone", "pause_until"} & set(values):
+        if plan_changed:
             job.next_run_at = calculate_next_run_at(job)
             update_fields.append("next_run_at")
         job.save(update_fields=[*dict.fromkeys(update_fields), "updated_at"])
@@ -2577,6 +2623,8 @@ def toggle_sync_job(request, pk):
         raise ValidationError("enabled 必须明确为 true 或 false。")
     enabled = request.data["enabled"]
     if enabled:
+        if job.schedule_type == "cron":
+            raise ValidationError("Cron 尚未开放，请先修改定时计划。")
         if job.integration_config.status == PlatformIntegrationConfig.Status.DISABLED:
             raise ValidationError("关联接入配置已禁用。")
         if job.integration_config.environment != "mock" and (not job.integration_config.credential_id or job.integration_config.credential_status in {
@@ -2587,7 +2635,7 @@ def toggle_sync_job(request, pk):
         validate_manual_sync_job(job)
     job.is_enabled = enabled
     job.status = SyncJob.Status.IDLE if enabled else SyncJob.Status.DISABLED
-    job.next_run_at = None
+    job.next_run_at = calculate_next_run_at(job) if enabled else None
     job.save(update_fields=["is_enabled", "status", "next_run_at", "updated_at"])
     _write_audit_log(job.integration_config, request.user, "enable_sync_job" if enabled else "disable_sync_job", detail={"sync_job_id": job.id})
     return success_response(SyncJobSerializer(job, context={"request": request}).data)

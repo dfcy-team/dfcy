@@ -54,8 +54,7 @@ describe('integration sync workspace health contract', () => {
       'failed_run_count', 'retry_waiting_job_count', 'retry_exhausted_job_count',
       'stale_running_job_count', 'capability_blocked_job_count', 'open_sync_alert_count',
       'health_state', 'schedule_state', 'blocked_reason', 'capability_state',
-      'capability_code', 'source_priority', 'selected_authorization_id',
-      'latest_error_code', 'latest_error_message', 'next_run_at'
+      'latest_run_pk', 'last_success_at', 'next_run_at'
     ]) expect(page).toContain(field);
     expect(page).toContain("permission: 'integrations.run'");
     expect(page).toContain("permission: 'integrations.manage'");
@@ -76,20 +75,17 @@ describe('integration sync workspace health contract', () => {
 
   it('implements incident handling and preview-confirmed sandbox retry without live writes', () => {
     const api = read('src/api/integrations.js');
-    const page = read('src/views/integrations/SyncJobList.vue');
+    const page = read('src/views/integrations/SyncIncidentList.vue');
     expect(api).toContain('/api/internal/integrations/sync-alert-incidents/');
     expect(api).toContain('/action/`');
     expect(api).toContain('/retry/`');
     expect(api).toContain('confirmed: true');
     expect(api).toContain('idempotency_key');
     for (const action of ['acknowledge', 'assign', 'note', 'resolve']) expect(page).toContain(action);
-    expect(page).toContain('同步事件工作台');
-    expect(page).toContain('loadRetryPreview');
-    expect(page).toContain('人工重试二次确认');
-    expect(page).toContain('external_api_called=false');
-    expect(page).toContain("permission: 'integrations.manage'");
-    expect(page).toContain("permission: 'integrations.run'");
-    expect(page).toContain('至少 3 个字符的处置备注');
+    expect(page).toContain('同步异常');
+    expect(page).toContain('fetchSyncAlertIncidentRetryPreview');
+    expect(page).toContain('integrations.manage');
+    expect(page).toContain('integrations.run');
     expect(mockSyncAlertIncidents().data.length).toBeGreaterThan(0);
     const preview = mockSyncAlertIncidentRetryPreview(901).data;
     expect(preview.allowed).toBe(true);

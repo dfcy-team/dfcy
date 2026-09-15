@@ -151,7 +151,8 @@ describe('平台商品同步任务上下文闭环', () => {
       resource_type: 'platform_product',
       store_id: '1',
     }));
-    expect(api.fetchSyncAlertIncidents).toHaveBeenCalledWith({ status: '', store_id: '1', resource_type: 'platform_product' });
+    expect(api.fetchSyncAlertIncidents).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('前往同步异常');
     expect(wrapper.vm.productSyncContext).toBe(true);
     expect(wrapper.text()).toContain('新加坡示例店铺 · 平台商品同步任务');
 
@@ -178,7 +179,8 @@ describe('平台商品同步任务上下文闭环', () => {
     api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'mock', summary: {}, results } });
     const wrapper = mount(SyncJobList, { global: { stubs } });
     await flushPromises();
-    expect(wrapper.find('.missing-preview').exists()).toBe(true);
+    expect(wrapper.find('.missing-preview').exists()).toBe(false);
+    expect(wrapper.text()).toContain('检查缺失任务');
     expect(wrapper.find('[aria-label="同步任务健康摘要"]').exists()).toBe(true);
     expect(wrapper.find('.app-state').exists()).toBe(false);
     expect(wrapper.find('.empty').exists()).toBe(results.length === 0);
@@ -193,7 +195,8 @@ describe('平台商品同步任务上下文闭环', () => {
     await flushPromises();
     expect(wrapper.find('.app-state').exists()).toBe(true);
     expect(wrapper.find('[aria-label="同步任务健康摘要"]').exists()).toBe(false);
-    expect(wrapper.find('.missing-preview').exists()).toBe(manager);
+    expect(wrapper.find('.missing-preview').exists()).toBe(false);
+    expect(wrapper.text().includes('检查缺失任务')).toBe(manager);
     wrapper.unmount();
   });
 });

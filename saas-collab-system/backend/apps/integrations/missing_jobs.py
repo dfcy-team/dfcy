@@ -10,7 +10,7 @@ from .platform_capabilities import CAPABILITY_REGISTRY
 from .warehouse_credential_service import require_verified_warehouse
 
 
-def preview_missing_jobs(user):
+def preview_missing_jobs(user, include_existing=False):
     rows = []
     subjects = (
         ("store", MarketplaceStoreAuthorization.objects.filter(tenant=user.tenant)
@@ -20,9 +20,9 @@ def preview_missing_jobs(user):
          .exclude(status=WarehouseAuthorization.Status.REVOKED)
          .select_related("integration_config", "warehouse")),
     )
-    existing = set(SyncJob.objects.filter(tenant=user.tenant).values_list(
-        "store_authorization_id", "warehouse_authorization_id", "resource_type",
-    ))
+    existing = {tuple(values[:3]): values[3] for values in SyncJob.objects.filter(tenant=user.tenant).values_list(
+        "store_authorization_id", "warehouse_authorization_id", "resource_type", "id",
+    )}
     for kind, authorizations in subjects:
         for authorization in authorizations.order_by("id"):
             config = authorization.integration_config
@@ -51,7 +51,7 @@ def preview_missing_jobs(user):
                     continue
                 key = (authorization.id if kind == "store" else None,
                        authorization.id if kind == "warehouse" else None, resource)
-                if key in existing:
+                if key in existing and not include_existing:
                     continue
                 blockers = []
                 if subject.status != "active":
@@ -83,6 +83,8 @@ def preview_missing_jobs(user):
                     except ValidationError:
                         blockers.append("仓库凭据不完整或尚未通过只读校验")
                 rows.append({
+                    "platform": config.platform, "config_name": config.account_alias,
+                    "existing_job_id": existing.get(key),
                     "subject_type": kind, "subject_id": subject.id, "subject_name": subject.name,
                     "authorization_id": authorization.id, "integration_config_id": config.id,
                     "resource_type": resource, "status": "blocked" if blockers else "missing",

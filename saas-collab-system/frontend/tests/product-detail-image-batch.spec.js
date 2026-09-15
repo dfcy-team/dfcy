@@ -5,7 +5,7 @@ import path from 'node:path';
 const page = fs.readFileSync(
   path.resolve(process.cwd(), 'src/views/products/ProductDetailData.vue'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 describe('商品明细图片批量缓存流程', () => {
   it('提供提交、逐行状态、重试和保存阶段', () => {

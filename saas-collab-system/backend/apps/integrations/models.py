@@ -1230,6 +1230,29 @@ class SyncJob(models.Model):
             raise ValidationError(errors)
 
 
+class SyncScheduleDispatch(models.Model):
+    """Durable plan occurrence; skipped/blocked occurrences are not executions."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="schedule_dispatches")
+    scheduled_at = models.DateTimeField()
+    enqueued_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, default="queued")
+    reason = models.CharField(max_length=240, blank=True)
+    schedule_snapshot = models.JSONField(default=dict)
+    sync_run = models.OneToOneField("SyncRun", null=True, blank=True, on_delete=models.SET_NULL, related_name="schedule_dispatch")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["sync_job", "scheduled_at"], name="uniq_sync_plan_occurrence")]
+        indexes = [models.Index(fields=["sync_job", "status"], name="idx_sync_plan_status")]
+
+
+class SyncSchedulerHeartbeat(models.Model):
+    key = models.CharField(max_length=40, primary_key=True)
+    last_seen_at = models.DateTimeField()
+
+
 class SyncRun(models.Model):
     class Status(models.TextChoices):
         RUNNING = "running", "Running"
