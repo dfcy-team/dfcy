@@ -261,7 +261,12 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('fetchOutreachTaskOptions');
     expect(page).toContain("include_influencers: includeInfluencers ? 'true' : 'false'");
     expect(page).toContain('loadTaskOptions(false, true)');
-    expect(page).toContain('loadTaskOptions(true, true)');
+    const sampleCreate = page.slice(
+      page.indexOf('async function openSampleCreate'),
+      page.indexOf('function openSampleFulfillment')
+    );
+    expect(sampleCreate).toContain('loadTaskOptions(true, false)');
+    expect(sampleCreate).not.toContain('loadTaskOptions(true, true)');
     expect(page).toContain('按店铺名称搜索');
     expect(page).toContain('目标人数');
     expect(page).toContain('按姓名或账号搜索');
