@@ -744,18 +744,6 @@ class SampleFulfillment(StateMachineTenantModel):
             raise ValidationError({"outreach_task": "Cancelled outreach tasks cannot receive samples."})
         if self.store_id and task["store_id"] != self.store_id:
             raise ValidationError({"store": "Store must match the outreach task."})
-        if self.owner_id and self.source != self.SOURCE_FEISHU_FULL_IMPORT:
-            owner_is_assigned = (
-                task["owner_id"] == self.owner_id
-                or OutreachTask.objects.filter(
-                    pk=self.outreach_task_id,
-                    owners__pk=self.owner_id,
-                ).exists()
-            )
-            if not owner_is_assigned:
-                raise ValidationError(
-                    {"owner": "Owner must match an assigned outreach task owner."}
-                )
         if not self.outreach_target_id and task["influencer_id"] and task["influencer_id"] != self.influencer_id:
             raise ValidationError({"influencer": "Influencer must match the outreach task."})
         if task["external_product_id"] and self.external_product_id != task["external_product_id"]:

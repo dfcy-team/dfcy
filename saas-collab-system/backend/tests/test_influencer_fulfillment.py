@@ -1355,7 +1355,7 @@ def test_sample_accepts_any_assigned_outreach_task_owner():
     assert sample.data["data"]["owner"] == user.pk
 
 
-def test_linked_sample_defaults_to_signed_in_assigned_owner():
+def test_linked_sample_defaults_to_signed_in_user_without_task_assignment():
     tenant = Tenant.objects.create(name="Signed In Owner Tenant", code="signed-in-owner")
     user, client = user_with_permissions(
         tenant,
@@ -1376,7 +1376,7 @@ def test_linked_sample_defaults_to_signed_in_assigned_owner():
         validated_data={
             "task_name": "Signed-in owner sample task",
             "store": store,
-            "owners": [primary_owner, user],
+            "owners": [primary_owner],
         },
     )
     influencer = Influencer.objects.create(
@@ -1401,6 +1401,7 @@ def test_linked_sample_defaults_to_signed_in_assigned_owner():
 
     assert sample.status_code == 201, sample.data
     assert task.owner_id == primary_owner.pk
+    assert not task.owners.filter(pk=user.pk).exists()
     assert sample.data["data"]["owner"] == user.pk
 
 

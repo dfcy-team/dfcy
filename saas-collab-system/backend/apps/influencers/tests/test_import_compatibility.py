@@ -637,23 +637,25 @@ def test_linked_sample_can_use_different_same_tenant_owner(sample_records):
     assert OutreachTask.objects.get(pk=records["task"].pk).owner_id == records["user"].pk
 
 
-def test_linked_sample_owner_must_match_for_non_feishu_source(sample_records):
+def test_linked_sample_allows_same_tenant_owner_for_non_feishu_source(sample_records):
     records = sample_records
-    with pytest.raises(ValidationError, match="owner"):
-        create_sample_fulfillment(
-            user=records["user"],
-            request_key="linked-owner-manual-source",
-            validated_data={
-                "outreach_task": records["task"],
-                "influencer": records["influencer"],
-                "owner": records["executor"],
-                "source": "manual",
-            },
-            item_payloads=[],
-        )
+    fulfillment, created = create_sample_fulfillment(
+        user=records["user"],
+        request_key="linked-owner-manual-source",
+        validated_data={
+            "outreach_task": records["task"],
+            "influencer": records["influencer"],
+            "owner": records["executor"],
+            "source": "manual",
+        },
+        item_payloads=[],
+    )
+
+    assert created is True
+    assert fulfillment.owner_id == records["executor"].pk
 
 
-def test_model_validation_keeps_owner_match_for_non_feishu_source(sample_records):
+def test_model_validation_allows_unassigned_same_tenant_owner(sample_records):
     records = sample_records
     fulfillment = SampleFulfillment(
         tenant=records["tenant"],
@@ -664,11 +666,11 @@ def test_model_validation_keeps_owner_match_for_non_feishu_source(sample_records
         influencer=records["influencer"],
         store=records["store"],
         owner=records["executor"],
+        external_product_id=records["task"].external_product_id,
         source="manual",
     )
 
-    with pytest.raises(DjangoValidationError, match="Owner must match"):
-        fulfillment.full_clean()
+    fulfillment.full_clean()
 
 
 def test_linked_sample_rejects_cross_tenant_owner(sample_records):

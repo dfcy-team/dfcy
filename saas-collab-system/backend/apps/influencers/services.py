@@ -475,19 +475,8 @@ def _lock_task_relations(
     # not explicitly choose an owner, attribute it to the signed-in BD rather
     # than silently falling back to the task's legacy primary owner.
     requested_owner_id = _pk(owner_id) if owner_id is not None else user.pk
-    owner_is_assigned = (
-        requested_owner_id == task.owner_id
-        or task.owners.filter(pk=requested_owner_id).exists()
-    )
-    if not owner_is_assigned and source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
-        raise ValidationError(
-            {"owner": "Sample owner must be assigned to the outreach task for this source."},
-            code="conflict",
-        )
-
-    # Any assigned owner may execute a multi-owner task. The legacy primary
-    # owner remains accepted before/after backfill; the controlled Feishu
-    # snapshot may carry a different same-tenant executor.
+    # Fulfillment ownership reflects the actual operator, independently from
+    # outreach-task assignment. _locked_user keeps the tenant boundary intact.
     owner = _locked_user(user, requested_owner_id)
 
     task_product_id = (task.external_product_id or "").strip()
