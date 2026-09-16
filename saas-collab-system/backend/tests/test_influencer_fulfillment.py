@@ -2186,6 +2186,9 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     sample = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
     sample.sampled_at = order_time - timedelta(hours=1)
     sample.shop_abbr = "store-affiliate"
+    # Imported snapshots may retain a Feishu option id instead of PH/MY/TH.
+    # Country reporting must fall back to the authoritative store country.
+    sample.site = "optV1klsyF"
     sample.product_id = "P-1"
     sample.save()
     order = _new_affiliate_order(tenant, data_time=order_time)

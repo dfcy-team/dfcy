@@ -695,13 +695,15 @@ def build_bd_performance(
         sampled_at__gte=start_dt,
         sampled_at__lt=end_dt,
     ).values(
-        "owner_id", "site", "cost_amount", "currency",
+        "owner_id", "site", "store__country_code", "cost_amount", "currency",
         "sampled_at", "sample_status", "shipped_at",
     ).order_by("id")
     for row in sample_rows.iterator(chunk_size=1000):
         bucket = buckets[row["owner_id"]]
         bucket["sample_count"] += 1
-        country = bucket["country_breakdown"].get(_country_code(row["site"]))
+        country = bucket["country_breakdown"].get(
+            _country_code(row["site"]) or _country_code(row["store__country_code"])
+        )
         if country:
             country["sample_count"] += 1
         if (
