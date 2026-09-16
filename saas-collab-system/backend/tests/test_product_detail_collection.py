@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -78,6 +79,7 @@ def test_product_detail_collection_flattens_rows_and_supports_pagination_and_glo
 
 @pytest.mark.django_db
 def test_product_detail_collection_does_not_count_or_sort_a_union():
+    cache.clear()
     tenant = Tenant.objects.create(name="Efficient detail tenant", code="efficient-detail")
     user = _user(tenant)
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="PERF-SPU")
@@ -91,13 +93,12 @@ def test_product_detail_collection_does_not_count_or_sort_a_union():
     assert response.status_code == 200
     assert response.json()["data"]["count"] == 8
     assert all("UNION" not in query["sql"].upper() for query in captured.captured_queries)
-    key_queries = [
-        query["sql"] for query in captured.captured_queries
-        if "PRODUCTS_PRODUCTLEGACYITEM" in query["sql"].upper()
-        or "PRODUCTS_PRODUCTSKU" in query["sql"].upper()
-    ]
-    assert any("EXISTS" in sql.upper() for sql in key_queries)
-    assert sum("LIMIT 2" in sql.upper() for sql in key_queries) >= 2
+    assert all("NOT IN" not in query["sql"].upper() for query in captured.captured_queries)
+    with CaptureQueriesContext(connection) as cached:
+        repeated = client.get("/api/internal/products/details/", {"page": 1, "page_size": 2})
+    assert repeated.status_code == 200
+    assert repeated.json()["data"] == response.json()["data"]
+    assert len(cached.captured_queries) < len(captured.captured_queries)
 
 
 @pytest.mark.django_db

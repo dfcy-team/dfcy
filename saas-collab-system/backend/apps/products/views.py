@@ -1,5 +1,6 @@
 import hashlib
 import ipaddress
+import json
 import os
 import re
 import secrets
@@ -11,14 +12,14 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import Case, DateTimeField, Exists, F, OuterRef, Q, When
-from django.db.models.functions import Coalesce, Greatest
+from django.db.models import Count, Max, Q
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 
@@ -1759,47 +1760,67 @@ def product_detail_collection(request):
         sku_queryset = sku_queryset.filter(is_active=False)
 
     page, page_size = pagination_query(request)
-    # Avoid materialising every visible key on every page read.  A correlated
-    # EXISTS uses the generated_sku FK index to remove rows already represented
-    # by a visible legacy item.  Each ordered stream is then capped at the
-    # requested page boundary; merging those two prefixes is sufficient to
-    # produce the globally newest page without UNION/NOT IN filesorts.
-    visible_legacy_for_sku = legacy_queryset.filter(generated_sku_id=OuterRef("pk"))
-    standalone_skus = sku_queryset.annotate(
-        _has_visible_legacy=Exists(visible_legacy_for_sku),
-    ).filter(_has_visible_legacy=False)
-    total_count = legacy_queryset.count() + standalone_skus.count()
+    # The mixed legacy/SKU ordering cannot use one database index.  Cache the
+    # compact merged key stream across page navigation, while deriving the key
+    # from tenant data versions, filters and the caller's exact data scopes.
+    # This keeps permission changes isolated and invalidates on inserts,
+    # deletes or timestamped updates without caching any product payload.
+    legacy_version = ProductLegacyItem.objects.filter(tenant=tenant).aggregate(
+        count=Count("id"), latest=Max("updated_at"),
+    )
+    sku_version = ProductSKU.objects.filter(tenant=tenant).aggregate(
+        count=Count("id"), latest=Max("updated_at"),
+    )
+    cache_material = {
+        "tenant": tenant.id,
+        "user": request.user.id,
+        "search": search,
+        "category_id": category_id,
+        "sku_status": sku_status,
+        "scopes": get_permission_data_scopes(request.user, "products.master.view"),
+        "legacy_version": legacy_version,
+        "sku_version": sku_version,
+    }
+    cache_digest = hashlib.sha256(
+        json.dumps(cache_material, sort_keys=True, default=str, ensure_ascii=True).encode()
+    ).hexdigest()
+    key_cache_name = f"products:detail-keys:v2:{cache_digest}"
+    cached_keys = cache.get(key_cache_name)
+    standalone_skus = sku_queryset
+    if cached_keys is None:
+        raw_legacy_keys = list(legacy_queryset.order_by().values(
+            "id", "tenant_id", "updated_at", "generated_sku_id",
+            "generated_sku__tenant_id", "generated_sku__updated_at",
+        ))
+        linked_sku_ids = {
+            key["generated_sku_id"]
+            for key in raw_legacy_keys
+            if key["generated_sku_id"] is not None
+        }
+        legacy_keys = []
+        for key in raw_legacy_keys:
+            generated_updated = key["generated_sku__updated_at"]
+            same_tenant = key["generated_sku__tenant_id"] == key["tenant_id"]
+            sort_time = max(key["updated_at"], generated_updated) if same_tenant and generated_updated else key["updated_at"]
+            legacy_keys.append({"id": key["id"], "sort_time": sort_time, "row_kind": 0})
+        sku_keys = [
+            {"id": key["id"], "sort_time": key["updated_at"], "row_kind": 1}
+            for key in sku_queryset.order_by().values("id", "updated_at")
+            if key["id"] not in linked_sku_ids
+        ]
+        candidate_keys = legacy_keys + sku_keys
+        candidate_keys.sort(
+            key=lambda key: (key["sort_time"], key["id"], -key["row_kind"]),
+            reverse=True,
+        )
+        cache.set(key_cache_name, candidate_keys, timeout=60)
+    else:
+        candidate_keys = cached_keys
+    total_count = len(candidate_keys)
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     page = min(page, total_pages)
     start = (page - 1) * page_size
     end = start + page_size
-    legacy_sort_time = Case(
-        When(
-            generated_sku__tenant_id=F("tenant_id"),
-            then=Greatest(
-                F("updated_at"),
-                Coalesce(F("generated_sku__updated_at"), F("updated_at")),
-            ),
-        ),
-        default=F("updated_at"),
-        output_field=DateTimeField(),
-    )
-    legacy_keys = [
-        {"id": key["id"], "sort_time": key["sort_time"], "row_kind": 0}
-        for key in legacy_queryset.annotate(sort_time=legacy_sort_time)
-        .order_by("-sort_time", "-id")
-        .values("id", "sort_time")[:end]
-    ]
-    sku_keys = [
-        {"id": key["id"], "sort_time": key["updated_at"], "row_kind": 1}
-        for key in standalone_skus.order_by("-updated_at", "-id")
-        .values("id", "updated_at")[:end]
-    ]
-    candidate_keys = legacy_keys + sku_keys
-    candidate_keys.sort(
-        key=lambda key: (key["sort_time"], key["id"], -key["row_kind"]),
-        reverse=True,
-    )
     keys = candidate_keys[start:end]
 
     # Rehydrate only the models represented on this page, retaining the
