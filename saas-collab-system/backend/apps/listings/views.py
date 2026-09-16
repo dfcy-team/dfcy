@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
@@ -107,13 +107,16 @@ def _mapping_visible_detail_scope(user, queryset):
         MarketplaceStoreMapping.objects.filter(tenant=user.tenant),
         MAPPING_VIEW_PERMISSION,
     )
-    pairs = list(store_mappings.values_list("store_id", "platform"))
-    allowed = Q(pk__in=[])
-    for store_id, platform in pairs:
-        allowed |= Q(store_id=store_id) & (
-            Q(platform__platform_type=platform) | Q(platform__code=platform)
-        )
-    return queryset.filter(allowed).distinct()
+    # Keep authorization matching inside SQL.  Materialising every visible
+    # pair and expanding it into a large OR tree made request parsing and query
+    # planning grow linearly with the user's store scope.
+    matching_store_mapping = store_mappings.filter(
+        store_id=OuterRef("store_id"),
+    ).filter(
+        Q(platform=OuterRef("platform__platform_type"))
+        | Q(platform=OuterRef("platform__code"))
+    )
+    return queryset.filter(Exists(matching_store_mapping))
 
 
 def _platform_detail_target_allowed(user, permission_code, platform, store):
