@@ -141,7 +141,7 @@
           style="width: 100%"
         >
           <el-option
-            v-for="role in roleOptions"
+            v-for="role in roleSelectOptions"
             :key="role.code"
             :label="adminRoleDisplayName(role)"
             :value="role.code"
@@ -202,6 +202,15 @@ const departmentTreeVisible = computed(() => departmentFieldVisible.value && org
 const allUsersSelected = computed(() => (
   !departmentFilters.department_id && !departmentFilters.unassigned && !departmentFilters.include_descendants
 ));
+const roleSelectOptions = computed(() => {
+  const options = new Map(roleOptions.value.map((role) => [role.code, role]));
+  const assignedCodes = selectedUser.value?.roles || [];
+  const assignedNames = selectedUser.value?.role_labels || [];
+  assignedCodes.forEach((code, index) => {
+    if (!options.has(code)) options.set(code, { code, name: assignedNames[index] || code });
+  });
+  return [...options.values()];
+});
 const filterSummary = computed(() => {
   if (departmentFilters.unassigned) return '未分配人员';
   if (!departmentFilters.department_id) return '全部可见用户';
@@ -217,7 +226,7 @@ const columns = computed(() => [
     ? [{ prop: 'department_name', label: '主部门', width: 150 }]
     : []),
   ...(auth.hasFieldPermission('field.system.users.roles.view')
-    ? [{ prop: 'roles', label: '角色', type: 'list', width: 210 }]
+    ? [{ prop: 'role_labels', label: '角色', type: 'list', width: 210 }]
     : []),
   { prop: 'email_masked', label: '邮箱（脱敏）', width: 190 },
   { prop: 'phone_masked', label: '手机（脱敏）', width: 140 },

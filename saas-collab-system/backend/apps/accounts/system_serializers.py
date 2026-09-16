@@ -205,7 +205,7 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
     def get_role_labels(self, obj):
         return [
-            f"{item.role.name}（{item.role.code}）"
+            item.role.name
             for item in sorted(self._tenant_user_roles(obj), key=lambda item: item.role.name)
         ]
 
