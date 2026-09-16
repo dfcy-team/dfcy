@@ -1,4 +1,6 @@
 import hashlib
+import csv
+import io
 import ipaddress
 import json
 import os
@@ -18,6 +20,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.db.models.deletion import ProtectedError
 from django.db.models import Count, Max, Q
 from django.shortcuts import get_object_or_404
@@ -76,10 +79,12 @@ from .serializers import (
     ProductResearchSerializer,
     ProductSKUSerializer,
     ProductSPUSerializer,
+    ProductSPURecodeSerializer,
     ProductStatusRecommendationSerializer,
     ProductStatusTransitionSerializer,
 )
 from .status_services import confirm_recommendation, evaluate_mock_status, reject_recommendation
+from .recode_services import plan_recode, execute_recode
 
 
 def _serializer_context(request):
@@ -669,7 +674,11 @@ def product_spu_collection(request):
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("sales_status", "").strip()
         if search:
-            queryset = queryset.filter(product_name__icontains=search)
+            queryset = queryset.filter(
+                Q(product_name__icontains=search)
+                | Q(spu_code__icontains=search)
+                | Q(legacy_spu_code__icontains=search)
+            )
         if status:
             queryset = queryset.filter(sales_status=status)
         category_id = request.query_params.get("category_id", "").strip()
@@ -689,6 +698,96 @@ def product_spu_collection(request):
     serializer.is_valid(raise_exception=True)
     item = serializer.save(tenant=request.user.tenant)
     return success_response(ProductSPUSerializer(item).data, status=201)
+
+
+@api_view(["POST"])
+@permission_classes([IsProductMasterReadOrManage])
+def product_spu_recode(request):
+    require_create_scope(request.user, "products.master.manage")
+    serializer = ProductSPURecodeSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    payload = serializer.validated_data
+    plans = plan_recode(request.user.tenant, payload["rows"])
+
+    def public_plan(plan, executed=False):
+        spu = plan["spu"]
+        return {
+            "row_number": plan["row_number"],
+            "source_spu_code": plan["source"],
+            "target_spu_code": plan["target"],
+            "source_product_name": spu.product_name if spu else "",
+            "target_product_name": plan["product_name"] if plan["product_name"] is not None else (spu.product_name if spu else ""),
+            "status": "executed" if executed and not plan["conflicts"] else plan["status"],
+            "conflicts": plan["conflicts"],
+            "sku_mappings": [{
+                "source_sku_code": sku["source"],
+                "target_sku_code": sku["target"],
+                "conflicts": sku["conflicts"],
+            } for sku in plan["skus"]],
+        }
+
+    conflicts = [plan for plan in plans if plan["conflicts"]]
+    if conflicts and payload.get("atomic", True) and not payload.get("dry_run"):
+        return error_response(ErrorCode.STATE_CONFLICT, "存在编码冲突，未执行任何修改。", data={"results": [public_plan(plan) for plan in plans]}, status=409)
+    if payload.get("dry_run") or (conflicts and payload.get("atomic", True)):
+        return success_response({"dry_run": True, "results": [public_plan(plan) for plan in plans]})
+    try:
+        execute_recode(request.user.tenant, [plan for plan in plans if not plan["conflicts"]])
+    except Exception:
+        return error_response(ErrorCode.STATE_CONFLICT, "编码修改失败，未完成写入。", status=409)
+    return success_response({"dry_run": False, "results": [public_plan(plan, executed=True) for plan in plans]})
+
+
+def _product_csv_response(filename, headers, rows):
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream)
+    writer.writerow(headers)
+    for row in rows:
+        safe = []
+        for value in row:
+            value = "" if value is None else str(value)
+            if value.startswith(("=", "+", "-", "@")):
+                value = "'" + value
+            safe.append(value)
+        writer.writerow(safe)
+    response = HttpResponse("\ufeff" + stream.getvalue(), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@api_view(["GET"])
+@permission_classes([IsProductMasterReadOrManage])
+def product_spu_export(request):
+    queryset = ProductSPU.objects.filter(tenant=request.user.tenant).select_related(
+        "category_node", "category_node__parent"
+    ).prefetch_related("skus").order_by("-updated_at", "-id")
+    queryset = filter_product_spus(request.user, queryset, "products.master.view")
+    search = request.query_params.get("search", "").strip()
+    status = request.query_params.get("sales_status", "").strip()
+    if search:
+        queryset = queryset.filter(Q(product_name__icontains=search) | Q(spu_code__icontains=search) | Q(legacy_spu_code__icontains=search))
+    if status:
+        queryset = queryset.filter(sales_status=status)
+    category_id = request.query_params.get("category_id", "").strip()
+    if category_id.isdigit():
+        selected = get_object_or_404(ProductCategory, pk=int(category_id), tenant=request.user.tenant)
+        category_ids = [selected.id]
+        frontier = [selected.id]
+        while frontier:
+            frontier = list(
+                ProductCategory.objects.filter(
+                    tenant=request.user.tenant,
+                    parent_id__in=frontier,
+                ).values_list("id", flat=True)
+            )
+            category_ids.extend(frontier)
+        queryset = queryset.filter(category_node_id__in=category_ids)
+    rows = ProductSPUSerializer(queryset, many=True).data
+    headers = ["SPU编码", "旧SPU编码", "商品名称", "类目", "品牌", "属性编码", "商品类型", "生命周期", "销售状态", "编码冻结", "SKU数量", "SKU编码", "创建时间", "更新时间"]
+    return _product_csv_response("product-master.csv", headers, [
+        [row.get("spu_code"), row.get("legacy_spu_code"), row.get("product_name"), row.get("category"), row.get("brand"), row.get("season_code"), row.get("product_type"), row.get("lifecycle_status"), row.get("sales_status_display") or row.get("sales_status"), "是" if row.get("is_code_frozen") else "否", row.get("sku_count"), "、".join(row.get("sku_codes") or []), row.get("created_at"), row.get("updated_at")]
+        for row in rows
+    ])
 
 
 def _bulk_category_path(category):
@@ -1856,6 +1955,71 @@ def product_detail_collection(request):
             "results": rows,
         }
     )
+
+
+@api_view(["GET"])
+@permission_classes([IsProductMasterReadOrManage])
+def product_detail_export(request):
+    tenant = request.user.tenant
+    legacy_queryset = _filter_product_legacy_items(
+        request.user,
+        ProductLegacyItem.objects.filter(tenant=tenant).select_related(
+            "category_node", "category_node__parent", "generated_spu", "generated_sku", "generated_sku__spu",
+        ),
+        "products.master.view",
+    )
+    sku_queryset = filter_product_skus(
+        request.user,
+        ProductSKU.objects.filter(tenant=tenant, spu__tenant=tenant).select_related(
+            "spu", "spu__category_node", "spu__category_node__parent",
+        ),
+        "products.master.view",
+    )
+    search = request.query_params.get("search", "").strip()
+    if search:
+        legacy_queryset = legacy_queryset.filter(
+            Q(legacy_spu_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(product_name__icontains=search)
+            | Q(generated_spu__spu_code__icontains=search) | Q(generated_spu__product_name__icontains=search)
+            | Q(generated_sku__sku_code__icontains=search) | Q(generated_sku__product_name__icontains=search)
+        )
+        sku_queryset = sku_queryset.filter(
+            Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(product_name__icontains=search)
+            | Q(spu__spu_code__icontains=search) | Q(spu__legacy_spu_code__icontains=search) | Q(spu__product_name__icontains=search)
+        )
+    category_id = request.query_params.get("category_id", "").strip()
+    if category_id.isdigit():
+        selected = get_object_or_404(ProductCategory, pk=int(category_id), tenant=tenant)
+        category_ids = [selected.id]
+        frontier = [selected.id]
+        while frontier:
+            frontier = list(
+                ProductCategory.objects.filter(
+                    tenant=tenant,
+                    parent_id__in=frontier,
+                ).values_list("id", flat=True)
+            )
+            category_ids.extend(frontier)
+        legacy_queryset = legacy_queryset.filter(
+            Q(category_node_id__in=category_ids)
+            | Q(generated_spu__category_node_id__in=category_ids)
+        )
+        sku_queryset = sku_queryset.filter(spu__category_node_id__in=category_ids)
+    sku_status = request.query_params.get("sku_status", request.query_params.get("active_status", "all")).strip()
+    if sku_status == "active":
+        legacy_queryset = legacy_queryset.filter(generated_sku__is_active=True)
+        sku_queryset = sku_queryset.filter(is_active=True)
+    elif sku_status == "inactive":
+        legacy_queryset = legacy_queryset.filter(generated_sku__is_active=False)
+        sku_queryset = sku_queryset.filter(is_active=False)
+    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-created_at", "id")]
+    linked_ids = set(legacy_queryset.exclude(generated_sku_id=None).values_list("generated_sku_id", flat=True))
+    sku_rows = [_product_detail_row_from_sku(sku) for sku in sku_queryset.order_by("sku_code") if sku.id not in linked_ids]
+    rows = legacy_rows + sku_rows
+    headers = ["旧SPU编码", "旧SKU编码", "SPU编码", "SKU编码", "SKU商品名称", "SPU商品名称", "类目", "属性编码", "颜色编码", "规格", "采购价", "单位", "状态"]
+    return _product_csv_response("product-detail.csv", headers, [
+        [row.get("legacy_spu_code"), row.get("legacy_sku_code"), row.get("spu_code"), row.get("sku_code"), row.get("sku_product_name") or row.get("product_name"), row.get("spu_product_name"), row.get("category_name"), row.get("attribute_code"), row.get("color_code"), row.get("specification"), row.get("purchase_price"), row.get("unit"), row.get("conversion_status_name") or row.get("sku_status_name")]
+        for row in rows
+    ])
 
 
 def _product_detail_bulk_ref(raw):
