@@ -391,8 +391,9 @@ def _validate_mapping_keys(value: dict, allowed: set[str], path: str):
 def validate_runtime_config(value: Any):
     """Validate a stored or submitted runtime config and return a copy.
 
-    Partial objects are accepted so an administrator can create a version for
-    one section; runtime loading merges it over safe/environment defaults.
+    Partial objects are accepted at this layer. The write API materialises a
+    complete document before creating a version so a section-only editor
+    cannot discard settings owned by another administration page.
     """
     _require_mapping(value, "runtime")
     _check_no_plaintext_secret(value)
@@ -568,6 +569,13 @@ def _deep_merge(base: dict, override: dict):
         else:
             merged[key] = deepcopy(value)
     return merged
+
+
+def merge_runtime_config(base: dict, override: dict):
+    """Return one validated, fully merged runtime configuration document."""
+    validated_base = validate_runtime_config(base)
+    validated_override = validate_runtime_config(override)
+    return validate_runtime_config(_deep_merge(validated_base, validated_override))
 
 
 def _env_bool(name: str, default=False):
