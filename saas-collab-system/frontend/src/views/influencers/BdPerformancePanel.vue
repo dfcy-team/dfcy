@@ -119,13 +119,18 @@ async function load({ includeDateRange = true } = {}) {
   }
   loading.value = true; state.value = 'loading'; errorMessage.value = '';
   try {
-    const params = { currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics };
-    if (includeDateRange) Object.assign(params, { start_date: filters.startDay, end_date: filters.endDay });
+    const params = includeDateRange
+      ? { currency: filters.currency, attribution: filters.attribution, metrics: filters.metrics, start_date: filters.startDay, end_date: filters.endDay }
+      : {};
     const response = await fetchBdPerformance(params);
     if (!response?.success) {
       rows.value = []; performance.value = {}; errorMessage.value = formatInfluencerError(response, '绩效聚合数据加载失败'); state.value = 'error'; return;
     }
     performance.value = response.data || {};
+    const reportSettings = performance.value.settings || {};
+    filters.currency = performance.value.currency || reportSettings.default_currency || filters.currency;
+    filters.attribution = performance.value.attribution || reportSettings.default_attribution || filters.attribution;
+    filters.metrics = reportSettings.default_metrics || filters.metrics;
     if (performance.value.start_date) filters.startDay = performance.value.start_date;
     if (performance.value.end_date) filters.endDay = performance.value.end_date;
     rows.value = collectionRows(response.data);

@@ -9,7 +9,8 @@ from apps.accounts.models import CustomUser
 from apps.tenants.models import Tenant
 
 from .attribution import refresh_order_attributions
-from .models import SampleFulfillment
+from .bd_config import bd_performance_settings
+from .models import AffiliateOrderSnapshot, SampleFulfillment
 from .services import SAMPLE_TIMEOUT_CANDIDATE_STATUSES, mark_overdue_sample_fulfillments
 
 
@@ -34,6 +35,30 @@ def refresh_affiliate_order_attributions_task(tenant_id):
             )
     result["status"] = "completed"
     return result
+
+
+@shared_task(name="influencers.dispatch_daily_affiliate_order_attribution_refreshes")
+def dispatch_daily_affiliate_order_attribution_refreshes_task():
+    """Queue one tenant-isolated attribution refresh for tenants with order facts."""
+    tenant_ids = list(
+        AffiliateOrderSnapshot.objects.order_by()
+        .values_list("tenant_id", flat=True)
+        .distinct()
+    )
+    queued_tenant_ids = []
+    skipped_tenant_ids = []
+    for tenant_id in tenant_ids:
+        if not bd_performance_settings(tenant_id)["daily_attribution_reconciliation_enabled"]:
+            skipped_tenant_ids.append(tenant_id)
+            continue
+        refresh_affiliate_order_attributions_task.delay(tenant_id=tenant_id)
+        queued_tenant_ids.append(tenant_id)
+    return {
+        "status": "queued",
+        "tenant_count": len(queued_tenant_ids),
+        "tenant_ids": queued_tenant_ids,
+        "skipped_tenant_ids": skipped_tenant_ids,
+    }
 
 
 @shared_task(name="influencers.mark_overdue_sample_fulfillments")
