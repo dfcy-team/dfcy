@@ -35,10 +35,11 @@ describe('系统管理中文显示', () => {
   });
 
   it('内置角色和遗留测试角色使用简短中文名称', () => {
-    expect(adminRoleDisplayName({ code: 'operations', name: 'Operations' })).toBe('业务运营人员');
-    expect(adminRoleDisplayName({ id: 8, code: 'pilot-admin-x', name: 'Pilot E2E admin' })).toBe('试点管理员');
-    expect(adminRoleDisplayName({ id: 9, code: 'bd', name: 'BD' })).toBe('商务拓展');
-    expect(adminRoleDisplayName({ id: 10, code: 'custom-x', name: 'Unknown Role' })).toBe('自定义角色10');
+    expect(adminRoleDisplayName({ code: 'operations', name: '业务运营人员' })).toBe('业务运营人员');
+    expect(adminRoleDisplayName({ id: 8, code: 'pilot-admin-x', name: 'Pilot E2E admin' })).toBe('Pilot E2E admin');
+    expect(adminRoleDisplayName({ id: 9, code: 'bd', name: 'BD' })).toBe('BD');
+    expect(adminRoleDisplayName({ id: 10, code: 'custom-x', name: 'shopee业务运营' })).toBe('shopee业务运营');
+    expect(adminRoleDisplayName({ id: 10, code: 'custom-x', name: '' })).toBe('自定义角色10');
   });
 
   it('权限页面分列显示角色名称和系统标识，并不暴露内部权限编码', () => {

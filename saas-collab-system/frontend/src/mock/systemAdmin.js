@@ -65,17 +65,17 @@ const mockUserRecords = [
   {
     id: 1, tenant_id: 1, username: 'demo-operator', email_masked: 'd***@example.com', phone_masked: '***1200',
     user_type: 'internal', is_active: true, department_id: 1, department_ids: [1],
-    department_name: '经营中心', roles: ['operator']
+    department_name: '经营中心', roles: ['operator'], role_labels: ['业务运营人员']
   },
   {
     id: 2, tenant_id: 1, username: 'demo-finance', email_masked: 'f***@example.com', phone_masked: '***2600',
     user_type: 'internal', is_active: false, department_id: 2, department_ids: [2],
-    department_name: '供应链组', roles: ['finance_viewer']
+    department_name: '供应链组', roles: ['finance_viewer'], role_labels: ['财务查看员']
   },
   {
     id: 3, tenant_id: 1, username: 'demo-unassigned', email_masked: 'u***@example.com', phone_masked: '***0000',
     user_type: 'internal', is_active: true, department_id: null, department_ids: [],
-    department_name: '', roles: []
+    department_name: '', roles: [], role_labels: []
   }
 ];
 
@@ -89,6 +89,7 @@ export const mockUsers = (params = {}) => {
     ...user,
     department_ids: [...(user.department_ids || [])],
     roles: [...(user.roles || [])],
+    role_labels: [...(user.role_labels || [])],
   }));
   let results = users;
   if (String(params.unassigned).toLowerCase() === 'true') {

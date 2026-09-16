@@ -125,6 +125,26 @@ def test_user_directory_applies_field_allow_list_without_exposing_sensitive_valu
     assert row["phone_masked"] == ""
 
 
+def test_user_directory_returns_role_names_separately_from_role_codes():
+    tenant = Tenant.objects.create(name="Role label tenant", code="role-label-tenant")
+    user = create_internal(tenant, "role-label-reader")
+    role = grant_role(user, "operations-shopee-copy", [
+        "system.users.view",
+        "field.system.users.roles.view",
+    ])
+    role.name = "shopee业务运营"
+    role.save(update_fields=["name"])
+
+    client = APIClient()
+    client.force_authenticate(user)
+    response = client.get("/api/internal/system/users/")
+
+    assert response.status_code == 200
+    row = next(item for item in response.json()["data"]["results"] if item["id"] == user.pk)
+    assert row["roles"] == ["operations-shopee-copy"]
+    assert row["role_labels"] == ["shopee业务运营"]
+
+
 def test_platform_superuser_must_supply_target_tenant_for_cross_tenant_role_operations():
     actor_tenant = Tenant.objects.create(name="Platform tenant", code="platform-tenant")
     target_tenant = Tenant.objects.create(name="Target tenant", code="target-tenant")

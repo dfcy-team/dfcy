@@ -58,12 +58,9 @@ const builtInRoleLabels = Object.freeze({
 });
 
 export function adminRoleDisplayName(role) {
+  const rawName = departmentDisplayName(role?.name || '').trim();
+  if (rawName) return rawName;
   if (builtInRoleLabels[role?.code]) return builtInRoleLabels[role.code];
-  const rawName = departmentDisplayName(role?.name || '')
-    .replace(/pilot\s+e2e\s+admin/gi, '试点管理员')
-    .replace(/pilot\s+e2e\s+scoped/gi, '试点范围角色')
-    .replace(/^bd$/i, '商务拓展').trim();
-  if (rawName && !hasLatin(rawName)) return rawName;
   return role?.id ? `自定义角色${role.id}` : '未命名角色';
 }
 
