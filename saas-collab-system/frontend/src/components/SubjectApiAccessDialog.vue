@@ -849,7 +849,9 @@ const oauthBlockerLabels = {
 
 function oauthBlockerText(config) {
   const reasons = (config?.oauth_blockers || []).map((code) => oauthBlockerLabels[code] || code);
-  return reasons.length ? `暂不可授权：${reasons.join('；')}。请先到“连接配置”完成整改。` : '';
+  const callbackMismatch = (config?.oauth_blockers || []).some((code) => ['callback_mismatch', 'callback_not_allowlisted', 'callback_allowlist_missing'].includes(code));
+  const action = callbackMismatch ? '请由系统管理员同时核对“生产环境配置”与“连接配置”' : '请先到“连接配置”完成整改';
+  return reasons.length ? `暂不可授权：${reasons.join('；')}。${action}。` : '';
 }
 
 function canAuthorize(apiType) {

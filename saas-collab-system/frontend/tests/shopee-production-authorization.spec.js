@@ -9,7 +9,9 @@ describe('Shopee production authorization guard', () => {
     const workspace = read('src/views/integrations/IntegrationWorkspace.vue');
 
     expect(workspace).toContain("activeConfig?.platform === 'shopee'");
-    expect(workspace).toContain('oauth/callback/shopee/');
+    expect(workspace).toContain('Shopee 开放平台登记地址');
+    expect(workspace).toContain('placeholder="https://your-domain.example/"');
+    expect(workspace).toContain('网关内部转交到 Shopee 回调处理器');
     expect(workspace).toContain("['partner_id', 'partner_key', 'redirect_uri']");
     expect(workspace).toContain('type="password"');
     expect(workspace).toContain('secretCredentialFields');
@@ -22,6 +24,7 @@ describe('Shopee production authorization guard', () => {
 
     expect(dialog).toContain('oauthBlockerText');
     expect(dialog).toContain('Shopee 授权回调地址尚未配置');
+    expect(dialog).toContain('同时核对“生产环境配置”与“连接配置”');
     expect(dialog).toContain(':disabled="storeAuthorizeAccess.disabled || !selectedConfig(apiType) || !selectedConfig(apiType).oauth_ready"');
     expect(guard).toBeGreaterThan(-1);
     expect(request).toBeGreaterThan(guard);
