@@ -112,7 +112,7 @@
               <SpuCodeDisplay :code="row.spu_code" />
             </template>
           </el-table-column>
-          <el-table-column label="旧SPU" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ row.legacy_spu_code || '' }}</template></el-table-column>
+          <el-table-column label="旧SPU" min-width="150"><template #default="{ row }">{{ row.legacy_spu_code || '' }}</template></el-table-column>
           <el-table-column label="SKU" min-width="220">
             <template #default="{ row }">
               <el-popover
