@@ -170,6 +170,46 @@ def test_effective_database_runtime_overrides_environment_and_keeps_production_w
 
 
 @pytest.mark.django_db
+def test_section_only_version_materializes_complete_effective_runtime_document():
+    tenant = Tenant.objects.create(name="Runtime merge", code="runtime-merge")
+    creator = _user(tenant, "runtime-merge-creator")
+    approver = _user(tenant, "runtime-merge-approver")
+    for code in ("config.view", "config.manage", "config.system.manage"):
+        _grant(creator, code)
+    for code in ("config.view", "config.approve", "config.system.manage"):
+        _grant(approver, code)
+
+    first = create_config_version(
+        definition=_runtime_definition(),
+        actor=creator,
+        value={
+            "network": {
+                "mode": "approved-live-test",
+                "security_approved": True,
+                "readonly_sync_enabled": True,
+                "allowed_hosts": ["api.example.com"],
+                "oauth_redirect_allowlist": ["https://app.example.com/oauth/callback"],
+            },
+            "modules": {"api_integrations": "enabled"},
+        },
+        effective_at=timezone.now(),
+    )
+    approve_config_version(version=first, actor=approver)
+
+    response = _client(creator).post(
+        "/api/internal/integrations/production-settings/versions/",
+        {"value": {"modules": {"api_integrations": "disabled"}}, "change_reason": "停用 API 接入模块验证合并"},
+        format="json",
+    )
+    assert response.status_code == 201
+    stored = TenantConfigVersion.objects.get(pk=response.json()["data"]["version"]["id"])
+    assert stored.value["modules"]["api_integrations"] == "disabled"
+    assert stored.value["network"]["allowed_hosts"] == ["api.example.com"]
+    assert stored.value["network"]["oauth_redirect_allowlist"] == ["https://app.example.com/oauth/callback"]
+    assert {"network", "connection", "custody", "listing_write", "platforms", "modules"} <= set(stored.value)
+
+
+@pytest.mark.django_db
 def test_custody_backend_cache_switches_when_effective_runtime_changes(monkeypatch):
     custody_module.reset_custody_backend_cache()
     runtime = {"custody": {"backend": "refuse", "service_url": "", "service_host": "", "auth_file_path": "", "ca_file_path": ""}}
