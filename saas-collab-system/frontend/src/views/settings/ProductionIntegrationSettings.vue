@@ -195,7 +195,10 @@
             <div v-else class="form-grid compact">
               <el-form-item label="公开 App ID *"><el-input v-model="form.platforms[platform].app_id" autocomplete="off" placeholder="填写平台公开应用 ID" /></el-form-item>
               <el-form-item v-if="platform === 'tiktok'" label="Service ID"><el-input v-model="form.platforms[platform].service_id" autocomplete="off" placeholder="TikTok Shop Service ID" /></el-form-item>
-              <el-form-item label="OAuth redirect_uri *"><el-input v-model="form.platforms[platform].redirect_uri" type="url" autocomplete="off" placeholder="https://.../callback" /></el-form-item>
+              <el-form-item label="OAuth redirect_uri *">
+                <el-input v-model="form.platforms[platform].redirect_uri" type="url" autocomplete="off" :placeholder="platform === 'shopee' ? 'https://your-domain.example/' : 'https://.../callback'" />
+                <small v-if="platform === 'shopee'" class="field-help">Shopee 填写开放平台实际登记的 HTTPS 根地址；网关会仅在同时存在 OAuth code/error 和 state 时内部转交回调。</small>
+              </el-form-item>
               <el-form-item label="market *"><el-input v-model="form.platforms[platform].market" maxlength="40" placeholder="SG" /></el-form-item>
               <el-form-item v-if="platform === 'shopee'" label="region"><el-input v-model="form.platforms[platform].region" maxlength="40" placeholder="SG" /></el-form-item>
             </div>

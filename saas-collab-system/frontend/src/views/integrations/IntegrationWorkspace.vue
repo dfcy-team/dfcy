@@ -303,7 +303,10 @@
         <template v-else-if="activeConfig?.platform === 'shopee'">
           <el-form-item label="Partner ID"><el-input v-model="credentialForm.partner_id" inputmode="numeric" maxlength="32" placeholder="留空保留现值" /></el-form-item>
           <el-form-item label="Partner Key"><el-input v-model="credentialForm.partner_key" type="password" autocomplete="new-password" placeholder="输入新的 Partner Key" /></el-form-item>
-          <el-form-item label="授权回调地址" class="wide"><el-input v-model="credentialForm.redirect_uri" type="url" maxlength="500" placeholder="https://your-domain.example/api/internal/integrations/store-authorizations/oauth/callback/shopee/" /></el-form-item>
+          <el-form-item label="Shopee 开放平台登记地址" class="wide">
+            <el-input v-model="credentialForm.redirect_uri" type="url" maxlength="500" aria-describedby="shopee-callback-help" placeholder="https://your-domain.example/" />
+            <span id="shopee-callback-help" class="safe-note">填写 Shopee 开放平台允许登记的 HTTPS 根地址。授权返回时系统会在网关内部转交到 Shopee 回调处理器；请勿填写带 code/state 的地址。</span>
+          </el-form-item>
         </template>
         <template v-else-if="activeConfig?.platform === 'tiktok' && activeConfig?.api_type === 'advertising'">
           <el-form-item label="App ID"><el-input v-model="credentialForm.ads_app_id" maxlength="255" placeholder="留空保留现值" /></el-form-item>
