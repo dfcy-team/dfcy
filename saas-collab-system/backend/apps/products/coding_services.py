@@ -18,7 +18,7 @@ SEASONS = (
 # New product creation uses the tenant attribute dictionary, whose one-digit
 # namespace also reserves ``0`` for the default/unset value.
 SEASON_CODES = {item["code"] for item in SEASONS}
-ATTRIBUTE_CODES = {str(number) for number in range(10)}
+ATTRIBUTE_CODES = set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 SPEC_VALUE_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)?(?:cm|mm|kg|m|inch)$", re.IGNORECASE)
 SKU_CODE_MAX_LENGTH = 80
 
@@ -35,7 +35,7 @@ def category_path(category):
 def allocate_spu_code(*, tenant, category, season_code):
     if category.tenant_id != tenant.id or not category.is_active:
         raise ValidationError("Category must be active and belong to the current tenant.")
-    season_code = str(season_code or "")
+    season_code = str(season_code or "").strip().upper()
     if season_code not in ATTRIBUTE_CODES:
         raise ValidationError("Unsupported attribute code.")
     l1, l2, l3 = category_path(category)

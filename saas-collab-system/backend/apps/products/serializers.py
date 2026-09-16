@@ -338,11 +338,11 @@ class ProductSPUSerializer(serializers.ModelSerializer):
         if instance and "season_code" in attrs and attrs["season_code"] != instance.season_code:
             raise serializers.ValidationError("Attribute code is immutable after SPU creation.")
         if instance is None and not self.initial_data.get("spu_code"):
-            attrs["season_code"] = str(attrs.get("season_code") or "0")
+            attrs["season_code"] = str(attrs.get("season_code") or "0").strip().upper()
             if not attrs.get("category_node"):
                 raise serializers.ValidationError({"category_node": "Category is required for automatic coding."})
             if str(attrs.get("season_code") or "") not in ATTRIBUTE_CODES:
-                raise serializers.ValidationError({"season_code": "Attribute code must be one digit."})
+                raise serializers.ValidationError({"season_code": "Attribute code must be one uppercase letter or digit."})
             try:
                 category_path(attrs["category_node"])
             except DjangoValidationError as exc:

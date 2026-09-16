@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.coding_services import SEASON_CODES, allocate_spu_code
-from apps.products.models import ProductCategory, ProductCodeSequence, ProductSKU, ProductSPU
+from apps.products.models import ProductAttribute, ProductCategory, ProductCodeSequence, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
 
@@ -185,7 +185,7 @@ def test_category_specification_put_supports_leaf_l2_and_l3_but_not_parent_l2():
     assert l3.spec_dimensions == dimensions
 
 
-@pytest.mark.parametrize("attribute_code", ["0", "6", "9"])
+@pytest.mark.parametrize("attribute_code", ["0", "6", "9", "A", "Z"])
 def test_spu_generation_accepts_attribute_codes_and_syncs_stale_sequences(attribute_code):
     tenant = Tenant.objects.create(name=f"Attribute tenant {attribute_code}", code=f"attribute-{attribute_code}")
     l1, l2, l3 = _tree(tenant)
@@ -218,16 +218,33 @@ def test_spu_generation_accepts_attribute_codes_and_syncs_stale_sequences(attrib
     assert segments == ("1", "01", "01")
 
 
-def test_spu_api_defaults_to_attribute_code_zero_and_accepts_codes_six_and_nine():
+def test_spu_api_defaults_to_zero_and_normalizes_letter_attribute_codes():
     tenant = Tenant.objects.create(name="Attribute API tenant", code="attribute-api")
     client = _client(tenant, "attribute-api-manager")
     _l1, _l2, l3 = _tree(tenant)
 
-    for attribute_code in ("0", "6", "9"):
-        payload = {"product_name": f"Product {attribute_code}", "category_node": l3.pk}
-        if attribute_code != "0":
-            payload["season_code"] = attribute_code
+    for supplied_code, expected_code in (("0", "0"), ("6", "6"), ("9", "9"), ("a", "A"), ("Z", "Z")):
+        payload = {"product_name": f"Product {expected_code}", "category_node": l3.pk}
+        if supplied_code != "0":
+            payload["season_code"] = supplied_code
         response = client.post("/api/internal/products/spus/", payload, format="json")
         assert response.status_code == 201, response.content
-        assert response.json()["data"]["season_code"] == attribute_code
-        assert response.json()["data"]["spu_code"] == f"10101{attribute_code}001"
+        assert response.json()["data"]["season_code"] == expected_code
+        assert response.json()["data"]["spu_code"] == f"10101{expected_code}001"
+
+
+def test_attribute_dictionary_continues_with_letters_after_nine():
+    tenant = Tenant.objects.create(name="Letter attribute tenant", code="letter-attributes")
+    client = _client(tenant, "letter-attribute-manager")
+
+    for index in range(10):
+        response = client.post(
+            "/api/internal/products/attributes/",
+            {"name": f"Attribute {index + 1}", "is_active": True},
+            format="json",
+        )
+        assert response.status_code == 201, response.content
+
+    assert list(
+        ProductAttribute.objects.filter(tenant=tenant).order_by("id").values_list("code", flat=True)
+    ) == [*"123456789A"]

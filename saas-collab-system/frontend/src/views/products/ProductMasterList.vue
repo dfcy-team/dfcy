@@ -581,9 +581,9 @@ const productRowStyle = ({ row }) => categoryRowStyle(row, categories.value);
 
 const activeColors = computed(() => colors.value.filter((item) => item?.is_active !== false));
 const activeAttributes = computed(() => attributes.value
-  .filter((item) => item?.is_active !== false && /^[1-9]$/.test(String(item?.code ?? '').trim()))
-  .map((item) => ({ ...item, code: String(item.code).trim() }))
-  .sort((left, right) => Number(left.code) - Number(right.code)));
+  .filter((item) => item?.is_active !== false && /^[1-9A-Z]$/.test(String(item?.code ?? '').trim().toUpperCase()))
+  .map((item) => ({ ...item, code: String(item.code).trim().toUpperCase() }))
+  .sort((left, right) => left.code.localeCompare(right.code, 'en')));
 const skuCategory = computed(() => {
   const categoryId = skuTarget.value?.category_node;
   return categories.value.find((item) => String(item.id) === String(categoryId)) || null;
@@ -888,10 +888,10 @@ async function saveProduct() {
   if (attributeLoading.value) {
     return ElMessage.warning('属性编码字典加载中，请稍后重试');
   }
-  const attributeCode = String(createForm.season_code ?? '').trim() || '0';
+  const attributeCode = (String(createForm.season_code ?? '').trim().toUpperCase() || '0');
   const isKnownAttribute = attributeCode === '0'
     || activeAttributes.value.some((attribute) => attribute.code === attributeCode);
-  if (!/^[0-9]$/.test(attributeCode) || !isKnownAttribute) {
+  if (!/^[0-9A-Z]$/.test(attributeCode) || !isKnownAttribute) {
     return ElMessage.warning('请选择属性设置中的启用属性编码，未选择时按 0 处理');
   }
   if (saving.value) return;
