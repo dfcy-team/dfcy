@@ -153,6 +153,14 @@ describe('商品明细数据页面契约', () => {
     expect(page).not.toContain('组合商品导入');
   });
 
+  it('按当前筛选导出全部商品明细数据', () => {
+    expect(page).toContain('data-testid="product-detail-export"');
+    expect(page).toContain("command === 'detail-export'");
+    expect(page).toContain('exportProductDetails(filters)');
+    expect(api).toContain('/api/internal/products/details/export/');
+    expect(api).toContain("'product-detail.csv'");
+  });
+
   it('在新增导入模板允许旧 SPU/SKU 留空，其他生成必需字段保留星号', () => {
     for (const header of ['旧SPU编码', '旧SKU编码', '新SPU编码', '*商品名称', '*完整类目编码', '*属性编码', '*颜色英文编码', '*规格']) {
       expect(page).toContain(`'${header}'`);

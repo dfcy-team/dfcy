@@ -373,6 +373,21 @@ class ProductSPUSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class ProductSPURecodeRowSerializer(serializers.Serializer):
+    row_number = serializers.IntegerField(required=False, min_value=1)
+    source_spu_code = serializers.CharField(required=False, allow_blank=True, max_length=120)
+    spu_code = serializers.CharField(required=False, allow_blank=True, max_length=120)
+    product_name = serializers.CharField(required=False, allow_blank=False, max_length=200, trim_whitespace=True)
+    attribute_code = serializers.CharField(required=False, allow_blank=True, max_length=1)
+    serial_number = serializers.CharField(required=False, allow_blank=True, max_length=3)
+
+
+class ProductSPURecodeSerializer(serializers.Serializer):
+    rows = ProductSPURecodeRowSerializer(many=True, allow_empty=False)
+    dry_run = serializers.BooleanField(default=False)
+    atomic = serializers.BooleanField(default=True)
+
+
 DETAIL_EDIT_CLEARABLE_FIELDS = {
     "purchase_price",
     "package_weight",

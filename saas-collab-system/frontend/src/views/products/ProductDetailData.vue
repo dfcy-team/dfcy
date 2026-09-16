@@ -18,6 +18,7 @@
               <el-dropdown-item command="bigseller-export" data-testid="bigseller-create-product-export" :disabled="!exportableSelectedRows.length || bigsellerExporting">
                 下载 BigSeller 商品SKU表
               </el-dropdown-item>
+              <el-dropdown-item command="detail-export" data-testid="product-detail-export">导出商品明细 CSV</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -572,6 +573,7 @@ import {
   fetchProductColors,
   fetchProductAttributes,
   fetchProductDetailList,
+  exportProductDetails,
   importLegacyProductItems,
   updateLegacyProductItem,
   generateLegacyProductItem,
@@ -1401,6 +1403,7 @@ function handleIoCommand(command) {
   else if (command === 'legacy-import') openLegacyImport();
   else if (command === 'image-import') openImageBatch();
   else if (command === 'bigseller-export') exportBigSellerProducts();
+  else if (command === 'detail-export') exportProductDetails(filters);
 }
 
 function selectCreateImportFile(event) {

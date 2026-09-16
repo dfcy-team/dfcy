@@ -78,6 +78,67 @@ def test_product_detail_collection_flattens_rows_and_supports_pagination_and_glo
 
 
 @pytest.mark.django_db
+def test_product_exports_apply_filters_tenant_scope_and_csv_formula_protection():
+    tenant = Tenant.objects.create(name="Export tenant", code="product-export")
+    other_tenant = Tenant.objects.create(name="Other export tenant", code="other-product-export")
+    user = _user(tenant)
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    visible_spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="EXPORT-SPU-1",
+        product_name="=Formula product",
+        sales_status=ProductSPU.SalesStatus.ON_SALE,
+    )
+    ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="EXPORT-SPU-2",
+        product_name="Filtered product",
+        sales_status=ProductSPU.SalesStatus.STOPPED,
+    )
+    ProductSPU.objects.create(
+        tenant=other_tenant,
+        spu_code="OTHER-SPU",
+        product_name="=Formula product",
+    )
+    ProductSKU.objects.create(
+        tenant=tenant,
+        spu=visible_spu,
+        sku_code="EXPORT-SKU-ACTIVE",
+        product_name="Visible detail",
+        is_active=True,
+    )
+    ProductSKU.objects.create(
+        tenant=tenant,
+        spu=visible_spu,
+        sku_code="EXPORT-SKU-INACTIVE",
+        product_name="Hidden detail",
+        is_active=False,
+    )
+
+    master = client.get(
+        "/api/internal/products/spus/export/",
+        {"search": "Formula", "sales_status": ProductSPU.SalesStatus.ON_SALE},
+    )
+    assert master.status_code == 200
+    assert master["Content-Type"].startswith("text/csv")
+    master_csv = master.content.decode("utf-8-sig")
+    assert "EXPORT-SPU-1" in master_csv
+    assert "EXPORT-SPU-2" not in master_csv
+    assert "OTHER-SPU" not in master_csv
+    assert "'=Formula product" in master_csv
+
+    details = client.get("/api/internal/products/details/export/", {"sku_status": "active"})
+    assert details.status_code == 200
+    assert details["Content-Type"].startswith("text/csv")
+    detail_csv = details.content.decode("utf-8-sig")
+    assert "EXPORT-SKU-ACTIVE" in detail_csv
+    assert "EXPORT-SKU-INACTIVE" not in detail_csv
+    assert "OTHER-SPU" not in detail_csv
+
+
+@pytest.mark.django_db
 def test_product_detail_collection_does_not_count_or_sort_a_union():
     cache.clear()
     tenant = Tenant.objects.create(name="Efficient detail tenant", code="efficient-detail")

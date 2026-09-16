@@ -36,6 +36,7 @@
         >
           移动目录
         </el-button>
+        <el-button data-testid="product-master-export" :loading="exporting" @click="exportMaster">导出数据</el-button>
         <el-button v-if="canManage" type="primary" @click="openCreate">创建商品</el-button>
       </div>
     </header>
@@ -111,6 +112,7 @@
               <SpuCodeDisplay :code="row.spu_code" />
             </template>
           </el-table-column>
+          <el-table-column label="旧SPU" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ row.legacy_spu_code || '' }}</template></el-table-column>
           <el-table-column label="SKU" min-width="220">
             <template #default="{ row }">
               <el-popover
@@ -175,6 +177,7 @@
                 >
                   编辑
                 </el-button>
+                <el-button v-if="canManage" link type="primary" :disabled="!canRecode(row)" :title="recodeDisabledReason(row)" data-testid="product-master-recode-button" @click="openRecode(row)">修改SPU编码</el-button>
                 <el-button
                   v-if="canManage"
                   link
@@ -469,6 +472,18 @@
         <el-button type="primary" :loading="statusSaving" data-testid="product-master-save-status" @click="saveStatus">保存状态</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="recodeVisible" title="修改 SPU 编码" width="min(760px, 96vw)" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="来源 SPU（支持旧/新编码）"><el-input v-model="recodeForm.source_spu_code" data-testid="recode-source" /></el-form-item>
+        <el-form-item label="商品名称"><el-input v-model="recodeForm.product_name" data-testid="recode-product-name" /></el-form-item>
+        <el-form-item label="属性编码"><el-input v-model="recodeForm.attribute_code" maxlength="1" data-testid="recode-attribute" /></el-form-item>
+        <el-form-item label="三位流水"><el-input v-model="recodeForm.serial_number" maxlength="3" data-testid="recode-serial" /></el-form-item>
+        <el-form-item label="CSV 批量改码"><p class="form-help">CSV 列：source_spu_code,product_name,attribute_code,serial_number</p><input type="file" accept=".csv,text/csv" data-testid="recode-file" @change="loadRecodeCsv" /><el-button data-testid="recode-csv-preview" :disabled="!recodeRows.length" @click="previewRecode">预检导入数据</el-button></el-form-item>
+      </el-form>
+      <el-table v-if="recodeResults.length" :data="recodeResults" border size="small" data-testid="recode-results"><el-table-column prop="row_number" label="行号" /><el-table-column prop="source_spu_code" label="来源 SPU" /><el-table-column prop="target_spu_code" label="目标 SPU" /><el-table-column prop="status" label="状态" /><el-table-column label="冲突"><template #default="{ row }"><div v-if="row.conflicts?.length" v-for="(conflict, index) in row.conflicts" :key="index">{{ conflict.code }} {{ conflict.message }}（{{ conflict.field }}）</div><span v-else>无</span></template></el-table-column><el-table-column label="SKU映射"><template #default="{ row }"><div v-for="(mapping, index) in (row.sku_mappings || [])" :key="index">{{ mapping.source_sku_code }} → {{ mapping.target_sku_code }}</div></template></el-table-column></el-table>
+      <el-alert v-if="recodeResults.length" :title="recodeResults.map((item) => item.conflicts?.map((c) => c.message).join('；')).filter(Boolean).join('；') || '预检通过'" :type="hasRecodeConflicts ? 'error' : 'success'" :closable="false" />
+      <template #footer><el-button @click="recodeVisible = false">取消</el-button><el-button :loading="recodeBusy" data-testid="recode-preview" @click="previewRecode">预检</el-button><el-button type="primary" :loading="recodeBusy" :disabled="!recodeResults.length || hasRecodeConflicts" data-testid="recode-execute" @click="executeRecode">确认执行</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
@@ -483,6 +498,8 @@ import {
   fetchProductColors,
   fetchProductAttributes,
   fetchProductMasterList,
+  exportProductMaster,
+  recodeProductSpus,
   updateProductSpu,
   updateProductSpuStatus,
   deleteProductSpu,
@@ -515,6 +532,7 @@ const page = ref(1);
 const pageSize = ref(20);
 const pageSizes = [10, 20, 50, 100];
 const loading = ref(false);
+const exporting = ref(false);
 const state = ref('loading');
 const message = ref('');
 const stateLabels = {
@@ -562,6 +580,12 @@ const moveCategoryNode = ref(null);
 const statusVisible = ref(false);
 const statusSaving = ref(false);
 const statusForm = reactive({ id: null, lifecycle_status: 'draft', sales_status: 'not_listed' });
+const recodeVisible = ref(false);
+const recodeBusy = ref(false);
+const recodeResults = ref([]);
+const recodeRows = ref([]);
+const recodeForm = reactive({ source_spu_code: '', product_name: '', attribute_code: '', serial_number: '' });
+const hasRecodeConflicts = computed(() => recodeResults.value.some((item) => item.conflicts?.length));
 
 const lifecycleOptions = [
   { value: 'draft', label: '草稿' },
@@ -718,6 +742,73 @@ async function load() {
     message.value = spus.message;
   }
   loading.value = false;
+}
+
+function canRecode(row) {
+  return Boolean(canManage.value && row?.id && !row.is_code_frozen
+    && (row.lifecycle_status || 'draft') === 'draft'
+    && (row.sales_status || 'not_listed') === 'not_listed');
+}
+
+function recodeDisabledReason(row) {
+  if (!row?.id) return '商品缺少有效标识';
+  if (row.is_code_frozen) return '编码已冻结，不能修改';
+  if ((row.lifecycle_status || 'draft') !== 'draft') return '仅草稿商品可修改编码';
+  if ((row.sales_status || 'not_listed') !== 'not_listed') return '仅未刊登商品可修改编码';
+  return '';
+}
+
+async function exportMaster() {
+  if (exporting.value) return;
+  exporting.value = true;
+  try { await exportProductMaster({ ...filters }); } catch (error) { ElMessage.error(error?.message || '导出失败'); }
+  finally { exporting.value = false; }
+}
+
+function openRecode(row) {
+  Object.assign(recodeForm, { source_spu_code: row?.spu_code || '', product_name: row?.product_name || '', attribute_code: '', serial_number: '' });
+  recodeResults.value = [];
+  recodeRows.value = [];
+  recodeVisible.value = true;
+}
+
+function loadRecodeCsv(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const lines = String(reader.result || '').replace(/^\uFEFF/, '').split(/\r?\n/).filter(Boolean);
+    if (lines.length < 2) return ElMessage.warning('CSV 没有有效数据');
+    const headers = lines[0].split(',').map((item) => item.trim().toLowerCase());
+    const value = (values, name) => values[headers.indexOf(name)]?.trim() || '';
+    recodeRows.value = lines.slice(1).map((line, index) => {
+      const values = line.split(',');
+      return { row_number: index + 2, source_spu_code: value(values, 'source_spu_code'), product_name: value(values, 'product_name'), attribute_code: value(values, 'attribute_code').toUpperCase(), serial_number: value(values, 'serial_number') };
+    }).filter((row) => row.source_spu_code);
+    recodeResults.value = [];
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+async function previewRecode() {
+  recodeBusy.value = true;
+  try {
+    const rows = recodeRows.value.length ? recodeRows.value : [{ ...recodeForm }];
+    const response = await recodeProductSpus({ dry_run: true, atomic: true, rows });
+    recodeResults.value = response.success ? (response.data?.results || []) : [{ conflicts: [{ message: response.message || '预检失败' }] }];
+  } catch (error) { recodeResults.value = [{ conflicts: [{ message: error?.message || '预检失败' }] }]; }
+  finally { recodeBusy.value = false; }
+}
+
+async function executeRecode() {
+  recodeBusy.value = true;
+  try {
+    const rows = recodeRows.value.length ? recodeRows.value : [{ ...recodeForm }];
+    const response = await recodeProductSpus({ dry_run: false, atomic: true, rows });
+    if (response.success) { ElMessage.success('SPU 编码已修改'); recodeVisible.value = false; await load(); }
+    else ElMessage.error(response.message || '执行失败');
+  } catch (error) { ElMessage.error(error?.message || '执行失败'); }
+  finally { recodeBusy.value = false; }
 }
 
 async function loadCategories() {

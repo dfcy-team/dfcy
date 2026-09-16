@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { downloadApiFile, requestWithMockFallback } from './request';
 import {
   mockFreezeProductCode,
   mockProductMasterDetail,
@@ -19,6 +19,19 @@ export const fetchResearchDetail = (id = 1) =>
 
 export const fetchProductMasterList = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/spus/', params }, mockProductMasterList, 'products.spus');
+
+const exportQuery = (params = {}) => new URLSearchParams(
+  Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+).toString();
+
+export const exportProductMaster = (params = {}) =>
+  downloadApiFile(`/api/internal/products/spus/export/?${exportQuery(params)}`, 'product-master.csv');
+
+export const recodeProductSpus = (data = {}) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/products/spus/recode/', data, timeout: 120000 },
+  () => ({ success: false, message: '模拟环境不支持SPU改码' }),
+  'products.spus.recode'
+);
 
 export const createProductSpu = (data = {}) =>
   requestWithMockFallback({ method: 'post', url: '/api/internal/products/spus/', data }, () => ({
@@ -70,6 +83,9 @@ export const fetchProductDetailList = (params = {}) =>
     mockProductDetailList,
     'products.details'
   );
+
+export const exportProductDetails = (params = {}) =>
+  downloadApiFile(`/api/internal/products/details/export/?${exportQuery(params)}`, 'product-detail.csv');
 
 export const bulkUpdateProductDetails = (data = {}) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/products/details/bulk-update/', data },
