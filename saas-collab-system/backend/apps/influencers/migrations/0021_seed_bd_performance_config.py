@@ -36,6 +36,6 @@ def remove_bd_performance_config(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("configcenter", "0003_product_readonly_endpoint_defaults"),
-        ("influencers", "0018_source_personnel_snapshots"),
+        ("influencers", "0020_influencer_query_efficiency"),
     ]
     operations = [migrations.RunPython(seed_bd_performance_config, remove_bd_performance_config)]
