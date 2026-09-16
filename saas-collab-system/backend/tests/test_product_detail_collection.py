@@ -91,6 +91,13 @@ def test_product_detail_collection_does_not_count_or_sort_a_union():
     assert response.status_code == 200
     assert response.json()["data"]["count"] == 8
     assert all("UNION" not in query["sql"].upper() for query in captured.captured_queries)
+    key_queries = [
+        query["sql"] for query in captured.captured_queries
+        if "PRODUCTS_PRODUCTLEGACYITEM" in query["sql"].upper()
+        or "PRODUCTS_PRODUCTSKU" in query["sql"].upper()
+    ]
+    assert any("EXISTS" in sql.upper() for sql in key_queries)
+    assert sum("LIMIT 2" in sql.upper() for sql in key_queries) >= 2
 
 
 @pytest.mark.django_db
