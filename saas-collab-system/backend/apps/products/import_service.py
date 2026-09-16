@@ -211,8 +211,9 @@ def _parse_row(row, headers, line_no):
         parsed[key] = value
 
     if "attribute_code" in parsed:
-        if not re.fullmatch(r"[0-9]", parsed["attribute_code"]):
-            raise ImportRowError(f"属性码必须为空或 1 位数字：{parsed['attribute_code']}")
+        parsed["attribute_code"] = parsed["attribute_code"].strip().upper()
+        if parsed["attribute_code"] and not re.fullmatch(r"[0-9A-Z]", parsed["attribute_code"]):
+            raise ImportRowError(f"属性码必须为空或 1 位字母/数字：{parsed['attribute_code']}")
 
     for key in DECIMAL_SPECS:
         if key in parsed:

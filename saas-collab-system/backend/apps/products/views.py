@@ -424,9 +424,11 @@ def product_attribute_collection(request):
     )
     with transaction.atomic():
         existing = list(ProductAttribute.objects.select_for_update().filter(tenant=request.user.tenant).values_list("code", flat=True))
-        next_code = next((str(number) for number in range(1, 10) if str(number) not in existing), None)
+        code_candidates = list("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        existing = {str(code).strip().upper() for code in existing}
+        next_code = next((code for code in code_candidates if code not in existing), None)
         if next_code is None:
-            return error_response(ErrorCode.STATE_CONFLICT, "一位属性编码已用完（1-9）。", status=409)
+            return error_response(ErrorCode.STATE_CONFLICT, "一位属性编码已用完（1-9、A-Z）。", status=409)
         serializer = ProductAttributeSerializer(data=request.data, context=_serializer_context(request))
         serializer.is_valid(raise_exception=True)
         item = serializer.save(tenant=request.user.tenant, code=next_code)

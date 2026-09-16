@@ -29,6 +29,7 @@ const categoryRows = [
 const attributeRows = [
   { id: 11, code: '2', name: '春季', is_active: true },
   { id: 12, code: '3', name: '停用属性', is_active: false },
+  { id: 13, code: 'A', name: '字母属性', is_active: true },
 ];
 
 const collection = (results = []) => ({
@@ -160,5 +161,20 @@ describe('商品主数据属性编码创建流程', () => {
     await wrapper.vm.saveProduct();
 
     expect(productsApi.createProductSpu).not.toHaveBeenCalled();
+  });
+
+  it('提交字母属性编码时统一转为大写', async () => {
+    const wrapper = await mountPage();
+    await wrapper.vm.openCreate();
+    await flushPromises();
+
+    wrapper.vm.createForm.product_name = '字母属性床笠';
+    wrapper.vm.createForm.category_node = 3;
+    wrapper.vm.createForm.season_code = 'a';
+    await wrapper.vm.saveProduct();
+    await flushPromises();
+
+    expect(productsApi.createProductSpu).toHaveBeenCalledTimes(1);
+    expect(productsApi.createProductSpu.mock.calls[0][0].season_code).toBe('A');
   });
 });

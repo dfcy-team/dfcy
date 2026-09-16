@@ -235,7 +235,7 @@
         <template v-else-if="currentKind === 'attributes'">
           <el-form-item label="属性编码">
             <el-input v-if="form.id" v-model="form.code" disabled />
-            <p v-else class="generated-code-note">保存后按现有字典顺序自动生成 1–9 的一位编码。</p>
+            <p v-else class="generated-code-note">保存后按现有字典顺序自动生成 1–9、A–Z 的一位编码。</p>
           </el-form-item>
           <el-form-item label="属性名称" required>
             <el-input v-model="form.name" data-testid="attribute-name" maxlength="80" placeholder="例如：季节" />
@@ -335,7 +335,7 @@ const CONFIG = {
     title: '属性设置',
     subtitle: '维护用于商品编码的属性名称和一位属性编码字典。',
     contentTitle: '商品属性字典',
-    contentCaption: '新属性按 1–9 顺序自动分配编码，商品编码会引用这里的属性编码。',
+    contentCaption: '新属性按 1–9、A–Z 顺序自动分配编码，商品编码会引用这里的属性编码。',
     emptyText: '暂无属性字典',
     viewPermissions: ['products.attribute.view', 'products.master.view'],
     managePermissions: ['products.attribute.manage', 'products.specification.manage', 'products.master.manage']

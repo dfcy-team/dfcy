@@ -99,8 +99,9 @@ class ProductAttribute(models.Model):
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_product_attribute_per_tenant")]
 
     def clean(self):
-        if not self.code.isdigit() or len(self.code) != 1 or self.code == "0":
-            raise ValidationError({"code": "Attribute code must be one digit from 1 to 9."})
+        self.code = str(self.code or "").strip().upper()
+        if len(self.code) != 1 or self.code not in "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            raise ValidationError({"code": "Attribute code must be one uppercase letter or digit from 1 to 9."})
 
     def save(self, *args, **kwargs):
         self.full_clean()
