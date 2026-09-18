@@ -296,6 +296,7 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
         data = self._request_json(
             "POST",
             f"{self._host()}{path}",
+            retry=False,
             query=self._signed_public_query(path),
             json_body={
                 "refresh_token": refresh_token,

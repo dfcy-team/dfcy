@@ -328,6 +328,10 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
+    "refresh-due-integration-credentials": {
+        "task": "apps.integrations.tasks.refresh_due_integration_credentials",
+        "schedule": 60.0,
+    },
     "refresh-country-cny-exchange-rates": {
         "task": "apps.masterdata.tasks.refresh_country_cny_exchange_rates",
         "schedule": crontab(minute=30, hour=18),
