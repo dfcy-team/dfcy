@@ -3,7 +3,7 @@ const labels = {
   pending: '待处理', processing: '处理中', running: '运行中', queued: '排队中',
   completed: '已完成', success: '成功', partial: '部分成功', failed: '失败',
   open: '待处理', resolved: '已解决', high: '高', medium: '中', low: '低',
-  healthy: '正常', warning: '需关注', none: '无', confirmed: '已确认',
+  healthy: '正常', warning: '需关注', none: '无', confirmed: '已确认', accepted: '已接受',
   fulfilled: '已履约', cancelled: '已取消', canceled: '已取消', rejected: '已拒绝',
   approved: '已通过', closed: '已关闭', mapped: '已关联', unmapped: '未关联',
   active: '已启用', disabled: '已停用', idle: '尚未运行', expired: '已过期',
