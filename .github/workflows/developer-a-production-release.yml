@@ -330,8 +330,18 @@ jobs:
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
-            $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
-            if ($LASTEXITCODE -ne 0) { throw 'VM deployment failed.' }
+            $ssh = [Diagnostics.ProcessStartInfo]::new()
+            $ssh.FileName = 'ssh.exe'
+            $ssh.UseShellExecute = $false
+            $ssh.RedirectStandardInput = $true
+            foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $remote)) {
+              [void]$ssh.ArgumentList.Add($argument)
+            }
+            $process = [Diagnostics.Process]::Start($ssh)
+            $process.StandardInput.Write($env:GHCR_TOKEN)
+            $process.StandardInput.Close()
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) { throw 'VM deployment failed.' }
           } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
 
   remote-rollback:
@@ -362,6 +372,16 @@ jobs:
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "rollback --emergency --reason-b64=$reasonB64 --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
-            $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
-            if ($LASTEXITCODE -ne 0) { throw 'VM rollback failed.' }
+            $ssh = [Diagnostics.ProcessStartInfo]::new()
+            $ssh.FileName = 'ssh.exe'
+            $ssh.UseShellExecute = $false
+            $ssh.RedirectStandardInput = $true
+            foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $remote)) {
+              [void]$ssh.ArgumentList.Add($argument)
+            }
+            $process = [Diagnostics.Process]::Start($ssh)
+            $process.StandardInput.Write($env:GHCR_TOKEN)
+            $process.StandardInput.Close()
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) { throw 'VM rollback failed.' }
           } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }

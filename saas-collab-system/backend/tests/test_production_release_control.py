@@ -96,6 +96,14 @@ def test_production_release_builds_the_pilot_frontend_image():
     assert "file: saas-collab-system/deploy/sandbox/application/Dockerfile.frontend" not in workflow
 
 
+def test_registry_token_is_written_to_ssh_stdin_without_pipeline_newline():
+    workflow = _production_workflow()
+
+    assert "$env:GHCR_TOKEN | & ssh.exe" not in workflow
+    assert workflow.count("$ssh.RedirectStandardInput = $true") == 2
+    assert workflow.count("$process.StandardInput.Write($env:GHCR_TOKEN)") == 2
+
+
 def test_internal_health_probe_marks_the_request_as_https():
     script = _health_script()
 
