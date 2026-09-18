@@ -60,6 +60,8 @@ describe('integration sync workspace health contract', () => {
     expect(page).toContain("permission: 'integrations.manage'");
     expect(page).toContain('runSyncJobMock');
     expect(page).toContain('disableSyncJob');
+    expect(page).toContain("['queued', 'running'].includes(row.schedule_state)");
+    expect(page).toContain('任务正在排队或运行，请勿重复提交或切换状态。');
     expect(page).not.toMatch(/\/api\/(external|rpa|finance)\//);
   });
 

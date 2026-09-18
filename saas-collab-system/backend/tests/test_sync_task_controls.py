@@ -7,7 +7,10 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from kombu.exceptions import OperationalError
 
+from apps.integrations.adapters import MockPlatformAdapter
 from apps.integrations.models import SyncRun
+from apps.integrations.sync_services import enqueue_sync_run, run_sync_job
+from apps.integrations.tasks import run_readonly_sync_job
 from apps.permissions.models import Permission, Role
 from tests.test_mock_sync_isolation import context, assert_no_execution
 
@@ -94,9 +97,79 @@ def test_live_request_is_only_accepted_after_preflight(context):
         response = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/run/', {'idempotency_key': 'fake-key'}, format='json')
     assert response.status_code == 202
     assert response.data['data']['accepted'] is True
+    assert response.data['data']['created'] is True
+    assert response.data['data']['run']['status'] == SyncRun.Status.QUEUED
     adapter.validate_configuration.assert_called_once()
     queue.assert_called_once_with(job.id, 'fake-key')
-    assert not SyncRun.objects.filter(sync_job=job).exists()
+    queued = SyncRun.objects.get(sync_job=job)
+    assert queued.idempotency_key == 'fake-key'
+    assert queued.enqueued_at is not None
+
+
+def test_live_request_blocks_second_key_while_first_is_queued(context):
+    client, job = context
+    grant_live(job)
+    adapter = Mock(execution_mode='live_readonly')
+    with patch('apps.integrations.sync_services.get_adapter_for_config', return_value=adapter), \
+            patch('apps.integrations.views.run_readonly_sync_job.delay', return_value=SimpleNamespace(id='fake-task')) as queue:
+        first = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/run/', {'idempotency_key': 'first-key'}, format='json')
+        second = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/run/', {'idempotency_key': 'second-key'}, format='json')
+    assert first.status_code == 202
+    assert second.status_code == 400
+    assert '正在排队或运行' in str(second.data)
+    queue.assert_called_once_with(job.id, 'first-key')
+    assert SyncRun.objects.filter(sync_job=job, status=SyncRun.Status.QUEUED).count() == 1
+
+    disable = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/disable/', {}, format='json')
+    assert disable.status_code == 400
+    job.refresh_from_db()
+    assert job.is_enabled is True
+
+
+def test_live_request_same_key_returns_existing_queue_record_without_republishing(context):
+    client, job = context
+    grant_live(job)
+    adapter = Mock(execution_mode='live_readonly')
+    with patch('apps.integrations.sync_services.get_adapter_for_config', return_value=adapter), \
+            patch('apps.integrations.views.run_readonly_sync_job.delay', return_value=SimpleNamespace(id='fake-task')) as queue:
+        first = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/run/', {'idempotency_key': 'same-key'}, format='json')
+        second = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/run/', {'idempotency_key': 'same-key'}, format='json')
+    assert first.status_code == second.status_code == 202
+    assert second.data['data']['created'] is False
+    assert first.data['data']['run']['id'] == second.data['data']['run']['id']
+    queue.assert_called_once_with(job.id, 'same-key')
+
+
+def test_worker_claims_existing_queued_run_instead_of_creating_another(context):
+    _client, job = context
+    queued, created = enqueue_sync_run(job, 'worker-claim-key')
+
+    completed, execution_created = run_sync_job(
+        job,
+        adapter=MockPlatformAdapter(),
+        idempotency_key='worker-claim-key',
+    )
+
+    assert created is True
+    assert execution_created is True
+    assert completed.id == queued.id
+    assert completed.status == SyncRun.Status.SUCCESS
+    assert completed.started_at is not None
+    assert SyncRun.objects.filter(sync_job=job, idempotency_key='worker-claim-key').count() == 1
+
+
+def test_worker_preflight_failure_closes_queued_run(context):
+    _client, job = context
+    queued, _created = enqueue_sync_run(job, 'failed-preflight-key')
+
+    with patch('apps.integrations.tasks.validate_manual_sync_job', side_effect=ValidationError('授权已失效')):
+        with pytest.raises(ValidationError):
+            run_readonly_sync_job.run(job.id, 'failed-preflight-key')
+
+    queued.refresh_from_db()
+    assert queued.status == SyncRun.Status.FAILED
+    assert queued.finished_at is not None
+    assert queued.error_code == 'SYNC_PREFLIGHT_FAILED'
 
 
 def test_preflight_failure_never_enqueues(context):

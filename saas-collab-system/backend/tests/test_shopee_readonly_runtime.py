@@ -53,3 +53,24 @@ def test_missing_runtime_host_does_not_fall_back_to_unapproved_legacy_host(monke
     with pytest.raises(ValidationError, match="shopee.api_host"):
         client._request("/api/v2/order/get_order_list", {})
     http.request.assert_not_called()
+
+
+def test_shopee_returns_start_at_page_zero_and_advance_page_index(monkeypatch):
+    client, _ = configured(monkeypatch, {})
+    list_queries = []
+
+    def request(path, query):
+        if path == client.RETURN_LIST_PATH:
+            list_queries.append(query)
+            return {"response": {"return": [], "more": query["page_no"] == 0}}
+        raise AssertionError(f"Unexpected Shopee endpoint: {path}")
+
+    monkeypatch.setattr(client, "_request", request)
+    scope = {"time_from": 1, "time_to": 2, "page_size": 50}
+
+    first_page = client.fetch_returns("", scope)
+    second_page = client.fetch_returns(first_page["next_cursor"], scope)
+
+    assert [query["page_no"] for query in list_queries] == [0, 1]
+    assert first_page["next_cursor"] == "1"
+    assert second_page["next_cursor"] == ""

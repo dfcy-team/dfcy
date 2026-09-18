@@ -1265,6 +1265,7 @@ class SyncSchedulerHeartbeat(models.Model):
 
 class SyncRun(models.Model):
     class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
         RUNNING = "running", "Running"
         SUCCESS = "success", "Success"
         FAILED = "failed", "Failed"
@@ -1275,6 +1276,7 @@ class SyncRun(models.Model):
     run_id = models.CharField(max_length=80)
     idempotency_key = models.CharField(max_length=160)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    enqueued_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     fetched_count = models.PositiveIntegerField(default=0)
@@ -1288,7 +1290,7 @@ class SyncRun(models.Model):
     masked_log = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        ordering = ["-started_at", "-id"]
+        ordering = ["-enqueued_at", "-started_at", "-id"]
         constraints = [
             models.UniqueConstraint(
                 fields=["tenant", "sync_job", "idempotency_key"],

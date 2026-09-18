@@ -89,7 +89,7 @@ describe('平台商品同步任务上下文闭环', () => {
     [{ id: 9, is_enabled: true, status: 'disabled', environment: 'mock' }, '任务已停用'],
     [{ id: 9, is_enabled: true, status: 'idle', environment: 'production' }, '独立 Mock 任务'],
     [{ id: 9, is_enabled: true, status: 'idle', environment: 'mock', resource_type: 'sales_order' }, '独立 Mock 任务'],
-    [{ id: 9, is_enabled: true, status: 'running', environment: 'mock', resource_type: 'mock_record' }, '正在运行'],
+    [{ id: 9, is_enabled: true, status: 'running', environment: 'mock', resource_type: 'mock_record' }, '正在排队或运行'],
   ])('blocks invalid mock runs before submitting (%j)', async (row, reason) => {
     const wrapper = mount(SyncJobList, { global: { stubs } });
     await flushPromises();

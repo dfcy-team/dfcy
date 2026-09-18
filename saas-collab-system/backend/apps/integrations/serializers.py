@@ -843,6 +843,7 @@ class SyncRunSerializer(serializers.ModelSerializer):
             "run_id",
             "idempotency_key",
             "status",
+            "enqueued_at",
             "started_at",
             "finished_at",
             "fetched_count",
