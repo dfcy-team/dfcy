@@ -329,9 +329,13 @@ class CountrySiteMasterSerializer(TenantOwnedSerializer):
         model = CountrySiteMaster
         fields = (
             "id", "tenant_id", "code", "name", "country_code", "currency", "timezone", "platform", "status",
+            "cny_exchange_rate", "exchange_rate_date", "exchange_rate_source", "exchange_rate_updated_at",
             "created_at", "updated_at",
         )
-        read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
+        read_only_fields = (
+            "id", "tenant_id", "cny_exchange_rate", "exchange_rate_date", "exchange_rate_source",
+            "exchange_rate_updated_at", "created_at", "updated_at",
+        )
 
     def validate_country_code(self, value):
         value = str(value or "").strip().upper()

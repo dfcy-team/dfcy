@@ -328,6 +328,11 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
+    "refresh-country-cny-exchange-rates": {
+        "task": "apps.masterdata.tasks.refresh_country_cny_exchange_rates",
+        "schedule": crontab(minute=30, hour=18),
+        "args": (),
+    },
     "mark-overdue-sample-fulfillments": {
         "task": "influencers.mark_overdue_sample_fulfillments",
         # Celery runs in UTC; 18:00 UTC is 02:00 the next day in Asia/Shanghai.
