@@ -956,6 +956,25 @@
       }
     },
     {
+      "code": "menu.config.influencers_bd_config.view",
+      "name": "BD配置",
+      "module": "config",
+      "action": "influencers_bd_config.view",
+      "description": "显示BD配置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/influencers/bd-config",
+        "route": "/influencers/bd-config",
+        "resource": "influencers_bd_config",
+        "parent": "达人管理",
+        "action_codes": [
+          "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.finance.finance_imports.view",
       "name": "财务导入",
       "module": "finance",
@@ -3347,6 +3366,18 @@
       ],
       "menuPermissions": [
         "menu.influencers.influencers_bd_performance.view"
+      ]
+    },
+    {
+      "path": "/influencers/bd-config",
+      "permissions": [
+        "config.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.config.influencers_bd_config.view"
       ]
     },
     {

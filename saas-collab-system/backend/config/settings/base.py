@@ -328,6 +328,12 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
+    "dispatch-daily-affiliate-order-attribution-refreshes": {
+        "task": "influencers.dispatch_daily_affiliate_order_attribution_refreshes",
+        # Celery runs in UTC; 19:00 UTC is 03:00 the next day in Asia/Shanghai.
+        "schedule": crontab(minute=0, hour=19),
+        "args": (),
+    },
     "mark-overdue-sample-fulfillments": {
         "task": "influencers.mark_overdue_sample_fulfillments",
         # Celery runs in UTC; 18:00 UTC is 02:00 the next day in Asia/Shanghai.

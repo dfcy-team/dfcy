@@ -116,7 +116,8 @@ export const menuItems = [
         label: 'BD绩效',
         permissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
         allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view']
-      }
+      },
+      { path: '/influencers/bd-config', label: 'BD配置', permissions: ['config.view'] }
     ]
   },
   {
@@ -427,6 +428,7 @@ export const routeCapabilities = [
     allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
     userTypes: ['internal']
   },
+  { path: '/influencers/bd-config', permissions: ['config.view'], userTypes: ['internal'] },
   { path: '/supply-chain/purchase-orders', permissions: ['supply.purchase_order.view'], userTypes: ['internal'] },
   { path: '/audit/operations', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] },
   { path: '/releases/contracts', permissions: ['release.contract.view'], userTypes: ['internal'] },
