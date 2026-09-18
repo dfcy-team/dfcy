@@ -310,6 +310,7 @@ jobs:
       VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
       VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
       GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
+      REGISTRY_USER: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN && vars.PRODUCTION_GHCR_PULL_USER || github.actor }}
       RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
       BACKEND_IMAGE: ghcr.io/${{ github.repository }}/saas-collab-backend@${{ needs.build.outputs.backend_digest }}
       FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/saas-collab-frontend@${{ needs.build.outputs.frontend_digest }}
@@ -322,12 +323,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$') { throw 'Production VM connection variables are invalid.' }
-          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:MIGRATION_SHA -notmatch '^[0-9a-f]{64}$' -or $env:MANIFEST_SHA -notmatch '^[0-9a-f]{64}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'CI release metadata is invalid.' }
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:MIGRATION_SHA -notmatch '^[0-9a-f]{64}$' -or $env:MANIFEST_SHA -notmatch '^[0-9a-f]{64}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' -or $env:REGISTRY_USER -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'CI release metadata is invalid.' }
           $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
           [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
-          $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:GITHUB_ACTOR --registry-token-stdin"
+          $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
             $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
             if ($LASTEXITCODE -ne 0) { throw 'VM deployment failed.' }
@@ -346,19 +347,20 @@ jobs:
       VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
       VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
       GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
+      REGISTRY_USER: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN && vars.PRODUCTION_GHCR_PULL_USER || github.actor }}
       ROLLBACK_REASON: ${{ needs.validate.outputs.rollback_reason }}
     steps:
       - name: Invoke the fixed rollback entrypoint
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'Production VM connection variables are invalid.' }
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' -or $env:REGISTRY_USER -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'Production VM connection variables are invalid.' }
           $reasonB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:ROLLBACK_REASON))
           $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
           [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
-          $remote = "rollback --emergency --reason-b64=$reasonB64 --actor=$env:GITHUB_ACTOR --registry-user=$env:GITHUB_ACTOR --registry-token-stdin"
+          $remote = "rollback --emergency --reason-b64=$reasonB64 --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
             $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
             if ($LASTEXITCODE -ne 0) { throw 'VM rollback failed.' }
