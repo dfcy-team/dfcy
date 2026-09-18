@@ -2,8 +2,8 @@
   <AdminResourcePage
     eyebrow="MASTER DATA"
     title="国家信息"
-    subtitle="维护租户内国家名称、国家代码、币种和时区，供店铺、开发和刊登菜单引用。"
-    boundary-note="国家档案只维护国家、币种与时区口径，不保存店铺或平台凭据。"
+    subtitle="维护租户内国家名称、国家代码、币种、时区和参考汇率，供店铺、开发、刊登和销售分析引用。"
+    boundary-note="汇率为每日缓存的参考值，口径为 1 CNY 可兑换的目标币种数量；不保存店铺或平台凭据。"
     entity-label="国家"
     :loader="fetchCountrySites"
     :columns="columns"
@@ -28,9 +28,16 @@ import { createMasterData, deleteMasterData, fetchCountrySites, updateMasterData
 const columns = [
   { prop: 'code', label: '国家档案编码', width: 150 }, { prop: 'name', label: '国家名称', width: 180 },
   { prop: 'country_code', label: '国家代码', width: 110 }, { prop: 'currency', label: '币种', width: 100 },
+  { prop: 'cny_exchange_rate', label: '汇率（1 CNY =）', width: 150, format: formatRate },
+  { prop: 'exchange_rate_date', label: '汇率日期', width: 120 },
   { prop: 'timezone', label: '时区', width: 170 },
   { prop: 'status', label: '状态', type: 'status' },
 ];
+
+function formatRate(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
+}
 const formFields = [
   { key: 'code', label: '国家档案编码', required: true, placeholder: '例如 country-th' },
   { key: 'name', label: '国家名称', required: true },
