@@ -180,6 +180,11 @@ export const bulkUpdateProductSpus = (data) => requestWithMockFallback(
 export const updateProductSku = (id, data) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/products/skus/${id}/`, data }, {}, 'products.skus.update'
 );
+export const fetchProductSku = (id) => requestWithMockFallback(
+  { method: 'get', url: `/api/internal/products/skus/${id}/`, noMockFallback: true },
+  () => ({ success: false, message: '商品明细不存在' }),
+  'products.skus.detail'
+);
 export const updateProductSkuStatus = (id, data) => requestWithMockFallback(
   { method: 'post', url: `/api/internal/products/skus/${id}/status/`, data }, {}, 'products.skus.status'
 );

@@ -4,6 +4,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.audit.models import OperationLog
 from apps.files.models import AttachmentFile
 from apps.products.models import ProductCategory, ProductLegacyItem, ProductSKU, ProductSPU
 from apps.permissions.models import DataScope, Permission, Role, UserRole
@@ -56,6 +57,10 @@ def test_sku_detail_fields_are_nullable_and_patchable_without_changing_name():
     assert sku.hs_code == "940360"
     assert sku.product_name == "SKU detail name"
     assert sku.spu.product_name == "完整商品名称"
+    audit = OperationLog.objects.get(object_type="ProductSKU", object_id=str(sku.id), action="product_sku.update")
+    assert audit.before_data["product_name"] == ""
+    assert audit.after_data["product_name"] == "SKU detail name"
+    assert "sku_code" not in audit.after_data
 
 
 @pytest.mark.django_db

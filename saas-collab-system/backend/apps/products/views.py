@@ -1181,6 +1181,16 @@ def product_sku_detail(request, pk):
             transaction.on_commit(cleanup_deleted_sku_media)
             return success_response({"deleted": True, "id": sku_id})
 
+    audit_fields = {
+        "product_name", "purchase_price", "unit", "image_url", "package_weight",
+        "package_volume", "package_length_cm", "package_width_cm", "package_height_cm",
+        "origin_country", "hs_code", "material", "inventory_type", "selling_points",
+        "product_description",
+    }
+    before = {
+        field: getattr(item, field)
+        for field in audit_fields.intersection(request.data.keys())
+    }
     serializer = ProductSKUSerializer(
         item,
         data=request.data,
@@ -1190,6 +1200,20 @@ def product_sku_detail(request, pk):
     serializer.is_valid(raise_exception=True)
     old_image_url = item.image_url
     item = serializer.save()
+    after = {field: getattr(item, field) for field in before}
+    if before != after:
+        from apps.audit.services import write_operation_log
+
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="products",
+            action="product_sku.update",
+            object_type="ProductSKU",
+            object_id=item.id,
+            before_data=before,
+            after_data=after,
+        )
     # A URL edit replaces an uploaded image as well; remove the old binary
     # only when it belongs to this service's tenant-scoped storage boundary.
     old_image_path = _stored_product_image_path(old_image_url)

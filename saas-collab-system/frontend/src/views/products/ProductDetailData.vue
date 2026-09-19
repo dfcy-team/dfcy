@@ -564,6 +564,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { parseImageCsv, yieldToPage } from '../../utils/imageBatchCsv';
 import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
@@ -601,6 +602,7 @@ import { downloadBigSellerProductWorkbook } from '../../utils/bigsellerWorkbook'
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 
 const auth = useAuthStore();
+const router = useRouter();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
 const filters = reactive({ search: '', sku_status: 'all', category_id: '' });
 const rows = ref([]);
@@ -1139,6 +1141,10 @@ function openGenerate(row) {
 }
 
 function openEdit(row) {
+  if (row.sku_id) {
+    router.push(`/products/details/${row.sku_id}/edit`);
+    return;
+  }
   Object.assign(editForm, {
     id: row.id,
     skuId: row.sku_id || null,
