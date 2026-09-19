@@ -1,5 +1,6 @@
 <template>
   <AdminResourcePage
+    ref="resourcePage"
     eyebrow="MASTER DATA"
     title="仓库档案"
     subtitle="统一维护仓库身份，并绑定对应的仓储服务平台后接入库存 API。"
@@ -44,6 +45,7 @@
       v-model="apiAccessOpen"
       subject-type="warehouse"
       :row="selectedWarehouse"
+      @changed="handleApiAccessChanged"
     />
   </AdminResourcePage>
 </template>
@@ -68,6 +70,7 @@ import { getActionAccess } from '../../utils/actionAccess';
 const auth = useAuthStore();
 const countryRows = ref([]);
 const platformRows = ref([]);
+const resourcePage = ref(null);
 const apiAccessOpen = ref(false);
 const selectedWarehouse = ref(null);
 const apiAccess = computed(() => {
@@ -190,6 +193,10 @@ function notifyApiAccessBlocked(row) {
   ElMessage.warning(row.service_platform_id
     ? '当前仓储服务平台尚未接入受支持的库存 API，请先维护平台档案。'
     : '请先绑定启用且匹配仓库类型的仓储服务平台。');
+}
+
+async function handleApiAccessChanged() {
+  await resourcePage.value?.loadData?.();
 }
 
 onMounted(() => Promise.all([loadCountryOptions(), loadPlatformOptions()]));

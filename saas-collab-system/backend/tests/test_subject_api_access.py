@@ -215,6 +215,7 @@ def test_subject_api_access_resolves_warehouse_service_platform_and_fail_closes_
             token_id="synthetic-token-reference",
             credential_mask={"token": "********"},
             status=WarehouseAuthorization.Status.ACTIVE,
+            validation_status=WarehouseAuthorization.ValidationStatus.VERIFIED,
             authorized_at=timezone.now(),
             created_by=user,
             updated_by=user,
@@ -255,6 +256,8 @@ def test_subject_api_access_resolves_warehouse_service_platform_and_fail_closes_
         status=StatusChoices.ACTIVE,
     )
     serialized = client.get("/api/internal/master-data/warehouses/")
+    warehouse_row = next(row for row in serialized.data["data"]["results"] if row["id"] == warehouse.id)
+    assert warehouse_row["api_validation_status"] == "verified"
     unknown_row = next(row for row in serialized.data["data"]["results"] if row["id"] == unknown_warehouse.id)
     assert unknown_row["api_access_available"] is False
     blocked = client.get(

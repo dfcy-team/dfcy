@@ -474,6 +474,18 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(api.checkJifengWarehouse).toHaveBeenCalledWith(202);
     expect(api.createSyncJob).not.toHaveBeenCalled();
     expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
+    expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(2);
+    expect(wrapper.emitted('changed')).toHaveLength(1);
+  });
+
+  it('reloads and emits changed when a warehouse readonly failure may persist failed status', async () => {
+    const wrapper = await mountDialog('warehouse');
+    api.checkJifengWarehouse.mockResolvedValue({ success: false, message: '连接校验失败' });
+    await wrapper.vm.checkToken({ id: 202, integration_config_id: 3, status: 'active', has_sync_job: false });
+    expect(api.checkJifengWarehouse).toHaveBeenCalledWith(202);
+    expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(2);
+    expect(wrapper.emitted('changed')).toHaveLength(1);
+    expect(ElMessage.error).toHaveBeenCalledWith('连接校验失败');
   });
 
   it('refreshes the warehouse authorization without using the bootstrap endpoint', async () => {
@@ -483,6 +495,8 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(api.refreshJifengWarehouse).toHaveBeenCalledWith(202);
     expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
     expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('重新执行只读校验'));
+    expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(2);
+    expect(wrapper.emitted('changed')).toHaveLength(1);
   });
 
   it('shows post-authorization discovery failure without repeating the exchange or claiming success', async () => {
