@@ -28,7 +28,7 @@
       <dl>
         <div><dt>来源更新时间（UTC）</dt><dd>{{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) : '尚无来源时间' }}</dd></div>
         <div><dt>数据范围</dt><dd>当前租户 · 当前角色 · 授权门店</dd></div>
-        <div><dt>币种口径</dt><dd>按来源币种分别展示，不跨币种相加</dd></div>
+        <div><dt>币种口径</dt><dd>{{ currencyConversion ? '按每日参考汇率换算为 CNY' : '按来源币种分别展示，不跨币种相加' }}</dd></div>
         <div><dt>质量检查评分</dt><dd>{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}</dd></div>
       </dl>
     </section>
@@ -72,6 +72,15 @@
     </el-form>
 
     <p v-if="hasUnappliedFilters" class="field-note">筛选已修改，请点击查询。当前报表与导出仍使用上次查询条件。</p>
+
+    <el-alert
+      v-if="currencyConversion"
+      :title="`已按每日参考汇率自动换算为 ${currencyConversion.target}。汇率日期：${currencyConversion.rate_dates?.join('、') || '未提供'}`"
+      :description="currencyConversion.formula"
+      type="info"
+      show-icon
+      :closable="false"
+    />
 
     <el-alert v-if="pageState === 'error'" :title="errorMessage" type="error" show-icon :closable="false" />
 
@@ -120,7 +129,7 @@
           <details v-if="mode === 'stores'" class="store-columns"><summary>展示列</summary><div><label v-for="column in contract.columns" :key="column.prop"><input v-model="storeColumns" type="checkbox" :value="column.prop" :disabled="column.prop === 'store_name'">{{ column.label }}</label></div></details>
         </div>
         <p class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为 UTC。点击详情可核对完整字段和原始值。</p>
-        <el-table v-if="rows.length || pageState === 'empty'" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
+        <el-table ref="salesTable" v-if="rows.length || pageState === 'empty'" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
           <el-table-column
             v-for="column in displayedColumns"
             :key="column.prop"
@@ -128,7 +137,7 @@
             :label="column.label"
             :min-width="column.width || 120"
             :align="column.numeric ? 'right' : 'left'"
-            :sortable="mode === 'stores' ? 'custom' : false"
+            :sortable="mode === 'stores' ? 'custom' : column.sortable || false"
             :fixed="mode === 'stores' && column.prop === 'store_name' ? 'left' : false"
             show-overflow-tooltip
           >
@@ -162,7 +171,7 @@
 
     <el-drawer v-model="detailOpen" size="min(960px, 100vw)" :title="`${contract.title} · 只读详情`" @closed="closeDetail">
       <dl v-if="selectedRow" v-loading="detailLoading" class="detail-list">
-        <div v-for="column in contract.columns" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ formatField(valueAt(selectedRow, column.prop), column) }}<small v-if="column.format === 'money' && valueAt(selectedRow, column.prop) != null" class="raw-value">原始金额：{{ valueAt(selectedRow, column.prop) }}</small></dd></div>
+        <div v-for="column in contract.columns" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ formatField(valueAt(selectedRow, column.prop), column) }}<small v-if="column.format === 'money' && valueAt(selectedRow, column.prop) != null" class="raw-value">原始金额：{{ rawAmount(selectedRow, column.prop) }}</small></dd></div>
       </dl>
       <section v-if="selectedRow?.items?.length" class="detail-lines">
         <h3>商品行</h3>
@@ -204,7 +213,7 @@
             <el-option v-for="option in exportTypes" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
         </el-form-item>
-        <el-alert title="任务将继承当前租户、角色、数据范围和筛选条件，默认生成脱敏文件。" type="info" :closable="false" />
+        <el-alert title="任务将继承当前租户、角色、数据范围和筛选条件，默认生成脱敏文件；页面 CNY 换算不进入导出，文件保留原币。" type="info" :closable="false" />
         <p v-if="isReport" class="field-note">当前导出提供筛选范围内的销售事实明细，不是本页按日／SKU 聚合表。</p>
       </el-form>
       <template #footer><el-button @click="exportDialogOpen = false">取消</el-button><el-button type="primary" :loading="actionLoading" @click="submitExport">创建任务</el-button></template>
@@ -241,6 +250,8 @@ const recentOrderDays = computed(() => {
 const storeColumns = ref(['store_name', 'gross_sales', 'currency', 'valid_order_count', 'order_count', 'units_sold', 'refund_amount', 'refund_case_count', 'cancelled_order_count', 'cancelled_amount', 'net_sales']);
 const displayedColumns = computed(() => props.mode === 'stores' ? storeColumns.value.map(prop => contract.value.columns.find(column => column.prop === prop)).filter(Boolean) : contract.value.columns);
 const storeOrdering = ref('');
+const orderOrdering = ref('');
+const salesTable = ref(null);
 const query = reactive({});
 const filterData = reactive({ platforms: [], stores: [], currencies: [], order_statuses: [], refund_statuses: [] });
 const resolvedFilters = computed(() => (isReport.value
@@ -254,6 +265,7 @@ const errorMessage = ref('');
 const rows = ref([]);
 const metrics = ref([]);
 const overviewData = ref({});
+const currencyConversion = ref(null);
 const reportCurrencies = computed(() => {
   const codes = [...new Set([overviewData.value.currency,
     ...(overviewData.value.currency_groups || []).map(group => group.currency),
@@ -321,7 +333,13 @@ function optionsFor(source) {
       .map((store) => ({ label: `${store.name} · ${store.region}`, value: store.id }));
   }
   const labels = { shopee: 'Shopee', tiktok: 'TikTok Shop' };
-  return values.map((value) => ({ label: labels[value] || statusLabel(value), value }));
+  const options = values.map((value) => ({
+    label: source === 'currencies' ? String(value).toUpperCase() : labels[value] || statusLabel(value),
+    value
+  }));
+  return source === 'currencies'
+    ? [{ label: 'CNY（自动换算）', value: '__AUTO_CNY__' }, ...options]
+    : options;
 }
 
 async function loadFilterOptions() {
@@ -356,11 +374,16 @@ function requestParams() {
   const params = { page: page.value, page_size: pageSize };
   if (props.mode === 'skus') Object.assign(params, { report: 'true', grouping: skuGrouping.value, ordering: skuOrdering.value });
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
+  if (props.mode === 'orders' && orderOrdering.value) params.ordering = orderOrdering.value;
   Object.entries(query).forEach(([key, value]) => {
     if (key === 'date_range' && value?.length === 2) {
       params.date_from = value[0];
       params.date_to = value[1];
     } else if (value !== '' && value !== null && (!Array.isArray(value) || value.length)) {
+      if (key === 'currency' && value === '__AUTO_CNY__') {
+        params.currency_basis = 'CNY';
+        return;
+      }
       if (isMultiFilter(key) && Array.isArray(value)) {
         params[key === 'platform' ? 'platforms' : 'store_ids'] = [...value].sort().join(',');
       } else params[key] = value;
@@ -409,6 +432,7 @@ async function loadData(useApplied = false) {
       return;
     }
     const data = response.data || {};
+    currencyConversion.value = data.currency_conversion || null;
     rows.value = normalizeRows(data.results || data.issues || []);
     total.value = Number(data.count ?? rows.value.length);
     metrics.value = data.metrics?.length
@@ -439,6 +463,16 @@ function applyFilters() { page.value = 1; selectedRow.value = null; loadData(); 
 function changeSkuGrouping(grouping) { skuGrouping.value = grouping; page.value = 1; loadData(); }
 function sortSkus({ prop, order }) { skuOrdering.value = order ? `${order === 'descending' ? '-' : ''}${prop}` : '-gross_sales'; page.value = 1; loadData(true); }
 function sortStores({ prop, order }) {
+  if (props.mode === 'orders') {
+    if (order && !contract.value.columns.some(column => column.prop === prop && column.sortable === 'custom')) return;
+    const next = order ? `${order === 'descending' ? '-' : ''}${prop}` : '';
+    if (next === orderOrdering.value) return;
+    orderOrdering.value = next;
+    page.value = 1;
+    selectedRow.value = null;
+    loadData();
+    return;
+  }
   if (props.mode !== 'stores') return;
   storeOrdering.value = order ? `${order === 'descending' ? '-' : ''}${prop}` : '';
   page.value = 1;
@@ -447,7 +481,10 @@ function sortStores({ prop, order }) {
 }
 function isQuickRange(days) { return JSON.stringify(query.date_range) === JSON.stringify(completedDateRange(days)); }
 function applyQuickRange(days) { query.date_range = completedDateRange(days); applyFilters(); }
-function resetFilters() { initializeFilters(); loadFilterOptions(); loadData(); }
+function resetFilters() {
+  if (props.mode === 'orders') { orderOrdering.value = ''; salesTable.value?.clearSort?.(); }
+  initializeFilters(); loadFilterOptions(); loadData();
+}
 function onPlatformChange() {
   if (isReport.value) {
     const allowed = new Set(optionsFor('stores').map(store => store.value));
@@ -461,11 +498,16 @@ function onPlatformChange() {
 }
 function clearData() {
   rows.value = []; metrics.value = []; overviewData.value = {}; sources.value = [];
+  currencyConversion.value = null;
   appliedOverviewFilters.value = null;
   total.value = 0; quality.value = {}; refreshedAt.value = ''; sourceStatus.value = 'pending';
 }
 function displayValue(value) { return formatField(value); }
 function valueAt(row, path) { return path?.split('.').reduce((value, key) => value?.[key], row); }
+function rawAmount(row, prop) {
+  const sourceValue = row?.source_amounts?.[prop];
+  return sourceValue === undefined ? valueAt(row, prop) : `${row.source_currency} ${sourceValue}`;
+}
 function yesNo(value) { return value === null || value === undefined ? '—' : (value ? '是' : '否'); }
 async function selectRow(row) {
   const sequence = ++detailSequence;
@@ -474,7 +516,7 @@ async function selectRow(row) {
   if (props.mode !== 'orders') return;
   detailLoading.value = true;
   try {
-    const response = await fetchSalesOrderDetail(row.id);
+    const response = await fetchSalesOrderDetail(row.id, query.currency === '__AUTO_CNY__' ? { currency_basis: 'CNY' } : {});
     if (sequence !== detailSequence) return;
     if (!response?.success) return ElMessage.error(formatApiError(response));
     selectedRow.value = response.data;
@@ -500,6 +542,7 @@ async function submitExport() {
   delete filters.ordering;
   delete filters.report;
   delete filters.grouping;
+  delete filters.currency_basis;
   const response = await createSalesExport({ export_type: exportForm.export_type, filters }, newKey('sales-export'));
   actionLoading.value = false;
   if (!response?.success) return ElMessage.error(formatApiError(response));

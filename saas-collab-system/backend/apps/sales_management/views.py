@@ -23,6 +23,7 @@ from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.reports.export_services import create_export_request, visible_export_requests
 
+from .currency_conversion import convert_sales_payload
 from .scopes import (
     filter_inventory_queryset,
     filter_quality_queryset,
@@ -838,14 +839,13 @@ class SalesOverviewView(APIView):
     read_permission_code = "sales_management.view"
 
     def get(self, request):
-        return success_response(
-            commerce_overview_payload(
-                request,
-                self.read_permission_code,
-                original_dimensions=True,
-                sales_management=True,
-            )
+        data = commerce_overview_payload(
+            request,
+            self.read_permission_code,
+            original_dimensions=True,
+            sales_management=True,
         )
+        return success_response(convert_sales_payload(request, data))
 
 
 class SalesTrendView(SalesOverviewView):
@@ -882,10 +882,24 @@ class SalesOrderCollectionView(APIView):
         if request.query_params.get("refund_status"):
             queryset = queryset.filter(refund_returns__normalized_status=request.query_params["refund_status"])
         page, page_size = _pagination(request)
-        queryset = queryset.distinct().prefetch_related("refund_returns").order_by("-created_at_utc", "-id")
+        sort_fields = {
+            "platform": "platform__platform_type", "store.name": "store__name",
+            "store.region": "store__country_code", "external_order_id": "external_order_id",
+            "raw_status": "raw_status", "normalized_status": "normalized_status",
+            "created_at_utc": "created_at_utc", "currency": "currency",
+            "order_total_amount": "order_total_amount", "item_count": "item_count",
+        }
+        ordering = request.query_params.get("ordering", "")
+        order_fields = ("-created_at_utc", "-id")
+        if ordering:
+            field = ordering.removeprefix("-")
+            if field not in sort_fields:
+                raise ValidationError({"ordering": "请选择销售订单中支持排序的列。"})
+            order_fields = (("-" if ordering.startswith("-") else "") + sort_fields[field], "-id")
+        queryset = queryset.distinct().prefetch_related("refund_returns").order_by(*order_fields)
         data = paginated_data(request, queryset, SalesOrderSerializer, page=page, page_size=page_size)
         data.update(_sales_page_context(scoped_orders, scoped_refunds))
-        return success_response(data)
+        return success_response(convert_sales_payload(request, data))
 
 
 class SalesOrderDetailView(APIView):
@@ -907,7 +921,7 @@ class SalesOrderDetailView(APIView):
             )
         )
         order = get_object_or_404(queryset, pk=pk)
-        return success_response(SalesOrderDetailSerializer(order).data)
+        return success_response(convert_sales_payload(request, SalesOrderDetailSerializer(order).data))
 
 
 class SalesReturnCollectionView(APIView):
@@ -930,7 +944,7 @@ class SalesReturnCollectionView(APIView):
         queryset = queryset.distinct().prefetch_related("items__internal_sku", "items__sales_order_item")
         data = paginated_data(request, queryset, SalesReturnSerializer, page=page, page_size=page_size)
         data.update(_sales_page_context(scoped_orders, scoped_refunds))
-        return success_response(data)
+        return success_response(convert_sales_payload(request, data))
 
 
 class StoreSalesCollectionView(APIView):
@@ -976,7 +990,7 @@ class StoreSalesCollectionView(APIView):
         data["currency_groups"] = groups
         data["trend"] = _analytics_trend_rows(orders, refunds)
         data["metric_daily"] = business_daily_rows(orders, refunds)
-        return success_response(data)
+        return success_response(convert_sales_payload(request, data))
 
 
 class SKUSalesCollectionView(APIView):
@@ -998,7 +1012,7 @@ class SKUSalesCollectionView(APIView):
             data = _paginated_rows(request, present + [row for row in rows if row.get(field) is None])
             data.update(_sales_page_context(orders, refunds))
             data.update(currency_groups=groups, trend=trend)
-            return success_response(data)
+            return success_response(convert_sales_payload(request, data))
         rows = _sku_rows(orders, refunds, original_dimensions=True)
         for field in ("sku", "spu"):
             if request.query_params.get(field):
@@ -1007,7 +1021,7 @@ class SKUSalesCollectionView(APIView):
                         or (field == "sku" and value in str(row["seller_sku"]).lower())]
         data = _paginated_rows(request, rows)
         data.update(_sales_page_context(orders, refunds))
-        return success_response(data)
+        return success_response(convert_sales_payload(request, data))
 
 
 class InventoryCollectionView(APIView):
