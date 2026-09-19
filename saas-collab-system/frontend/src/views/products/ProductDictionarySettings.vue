@@ -136,6 +136,73 @@
       </main>
     </div>
 
+    <div v-else-if="currentKind === 'specifications'" class="specification-workspace">
+      <aside class="category-panel specification-category-panel">
+        <div class="specification-panel-title">
+          <strong>分类目录</strong>
+          <el-button link data-testid="specification-clear" @click="selectCategory(null)">全部</el-button>
+        </div>
+        <el-input
+          v-model="categoryFilter"
+          data-testid="specification-filter"
+          clearable
+          placeholder="搜索分类"
+        />
+        <el-tree
+          ref="categoryTreeRef"
+          class="category-tree"
+          data-testid="specification-tree"
+          :data="categoryTree"
+          node-key="id"
+          :props="{ label: 'displayName', children: 'children' }"
+          :filter-node-method="filterCategory"
+          :expand-on-click-node="false"
+          default-expand-all
+          highlight-current
+          @node-click="selectCategory"
+        >
+          <template #default="{ data }">
+            <span :data-testid="`specification-node-${data.id}`">{{ data.displayName }}</span>
+          </template>
+        </el-tree>
+        <el-empty v-if="!loading && !message && !categoryTree.length" description="暂无分类数据" :image-size="72" />
+      </aside>
+
+      <main class="dictionary-panel specification-detail-panel" data-testid="specification-detail">
+        <template v-if="selectedSpecification">
+          <div class="panel-heading">
+            <div>
+              <strong>{{ selectedSpecification.code }} {{ selectedSpecification.name }}</strong>
+              <span class="panel-caption">{{ categoryPath(selectedSpecification) }}</span>
+            </div>
+            <el-tag :type="selectedSpecification.is_active === false ? 'info' : 'success'">
+              {{ selectedSpecification.is_active === false ? '停用' : '启用' }}
+            </el-tag>
+          </div>
+          <div class="specification-summary">
+            <span>规格维度</span>
+            <span class="panel-caption">按设置顺序用于后续 SKU 生成</span>
+          </div>
+          <div v-if="selectedSpecification.spec_dimensions?.length" class="specification-dimensions" data-testid="specification-dimensions">
+            <div v-for="dimension in selectedSpecification.spec_dimensions" :key="`${dimension.code}-${dimension.name}`" class="specification-dimension">
+              <strong>{{ dimension.name || dimension.code }}</strong>
+              <span>{{ dimension.code }}</span>
+              <span v-if="dimension.values?.length">{{ dimension.values.join('、') }}</span>
+            </div>
+          </div>
+          <el-empty v-else description="暂未设置规格维度" :image-size="72" />
+          <div class="specification-actions">
+            <el-button v-if="canManage" type="primary" data-testid="specification-edit" @click="edit(selectedSpecification)">设置规格</el-button>
+          </div>
+        </template>
+        <div v-else class="specification-guide" data-testid="specification-guide">
+          <strong class="specification-guide-title">{{ contentTitle }}</strong>
+          <strong>请选择可配置的末级分类</strong>
+          <p>左侧选择 L3 分类，或选择没有 L3 子分类的 L2 分类后，在右侧设置规格维度。</p>
+        </div>
+      </main>
+    </div>
+
     <div v-else class="dictionary-panel standalone-panel">
       <div class="panel-heading">
         <div>
@@ -415,6 +482,10 @@ const specificationRows = computed(() => {
     return level === 3 || (level === 2 && !l3ParentIds.has(String(item.id)));
   });
 });
+const selectedSpecification = computed(() => {
+  if (!selectedCategory.value) return null;
+  return specificationRows.value.find((item) => String(item.id) === String(selectedCategory.value.id)) || null;
+});
 const displayRows = computed(() => (currentKind.value === 'specifications' ? specificationRows.value : rows.value));
 const categoryDisplayRows = computed(() => {
   if (!selectedCategory.value) return rows.value;
@@ -471,6 +542,18 @@ function isDescendant(candidateId, ancestorId) {
 function parentName(row) {
   const parent = rows.value.find((item) => String(item.id) === String(parentIdOf(row)));
   return parent ? `${parent.code} ${parent.name}` : '—';
+}
+
+function categoryPath(row) {
+  const path = [];
+  const visited = new Set();
+  let current = row;
+  while (current && !visited.has(String(current.id))) {
+    visited.add(String(current.id));
+    path.unshift(`${current.code} ${current.name}`.trim());
+    current = rows.value.find((item) => String(item.id) === String(parentIdOf(current)));
+  }
+  return path.join(' / ');
 }
 
 function formatDimensions(dimensions) {
@@ -570,7 +653,15 @@ watch(categoryFilter, (value) => {
 });
 
 function selectCategory(node) {
-  selectedCategory.value = node || null;
+  if (!node) {
+    selectedCategory.value = null;
+    return;
+  }
+  if (currentKind.value === 'specifications') {
+    selectedCategory.value = specificationRows.value.some((item) => String(item.id) === String(node.id)) ? node : null;
+    return;
+  }
+  selectedCategory.value = node;
 }
 
 function resetForm(values = {}) {
@@ -778,6 +869,7 @@ onMounted(load);
 .page-subtitle { margin: 8px 0 0; color: #64748b; font-size: 14px; }
 .header-actions { display: flex; gap: 10px; align-items: center; }
 .category-workspace { display: grid; grid-template-columns: minmax(320px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.specification-workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
 .category-panel, .dictionary-panel { min-width: 0; padding: 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }
 .standalone-panel { overflow: hidden; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; color: #243b53; }
@@ -798,6 +890,22 @@ onMounted(load);
   .category-workspace { grid-template-columns: 1fr; }
   .tree-node-actions { display: flex; }
   .dimension-row { grid-template-columns: 1fr 1fr; }
-  .dimension-row :deep(.el-button) { justify-self: start; }
+.dimension-row :deep(.el-button) { justify-self: start; }
+}
+.specification-category-panel { min-height: 640px; padding: 14px; }
+.specification-panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; color: #243b53; }
+.specification-category-panel .category-tree { margin-top: 12px; }
+.specification-detail-panel { min-height: 640px; }
+.specification-summary { display: flex; align-items: baseline; gap: 10px; margin: 22px 0 12px; color: #243b53; font-weight: 600; }
+.specification-dimensions { display: grid; gap: 10px; }
+.specification-dimension { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(80px, .5fr) minmax(160px, 2fr); gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 6px; color: #52606d; }
+.specification-dimension strong { color: #243b53; }
+.specification-actions { display: flex; justify-content: flex-end; margin-top: 24px; }
+.specification-guide { display: grid; place-content: center; min-height: 280px; text-align: center; color: #52606d; }
+.specification-guide strong { color: #243b53; font-size: 16px; }
+.specification-guide p { margin: 10px 0 0; font-size: 13px; }
+@media (max-width: 900px) {
+  .specification-workspace { grid-template-columns: 1fr; }
+  .specification-dimension { grid-template-columns: 1fr; gap: 4px; }
 }
 </style>
