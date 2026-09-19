@@ -238,11 +238,20 @@ class ProductSPU(models.Model):
 
 
 class ProductSKU(models.Model):
+    class ProductNameSource(models.TextChoices):
+        AUTO = "auto", "Auto"
+        MANUAL = "manual", "Manual"
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_skus")
     spu = models.ForeignKey(ProductSPU, on_delete=models.CASCADE, related_name="skus")
     sku_code = models.CharField(max_length=80)
     legacy_sku_code = models.CharField(max_length=160, blank=True, db_index=True)
     product_name = models.CharField(max_length=200, blank=True, default="")
+    product_name_source = models.CharField(
+        max_length=10,
+        choices=ProductNameSource.choices,
+        default=ProductNameSource.AUTO,
+    )
     color_code = models.CharField(max_length=40, blank=True)
     specification = models.CharField(max_length=120, blank=True)
     spec_values = models.JSONField(default=dict, blank=True)

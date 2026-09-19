@@ -29,6 +29,53 @@ export function skuBatchCombinationCount(colorCodes, specValues = {}) {
   );
 }
 
+export const SKU_VARIANT_MODES = Object.freeze({
+  COLOR_SPEC: 'color_spec',
+  COLOR_ONLY: 'color_only',
+  SPEC_ONLY: 'spec_only',
+  SINGLE: 'single',
+});
+
+export function skuCombinationKey(colorCode = '', specValues = {}) {
+  const specs = Object.keys(specValues || {})
+    .sort()
+    .map((code) => [code, String(specValues[code] ?? '').trim()]);
+  return JSON.stringify([String(colorCode || '').trim(), specs]);
+}
+
+function cartesianSpecValues(dimensions, selectedValues, index = 0, current = {}) {
+  if (index >= dimensions.length) return [{ ...current }];
+  const dimension = dimensions[index];
+  const values = normalizeBatchSelection(selectedValues?.[dimension.code]);
+  if (!values.length) return [];
+  return values.flatMap((value) => cartesianSpecValues(
+    dimensions,
+    selectedValues,
+    index + 1,
+    { ...current, [dimension.code]: value },
+  ));
+}
+
+export function buildSkuCombinations(mode, colorCodes, dimensions = [], selectedValues = {}) {
+  const usesColor = [SKU_VARIANT_MODES.COLOR_SPEC, SKU_VARIANT_MODES.COLOR_ONLY].includes(mode);
+  const usesSpec = [SKU_VARIANT_MODES.COLOR_SPEC, SKU_VARIANT_MODES.SPEC_ONLY].includes(mode);
+  const colorAxis = usesColor ? normalizeBatchSelection(colorCodes) : [''];
+  const activeDimensions = usesSpec ? dimensions.filter((item) => item?.code) : [];
+  const specAxis = usesSpec ? cartesianSpecValues(activeDimensions, selectedValues) : [{}];
+  return colorAxis.flatMap((colorCode) => specAxis.map((specValues) => ({
+    color_code: colorCode,
+    spec_values: specValues,
+    key: skuCombinationKey(colorCode, specValues),
+  })));
+}
+
+export function calculatePackageVolume(length, width, height) {
+  const values = [length, width, height].map((value) => Number(value));
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) return '';
+  if (values.some((value) => value === 0)) return '0.000000';
+  return ((values[0] * values[1] * values[2]) / 1000000).toFixed(6);
+}
+
 /** Build the stable request shape consumed by the batch SKU endpoint. */
 export function buildSkuBatchPayload(spu, colorCodes, specValues = {}) {
   const payload = {

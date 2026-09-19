@@ -488,3 +488,104 @@ def test_batch_accepts_production_string_dictionary_values_without_units():
     assert retry.json()["data"]["skipped"] == 6
     assert retry.json()["data"]["total"] == 6
     assert ProductSKU.objects.filter(tenant=tenant, spu=spu).count() == 6
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("variant_mode", "color_codes", "spec_values", "expected_code"),
+    [
+        ("color_spec", ["BLUE"], {"size": ["15M"]}, "10101004-BLUE-15M"),
+        ("color_only", ["BLUE"], {}, "10101004-BLUE"),
+        ("spec_only", [], {"size": ["15M"]}, "10101004-15M"),
+        ("single", [], {}, "10101004"),
+    ],
+)
+def test_batch_preview_supports_four_variant_modes_without_writing(
+    variant_mode, color_codes, spec_values, expected_code
+):
+    client, user, tenant, _category, spu = _client_and_spu(
+        suffix=f"mode-{variant_mode}",
+        dimensions=[{"code": "size", "name": "规格", "values": ["15M"]}],
+    )
+    spu.spu_code = "10101004"
+    spu.product_name = "茶几桌布"
+    spu.save(update_fields=["spu_code", "product_name"])
+    ProductColor.objects.create(tenant=tenant, code="BLUE", name="蓝色")
+
+    response = _post(
+        client,
+        user,
+        {
+            "spu": spu.id,
+            "variant_mode": variant_mode,
+            "color_codes": color_codes,
+            "spec_values": spec_values,
+            "preview": True,
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    row = response.json()["data"]["results"][0]
+    assert row["sku_code"] == expected_code
+    assert row["status"] == "new"
+    assert row["product_name"].startswith("茶几桌布")
+    assert ProductSKU.objects.filter(tenant=tenant, spu=spu).count() == 0
+
+
+@pytest.mark.django_db
+def test_batch_selected_items_create_only_missing_and_persist_preview_fields():
+    client, user, tenant, _category, spu = _client_and_spu(
+        suffix="selected-items",
+        dimensions=[{"code": "size", "name": "规格", "values": ["15M", "18M"]}],
+    )
+    spu.spu_code = "10101004"
+    spu.product_name = "茶几桌布"
+    spu.save(update_fields=["spu_code", "product_name"])
+    ProductColor.objects.create(tenant=tenant, code="BLUE", name="蓝色")
+    ProductSKU.objects.create(
+        tenant=tenant,
+        spu=spu,
+        sku_code="10101004-BLUE-18M",
+        product_name="已有手动名称",
+        color_code="BLUE",
+        specification="18M",
+        spec_values={"size": "18M"},
+    )
+
+    payload = {
+        "spu": spu.id,
+        "variant_mode": "color_spec",
+        "color_codes": ["BLUE"],
+        "spec_values": {"size": ["15M", "18M"]},
+        "items": [
+            {
+                "sku_code": "10101004-BLUE-15M",
+                "color_code": "BLUE",
+                "spec_values": {"size": "15M"},
+                "product_name": "自定义SKU名称",
+                "package_weight": "600",
+                "package_length_cm": "150",
+                "package_width_cm": "200",
+                "package_height_cm": "20",
+                "package_volume": "99",
+                "purchase_price": "35.8",
+                "image_url": "https://example.com/product.jpg",
+            },
+            {
+                "sku_code": "10101004-BLUE-18M",
+                "color_code": "BLUE",
+                "spec_values": {"size": "18M"},
+            },
+        ],
+    }
+    response = _post(client, user, payload)
+
+    assert response.status_code == 201, response.json()
+    assert response.json()["data"]["created"] == 1
+    assert response.json()["data"]["skipped"] == 1
+    created = ProductSKU.objects.get(tenant=tenant, sku_code="10101004-BLUE-15M")
+    assert created.product_name == "自定义SKU名称"
+    assert str(created.package_volume) == "0.600000"
+    assert str(created.purchase_price) == "35.8000"
+    assert created.image_url == "https://example.com/product.jpg"
+    assert ProductSKU.objects.get(tenant=tenant, sku_code="10101004-BLUE-18M").product_name == "已有手动名称"
