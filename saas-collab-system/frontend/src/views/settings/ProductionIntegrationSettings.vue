@@ -177,10 +177,16 @@
       <fieldset class="settings-section">
         <legend>平台生产 API 配置</legend>
         <p class="section-note">平台端点和合同审批是公开配置元数据；店铺授权统一在“店铺档案”的“API 接入”中完成。全球刊登是否可生产执行由上方独立受控策略决定，API 数据同步仍只读。</p>
+        <p class="section-note">自动续期服务最近心跳（UTC）：{{ dateLabel(autoRefreshLastSeen) }}。心跳不代表续期成功，请在集成审计查看 automatic_refresh 结果。</p>
         <div class="platform-grid">
           <article v-for="platform in platformKeys" :key="platform" :ref="(element) => setPlatformSectionRef(platform, element)" class="platform-card">
             <header><div><strong>{{ platformLabels[platform] }}</strong><small>{{ platformDescriptions[platform] }}</small></div><el-tag effect="plain" :type="form.platforms[platform].contract_approved ? 'success' : 'warning'">{{ form.platforms[platform].contract_approved ? '合同已批准' : '合同未批准' }}</el-tag></header>
             <el-form-item label="合同审批状态"><el-switch v-model="form.platforms[platform].contract_approved" active-text="已批准" inactive-text="未批准" /></el-form-item>
+            <el-form-item v-if="platform === 'shopee' || platform === 'jifeng_wms'" label="自动刷新令牌">
+              <el-switch v-model="form.platforms[platform].auto_refresh_enabled" active-text="开启" inactive-text="关闭" />
+              <small class="field-help">当前生效：{{ currentConfig?.platforms?.[platform]?.auto_refresh_enabled ? '开启' : '关闭' }}。修改须提交并由另一位管理员审批。</small>
+              <small class="field-help">后台每分钟检查，到期前 15 分钟续期；仅处理已授权且记录到期时间的凭据。失败后暂停该凭据自动重试，请查看集成审计并手动处理；不会启用或执行同步任务。</small>
+            </el-form-item>
             <el-form-item v-if="platform === 'shopee' || platform === 'tiktok'" label="平台商品只读合同审批">
               <el-switch v-model="form.platforms[platform].product_contract_approved" active-text="已批准" inactive-text="未批准" />
               <small class="field-help">独立于订单/退款合同；未完成该平台商品接口证据核验时保持关闭。</small>
@@ -298,6 +304,7 @@ const allowedHostsText = ref('');
 const redirectAllowlistText = ref('');
 const allowedStoreIdsText = ref('');
 const currentConfig = ref(null);
+const autoRefreshLastSeen = ref(null);
 const currentVersion = ref(null);
 const pendingVersion = ref(null);
 const pendingConfig = ref(null);
@@ -355,9 +362,9 @@ const platformEndpointFields = {
   ]
 };
 const platformPayloadKeys = {
-  jifeng_wms: ['contract_approved'],
+  jifeng_wms: ['contract_approved', 'auto_refresh_enabled'],
   lazada: ['contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'market'],
-  shopee: ['contract_approved', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'market', 'region'],
+  shopee: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'market', 'region'],
   tiktok: ['contract_approved', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path']
 };
 
@@ -389,7 +396,7 @@ function createEmptyConfig() {
       max_batch_size: 20
     },
     platforms: Object.fromEntries(platformKeys.map((platform) => [platform, {
-      contract_approved: false, product_contract_approved: false, app_id: '', service_id: '', redirect_uri: '', market: '', region: '',
+      contract_approved: false, auto_refresh_enabled: false, product_contract_approved: false, app_id: '', service_id: '', redirect_uri: '', market: '', region: '',
       auth_url: '', api_host: '', auth_urls: {}, api_hosts: {}, token_host: '', token_path: '', refresh_path: '',
       revoke_path: '', shop_path: '', authorized_shops_path: '', metadata_path: '', order_list_path: '',
       order_detail_path: '', return_list_path: '', return_detail_path: '', product_list_path: '', product_base_info_path: '',
@@ -481,6 +488,7 @@ function runtimeReady(config, maskedStatus = {}) {
 }
 
 function hydrate(data = {}) {
+  autoRefreshLastSeen.value = data.auto_refresh_last_seen_at || null;
   const effective = data.effective_config || data.config || data.runtime?.config || data.effective?.value || data.effective || data.current?.config || {};
   const normalized = normalizeConfig(effective);
   currentConfig.value = clone(normalized);
@@ -571,6 +579,7 @@ function isDangerousChange() {
       || (form.network.security_approved && !previous.network.security_approved)
       || (form.network.readonly_sync_enabled && !previous.network.readonly_sync_enabled)
       || platformKeys.some((platform) => form.platforms[platform].contract_approved && !previous.platforms[platform].contract_approved)
+      || ['shopee', 'jifeng_wms'].some((platform) => form.platforms[platform].auto_refresh_enabled && !previous.platforms[platform].auto_refresh_enabled)
       || ['shopee', 'tiktok'].some((platform) => form.platforms[platform].product_contract_approved && !previous.platforms[platform].product_contract_approved)
       || (form.listing_write.mode === 'controlled' && previous.listing_write.mode !== 'controlled')
       || (form.listing_write.emergency_stop === false && previous.listing_write.emergency_stop !== false)

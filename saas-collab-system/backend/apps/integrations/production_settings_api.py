@@ -139,7 +139,10 @@ def _visible_versions():
 
 
 def _runtime_payload(user):
+    from .models import SyncSchedulerHeartbeat
+
     snapshot = runtime_snapshot()
+    heartbeat = SyncSchedulerHeartbeat.objects.filter(key="credential-refresh").first()
     versions = _visible_versions()
     effective = next((item for item in versions if item.status == TenantConfigVersion.Status.EFFECTIVE), None)
     pending = next((item for item in versions if item.status == TenantConfigVersion.Status.PENDING_APPROVAL), None)
@@ -147,6 +150,7 @@ def _runtime_payload(user):
     pending_data = _version_data(pending) if pending is not None else None
     return {
         **snapshot,
+        "auto_refresh_last_seen_at": heartbeat.last_seen_at.isoformat() if heartbeat else None,
         # Keep both explicit and compatibility names so the admin UI can
         # render the resolved document without knowing configcenter internals.
         "effective_config": snapshot["config"],

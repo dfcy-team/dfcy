@@ -8,6 +8,13 @@ from .sync_services import run_sync_job, validate_manual_sync_job
 from .sync_alerts import upsert_sync_failure_alert
 
 
+@shared_task
+def refresh_due_integration_credentials():
+    from .automatic_refresh import refresh_due_authorizations
+
+    return refresh_due_authorizations()
+
+
 @shared_task(bind=True, soft_time_limit=840, time_limit=900)
 def run_readonly_sync_job(self, sync_job_id, idempotency_key=None):
     sync_job = SyncJob.objects.select_related("tenant", "integration_config").get(pk=sync_job_id)

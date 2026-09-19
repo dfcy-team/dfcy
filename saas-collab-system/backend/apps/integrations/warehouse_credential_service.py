@@ -187,12 +187,18 @@ def authorize_warehouse(*, actor, authorization, http=None, custody=None):
 
 
 @transaction.atomic
-def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=None):
+def refresh_warehouse_authorization(
+    *, actor, authorization, http=None, custody=None, automatic=False, expected_token_id=None
+):
     """Explicit refresh uses warehouse OAuth credentials, never the OMS token."""
     from .readonly_clients import JifengWmsReadonlyClient
 
     config = PlatformIntegrationConfig.objects.select_for_update().get(pk=authorization.integration_config_id, tenant_id=actor.tenant_id)
     record = WarehouseAuthorization.objects.select_for_update().get(pk=authorization.pk, tenant_id=actor.tenant_id)
+    if automatic:
+        from .automatic_refresh import require_automatic_refresh
+
+        require_automatic_refresh(record, expected_token_id)
     if record.provider != "jifeng_wms" or record.status != "active" or not record.oauth_user_id or not record.token_id:
         raise ValidationError("请先完成该仓库的首次授权。")
     custody = custody or get_custody_backend()
@@ -222,9 +228,15 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
         raise ValidationError("刷新授权失败，请检查网络及公共配置；若刷新凭据已失效，请更换 OMS Token 后重新授权。") from None
     record.token_id = metadata["token_id"]
     record.oauth_expires_at = timezone.now() + timedelta(hours=24)
-    record.validation_status = "pending"
-    record.last_verified_at = None
+    if not automatic:
+        record.validation_status = "pending"
+        record.last_verified_at = None
     record.last_error_code = ""
     record.save(update_fields=["token_id", "oauth_expires_at", "validation_status", "last_verified_at", "last_error_code", "updated_at"])
-    SyncJob.objects.filter(warehouse_authorization=record).update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
+    if not automatic:
+        SyncJob.objects.filter(warehouse_authorization=record).update(
+            is_enabled=False,
+            status=SyncJob.Status.DISABLED,
+            next_run_at=None,
+        )
     return record

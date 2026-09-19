@@ -290,6 +290,16 @@ class IntegrationAuditLog(models.Model):
         raise ValidationError("Integration audit records cannot be deleted.")
 
 
+class AutomaticRefreshAttempt(models.Model):
+    # One durable attempt per binding/reference generation. A timeout or worker
+    # crash must not cause an ambiguous token rotation to be replayed.
+    request_key = models.CharField(max_length=64, primary_key=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    status = models.CharField(max_length=20, default="running")
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+
 class CredentialMutationRequest(models.Model):
     class Action(models.TextChoices):
         ROTATE = "rotate", "Rotate"

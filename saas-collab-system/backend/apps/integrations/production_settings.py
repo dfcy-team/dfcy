@@ -79,7 +79,7 @@ SAFE_DEFAULTS = {
         "max_batch_size": 20,
     },
     "platforms": {
-        "jifeng_wms": {"contract_approved": False},
+        "jifeng_wms": {"contract_approved": False, "auto_refresh_enabled": False},
         "lazada": {
             "contract_approved": False,
             "product_contract_approved": False,
@@ -93,6 +93,7 @@ SAFE_DEFAULTS = {
         },
         "shopee": {
             "contract_approved": False,
+            "auto_refresh_enabled": False,
             # Product APIs have a separate evidence/contract gate.  This must
             # never inherit order/read contract approval from an older release.
             "product_contract_approved": False,
@@ -198,9 +199,10 @@ _PLATFORM_COMMON_KEYS = {
     "contract_approved", "product_contract_approved", "app_id", "service_id", "redirect_uri", "market",
 }
 _PLATFORM_KEYS_BY_NAME = {
-    "jifeng_wms": {"contract_approved"},
+    "jifeng_wms": {"contract_approved", "auto_refresh_enabled"},
     "lazada": _PLATFORM_COMMON_KEYS | {"auth_url", "api_host", "token_path", "refresh_path"},
         "shopee": _PLATFORM_COMMON_KEYS | {
+        "auto_refresh_enabled",
         "auth_url", "api_host", "token_path", "refresh_path", "revoke_path", "shop_path", "region",
         "order_list_path", "order_detail_path", "return_list_path", "return_detail_path",
         "product_list_path", "product_base_info_path", "product_model_list_path",
@@ -526,6 +528,11 @@ def validate_runtime_config(value: Any):
             _validate_mapping_keys(item, _PLATFORM_KEYS_BY_NAME[platform], path)
             if "contract_approved" in item:
                 result["platforms"][platform]["contract_approved"] = _boolean(item["contract_approved"], f"{path}.contract_approved")
+            if "auto_refresh_enabled" in item:
+                result["platforms"][platform]["auto_refresh_enabled"] = _boolean(
+                    item["auto_refresh_enabled"],
+                    f"{path}.auto_refresh_enabled",
+                )
             if "product_contract_approved" in item:
                 result["platforms"][platform]["product_contract_approved"] = _boolean(
                     item["product_contract_approved"], f"{path}.product_contract_approved"
