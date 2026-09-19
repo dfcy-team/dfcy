@@ -261,7 +261,14 @@ class MasterDataCollectionView(APIView):
             queryset = queryset.filter(status=status)
         page = positive_int(request.query_params.get("page", 1), 1)
         page_size = positive_int(request.query_params.get("page_size", 20), 20)
-        return success_response(paginated_data(request, queryset, serializer, page=page, page_size=page_size))
+        return success_response(paginated_data(
+            request,
+            queryset,
+            serializer,
+            page=page,
+            page_size=page_size,
+            serializer_context={"request": request},
+        ))
 
     def post(self, request, resource):
         require_all_scope(request.user, self.write_permission_code)

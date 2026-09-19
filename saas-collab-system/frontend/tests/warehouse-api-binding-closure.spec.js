@@ -104,6 +104,13 @@ describe('仓库 API 接入操作闭环', () => {
     expect(warehousePage).toContain("notifyApiAccessBlocked(row)");
   });
 
+  it('refreshes the warehouse list after API authorization or validation changes', () => {
+    const warehousePage = read('src/views/masterdata/WarehouseMasterList.vue');
+    expect(warehousePage).toContain('ref="resourcePage"');
+    expect(warehousePage).toContain('@changed="handleApiAccessChanged"');
+    expect(warehousePage).toContain('await resourcePage.value?.loadData?.()');
+  });
+
   it('keeps the warehouse master fixture on the same MY Jifeng identity as the API fixture', () => {
     const masterData = read('src/mock/masterData.js');
     const integrations = read('src/mock/integrations.js');
