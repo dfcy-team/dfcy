@@ -113,6 +113,81 @@ def validate_manual_sync_job(sync_job, *, live_only=False):
     adapter.validate_configuration(sync_job)
 
 
+def enqueue_sync_run(sync_job, idempotency_key=None):
+    """Persist a manual queue request before publishing it to the worker."""
+    now = timezone.now()
+    idempotency_key = idempotency_key or uuid.uuid4().hex
+    with transaction.atomic():
+        locked_job = SyncJob.objects.select_for_update().get(
+            pk=sync_job.pk,
+            tenant_id=sync_job.tenant_id,
+        )
+        if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
+            raise ValidationError("任务已停用，请先启用任务。")
+        if locked_job.status == SyncJob.Status.RUNNING or (
+            locked_job.lock_expires_at and locked_job.lock_expires_at > now
+        ):
+            raise ValidationError("任务正在运行，请勿重复提交或切换状态。")
+        existing = SyncRun.objects.filter(
+            tenant=locked_job.tenant,
+            sync_job=locked_job,
+            idempotency_key=idempotency_key,
+        ).first()
+        if existing:
+            return existing, False
+        if SyncRun.objects.filter(
+            sync_job=locked_job,
+            status__in=(SyncRun.Status.QUEUED, SyncRun.Status.RUNNING),
+        ).exists():
+            raise ValidationError("任务正在排队或运行，请勿重复提交。")
+        run = SyncRun.objects.create(
+            tenant=locked_job.tenant,
+            sync_job=locked_job,
+            run_id=_run_id(),
+            idempotency_key=idempotency_key,
+            status=SyncRun.Status.QUEUED,
+            enqueued_at=now,
+            masked_log={
+                "execution_mode": "live_readonly",
+                "trigger_type": "manual",
+                "enqueued_at": now.isoformat(),
+            },
+        )
+    return run, True
+
+
+def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
+    if not idempotency_key:
+        return None
+    run = SyncRun.objects.filter(
+        tenant=sync_job.tenant,
+        sync_job=sync_job,
+        idempotency_key=idempotency_key,
+        status=SyncRun.Status.QUEUED,
+    ).first()
+    if not run:
+        return None
+    run.status = SyncRun.Status.FAILED
+    run.finished_at = timezone.now()
+    run.failed_count = 1
+    run.error_code = error_code
+    run.masked_error_message = sanitize_text(message)
+    run.masked_log = sanitize_payload(
+        {**(run.masked_log or {}), "error": run.masked_error_message}
+    )
+    run.save(
+        update_fields=[
+            "status",
+            "finished_at",
+            "failed_count",
+            "error_code",
+            "masked_error_message",
+            "masked_log",
+        ]
+    )
+    return run
+
+
 def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None):
     retry_wait = retry_wait or default_retry_wait
     adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
@@ -157,15 +232,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             defaults={"cursor_value": str(checkpoint_cursor or "")},
         )
         idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
-        existing = SyncRun.objects.filter(
+        existing = SyncRun.objects.select_for_update().filter(
             tenant=locked_job.tenant,
             sync_job=locked_job,
             idempotency_key=idempotency_key,
         ).first()
-        if existing:
+        if existing and existing.status != SyncRun.Status.QUEUED:
             return existing, False
 
-        run_id = _run_id()
+        run_id = existing.run_id if existing else _run_id()
         lease_expires_at = now + _lease_duration()
         acquired = SyncJob.objects.filter(
             pk=locked_job.pk,
@@ -183,19 +258,49 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         if not acquired:
             raise ValidationError("Sync job already has an active run.")
 
-        run = SyncRun.objects.create(
-            tenant=locked_job.tenant,
-            sync_job=locked_job,
-            run_id=run_id,
-            idempotency_key=idempotency_key,
-            status=SyncRun.Status.RUNNING,
-            started_at=now,
-            masked_log={"execution_mode": "live_readonly" if adapter.execution_mode == "live_readonly" else "simulation",
-                        "trigger_type": "scheduled" if dispatch else "manual",
-                        **({"scheduled_at": dispatch.scheduled_at.isoformat(),
-                            "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
-                            "schedule_snapshot": dispatch.schedule_snapshot} if dispatch else {})},
-        )
+        run_log = {
+            **((existing.masked_log or {}) if existing else {}),
+            "execution_mode": "live_readonly" if adapter.execution_mode == "live_readonly" else "simulation",
+            "trigger_type": "scheduled" if dispatch else "manual",
+            **(
+                {
+                    "scheduled_at": dispatch.scheduled_at.isoformat(),
+                    "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
+                    "schedule_snapshot": dispatch.schedule_snapshot,
+                }
+                if dispatch
+                else {}
+            ),
+        }
+        if existing:
+            run = existing
+            run.status = SyncRun.Status.RUNNING
+            run.started_at = now
+            run.finished_at = None
+            run.error_code = ""
+            run.masked_error_message = ""
+            run.masked_log = run_log
+            run.save(
+                update_fields=[
+                    "status",
+                    "started_at",
+                    "finished_at",
+                    "error_code",
+                    "masked_error_message",
+                    "masked_log",
+                ]
+            )
+        else:
+            run = SyncRun.objects.create(
+                tenant=locked_job.tenant,
+                sync_job=locked_job,
+                run_id=run_id,
+                idempotency_key=idempotency_key,
+                status=SyncRun.Status.RUNNING,
+                enqueued_at=dispatch.enqueued_at if dispatch else now,
+                started_at=now,
+                masked_log=run_log,
+            )
         if dispatch:
             dispatch.sync_run = run
             dispatch.save(update_fields=["sync_run"])
@@ -218,6 +323,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             "started_from_initial_cursor": not bool(cursor.cursor_value),
             "coverage_certified": False,
         }
+        run.masked_log = sanitize_payload(
+            {**(run.masked_log or {}), "decision_source": decision_source}
+        )
+        run.save(update_fields=["masked_log"])
 
     last_retry_error = ""
     while True:

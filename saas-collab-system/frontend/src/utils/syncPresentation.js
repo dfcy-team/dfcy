@@ -2,9 +2,14 @@ export const resources = { platform_product: '平台商品', sales_order: '销�
 export const runStates = { queued: '排队中', skipped: '已跳过（未执行）', blocked: '配置阻塞', dispatch_failed: '派发未确认', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消' };
 export const schedules = { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每日', weekly: '每周', cron: '定时' };
 export function syncTime(value) {
-  if (!value) return '—';
-  const date = new Date(value);
+  if (value == null || value === '') return '—';
+  const date = new Date(typeof value === 'number' && Math.abs(value) < 1e12 ? value * 1000 : value);
   return Number.isNaN(date.getTime()) ? '—' : date.toISOString().replace('T', ' ').slice(0, 19);
+}
+export function syncCollectionDate(seconds) {
+  if (seconds == null || seconds === '' || !Number.isFinite(Number(seconds))) return '—';
+  const date = new Date((Number(seconds) + 8 * 3600) * 1000);
+  return Number.isNaN(date.getTime()) ? '—' : date.toISOString().slice(0, 10);
 }
 export function syncCount(value) { return value == null ? '—' : Number(value).toLocaleString('zh-CN'); }
 export function syncError(value, code) {

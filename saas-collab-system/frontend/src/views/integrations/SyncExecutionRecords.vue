@@ -43,7 +43,7 @@
         <el-descriptions-item label="原始运行关联">{{ detail.retry_of || '—' }}</el-descriptions-item>
         <el-descriptions-item label="触发方式">{{ { manual: '手动', scheduled: '调度', retry: '重试' }[detail.trigger_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="读取／落库／失败">{{ syncCount(detail.fetched_count) }} / {{ syncCount(written(detail)) }} / {{ syncCount(detail.failed_count) }}</el-descriptions-item>
-        <el-descriptions-item label="同步范围（UTC）">{{ syncTime(detail.masked_log?.decision_source?.time_from) }} 至 {{ syncTime(detail.masked_log?.decision_source?.time_to) }}</el-descriptions-item>
+        <el-descriptions-item label="采集日期（北京时间）">{{ syncCollectionDate(detail.masked_log?.decision_source?.time_from) }} 至 {{ syncCollectionDate(detail.masked_log?.decision_source?.time_to) }}</el-descriptions-item>
         <el-descriptions-item label="执行参数">{{ detail.execution_mode || '—' }}；重试次数 {{ detail.retry_count ?? '—' }}；检查点 {{ detail.checkpoint_version ?? '—' }}</el-descriptions-item>
         <el-descriptions-item label="失败阶段">{{ detail.masked_log?.failure_stage || '—' }}</el-descriptions-item>
         <el-descriptions-item label="错误码">{{ detail.error_code || '—' }}</el-descriptions-item>
@@ -65,7 +65,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { fetchIntegrationWorkspace, retrySyncRun } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
-import { resources, runStates, schedules, syncTime, syncCount, syncError } from '../../utils/syncPresentation';
+import { resources, runStates, schedules, syncTime, syncCount, syncError, syncCollectionDate } from '../../utils/syncPresentation';
 const route = useRoute(), router = useRouter(), auth = useAuthStore();
 const props = defineProps({ detailId: { type: [String, Number], default: '' } });
 const rows = ref([]), options = ref({}), loading = ref(false), error = ref(''), page = ref(1), total = ref(0), dates = ref([]);
