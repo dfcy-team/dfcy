@@ -2011,9 +2011,9 @@ def product_detail_export(request):
     elif sku_status == "inactive":
         legacy_queryset = legacy_queryset.filter(generated_sku__is_active=False)
         sku_queryset = sku_queryset.filter(is_active=False)
-    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-created_at", "id")]
+    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-updated_at", "-id")]
     linked_ids = set(legacy_queryset.exclude(generated_sku_id=None).values_list("generated_sku_id", flat=True))
-    sku_rows = [_product_detail_row_from_sku(sku) for sku in sku_queryset.order_by("sku_code") if sku.id not in linked_ids]
+    sku_rows = [_product_detail_row_from_sku(sku) for sku in sku_queryset.order_by("-updated_at", "-id") if sku.id not in linked_ids]
     rows = legacy_rows + sku_rows
     headers = ["旧SPU编码", "旧SKU编码", "SPU编码", "SKU编码", "SKU商品名称", "SPU商品名称", "类目", "属性编码", "颜色编码", "规格", "采购价", "单位", "状态"]
     return _product_csv_response("product-detail.csv", headers, [
