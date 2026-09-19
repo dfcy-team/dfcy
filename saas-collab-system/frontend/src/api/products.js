@@ -121,16 +121,49 @@ export const createProductSkuBatch = (data = {}) =>
   requestWithMockFallback(
     { method: 'post', url: '/api/internal/products/skus/batch/', data, timeout: 120000 },
     () => {
-      const total = skuBatchCombinationCount(data.color_codes, data.spec_values);
+      const requestedItems = Array.isArray(data.items) ? data.items : [];
+      const total = requestedItems.length || skuBatchCombinationCount(data.color_codes, data.spec_values);
+      const results = requestedItems.map((item, index) => {
+        const specification = Object.values(item.spec_values || {}).filter((value) => value && value !== '0').join('×');
+        const segments = ['MOCK-SPU-001', item.color_code, specification].filter(Boolean);
+        return {
+          id: data.preview ? null : `mock-sku-${Date.now()}-${index}`,
+          sku_code: item.sku_code || segments.join('-'),
+          color_code: item.color_code || '',
+          color_name: item.color_code === 'BLUE' ? '蓝色' : item.color_code === 'WHITE' ? '米白色' : '',
+          spec_values: item.spec_values || {},
+          specification,
+          product_name: item.product_name || `Mock Product${item.color_code === 'BLUE' ? '蓝色' : item.color_code === 'WHITE' ? '米白色' : ''}${specification}`,
+          name_source: item.product_name_source || 'auto',
+          status: 'new',
+          ...item,
+        };
+      });
       return {
         success: true,
         code: 'OK',
         message: 'SKU 批量生成完成（模拟）',
-        data: { created: total, skipped: 0, total, results: [] }
+        data: { created: total, skipped: 0, total, results }
       };
     },
     'products.skus.batch_create'
   );
+
+export const uploadProductSkuImage = (id, file) => {
+  const data = new FormData();
+  data.append('file', file);
+  return requestWithMockFallback(
+    {
+      method: 'post',
+      url: `/api/internal/products/skus/${id}/image/`,
+      data,
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    },
+    {},
+    'products.skus.image_upload',
+  );
+};
 
 export const updateProductSpu = (id, data) => requestWithMockFallback(
   { method: 'patch', url: `/api/internal/products/spus/${id}/`, data }, {}, 'products.spus.update'
@@ -167,7 +200,11 @@ export const fetchProductStatusList = (params = {}) =>
 const dictionaryApi = (resource) => `/api/internal/products/${resource}/`;
 
 export const fetchProductCategories = (params = {}) =>
-  requestWithMockFallback({ method: 'get', url: dictionaryApi('categories'), params }, () => ({ success: true, data: [] }), 'products.categories');
+  requestWithMockFallback({ method: 'get', url: dictionaryApi('categories'), params }, () => ({ success: true, code: 'OK', message: '演示数据', data: [
+    { id: 1, level: 1, code: '1', name: '家纺布艺', is_active: true },
+    { id: 2, level: 2, code: '01', name: '床上用品', parent: 1, is_active: true },
+    { id: 3, level: 3, code: '01', name: '桌布', parent: 2, is_active: true, spec_dimensions: [{ code: 'size', name: '规格', values: ['15M', '18M'] }] },
+  ] }), 'products.categories');
 export const createProductCategory = (data) => requestWithMockFallback({ method: 'post', url: dictionaryApi('categories'), data }, {}, 'products.categories.create');
 export const updateProductCategory = (id, data) => requestWithMockFallback({ method: 'patch', url: `${dictionaryApi('categories')}${id}/`, data }, {}, 'products.categories.update');
 export const deleteProductCategory = (id) => requestWithMockFallback({ method: 'delete', url: `${dictionaryApi('categories')}${id}/` }, {}, 'products.categories.delete');
@@ -188,7 +225,10 @@ export const updateProductCategoryBackgroundColors = (items) => requestWithMockF
 );
 
 export const fetchProductColors = (params = {}) =>
-  requestWithMockFallback({ method: 'get', url: dictionaryApi('colors'), params }, () => ({ success: true, data: [] }), 'products.colors');
+  requestWithMockFallback({ method: 'get', url: dictionaryApi('colors'), params }, () => ({ success: true, code: 'OK', message: '演示数据', data: [
+    { id: 1, code: 'BLUE', name: '蓝色', is_active: true },
+    { id: 2, code: 'WHITE', name: '米白色', is_active: true },
+  ] }), 'products.colors');
 export const createProductColor = (data) => requestWithMockFallback({ method: 'post', url: dictionaryApi('colors'), data }, {}, 'products.colors.create');
 export const updateProductColor = (id, data) => requestWithMockFallback({ method: 'patch', url: `${dictionaryApi('colors')}${id}/`, data }, {}, 'products.colors.update');
 export const deleteProductColor = (id) => requestWithMockFallback({ method: 'delete', url: `${dictionaryApi('colors')}${id}/` }, {}, 'products.colors.delete');

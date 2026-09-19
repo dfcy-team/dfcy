@@ -9,6 +9,7 @@ cannot leave a partially generated set behind.
 
 from itertools import product
 from math import prod as math_prod
+from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
@@ -24,6 +25,22 @@ from .serializers import ProductSKUSerializer
 
 
 MAX_BATCH_COMBINATIONS = 200
+VARIANT_MODES = {"color_spec", "color_only", "spec_only", "single"}
+SKU_DETAIL_FIELDS = {
+    "product_name",
+    "product_name_source",
+    "image_url",
+    "package_weight",
+    "package_length_cm",
+    "package_width_cm",
+    "package_height_cm",
+    "package_volume",
+    "purchase_price",
+    "unit",
+    "origin_country",
+    "hs_code",
+    "product_description",
+}
 
 
 def _dedupe_strings(value, *, field_name):
@@ -63,9 +80,17 @@ def _normalize_batch_input(request_data):
     if spu_id < 1:
         raise serializers.ValidationError({"spu": "SPU 必须是有效的整数 ID。"})
 
-    colors = _dedupe_strings(request_data.get("color_codes"), field_name="color_codes")
-    if not colors:
+    variant_mode = str(request_data.get("variant_mode") or "").strip()
+    if variant_mode and variant_mode not in VARIANT_MODES:
+        raise serializers.ValidationError({"variant_mode": "生成方式无效。"})
+    colors = _dedupe_strings(request_data.get("color_codes", []), field_name="color_codes")
+    # Requests from the previous dialog did not send a mode and always
+    # required colour selection. Keep that contract while allowing the new
+    # four-mode workflow to omit colour deliberately.
+    if (not variant_mode or variant_mode in {"color_spec", "color_only"}) and not colors:
         raise serializers.ValidationError({"color_codes": "至少选择一个颜色。"})
+    if variant_mode in {"spec_only", "single"}:
+        colors = []
 
     raw_specs = request_data.get("spec_values", {})
     if raw_specs is None:
@@ -80,7 +105,18 @@ def _normalize_batch_input(request_data):
         dimension = dimension.strip()
         spec_values[dimension] = _dedupe_strings(values, field_name=f"spec_values.{dimension}")
 
-    return spu_id, colors, spec_values
+    if variant_mode in {"color_only", "single"}:
+        spec_values = {}
+    if variant_mode in {"color_spec", "spec_only"} and not any(spec_values.values()):
+        raise serializers.ValidationError({"spec_values": "至少选择一个规格。"})
+
+    raw_items = request_data.get("items")
+    if raw_items is not None and not isinstance(raw_items, list):
+        raise serializers.ValidationError({"items": "必须是数组。"})
+    if isinstance(raw_items, list) and len(raw_items) > MAX_BATCH_COMBINATIONS:
+        raise serializers.ValidationError({"items": f"一次最多生成 {MAX_BATCH_COMBINATIONS} 个 SKU。"})
+    preview = request_data.get("preview") is True
+    return spu_id, colors, spec_values, variant_mode, raw_items, preview
 
 
 def _category_dimensions(category):
@@ -174,7 +210,44 @@ def _validate_color_codes(tenant, color_codes):
         )
 
 
-def _build_combinations(category, spu, color_codes, spec_values):
+def _predict_sku(category, spu, color_code, current_specs):
+    if _category_dimensions(category):
+        return build_sku_code(
+            spu=spu,
+            color_code=color_code,
+            spec_values=current_specs,
+        )
+    segments = [str(spu.spu_code).strip()]
+    if str(color_code or "").strip():
+        segments.append(str(color_code).strip())
+    return "-".join(segments), "", {}
+
+
+def _normalize_requested_items(raw_items):
+    normalized = []
+    for index, item in enumerate(raw_items or []):
+        if not isinstance(item, dict):
+            raise serializers.ValidationError({"items": f"第 {index + 1} 项必须是对象。"})
+        raw_specs = item.get("spec_values") or {}
+        if not isinstance(raw_specs, dict):
+            raise serializers.ValidationError({"items": f"第 {index + 1} 项的规格必须是对象。"})
+        specs = {
+            str(code).strip(): str(value).strip()
+            for code, value in raw_specs.items()
+            if str(code).strip() and str(value).strip()
+        }
+        normalized.append(
+            {
+                "color_code": str(item.get("color_code") or "").strip(),
+                "spec_values": specs,
+                "details": {key: item[key] for key in SKU_DETAIL_FIELDS if key in item},
+                "submitted_sku_code": str(item.get("sku_code") or "").strip(),
+            }
+        )
+    return normalized
+
+
+def _build_combinations(category, spu, color_codes, spec_values, raw_items=None):
     """Return deterministic (colour, spec mapping, predicted code) tuples."""
 
     dimension_codes = _category_dimensions(category)
@@ -184,37 +257,39 @@ def _build_combinations(category, spu, color_codes, spec_values):
             {"spec_values": f"未知规格维度：{', '.join(unknown)}。"}
         )
 
-    # Missing dimensions and explicitly empty selections are intentionally
+    requested_items = _normalize_requested_items(raw_items)
+    if requested_items:
+        source = [(item["color_code"], item["spec_values"], item) for item in requested_items]
+    else:
+        # Missing dimensions and explicitly empty selections are intentionally
     # omitted from a combination.  build_sku_code fills missing dimensions
     # with its existing ``0`` placeholder, preserving single-SKU behaviour.
-    selected_codes = [code for code in dimension_codes if spec_values.get(code)]
-    selected_values = [spec_values[code] for code in selected_codes]
-    specification_count = math_prod(len(values) for values in selected_values) if selected_values else 1
-    total_count = len(color_codes) * specification_count
-    if total_count > MAX_BATCH_COMBINATIONS:
-        raise serializers.ValidationError(
-            {"spec_values": f"一次最多生成 {MAX_BATCH_COMBINATIONS} 个 SKU。"}
-        )
-    # Materialize once because the Cartesian iterator must be reused for each
-    # selected colour.
-    spec_combinations = list(product(*selected_values)) if selected_values else [()]
+        selected_codes = [code for code in dimension_codes if spec_values.get(code)]
+        selected_values = [spec_values[code] for code in selected_codes]
+        specification_count = math_prod(len(values) for values in selected_values) if selected_values else 1
+        color_axis = color_codes or [""]
+        total_count = len(color_axis) * specification_count
+        if total_count > MAX_BATCH_COMBINATIONS:
+            raise serializers.ValidationError(
+                {"spec_values": f"一次最多生成 {MAX_BATCH_COMBINATIONS} 个 SKU。"}
+            )
+        spec_combinations = list(product(*selected_values)) if selected_values else [()]
+        source = [
+            (color_code, dict(zip(selected_codes, values)), None)
+            for color_code in color_axis
+            for values in spec_combinations
+        ]
 
     combinations = []
     seen_codes = set()
-    for color_code in color_codes:
-        for values in spec_combinations:
-            current_specs = dict(zip(selected_codes, values))
-            if dimension_codes:
-                sku_code, _specification, _normalized = build_sku_code(
-                    spu=spu,
-                    color_code=color_code,
-                    spec_values=current_specs,
+    for color_code, current_specs, requested in source:
+            sku_code, specification, normalized = _predict_sku(
+                category, spu, color_code, current_specs
+            )
+            if requested and requested["submitted_sku_code"] and requested["submitted_sku_code"] != sku_code:
+                raise serializers.ValidationError(
+                    {"items": f"SKU 编码已过期，请重新生成预览：{requested['submitted_sku_code']}。"}
                 )
-            else:
-                # A category without dimensions has no ``0`` specification
-                # segment.  This is the no-specification form used by the
-                # product master generator.
-                sku_code = f"{spu.spu_code}-{color_code}"
             if len(sku_code) > 80:
                 raise serializers.ValidationError(
                     {"spec_values": f"生成的 SKU 编码长度不能超过 80：{sku_code}。"}
@@ -222,7 +297,9 @@ def _build_combinations(category, spu, color_codes, spec_values):
             if sku_code in seen_codes:
                 continue
             seen_codes.add(sku_code)
-            combinations.append((color_code, current_specs, sku_code))
+            combinations.append(
+                (color_code, normalized, sku_code, specification, requested["details"] if requested else {})
+            )
 
     if not combinations:
         raise serializers.ValidationError({"spec_values": "没有可生成的规格组合。"})
@@ -248,16 +325,22 @@ def product_sku_batch_create(request):
     # that rule for batch generation as well, while the SPU lookup below still
     # applies the normal scoped-queryset boundary.
     require_create_scope(request.user, "products.master.manage")
-    spu_id, color_codes, spec_values = _normalize_batch_input(request.data)
+    spu_id, color_codes, spec_values, _variant_mode, raw_items, preview = _normalize_batch_input(request.data)
 
     with transaction.atomic():
         spu, category = _resolve_spu(request.user, spu_id)
-        _validate_color_codes(request.user.tenant, color_codes)
+        requested_colors = color_codes or [
+            str(item.get("color_code") or "").strip()
+            for item in (raw_items or [])
+            if str(item.get("color_code") or "").strip()
+        ]
+        if requested_colors:
+            _validate_color_codes(request.user.tenant, list(dict.fromkeys(requested_colors)))
 
         # build_sku_code expects the category through the SPU relation.  Keep
         # this locked category attached for all candidate calculations.
         spu.category_node = category
-        combinations = _build_combinations(category, spu, color_codes, spec_values)
+        combinations = _build_combinations(category, spu, color_codes, spec_values, raw_items)
         candidate_codes = [item[2] for item in combinations]
         legacy_aliases = {
             predicted_code: build_legacy_sku_code(
@@ -265,7 +348,7 @@ def product_sku_batch_create(request):
                 color_code=color_code,
                 spec_values=current_specs,
             )
-            for color_code, current_specs, predicted_code in combinations
+            for color_code, current_specs, predicted_code, _specification, _details in combinations
         }
         lookup_codes = candidate_codes + [
             alias
@@ -285,9 +368,60 @@ def product_sku_batch_create(request):
                 {"sku_code": f"SKU 编码已归属其他商品：{', '.join(sorted(conflicting))}。"}
             )
 
+        color_names = dict(
+            ProductColor.objects.filter(
+                tenant=request.user.tenant,
+                code__in=[code for code in requested_colors if code],
+            ).values_list("code", "name")
+        )
+        if preview:
+            preview_rows = []
+            for color_code, current_specs, predicted_code, specification, details in combinations:
+                existing_item = existing.get(predicted_code)
+                auto_name = "".join(
+                    part for part in (
+                        spu.product_name,
+                        color_names.get(color_code, ""),
+                        specification,
+                    ) if part
+                )
+                existing_details = {}
+                if existing_item and existing_item.spu_id == spu.id:
+                    existing_details = {
+                        field: getattr(existing_item, field)
+                        for field in SKU_DETAIL_FIELDS
+                        if field not in {"product_name_source"}
+                    }
+                preview_rows.append(
+                    {
+                        "sku_code": predicted_code,
+                        "color_code": color_code,
+                        "color_name": color_names.get(color_code, ""),
+                        "spec_values": current_specs,
+                        "specification": specification,
+                        "product_name": existing_details.get("product_name") or details.get("product_name") or auto_name,
+                        "name_source": (
+                            existing_item.product_name_source
+                            if existing_item and existing_item.spu_id == spu.id
+                            else "manual" if details.get("product_name") and details.get("product_name") != auto_name else "auto"
+                        ),
+                        "status": "existing" if existing_item and existing_item.spu_id == spu.id else "new",
+                        "existing_id": existing_item.id if existing_item and existing_item.spu_id == spu.id else None,
+                        **existing_details,
+                    }
+                )
+            return success_response(
+                {
+                    "created": sum(1 for row in preview_rows if row["status"] == "new"),
+                    "skipped": sum(1 for row in preview_rows if row["status"] == "existing"),
+                    "total": len(preview_rows),
+                    "results": preview_rows,
+                }
+            )
+
         created_items = []
         skipped = 0
-        for color_code, current_specs, predicted_code in combinations:
+        for color_code, current_specs, predicted_code, specification, details in combinations:
             if predicted_code in existing:
                 skipped += 1
                 continue
@@ -300,15 +434,31 @@ def product_sku_batch_create(request):
                 skipped += 1
                 continue
 
+            details = dict(details)
+            dimensions = [
+                details.get("package_length_cm"),
+                details.get("package_width_cm"),
+                details.get("package_height_cm"),
+            ]
+            if all(value not in (None, "") for value in dimensions):
+                try:
+                    details["package_volume"] = (
+                        Decimal(str(dimensions[0]))
+                        * Decimal(str(dimensions[1]))
+                        * Decimal(str(dimensions[2]))
+                        / Decimal("1000000")
+                    ).quantize(Decimal("0.000001"))
+                except (InvalidOperation, TypeError, ValueError):
+                    raise serializers.ValidationError(
+                        {"package_volume": f"{predicted_code} 的长宽高无法换算体积。"}
+                    )
             payload = {
                 "spu": spu.id,
                 "color_code": color_code,
                 "spec_values": current_specs,
+                "sku_code": predicted_code,
+                **details,
             }
-            # A no-dimension category has no value for ProductSKUSerializer's
-            # automatic specification builder, so supply its explicit code.
-            if not _category_dimensions(category):
-                payload["sku_code"] = predicted_code
 
             serializer = ProductSKUSerializer(
                 data=payload,
@@ -319,7 +469,11 @@ def product_sku_batch_create(request):
                 # Use a savepoint so a concurrent single-SKU create's unique
                 # collision does not poison the outer transaction.
                 with transaction.atomic():
-                    item = serializer.save(tenant=request.user.tenant)
+                    item = serializer.save(
+                        tenant=request.user.tenant,
+                        specification=specification,
+                        size=specification,
+                    )
             except IntegrityError:
                 raced = ProductSKU.objects.select_for_update().filter(
                     tenant=request.user.tenant,

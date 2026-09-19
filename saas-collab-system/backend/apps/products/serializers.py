@@ -521,6 +521,7 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             "spu",
             "sku_code",
             "product_name",
+            "product_name_source",
             "status_name",
             "legacy_sku_code",
             "color_code",

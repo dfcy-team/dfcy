@@ -118,8 +118,16 @@ def build_sku_code(*, spu, color_code, spec_values):
     if not spu.category_node_id:
         raise ValidationError("SPU has no structured category; SKU code cannot be generated automatically.")
     specification, normalized = build_specification(spu.category_node, spec_values)
-    suffix = f"-{specification}" if specification else ""
-    return f"{spu.spu_code}-{color_code}{suffix}", specification, normalized
+    # Join only meaningful segments.  Batch generation supports variants
+    # without a colour and/or specification, so an empty optional dimension
+    # must never leave a dangling hyphen in the persisted identifier.
+    segments = [str(spu.spu_code).strip()]
+    normalized_color = str(color_code or "").strip()
+    if normalized_color:
+        segments.append(normalized_color)
+    if specification:
+        segments.append(specification)
+    return "-".join(segments), specification, normalized
 
 
 def build_legacy_sku_code(*, spu, color_code, spec_values):
@@ -137,7 +145,13 @@ def build_legacy_sku_code(*, spu, color_code, spec_values):
     if not codes:
         return None
     values = [str((spec_values or {}).get(code, "0") or "0").strip() or "0" for code in codes]
-    return f"{spu.spu_code}-{color_code}-{'×'.join(values)}"
+    segments = [str(spu.spu_code).strip()]
+    normalized_color = str(color_code or "").strip()
+    if normalized_color:
+        segments.append(normalized_color)
+    if values:
+        segments.append("×".join(values))
+    return "-".join(segments)
 
 
 def allocate_legacy_sku_code(*, tenant, base_code, legacy_sku_code, max_length=SKU_CODE_MAX_LENGTH):

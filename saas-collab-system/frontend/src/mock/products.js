@@ -17,6 +17,7 @@ const spuItem = {
   spu_code: 'MOCK-SPU-001',
   product_name: 'Mock Product',
   category: 'mock-category',
+  category_node: 3,
   lifecycle_status: 'draft',
   sales_status: 'not_listed',
   is_code_frozen: false
