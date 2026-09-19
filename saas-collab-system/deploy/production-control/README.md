@@ -97,6 +97,7 @@ sudo /opt/saas-collab/release-control/unified/bin/adopt-current.sh \
 | Variable | `VM_PORT` | `22131` |
 | Variable | `VM_DEPLOY_USER` | `dfcy01` |
 | Variable | `PRODUCTION_RUNNER_LABEL` | 能访问 VM 的 self-hosted runner label |
+| Variable | `PRODUCTION_GHCR_PULL_USER` | `PRODUCTION_GHCR_PULL_TOKEN` 所属的 GitHub 用户名 |
 
 配置以下 Secrets：
 
@@ -104,8 +105,9 @@ sudo /opt/saas-collab/release-control/unified/bin/adopt-current.sh \
 | --- | --- |
 | `VM_SSH_PRIVATE_KEY` | 仅用于该 forced-command CI key 的私钥 |
 | `VM_KNOWN_HOSTS` | owner 固定的 VM host key，禁止关闭 host key 校验 |
+| `PRODUCTION_GHCR_PULL_TOKEN` | 可选的 GHCR 拉取令牌；必须与 `PRODUCTION_GHCR_PULL_USER` 成对配置 |
 
-Production 环境不要添加 Required reviewers，否则会重新引入人工审批。保留分支/环境访问范围、Actions 权限和审计；`GITHUB_TOKEN` 由 workflow 的 `packages: write` 权限用于推送并在任务期间临时登录 GHCR，VM 不保存长期 GHCR PAT。
+Production 环境不要添加 Required reviewers，否则会重新引入人工审批。保留分支/环境访问范围、Actions 权限和审计；`GITHUB_TOKEN` 由 workflow 的 `packages: write` 权限用于推送镜像。拉取时优先使用成对配置的专用 GHCR 用户名和令牌，否则回退到当前任务的 GitHub 身份；凭据只在任务期间传入，VM 不保存长期 GHCR PAT。
 
 ## 开发 A 的使用方式
 
