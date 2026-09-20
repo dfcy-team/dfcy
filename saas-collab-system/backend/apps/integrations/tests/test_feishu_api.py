@@ -12,7 +12,7 @@ class FeishuApiTests(APITestCase):
     def setUp(self):
         self.tenant = Tenant.objects.create(code="FS01", name="Feishu tenant")
         self.user = get_user_model().objects.create_user(
-            username="feishu-admin", password="x", tenant=self.tenant,
+            username="feishu-admin", tenant=self.tenant,
             user_type="internal", is_active=True, is_superuser=True,
         )
         self.client.force_authenticate(self.user)
@@ -62,7 +62,7 @@ class FeishuApiTests(APITestCase):
 
     def test_unauthorized_user_is_forbidden_and_fine_grained_write_is_enforced(self):
         limited = get_user_model().objects.create_user(
-            username="limited-feishu", password="x", tenant=self.tenant,
+            username="limited-feishu", tenant=self.tenant,
             user_type="internal", is_active=True,
         )
         self.client.force_authenticate(limited)
