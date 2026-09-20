@@ -57,7 +57,7 @@ describe('current deployment menu baseline', () => {
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
     // entries; the detail routes remain in the route contract.
-    expect(flattenMenuItems(menuItems)).toHaveLength(106);
+    expect(flattenMenuItems(menuItems)).toHaveLength(107);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
@@ -108,7 +108,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(106);
+    expect(flatItems).toHaveLength(107);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {
