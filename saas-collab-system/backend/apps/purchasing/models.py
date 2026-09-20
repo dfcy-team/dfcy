@@ -346,6 +346,10 @@ class SupplyPurchaseOrderLine(models.Model):
     unit_price = models.DecimalField(max_digits=14, decimal_places=4)
     expected_delivery_date = models.DateField(null=True, blank=True)
     source_record_id = models.CharField(max_length=128, null=True, blank=True)
+    source_bundle_sku = models.ForeignKey(
+        ProductSKU, on_delete=models.PROTECT, related_name="expanded_supply_purchase_order_lines", null=True, blank=True
+    )
+    source_bundle_snapshot = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

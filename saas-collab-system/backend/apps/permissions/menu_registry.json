@@ -34,7 +34,8 @@
         "resource": "products_details",
         "parent": "基础档案",
         "action_codes": [
-          "products.master.view"
+          "products.master.view",
+          "products.bundle.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -131,25 +132,6 @@
         "parent": "基础档案",
         "action_codes": [
           "products.specification.view"
-        ],
-        "source": "frontend/src/router/menu.js",
-        "status": "active"
-      }
-    },
-    {
-      "code": "menu.products.products_bundles.view",
-      "name": "组合商品",
-      "module": "products",
-      "action": "products_bundles.view",
-      "description": "显示组合商品入口",
-      "permission_type": "menu",
-      "metadata": {
-        "path": "/products/bundles",
-        "route": "/products/bundles",
-        "resource": "products_bundles",
-        "parent": "基础档案",
-        "action_codes": [
-          "products.bundle.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -2451,7 +2433,8 @@
     {
       "path": "/products/details",
       "permissions": [
-        "products.master.view"
+        "products.master.view",
+        "products.bundle.view"
       ],
       "userTypes": [
         "internal"
@@ -2540,9 +2523,6 @@
       ],
       "userTypes": [
         "internal"
-      ],
-      "menuPermissions": [
-        "menu.products.products_bundles.view"
       ]
     },
     {

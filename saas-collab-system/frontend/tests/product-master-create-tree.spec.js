@@ -20,4 +20,13 @@ describe('商品主数据创建与分类目录契约', () => {
     expect(page).toContain('createProductSpu');
     expect(page).toContain('category_node: createForm.category_node');
   });
+
+  it('单个新增支持新建 SPU 或按新旧编码选择已有 SPU 新增 SKU', () => {
+    expect(page).toContain('data-testid="standard-spu-mode"');
+    expect(page).toContain('新建 SPU');
+    expect(page).toContain('选择已有 SPU 新增 SKU');
+    expect(page).toContain('搜索新/旧 SPU 编码或商品名称');
+    expect(page).toContain('legacy_spu_code');
+    expect(page).toContain('openSkuCreate(target)');
+  });
 });

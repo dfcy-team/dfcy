@@ -443,6 +443,68 @@ class ProductBundleComponent(models.Model):
         return super().save(*args, **kwargs)
 
 
+class ProductBundleVersion(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_bundle_versions")
+    bundle_sku = models.ForeignKey(ProductSKU, on_delete=models.CASCADE, related_name="bundle_versions")
+    version = models.PositiveIntegerField()
+    effective_at = models.DateTimeField()
+    reason = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_product_bundle_versions"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["bundle_sku_id", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["bundle_sku", "version"], name="uniq_bundle_sku_version"),
+        ]
+
+
+class ProductBundleVersionComponent(models.Model):
+    version = models.ForeignKey(ProductBundleVersion, on_delete=models.CASCADE, related_name="components")
+    component_sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, related_name="bundle_version_components")
+    component_sku_code = models.CharField(max_length=80)
+    component_name = models.CharField(max_length=200, blank=True)
+    quantity = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["version_id", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["version", "component_sku"], name="uniq_bundle_version_component"),
+            models.CheckConstraint(condition=models.Q(quantity__gte=1), name="bundle_version_component_qty_positive"),
+        ]
+
+
+class ProductBundleChangeAudit(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_bundle_change_audits")
+    bundle_sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, related_name="bundle_change_audits")
+    version = models.ForeignKey(ProductBundleVersion, on_delete=models.PROTECT, related_name="audits")
+    action = models.CharField(max_length=40, default="components_updated")
+    reason = models.CharField(max_length=500, blank=True)
+    before_payload = models.JSONField(default=list)
+    after_payload = models.JSONField(default=list)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="product_bundle_audits")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ProductBundleMigrationBatch(models.Model):
+    class Status(models.TextChoices):
+        PREVIEWED = "previewed", "Previewed"
+        CONFIRMED = "confirmed", "Confirmed"
+        EXPIRED = "expired", "Expired"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_bundle_migration_batches")
+    token_hash = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PREVIEWED)
+    normalized_rows = models.JSONField(default=list)
+    preview_summary = models.JSONField(default=dict)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="bundle_migrations")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+
 class ProductStatus(models.TextChoices):
     NEW = "new", "New"
     ACTIVE = "active", "Active"

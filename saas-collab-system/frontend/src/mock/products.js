@@ -20,7 +20,20 @@ const spuItem = {
   category_node: 3,
   lifecycle_status: 'draft',
   sales_status: 'not_listed',
-  is_code_frozen: false
+  is_code_frozen: false,
+  product_type: 'standard'
+};
+
+const bundleSpuItem = {
+  id: 2,
+  spu_code: 'MOCK-BUNDLE-SPU-001',
+  legacy_spu_code: 'ZH-DEMO-001',
+  product_name: '演示组合商品',
+  category: 'mock-category',
+  lifecycle_status: 'draft',
+  sales_status: 'not_listed',
+  is_code_frozen: false,
+  product_type: 'bundle'
 };
 
 const skuItem = {
@@ -32,6 +45,15 @@ const skuItem = {
   selling_points: ['mock-selling-point'],
   package_weight: '0.500',
   package_volume: '0.020',
+  is_code_frozen: false
+};
+
+const bundleSkuItem = {
+  id: 2,
+  spu: 2,
+  sku_code: 'MOCK-BUNDLE-SKU-001',
+  legacy_sku_code: 'ZH-DEMO-001-WHITE',
+  product_name: '演示组合商品',
   is_code_frozen: false
 };
 
@@ -50,7 +72,7 @@ export const mockResearchDetail = () => successResponse({
 export const mockProductMasterList = () => successResponse({
   status: 'mock',
   module: 'products.spus',
-  items: [spuItem]
+  items: [spuItem, bundleSpuItem]
 });
 
 export const mockProductMasterDetail = () => successResponse({
@@ -62,7 +84,7 @@ export const mockProductMasterDetail = () => successResponse({
 export const mockProductSkuList = () => successResponse({
   status: 'mock',
   module: 'products.skus',
-  items: [skuItem]
+  items: [skuItem, bundleSkuItem]
 });
 
 export const mockProductDetailList = () => successResponse({

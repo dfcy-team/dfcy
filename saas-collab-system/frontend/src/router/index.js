@@ -32,7 +32,6 @@ const ProductDetailData = () => import('../views/products/ProductDetailData.vue'
 const ProductSkuEditor = () => import('../views/products/ProductSkuEditor.vue');
 const ProductDictionarySettings = () => import('../views/products/ProductDictionarySettings.vue');
 const FoundationSettings = () => import('../views/masterdata/FoundationSettings.vue');
-const ProductBundleManager = () => import('../views/products/ProductBundleManager.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
 const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
@@ -212,7 +211,10 @@ const routes = [
       { path: 'products/attributes', component: ProductDictionarySettings, props: { kind: 'attributes' } },
       { path: 'products/colors', component: ProductDictionarySettings, props: { kind: 'colors' } },
       { path: 'products/specifications', component: ProductDictionarySettings, props: { kind: 'specifications' } },
-      { path: 'products/bundles', component: ProductBundleManager },
+      {
+        path: 'products/bundles',
+        redirect: { path: '/products/details', query: { product_type: 'bundle' } },
+      },
       { path: 'master-data/settings', component: FoundationSettings },
       { path: 'products/status', component: ProductStatusList },
       { path: 'products/status-dashboard', component: ProductStatusDashboard },
