@@ -5,7 +5,9 @@
         <div class="brand">
           <strong>业务协同工作台</strong>
         </div>
-        <AppMenu :items="visibleMenuItems" />
+        <div class="sidebar-menu-scroll">
+          <AppMenu :items="visibleMenuItems" />
+        </div>
       </div>
     </el-aside>
 
@@ -21,6 +23,33 @@
           </el-breadcrumb>
         </div>
 
+        <nav class="route-tabs" aria-label="已打开页面" role="tablist">
+          <button
+            v-for="tab in openTabs"
+            :key="tab.path"
+            class="route-tab"
+            :class="{ 'is-active': route.fullPath === tab.path }"
+            role="tab"
+            :aria-selected="route.fullPath === tab.path"
+            :draggable="true"
+            :title="tab.label"
+            @click="activateTab(tab.path)"
+            @dragstart="startTabDrag(tab.path, $event)"
+            @dragover.prevent
+            @drop.prevent="dropTab(tab.path)"
+            @dragend="clearTabDrag"
+          >
+            <span class="route-tab__label">{{ tab.label }}</span>
+            <span
+              v-if="tab.closable"
+              class="route-tab__close"
+              role="button"
+              :aria-label="`关闭${tab.label}`"
+              @click.stop="closeTab(tab.path)"
+            >×</span>
+          </button>
+        </nav>
+
         <div class="header-user">
           <div class="header-user__identity">
             <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
@@ -31,8 +60,12 @@
         </div>
       </el-header>
 
-      <el-main class="app-main">
+      <el-main ref="mainScrollContainer" class="app-main" @scroll="updateScrollControls">
         <router-view />
+        <div class="main-scroll-controls" aria-label="内容滚动控制">
+          <button v-if="canScrollUp" type="button" aria-label="回到顶部" title="回到顶部" @click="scrollMainTo('top')">↑</button>
+          <button v-if="canScrollDown" type="button" aria-label="滚动到底部" title="滚动到底部" @click="scrollMainTo('bottom')">↓</button>
+        </div>
       </el-main>
     </el-container>
 
@@ -47,7 +80,9 @@
         <div class="brand">
           <strong>业务协同工作台</strong>
         </div>
-        <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
+        <div class="sidebar-menu-scroll">
+          <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
+        </div>
       </div>
     </el-drawer>
 
@@ -61,7 +96,7 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, ref } from 'vue';
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMenu, ElMenuItem, ElMessage, ElSubMenu } from 'element-plus';
 import 'element-plus/theme-chalk/el-container.css';
@@ -83,6 +118,26 @@ const route = useRoute();
 const router = useRouter();
 const mobileMenuOpen = ref(false);
 const userSettingsOpen = ref(false);
+const mainScrollContainer = ref(null);
+const canScrollUp = ref(false);
+const canScrollDown = ref(false);
+const tabsStorageKey = 'business-workbench:open-tabs';
+const homeTab = { path: '/', label: '工作台', closable: false };
+
+function loadOpenTabs() {
+  try {
+    const storedTabs = JSON.parse(sessionStorage.getItem(tabsStorageKey) || '[]');
+    if (!Array.isArray(storedTabs)) return [homeTab];
+    const validTabs = storedTabs.filter((tab) => tab?.path && tab?.label);
+    return [homeTab, ...validTabs.filter((tab) => tab.path !== '/')];
+  } catch {
+    return [homeTab];
+  }
+}
+
+const openTabs = ref(loadOpenTabs());
+const draggedTabPath = ref(null);
+let contentObserver;
 
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
 const currentLabel = computed(() => findMenuLabel(route.path, visibleMenuItems.value));
@@ -91,6 +146,91 @@ const roleLabel = computed(() => {
   if (auth.currentUser?.is_superuser) return '平台超级管理员';
   const roles = auth.currentUser?.roles?.filter(Boolean) || [];
   return roles.length ? roles.join(' / ') : '未分配角色';
+});
+
+function updateOpenTabs(currentRoute) {
+  const path = currentRoute.fullPath;
+  if (!openTabs.value.some((tab) => tab.path === path)) {
+    openTabs.value.push({
+      path,
+      label: currentLabel.value || currentRoute.meta?.title || currentRoute.path,
+      closable: path !== '/'
+    });
+  }
+  nextTick(updateScrollControls);
+}
+
+watch(() => route.fullPath, () => updateOpenTabs(route), { immediate: true });
+watch(openTabs, (tabs) => {
+  sessionStorage.setItem(tabsStorageKey, JSON.stringify(tabs));
+}, { deep: true });
+
+function activateTab(path) {
+  if (path !== route.fullPath) router.push(path);
+}
+
+function closeTab(path) {
+  const index = openTabs.value.findIndex((tab) => tab.path === path);
+  if (index < 0 || path === '/') return;
+  const wasActive = route.fullPath === path;
+  openTabs.value.splice(index, 1);
+  if (wasActive) {
+    const nextTab = openTabs.value[Math.max(0, index - 1)] || openTabs.value[0];
+    router.push(nextTab.path);
+  }
+}
+
+function startTabDrag(path, event) {
+  draggedTabPath.value = path;
+  event.dataTransfer?.setData('text/plain', path);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+}
+
+function dropTab(targetPath) {
+  const sourcePath = draggedTabPath.value;
+  draggedTabPath.value = null;
+  if (!sourcePath || sourcePath === targetPath) return;
+  const sourceIndex = openTabs.value.findIndex((tab) => tab.path === sourcePath);
+  const targetIndex = openTabs.value.findIndex((tab) => tab.path === targetPath);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const [tab] = openTabs.value.splice(sourceIndex, 1);
+  openTabs.value.splice(targetIndex, 0, tab);
+}
+
+function clearTabDrag() {
+  draggedTabPath.value = null;
+}
+
+function getMainScrollElement() {
+  return mainScrollContainer.value?.$el || mainScrollContainer.value;
+}
+
+function updateScrollControls() {
+  const element = getMainScrollElement();
+  if (!element) return;
+  canScrollUp.value = element.scrollTop > 4;
+  canScrollDown.value = element.scrollTop + element.clientHeight < element.scrollHeight - 4;
+}
+
+function scrollMainTo(direction) {
+  const element = getMainScrollElement();
+  if (!element) return;
+  element.scrollTo({ top: direction === 'top' ? 0 : element.scrollHeight, behavior: 'smooth' });
+}
+
+onMounted(() => {
+  nextTick(updateScrollControls);
+  window.addEventListener('resize', updateScrollControls);
+  const scrollElement = getMainScrollElement();
+  if (typeof MutationObserver !== 'undefined' && scrollElement) {
+    contentObserver = new MutationObserver(() => nextTick(updateScrollControls));
+    contentObserver.observe(scrollElement, { childList: true, subtree: true });
+  }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateScrollControls);
+  contentObserver?.disconnect();
 });
 
 function handleLogout() {
@@ -132,19 +272,28 @@ const AppMenu = defineComponent({
 </script>
 
 <style scoped>
-.app-shell { min-height: 100vh; }
-.app-workspace { min-width: 0; }
+.app-shell { height: 100vh; overflow: hidden; }
+.app-workspace { width: calc(100% - 248px); min-width: 0; height: 100vh; min-height: 0; margin-left: 248px; }
 
 .app-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 20;
+  width: 248px;
+  height: 100vh;
   border-right: 1px solid #263449;
   background: #101827;
 }
 
 .navigation-surface {
-  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   color: #cbd5e1;
   background: #101827;
 }
+
+.sidebar-menu-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 
 .brand {
   display: flex;
@@ -262,6 +411,37 @@ const AppMenu = defineComponent({
   min-width: 0;
 }
 
+.route-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  align-self: stretch;
+  min-width: 0;
+  max-width: 48%;
+  overflow-x: auto;
+  margin: 0 16px;
+}
+
+.route-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  max-width: 180px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: #64748b;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.route-tab.is-active { border-bottom-color: #2563eb; color: #1d4ed8; font-weight: 600; }
+.route-tab__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-tab__close { color: #94a3b8; font-size: 17px; line-height: 1; }
+.route-tab__close:hover { color: #dc2626; }
+
 .header-user__identity {
   display: flex;
   flex-direction: column;
@@ -277,17 +457,21 @@ const AppMenu = defineComponent({
 }
 .header-user__identity span { color: #718096; font-size: 11px; }
 .mobile-menu-button { display: none; width: 36px; min-width: 36px; padding: 0; font-size: 20px; }
-.app-main { min-width: 0; padding: 20px; overflow-x: auto; }
+.app-main { position: relative; min-width: 0; height: calc(100vh - 64px); padding: 20px; overflow: auto; }
+.main-scroll-controls { position: fixed; z-index: 30; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.main-scroll-controls button { width: 32px; height: 32px; border: 1px solid #cbd5e1; border-radius: 50%; color: #334155; background: #fff; box-shadow: 0 2px 8px rgb(15 23 42 / 14%); cursor: pointer; pointer-events: auto; }
 
 @media (max-width: 900px) {
   .desktop-sidebar { display: none; }
+  .app-workspace { width: 100%; margin-left: 0; }
   .mobile-menu-button { display: inline-flex; }
+  .header-context :deep(.el-breadcrumb) { display: none; }
   .app-header { padding: 0 12px; }
   .app-main { width: 100%; padding: 14px; }
-  .header-user__identity span { display: none; }
+  .route-tabs { flex: 1; max-width: none; margin: 0 6px; }
+  .header-user__identity { display: none; }
   .header-user { gap: 6px; }
-  .header-user__identity { width: 76px; min-width: 0; }
   .user-settings-button { min-width: 36px; padding: 4px; }
-  .header-user .el-button { min-width: 36px; padding: 4px; }
+  .header-user .el-button { min-width: 36px; padding: 4px; font-size: 12px; }
 }
 </style>
