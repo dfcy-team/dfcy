@@ -1004,6 +1004,7 @@ def product_spu_detail(request, pk):
     if request.method == "GET":
         return success_response(ProductSPUSerializer(item).data)
 
+    old_legacy_spu_code = item.legacy_spu_code
     serializer = ProductSPUSerializer(
         item,
         data=request.data,
@@ -1012,6 +1013,19 @@ def product_spu_detail(request, pk):
     )
     serializer.is_valid(raise_exception=True)
     item = serializer.save()
+    if old_legacy_spu_code != item.legacy_spu_code:
+        from apps.audit.services import write_operation_log
+
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="products",
+            action="product_spu.update",
+            object_type="ProductSPU",
+            object_id=item.id,
+            before_data={"legacy_spu_code": old_legacy_spu_code},
+            after_data={"legacy_spu_code": item.legacy_spu_code},
+        )
     return success_response(ProductSPUSerializer(item).data)
 
 
@@ -1185,7 +1199,7 @@ def product_sku_detail(request, pk):
         "product_name", "purchase_price", "unit", "image_url", "package_weight",
         "package_volume", "package_length_cm", "package_width_cm", "package_height_cm",
         "origin_country", "hs_code", "material", "inventory_type", "selling_points",
-        "product_description",
+        "product_description", "legacy_sku_code",
     }
     before = {
         field: getattr(item, field)

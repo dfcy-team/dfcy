@@ -35,7 +35,16 @@
             <el-form label-position="top" class="form-grid">
               <el-form-item label="SKU 商品名称" class="span-2"><el-input v-model="form.product_name" maxlength="200" show-word-limit /></el-form-item>
               <el-form-item label="新 SKU 编码"><el-input v-model="form.sku_code" disabled /></el-form-item>
-              <el-form-item label="旧 SKU 编码"><el-input v-model="form.legacy_sku_code" disabled /></el-form-item>
+              <el-form-item label="旧 SKU 编码">
+                <el-input
+                  v-model="form.legacy_sku_code"
+                  maxlength="160"
+                  :disabled="!canEditLegacyCodes"
+                  :placeholder="canEditLegacyCodes ? '请输入旧 SKU 编码' : '仅管理员可编辑'"
+                  data-testid="legacy-sku-code-input"
+                />
+                <div v-if="!canEditLegacyCodes" class="field-hint">仅平台超级管理员或租户管理员可修改</div>
+              </el-form-item>
               <el-form-item label="所属 SPU"><el-input :model-value="String(form.spu || '')" disabled /></el-form-item>
               <el-form-item label="颜色 / 规格"><el-input :model-value="variantText" disabled /></el-form-item>
               <el-form-item label="计量单位"><el-input v-model="form.unit" placeholder="如：件" /></el-form-item>
@@ -125,9 +134,11 @@ import { fetchPlatformProductDetails, fetchWarehouseSkus } from '../../api/platf
 import { fetchOperationLogs } from '../../api/audit';
 import { apiBaseUrl } from '../../api/baseUrl';
 import { collectionRows, detailData } from '../../utils/businessResponse';
+import { useAuthStore } from '../../stores/auth';
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 const loading = ref(false);
 const saving = ref(false);
 const previewVisible = ref(false);
@@ -135,6 +146,9 @@ const platformRows = ref([]);
 const warehouseRows = ref([]);
 const auditRows = ref([]);
 const originalActive = ref(true);
+const canEditLegacyCodes = computed(() => Boolean(
+  auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')
+));
 const form = reactive({});
 const anchors = [
   { id: 'basic', label: '基本信息' }, { id: 'price', label: '价格信息' },
@@ -178,6 +192,7 @@ async function save() {
   const fields = ['product_name', 'purchase_price', 'unit', 'image_url', 'package_weight', 'package_volume', 'package_length_cm', 'package_width_cm', 'package_height_cm', 'origin_country', 'hs_code', 'material', 'inventory_type', 'selling_points', 'product_description'];
   const numericFields = new Set(['purchase_price', 'package_weight', 'package_volume', 'package_length_cm', 'package_width_cm', 'package_height_cm']);
   const payload = Object.fromEntries(fields.map(key => [key, numericFields.has(key) && form[key] === '' ? null : (form[key] ?? '')]));
+  if (canEditLegacyCodes.value) payload.legacy_sku_code = String(form.legacy_sku_code || '').trim();
   const update = await updateProductSku(route.params.id, payload);
   if (!update.success) { ElMessage.error(update.message || '保存失败'); saving.value = false; return; }
   if (Boolean(form.is_active) !== originalActive.value) {
@@ -203,5 +218,6 @@ onMounted(reload);
 .section-title { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }.section-title h2 { margin: 0; font-size: 18px; }.section-title span { color: #64748b; font-size: 13px; }
 .basic-grid { display: grid; grid-template-columns: 180px 1fr; gap: 24px; }.image-box { height: 210px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; cursor: pointer; color: #94a3b8; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; }.image-box .el-image { width: 100%; height: 170px; }.image-box small { font-size: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 18px; }.span-2 { grid-column: span 2; }.compact-grid { max-width: 360px; }.measure-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0 18px; }.volume-button { align-self: center; justify-self: start; }
+.field-hint { margin-top: 6px; color: #909399; font-size: 12px; }
 @media (max-width: 1100px) { .editor-layout { grid-template-columns: 1fr; }.anchor-nav { position: static; flex-direction: row; flex-wrap: wrap; }.basic-grid { grid-template-columns: 1fr; }.image-box { width: 180px; }.measure-grid { grid-template-columns: 1fr 1fr; } }
 </style>
