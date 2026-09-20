@@ -4,9 +4,20 @@ from . import views
 from .manual_callback import manual_store_callback
 from . import production_settings_api
 from . import warehouse_credential_views
+from . import feishu_api
 
 
 urlpatterns = [
+    path("feishu/connection/", feishu_api.connection_detail, name="feishu-connection"),
+    path("feishu/identities/", feishu_api.identity_collection, name="feishu-identity-collection"),
+    path("feishu/identities/<int:pk>/", feishu_api.identity_detail, name="feishu-identity-detail"),
+    path("feishu/notifications/", feishu_api.notification_collection, name="feishu-notification-collection"),
+    path("feishu/notifications/<int:pk>/", feishu_api.notification_detail, name="feishu-notification-detail"),
+    path("feishu/reports/", feishu_api.report_collection, name="feishu-report-collection"),
+    path("feishu/reports/<int:pk>/", feishu_api.report_detail, name="feishu-report-detail"),
+    path("feishu/approvals/", feishu_api.approval_collection, name="feishu-approval-collection"),
+    path("feishu/approvals/<int:pk>/", feishu_api.approval_detail, name="feishu-approval-detail"),
+    path("feishu/operations/", feishu_api.operation_collection, name="feishu-operation-collection"),
     path("warehouse-authorizations/<int:pk>/credentials/", warehouse_credential_views.warehouse_credentials),
     path("warehouse-authorizations/<int:pk>/authorize/", warehouse_credential_views.warehouse_first_authorization),
     path("warehouse-authorizations/<int:pk>/warehouses/", warehouse_credential_views.warehouse_discovery),

@@ -1655,3 +1655,71 @@ class APIDataQualityCheck(models.Model):
 
     def __str__(self):
         return f"{self.check_type}:{self.status}"
+
+
+class FeishuConnection(models.Model):
+    """Tenant-scoped Feishu application metadata; secrets stay in custody."""
+
+    tenant = models.OneToOneField(Tenant, on_delete=models.CASCADE, related_name="feishu_connection")
+    app_id = models.CharField(max_length=120, blank=True)
+    app_secret_ref = models.CharField(max_length=160, blank=True)
+    verification_token_ref = models.CharField(max_length=160, blank=True)
+    encrypt_key_ref = models.CharField(max_length=160, blank=True)
+    domain = models.CharField(max_length=20, default="feishu")
+    callback_url = models.URLField(max_length=500, blank=True)
+    enabled = models.BooleanField(default=False)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_feishu_connections")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="updated_feishu_connections")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class FeishuIdentity(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="feishu_identities")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="feishu_identities")
+    open_id = models.CharField(max_length=120, blank=True)
+    feishu_user_id = models.CharField(max_length=120, blank=True)
+    union_id = models.CharField(max_length=120, blank=True)
+    department_ids = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=20, default="active")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "user"], name="uniq_feishu_identity_user")]
+
+
+class FeishuConfigRule(models.Model):
+    class Kind(models.TextChoices):
+        NOTIFICATION = "notification", "Notification"
+        REPORT = "report", "Report"
+        APPROVAL = "approval", "Approval"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="feishu_config_rules")
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    name = models.CharField(max_length=160)
+    code = models.CharField(max_length=120)
+    enabled = models.BooleanField(default=False)
+    config = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_feishu_rules")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="updated_feishu_rules")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "kind", "code"], name="uniq_feishu_rule_code")]
+
+
+class FeishuOperation(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="feishu_operations")
+    operation_type = models.CharField(max_length=40)
+    status = models.CharField(max_length=20, default="pending")
+    reference_type = models.CharField(max_length=40, blank=True)
+    reference_id = models.CharField(max_length=120, blank=True)
+    masked_detail = models.JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]

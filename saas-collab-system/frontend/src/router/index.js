@@ -88,6 +88,7 @@ const IntegrationAuditList = () => import('../views/integrations/IntegrationAudi
 const PlatformSiteList = () => import('../views/integrations/PlatformSiteList.vue');
 const SyncJobList = () => import('../views/integrations/SyncJobList.vue');
 const SyncRunDetail = () => import('../views/integrations/SyncRunDetail.vue');
+const FeishuCollaboration = () => import('../views/integrations/FeishuCollaboration.vue');
 const OperationLogList = () => import('../views/audit/OperationLogList.vue');
 const FinanceImportList = () => import('../views/finance/FinanceImportList.vue');
 const PlatformStatementList = () => import('../views/finance/PlatformStatementList.vue');
@@ -280,6 +281,7 @@ const routes = [
       { path: 'integrations/sync-jobs', component: SyncJobList },
       { path: 'integrations/sync-runs', component: IntegrationWorkspace, props: { mode: 'sync-runs', runPermission: 'integrations.run_live_readonly', mockRunPermission: 'integrations.run' } },
       { path: 'integrations/sync-runs/:id', component: SyncRunDetail },
+      { path: 'integrations/feishu', component: FeishuCollaboration },
       { path: 'integrations/api-sync', component: APISyncTaskList },
       { path: 'integrations/api-sync/logs', component: APISyncLogList },
       { path: 'finance/imports', component: FinanceImportList },

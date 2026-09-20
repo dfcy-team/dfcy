@@ -1660,6 +1660,25 @@
       }
     },
     {
+      "code": "menu.feishu.integrations_feishu.view",
+      "name": "飞书协同",
+      "module": "feishu",
+      "action": "integrations_feishu.view",
+      "description": "显示飞书协同入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/feishu",
+        "route": "/integrations/feishu",
+        "resource": "integrations_feishu",
+        "parent": "API数据接入",
+        "action_codes": [
+          "feishu.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.integrations.integrations_sync_jobs.view",
       "name": "同步任务",
       "module": "integrations",
@@ -2848,6 +2867,18 @@
       ],
       "menuPermissions": [
         "menu.integrations.integrations_configs.view"
+      ]
+    },
+    {
+      "path": "/integrations/feishu",
+      "permissions": [
+        "feishu.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.feishu.integrations_feishu.view"
       ]
     },
     {
