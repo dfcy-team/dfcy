@@ -1006,9 +1006,11 @@ class ProductBundleCreateComponentInputSerializer(serializers.Serializer):
 
 
 class ProductBundleCreateInputSerializer(serializers.Serializer):
-    product_name = serializers.CharField(max_length=200)
-    category_node = serializers.IntegerField(min_value=1)
-    season_code = serializers.RegexField(r"^[0-9]$")
+    spu_mode = serializers.ChoiceField(choices=("new", "existing"), default="new")
+    existing_spu = serializers.IntegerField(min_value=1, required=False)
+    product_name = serializers.CharField(max_length=200, required=False)
+    category_node = serializers.IntegerField(min_value=1, required=False)
+    season_code = serializers.RegexField(r"^[0-9]$", required=False)
     color_code = serializers.CharField(max_length=40)
     components = ProductBundleCreateComponentInputSerializer(many=True, allow_empty=False, max_length=20)
 
@@ -1017,6 +1019,19 @@ class ProductBundleCreateInputSerializer(serializers.Serializer):
         if len(component_ids) != len(set(component_ids)):
             raise serializers.ValidationError("The same component SKU cannot be added twice.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs["spu_mode"] == "new":
+            missing = [
+                field for field in ("product_name", "category_node", "season_code")
+                if field not in attrs
+            ]
+            if missing:
+                raise serializers.ValidationError({field: "This field is required." for field in missing})
+        elif "existing_spu" not in attrs:
+            raise serializers.ValidationError({"existing_spu": "This field is required when spu_mode is existing."})
+        return attrs
 
 
 class ProductBundleComponentSerializer(serializers.ModelSerializer):

@@ -2,7 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.masterdata.models import StatusChoices, SupplierMaster
-from apps.products.models import ProductSKU
+from apps.products.models import ProductSKU, ProductSPU
 
 from .models import (
     SupplyProductionProgress,
@@ -27,6 +27,8 @@ class SupplyPurchaseOrderLineSerializer(serializers.ModelSerializer):
             "unit_price",
             "expected_delivery_date",
             "source_record_id",
+            "source_bundle_sku_id",
+            "source_bundle_snapshot",
         )
 
 
@@ -328,15 +330,37 @@ class SupplyPurchaseOrderCreateSerializer(serializers.Serializer):
             currency=validated_data.pop("currency").upper(),
             **validated_data,
         )
+        expanded_lines = []
         for line in lines:
             sku = skus[line.pop("sku_id")]
+            if sku.spu.product_type != ProductSPU.ProductType.BUNDLE:
+                expanded_lines.append((sku, line, None, {}))
+                continue
+            components = list(sku.bundle_components.select_related("component_sku", "component_sku__spu"))
+            if not components:
+                raise serializers.ValidationError({"lines": f"Bundle SKU {sku.sku_code} has no components."})
+            snapshot = {
+                "bundle_sku_id": sku.id,
+                "bundle_sku_code": sku.sku_code,
+                "components": [
+                    {"component_sku_id": row.component_sku_id, "component_sku_code": row.component_sku.sku_code, "quantity": row.quantity}
+                    for row in components
+                ],
+            }
+            total_units = sum(row.quantity for row in components)
+            for position, component in enumerate(components, start=1):
+                child = dict(line)
+                child["quantity"] = line["quantity"] * component.quantity
+                child["unit_price"] = line["unit_price"] / total_units
+                if child.get("source_record_id"):
+                    child["source_record_id"] = f"{child['source_record_id']}:component:{position}"
+                expanded_lines.append((component.component_sku, child, sku, snapshot))
+        for line_no, (sku, line, source_bundle, snapshot) in enumerate(expanded_lines, start=1):
+            line["line_no"] = line_no
             SupplyPurchaseOrderLine.objects.create(
-                tenant=request.user.tenant,
-                order=order,
-                sku=sku,
-                sku_code_snapshot=sku.sku_code,
-                product_name_snapshot=sku.spu.product_name,
-                **line,
+                tenant=request.user.tenant, order=order, sku=sku,
+                sku_code_snapshot=sku.sku_code, product_name_snapshot=sku.spu.product_name,
+                source_bundle_sku=source_bundle, source_bundle_snapshot=snapshot, **line,
             )
         return order
 

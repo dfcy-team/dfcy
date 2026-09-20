@@ -6,6 +6,7 @@ from apps.accounts.models import CustomUser
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import (
     ProductBundleComponent,
+    ProductBundleVersion,
     ProductCategory,
     ProductCodeSequence,
     ProductColor,
@@ -84,6 +85,31 @@ def test_bundle_create_commits_spu_sku_and_components_together():
     assert [item["component_sku"] for item in data["components"]] == [sku.id for sku in components]
     assert ProductSPU.objects.filter(tenant=tenant, product_type=ProductSPU.ProductType.BUNDLE).count() == 1
     assert ProductBundleComponent.objects.filter(tenant=tenant).count() == 2
+    version = ProductBundleVersion.objects.get(bundle_sku_id=data["sku"]["id"])
+    assert version.version == 1
+    assert version.components.count() == 2
+
+
+@pytest.mark.django_db
+def test_bundle_image_url_is_cached_through_bundle_scoped_endpoint(monkeypatch):
+    tenant = Tenant.objects.create(name="Bundle image tenant", code="bundle-image")
+    client = _bundle_client(tenant, "bundle-image-user")
+    category = _catalog(tenant, "图片")
+    component = _component_sku(tenant, "NORMAL-IMAGE")
+    created = client.post("/api/internal/products/bundles/create/", _payload(category, [component]), format="json")
+    sku_id = created.json()["data"]["sku"]["id"]
+
+    monkeypatch.setattr("apps.products.views._download_product_image", lambda url, tenant_id: ("product-images/cached.webp", "image/webp", False))
+    monkeypatch.setattr("apps.products.views._attach_cached_product_image", lambda *args, **kwargs: (True, "/media/product-images/cached.webp"))
+
+    response = client.post(
+        f"/api/internal/products/bundles/{sku_id}/image-cache/",
+        {"image_url": "https://cdn.example.test/bundle.webp"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["image_url"] == "/media/product-images/cached.webp"
 
 
 @pytest.mark.django_db
@@ -135,3 +161,77 @@ def test_bundle_create_rejects_duplicate_or_cross_tenant_components_before_writi
     assert duplicate.status_code == 400
     assert foreign.status_code == 400
     assert not ProductSPU.objects.filter(tenant=tenant, product_type=ProductSPU.ProductType.BUNDLE).exists()
+
+
+@pytest.mark.django_db
+def test_bundle_create_can_add_sku_to_existing_bundle_spu():
+    tenant = Tenant.objects.create(name="Existing bundle tenant", code="bundle-existing")
+    client = _bundle_client(tenant, "bundle-existing-user")
+    category = _catalog(tenant, "已有")
+    component = _component_sku(tenant, "EXISTING-A")
+    existing_spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="BUNDLE-EXISTING-SPU",
+        product_name="已有组合",
+        product_type=ProductSPU.ProductType.BUNDLE,
+        category_node=category,
+        season_code="5",
+        l1_code="1",
+        l2_code="01",
+        l3_code="08",
+    )
+    payload = {
+        "spu_mode": "existing",
+        "existing_spu": existing_spu.id,
+        "color_code": "Multi",
+        "components": [{"component_sku": component.id, "quantity": 2}],
+    }
+
+    response = client.post("/api/internal/products/bundles/create/", payload, format="json")
+
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert data["spu"]["id"] == existing_spu.id
+    assert data["sku"]["spu"] == existing_spu.id
+    assert ProductSPU.objects.filter(tenant=tenant, product_type=ProductSPU.ProductType.BUNDLE).count() == 1
+    assert ProductBundleComponent.objects.get(bundle_sku_id=data["sku"]["id"]).quantity == 2
+
+
+@pytest.mark.django_db
+def test_bundle_create_existing_spu_rejects_standard_and_cross_tenant_spus():
+    tenant = Tenant.objects.create(name="Existing validation tenant", code="bundle-existing-validation")
+    other_tenant = Tenant.objects.create(name="Foreign existing tenant", code="bundle-existing-foreign")
+    client = _bundle_client(tenant, "bundle-existing-validation-user")
+    category = _catalog(tenant, "已有校验")
+    foreign_category = _catalog(other_tenant, "外部")
+    component = _component_sku(tenant, "EXISTING-VALID-A")
+    standard_spu = ProductSPU.objects.create(
+        tenant=tenant, spu_code="STANDARD-SPU", product_name="普通", category_node=category,
+    )
+    foreign_bundle_spu = ProductSPU.objects.create(
+        tenant=other_tenant,
+        spu_code="FOREIGN-BUNDLE-SPU",
+        product_name="外部组合",
+        product_type=ProductSPU.ProductType.BUNDLE,
+        category_node=foreign_category,
+    )
+    base_payload = {
+        "spu_mode": "existing",
+        "color_code": "Multi",
+        "components": [{"component_sku": component.id, "quantity": 1}],
+    }
+
+    standard = client.post(
+        "/api/internal/products/bundles/create/",
+        {**base_payload, "existing_spu": standard_spu.id},
+        format="json",
+    )
+    foreign = client.post(
+        "/api/internal/products/bundles/create/",
+        {**base_payload, "existing_spu": foreign_bundle_spu.id},
+        format="json",
+    )
+
+    assert standard.status_code == 400
+    assert foreign.status_code == 400
+    assert not ProductSKU.objects.filter(tenant=tenant, spu=standard_spu).exists()

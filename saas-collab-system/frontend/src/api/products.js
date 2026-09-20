@@ -65,6 +65,46 @@ export const createProductBundle = (data = {}) =>
     'products.bundles.create'
   );
 
+export const fetchProductBundleDetail = (skuId) => requestWithMockFallback(
+  { method: 'get', url: `/api/internal/products/bundles/${skuId}/` },
+  () => ({ success: true, code: 'OK', message: '模拟组合详情', data: {
+    sku_id: skuId,
+    sku_code: 'MOCK-BUNDLE-SKU-001',
+    components: [{ component_sku_id: 1, component_sku_code: 'MOCK-SKU-001', quantity: 2 }],
+    versions: [{ version: 1, effective_at: '2026-09-20T00:00:00Z', reason: '演示初始版本', created_by_name: '演示用户' }],
+  } }),
+  'products.bundles.detail'
+);
+
+export const updateProductBundle = (skuId, data = {}) => requestWithMockFallback(
+  { method: 'put', url: `/api/internal/products/bundles/${skuId}/`, data },
+  () => ({ success: true, data: { ...data, id: skuId } }),
+  'products.bundles.update'
+);
+
+export const fetchProductBundleAvailability = (skuId, params = {}) => requestWithMockFallback(
+  { method: 'get', url: `/api/internal/products/bundles/${skuId}/availability/`, params },
+  () => ({ success: true, code: 'OK', message: '模拟组合库存', data: { warehouses: [{
+    warehouse_id: 1,
+    warehouse_name: '演示仓库',
+    available_quantity: 6,
+    components: [{ component_sku_id: 1, component_sku_code: 'MOCK-SKU-001', required_quantity: 2, available_quantity: 12, bundle_capacity: 6, snapshot_at: '2026-09-20T00:00:00Z' }],
+  }] } }),
+  'products.bundles.availability'
+);
+
+export const previewProductBundleMigration = (data = {}) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/products/bundles/migrations/preview/', data },
+  () => ({ success: true, data: { token: `mock-${Date.now()}`, rows: data.rows || [], errors: [] } }),
+  'products.bundles.migrations.preview'
+);
+
+export const confirmProductBundleMigration = (token, data = {}) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/bundles/migrations/${encodeURIComponent(token)}/confirm/`, data },
+  () => ({ success: true, data: { migrated: 0 } }),
+  'products.bundles.migrations.confirm'
+);
+
 export const fetchCodingOptions = () =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/coding-options/' }, () => ({
     success: true,
@@ -76,6 +116,12 @@ export const fetchProductMasterDetail = (id = 1) =>
 
 export const fetchProductSkuList = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/skus/', params }, mockProductSkuList, 'products.skus');
+
+export const cacheProductBundleImage = (skuId, imageUrl) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/bundles/${skuId}/image-cache/`, data: { image_url: imageUrl }, timeout: 120000 },
+  () => ({ success: true, data: { sku_id: skuId, image_url: imageUrl, status: 'updated' } }),
+  'products.bundles.image_cache'
+);
 
 export const fetchProductDetailList = (params = {}) =>
   requestWithMockFallback(
@@ -149,13 +195,13 @@ export const createProductSkuBatch = (data = {}) =>
     'products.skus.batch_create'
   );
 
-export const uploadProductSkuImage = (id, file) => {
+export const uploadProductSkuImage = (skuId, file) => {
   const data = new FormData();
   data.append('file', file);
   return requestWithMockFallback(
     {
       method: 'post',
-      url: `/api/internal/products/skus/${id}/image/`,
+      url: `/api/internal/products/skus/${skuId}/image/`,
       data,
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 120000,
@@ -272,6 +318,8 @@ export const createBundleComponent = (data) => requestWithMockFallback({ method:
 export const fetchBundleComponents = (params = {}) =>
   requestWithMockFallback(
     { method: 'get', url: dictionaryApi('bundle-components'), params },
-    () => ({ success: true, data: [] }),
+    () => ({ success: true, code: 'OK', message: '模拟组合组成', data: { items: [
+      { id: 1, bundle_sku: 2, component_sku: 1, component_sku_code: 'MOCK-SKU-001', quantity: 2 },
+    ] } }),
     'products.bundle_components'
   );

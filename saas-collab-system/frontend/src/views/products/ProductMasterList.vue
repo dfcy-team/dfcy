@@ -230,10 +230,27 @@
 
     <el-dialog v-model="createOpen" title="创建商品" width="min(560px, 94vw)">
       <el-form label-position="top">
-        <el-form-item label="商品名称" required>
+        <el-form-item label="SPU 处理方式" required>
+          <el-radio-group v-model="createForm.spu_mode" data-testid="standard-spu-mode">
+            <el-radio value="new">新建 SPU</el-radio>
+            <el-radio value="existing">选择已有 SPU 新增 SKU</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="createForm.spu_mode === 'existing'" label="已有普通 SPU" required>
+          <el-select v-model="createForm.existing_spu" filterable style="width: 100%" placeholder="搜索新/旧 SPU 编码或商品名称">
+            <el-option
+              v-for="item in standardSpuOptions"
+              :key="item.id"
+              :value="item.id"
+              :label="`${item.spu_code} ${item.product_name}${item.legacy_spu_code ? ` · 旧SPU ${item.legacy_spu_code}` : ''}`"
+            />
+          </el-select>
+          <small class="form-help">旧 SPU 仅用于搜索与识别，新 SKU 将归属当前 SPU。</small>
+        </el-form-item>
+        <el-form-item v-if="createForm.spu_mode === 'new'" label="商品名称" required>
           <el-input v-model="createForm.product_name" />
         </el-form-item>
-        <el-form-item label="末级分类" required>
+        <el-form-item v-if="createForm.spu_mode === 'new'" label="末级分类" required>
           <el-tree-select
             v-model="createForm.category_node"
             :data="categoryTree"
@@ -243,10 +260,10 @@
             filterable
           />
         </el-form-item>
-        <el-form-item label="品牌">
+        <el-form-item v-if="createForm.spu_mode === 'new'" label="品牌">
           <el-input v-model="createForm.brand" />
         </el-form-item>
-        <el-form-item label="属性编码">
+        <el-form-item v-if="createForm.spu_mode === 'new'" label="属性编码">
           <el-select
             v-model="createForm.season_code"
             class="form-control"
@@ -486,7 +503,7 @@ const attributeLoadError = ref('');
 let attributeRequestId = 0;
 // The API keeps the legacy season_code field for compatibility. Its value is
 // now the one-digit code maintained by the product attribute dictionary.
-const createForm = reactive({ product_name: '', category_node: null, brand: '', season_code: '0' });
+const createForm = reactive({ spu_mode: 'new', existing_spu: null, product_name: '', category_node: null, brand: '', season_code: '0' });
 const editOpen = ref(false);
 const editSaving = ref(false);
 const editForm = reactive({ id: null, product_name: '', category_node: null, legacy_spu_code: '' });
@@ -535,6 +552,7 @@ const activeAttributes = computed(() => attributes.value
   .filter((item) => item?.is_active !== false && /^[1-9A-Z]$/.test(String(item?.code ?? '').trim().toUpperCase()))
   .map((item) => ({ ...item, code: String(item.code).trim().toUpperCase() }))
   .sort((left, right) => left.code.localeCompare(right.code, 'en')));
+const standardSpuOptions = computed(() => rows.value.filter((item) => item.product_type !== 'bundle'));
 const skuCategory = computed(() => {
   const categoryId = skuTarget.value?.category_node;
   return categories.value.find((item) => String(item.id) === String(categoryId)) || null;
@@ -891,7 +909,7 @@ async function saveMoveCategory() {
 
 async function openCreate() {
   if (!canManage.value) return;
-  Object.assign(createForm, { product_name: '', category_node: null, brand: '', season_code: '0' });
+  Object.assign(createForm, { spu_mode: 'new', existing_spu: null, product_name: '', category_node: null, brand: '', season_code: '0' });
   createOpen.value = true;
   // Refresh when the dialog opens so recently changed attribute settings are
   // reflected and stale/deactivated codes cannot be submitted.
@@ -900,6 +918,13 @@ async function openCreate() {
 
 async function saveProduct() {
   if (!canManage.value) return;
+  if (createForm.spu_mode === 'existing') {
+    const target = standardSpuOptions.value.find((item) => String(item.id) === String(createForm.existing_spu));
+    if (!target) return ElMessage.warning('请选择已有普通 SPU');
+    createOpen.value = false;
+    openSkuCreate(target);
+    return;
+  }
   if (!createForm.product_name?.trim() || !isUsableCategory(createForm.category_node)) {
     return ElMessage.warning('请填写商品名称并选择末级分类');
   }
@@ -917,7 +942,8 @@ async function saveProduct() {
   saving.value = true;
   try {
     const response = await createProductSpu({
-      ...createForm,
+      brand: createForm.brand,
+      season_code: createForm.season_code,
       category_node: createForm.category_node,
       product_name: createForm.product_name.trim(),
       product_type: 'standard'
@@ -1099,6 +1125,13 @@ async function handleSkuGenerated() {
 onMounted(async () => {
   document.addEventListener('click', handleDocumentClick, true);
   await Promise.all([loadCategories(), loadColors(), loadAttributes(), load()]);
+  const query = new URLSearchParams(window.location.search);
+  if (query.get('action') === 'create' && canManage.value) {
+    await openCreate();
+    query.delete('action');
+    const search = query.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`);
+  }
 });
 
 onBeforeUnmount(() => {
