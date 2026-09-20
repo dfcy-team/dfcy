@@ -142,7 +142,7 @@ export const menuItems = [
   },
   {
     label: 'API数据接入',
-    permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'config.system.manage', 'masterdata.view'],
+    permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'feishu.view', 'config.system.manage', 'masterdata.view'],
     children: [
       { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
       { path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
@@ -153,6 +153,7 @@ export const menuItems = [
       { path: '/integrations/audit', label: '集成审计', permissions: ['integrations.audit.view'] },
       { path: '/integrations/platform-drill', label: '平台操作演练', permissions: ['integrations.view'] },
       { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.config.view'] },
+      { path: '/integrations/feishu', label: '飞书协同', permissions: ['feishu.view'] },
       { path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
       { path: '/integrations/sync-runs', label: '同步运行记录', permissions: ['integrations.view'] }
     ]
@@ -380,6 +381,7 @@ export const routeCapabilities = [
   { path: '/rpa/account-locks', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/rpa/page-signatures', permissions: ['rpa.stability.view'], userTypes: ['internal'] },
   { path: '/integrations/configs', permissions: ['integrations.config.view'], userTypes: ['internal'] },
+  { path: '/integrations/feishu', permissions: ['feishu.view'], userTypes: ['internal'] },
   { path: '/integrations/readiness', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/production-settings', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
   { path: '/integrations/capabilities', permissions: ['integrations.store.view'], userTypes: ['internal'] },

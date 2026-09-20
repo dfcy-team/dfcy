@@ -204,6 +204,49 @@ class IsWarehouseAuthorizationCollectionUser(IntegrationActionPermission):
         return self.has_action_permission(request, permission_code)
 
 
+class IsFeishuViewer(IntegrationActionPermission):
+    permission_code = "feishu.view"
+
+
+class FeishuReadOrActionPermission(IntegrationActionPermission):
+    write_permission_code = None
+
+    def has_permission(self, request, view):
+        code = "feishu.view" if request.method in SAFE_METHODS else self.write_permission_code
+        return self.has_action_permission(request, code)
+
+
+class IsFeishuConnectionUser(FeishuReadOrActionPermission):
+    write_permission_code = "feishu.connection.manage"
+
+
+class IsFeishuIdentityUser(FeishuReadOrActionPermission):
+    write_permission_code = "feishu.identity.manage"
+
+
+class IsFeishuNotificationUser(FeishuReadOrActionPermission):
+    write_permission_code = "feishu.notification.manage"
+
+
+class IsFeishuReportUser(FeishuReadOrActionPermission):
+    write_permission_code = "feishu.report.manage"
+
+
+class IsFeishuApprovalUser(FeishuReadOrActionPermission):
+    write_permission_code = "feishu.approval.manage"
+
+
+class IsFeishuOperationsViewer(IntegrationActionPermission):
+    def has_permission(self, request, view):
+        return self.has_action_permission(request, "feishu.operations.view") or self.has_action_permission(
+            request, "feishu.view"
+        )
+
+
+class IsFeishuOperationsRetryUser(IntegrationActionPermission):
+    permission_code = "feishu.operations.retry"
+
+
 class IsWarehouseAuthorizationViewer(IntegrationActionPermission):
     permission_code = "integrations.warehouse.view"
 
