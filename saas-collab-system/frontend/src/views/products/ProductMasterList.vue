@@ -285,6 +285,16 @@
         <el-form-item label="商品名称" required>
           <el-input v-model="editForm.product_name" maxlength="200" />
         </el-form-item>
+        <el-form-item label="旧 SPU 编码">
+          <el-input
+            v-model="editForm.legacy_spu_code"
+            maxlength="120"
+            :disabled="!canEditLegacyCodes"
+            :placeholder="canEditLegacyCodes ? '请输入旧 SPU 编码' : '仅管理员可编辑'"
+            data-testid="legacy-spu-code-input"
+          />
+          <div v-if="!canEditLegacyCodes" class="form-help">仅平台超级管理员或租户管理员可修改</div>
+        </el-form-item>
         <el-form-item label="末级分类" required>
           <el-tree-select
             v-model="editForm.category_node"
@@ -441,6 +451,9 @@ import SkuGenerationDialog from '../../components/products/SkuGenerationDialog.v
 
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
+const canEditLegacyCodes = computed(() => Boolean(
+  auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')
+));
 const filters = reactive({ search: '', sales_status: '', category_id: '' });
 const rows = ref([]);
 const categories = ref([]);
@@ -476,7 +489,7 @@ let attributeRequestId = 0;
 const createForm = reactive({ product_name: '', category_node: null, brand: '', season_code: '0' });
 const editOpen = ref(false);
 const editSaving = ref(false);
-const editForm = reactive({ id: null, product_name: '', category_node: null });
+const editForm = reactive({ id: null, product_name: '', category_node: null, legacy_spu_code: '' });
 const colors = ref([]);
 const attributes = ref([]);
 const skuCreateOpen = ref(false);
@@ -926,7 +939,8 @@ function openEdit(row) {
   Object.assign(editForm, {
     id: row.id,
     product_name: row.product_name || '',
-    category_node: row.category_node || null
+    category_node: row.category_node || null,
+    legacy_spu_code: row.legacy_spu_code || ''
   });
   editOpen.value = true;
 }
@@ -939,10 +953,12 @@ async function saveEdit() {
   }
   editSaving.value = true;
   try {
-    const response = await updateProductSpu(editForm.id, {
+    const payload = {
       product_name: editForm.product_name.trim(),
       category_node: editForm.category_node
-    });
+    };
+    if (canEditLegacyCodes.value) payload.legacy_spu_code = editForm.legacy_spu_code.trim();
+    const response = await updateProductSpu(editForm.id, payload);
     if (!response.success) {
       ElMessage.error(response.message || '保存商品失败');
       return;

@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
 from .models import (
     ProductBundleComponent,
@@ -328,6 +329,14 @@ class ProductSPUSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         instance = self.instance
         if instance is not None:
+            if "legacy_spu_code" in self.initial_data:
+                requested = str(self.initial_data.get("legacy_spu_code") or "").strip()
+                if requested != (instance.legacy_spu_code or ""):
+                    from apps.permissions.role_catalog import user_is_tenant_administrator
+
+                    user = self.context["request"].user
+                    if not (user.is_superuser or user_is_tenant_administrator(user, instance.tenant)):
+                        raise PermissionDenied("只有平台超级管理员或租户管理员可以修改旧 SPU 编码。")
             attempted = self.CONTROLLED_UPDATE_FIELDS.intersection(self.initial_data)
             if attempted:
                 raise serializers.ValidationError(
@@ -593,6 +602,14 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         instance = self.instance
+        if instance and "legacy_sku_code" in self.initial_data:
+            requested = str(self.initial_data.get("legacy_sku_code") or "").strip()
+            if requested != (instance.legacy_sku_code or ""):
+                from apps.permissions.role_catalog import user_is_tenant_administrator
+
+                user = self.context["request"].user
+                if not (user.is_superuser or user_is_tenant_administrator(user, instance.tenant)):
+                    raise PermissionDenied("只有平台超级管理员或租户管理员可以修改旧 SKU 编码。")
         if instance and instance.is_code_frozen and "sku_code" in attrs and attrs["sku_code"] != instance.sku_code:
             raise serializers.ValidationError({"sku_code": "Code is frozen and cannot be changed."})
         if instance and any(field in attrs for field in ("spu", "color_code", "spec_values")):

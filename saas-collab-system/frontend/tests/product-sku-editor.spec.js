@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 const editor = readFileSync(resolve('src/views/products/ProductSkuEditor.vue'), 'utf8');
 const detailList = readFileSync(resolve('src/views/products/ProductDetailData.vue'), 'utf8');
 const router = readFileSync(resolve('src/router/index.js'), 'utf8');
+const masterList = readFileSync(resolve('src/views/products/ProductMasterList.vue'), 'utf8');
 
 describe('single SKU editor', () => {
   it('opens generated SKUs in the dedicated editor route', () => {
@@ -24,5 +25,13 @@ describe('single SKU editor', () => {
     expect(editor).toContain('SKU 编码、所属 SPU、颜色和规格生成后不可修改');
     expect(editor).toContain('updateProductSkuStatus');
     expect(editor).toContain('is_active: Boolean(form.is_active)');
+  });
+
+  it('allows only platform or tenant administrators to submit legacy codes', () => {
+    expect(editor).toContain("auth.currentUser?.roles?.includes('administrator')");
+    expect(editor).toContain('payload.legacy_sku_code');
+    expect(editor).toContain(':disabled="!canEditLegacyCodes"');
+    expect(masterList).toContain('payload.legacy_spu_code');
+    expect(masterList).toContain('仅平台超级管理员或租户管理员可修改');
   });
 });
