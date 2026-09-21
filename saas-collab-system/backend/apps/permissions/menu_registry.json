@@ -42,6 +42,25 @@
       }
     },
     {
+      "code": "menu.products.products_costs.view",
+      "name": "商品成本",
+      "module": "products",
+      "action": "products_costs.view",
+      "description": "显示商品成本入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/products/costs",
+        "route": "/products/costs",
+        "resource": "products_costs",
+        "parent": "基础档案",
+        "action_codes": [
+          "products.cost.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.listings.products_platform_details.view",
       "name": "平台商品明细数据",
       "module": "listings",
@@ -2480,6 +2499,18 @@
       ],
       "menuPermissions": [
         "menu.products.products_details.view"
+      ]
+    },
+    {
+      "path": "/products/costs",
+      "permissions": [
+        "products.cost.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.products.products_costs.view"
       ]
     },
     {

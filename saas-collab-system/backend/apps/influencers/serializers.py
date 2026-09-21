@@ -427,12 +427,14 @@ class SampleItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = SampleItem
         fields = (
-            "id", "sku", "external_product_id", "site_code", "requested_sku", "normalized_sku",
+            "id", "sku", "cost_version", "external_product_id", "site_code", "requested_sku", "normalized_sku",
             "matched_sku_code", "matched_legacy_sku_code", "product_name", "quantity", "cost_amount",
-            "cost_match_status", "cost_source", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
+            "unit_cost", "cost_match_status", "cost_source", "cost_snapshot_at", "match_notes",
+            "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "normalized_sku", "matched_sku_code", "matched_legacy_sku_code", "cost_amount",
+            "id", "cost_version", "normalized_sku", "matched_sku_code", "matched_legacy_sku_code",
+            "unit_cost", "cost_amount",
             "cost_match_status", "cost_source", "cost_snapshot_at", "match_notes", "created_at", "updated_at",
         )
 

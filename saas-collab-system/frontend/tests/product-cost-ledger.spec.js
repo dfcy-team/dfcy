@@ -1,0 +1,73 @@
+import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const read = (file) => fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
+const menu = read('src/router/menu.js');
+const router = read('src/router/index.js');
+const page = read('src/views/products/ProductCostLedger.vue');
+const api = read('src/api/productCosts.js');
+
+describe('商品成本菜单与页面契约', () => {
+  it('在基础档案中提供独立菜单和受控路由', () => {
+    expect(menu).toContain("{ path: '/products/costs', label: '商品成本', permissions: ['products.cost.view'] }");
+    expect(menu).toContain("{ path: '/products/costs', permissions: ['products.cost.view'], userTypes: ['internal'] }");
+    expect(router).toContain("const ProductCostLedger = () => import('../views/products/ProductCostLedger.vue')");
+    expect(router).toContain("{ path: 'products/costs', component: ProductCostLedger }");
+  });
+
+  it('明确区分采购价格、系统成本与已确认商品成本', () => {
+    expect(page).toContain('采购价格仅作为成本构成项');
+    expect(page).toContain('label="采购价格"');
+    expect(page).toContain('label="系统成本"');
+    expect(page).toContain('label="已确认商品成本"');
+    expect(page).toContain('物流分摊');
+    expect(page).toContain('税费');
+    expect(page).toContain('包装费');
+  });
+
+  it('提供人工维护、审计原因和系统回填预览', () => {
+    expect(page).toContain('维护商品成本');
+    expect(page).toContain('调整原因');
+    expect(page).toContain('采用系统成本');
+    expect(page).toContain('系统生成回填');
+    expect(page).toContain('回填不会覆盖或改写任何历史成本');
+    expect(page).toContain('dry_run: true');
+    expect(api).toContain('/api/internal/products/costs/backfill-preview/');
+    expect(api).toContain('/api/internal/products/costs/backfill-execute/');
+    expect(api).toContain('/confirm/');
+    expect(page).toContain('写入待核对版本');
+    expect(api).toContain('/api/internal/products/costs/');
+  });
+  it('成本调整新增版本且不覆盖历史', () => {
+    expect(page).toContain('调整成本只新增版本，不覆盖历史');
+    expect(page).toContain('下游业务按发生时间锁定成本快照');
+    expect(page).toContain('成本历史版本');
+    expect(page).toContain('新增版本并确认');
+    expect(page).toContain('effective_from');
+    expect(page).toContain('previous.version_no');
+    expect(api).toContain('/versions/');
+    expect(api).toContain("method: 'post'");
+    expect(api).not.toContain("method: 'patch'");
+    expect(api).toContain('requestApi');
+    expect(api).not.toContain('Mock');
+  });
+  it('维护时展示成本变化影响', () => {
+    expect(page).toContain('data-testid="cost-change-preview"');
+    expect(page).toContain('当前生效成本');
+    expect(page).toContain('拟生效成本');
+    expect(page).toContain('成本变化');
+    expect(page).toContain('changeAmount');
+    expect(page).toContain('changeRate');
+  });
+
+  it('支持每期 CSV/XLSX 成本预检后确认导入', () => {
+    expect(page).toContain('每期成本导入');
+    expect(page).toContain('accept=".csv,.xlsx"');
+    expect(page).toContain('导入只追加成本版本');
+    expect(page).toContain('cost-import-preview');
+    expect(api).toContain('/api/internal/products/costs/import/preview/');
+    expect(api).toContain('/api/internal/products/costs/import/confirm/');
+    expect(api).toContain('Idempotency-Key');
+  });
+});

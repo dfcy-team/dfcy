@@ -20,6 +20,7 @@ from rest_framework.exceptions import ValidationError
 from apps.audit.services import write_operation_log
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
+from apps.products.cost_services import effective_cost_for
 from apps.tenants.models import Tenant
 
 from .models import (
@@ -1035,7 +1036,7 @@ def _sample_item_payload(item):
 
 
 def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
-    """Replace item purchase-cost facts and aggregate cost in one transaction."""
+    """Replace item cost snapshots and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
     SampleItem.objects.filter(
         tenant=user.tenant,
@@ -1046,6 +1047,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     cost_total = Decimal("0")
     any_cost_matched = False
     snapshot_time = timezone.now()
+    occurred_at = fulfillment.shipped_at or fulfillment.sample_sent_at or snapshot_time
     for raw_payload in item_payloads:
         payload = _inherit_item_product(
             raw_payload,
@@ -1060,6 +1062,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
             "matched_legacy_sku_code",
             "unit_price",
             "unit_cost",
+            "cost_version",
             "sales_amount",
             "cost_amount",
             "currency",
@@ -1076,19 +1079,29 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
             payload.pop(field_name, None)
         normalized_sku, cost_sku, cost_status = _purchase_cost_for_payload(user.tenant, payload)
         quantity = payload.get("quantity", 1)
-        unit_cost = cost_sku.purchase_price if cost_sku else None
+        cost_version = (
+            effective_cost_for(tenant=user.tenant, sku=cost_sku, occurred_at=occurred_at)
+            if cost_sku else None
+        )
+        if cost_version is not None and cost_version.confirmed_cost is None:
+            cost_version = None
+        unit_cost = cost_version.confirmed_cost if cost_version else None
         cost_amount = unit_cost * quantity if unit_cost is not None else None
+        if cost_sku and cost_version is None:
+            cost_status = "cost_unmatched"
         item = SampleItem(
             tenant=user.tenant,
             fulfillment=fulfillment,
+            cost_version=cost_version,
             unit_cost=unit_cost,
             normalized_sku=normalized_sku,
             matched_sku_code=cost_sku.sku_code if cost_sku else "",
             matched_legacy_sku_code=cost_sku.legacy_sku_code if cost_sku else "",
             cost_amount=cost_amount,
+            currency=cost_version.currency if cost_version else "",
             cost_match_status=cost_status,
-            cost_source="products_productsku" if cost_sku else "",
-            cost_snapshot_at=snapshot_time if cost_sku else None,
+            cost_source="product_cost_version" if cost_version else "product_cost_version_unmatched",
+            cost_snapshot_at=snapshot_time,
             **payload,
         )
         _save(item)
@@ -1134,13 +1147,13 @@ def _purchase_cost_for_item(tenant, requested_sku):
     ).order_by("id")
     if exact_new.count() == 1:
         sku = exact_new.first()
-        return normalized, sku, "matched_new_sku" if sku.purchase_price is not None else "not_priced"
+        return normalized, sku, "matched_new_sku"
     exact_old = ProductSKU.objects.filter(
         tenant=tenant, is_active=True, legacy_sku_code__iexact=str(requested_sku).strip()
     ).order_by("id")
     if exact_old.count() == 1:
         sku = exact_old.first()
-        return normalized, sku, "matched_legacy_sku" if sku.purchase_price is not None else "not_priced"
+        return normalized, sku, "matched_legacy_sku"
     candidates = list(ProductSKU.objects.filter(tenant=tenant, is_active=True).filter(
         Q(sku_code__iexact=normalized)
         | Q(legacy_sku_code__iexact=normalized)
@@ -1149,7 +1162,7 @@ def _purchase_cost_for_item(tenant, requested_sku):
     ).order_by("id")[:2])
     if len(candidates) == 1:
         sku = candidates[0]
-        return normalized, sku, "matched_normalized" if sku.purchase_price is not None else "not_priced"
+        return normalized, sku, "matched_normalized"
     return normalized, None, "ambiguous" if candidates else "not_found"
 
 
@@ -1169,8 +1182,7 @@ def _purchase_cost_for_payload(tenant, payload):
             if requested_normalized and requested_normalized == legacy_normalized
             else "matched_new_sku"
         )
-        status = matched_status if selected_sku.purchase_price is not None else "not_priced"
-        return _normalize_sku(selected_sku.sku_code), selected_sku, status
+        return _normalize_sku(selected_sku.sku_code), selected_sku, matched_status
     return _purchase_cost_for_item(tenant, requested_sku)
 
 

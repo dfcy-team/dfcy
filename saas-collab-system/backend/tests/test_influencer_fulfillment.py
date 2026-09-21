@@ -36,7 +36,7 @@ from apps.influencers.models import (
 )
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
-from apps.products.models import ProductSKU, ProductSPU
+from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 from apps.influencers.services import (
     _payload_hash,
@@ -973,6 +973,21 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         sku_code="SAMPLE-COST-B",
         purchase_price="3.0000",
     )
+    effective_from = timezone.now() - timedelta(days=1)
+    for sku, amount, version_no in ((first_sku, "4.0000", 1), (second_sku, "3.0000", 1)):
+        ProductCostVersion.objects.create(
+            tenant=tenant,
+            sku=sku,
+            version_no=version_no,
+            status=ProductCostVersion.Status.CONFIRMED,
+            source=ProductCostVersion.Source.MANUAL,
+            purchase_cost=amount,
+            system_cost=amount,
+            confirmed_cost=amount,
+            effective_from=effective_from,
+            reason="fulfillment regression fixture",
+            created_by=user,
+        )
     listing = StoreProductListing.objects.create(
         tenant=tenant,
         store=store,
@@ -1041,7 +1056,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
     fulfillment = SampleFulfillment.objects.get(fulfillment_no="SAMPLE-COST-ONLY")
     created_item = fulfillment.items.get()
     assert created_item.unit_price is None
-    assert created_item.currency == ""
+    assert created_item.currency == "CNY"
     assert created_item.sales_amount is None
     assert created_item.price_match_status == "not_imported"
     assert created_item.price_source == ""
@@ -1091,7 +1106,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
     fulfillment.refresh_from_db()
     edited_item = fulfillment.items.get()
     assert edited_item.unit_price is None
-    assert edited_item.currency == ""
+    assert edited_item.currency == "CNY"
     assert edited_item.sales_amount is None
     assert edited_item.price_match_status == "not_imported"
     assert edited_item.price_source == ""
