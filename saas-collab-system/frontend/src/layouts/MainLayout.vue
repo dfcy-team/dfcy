@@ -13,14 +13,25 @@
 
     <el-container class="app-workspace">
       <el-header class="app-header">
-        <div class="header-context">
-          <el-button class="mobile-menu-button" text aria-label="打开导航菜单" @click="mobileMenuOpen = true">
-            ☰
-          </el-button>
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item>工作台</el-breadcrumb-item>
-            <el-breadcrumb-item v-if="currentLabel && $route.path !== '/'">{{ currentLabel }}</el-breadcrumb-item>
-          </el-breadcrumb>
+        <div class="header-primary">
+          <div class="header-context">
+            <el-button class="mobile-menu-button" text aria-label="打开导航菜单" @click="mobileMenuOpen = true">
+              ☰
+            </el-button>
+            <el-breadcrumb separator="/">
+              <el-breadcrumb-item>工作台</el-breadcrumb-item>
+              <el-breadcrumb-item v-if="currentLabel && $route.path !== '/'">{{ currentLabel }}</el-breadcrumb-item>
+            </el-breadcrumb>
+          </div>
+
+          <div class="header-user">
+            <div class="header-user__identity">
+              <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
+              <span>{{ roleLabel }}</span>
+            </div>
+            <el-button class="user-settings-button" text @click="userSettingsOpen = true">个人设置</el-button>
+            <el-button text @click="handleLogout">退出登录</el-button>
+          </div>
         </div>
 
         <nav class="route-tabs" aria-label="已打开页面" role="tablist">
@@ -32,7 +43,9 @@
             role="tab"
             :aria-selected="route.fullPath === tab.path"
             :draggable="true"
-            :title="tab.label"
+            :title="tab.closable
+              ? `${tab.label}：可以移动TAB页，可以关闭TAB页`
+              : `${tab.label}：可以移动TAB页，固定页签不可关闭`"
             @click="activateTab(tab.path)"
             @dragstart="startTabDrag(tab.path, $event)"
             @dragover.prevent
@@ -49,15 +62,6 @@
             >×</span>
           </button>
         </nav>
-
-        <div class="header-user">
-          <div class="header-user__identity">
-            <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
-            <span>{{ roleLabel }}</span>
-          </div>
-          <el-button class="user-settings-button" text @click="userSettingsOpen = true">个人设置</el-button>
-          <el-button text @click="handleLogout">退出登录</el-button>
-        </div>
       </el-header>
 
       <el-main ref="mainScrollContainer" class="app-main" @scroll="updateScrollControls">
@@ -89,8 +93,11 @@
     <UserSettingsDrawer
       v-model="userSettingsOpen"
       :current-user="auth.currentUser"
+      :tab-limit="tabLimit"
+      :open-tab-count="openTabs.length"
       @profile-updated="handleProfileUpdated"
       @password-changed="handlePasswordChanged"
+      @tab-limit-changed="handleTabLimitChanged"
     />
   </el-container>
 </template>
@@ -122,7 +129,19 @@ const mainScrollContainer = ref(null);
 const canScrollUp = ref(false);
 const canScrollDown = ref(false);
 const tabsStorageKey = 'business-workbench:open-tabs';
+const defaultTabLimit = 15;
 const homeTab = { path: '/', label: '工作台', closable: false };
+
+function tabLimitStorageKey() {
+  return `business-workbench:tab-limit:${auth.currentUser?.username || 'anonymous'}`;
+}
+
+function loadTabLimit() {
+  const storedLimit = Number(localStorage.getItem(tabLimitStorageKey()));
+  return Number.isInteger(storedLimit) && storedLimit >= 5 && storedLimit <= 30
+    ? storedLimit
+    : defaultTabLimit;
+}
 
 function loadOpenTabs() {
   try {
@@ -136,8 +155,11 @@ function loadOpenTabs() {
 }
 
 const openTabs = ref(loadOpenTabs());
+const tabLimit = ref(loadTabLimit());
 const draggedTabPath = ref(null);
+const menuRenderVersion = ref(0);
 let contentObserver;
+let removeTabLimitGuard;
 
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
 const currentLabel = computed(() => findMenuLabel(route.path, visibleMenuItems.value));
@@ -219,6 +241,12 @@ function scrollMainTo(direction) {
 }
 
 onMounted(() => {
+  removeTabLimitGuard = router.beforeEach((to) => {
+    const alreadyOpen = openTabs.value.some((tab) => tab.path === to.fullPath);
+    if (alreadyOpen || openTabs.value.length < tabLimit.value) return true;
+    ElMessage.warning(`最多可打开 ${tabLimit.value} 个页签，请先关闭不需要的页签后再试。`);
+    return false;
+  });
   nextTick(updateScrollControls);
   window.addEventListener('resize', updateScrollControls);
   const scrollElement = getMainScrollElement();
@@ -229,6 +257,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  removeTabLimitGuard?.();
   window.removeEventListener('resize', updateScrollControls);
   contentObserver?.disconnect();
 });
@@ -240,6 +269,13 @@ function handleLogout() {
 
 function handleProfileUpdated(profile) {
   auth.setCurrentUser({ ...auth.currentUser, ...profile });
+}
+
+function handleTabLimitChanged(limit) {
+  const normalizedLimit = Math.min(30, Math.max(5, Number(limit) || defaultTabLimit));
+  tabLimit.value = normalizedLimit;
+  localStorage.setItem(tabLimitStorageKey(), String(normalizedLimit));
+  ElMessage.success(`最大打开页签数已设置为 ${normalizedLimit} 个。`);
 }
 
 function handlePasswordChanged() {
@@ -264,9 +300,20 @@ const AppMenu = defineComponent({
           }
         );
       }
-      return h(ElMenuItem, { index: item.path, onClick: () => emit('select') }, () => item.label);
+      return h(ElMenuItem, {
+        index: item.path,
+        onClick: async () => {
+          const navigationFailure = await router.push(item.path);
+          if (navigationFailure) menuRenderVersion.value += 1;
+          else emit('select');
+        }
+      }, () => item.label);
     };
-    return () => h(ElMenu, { router: true, defaultActive: route.path, class: 'menu' }, () => props.items.map(renderItem));
+    return () => h(ElMenu, {
+      key: `${route.path}:${menuRenderVersion.value}`,
+      defaultActive: route.path,
+      class: 'menu'
+    }, () => props.items.map(renderItem));
   }
 });
 </script>
@@ -395,12 +442,20 @@ const AppMenu = defineComponent({
 
 .app-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 64px;
-  padding: 0 20px;
+  flex-direction: column;
+  align-items: stretch;
+  height: 104px;
+  padding: 0;
   border-bottom: 1px solid #d9e2ec;
   background: #fff;
+}
+
+.header-primary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 0 20px;
 }
 
 .header-context,
@@ -413,13 +468,15 @@ const AppMenu = defineComponent({
 
 .route-tabs {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: flex-start;
   gap: 4px;
-  align-self: stretch;
+  flex: 0 0 48px;
   min-width: 0;
-  max-width: 48%;
   overflow-x: auto;
-  margin: 0 16px;
+  padding: 7px 20px;
+  border-top: 1px solid #edf0f4;
+  background: #f8fafc;
 }
 
 .route-tab {
@@ -428,19 +485,24 @@ const AppMenu = defineComponent({
   gap: 8px;
   flex: 0 0 auto;
   max-width: 180px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: #64748b;
-  background: transparent;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #d9dee7;
+  border-radius: 5px;
+  color: #334155;
+  background: linear-gradient(#fff, #f3f4f6);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
 }
-.route-tab.is-active { border-bottom-color: #2563eb; color: #1d4ed8; font-weight: 600; }
+.route-tab:hover { border-color: #aeb8c6; background: #fff; }
+.route-tab.is-active { border-color: #334155; color: #fff; background: #334155; font-weight: 600; }
 .route-tab__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .route-tab__close { color: #94a3b8; font-size: 17px; line-height: 1; }
 .route-tab__close:hover { color: #dc2626; }
+.route-tab.is-active .route-tab__close { color: #dbe4ef; }
+.route-tab.is-active .route-tab__close:hover { color: #fff; }
 
 .header-user__identity {
   display: flex;
@@ -457,7 +519,7 @@ const AppMenu = defineComponent({
 }
 .header-user__identity span { color: #718096; font-size: 11px; }
 .mobile-menu-button { display: none; width: 36px; min-width: 36px; padding: 0; font-size: 20px; }
-.app-main { position: relative; min-width: 0; height: calc(100vh - 64px); padding: 20px; overflow: auto; }
+.app-main { position: relative; min-width: 0; height: calc(100vh - 104px); padding: 20px; overflow: auto; }
 .main-scroll-controls { position: fixed; z-index: 30; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .main-scroll-controls button { width: 32px; height: 32px; border: 1px solid #cbd5e1; border-radius: 50%; color: #334155; background: #fff; box-shadow: 0 2px 8px rgb(15 23 42 / 14%); cursor: pointer; pointer-events: auto; }
 
@@ -466,9 +528,9 @@ const AppMenu = defineComponent({
   .app-workspace { width: 100%; margin-left: 0; }
   .mobile-menu-button { display: inline-flex; }
   .header-context :deep(.el-breadcrumb) { display: none; }
-  .app-header { padding: 0 12px; }
+  .header-primary { padding: 0 12px; }
   .app-main { width: 100%; padding: 14px; }
-  .route-tabs { flex: 1; max-width: none; margin: 0 6px; }
+  .route-tabs { padding: 7px 12px; }
   .header-user__identity { display: none; }
   .header-user { gap: 6px; }
   .user-settings-button { min-width: 36px; padding: 4px; }
