@@ -12,7 +12,7 @@ describe('MainLayout dark navigation theme', () => {
     expect(source).toContain('<AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />');
   });
 
-  it('declares readable dark menu states without changing menu data or routing', () => {
+  it('declares readable dark menu states while preserving guarded explicit routing', () => {
     for (const color of ['#101827', '#0b1220', '#1e293b', '#1d4ed8', '#1e40af', '#cbd5e1', '#f8fafc']) {
       expect(source).toContain(color);
     }
@@ -28,6 +28,7 @@ describe('MainLayout dark navigation theme', () => {
     expect(source).toContain(':global(.navigation-drawer)');
     expect(source).toContain(':global(.navigation-drawer .el-drawer__body)');
     expect(source).toContain("filterMenuItems(auth.currentUser)");
-    expect(source).toContain("router: true");
+    expect(source).toContain('const navigationFailure = await router.push(item.path)');
+    expect(source).toContain('if (navigationFailure) menuRenderVersion.value += 1');
   });
 });
