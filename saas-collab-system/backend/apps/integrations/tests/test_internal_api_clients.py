@@ -14,11 +14,11 @@ class InternalAPIClientTests(APITestCase):
         self.tenant = Tenant.objects.create(code="IAC01", name="Internal API tenant")
         self.other_tenant = Tenant.objects.create(code="IAC02", name="Other tenant")
         self.user = get_user_model().objects.create_user(
-            username="internal-api-admin", password="x", tenant=self.tenant,
+            username="internal-api-admin", password=None, tenant=self.tenant,
             user_type="internal", is_active=True, is_superuser=True,
         )
         self.other_user = get_user_model().objects.create_user(
-            username="other-admin", password="x", tenant=self.other_tenant,
+            username="other-admin", password=None, tenant=self.other_tenant,
             user_type="internal", is_active=True, is_superuser=True,
         )
         self.client.force_authenticate(self.user)
@@ -104,7 +104,7 @@ class InternalAPIClientTests(APITestCase):
 
     def test_permissions_fail_closed_without_scope_and_business_read_api_is_absent(self):
         limited = get_user_model().objects.create_user(
-            username="limited-internal-api", password="x", tenant=self.tenant,
+            username="limited-internal-api", password=None, tenant=self.tenant,
             user_type="internal", is_active=True,
         )
         role = Role.objects.create(tenant=self.tenant, name="Internal API viewer", code="internal-api-viewer")
