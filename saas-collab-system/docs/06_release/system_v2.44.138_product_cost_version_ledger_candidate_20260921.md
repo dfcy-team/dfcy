@@ -5,7 +5,7 @@
 - 版本：`V2.44.138`
 - 登记日期：`2026-09-21`
 - 主题：基础档案新增“商品成本”菜单，支持商品成本人工维护、系统生成回填预览、差异核对和历史版本展示。
-- 状态：`READY_FOR_REVIEW`；标准 XLSX 关系路径和 Excel 日期序列解析阻断已修复，已通过真实 openpyxl 工作簿预检与确认入账回归，未部署。
+- 状态：`REVIEW_PASSED_AWAITING_PR_CI`；候选第三次复审通过，标准 XLSX、成本回填与确认闭环均已验证；仍待受保护 PR、CI 和发布审批，未部署。
 - 直接父基线：`V2.44.137` / `v2.44.137-deployed` / `c228080fa6982a9971c7de06ea0d47fa5312d0f5`。
 - 版本占用复核：`V2.44.137` 已完成生产部署并占用不可变标签 `v2.44.137-deployed`，因此本次顺延登记 `V2.44.138`。
 - 发布边界：本记录不创建 deployed 标签、不合并主线、不触发虚拟机或生产部署。
@@ -135,3 +135,11 @@
 - 已读取 `styles.xml` 的内置及自定义日期格式，将 Excel 日期序列转换为 ISO 日期时间后再进入期间校验。
 - 新增 openpyxl 生成的标准 XLSX 回归，覆盖真实日期单元格的 preview、confirm 与最终生效期间；导入套件 5/5 通过。
 - 当前结论：XLSX 实现型阻断已解除，恢复 `READY_FOR_REVIEW`；仍不代表已通过发布审批或已部署。
+
+## 第三次候选复审结论（2026-09-21）
+
+- 候选身份核验通过：分支 `codex/v244138-product-cost`，提交 `3c32d6df9c98efc33e810dc00c2bcd1ead5e6c2d`；与 `v2.44.137-deployed` 的 merge-base 为 `c228080fa6982a9971c7de06ea0d47fa5312d0f5`，候选共 3 个顺序提交。
+- XLSX 修复复核通过：工作表关系目标 `/xl/worksheets/...`、`xl/worksheets/...`、`worksheets/...` 均按正确归一化路径读取；`styles.xml` 的内置及自定义日期格式可触发 Excel 日期序列转换。
+- 独立复现通过：openpyxl 生成、包含真实日期时间单元格的标准工作簿已可读取，示例 `2026-01-01 12:30` 与 `2026-02-01` 均进入日期解析链路；新增 API 回归覆盖 preview、confirm 和生效区间落库。
+- 验证复跑：商品成本导入/回填/确认/送样快照聚焦测试 `15 passed`；Django system check 0 问题；`makemigrations --check --dry-run` 无漂移；`git diff --check` 通过。
+- 复审决定：实现型阻断全部解除，登记状态更新为 `REVIEW_PASSED_AWAITING_PR_CI`。后续仍须经过受保护 PR、CI 与发布审批；本次未执行部署、未创建 `v2.44.138-deployed` 标签。
