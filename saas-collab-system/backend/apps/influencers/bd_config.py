@@ -2,6 +2,8 @@ from django.utils import timezone
 
 from apps.configcenter.models import SystemConfigDefinition, TenantConfigVersion
 
+from .models import SUPPORTED_CURRENCY_CHOICES
+
 
 BD_PERFORMANCE_CONFIG_KEY = "influencers.bd.performance"
 BD_PERFORMANCE_CONFIG_DEFAULTS = {
@@ -32,7 +34,8 @@ def bd_performance_settings(tenant_id):
     currency = str(value.get("default_currency") or "").strip().upper()
     attribution = str(value.get("default_attribution") or "").strip().lower()
     metrics = str(value.get("default_metrics") or "").strip().lower()
-    if currency in {"CNY", "PHP", "USD"}:
+    supported_currencies = {code for code, _label in SUPPORTED_CURRENCY_CHOICES}
+    if currency in supported_currencies:
         settings["default_currency"] = currency
     if attribution in {"strict", "fallback"}:
         settings["default_attribution"] = attribution

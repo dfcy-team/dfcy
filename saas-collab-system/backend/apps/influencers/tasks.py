@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 
 from celery import shared_task
 from django.db import transaction
@@ -18,12 +19,17 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name="influencers.refresh_affiliate_order_attributions")
-def refresh_affiliate_order_attributions_task(tenant_id):
+def refresh_affiliate_order_attributions_task(tenant_id, changed_since=None):
     """Refresh both deterministic attribution modes for one tenant only."""
     result = {"tenant_id": tenant_id, "modes": {}}
     if not Tenant.objects.filter(pk=tenant_id).exists():
         return {**result, "status": "tenant_not_found"}
 
+    parsed_changed_since = None
+    if changed_since:
+        parsed_changed_since = datetime.fromisoformat(changed_since)
+        if timezone.is_naive(parsed_changed_since):
+            parsed_changed_since = timezone.make_aware(parsed_changed_since, timezone.get_current_timezone())
     for mode in ("strict", "fallback"):
         # Serializing on the tenant row makes duplicate queue deliveries harmless
         # while keeping each refresh transaction and rule version independent.
@@ -32,6 +38,7 @@ def refresh_affiliate_order_attributions_task(tenant_id):
             result["modes"][mode] = refresh_order_attributions(
                 tenant=tenant,
                 attribution=mode,
+                changed_since=parsed_changed_since,
             )
     result["status"] = "completed"
     return result
@@ -47,17 +54,22 @@ def dispatch_daily_affiliate_order_attribution_refreshes_task():
     )
     queued_tenant_ids = []
     skipped_tenant_ids = []
+    changed_since = timezone.now() - timedelta(days=7)
     for tenant_id in tenant_ids:
         if not bd_performance_settings(tenant_id)["daily_attribution_reconciliation_enabled"]:
             skipped_tenant_ids.append(tenant_id)
             continue
-        refresh_affiliate_order_attributions_task.delay(tenant_id=tenant_id)
+        refresh_affiliate_order_attributions_task.delay(
+            tenant_id=tenant_id,
+            changed_since=changed_since.isoformat(),
+        )
         queued_tenant_ids.append(tenant_id)
     return {
         "status": "queued",
         "tenant_count": len(queued_tenant_ids),
         "tenant_ids": queued_tenant_ids,
         "skipped_tenant_ids": skipped_tenant_ids,
+        "changed_since": changed_since.isoformat(),
     }
 
 

@@ -32,6 +32,15 @@ def test_bd_performance_settings_allow_only_supported_values(version_objects):
 
 
 @patch("apps.influencers.bd_config.TenantConfigVersion.objects")
+def test_bd_performance_settings_accept_all_supported_country_currencies(version_objects):
+    for currency in ("MYR", "THB"):
+        version_objects.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(
+            value={"default_currency": currency}
+        )
+        assert bd_performance_settings(tenant_id=7)["default_currency"] == currency
+
+
+@patch("apps.influencers.bd_config.TenantConfigVersion.objects")
 def test_bd_performance_settings_reject_invalid_values(version_objects):
     version_objects.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(
         value={

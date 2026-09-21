@@ -328,6 +328,11 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
+    "activate-due-config-versions": {
+        "task": "configcenter.activate_due_config_versions",
+        "schedule": 60.0,
+        "args": (),
+    },
     "dispatch-daily-affiliate-order-attribution-refreshes": {
         "task": "influencers.dispatch_daily_affiliate_order_attribution_refreshes",
         # Celery runs in UTC; 19:00 UTC is 03:00 the next day in Asia/Shanghai.

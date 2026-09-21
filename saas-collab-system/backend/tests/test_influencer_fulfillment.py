@@ -2208,6 +2208,38 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.order_id == order.order_id
     assert attribution.sku_id == order.sku_id
 
+    QuerySet.update(
+        AffiliateOrderSnapshot.objects.filter(pk__in=[order.pk, duplicate.pk]),
+        updated_at=timezone.now() - timedelta(days=10),
+    )
+    QuerySet.update(
+        AffiliateOrderSnapshot.objects.filter(pk=duplicate.pk),
+        updated_at=timezone.now(),
+    )
+    duplicate_refresh = refresh_order_attributions(
+        tenant=tenant,
+        attribution="strict",
+        changed_since=timezone.now() - timedelta(hours=1),
+    )
+    assert duplicate_refresh["updated"] == 0
+    attribution.refresh_from_db()
+    assert attribution.order_snapshot_id == order.pk
+
+    incremental_order = _new_affiliate_order(
+        tenant,
+        data_time=order_time + timedelta(hours=1),
+        order_id="ORDER-INCREMENTAL",
+    )
+    incremental = refresh_order_attributions(
+        tenant=tenant,
+        attribution="strict",
+        changed_since=timezone.now() - timedelta(hours=1),
+    )
+    assert incremental["scope"] == "incremental"
+    assert incremental["created"] == 1
+    assert BdOrderAttributionSnapshot.objects.filter(order_snapshot=order).exists()
+    assert BdOrderAttributionSnapshot.objects.filter(order_snapshot=incremental_order).exists()
+
     corrected_owner = CustomUser.objects.create_user(
         username="corrected-standalone-owner",
         tenant=tenant,
@@ -2227,7 +2259,7 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     corrected_row = next(
         row for row in corrected["rows"] if row["owner_id"] == corrected_owner.pk
     )
-    assert corrected_row["valid_order_count"] == 1
+    assert corrected_row["valid_order_count"] == 2
     attribution.refresh_from_db()
     assert attribution.owner_id == user.pk
 
