@@ -16,6 +16,6 @@ const importPayload = (file, confirm = false, token = '') => {
   return data;
 };
 
-export const previewProductCostImport = (file) => requestApi({ method: 'post', url: '/api/internal/products/costs/import/preview/', data: importPayload(file), timeout: 120000 });
+export const previewProductCostImport = (file, onUploadProgress) => requestApi({ method: 'post', url: '/api/internal/products/costs/import/preview/', data: importPayload(file), timeout: 120000, onUploadProgress });
 
-export const confirmProductCostImport = (file, token, idempotencyKey) => requestApi({ method: 'post', url: '/api/internal/products/costs/import/confirm/', data: importPayload(file, true, token), headers: { 'Idempotency-Key': idempotencyKey }, timeout: 120000 });
+export const confirmProductCostImport = (file, token, idempotencyKey, onUploadProgress) => requestApi({ method: 'post', url: '/api/internal/products/costs/import/confirm/', data: importPayload(file, true, token), headers: { 'Idempotency-Key': idempotencyKey }, timeout: 120000, onUploadProgress });

@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.audit.models import DataImportLog
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.cost_services import append_cost_version
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
@@ -142,6 +143,10 @@ def test_preview_reports_batch_and_database_overlap():
     errors = response.json()["data"]["errors"]
     assert any("import row" in item["message"] for item in errors)
     assert any("existing version" in item["message"] for item in errors)
+    batch_id = response.json()["data"]["error_batch_id"]
+    log = DataImportLog.objects.get(pk=batch_id, import_type="product_cost_preview")
+    assert log.status == DataImportLog.Status.FAILED
+    assert log.error_summary["errors"] == errors
 
 
 @pytest.mark.django_db
