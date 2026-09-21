@@ -4,7 +4,7 @@ import hashlib
 import io
 import re
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree
 
@@ -29,6 +29,40 @@ AMOUNT_COLUMNS = ("purchase_cost", "freight_cost", "duty_cost", "packaging_cost"
 TOKEN_SALT = "products.cost.import.v1"
 
 
+def _xlsx_date_styles(archive, ns):
+    if "xl/styles.xml" not in archive.namelist():
+        return set()
+    root = ElementTree.fromstring(archive.read("xl/styles.xml"))
+    custom = {
+        int(node.attrib["numFmtId"]): node.attrib.get("formatCode", "")
+        for node in root.findall("x:numFmts/x:numFmt", ns)
+    }
+    built_in_dates = set(range(14, 23)) | set(range(45, 48))
+    styles = set()
+    for index, node in enumerate(root.findall("x:cellXfs/x:xf", ns)):
+        num_fmt_id = int(node.attrib.get("numFmtId", 0))
+        format_code = re.sub(r'"[^"]*"|\\.', "", custom.get(num_fmt_id, "")).lower()
+        if num_fmt_id in built_in_dates or re.search(r"[ymdhis]", format_code):
+            styles.add(index)
+    return styles
+
+
+def _xlsx_cell_value(cell, raw_value, shared, date_styles):
+    if cell.attrib.get("t") == "s" and raw_value.isdigit() and int(raw_value) < len(shared):
+        return shared[int(raw_value)]
+    inline = cell.find("x:is", {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"})
+    if inline is not None:
+        return "".join(inline.itertext())
+    style_index = int(cell.attrib.get("s", 0))
+    if raw_value and style_index in date_styles:
+        try:
+            parsed = datetime(1899, 12, 30) + timedelta(days=float(raw_value))
+            return parsed.isoformat(sep=" ")
+        except ValueError:
+            pass
+    return raw_value
+
+
 def _xlsx_rows(raw):
     """Read the first non-empty XLSX worksheet without an optional dependency."""
     try:
@@ -38,6 +72,7 @@ def _xlsx_rows(raw):
         if "xl/sharedStrings.xml" in archive.namelist():
             root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
             shared = ["".join(node.itertext()) for node in root.findall("x:si", ns)]
+        date_styles = _xlsx_date_styles(archive, ns)
         workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
         rels = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
         rel_ns = {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}
@@ -46,7 +81,12 @@ def _xlsx_rows(raw):
         for sheet in workbook.findall("x:sheets/x:sheet", ns):
             rel_id = sheet.attrib.get("{%s}id" % ns["r"])
             target = rel_map.get(rel_id, "")
-            path = target if target.startswith("xl/") else "xl/" + target.lstrip("/")
+            if target.startswith("/"):
+                path = target.lstrip("/")
+            elif target.startswith("xl/"):
+                path = target
+            else:
+                path = "xl/" + target.lstrip("/")
             if path not in archive.namelist():
                 continue
             root = ElementTree.fromstring(archive.read(path))
@@ -60,12 +100,8 @@ def _xlsx_rows(raw):
                     for letter in letters:
                         column = column * 26 + ord(letter) - 64
                     value_node = cell.find("x:v", ns)
-                    value = "" if value_node is None else (value_node.text or "")
-                    if cell.attrib.get("t") == "s" and value.isdigit() and int(value) < len(shared):
-                        value = shared[int(value)]
-                    inline = cell.find("x:is", ns)
-                    if inline is not None:
-                        value = "".join(inline.itertext())
+                    raw_value = "" if value_node is None else (value_node.text or "")
+                    value = _xlsx_cell_value(cell, raw_value, shared, date_styles)
                     cells[column - 1] = value
                     max_column = max(max_column, column)
                 sparse_rows.append(cells)

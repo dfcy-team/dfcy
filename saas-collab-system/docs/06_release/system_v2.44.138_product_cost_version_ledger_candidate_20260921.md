@@ -5,7 +5,7 @@
 - 版本：`V2.44.138`
 - 登记日期：`2026-09-21`
 - 主题：基础档案新增“商品成本”菜单，支持商品成本人工维护、系统生成回填预览、差异核对和历史版本展示。
-- 状态：`READY_FOR_REVIEW`；已在 `v2.44.137-deployed` 干净基线上完成成本版本、每期 CSV/XLSX 导入、回填执行、人工确认、数据库级区间互斥、时态解析和下游快照，未部署。
+- 状态：`READY_FOR_REVIEW`；标准 XLSX 关系路径和 Excel 日期序列解析阻断已修复，已通过真实 openpyxl 工作簿预检与确认入账回归，未部署。
 - 直接父基线：`V2.44.137` / `v2.44.137-deployed` / `c228080fa6982a9971c7de06ea0d47fa5312d0f5`。
 - 版本占用复核：`V2.44.137` 已完成生产部署并占用不可变标签 `v2.44.137-deployed`，因此本次顺延登记 `V2.44.138`。
 - 发布边界：本记录不创建 deployed 标签、不合并主线、不触发虚拟机或生产部署。
@@ -120,3 +120,18 @@
 - 数据库约束：PostgreSQL 迁移新增 `btree_gist` 的确认版本时间区间排斥约束，防止绕过服务层写入重叠区间。
 - 验证：后端导入/回填/确认/时态快照 14/14 通过；前端商品成本与菜单契约 11/11 通过；Django check、迁移漂移检查、Vite 生产构建和 `git diff --check` 通过。
 - 当前结论：上次复审三项实现型阻断已修复，状态回到 `READY_FOR_REVIEW`；仍需重新复审及 PR/CI/发布审批，不视为已部署。
+
+## 第二次候选复审结论（2026-09-21）
+
+- 候选身份核验通过：分支 `codex/v244138-product-cost`，提交 `fcea1bc79939680f750108a730a71d7d7eaeae9b`；直接基于 `1b2fb52`，相对 `v2.44.137-deployed` 共 2 个候选提交。
+- 上次三项阻断已在代码中闭环：backfill execute 会新增 `pending` 版本；独立 confirm API 由 `products.cost.approve` 控制；PostgreSQL 迁移通过 `btree_gist` 为 `confirmed` 区间增加排斥约束。
+- 新阻断：当前 `_xlsx_rows()` 对工作簿关系目标的路径拼接不兼容标准 XLSX。以 openpyxl 生成的正常工作簿为例，关系目标为 `/xl/worksheets/sheet1.xml`，解析器会错误拼成 `xl/xl/worksheets/sheet1.xml`，最终返回空行并将有效文件误判为空文件；同时解析器未读取单元格样式并转换 Excel 日期序列值，即使修正路径，正常日期单元格仍不能按日期解析。因此“CSV/XLSX 两阶段导入”中的 XLSX 能力尚不可用；现有测试只覆盖了手工构造的文本单元格和非标准关系路径，未捕获这些问题。
+- 验证复跑：后端导入/回填/确认/快照 `14 passed`；前端商品成本与菜单合同 `11 passed`；Django system check 0 问题；迁移无漂移；Vite build 通过；`git diff --check` 通过。另行使用 openpyxl 生成标准 XLSX 的解析复现结果为 `[]`。
+- 发布决定：登记保持 `REVIEW_BLOCKED`。修复 XLSX 关系路径解析，并增加由真实 XLSX 库生成、含 Excel 日期单元格的 preview/confirm 回归测试后再复审；本次不部署、不创建 `v2.44.138-deployed` 标签。
+
+## XLSX 阻断修复补记（2026-09-21）
+
+- 已正确处理 `/xl/worksheets/...`、`xl/worksheets/...` 和 `worksheets/...` 三种工作表关系目标，不再重复拼接 `xl/`。
+- 已读取 `styles.xml` 的内置及自定义日期格式，将 Excel 日期序列转换为 ISO 日期时间后再进入期间校验。
+- 新增 openpyxl 生成的标准 XLSX 回归，覆盖真实日期单元格的 preview、confirm 与最终生效期间；导入套件 5/5 通过。
+- 当前结论：XLSX 实现型阻断已解除，恢复 `READY_FOR_REVIEW`；仍不代表已通过发布审批或已部署。

@@ -1,6 +1,6 @@
 import io
 import zipfile
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -143,3 +143,42 @@ def test_xlsx_preview_and_confirm_requires_both_permissions():
         format="multipart", HTTP_IDEMPOTENCY_KEY="xlsx-import-0001",
     )
     assert confirm.status_code == 403
+
+
+@pytest.mark.django_db
+def test_real_openpyxl_workbook_with_date_cells_previews_and_confirms():
+    openpyxl = pytest.importorskip("openpyxl")
+    tenant, sku, user = make_context("real-xlsx")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Costs"
+    sheet.append(HEADERS.strip().split(","))
+    sheet.append([
+        sku.sku_code,
+        datetime(2026, 5, 1),
+        datetime(2026, 6, 1),
+        "CNY", 10, 2, 1, 0.5, 0.5, 14, "real workbook",
+    ])
+    stream = io.BytesIO()
+    workbook.save(stream)
+    raw = stream.getvalue()
+    client = client_for(user)
+    preview = client.post(
+        "/api/internal/products/costs/import/preview/",
+        {"file": upload(raw, "real-costs.xlsx")},
+        format="multipart",
+    )
+    assert preview.status_code == 200
+    detail = preview.json()["data"]
+    assert (detail["total"], detail["valid"], detail["errors"]) == (1, 1, [])
+    confirm = client.post(
+        "/api/internal/products/costs/import/confirm/",
+        {"file": upload(raw, "real-costs.xlsx"), "token": detail["token"]},
+        format="multipart",
+        HTTP_IDEMPOTENCY_KEY="real-xlsx-import-0001",
+    )
+    assert confirm.status_code == 201
+    version = ProductCostVersion.objects.get(tenant=tenant, sku=sku)
+    assert timezone.localtime(version.effective_from).date().isoformat() == "2026-05-01"
+    assert timezone.localtime(version.effective_to).date().isoformat() == "2026-06-01"
