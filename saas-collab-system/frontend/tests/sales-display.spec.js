@@ -23,6 +23,7 @@ describe('销售字段展示', () => {
     expect(statusLabel('mapped')).toBe('已关联');
     expect(statusLabel('unmapped')).toBe('未关联');
     expect(statusLabel('cancelled')).toBe('已取消');
+    expect(statusLabel('accepted')).toBe('已接受');
     expect(statusLabel('NEW_PROVIDER_STATUS')).toBe('NEW_PROVIDER_STATUS');
     expect(formatField('tiktok', { format: 'platform' })).toBe('TikTok Shop');
   });

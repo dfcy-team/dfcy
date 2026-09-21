@@ -45,9 +45,9 @@ export const fetchSalesPage = (mode, params = {}) => {
   );
 };
 
-export const fetchSalesOrderDetail = (id) =>
+export const fetchSalesOrderDetail = (id, params = {}) =>
   salesRequest(
-    { method: 'get', url: `/api/internal/commerce/orders/${id}/` },
+    { method: 'get', url: `/api/internal/commerce/orders/${id}/`, params },
     salesManagementMocks.orderDetail ? () => salesManagementMocks.orderDetail(id) : undefined,
     'sales_management.orders.detail'
   );

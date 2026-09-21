@@ -23,7 +23,11 @@ def marketplace_callback(request, lazada_context):
     platform.name = provider
     platform.save()
     config.platform = provider
-    config.callback_url = f"https://example.test/api/internal/integrations/store-authorizations/oauth/callback/{provider}/"
+    config.callback_url = (
+        "https://example.test/"
+        if provider == "shopee"
+        else f"https://example.test/api/internal/integrations/store-authorizations/oauth/callback/{provider}/"
+    )
     config.contract_version = "v2" if provider == "shopee" else "v202309"
     config.platform_config = {"api_type": "marketplace"}
     config.save()
@@ -77,6 +81,15 @@ def test_automatic_completion_then_manual_replay_is_non_destructive(marketplace_
     assert client.post(MANUAL, payload, format="json").status_code == 409
     after = MarketplaceStoreAuthorization.objects.get(store=store)
     assert (after.pk, after.token_id, after.status) == (before.pk, before.token_id, "active")
+
+
+def test_shopee_root_registration_is_preserved_for_internal_callback(marketplace_callback):
+    _, _, config, _, _ = marketplace_callback
+    if config.platform != "shopee":
+        pytest.skip("Shopee-only root callback contract")
+    session = OAuthStateSession.objects.get()
+    assert config.callback_url == "https://example.test/"
+    assert session.redirect_uri == "https://example.test/"
 
 
 def test_wrong_store_does_not_consume_correct_callback(marketplace_callback):

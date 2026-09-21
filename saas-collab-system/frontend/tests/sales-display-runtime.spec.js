@@ -33,6 +33,44 @@ beforeEach(() => {
 });
 
 describe('销售页面展示验收', () => {
+  it.each(['overview', 'orders', 'returns', 'stores', 'skus'])('offers automatic CNY conversion in %s currency basis', async mode => {
+    api.fetchSalesFilters.mockResolvedValue({ success: true, data: { currencies: ['PHP'] } });
+    api.fetchSalesPage.mockResolvedValue({ success: true, data: {
+      results: [], currency_conversion: { target: 'CNY', rate_dates: ['2026-09-17'], formula: '原币金额 ÷ 汇率' }
+    } });
+    const wrapper = render(mode); await flushPromises();
+    expect(wrapper.vm.optionsFor('currencies')).toEqual([
+      { label: 'CNY（自动换算）', value: '__AUTO_CNY__' },
+      { label: 'PHP', value: 'PHP' }
+    ]);
+    wrapper.vm.query.currency = '__AUTO_CNY__';
+    wrapper.vm.applyFilters(); await flushPromises();
+    const params = api.fetchSalesPage.mock.lastCall[1];
+    expect(params.currency_basis).toBe('CNY');
+    expect(params).not.toHaveProperty('currency');
+    expect(wrapper.text()).toContain('汇率日期：2026-09-17');
+    api.createSalesExport.mockResolvedValueOnce({ success: true });
+    await wrapper.vm.submitExport(); await flushPromises();
+    expect(api.createSalesExport.mock.lastCall[0].filters).not.toHaveProperty('currency_basis');
+    wrapper.unmount();
+  });
+  it('sorts order headers on the server and retains sorting during pagination', async () => {
+    const wrapper = render('orders'); await flushPromises();
+    wrapper.vm.page = 3;
+    wrapper.vm.query.external_order_id = 'ORDER';
+    wrapper.vm.sortStores({ prop: 'order_total_amount', order: 'descending' }); await flushPromises();
+    expect(api.fetchSalesPage).toHaveBeenLastCalledWith('orders', expect.objectContaining({ page: 1, ordering: '-order_total_amount', external_order_id: 'ORDER' }));
+    wrapper.vm.page = 2; await wrapper.vm.loadData();
+    expect(api.fetchSalesPage.mock.lastCall[1]).toMatchObject({ page: 2, ordering: '-order_total_amount' });
+    wrapper.vm.sortStores({ prop: 'store.name', order: 'ascending' }); await flushPromises();
+    expect(api.fetchSalesPage.mock.lastCall[1].ordering).toBe('store.name');
+    wrapper.vm.sortStores({ prop: 'store.name', order: null }); await flushPromises();
+    expect(api.fetchSalesPage.mock.lastCall[1]).not.toHaveProperty('ordering');
+    wrapper.vm.sortStores({ prop: 'item_count', order: 'ascending' }); await flushPromises();
+    wrapper.vm.resetFilters(); await flushPromises();
+    expect(api.fetchSalesPage.mock.lastCall[1]).not.toHaveProperty('ordering');
+    wrapper.unmount();
+  });
   it('shows no-data guidance instead of asking for metrics on an empty SKU report', async () => {
     const wrapper = render('skus'); await flushPromises();
     expect(wrapper.text()).toContain('当前币种暂无趋势数据');

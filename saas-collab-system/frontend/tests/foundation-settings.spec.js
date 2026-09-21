@@ -46,7 +46,6 @@ describe('基础档案设置前端契约', () => {
       '/products/attributes',
       '/products/colors',
       '/products/specifications',
-      '/products/bundles',
       '/master-data/platforms',
       '/master-data/sites',
       '/master-data/stores',

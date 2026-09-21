@@ -4,8 +4,15 @@ from django.utils import timezone
 
 from .models import SyncJob, SyncScheduleDispatch
 from .scheduler import dispatch_due_jobs, paused_until
-from .sync_services import run_sync_job, validate_manual_sync_job
+from .sync_services import fail_queued_sync_run, run_sync_job, validate_manual_sync_job
 from .sync_alerts import upsert_sync_failure_alert
+
+
+@shared_task
+def refresh_due_integration_credentials():
+    from .automatic_refresh import refresh_due_authorizations
+
+    return refresh_due_authorizations()
 
 
 @shared_task(bind=True, soft_time_limit=840, time_limit=900)
@@ -35,6 +42,12 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None):
             dispatch.status, dispatch.finished_at = run.status, run.finished_at
             dispatch.save(update_fields=["status", "finished_at"])
     except Exception as exc:
+        fail_queued_sync_run(
+            sync_job,
+            idempotency_key,
+            error_code="SYNC_PREFLIGHT_FAILED",
+            message=str(exc),
+        )
         if dispatch:
             SyncScheduleDispatch.objects.filter(pk=dispatch.pk, status="running").update(
                 status="blocked", reason="执行校验或执行阶段失败，请核对授权、能力和只读准入，并查看同步异常。", finished_at=timezone.now())

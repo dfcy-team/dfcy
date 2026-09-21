@@ -35,4 +35,28 @@ describe('Jifeng warehouse form', () => {
     expect(createMasterData).toHaveBeenCalledWith('warehouses', { code: 'TEST', service_platform_id: 7 });
     expect(updateMasterData).toHaveBeenCalledWith('warehouses', 9, { code: 'TEST', service_platform_id: 7 });
   });
+
+  it('reloads the warehouse table when the API access dialog emits changed', async () => {
+    const loadData = vi.fn();
+    const wrapper = shallowMount(WarehouseMasterList, {
+      global: {
+        stubs: {
+          AdminResourcePage: {
+            setup(_, { expose }) {
+              expose({ loadData });
+            },
+            template: '<section><slot /></section>',
+          },
+          SubjectApiAccessDialog: {
+            emits: ['changed'],
+            template: '<button class="api-access-dialog" @click="$emit(\'changed\')" />',
+          },
+        },
+      },
+    });
+    await flushPromises();
+    await wrapper.find('.api-access-dialog').trigger('click');
+    await flushPromises();
+    expect(loadData).toHaveBeenCalledTimes(1);
+  });
 });

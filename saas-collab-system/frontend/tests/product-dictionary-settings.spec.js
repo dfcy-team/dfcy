@@ -220,6 +220,24 @@ describe('ProductDictionarySettings mounted kind matrix', () => {
     ]);
   });
 
+  it('shows a category tree and switches the specification workspace by leaf selection', async () => {
+    const wrapper = mountPage('specifications');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="specification-tree"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="specification-filter"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="specification-guide"]').exists()).toBe(true);
+
+    wrapper.vm.selectCategory(wrapper.vm.rows.find((item) => item.id === 10));
+    expect(wrapper.find('[data-testid="specification-guide"]').exists()).toBe(true);
+
+    wrapper.vm.selectCategory(wrapper.vm.rows.find((item) => item.id === 20));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="specification-detail"]').text()).toContain('01 床品');
+    expect(wrapper.find('[data-testid="specification-dimensions"]').text()).toContain('尺寸');
+    expect(wrapper.find('[data-testid="specification-edit"]').exists()).toBe(true);
+  });
+
   it('sends the backend field name used by the category specification endpoint', () => {
     const source = fs.readFileSync(path.resolve(process.cwd(), 'src/api/products.js'), 'utf8');
     expect(source).toContain("method: 'put'");

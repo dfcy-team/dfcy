@@ -220,6 +220,54 @@ class SalesOrderItem(ValidatedWriteModel):
         if errors:
             raise ValidationError(errors)
 
+    def save(self, *args, **kwargs):
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+        if is_new and self.internal_sku_id:
+            # Snapshot only new facts. Existing order rows are intentionally not backfilled.
+            from apps.products.models import ProductBundleVersion
+
+            version = (
+                ProductBundleVersion.objects.filter(
+                    tenant_id=self.sales_order.tenant_id,
+                    bundle_sku_id=self.internal_sku_id,
+                    effective_at__lte=self.sales_order.created_at_utc,
+                )
+                .prefetch_related("components")
+                .order_by("-effective_at", "-version")
+                .first()
+            )
+            if version:
+                SalesOrderBundleSnapshot.objects.get_or_create(
+                    order_item=self,
+                    defaults={
+                        "tenant_id": self.sales_order.tenant_id,
+                        "bundle_version": version,
+                        "components_payload": [
+                            {
+                                "component_sku_id": row.component_sku_id,
+                                "component_sku_code": row.component_sku_code,
+                                "component_name": row.component_name,
+                                "quantity": row.quantity,
+                            }
+                            for row in version.components.all()
+                        ],
+                    },
+                )
+
+
+class SalesOrderBundleSnapshot(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="sales_order_bundle_snapshots")
+    order_item = models.OneToOneField(SalesOrderItem, on_delete=models.PROTECT, related_name="bundle_snapshot")
+    bundle_version = models.ForeignKey(
+        "products.ProductBundleVersion", on_delete=models.PROTECT, related_name="sales_order_snapshots"
+    )
+    components_payload = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "sales_order_bundle_snapshot"
+
 
 class InventorySnapshot(ValidatedWriteModel):
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="commerce_inventory_snapshots")

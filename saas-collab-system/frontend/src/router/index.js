@@ -29,9 +29,9 @@ const ResearchDetail = () => import('../views/products/ResearchDetail.vue');
 const ProductMasterList = () => import('../views/products/ProductMasterList.vue');
 const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.vue');
 const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
+const ProductSkuEditor = () => import('../views/products/ProductSkuEditor.vue');
 const ProductDictionarySettings = () => import('../views/products/ProductDictionarySettings.vue');
 const FoundationSettings = () => import('../views/masterdata/FoundationSettings.vue');
-const ProductBundleManager = () => import('../views/products/ProductBundleManager.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
 const ProductStatusDashboard = () => import('../views/products/ProductStatusDashboard.vue');
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
@@ -87,6 +87,7 @@ const IntegrationAuditList = () => import('../views/integrations/IntegrationAudi
 const PlatformSiteList = () => import('../views/integrations/PlatformSiteList.vue');
 const SyncJobList = () => import('../views/integrations/SyncJobList.vue');
 const SyncRunDetail = () => import('../views/integrations/SyncRunDetail.vue');
+const FeishuCollaboration = () => import('../views/integrations/FeishuCollaboration.vue');
 const OperationLogList = () => import('../views/audit/OperationLogList.vue');
 const FinanceImportList = () => import('../views/finance/FinanceImportList.vue');
 const PlatformStatementList = () => import('../views/finance/PlatformStatementList.vue');
@@ -102,6 +103,7 @@ const ReportExportCenter = () => import('../views/reports/ReportExportCenter.vue
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
 const ProductionIntegrationSettings = () => import('../views/settings/ProductionIntegrationSettings.vue');
+const AIExternalApiSettings = () => import('../views/integrations/AIExternalApiSettings.vue');
 const ModuleReleaseControl = () => import('../views/settings/ModuleReleaseControl.vue');
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
 const ConfigCenterList = () => import('../views/settings/ConfigCenterList.vue');
@@ -205,12 +207,16 @@ const routes = [
       { path: 'products/master', component: ProductMasterList },
       { path: 'products/master/:id', component: ProductMasterDetail },
       { path: 'products/details', component: ProductDetailData },
+      { path: 'products/details/:id/edit', component: ProductSkuEditor },
       { path: 'products/platform-details', component: PlatformProductDetailList },
       { path: 'products/categories', component: ProductDictionarySettings, props: { kind: 'categories' } },
       { path: 'products/attributes', component: ProductDictionarySettings, props: { kind: 'attributes' } },
       { path: 'products/colors', component: ProductDictionarySettings, props: { kind: 'colors' } },
       { path: 'products/specifications', component: ProductDictionarySettings, props: { kind: 'specifications' } },
-      { path: 'products/bundles', component: ProductBundleManager },
+      {
+        path: 'products/bundles',
+        redirect: { path: '/products/details', query: { product_type: 'bundle' } },
+      },
       { path: 'master-data/settings', component: FoundationSettings },
       { path: 'products/status', component: ProductStatusList },
       { path: 'products/status-dashboard', component: ProductStatusDashboard },
@@ -267,6 +273,7 @@ const routes = [
       { path: 'integrations/configs/:id', component: IntegrationConfigDetail },
       { path: 'integrations/readiness', component: PlatformIntegrationReadiness },
       { path: 'integrations/production-settings', component: ProductionIntegrationSettings },
+      { path: 'integrations/ai-open-api', component: AIExternalApiSettings },
       { path: 'settings/module-controls', component: ModuleReleaseControl },
       { path: 'integrations/authorizations', redirect: '/master-data/stores' },
       { path: 'integrations/capabilities', component: IntegrationCapabilityMatrix },
@@ -279,6 +286,7 @@ const routes = [
       { path: 'integrations/sync-jobs', component: SyncJobList },
       { path: 'integrations/sync-runs', component: IntegrationWorkspace, props: { mode: 'sync-runs', runPermission: 'integrations.run_live_readonly', mockRunPermission: 'integrations.run' } },
       { path: 'integrations/sync-runs/:id', component: SyncRunDetail },
+      { path: 'integrations/feishu', component: FeishuCollaboration },
       { path: 'integrations/api-sync', component: APISyncTaskList },
       { path: 'integrations/api-sync/logs', component: APISyncLogList },
       { path: 'finance/imports', component: FinanceImportList },

@@ -261,7 +261,16 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
     return authorization
 
 
-def refresh_marketplace_authorization(record, *, actor):
+@transaction.atomic
+def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
+    record = MarketplaceStoreAuthorization.objects.select_for_update().get(
+        pk=record.pk,
+        tenant_id=actor.tenant_id,
+    )
+    if expected_token_id is not None:
+        from .automatic_refresh import require_automatic_refresh
+
+        require_automatic_refresh(record, expected_token_id)
     provider = resolve_oauth_provider(record.platform, record.integration_config)
     result = provider.refresh_authorization(record)
     return rotate_store_authorization_references(
@@ -275,6 +284,7 @@ def refresh_marketplace_authorization(record, *, actor):
         allow_live_references=result.get("reference_kind") == "custody",
         revoker=result.get("previous_reference_revoker"),
         new_reference_revoker=result.get("new_reference_revoker"),
+        defer_previous_revocation=True,
     )
 
 

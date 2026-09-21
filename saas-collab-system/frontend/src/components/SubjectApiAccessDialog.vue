@@ -579,15 +579,18 @@ async function getWarehouseCodes(confirmSelection = false) {
 
 async function refreshWarehouseAuthorization(binding) {
   busy.value = `refresh-${binding.id}`;
+  let changed = false;
   try {
     const response = await refreshJifengWarehouse(binding.id);
     if (!response?.success) throw new Error(response?.message || '刷新失败');
+    changed = true;
     ElMessage.success('仓库授权已刷新，请重新执行只读校验后启用同步任务。');
   } catch (reason) {
     ElMessage.error(reason?.message || '刷新失败，请检查仓库授权。');
   } finally {
     busy.value = '';
     await load();
+    if (changed) emit('changed');
   }
 }
 
@@ -849,7 +852,9 @@ const oauthBlockerLabels = {
 
 function oauthBlockerText(config) {
   const reasons = (config?.oauth_blockers || []).map((code) => oauthBlockerLabels[code] || code);
-  return reasons.length ? `暂不可授权：${reasons.join('；')}。请先到“连接配置”完成整改。` : '';
+  const callbackMismatch = (config?.oauth_blockers || []).some((code) => ['callback_mismatch', 'callback_not_allowlisted', 'callback_allowlist_missing'].includes(code));
+  const action = callbackMismatch ? '请由系统管理员同时核对“生产环境配置”与“连接配置”' : '请先到“连接配置”完成整改';
+  return reasons.length ? `暂不可授权：${reasons.join('；')}。${action}。` : '';
 }
 
 function canAuthorize(apiType) {
@@ -1028,10 +1033,14 @@ async function checkToken(binding) {
     } else {
       ElMessage.success('只读 API 检查通过，授权凭据可用于当前同步任务。');
     }
-    await load();
+    if (props.subjectType !== 'warehouse') await load();
   } catch (reason) {
     ElMessage.error(reason?.message || '平台只读检查失败');
   } finally {
+    if (props.subjectType === 'warehouse') {
+      await load();
+      emit('changed');
+    }
     busy.value = '';
   }
 }

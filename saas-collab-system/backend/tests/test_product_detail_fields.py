@@ -4,6 +4,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.audit.models import OperationLog
 from apps.files.models import AttachmentFile
 from apps.products.models import ProductCategory, ProductLegacyItem, ProductSKU, ProductSPU
 from apps.permissions.models import DataScope, Permission, Role, UserRole
@@ -56,6 +57,83 @@ def test_sku_detail_fields_are_nullable_and_patchable_without_changing_name():
     assert sku.hs_code == "940360"
     assert sku.product_name == "SKU detail name"
     assert sku.spu.product_name == "完整商品名称"
+    audit = OperationLog.objects.get(object_type="ProductSKU", object_id=str(sku.id), action="product_sku.update")
+    assert audit.before_data["product_name"] == ""
+    assert audit.after_data["product_name"] == "SKU detail name"
+    assert "sku_code" not in audit.after_data
+
+
+@pytest.mark.django_db
+def test_only_platform_or_tenant_administrator_can_edit_legacy_product_codes():
+    tenant = Tenant.objects.create(name="Legacy code tenant", code="legacy-code-admin")
+    regular = _user(tenant, "legacy-code-regular")
+    administrator = _user(tenant, "legacy-code-administrator")
+    administrator_role = Role.objects.create(
+        tenant=tenant,
+        code="administrator",
+        name="租户管理员",
+        status=Role.Status.ACTIVE,
+    )
+    UserRole.objects.create(tenant=tenant, user=administrator, role=administrator_role)
+    spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="SPU-LEGACY-ADMIN",
+        legacy_spu_code="OLD-SPU-1",
+        product_name="Legacy codes",
+    )
+    sku = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=spu,
+        sku_code="SKU-LEGACY-ADMIN",
+        legacy_sku_code="OLD-SKU-1",
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=regular)
+    spu_denied = client.patch(
+        f"/api/internal/products/spus/{spu.id}/",
+        {"legacy_spu_code": "OLD-SPU-2"},
+        format="json",
+    )
+    sku_denied = client.patch(
+        f"/api/internal/products/skus/{sku.id}/",
+        {"legacy_sku_code": "OLD-SKU-2"},
+        format="json",
+    )
+    assert spu_denied.status_code == 403
+    assert sku_denied.status_code == 403
+    spu.refresh_from_db()
+    sku.refresh_from_db()
+    assert spu.legacy_spu_code == "OLD-SPU-1"
+    assert sku.legacy_sku_code == "OLD-SKU-1"
+
+    client.force_authenticate(user=administrator)
+    assert client.patch(
+        f"/api/internal/products/spus/{spu.id}/",
+        {"legacy_spu_code": "OLD-SPU-2"},
+        format="json",
+    ).status_code == 200
+    assert client.patch(
+        f"/api/internal/products/skus/{sku.id}/",
+        {"legacy_sku_code": "OLD-SKU-2"},
+        format="json",
+    ).status_code == 200
+    spu.refresh_from_db()
+    sku.refresh_from_db()
+    assert spu.legacy_spu_code == "OLD-SPU-2"
+    assert sku.legacy_sku_code == "OLD-SKU-2"
+    assert OperationLog.objects.filter(
+        object_type="ProductSPU",
+        object_id=str(spu.id),
+        action="product_spu.update",
+        after_data__legacy_spu_code="OLD-SPU-2",
+    ).exists()
+    assert OperationLog.objects.filter(
+        object_type="ProductSKU",
+        object_id=str(sku.id),
+        action="product_sku.update",
+        after_data__legacy_sku_code="OLD-SKU-2",
+    ).exists()
 
 
 @pytest.mark.django_db

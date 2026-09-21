@@ -339,6 +339,15 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute=0, hour=19),
         "args": (),
     },
+    "refresh-due-integration-credentials": {
+        "task": "apps.integrations.tasks.refresh_due_integration_credentials",
+        "schedule": 60.0,
+    },
+    "refresh-country-cny-exchange-rates": {
+        "task": "apps.masterdata.tasks.refresh_country_cny_exchange_rates",
+        "schedule": crontab(minute=30, hour=18),
+        "args": (),
+    },
     "mark-overdue-sample-fulfillments": {
         "task": "influencers.mark_overdue_sample_fulfillments",
         # Celery runs in UTC; 18:00 UTC is 02:00 the next day in Asia/Shanghai.

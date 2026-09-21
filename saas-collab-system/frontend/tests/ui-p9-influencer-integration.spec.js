@@ -188,6 +188,10 @@ describe('influencer integration workspace contracts', () => {
     expect(api).toContain('noMockFallback: true');
     expect(performance).toContain('downloadCsv');
     expect(performance).toContain('待预计算');
+    expect(performance).toContain('row.country_breakdown || []');
+    expect(performance).toContain('label="本币 GMV"');
+    expect(performance).toContain('toggleCountry(row)');
+    for (const field of ['gmv_php', 'gmv_myr', 'gmv_thb']) expect(performance).toContain(field);
     expect(performance).not.toMatch(/CN[¥￥]\s*[1-9]/);
   });
 

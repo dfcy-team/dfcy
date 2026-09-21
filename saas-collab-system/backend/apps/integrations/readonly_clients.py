@@ -260,7 +260,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
     def fetch_returns(self, cursor, scope):
         return_list_path = self._runtime_path("return_list_path", self.RETURN_LIST_PATH)
         return_detail_path = self._runtime_path("return_detail_path", self.RETURN_DETAIL_PATH)
-        page_no = int(cursor or 1)
+        page_no = int(cursor or 0)
         response = self._request(
             return_list_path,
             {
@@ -800,7 +800,7 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
         }
 
 
-def default_sync_scope(config, override=None):
+def default_sync_scope(config, override=None, resource_type=None):
     scope = dict((config.platform_config or {}).get("sync_scope") or {})
     if isinstance(override, dict):
         # SyncJob stores schedule and query policy in nested objects.  Flatten
@@ -811,7 +811,64 @@ def default_sync_scope(config, override=None):
         if isinstance(query, dict):
             scope.update(query)
     now = timezone.now()
-    lookback_days = max(1, min(int(scope.get("lookback_days") or 1), 30))
+    raw_lookback_days = scope.get("lookback_days") or 1
+    try:
+        lookback_days = int(raw_lookback_days)
+    except (TypeError, ValueError):
+        raise ValidationError("回看天数必须是整数。") from None
+    if isinstance(raw_lookback_days, bool) or str(raw_lookback_days) != str(lookback_days):
+        raise ValidationError("回看天数必须是整数。")
+    lookback_days = max(1, min(lookback_days, 30))
+    start, end = now - timedelta(days=lookback_days), now
+    if resource_type in {"sales_order", "refund_return"}:
+        from datetime import date, datetime, time
+        from zoneinfo import ZoneInfo
+
+        from django.utils.dateparse import parse_datetime
+
+        zone = ZoneInfo("Asia/Shanghai")
+        maximum = 15 if config.platform == "shopee" else 30
+        mode = scope.get("mode", scope.get("query_mode", "incremental"))
+        if mode == "range":
+            start_value = str(scope.get("start_at") or scope.get("range_start_at") or "")
+            end_value = str(scope.get("end_at") or scope.get("range_end_at") or "")
+            try:
+                if len(start_value) == 10 and len(end_value) == 10:
+                    start_day = date.fromisoformat(start_value)
+                    end_day = date.fromisoformat(end_value)
+                    if start_day > end_day or end_day > now.astimezone(zone).date():
+                        raise ValidationError("开始日期不能晚于结束日期，结束日期不能晚于今天。")
+                    if (end_day - start_day).days + 1 > maximum:
+                        raise ValidationError(f"含首尾日期最多 {maximum} 天，请分段采集。")
+                    start = datetime.combine(start_day, time.min, zone)
+                    end = min(datetime.combine(end_day, time(23, 59, 59), zone), now)
+                else:
+                    start = parse_datetime(start_value)
+                    end = parse_datetime(end_value)
+            except ValueError:
+                start = end = None
+            if not start or not end or timezone.is_naive(start) or timezone.is_naive(end):
+                raise ValidationError("采集起止时间必须有效且包含时区。")
+            if start >= end or end > now:
+                raise ValidationError("采集开始时间必须早于结束时间，结束时间不能晚于当前时间。")
+            if end - start > timedelta(days=maximum):
+                raise ValidationError(f"单次采集范围最多 {maximum} 天，请分段采集。")
+        elif mode == "incremental":
+            raw_days = scope.get("lookback_days", 1)
+            try:
+                parsed_days = int(raw_days)
+            except (TypeError, ValueError):
+                raise ValidationError(f"回看天数必须为 1～{maximum} 的整数。") from None
+            if (
+                isinstance(raw_days, bool)
+                or str(raw_days) != str(parsed_days)
+                or not 1 <= parsed_days <= maximum
+            ):
+                raise ValidationError(f"回看天数必须为 1～{maximum} 的整数。")
+            start_day = now.astimezone(zone).date() - timedelta(days=parsed_days - 1)
+            start = datetime.combine(start_day, time.min, zone)
+        else:
+            raise ValidationError("不支持的采集范围模式。")
     page_size = max(1, min(int(scope.get("page_size") or 50), 100))
     # SyncJob stores the provider-neutral policy as query.statuses.  Preserve
     # it in the runtime scope so each client can map it to its own verified
@@ -819,8 +876,8 @@ def default_sync_scope(config, override=None):
     raw_statuses = scope.get("statuses", scope.get("query_statuses"))
     statuses = _status_values(raw_statuses)
     return {
-        "time_from": int((now - timedelta(days=lookback_days)).timestamp()),
-        "time_to": int(now.timestamp()),
+        "time_from": int(start.timestamp()),
+        "time_to": int(end.timestamp()),
         "page_size": page_size,
         # Full product snapshots are the safe default.  A product job may
         # explicitly opt into the documented update-time window without

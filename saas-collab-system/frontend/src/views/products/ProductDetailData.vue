@@ -6,6 +6,17 @@
         <p>维护旧 SKU 与新 SPU/SKU 的对应关系。导入后可逐条补充信息，再生成新编码。</p>
       </div>
       <div class="header-actions">
+        <el-dropdown v-if="canManage || canManageBundles" trigger="click" @command="handleCreateCommand">
+          <el-button type="primary" data-testid="product-create-menu">新增商品 <span class="io-menu-caret">⌄</span></el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-if="canManage" command="standard-single">新增普通商品</el-dropdown-item>
+              <el-dropdown-item v-if="canManageBundles" command="bundle-single">新增组合商品</el-dropdown-item>
+              <el-dropdown-item v-if="canManage" divided command="standard-batch">批量新增普通商品</el-dropdown-item>
+              <el-dropdown-item v-if="canManageBundles" command="bundle-batch">批量新增组合商品</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-dropdown v-if="canManage" trigger="click" @command="handleIoCommand">
           <el-button data-testid="detail-io-menu">导入与导出 <span class="io-menu-caret">⌄</span></el-button>
           <template #dropdown>
@@ -52,13 +63,20 @@
       </aside>
 
       <main class="content-panel">
+        <el-segmented
+          v-model="filters.product_type"
+          class="product-type-switch"
+          :options="productTypeOptions"
+          data-testid="product-type-switch"
+          @change="search"
+        />
         <el-form class="filters" inline @submit.prevent="search">
           <el-form-item label="全局搜索">
             <el-input
               v-model="filters.search"
               clearable
               class="search-control"
-              placeholder="旧/新 SPU、SKU、SKU商品名称"
+              placeholder="新/旧 SPU、新/旧 SKU、组合子 SKU、商品名称"
               @keyup.enter="search"
             />
           </el-form-item>
@@ -125,6 +143,16 @@
           </el-table-column>
           <el-table-column prop="sku_code" label="新 SKU 编码" min-width="190" show-overflow-tooltip>
             <template #default="{ row }">{{ row.sku_code || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="product_type_name" label="商品类型" width="105">
+            <template #default="{ row }">
+              <el-tag :type="row.product_type === 'bundle' ? 'warning' : 'info'" effect="plain">
+                {{ row.product_type_name || (row.product_type === 'bundle' ? '组合商品' : '普通商品') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="filters.product_type !== 'standard'" label="组合内容" min-width="210" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.product_type === 'bundle' ? formatComponentSummary(row) : '-' }}</template>
           </el-table-column>
           <el-table-column prop="sku_product_name" label="SKU商品名称" min-width="190" show-overflow-tooltip>
             <template #default="{ row }">{{ row.sku_product_name || row.product_name || '待生成' }}</template>
@@ -217,6 +245,15 @@
         </footer>
       </main>
     </div>
+
+    <el-drawer v-model="bundleWorkspaceVisible" title="组合商品" size="min(980px, 96vw)" destroy-on-close>
+      <ProductBundleManager
+        v-if="bundleWorkspaceVisible"
+        :key="bundleWorkspaceKey"
+        embedded
+        :initial-action="bundleWorkspaceAction"
+      />
+    </el-drawer>
 
     <el-dialog v-model="viewVisible" title="旧商品与新编码对应关系" width="min(720px, 94vw)">
       <el-descriptions v-if="selectedRow" :column="2" border>
@@ -564,6 +601,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { parseImageCsv, yieldToPage } from '../../utils/imageBatchCsv';
 import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
@@ -599,10 +637,26 @@ import {
 } from '../../utils/productDictionaryCache';
 import { downloadBigSellerProductWorkbook } from '../../utils/bigsellerWorkbook';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
+import ProductBundleManager from './ProductBundleManager.vue';
 
 const auth = useAuthStore();
+const route = useRoute();
+const router = useRouter();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
-const filters = reactive({ search: '', sku_status: 'all', category_id: '' });
+const canManageBundles = computed(() => auth.hasPermission('products.bundle.manage'));
+const canViewBundles = computed(() => auth.hasPermission('products.bundle.view'));
+const filters = reactive({
+  search: '', sku_status: 'all', category_id: '',
+  product_type: route.query.product_type === 'bundle' && canViewBundles.value ? 'bundle' : 'all',
+});
+const productTypeOptions = computed(() => [
+  { label: '全部商品', value: 'all' },
+  { label: '普通商品', value: 'standard' },
+  ...(canViewBundles.value ? [{ label: '组合商品', value: 'bundle' }] : []),
+]);
+const bundleWorkspaceVisible = ref(false);
+const bundleWorkspaceAction = ref('');
+const bundleWorkspaceKey = ref(0);
 const rows = ref([]);
 const total = ref(0);
 const page = ref(1);
@@ -702,6 +756,15 @@ watch(() => productDictionaryCacheScope(auth.currentUser), () => {
 
 function show(value, type = 'success') { message.value = value; messageType.value = type; }
 function formatPrice(value) { return value === null || value === undefined || value === '' ? '-' : Number.isFinite(Number(value)) ? Number(value).toFixed(4) : value; }
+function formatComponentSummary(row) {
+  if (Array.isArray(row?.component_summary) && row.component_summary.length) {
+    return row.component_summary
+      .map((item) => `${item.sku_code || item.legacy_sku_code || '-'} × ${item.quantity || 1}`)
+      .join('、');
+  }
+  if (typeof row?.component_summary === 'string' && row.component_summary) return row.component_summary;
+  return `共 ${row?.component_count || 0} 种子 SKU`;
+}
 function formatPhysical(value, decimals = 3) {
   if (value === null || value === undefined || value === '') return '-';
   const numeric = Number(value);
@@ -1032,8 +1095,12 @@ async function saveImageBatch() {
     imageBatchSaving.value = false;
   }
 }
-function search() { page.value = 1; load(); }
-function reset() { filters.search = ''; filters.sku_status = 'all'; selectCategory(null); }
+function search() {
+  page.value = 1;
+  void router.replace({ query: { ...route.query, product_type: filters.product_type === 'all' ? undefined : filters.product_type } });
+  load();
+}
+function reset() { filters.search = ''; filters.sku_status = 'all'; filters.product_type = 'all'; selectCategory(null); }
 function changePageSize() { page.value = 1; load(); }
 
 async function load() {
@@ -1045,6 +1112,7 @@ async function load() {
     search: filters.search.trim() || undefined,
     category_id: filters.category_id || undefined,
     sku_status: filters.sku_status,
+    product_type: filters.product_type,
     page: page.value,
     page_size: pageSize.value,
   });
@@ -1139,6 +1207,10 @@ function openGenerate(row) {
 }
 
 function openEdit(row) {
+  if (row.sku_id) {
+    router.push(`/products/details/${row.sku_id}/edit`);
+    return;
+  }
   Object.assign(editForm, {
     id: row.id,
     skuId: row.sku_id || null,
@@ -1406,6 +1478,24 @@ function handleIoCommand(command) {
   else if (command === 'detail-export') exportProductDetails(filters);
 }
 
+function openBundleWorkspace(action) {
+  bundleWorkspaceAction.value = action;
+  bundleWorkspaceKey.value += 1;
+  bundleWorkspaceVisible.value = true;
+}
+
+function handleCreateCommand(command) {
+  if (command === 'standard-single') {
+    router.push({ path: '/products/master', query: { action: 'create' } });
+  } else if (command === 'standard-batch') {
+    openCreateImport();
+  } else if (command === 'bundle-single') {
+    openBundleWorkspace('create');
+  } else if (command === 'bundle-batch') {
+    openBundleWorkspace('import');
+  }
+}
+
 function selectCreateImportFile(event) {
   const uploadedFile = event.target.files?.[0] || null;
   event.target.value = '';
@@ -1664,6 +1754,7 @@ onBeforeUnmount(() => {
 .panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .category-panel :deep(.el-tree) { margin-top: 12px; }
 .content-panel { padding: 12px; min-width: 0; }
+.product-type-switch { margin-bottom: 12px; }
 .filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
 .filters :deep(.el-form-item) { margin-bottom: 0; }
 .search-control { width: min(420px, 38vw); }

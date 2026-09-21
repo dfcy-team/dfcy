@@ -36,7 +36,10 @@ def ready_warehouse_config(monkeypatch, settings):
 
 
 def test_warehouse_runtime_only_accepts_non_secret_contract_flag():
-    assert SAFE_DEFAULTS["platforms"]["jifeng_wms"] == {"contract_approved": False}
+    assert SAFE_DEFAULTS["platforms"]["jifeng_wms"] == {
+        "contract_approved": False,
+        "auto_refresh_enabled": False,
+    }
     assert validate_runtime_config({"platforms": {"jifeng_wms": {"contract_approved": True}}})
     for field in ("email", "token", "client_secret", "api_host", "redirect_uri"):
         with pytest.raises(DjangoValidationError):

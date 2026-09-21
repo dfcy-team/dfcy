@@ -173,6 +173,7 @@ for (const contract of Object.values(salesPageContracts)) {
     if (field.prop === 'order_count') field.label = '订单数（单）';
     if (['units_sold', 'item_count'].includes(field.prop)) field.label = '销售数量（件）';
     if (field.prop === 'normalized_status' && contract === salesPageContracts.orders) field.label = '订单状态';
+    if (contract === salesPageContracts.orders && !field.prop.startsWith('refund_summary.')) field.sortable = 'custom';
     if (field.numeric) field.width ||= 135;
     return field;
   });

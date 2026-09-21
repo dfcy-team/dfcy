@@ -9,6 +9,24 @@ const page = fs.readFileSync(
 const api = fs.readFileSync(path.resolve(process.cwd(), 'src/api/products.js'), 'utf8');
 
 describe('商品明细数据页面契约', () => {
+  it('统一展示普通与组合商品，并保留新旧编码搜索入口', () => {
+    expect(page).toContain('data-testid="product-type-switch"');
+    expect(page).toContain('全部商品');
+    expect(page).toContain('普通商品');
+    expect(page).toContain('组合商品');
+    expect(page).toContain('新/旧 SPU、新/旧 SKU、组合子 SKU、商品名称');
+    expect(page).toContain('product_type: filters.product_type');
+    expect(page).toContain('formatComponentSummary(row)');
+  });
+
+  it('将普通与组合商品的单个/批量新增收口到同一下拉菜单', () => {
+    expect(page).toContain('data-testid="product-create-menu"');
+    expect(page).toContain('新增普通商品');
+    expect(page).toContain('新增组合商品');
+    expect(page).toContain('批量新增普通商品');
+    expect(page).toContain('批量新增组合商品');
+    expect(page).toContain('<ProductBundleManager');
+  });
   it('使用分类树、服务端筛选和分页', () => {
     expect(page).toContain('分类目录');
     expect(page).toContain('categoryTree');

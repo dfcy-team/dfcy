@@ -22,8 +22,10 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.db.models.deletion import ProtectedError
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, Prefetch, Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.decorators import api_view, permission_classes
 
 from apps.common.query import pagination_query
@@ -42,6 +44,8 @@ from .category_metadata import category_metadata
 from .standard_colors import STANDARD_COLORS
 from .models import (
     ProductBundleComponent,
+    ProductBundleMigrationBatch,
+    ProductBundleVersion,
     ProductCategory,
     ProductColor,
     ProductAttribute,
@@ -85,6 +89,13 @@ from .serializers import (
 )
 from .status_services import confirm_recommendation, evaluate_mock_status, reject_recommendation
 from .recode_services import plan_recode, execute_recode
+from .bundle_services import (
+    component_payload,
+    confirm_legacy_migration,
+    create_bundle_version,
+    preview_legacy_migration,
+    validate_component_rows,
+)
 
 
 def _serializer_context(request):
@@ -1004,6 +1015,7 @@ def product_spu_detail(request, pk):
     if request.method == "GET":
         return success_response(ProductSPUSerializer(item).data)
 
+    old_legacy_spu_code = item.legacy_spu_code
     serializer = ProductSPUSerializer(
         item,
         data=request.data,
@@ -1012,6 +1024,19 @@ def product_spu_detail(request, pk):
     )
     serializer.is_valid(raise_exception=True)
     item = serializer.save()
+    if old_legacy_spu_code != item.legacy_spu_code:
+        from apps.audit.services import write_operation_log
+
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="products",
+            action="product_spu.update",
+            object_type="ProductSPU",
+            object_id=item.id,
+            before_data={"legacy_spu_code": old_legacy_spu_code},
+            after_data={"legacy_spu_code": item.legacy_spu_code},
+        )
     return success_response(ProductSPUSerializer(item).data)
 
 
@@ -1181,6 +1206,16 @@ def product_sku_detail(request, pk):
             transaction.on_commit(cleanup_deleted_sku_media)
             return success_response({"deleted": True, "id": sku_id})
 
+    audit_fields = {
+        "product_name", "purchase_price", "unit", "image_url", "package_weight",
+        "package_volume", "package_length_cm", "package_width_cm", "package_height_cm",
+        "origin_country", "hs_code", "material", "inventory_type", "selling_points",
+        "product_description", "legacy_sku_code",
+    }
+    before = {
+        field: getattr(item, field)
+        for field in audit_fields.intersection(request.data.keys())
+    }
     serializer = ProductSKUSerializer(
         item,
         data=request.data,
@@ -1190,6 +1225,20 @@ def product_sku_detail(request, pk):
     serializer.is_valid(raise_exception=True)
     old_image_url = item.image_url
     item = serializer.save()
+    after = {field: getattr(item, field) for field in before}
+    if before != after:
+        from apps.audit.services import write_operation_log
+
+        write_operation_log(
+            tenant=request.user.tenant,
+            user=request.user,
+            module="products",
+            action="product_sku.update",
+            object_type="ProductSKU",
+            object_id=item.id,
+            before_data=before,
+            after_data=after,
+        )
     # A URL edit replaces an uploaded image as well; remove the old binary
     # only when it belongs to this service's tenant-scoped storage boundary.
     old_image_path = _stored_product_image_path(old_image_url)
@@ -1488,10 +1537,27 @@ def _product_detail_row_from_legacy(item):
         ProductLegacyItem.Status.GENERATED: "已生成",
         ProductLegacyItem.Status.ERROR: "生成失败",
     }.get(item.status, item.status)
+    product_type = spu.product_type if spu is not None else (
+        target_spu.product_type if target_spu is not None else ProductSPU.ProductType.STANDARD
+    )
+    components = list(getattr(sku, "bundle_components", []).all()) if sku is not None else []
     return {
         "id": item.id,
         "sku_id": sku.id if sku is not None else None,
         "row_type": "legacy",
+        "product_type": product_type,
+        "product_type_name": "组合商品" if product_type == ProductSPU.ProductType.BUNDLE else "普通商品",
+        "component_count": len(components),
+        "component_summary": [
+            {
+                "sku_id": component.component_sku_id,
+                "sku_code": component.component_sku.sku_code,
+                "legacy_sku_code": component.component_sku.legacy_sku_code or "",
+                "product_name": component.component_sku.product_name or component.component_sku.spu.product_name,
+                "quantity": component.quantity,
+            }
+            for component in components
+        ],
         "legacy_spu_code": item.legacy_spu_code or "",
         "legacy_sku_code": item.legacy_sku_code or "",
         "spu_code": spu.spu_code if spu is not None else (target_spu.spu_code if target_spu is not None else ""),
@@ -1537,10 +1603,24 @@ def _product_detail_row_from_legacy(item):
 def _product_detail_row_from_sku(sku):
     spu = sku.spu
     category_info = category_metadata(getattr(spu, "category_node", None), spu=spu)
+    components = list(sku.bundle_components.all())
     return {
         "id": sku.id,
         "sku_id": sku.id,
         "row_type": "sku",
+        "product_type": spu.product_type,
+        "product_type_name": "组合商品" if spu.product_type == ProductSPU.ProductType.BUNDLE else "普通商品",
+        "component_count": len(components),
+        "component_summary": [
+            {
+                "sku_id": component.component_sku_id,
+                "sku_code": component.component_sku.sku_code,
+                "legacy_sku_code": component.component_sku.legacy_sku_code or "",
+                "product_name": component.component_sku.product_name or component.component_sku.spu.product_name,
+                "quantity": component.quantity,
+            }
+            for component in components
+        ],
         "legacy_spu_code": spu.legacy_spu_code or "",
         "legacy_sku_code": sku.legacy_sku_code or "",
         "spu_code": spu.spu_code,
@@ -1768,7 +1848,7 @@ def product_detail_bulk_cache_images(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsProductMasterReadOrManage])
+@permission_classes([IsProductBundleReadOrManage])
 def product_detail_collection(request):
     """Return one paginated, tenant-scoped view of legacy mappings and SKUs.
 
@@ -1778,24 +1858,79 @@ def product_detail_collection(request):
     """
 
     tenant = request.user.tenant
+    has_master_access = bool(
+        check_user_permission(request.user, "products.master.view")
+        and get_permission_data_scopes(request.user, "products.master.view")
+    )
+    has_bundle_access = bool(
+        check_user_permission(request.user, "products.bundle.view")
+        and get_permission_data_scopes(request.user, "products.bundle.view")
+    )
+    detail_permission_code = "products.master.view" if has_master_access else "products.bundle.view"
     legacy_queryset = _filter_product_legacy_items(
         request.user,
         ProductLegacyItem.objects.filter(tenant=tenant),
-        "products.master.view",
+        detail_permission_code,
     ).select_related(
         "category_node", "category_node__parent",
         "target_spu", "target_spu__category_node", "target_spu__category_node__parent",
         "generated_spu", "generated_spu__category_node", "generated_spu__category_node__parent",
         "generated_sku", "generated_sku__spu", "generated_sku__spu__category_node",
         "generated_sku__spu__category_node__parent",
+    ).prefetch_related(
+        Prefetch(
+            "generated_sku__bundle_components",
+            queryset=ProductBundleComponent.objects.select_related("component_sku", "component_sku__spu"),
+        )
     )
     sku_queryset = filter_product_skus(
         request.user,
         ProductSKU.objects.filter(tenant=tenant, spu__tenant=tenant).select_related(
             "spu", "spu__category_node", "spu__category_node__parent"
+        ).prefetch_related(
+            Prefetch(
+                "bundle_components",
+                queryset=ProductBundleComponent.objects.select_related("component_sku", "component_sku__spu"),
+            )
         ),
-        "products.master.view",
+        detail_permission_code,
     )
+
+    product_type = request.query_params.get("product_type", "all").strip().lower()
+    if product_type not in ("all", ProductSPU.ProductType.STANDARD, ProductSPU.ProductType.BUNDLE):
+        return error_response(
+            ErrorCode.VALIDATION_ERROR,
+            "product_type 仅支持 all、standard 或 bundle。",
+            status=400,
+        )
+    legacy_bundle_filter = (
+        Q(generated_sku__spu__product_type=ProductSPU.ProductType.BUNDLE)
+        | Q(generated_spu__product_type=ProductSPU.ProductType.BUNDLE)
+        | Q(target_spu__product_type=ProductSPU.ProductType.BUNDLE)
+    )
+    if product_type == ProductSPU.ProductType.BUNDLE:
+        legacy_queryset = legacy_queryset.filter(legacy_bundle_filter)
+        sku_queryset = sku_queryset.filter(spu__product_type=ProductSPU.ProductType.BUNDLE)
+    elif product_type == ProductSPU.ProductType.STANDARD:
+        legacy_queryset = legacy_queryset.exclude(legacy_bundle_filter)
+        sku_queryset = sku_queryset.filter(spu__product_type=ProductSPU.ProductType.STANDARD)
+
+    # A bundle-only operator may use this merged endpoint, but that permission
+    # must never expose standard products through either the all or standard tab.
+    if not has_master_access:
+        if product_type == ProductSPU.ProductType.STANDARD:
+            legacy_queryset = legacy_queryset.none()
+            sku_queryset = sku_queryset.none()
+        else:
+            legacy_queryset = legacy_queryset.filter(legacy_bundle_filter)
+            sku_queryset = sku_queryset.filter(spu__product_type=ProductSPU.ProductType.BUNDLE)
+    elif not has_bundle_access:
+        if product_type == ProductSPU.ProductType.BUNDLE:
+            legacy_queryset = legacy_queryset.none()
+            sku_queryset = sku_queryset.none()
+        else:
+            legacy_queryset = legacy_queryset.exclude(legacy_bundle_filter)
+            sku_queryset = sku_queryset.exclude(spu__product_type=ProductSPU.ProductType.BUNDLE)
 
     search = request.query_params.get("search", "").strip()
     if search:
@@ -1804,8 +1939,10 @@ def product_detail_collection(request):
             | Q(legacy_sku_code__icontains=search)
             | Q(product_name__icontains=search)
             | Q(generated_spu__spu_code__icontains=search)
+            | Q(generated_spu__legacy_spu_code__icontains=search)
             | Q(generated_spu__product_name__icontains=search)
             | Q(target_spu__spu_code__icontains=search)
+            | Q(target_spu__legacy_spu_code__icontains=search)
             | Q(target_spu__product_name__icontains=search)
             | Q(generated_sku__sku_code__icontains=search)
             | Q(generated_sku__product_name__icontains=search)
@@ -1819,13 +1956,18 @@ def product_detail_collection(request):
             | Q(package_volume__icontains=search)
             | Q(origin_country__icontains=search)
             | Q(hs_code__icontains=search)
+            | Q(generated_sku__bundle_components__component_sku__sku_code__icontains=search)
+            | Q(generated_sku__bundle_components__component_sku__legacy_sku_code__icontains=search)
+            | Q(generated_sku__bundle_components__component_sku__product_name__icontains=search)
+            | Q(generated_sku__bundle_components__component_sku__spu__product_name__icontains=search)
         )
-        legacy_queryset = legacy_queryset.filter(search_filter)
+        legacy_queryset = legacy_queryset.filter(search_filter).distinct()
         sku_queryset = sku_queryset.filter(
             Q(sku_code__icontains=search)
             | Q(legacy_sku_code__icontains=search)
             | Q(product_name__icontains=search)
             | Q(spu__spu_code__icontains=search)
+            | Q(spu__legacy_spu_code__icontains=search)
             | Q(spu__product_name__icontains=search)
             | Q(spu__category_node__name__icontains=search)
             | Q(color_code__icontains=search)
@@ -1835,7 +1977,11 @@ def product_detail_collection(request):
             | Q(package_volume__icontains=search)
             | Q(origin_country__icontains=search)
             | Q(hs_code__icontains=search)
-        )
+            | Q(bundle_components__component_sku__sku_code__icontains=search)
+            | Q(bundle_components__component_sku__legacy_sku_code__icontains=search)
+            | Q(bundle_components__component_sku__product_name__icontains=search)
+            | Q(bundle_components__component_sku__spu__product_name__icontains=search)
+        ).distinct()
 
     category_id = request.query_params.get("category_id", "").strip()
     if category_id.isdigit():
@@ -1876,7 +2022,11 @@ def product_detail_collection(request):
         "search": search,
         "category_id": category_id,
         "sku_status": sku_status,
-        "scopes": get_permission_data_scopes(request.user, "products.master.view"),
+        "product_type": product_type,
+        "has_master_access": has_master_access,
+        "has_bundle_access": has_bundle_access,
+        "permission_code": detail_permission_code,
+        "scopes": get_permission_data_scopes(request.user, detail_permission_code),
         "legacy_version": legacy_version,
         "sku_version": sku_version,
     }
@@ -2011,9 +2161,9 @@ def product_detail_export(request):
     elif sku_status == "inactive":
         legacy_queryset = legacy_queryset.filter(generated_sku__is_active=False)
         sku_queryset = sku_queryset.filter(is_active=False)
-    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-created_at", "id")]
+    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-updated_at", "-id")]
     linked_ids = set(legacy_queryset.exclude(generated_sku_id=None).values_list("generated_sku_id", flat=True))
-    sku_rows = [_product_detail_row_from_sku(sku) for sku in sku_queryset.order_by("sku_code") if sku.id not in linked_ids]
+    sku_rows = [_product_detail_row_from_sku(sku) for sku in sku_queryset.order_by("-updated_at", "-id") if sku.id not in linked_ids]
     rows = legacy_rows + sku_rows
     headers = ["旧SPU编码", "旧SKU编码", "SPU编码", "SKU编码", "SKU商品名称", "SPU商品名称", "类目", "属性编码", "颜色编码", "规格", "采购价", "单位", "状态"]
     return _product_csv_response("product-detail.csv", headers, [
@@ -2430,8 +2580,23 @@ def product_bundle_create(request):
     payload = input_serializer.validated_data
     tenant = request.user.tenant
 
+    spu_mode = payload["spu_mode"]
+    existing_spu = None
+    if spu_mode == "existing":
+        existing_spu = ProductSPU.objects.filter(
+            pk=payload["existing_spu"],
+            tenant=tenant,
+            product_type=ProductSPU.ProductType.BUNDLE,
+        ).select_related("category_node", "category_node__parent").first()
+        if existing_spu is None:
+            return error_response(
+                ErrorCode.VALIDATION_ERROR,
+                "请选择当前租户的组合商品 SPU。",
+                status=400,
+            )
+    category_id = existing_spu.category_node_id if existing_spu is not None else payload["category_node"]
     category = ProductCategory.objects.filter(
-        pk=payload["category_node"], tenant=tenant, is_active=True,
+        pk=category_id, tenant=tenant, is_active=True,
     ).first()
     if category is None:
         return error_response(ErrorCode.VALIDATION_ERROR, "请选择当前租户的启用末级分类。", status=400)
@@ -2464,17 +2629,20 @@ def product_bundle_create(request):
     context = _serializer_context(request)
     try:
         with transaction.atomic():
-            spu_serializer = ProductSPUSerializer(
-                data={
-                    "product_name": payload["product_name"],
-                    "category_node": category.id,
-                    "season_code": payload["season_code"],
-                    "product_type": ProductSPU.ProductType.BUNDLE,
-                },
-                context=context,
-            )
-            spu_serializer.is_valid(raise_exception=True)
-            spu = spu_serializer.save(tenant=tenant)
+            if existing_spu is None:
+                spu_serializer = ProductSPUSerializer(
+                    data={
+                        "product_name": payload["product_name"],
+                        "category_node": category.id,
+                        "season_code": payload["season_code"],
+                        "product_type": ProductSPU.ProductType.BUNDLE,
+                    },
+                    context=context,
+                )
+                spu_serializer.is_valid(raise_exception=True)
+                spu = spu_serializer.save(tenant=tenant)
+            else:
+                spu = existing_spu
 
             spec_values = {
                 str(item["code"]): "组合"
@@ -2500,6 +2668,9 @@ def product_bundle_create(request):
                 )
                 component_serializer.is_valid(raise_exception=True)
                 components.append(component_serializer.save(tenant=tenant))
+            version = create_bundle_version(
+                bundle_sku=sku, actor=request.user, reason="bundle created", action="created"
+            )
     except IntegrityError:
         return error_response(
             ErrorCode.STATE_CONFLICT,
@@ -2512,9 +2683,218 @@ def product_bundle_create(request):
             "spu": ProductSPUSerializer(spu, context=context).data,
             "sku": ProductSKUSerializer(sku, context=context).data,
             "components": ProductBundleComponentSerializer(components, many=True, context=context).data,
+            "version": version.version,
         },
         status=201,
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_image_cache(request, sku_id):
+    """Download a public bundle image into tenant-scoped local storage."""
+    _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
+    bundle = get_object_or_404(
+        ProductSKU.objects.select_related("spu"),
+        pk=sku_id,
+        tenant=request.user.tenant,
+        spu__product_type=ProductSPU.ProductType.BUNDLE,
+    )
+    image_url = str(request.data.get("image_url") or request.data.get("url") or "").strip()
+    if not image_url:
+        return error_response(ErrorCode.VALIDATION_ERROR, "image_url 不能为空。", status=400)
+    try:
+        relative, file_type, was_cached = _download_product_image(image_url, request.user.tenant_id)
+        updated, media_url = _attach_cached_product_image(
+            bundle,
+            relative,
+            file_type,
+            request,
+            business_type="product_bundle_image",
+        )
+    except ValueError as exc:
+        return error_response(ErrorCode.VALIDATION_ERROR, str(exc), status=400)
+    return success_response({
+        "sku_id": bundle.id,
+        "image_url": media_url,
+        "status": "updated" if updated else "unchanged",
+        "reused": was_cached,
+    })
+
+
+def _bundle_version_data(version):
+    return {
+        "id": version.id,
+        "version": version.version,
+        "effective_at": version.effective_at,
+        "reason": version.reason,
+        "created_at": version.created_at,
+        "components": [
+            {
+                "component_sku_id": row.component_sku_id,
+                "component_sku_code": row.component_sku_code,
+                "component_name": row.component_name,
+                "quantity": row.quantity,
+            }
+            for row in version.components.all()
+        ],
+    }
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_detail(request, sku_id):
+    bundle = get_object_or_404(
+        ProductSKU.objects.select_related("spu").prefetch_related("bundle_components__component_sku"),
+        pk=sku_id, tenant=request.user.tenant, spu__product_type=ProductSPU.ProductType.BUNDLE,
+    )
+    if request.method == "PUT":
+        _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
+        from apps.commerce.models import NormalizedOrderStatus, SalesOrderBundleSnapshot
+        from apps.purchasing.models import SupplyPurchaseOrder, SupplyPurchaseOrderLine
+
+        active_order = SalesOrderBundleSnapshot.objects.filter(
+            tenant=request.user.tenant,
+            bundle_version__bundle_sku=bundle,
+            order_item__sales_order__normalized_status__in=[
+                NormalizedOrderStatus.PENDING, NormalizedOrderStatus.CONFIRMED
+            ],
+        ).exists()
+        active_purchase = SupplyPurchaseOrderLine.objects.filter(
+            tenant=request.user.tenant, source_bundle_sku=bundle,
+            order__status__in=[
+                SupplyPurchaseOrder.Status.PENDING, SupplyPurchaseOrder.Status.ACCEPTED,
+                SupplyPurchaseOrder.Status.IN_PRODUCTION,
+            ],
+        ).exists()
+        if active_order or active_purchase:
+            return error_response(
+                ErrorCode.STATE_CONFLICT,
+                "组合商品存在活跃订单或采购单，当前不允许修改组成。",
+                {"active_order": active_order, "active_purchase": active_purchase}, status=409,
+            )
+        try:
+            normalized = validate_component_rows(request.user.tenant, request.data.get("components", []), bundle)
+        except (ValueError, TypeError, KeyError) as exc:
+            return error_response(ErrorCode.VALIDATION_ERROR, str(exc), status=400)
+        effective_at = request.data.get("effective_at")
+        if effective_at:
+            effective_at = parse_datetime(effective_at)
+            if effective_at is None:
+                return error_response(ErrorCode.VALIDATION_ERROR, "effective_at must be ISO-8601", status=400)
+        with transaction.atomic():
+            locked = ProductSKU.objects.select_for_update().get(pk=bundle.pk)
+            before = component_payload(locked.bundle_components.select_related("component_sku"))
+            locked.bundle_components.all().delete()
+            for component, quantity in normalized:
+                ProductBundleComponent.objects.create(
+                    tenant=request.user.tenant, bundle_sku=locked, component_sku=component, quantity=quantity
+                )
+            create_bundle_version(
+                bundle_sku=locked, actor=request.user, effective_at=effective_at,
+                reason=str(request.data.get("reason", ""))[:500], before=before,
+            )
+        bundle = ProductSKU.objects.select_related("spu").prefetch_related("bundle_components__component_sku").get(pk=bundle.pk)
+    versions = ProductBundleVersion.objects.filter(bundle_sku=bundle).prefetch_related("components").order_by("-version")
+    return success_response({
+        "sku_id": bundle.id, "sku_code": bundle.sku_code, "spu_id": bundle.spu_id,
+        "spu_code": bundle.spu.spu_code, "product_name": bundle.product_name or bundle.spu.product_name,
+        "components": component_payload(bundle.bundle_components.all()),
+        "current_version": versions.first().version if versions.exists() else None,
+        "versions": [_bundle_version_data(version) for version in versions],
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_availability(request, sku_id):
+    from apps.commerce.models import InventorySnapshot
+
+    bundle = get_object_or_404(
+        ProductSKU.objects.prefetch_related("bundle_components__component_sku"),
+        pk=sku_id, tenant=request.user.tenant, spu__product_type=ProductSPU.ProductType.BUNDLE,
+    )
+    components = list(bundle.bundle_components.all())
+    warehouse_id = request.query_params.get("warehouse_id", "").strip()
+    snapshots = InventorySnapshot.objects.filter(
+        tenant=request.user.tenant, internal_sku_id__in=[row.component_sku_id for row in components]
+    ).select_related("warehouse").order_by("warehouse_id", "internal_sku_id", "-snapshot_at_utc", "-id")
+    if warehouse_id:
+        if not warehouse_id.isdigit():
+            return error_response(ErrorCode.VALIDATION_ERROR, "warehouse_id must be an integer", status=400)
+        snapshots = snapshots.filter(warehouse_id=int(warehouse_id))
+    latest = {}
+    for snapshot in snapshots:
+        latest.setdefault((snapshot.warehouse_id, snapshot.internal_sku_id), snapshot)
+    warehouse_ids = sorted({key[0] for key in latest})
+    warehouses = []
+    for wid in warehouse_ids:
+        detail = []
+        capacities = []
+        for component in components:
+            snapshot = latest.get((wid, component.component_sku_id))
+            available = int(snapshot.available_qty) if snapshot else 0
+            capacity = available // component.quantity
+            capacities.append(capacity)
+            detail.append({
+                "component_sku_id": component.component_sku_id,
+                "component_sku_code": component.component_sku.sku_code,
+                "required_quantity": component.quantity,
+                "available_quantity": available,
+                "bundle_capacity": capacity,
+                "snapshot_at": snapshot.snapshot_at_utc if snapshot else None,
+            })
+        first = next((value for (warehouse, _), value in latest.items() if warehouse == wid), None)
+        warehouses.append({
+            "warehouse_id": wid,
+            "warehouse_name": str(first.warehouse) if first else "",
+            "available_quantity": min(capacities) if capacities else 0,
+            "components": detail,
+        })
+    return success_response({"sku_id": bundle.id, "calculation": "min(floor(available/required))", "warehouses": warehouses})
+
+
+@api_view(["POST"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_migration_preview(request):
+    _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
+    rows = request.data.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return error_response(ErrorCode.VALIDATION_ERROR, "rows must be a non-empty array", status=400)
+    token, batch = preview_legacy_migration(tenant=request.user.tenant, actor=request.user, rows=rows)
+    return success_response({"token": token, **batch.preview_summary, "expires_at": batch.expires_at}, status=201)
+
+
+@api_view(["POST"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_migration_confirm(request, token):
+    _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
+    try:
+        batch = confirm_legacy_migration(tenant=request.user.tenant, actor=request.user, token=token)
+    except ValueError as exc:
+        return error_response(ErrorCode.STATE_CONFLICT, str(exc), status=409)
+    return success_response({"status": batch.status, "confirmed_at": batch.confirmed_at, **batch.preview_summary})
+
+
+@api_view(["GET"])
+@permission_classes([IsProductBundleReadOrManage])
+def product_bundle_return_suggestion(request, refund_item_id):
+    from apps.commerce.models import RefundReturnItem
+
+    item = get_object_or_404(
+        RefundReturnItem.objects.select_related("sales_order_item").filter(
+            refund_return__tenant=request.user.tenant
+        ), pk=refund_item_id,
+    )
+    snapshot = getattr(item.sales_order_item, "bundle_snapshot", None) if item.sales_order_item_id else None
+    rows = [] if snapshot is None else [
+        {**component, "suggested_quantity": int(component["quantity"]) * item.quantity}
+        for component in snapshot.components_payload
+    ]
+    return success_response({
+        "refund_item_id": item.id, "source": "sales_order_bundle_snapshot" if snapshot else None,
+        "advisory_only": True, "components": rows,
+    })
 
 
 @api_view(["GET", "POST"])

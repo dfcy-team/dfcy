@@ -153,8 +153,16 @@
         <el-descriptions-item label="主体">{{ configRow.subject_name }}</el-descriptions-item>
         <el-descriptions-item label="接入配置">{{ configRow.config_name || '—' }}</el-descriptions-item>
         <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="查询方式">{{ configRow.query_mode || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="查询范围（UTC）">{{ syncTime(configRow.range_start_at) }} 至 {{ syncTime(configRow.range_end_at) }}</el-descriptions-item>
+        <el-descriptions-item label="采集范围">
+          <template v-if="['sales_order', 'refund_return'].includes(configRow.resource_type)">
+            <template v-if="configRow.query_mode === 'range'">
+              <template v-if="/^\d{4}-\d{2}-\d{2}$/.test(configRow.range_start_at || '')">{{ configRow.range_start_at }} 至 {{ configRow.range_end_at }}（北京时间，含结束日）</template>
+              <template v-else>{{ syncTime(configRow.range_start_at) }} 至 {{ syncTime(configRow.range_end_at) }}（UTC）</template>
+            </template>
+            <template v-else>每次执行回看最近 {{ configRow.lookback_days ?? 1 }} 天</template>
+          </template>
+          <template v-else>按资源自身的全量/快照策略采集</template>
+        </el-descriptions-item>
         <el-descriptions-item label="最大页数">{{ configRow.max_pages ?? '—' }}</el-descriptions-item>
         <el-descriptions-item label="最大记录数">{{ configRow.max_records ?? '—' }}</el-descriptions-item>
       </el-descriptions>
@@ -175,6 +183,7 @@ import AppState from '../../components/AppState.vue';
 import CreateSyncJob from '../../components/CreateSyncJob.vue';
 import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
 import { syncTime, syncError, runStates, schedules } from '../../utils/syncPresentation';
+import { syncRequestId } from '../../utils/syncRequestId';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
 import { useMock } from '../../api/request';
 
@@ -383,13 +392,15 @@ async function load() {
 const liveRunKeys = new Map();
 function liveRunKey(row) {
   const version = `${row.id}:${row.last_run_at || ''}`;
-  if (!liveRunKeys.has(version)) liveRunKeys.set(version, crypto.randomUUID());
+  if (!liveRunKeys.has(version)) liveRunKeys.set(version, syncRequestId());
   return liveRunKeys.get(version);
 }
 
 function taskBusyReason(row) {
   if (!row?.id) return '任务信息不完整，请刷新后重试。';
-  return row.status === 'running' || row.schedule_state === 'running' ? '任务正在运行，请勿重复提交或切换状态。' : '';
+  return ['queued', 'running'].includes(row.schedule_state) || row.status === 'running'
+    ? '任务正在排队或运行，请勿重复提交或切换状态。'
+    : '';
 }
 
 function liveRunReason(row) {
@@ -408,7 +419,7 @@ function mockRunReason(row) {
   if (row.environment !== 'mock' || row.resource_type !== 'mock_record') {
     return '仅独立 Mock 任务可运行模拟；真实平台任务请使用受控只读同步入口。';
   }
-  if (row.status === 'running' || row.schedule_state === 'running') return '任务正在运行，请勿重复提交。';
+  if (row.status === 'running' || ['queued', 'running'].includes(row.schedule_state)) return '任务正在排队或运行，请勿重复提交。';
   return '';
 }
 

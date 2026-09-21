@@ -37,3 +37,27 @@ it('readonly users cannot preview or save a schedule', async () => {
   expect(api.requestApi).not.toHaveBeenCalled();
   expect(api.updateSyncJob).not.toHaveBeenCalled();
 });
+it('previews and saves collection range separately from schedule', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 10, is_enabled: false, platform: 'shopee', resource_type: 'refund_return', schedule_type: 'manual', lookback_days: 1 } });
+  expect(wrapper.vm.form.lookback_days).toBe(1);
+  wrapper.vm.form.lookback_days = 7;
+  await flushPromises();
+  await wrapper.vm.preview();
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(10, expect.objectContaining({ query_mode: 'incremental', lookback_days: 7, schedule_type: 'manual' }));
+  wrapper.vm.form.query_mode = 'range';
+  wrapper.vm.form.range_start_at = '2026-09-10';
+  wrapper.vm.form.range_end_at = '2026-09-14';
+  await flushPromises();
+  expect(wrapper.vm.previewed).toBe(false);
+  await wrapper.vm.preview();
+  expect(api.requestApi.mock.lastCall[0].data.query_mode).toBe('range');
+  expect(api.requestApi.mock.lastCall[0].data.range_end_at).toBe('2026-09-14');
+});
+it('displays existing timestamp ranges as Beijing dates', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 10, resource_type: 'refund_return', query_mode: 'range', range_start_at: '2026-09-09T16:00:00Z', range_end_at: '2026-09-14' } });
+  expect(wrapper.vm.form.range_start_at).toBe('2026-09-10');
+  expect(wrapper.vm.form.range_end_at).toBe('2026-09-14');
+});

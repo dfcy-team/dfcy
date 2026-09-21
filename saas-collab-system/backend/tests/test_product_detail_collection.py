@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.products import views as product_views
-from apps.products.models import ProductLegacyItem, ProductSKU, ProductSPU
+from apps.products.models import ProductBundleComponent, ProductLegacyItem, ProductSKU, ProductSPU
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -23,6 +23,19 @@ def _user(tenant):
     )
     role = Role.objects.create(tenant=tenant, code=f"detail-role-{tenant.code}", name="Product detail role")
     role.permissions.add(*Permission.objects.filter(code__in=["products.master.view", "products.master.manage"]))
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+    return user
+
+
+def _bundle_view_user(tenant):
+    user = CustomUser.objects.create_user(
+        username=f"bundle-detail-{tenant.code}",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    role = Role.objects.create(tenant=tenant, code=f"bundle-detail-role-{tenant.code}", name="Bundle detail role")
+    role.permissions.add(Permission.objects.get(code="products.bundle.view"))
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
     return user
@@ -136,6 +149,110 @@ def test_product_exports_apply_filters_tenant_scope_and_csv_formula_protection()
     assert "EXPORT-SKU-ACTIVE" in detail_csv
     assert "EXPORT-SKU-INACTIVE" not in detail_csv
     assert "OTHER-SPU" not in detail_csv
+
+
+@pytest.mark.django_db
+def test_product_detail_collection_filters_types_and_searches_bundle_components():
+    tenant = Tenant.objects.create(name="Unified product tenant", code="unified-product")
+    client = APIClient()
+    unified_user = _user(tenant)
+    UserRole.objects.get(user=unified_user).role.permissions.add(
+        Permission.objects.get(code="products.bundle.view")
+    )
+    client.force_authenticate(user=unified_user)
+    standard_spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="STANDARD-SPU",
+        legacy_spu_code="OLD-STANDARD-SPU",
+        product_name="普通商品",
+    )
+    component = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=standard_spu,
+        sku_code="COMPONENT-NEW",
+        legacy_sku_code="COMPONENT-OLD",
+        product_name="可搜索子商品",
+    )
+    bundle_spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="BUNDLE-SPU",
+        legacy_spu_code="OLD-BUNDLE-SPU",
+        product_name="组合商品",
+        product_type=ProductSPU.ProductType.BUNDLE,
+    )
+    bundle_sku = ProductSKU.objects.create(
+        tenant=tenant,
+        spu=bundle_spu,
+        sku_code="BUNDLE-SKU",
+        product_name="组合 SKU",
+    )
+    ProductBundleComponent.objects.create(
+        tenant=tenant,
+        bundle_sku=bundle_sku,
+        component_sku=component,
+        quantity=2,
+    )
+
+    bundle_response = client.get("/api/internal/products/details/", {"product_type": "bundle"})
+    standard_response = client.get("/api/internal/products/details/", {"product_type": "standard"})
+    invalid_response = client.get("/api/internal/products/details/", {"product_type": "unsupported"})
+
+    assert bundle_response.status_code == 200
+    bundle_rows = bundle_response.json()["data"]["results"]
+    assert [row["sku_code"] for row in bundle_rows] == ["BUNDLE-SKU"]
+    assert bundle_rows[0]["product_type"] == "bundle"
+    assert bundle_rows[0]["product_type_name"] == "组合商品"
+    assert bundle_rows[0]["component_count"] == 1
+    assert bundle_rows[0]["component_summary"] == [{
+        "sku_id": component.id,
+        "sku_code": "COMPONENT-NEW",
+        "legacy_sku_code": "COMPONENT-OLD",
+        "product_name": "可搜索子商品",
+        "quantity": 2,
+    }]
+    assert standard_response.status_code == 200
+    assert [row["sku_code"] for row in standard_response.json()["data"]["results"]] == ["COMPONENT-NEW"]
+    assert invalid_response.status_code == 400
+
+    for search in ("COMPONENT-NEW", "COMPONENT-OLD", "可搜索子商品", "OLD-BUNDLE-SPU"):
+        response = client.get(
+            "/api/internal/products/details/",
+            {"product_type": "bundle", "search": search},
+        )
+        assert response.status_code == 200
+        assert [row["sku_code"] for row in response.json()["data"]["results"]] == ["BUNDLE-SKU"]
+
+    bundle_only_client = APIClient()
+    bundle_only_client.force_authenticate(user=_bundle_view_user(tenant))
+    bundle_only_all = bundle_only_client.get("/api/internal/products/details/", {"product_type": "all"})
+    bundle_only_standard = bundle_only_client.get("/api/internal/products/details/", {"product_type": "standard"})
+    assert bundle_only_all.status_code == 200
+    assert [row["sku_code"] for row in bundle_only_all.json()["data"]["results"]] == ["BUNDLE-SKU"]
+    assert bundle_only_standard.status_code == 200
+    assert bundle_only_standard.json()["data"]["results"] == []
+
+
+@pytest.mark.django_db
+def test_product_detail_collection_master_only_user_cannot_read_bundle_rows():
+    tenant = Tenant.objects.create(name="Master only tenant", code="master-only-product")
+    client = APIClient()
+    client.force_authenticate(user=_user(tenant))
+    standard_spu = ProductSPU.objects.create(tenant=tenant, spu_code="MASTER-STANDARD")
+    bundle_spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="MASTER-HIDDEN-BUNDLE",
+        product_type=ProductSPU.ProductType.BUNDLE,
+    )
+    ProductSKU.objects.create(tenant=tenant, spu=standard_spu, sku_code="VISIBLE-STANDARD")
+    ProductSKU.objects.create(tenant=tenant, spu=bundle_spu, sku_code="HIDDEN-BUNDLE")
+
+    all_response = client.get("/api/internal/products/details/", {"product_type": "all"})
+    bundle_response = client.get("/api/internal/products/details/", {"product_type": "bundle"})
+
+    assert all_response.status_code == 200
+    assert [row["sku_code"] for row in all_response.json()["data"]["results"]] == ["VISIBLE-STANDARD"]
+    assert bundle_response.status_code == 200
+    assert bundle_response.json()["data"]["results"] == []
 
 
 @pytest.mark.django_db

@@ -2186,6 +2186,9 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     sample = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
     sample.sampled_at = order_time - timedelta(hours=1)
     sample.shop_abbr = "store-affiliate"
+    # Imported snapshots may retain a Feishu option id instead of PH/MY/TH.
+    # Country reporting must fall back to the authoritative store country.
+    sample.site = "optV1klsyF"
     sample.product_id = "P-1"
     sample.save()
     order = _new_affiliate_order(tenant, data_time=order_time)
@@ -2262,6 +2265,22 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert corrected_row["valid_order_count"] == 2
     attribution.refresh_from_db()
     assert attribution.owner_id == user.pk
+    assert corrected["totals"]["gmv_php"] == "2000.0000"
+    assert corrected["totals"]["gmv_myr"] == "0.0000"
+    assert corrected["totals"]["gmv_thb"] == "0.0000"
+    philippines = next(
+        country for country in corrected_row["country_breakdown"]
+        if country["country_code"] == "PH"
+    )
+    assert philippines == {
+        "country_code": "PH",
+        "country": "菲律宾",
+        "currency": "PHP",
+        "sample_count": 1,
+        "shipped_count": 0,
+        "valid_order_count": 2,
+        "gmv": "2000.0000",
+    }
 
 
 def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_imported():

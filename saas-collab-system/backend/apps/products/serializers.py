@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
 from .models import (
     ProductBundleComponent,
@@ -328,6 +329,14 @@ class ProductSPUSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         instance = self.instance
         if instance is not None:
+            if "legacy_spu_code" in self.initial_data:
+                requested = str(self.initial_data.get("legacy_spu_code") or "").strip()
+                if requested != (instance.legacy_spu_code or ""):
+                    from apps.permissions.role_catalog import user_is_tenant_administrator
+
+                    user = self.context["request"].user
+                    if not (user.is_superuser or user_is_tenant_administrator(user, instance.tenant)):
+                        raise PermissionDenied("只有平台超级管理员或租户管理员可以修改旧 SPU 编码。")
             attempted = self.CONTROLLED_UPDATE_FIELDS.intersection(self.initial_data)
             if attempted:
                 raise serializers.ValidationError(
@@ -521,6 +530,7 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             "spu",
             "sku_code",
             "product_name",
+            "product_name_source",
             "status_name",
             "legacy_sku_code",
             "color_code",
@@ -592,6 +602,14 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         instance = self.instance
+        if instance and "legacy_sku_code" in self.initial_data:
+            requested = str(self.initial_data.get("legacy_sku_code") or "").strip()
+            if requested != (instance.legacy_sku_code or ""):
+                from apps.permissions.role_catalog import user_is_tenant_administrator
+
+                user = self.context["request"].user
+                if not (user.is_superuser or user_is_tenant_administrator(user, instance.tenant)):
+                    raise PermissionDenied("只有平台超级管理员或租户管理员可以修改旧 SKU 编码。")
         if instance and instance.is_code_frozen and "sku_code" in attrs and attrs["sku_code"] != instance.sku_code:
             raise serializers.ValidationError({"sku_code": "Code is frozen and cannot be changed."})
         if instance and any(field in attrs for field in ("spu", "color_code", "spec_values")):
@@ -988,9 +1006,11 @@ class ProductBundleCreateComponentInputSerializer(serializers.Serializer):
 
 
 class ProductBundleCreateInputSerializer(serializers.Serializer):
-    product_name = serializers.CharField(max_length=200)
-    category_node = serializers.IntegerField(min_value=1)
-    season_code = serializers.RegexField(r"^[0-9]$")
+    spu_mode = serializers.ChoiceField(choices=("new", "existing"), default="new")
+    existing_spu = serializers.IntegerField(min_value=1, required=False)
+    product_name = serializers.CharField(max_length=200, required=False)
+    category_node = serializers.IntegerField(min_value=1, required=False)
+    season_code = serializers.RegexField(r"^[0-9]$", required=False)
     color_code = serializers.CharField(max_length=40)
     components = ProductBundleCreateComponentInputSerializer(many=True, allow_empty=False, max_length=20)
 
@@ -999,6 +1019,19 @@ class ProductBundleCreateInputSerializer(serializers.Serializer):
         if len(component_ids) != len(set(component_ids)):
             raise serializers.ValidationError("The same component SKU cannot be added twice.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs["spu_mode"] == "new":
+            missing = [
+                field for field in ("product_name", "category_node", "season_code")
+                if field not in attrs
+            ]
+            if missing:
+                raise serializers.ValidationError({field: "This field is required." for field in missing})
+        elif "existing_spu" not in attrs:
+            raise serializers.ValidationError({"existing_spu": "This field is required when spu_mode is existing."})
+        return attrs
 
 
 class ProductBundleComponentSerializer(serializers.ModelSerializer):

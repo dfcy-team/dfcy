@@ -8,6 +8,26 @@ const detailPage = read('src/views/products/ProductDetailData.vue');
 const api = read('src/api/products.js');
 
 describe('组合商品页面按钮与导入导出契约', () => {
+  it('新增组合 SKU 可新建 SPU 或选择已有组合 SPU，并显示旧 SPU 映射', () => {
+    expect(page).toContain('data-testid="bundle-spu-mode"');
+    expect(page).toContain('新建组合 SPU');
+    expect(page).toContain('选择已有组合 SPU');
+    expect(page).toContain('搜索新/旧 SPU 编码或商品名称');
+    expect(page).toContain('legacy_spu_code');
+    expect(page).toContain("spu_mode: spuMode");
+    expect(page).toContain("existing_spu: spuMode === 'existing'");
+  });
+  it('组合 SKU 支持独立主图上传、预览和列表展示', () => {
+    expect(page).toContain('组合商品主图');
+    expect(page).toContain('accept="image/jpeg,image/png,image/gif,image/webp,image/avif"');
+    expect(page).toContain('该图片属于组合 SKU，不会覆盖任何子 SKU 图片');
+    expect(page).toContain('uploadProductSkuImage(result.sku.id, bundleImageFile.value)');
+    expect(page).toContain('粘贴公网图片链接，保存时自动转存本地');
+    expect(page).toContain('cacheProductBundleImage(result.sku.id, bundleImageUrl.value.trim())');
+    expect(page).toContain('row.image_url');
+    expect(api).toContain('`/api/internal/products/skus/${skuId}/image/`');
+    expect(api).toContain('`/api/internal/products/bundles/${skuId}/image-cache/`');
+  });
   it('将组合商品导入导出归集到一个下拉菜单', () => {
     expect(page).toContain('data-testid="bundle-io-menu"');
     expect(page).toContain('导入与导出');
@@ -25,9 +45,21 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('新建组合 SKU');
     expect(page).toContain('data-testid="bigseller-create-bundle-export"');
     expect(page).toContain('下载 BigSeller 组合商品SKU表');
-    expect(page).toContain('@selection-change="selectedBundles = $event"');
+    expect(page).toContain('@selection-change="selectBundleRows"');
     expect(page).toContain(':disabled="!selectedBundles.length || importing"');
     expect(page).toContain('downloadBigSellerBundleWorkbook(selectedBundles.value, skus.value, bundleComponents.value)');
+  });
+
+  it('二期支持组合版本、库存可用量和旧 ZH 关系的预览确认迁移', () => {
+    expect(page).toContain('保存新版本');
+    expect(page).toContain('已同步订单继续使用下单时快照');
+    expect(page).toContain('库存可用量');
+    expect(page).toContain('仅供业务判断，不直接扣减库存');
+    expect(page).toContain('data-testid="bundle-legacy-migration-button"');
+    expect(page).toContain('服务端未返回迁移确认令牌');
+    expect(api).toContain("url: `/api/internal/products/bundles/${skuId}/`");
+    expect(api).toContain("url: '/api/internal/products/bundles/migrations/preview/'");
+    expect(api).toContain('migrations/${encodeURIComponent(token)}/confirm/');
   });
 
   it('批量导入复用服务端原子创建链路，成功后自动生成 BigSeller 表', () => {

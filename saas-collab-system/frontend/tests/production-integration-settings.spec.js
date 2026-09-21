@@ -17,8 +17,16 @@ const readiness = read('src/views/settings/PlatformIntegrationReadiness.vue');
 const workspace = read('src/views/integrations/IntegrationWorkspace.vue');
 
 describe('系统管理员生产环境 API 配置闭环', () => {
+  it('Shopee 和仓库自动续期走审批并展示生效状态及心跳', () => {
+    expect(page).toContain('label="自动刷新令牌"');
+    expect(page).toContain('v-model="form.platforms[platform].auto_refresh_enabled"');
+    expect(page).toContain("['shopee', 'jifeng_wms'].some((platform) => form.platforms[platform].auto_refresh_enabled");
+    expect(page).toContain('auto_refresh_last_seen_at');
+    expect(page).toContain('失败后暂停该凭据自动重试');
+    expect(page).toContain('当前生效：');
+  });
   it('仓库合同走版本审批，不复制公共配置或仓库凭据', () => {
-    expect(page).toContain("jifeng_wms: ['contract_approved']");
+    expect(page).toContain("jifeng_wms: ['contract_approved', 'auto_refresh_enabled']");
     expect(page).toContain('极风 WMS · 仓库');
     expect(page).toContain("v-if=\"platform !== 'jifeng_wms'\" class=\"advanced-endpoints\"");
     expect(page).toContain('极风无需 OAuth 回调地址');

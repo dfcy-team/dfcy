@@ -126,7 +126,7 @@ from .serializers import (
 )
 from .store_mapping_service import create_store_mapping, update_store_mapping
 from .adapters import MockPlatformAdapter, get_adapter_for_config
-from .sync_services import run_sync_job
+from .sync_services import enqueue_sync_run, run_sync_job
 from .scheduler import calculate_next_run_at
 from .tasks import run_readonly_sync_job
 from .workspace_service import integration_workspace
@@ -2509,6 +2509,8 @@ def _validated_job_policy(data):
     for key, (minimum, maximum) in limits.items():
         if key not in values:
             continue
+        if key == "lookback_days" and isinstance(values[key], (bool, float)):
+            raise ValidationError({key: "必须为整数。"})
         try:
             values[key] = int(values[key])
         except (TypeError, ValueError):
@@ -2573,7 +2575,11 @@ def preview_sync_schedule(request, pk):
     if "schedule_type" in values:
         job.schedule_type = values["schedule_type"]
     _set_job_scope(job, values)
+    from .readonly_clients import default_sync_scope
+
+    resolved = default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
     return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
+                             "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if job.resource_type in {"sales_order", "refund_return"} else None,
                              "timezone": (job.sync_scope.get("schedule") or {}).get("timezone", "Asia/Shanghai"),
                              "notice": "仅预览，未保存、启用或执行。超出计划时点 60 秒按漏跑策略处理。"})
 
@@ -2585,21 +2591,39 @@ def sync_job_detail(request, pk):
     job = _scoped_sync_job(request, pk, permission_code)
     if request.method == "GET":
         return success_response(SyncJobSerializer(job, context={"request": request}).data)
-    if job.status == SyncJob.Status.RUNNING:
-        raise ValidationError("运行中的同步任务不能修改。")
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(
+        status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]
+    ).exists():
+        raise ValidationError("排队中或运行中的同步任务不能修改。")
     values = _validated_job_policy(request.data)
     core_fields = {"schedule_type", "max_retry_count", "backoff_base_seconds"}
     changed_core = [key for key in core_fields if key in values]
     with transaction.atomic():
         job = SyncJob.objects.select_for_update().get(pk=job.pk)
-        if job.status == SyncJob.Status.RUNNING or job.schedule_dispatches.filter(status__in=["queued", "running"]).exists():
+        if (
+            job.status == SyncJob.Status.RUNNING
+            or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists()
+            or job.schedule_dispatches.filter(status__in=["queued", "running"]).exists()
+        ):
             raise ValidationError("任务正在排队或运行，暂不能修改计划。")
         from .scheduler import schedule_policy
         previous = {"interval_minutes": 60, "local_time": "02:00", "weekdays": [1], "timezone": "Asia/Shanghai", **schedule_policy(job), "schedule_type": job.schedule_type}
         plan_changed = any(key in values and values[key] != previous[key] for key in ("schedule_type", "interval_minutes", "local_time", "weekdays", "timezone"))
         for key in changed_core:
             setattr(job, key, values[key])
+        previous_query = dict((job.sync_scope or {}).get("query") or {})
         _set_job_scope(job, values)
+        from .readonly_clients import default_sync_scope
+
+        default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
+        if previous_query != job.sync_scope.get("query"):
+            # Page cursors belong to the previous query, never reuse them for a new range.
+            job.cursors.filter(cursor_key="default").update(cursor_value="")
+            from .models import SyncCheckpoint
+
+            SyncCheckpoint.objects.filter(tenant=job.tenant, sync_job=job).update(
+                cursor_json={"default": ""}
+            )
         update_fields = [*changed_core, "sync_scope"]
         if plan_changed:
             job.next_run_at = calculate_next_run_at(job)
@@ -2617,8 +2641,10 @@ def toggle_sync_job(request, pk):
         raise ValidationError("API data integration module is disabled.")
     job = _scoped_sync_job(request, pk)
     job = SyncJob.objects.select_for_update().select_related("integration_config").get(pk=job.pk)
-    if job.status == SyncJob.Status.RUNNING:
-        raise ValidationError("运行中的同步任务不能切换启用状态。")
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(
+        status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]
+    ).exists():
+        raise ValidationError("排队中或运行中的同步任务不能切换启用状态。")
     if not isinstance(request.data, dict) or type(request.data.get("enabled")) is not bool:
         raise ValidationError("enabled 必须明确为 true 或 false。")
     enabled = request.data["enabled"]
@@ -2931,11 +2957,18 @@ def enqueue_sync_job(request, pk):
     if not sync_job.is_enabled or sync_job.status == SyncJob.Status.DISABLED:
         raise ValidationError("任务已停用，请先启用任务。")
     validate_manual_sync_job(sync_job, live_only=True)
+    run, created = enqueue_sync_run(sync_job, idempotency_key)
     try:
-        task = run_readonly_sync_job.delay(sync_job.id, idempotency_key)
+        task = run_readonly_sync_job.delay(sync_job.id, run.idempotency_key) if created else None
     except QueueOperationalError:
+        SyncRun.objects.filter(pk=run.pk, status=SyncRun.Status.QUEUED).delete()
         raise ValidationError("同步队列连接异常，提交结果尚不能确认；请检查运行记录和本地任务服务，不要连续重试。") from None
-    return success_response({"accepted": True, "task_id": task.id}, status=202)
+    return success_response({
+        "accepted": True,
+        "created": created,
+        "task_id": task.id if task else None,
+        "run": SyncRunSerializer(run).data,
+    }, status=202)
 
 
 @api_view(["POST"])
@@ -2949,8 +2982,10 @@ def disable_sync_job(request, pk):
         ),
         pk=pk,
     )
-    if sync_job.status == SyncJob.Status.RUNNING:
-        raise ValidationError("任务正在运行，请等待当前运行结束后停用。")
+    if sync_job.status == SyncJob.Status.RUNNING or sync_job.runs.filter(
+        status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]
+    ).exists():
+        raise ValidationError("任务正在排队或运行，请等待当前运行结束后停用。")
     sync_job.is_enabled = False
     sync_job.status = SyncJob.Status.DISABLED
     sync_job.save(update_fields=["is_enabled", "status", "updated_at"])
