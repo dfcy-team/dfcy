@@ -1,3 +1,4 @@
+import ipaddress
 from urllib.parse import urlsplit
 
 from django.conf import settings
@@ -6,6 +7,7 @@ from rest_framework import serializers
 from .models import (
     ConnectionCapability,
     IntegrationAuditLog,
+    InternalAPIClient,
     MarketplaceProductMapping,
     MarketplaceStoreAuthorization,
     MarketplaceStoreMapping,
@@ -32,6 +34,89 @@ PILOT_LOOPBACK_CALLBACKS = {
     PlatformChoices.SHOPEE: "/api/internal/integrations/store-authorizations/oauth/callback/shopee/",
     PlatformChoices.TIKTOK: "/api/internal/integrations/store-authorizations/oauth/callback/tiktok/",
 }
+
+
+INTERNAL_API_RESOURCE_FIELDS = {
+    "products": {"id", "sku", "name", "status", "updated_at"},
+    "suppliers": {"id", "code", "name", "status", "updated_at"},
+    "purchase_orders": {"id", "order_number", "supplier_id", "status", "ordered_at", "updated_at"},
+}
+
+
+class InternalAPIClientSerializer(serializers.ModelSerializer):
+    credential_configured = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InternalAPIClient
+        fields = (
+            "id", "name", "caller_type", "client_id", "secret_prefix", "secret_fingerprint",
+            "credential_configured", "resources", "allowed_cidrs", "rate_limit_per_minute",
+            "page_size_limit", "expires_at", "status", "config_version", "last_rotated_at",
+            "created_at", "updated_at",
+        )
+        read_only_fields = (
+            "id", "client_id", "secret_prefix", "secret_fingerprint", "credential_configured",
+            "config_version", "last_rotated_at", "created_at", "updated_at",
+        )
+
+    def get_credential_configured(self, obj):
+        return bool(obj.secret_hash)
+
+    def to_internal_value(self, data):
+        allowed = {
+            "name", "caller_type", "resources", "allowed_cidrs", "rate_limit_per_minute",
+            "page_size_limit", "expires_at", "status",
+        }
+        if not isinstance(data, dict):
+            raise serializers.ValidationError("Expected an object.")
+        unsupported = set(data) - allowed
+        if unsupported:
+            raise serializers.ValidationError({"detail": f"Unsupported fields: {', '.join(sorted(unsupported))}."})
+        return super().to_internal_value(data)
+
+    def validate_resources(self, value):
+        if not isinstance(value, dict) or not value:
+            raise serializers.ValidationError("At least one resource and field whitelist is required.")
+        unknown_resources = set(value) - set(INTERNAL_API_RESOURCE_FIELDS)
+        if unknown_resources:
+            raise serializers.ValidationError(f"Unsupported resources: {', '.join(sorted(unknown_resources))}.")
+        normalized = {}
+        for resource, fields in value.items():
+            if not isinstance(fields, list) or not fields or any(not isinstance(item, str) for item in fields):
+                raise serializers.ValidationError(f"{resource} must contain a non-empty field list.")
+            unknown_fields = set(fields) - INTERNAL_API_RESOURCE_FIELDS[resource]
+            if unknown_fields:
+                raise serializers.ValidationError(
+                    f"Unsupported fields for {resource}: {', '.join(sorted(unknown_fields))}."
+                )
+            normalized[resource] = sorted(set(fields))
+        return normalized
+
+    def validate_allowed_cidrs(self, value):
+        if not isinstance(value, list) or not value:
+            raise serializers.ValidationError("At least one source CIDR is required.")
+        if any(not isinstance(item, str) for item in value):
+            raise serializers.ValidationError("CIDRs must be strings.")
+        try:
+            return sorted({str(ipaddress.ip_network(item, strict=True)) for item in value})
+        except ValueError as exc:
+            raise serializers.ValidationError(f"Invalid canonical CIDR: {exc}") from exc
+
+    def validate_rate_limit_per_minute(self, value):
+        if not 1 <= value <= 10000:
+            raise serializers.ValidationError("Must be between 1 and 10000.")
+        return value
+
+    def validate_page_size_limit(self, value):
+        if not 1 <= value <= 1000:
+            raise serializers.ValidationError("Must be between 1 and 1000.")
+        return value
+
+    def validate_expires_at(self, value):
+        from django.utils import timezone
+        if value is not None and value <= timezone.now():
+            raise serializers.ValidationError("Expiry must be in the future.")
+        return value
 
 def _is_approved_callback_transport(callback_url, environment, platform):
     try:

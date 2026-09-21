@@ -1723,3 +1723,65 @@ class FeishuOperation(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+
+
+class InternalAPIClient(models.Model):
+    """Tenant-scoped machine identity for the internal read-only API."""
+
+    class CallerType(models.TextChoices):
+        KNOWLEDGE_BASE = "knowledge_base", "Knowledge base"
+        INTERNAL_SYSTEM = "internal_system", "Internal system"
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="internal_api_clients")
+    name = models.CharField(max_length=160)
+    caller_type = models.CharField(max_length=32, choices=CallerType.choices)
+    client_id = models.CharField(max_length=80, unique=True)
+    secret_hash = models.CharField(max_length=256)
+    secret_prefix = models.CharField(max_length=16)
+    secret_fingerprint = models.CharField(max_length=64)
+    resources = models.JSONField(default=dict)
+    allowed_cidrs = models.JSONField(default=list)
+    rate_limit_per_minute = models.PositiveIntegerField(default=60)
+    page_size_limit = models.PositiveIntegerField(default=100)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    config_version = models.PositiveIntegerField(default=1)
+    last_rotated_at = models.DateTimeField(null=True, blank=True)
+    last_rotation_operation_hash = models.CharField(max_length=64, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_internal_api_clients")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="updated_internal_api_clients")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "name", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "name"], name="uniq_internal_api_client_name_tenant"),
+        ]
+
+
+class InternalAPIClientAudit(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="internal_api_client_audits")
+    client = models.ForeignKey(InternalAPIClient, on_delete=models.PROTECT, related_name="audit_logs")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="internal_api_client_audits")
+    action = models.CharField(max_length=32)
+    config_version = models.PositiveIntegerField()
+    detail = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableAuditQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Internal API client audit records are append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Internal API client audit records cannot be deleted.")
