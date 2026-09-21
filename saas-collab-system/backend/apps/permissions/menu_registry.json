@@ -1547,6 +1547,26 @@
       }
     },
     {
+      "code": "menu.config.integrations_ai_open_api.view",
+      "name": "内部系统数据接口",
+      "module": "config",
+      "action": "integrations_ai_open_api.view",
+      "description": "显示内部系统数据接口入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/ai-open-api",
+        "route": "/integrations/ai-open-api",
+        "resource": "integrations_ai_open_api",
+        "parent": "API数据接入",
+        "action_codes": [
+          "config.system.manage",
+          "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.integrations.integrations_capabilities.view",
       "name": "能力矩阵",
       "module": "integrations",
@@ -2886,6 +2906,21 @@
       ],
       "menuPermissions": [
         "menu.config.integrations_production_settings.view"
+      ]
+    },
+    {
+      "path": "/integrations/ai-open-api",
+      "permissions": [
+        "config.system.manage"
+      ],
+      "allPermissions": [
+        "config.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.config.integrations_ai_open_api.view"
       ]
     },
     {
