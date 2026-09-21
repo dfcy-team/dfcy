@@ -31,6 +31,7 @@ describe('基础档案设置前端契约', () => {
       'integrations.store_mapping.view',
       'integrations.product_mapping.view',
       'products.master.view',
+      'products.cost.view',
       'products.category.view',
       'products.attribute.view',
       'products.color.view',
@@ -41,6 +42,7 @@ describe('基础档案设置前端契约', () => {
     expect(foundationMenu.children.map((item) => item.path)).toEqual([
       '/products/master',
       '/products/details',
+      '/products/costs',
       '/products/platform-details',
       '/products/categories',
       '/products/attributes',
