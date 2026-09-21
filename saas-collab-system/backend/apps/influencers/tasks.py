@@ -11,11 +11,14 @@ from apps.tenants.models import Tenant
 
 from .attribution import refresh_order_attributions
 from .bd_config import bd_performance_settings
-from .models import AffiliateOrderSnapshot, SampleFulfillment
+from .models import AffiliateImportState, AffiliateOrderSnapshot, SampleFulfillment
 from .services import SAMPLE_TIMEOUT_CANDIDATE_STATUSES, mark_overdue_sample_fulfillments
 
 
 logger = logging.getLogger(__name__)
+
+HISTORICAL_ATTRIBUTION_SOURCE = "bd_attribution_history"
+HISTORICAL_ATTRIBUTION_BATCH_SIZE = 5000
 
 
 @shared_task(name="influencers.refresh_affiliate_order_attributions")
@@ -30,16 +33,43 @@ def refresh_affiliate_order_attributions_task(tenant_id, changed_since=None):
         parsed_changed_since = datetime.fromisoformat(changed_since)
         if timezone.is_naive(parsed_changed_since):
             parsed_changed_since = timezone.make_aware(parsed_changed_since, timezone.get_current_timezone())
-    for mode in ("strict", "fallback"):
-        # Serializing on the tenant row makes duplicate queue deliveries harmless
-        # while keeping each refresh transaction and rule version independent.
-        with transaction.atomic():
-            tenant = Tenant.objects.select_for_update().get(pk=tenant_id)
+    with transaction.atomic():
+        # The tenant lock serializes duplicate deliveries and advances the history
+        # cursor only after both attribution modes complete successfully.
+        tenant = Tenant.objects.select_for_update().get(pk=tenant_id)
+        state, _ = AffiliateImportState.objects.select_for_update().get_or_create(
+            tenant=tenant,
+            source=HISTORICAL_ATTRIBUTION_SOURCE,
+        )
+        try:
+            cursor_id = max(0, int(state.cursor or "0"))
+        except (TypeError, ValueError):
+            cursor_id = 0
+        historical_ids = list(
+            AffiliateOrderSnapshot.objects.filter(
+                tenant=tenant,
+                pk__gt=cursor_id,
+                updated_at__lt=parsed_changed_since,
+            ).order_by("pk").values_list("pk", flat=True)[:HISTORICAL_ATTRIBUTION_BATCH_SIZE]
+        ) if parsed_changed_since is not None else []
+        for mode in ("strict", "fallback"):
             result["modes"][mode] = refresh_order_attributions(
                 tenant=tenant,
                 attribution=mode,
                 changed_since=parsed_changed_since,
+                order_ids=historical_ids,
             )
+        cycle_completed = parsed_changed_since is not None and not historical_ids
+        state.cursor = "0" if cycle_completed else str(historical_ids[-1] if historical_ids else cursor_id)
+        state.last_row_count = len(historical_ids)
+        state.last_error_code = ""
+        state.status = AffiliateImportState.Status.IDLE
+        state.save(update_fields=["cursor", "last_row_count", "last_error_code", "status", "updated_at"])
+        result["historical_backfill"] = {
+            "batch_size": len(historical_ids),
+            "cursor": state.cursor,
+            "cycle_completed": cycle_completed,
+        }
     result["status"] = "completed"
     return result
 
