@@ -310,6 +310,73 @@ class ProductSKU(models.Model):
     def __str__(self):
         return self.sku_code
 
+
+class ProductCostVersion(models.Model):
+    """Immutable, tenant-scoped cost fact for one SKU and effective interval."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        CONFIRMED = "confirmed", "Confirmed"
+
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        SYSTEM = "system", "System generated"
+        IMPORT = "import", "Import"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_cost_versions")
+    sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, related_name="cost_versions")
+    version_no = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    source = models.CharField(max_length=16, choices=Source.choices, default=Source.MANUAL)
+    currency = models.CharField(max_length=3, default="CNY")
+    purchase_cost = models.DecimalField(max_digits=16, decimal_places=4, default=0)
+    freight_cost = models.DecimalField(max_digits=16, decimal_places=4, default=0)
+    duty_cost = models.DecimalField(max_digits=16, decimal_places=4, default=0)
+    packaging_cost = models.DecimalField(max_digits=16, decimal_places=4, default=0)
+    other_cost = models.DecimalField(max_digits=16, decimal_places=4, default=0)
+    system_cost = models.DecimalField(max_digits=16, decimal_places=4, null=True, blank=True)
+    confirmed_cost = models.DecimalField(max_digits=16, decimal_places=4, null=True, blank=True)
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+    reason = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_product_cost_versions")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["tenant_id", "sku_id", "-effective_from", "-version_no"]
+        indexes = [
+            models.Index(fields=["tenant", "sku", "status", "effective_from"], name="idx_cost_tenant_sku_asof"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "sku", "version_no"], name="uniq_cost_version_per_sku"),
+            models.CheckConstraint(
+                condition=models.Q(effective_to__isnull=True) | models.Q(effective_to__gt=models.F("effective_from")),
+                name="product_cost_valid_interval",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(purchase_cost__gte=0) & models.Q(freight_cost__gte=0)
+                    & models.Q(duty_cost__gte=0) & models.Q(packaging_cost__gte=0)
+                    & models.Q(other_cost__gte=0)
+                    & (models.Q(system_cost__isnull=True) | models.Q(system_cost__gte=0))
+                    & (models.Q(confirmed_cost__isnull=True) | models.Q(confirmed_cost__gte=0))
+                ),
+                name="product_cost_amounts_nonnegative",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and ProductCostVersion.objects.filter(pk=self.pk).exists():
+            raise ValidationError("Product cost versions are append-only.")
+        if self.sku_id and self.tenant_id != self.sku.tenant_id:
+            raise ValidationError({"sku": "SKU must belong to the same tenant."})
+        self.currency = str(self.currency or "").upper()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Product cost versions are append-only.")
+
 class ProductLegacyItem(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

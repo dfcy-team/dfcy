@@ -791,6 +791,13 @@ SampleFulfillment.Status.PROCESSING = "processing"
 class SampleItem(TenantValidatedModel):
     fulfillment = models.ForeignKey(SampleFulfillment, on_delete=models.CASCADE, related_name="items")
     sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, null=True, blank=True, related_name="sample_items")
+    cost_version = models.ForeignKey(
+        "products.ProductCostVersion",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sample_items",
+    )
     external_product_id = models.CharField(max_length=120, blank=True)
     site_code = models.CharField(max_length=16)
     requested_sku = models.CharField(max_length=120, null=True, blank=True)
@@ -813,7 +820,7 @@ class SampleItem(TenantValidatedModel):
     match_notes = models.CharField(max_length=240, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    tenant_relation_fields = ("fulfillment", "sku")
+    tenant_relation_fields = ("fulfillment", "sku", "cost_version")
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["tenant", "fulfillment", "requested_sku"], name="uniq_sample_item_requested_sku")]

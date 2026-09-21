@@ -165,6 +165,22 @@ class IsProductCodeFreezer(ProductBusinessPermission):
     write_permission_code = "products.master.freeze"
 
 
+class IsProductCostViewer(ProductBusinessPermission):
+    read_permission_code = "products.cost.view"
+
+
+class IsProductCostManager(ProductBusinessPermission):
+    write_permission_code = "products.cost.manage"
+
+
+class IsProductCostApprover(ProductBusinessPermission):
+    write_permission_code = "products.cost.approve"
+
+
+class IsProductCostBackfillOperator(ProductBusinessPermission):
+    write_permission_code = "products.cost.backfill"
+
+
 def filter_lifecycle_reviews(user, queryset, permission_code="products.lifecycle.view"):
     queryset = queryset.filter(tenant=user.tenant)
     return filter_lifecycle_queryset(user, queryset, permission_code)

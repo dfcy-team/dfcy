@@ -47,9 +47,13 @@ from .views import (
 )
 from .action_views import product_sku_status_action, product_spu_status_action
 from .batch_views import product_sku_batch_create
+from .cost_views import product_cost_backfill_preview, product_cost_collection, product_cost_create
 
 
 urlpatterns = [
+    path("costs/", product_cost_collection, name="product-cost-collection"),
+    path("costs/versions/", product_cost_create, name="product-cost-create"),
+    path("costs/backfill-preview/", product_cost_backfill_preview, name="product-cost-backfill-preview"),
     path("coding-options/", product_coding_options, name="product-coding-options"),
     path("attributes/", product_attribute_collection, name="product-attribute-collection"),
     path("attributes/<int:pk>/", product_attribute_detail, name="product-attribute-detail"),

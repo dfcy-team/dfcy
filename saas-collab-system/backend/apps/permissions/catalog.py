@@ -104,6 +104,15 @@ PERMISSION_DEFINITIONS = (
         "action": "master.freeze",
         "description": "Freeze authorized SPU and SKU codes without changing lifecycle state.",
     },
+    *(
+        {"code": code, "name": name, "module": "products", "action": action, "description": description}
+        for code, name, action, description in (
+            ("products.cost.view", "查看商品成本", "cost.view", "查看当前租户 SKU 的历史和时点成本。"),
+            ("products.cost.manage", "维护商品成本", "cost.manage", "追加当前租户 SKU 的商品成本版本。"),
+            ("products.cost.backfill", "生成商品成本回填预览", "cost.backfill", "预览系统计算的待核对商品成本，不直接写入。"),
+            ("products.cost.approve", "确认商品成本", "cost.approve", "确认商品成本版本并使其进入时态计算。"),
+        )
+    ),
     {
         "code": "products.category.view", "name": "查看商品分类", "module": "products",
         "action": "category.view", "description": "查看当前租户的商品分类。",

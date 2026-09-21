@@ -190,6 +190,7 @@ export const menuItems = [
       'integrations.store_mapping.view',
       'integrations.product_mapping.view',
       'products.master.view',
+      'products.cost.view',
       'products.category.view',
       'products.attribute.view',
       'products.color.view',
@@ -200,6 +201,7 @@ export const menuItems = [
     children: [
       { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
       { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view', 'products.bundle.view'] },
+      { path: '/products/costs', label: '商品成本', permissions: ['products.cost.view'] },
       { path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view', 'integrations.product_mapping.view'] },
       { path: '/products/categories', label: '分类设置', permissions: ['products.category.view'] },
       { path: '/products/attributes', label: '属性设置', permissions: ['products.attribute.view'] },
@@ -345,6 +347,7 @@ export const routeCapabilities = [
   { path: '/products/research', permissions: ['products.research.view'], userTypes: ['internal'] },
   { path: '/products/master', permissions: ['products.master.view'], userTypes: ['internal'] },
   { path: '/products/details', permissions: ['products.master.view', 'products.bundle.view'], userTypes: ['internal'] },
+  { path: '/products/costs', permissions: ['products.cost.view'], userTypes: ['internal'] },
   { path: '/products/platform-details', permissions: ['listings.product_detail.view', 'integrations.product_mapping.view'], userTypes: ['internal'] },
   { path: '/products/categories', permissions: ['products.category.view'], userTypes: ['internal'] },
   { path: '/master-data/settings', permissions: ['masterdata.settings.view'], userTypes: ['internal'] },

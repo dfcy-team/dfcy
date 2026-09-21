@@ -9,6 +9,7 @@ from .models import (
     ProductBundleComponent,
     ProductCategory,
     ProductColor,
+    ProductCostVersion,
     ProductAttribute,
     ProductResearch,
     ProductLifecycleDecision,
@@ -30,6 +31,29 @@ from .coding_services import (
     category_path,
 )
 from .category_metadata import category_metadata_from_spu
+
+
+class ProductCostVersionSerializer(serializers.ModelSerializer):
+    sku_code = serializers.CharField(source="sku.sku_code", read_only=True)
+    product_name = serializers.CharField(source="sku.product_name", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True)
+
+    class Meta:
+        model = ProductCostVersion
+        fields = (
+            "id", "sku", "sku_code", "product_name", "version_no", "status", "source", "currency",
+            "purchase_cost", "freight_cost", "duty_cost", "packaging_cost", "other_cost",
+            "system_cost", "confirmed_cost", "effective_from", "effective_to", "reason",
+            "created_by_name", "created_at",
+        )
+        read_only_fields = ("id", "version_no", "created_by_name", "created_at")
+
+    def validate(self, attrs):
+        if attrs.get("status") == ProductCostVersion.Status.CONFIRMED and attrs.get("confirmed_cost") is None:
+            raise serializers.ValidationError({"confirmed_cost": "Confirmed cost is required for a confirmed version."})
+        if attrs.get("effective_to") and attrs.get("effective_from") and attrs["effective_to"] <= attrs["effective_from"]:
+            raise serializers.ValidationError({"effective_to": "Must be later than effective_from."})
+        return attrs
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
