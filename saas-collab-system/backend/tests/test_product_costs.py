@@ -164,3 +164,46 @@ def test_backfill_is_dry_run_and_has_independent_permission():
     assert response.status_code == 200
     assert response.json()["data"]["results"][0]["system_cost"] == 12.34
     assert ProductCostVersion.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_backfill_execute_creates_pending_version_then_approver_confirms_it():
+    tenant = Tenant.objects.create(name="Backfill flow", code="cost-backfill-flow")
+    operator = make_user(tenant, "operator-flow")
+    approver = make_user(tenant, "approver-flow")
+    grant(operator, "products.cost.backfill")
+    grant(approver, "products.cost.approve")
+    sku = make_sku(tenant, "FLOW", "18.2500")
+    effective_from = timezone.now() + timedelta(days=1)
+
+    execute_url = "/api/internal/products/costs/backfill-execute/"
+    payload = {"sku_ids": [sku.id], "effective_from": effective_from.isoformat(), "reason": "monthly backfill"}
+    first = client_for(operator).post(execute_url, payload, format="json")
+    replay = client_for(operator).post(execute_url, payload, format="json")
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert first.json()["data"]["created"] == 1
+    assert replay.json()["data"]["unchanged"] == 1
+    pending = ProductCostVersion.objects.get(sku=sku)
+    assert pending.status == ProductCostVersion.Status.PENDING
+    assert pending.confirmed_cost is None
+
+    confirm = client_for(approver).post(
+        f"/api/internal/products/costs/versions/{pending.id}/confirm/",
+        {"confirmed_cost": "18.5000", "reason": "finance approved"},
+        format="json",
+    )
+    assert confirm.status_code == 200
+    pending.refresh_from_db()
+    assert pending.status == ProductCostVersion.Status.CONFIRMED
+    assert pending.confirmed_cost == Decimal("18.5000")
+
+
+def test_postgres_migration_declares_confirmed_interval_exclusion_constraint():
+    from pathlib import Path
+
+    migration = Path(__file__).parents[1] / "apps" / "products" / "migrations" / "0024_product_cost_confirmed_interval_exclusion.py"
+    source = migration.read_text(encoding="utf-8")
+    assert "EXCLUDE USING gist" in source
+    assert "tstzrange" in source
+    assert "status = 'confirmed'" in source

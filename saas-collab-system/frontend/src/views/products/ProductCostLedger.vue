@@ -7,6 +7,7 @@
       </div>
       <div class="header-actions">
         <el-button @click="load">刷新</el-button>
+        <el-button v-if="canImport" data-testid="cost-import-button" @click="openImport">每期成本导入</el-button>
         <el-button v-if="canBackfill" type="primary" data-testid="cost-backfill-button" @click="openBackfill">系统生成回填</el-button>
       </div>
     </header>
@@ -130,11 +131,13 @@
       <el-form label-position="top" class="backfill-form">
         <el-form-item label="回填范围"><el-radio-group v-model="backfill.scope"><el-radio value="all">全部 SKU</el-radio><el-radio value="pending">仅未确认 SKU</el-radio></el-radio-group></el-form-item>
         <el-form-item label="费用口径"><el-select v-model="backfill.rule"><el-option label="最新入库批次加权成本" value="latest" /><el-option label="近 30 天移动加权成本" value="moving30" /></el-select></el-form-item>
+        <el-form-item label="拟生效日期"><el-date-picker v-model="backfill.effective_from" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
       </el-form>
       <div v-if="preview" class="preview-result"><strong>预览结果</strong><span>匹配 {{ preview.matched }} 个 SKU，预计更新 {{ preview.changed }} 个，保持不变 {{ preview.unchanged }} 个。</span></div>
       <template #footer>
         <el-button @click="backfillVisible = false">取消</el-button>
         <el-button type="primary" :loading="previewing" data-testid="cost-backfill-preview" @click="previewBackfill">生成预览</el-button>
+        <el-button v-if="preview" type="success" :loading="previewing" data-testid="cost-backfill-execute" @click="executeBackfill">写入待核对版本</el-button>
       </template>
     </el-dialog>
 
@@ -148,6 +151,28 @@
         <el-table-column prop="source" label="来源" />
       </el-table>
     </el-dialog>
+
+    <el-dialog v-model="importVisible" title="每期商品成本导入" width="min(720px, 94vw)" @closed="resetImport">
+      <el-alert title="支持 CSV / XLSX。导入只追加成本版本，不覆盖历史；须先通过预检，再确认入账。" type="info" :closable="false" />
+      <p class="import-columns">CSV/XLSX 列：<code>sku_code</code>、<code>effective_from</code>、<code>effective_to</code>、<code>currency</code>、<code>purchase_cost</code>、<code>freight_cost</code>、<code>duty_cost</code>、<code>packaging_cost</code>、<code>other_cost</code>、<code>confirmed_cost</code>、<code>reason</code>。</p>
+      <el-upload drag :auto-upload="false" :limit="1" accept=".csv,.xlsx" :on-change="selectImportFile" :on-remove="resetImportFile">
+        <div>拖入文件，或点击选择 CSV / XLSX</div>
+      </el-upload>
+      <div v-if="importPreview" class="import-preview" data-testid="cost-import-preview">
+        <strong>预检结果：{{ importPreview.valid }} / {{ importPreview.total }} 行可导入</strong>
+        <span>失败 {{ importPreview.errors?.length || 0 }} 行。只有零错误才可确认入账。</span>
+        <el-table v-if="importPreview.errors?.length" :data="importPreview.errors.slice(0, 20)" size="small" border>
+          <el-table-column prop="row" label="行" width="70" />
+          <el-table-column prop="code" label="错误码" width="150" />
+          <el-table-column prop="message" label="原因" />
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button :disabled="!importFile" :loading="importing" @click="previewImport">校验预览</el-button>
+        <el-button type="primary" :disabled="!importPreview || importPreview.errors?.length || !importPreview.valid" :loading="importing" @click="confirmImport">确认导入</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -155,11 +180,12 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
-import { createProductCostVersion, fetchProductCosts, previewProductCostBackfill } from '../../api/productCosts';
+import { confirmProductCostImport, confirmProductCostVersion, createProductCostVersion, executeProductCostBackfill, fetchProductCosts, previewProductCostBackfill, previewProductCostImport } from '../../api/productCosts';
 
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('products.cost.manage', 'products.cost.approve'));
 const canBackfill = computed(() => auth.hasPermission('products.cost.backfill'));
+const canImport = computed(() => auth.hasPermission('products.cost.backfill') && auth.hasPermission('products.cost.approve'));
 const loading = ref(false);
 const saving = ref(false);
 const previewing = ref(false);
@@ -173,7 +199,11 @@ const historyVisible = ref(false);
 const historyRows = ref([]);
 const historySku = ref('');
 const preview = ref(null);
-const backfill = reactive({ scope: 'pending', rule: 'latest' });
+const importVisible = ref(false);
+const importFile = ref(null);
+const importPreview = ref(null);
+const importing = ref(false);
+const backfill = reactive({ scope: 'pending', rule: 'latest', effective_from: new Date().toISOString().slice(0, 10) });
 const form = reactive({});
 const statusMeta = {
   pending: { label: '待核对', type: 'warning' },
@@ -213,7 +243,7 @@ async function load() {
   rows.value = [...grouped.values()].map((item) => {
     item.versions.sort((a, b) => Number(b.version_no) - Number(a.version_no));
     const current = item.versions.find((version) => !version.effective_to) || item.versions[0];
-    return { ...item, ...current, id: item.sku_id, purchase_price: current.purchase_cost, version_no: `V${current.version_no}`, effective_date: String(current.effective_from || '').slice(0, 10), versions: item.versions.map((version) => ({ ...version, version_no: `V${version.version_no}`, effective_from: String(version.effective_from || '').slice(0, 10), effective_to: version.effective_to ? String(version.effective_to).slice(0, 10) : null })) };
+    return { ...item, ...current, id: item.sku_id, version_id: current.id, purchase_price: current.purchase_cost, version_no: `V${current.version_no}`, effective_date: String(current.effective_from || '').slice(0, 10), versions: item.versions.map((version) => ({ ...version, version_no: `V${version.version_no}`, effective_from: String(version.effective_from || '').slice(0, 10), effective_to: version.effective_to ? String(version.effective_to).slice(0, 10) : null })) };
   });
 }
 function applyFilters() { Object.assign(applied, filters); }
@@ -230,7 +260,9 @@ async function save() {
   saving.value = true;
   const payload = { sku: form.sku_id || form.id, purchase_cost: form.purchase_price, freight_cost: form.freight_cost, duty_cost: form.duty_cost, packaging_cost: form.packaging_cost, other_cost: form.other_cost, system_cost: calculatedFormCost.value.replace('¥', ''), confirmed_cost: form.confirmed_cost, reason: form.reason, status: 'confirmed', source: 'manual' };
   payload.effective_from = new Date(`${form.effective_from}T00:00:00`).toISOString();
-  const response = await createProductCostVersion(payload);
+  const response = form.status === 'pending'
+    ? await confirmProductCostVersion(form.version_id, { confirmed_cost: form.confirmed_cost, reason: form.reason })
+    : await createProductCostVersion(payload);
   saving.value = false;
   if (!response.success) return ElMessage.error(response.message || '商品成本保存失败');
   const index = rows.value.findIndex((item) => item.id === form.id);
@@ -244,6 +276,29 @@ async function save() {
   ElMessage.success('新成本版本已确认，历史版本已保留');
 }
 function openBackfill() { preview.value = null; backfillVisible.value = true; }
+function openImport() { resetImport(); importVisible.value = true; }
+function selectImportFile(uploadFile) { importFile.value = uploadFile.raw; importPreview.value = null; }
+function resetImportFile() { importFile.value = null; importPreview.value = null; }
+function resetImport() { resetImportFile(); importing.value = false; }
+async function previewImport() {
+  if (!importFile.value) return;
+  importing.value = true;
+  const response = await previewProductCostImport(importFile.value);
+  importing.value = false;
+  if (!response.success) return ElMessage.error(response.message || '成本导入预检失败');
+  importPreview.value = response.data;
+}
+async function confirmImport() {
+  if (!importFile.value || !importPreview.value || importPreview.value.errors?.length) return;
+  importing.value = true;
+  const key = globalThis.crypto?.randomUUID?.() || `cost-import-${Date.now()}`;
+  const response = await confirmProductCostImport(importFile.value, importPreview.value.token, key);
+  importing.value = false;
+  if (!response.success) return ElMessage.error(response.message || '成本导入失败');
+  ElMessage.success(`已导入 ${response.data?.created || 0} 个成本版本`);
+  importVisible.value = false;
+  await load();
+}
 async function previewBackfill() {
   previewing.value = true;
   const response = await previewProductCostBackfill({ sku_ids: [], dry_run: true });
@@ -252,6 +307,16 @@ async function previewBackfill() {
   const results = response.data?.results || [];
   preview.value = { matched: results.length, changed: results.filter((item) => item.action !== 'unchanged').length, unchanged: results.filter((item) => item.action === 'unchanged').length };
 }
+async function executeBackfill() {
+  if (!backfill.effective_from) return ElMessage.warning('请选择生效日期');
+  previewing.value = true;
+  const response = await executeProductCostBackfill({ sku_ids: [], effective_from: new Date(`${backfill.effective_from}T00:00:00`).toISOString(), reason: `系统回填：${backfill.rule}` });
+  previewing.value = false;
+  if (!response.success) return ElMessage.error(response.message || '回填执行失败');
+  ElMessage.success(`已生成 ${response.data?.created || 0} 个待核对成本版本`);
+  backfillVisible.value = false;
+  await load();
+}
 
 onMounted(load);
 </script>
@@ -259,4 +324,5 @@ onMounted(load);
 <style scoped>
 .cost-page{min-width:980px;color:#172033}.page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:16px}.page-header h1{margin:0;font-size:26px}.page-header p{max-width:760px;margin:7px 0 0;color:#64748b;line-height:1.6}.header-actions{display:flex;gap:10px}.definition-alert{margin-bottom:16px}.summary-strip{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:16px;border:1px solid #dbe3ee;border-radius:8px;background:#fff}.summary-strip div{padding:17px 20px;border-right:1px solid #e6ebf2}.summary-strip div:last-child{border-right:0}.summary-strip span,.summary-strip small{display:block;color:#718096;font-size:12px}.summary-strip strong{display:block;margin:7px 0 4px;font-size:25px}.summary-strip .warning{color:#d97706}.summary-strip .danger,.difference-value{color:#dc2626}.summary-strip .success{color:#16845b}.content-panel{border:1px solid #dbe3ee;border-radius:8px;background:#fff;overflow:hidden}.filters{display:flex;align-items:flex-end;gap:4px;padding:16px 16px 0}.filters :deep(.el-input){width:250px}.filters :deep(.el-select){width:160px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#1d4ed8}.system-cost{color:#2563eb;font-weight:600}.muted{color:#94a3b8}.sku-heading{display:flex;flex-direction:column;gap:6px;padding:14px 16px;margin-bottom:18px;border-radius:7px;background:#f5f8fc}.sku-heading strong{font-size:15px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}.audit-note{padding-top:14px;border-top:1px solid #e6ebf2;color:#718096;font-size:12px}.backfill-flow{display:flex;align-items:center;justify-content:center;gap:16px;margin:4px 0 22px}.backfill-flow div{display:flex;align-items:center;gap:8px;color:#334155}.backfill-flow b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#2563eb;color:#fff}.backfill-flow i{color:#94a3b8;font-style:normal}.backfill-form{margin-top:20px}.backfill-form :deep(.el-select){width:100%}.preview-result{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid #bbf7d0;border-radius:7px;background:#f0fdf4;color:#166534}@media(max-width:1100px){.summary-strip{grid-template-columns:repeat(2,1fr)}.summary-strip div:nth-child(2){border-right:0}.summary-strip div:nth-child(-n+2){border-bottom:1px solid #e6ebf2}}@media(max-width:720px){.cost-page{min-width:0}.page-header{flex-direction:column}.summary-strip{grid-template-columns:1fr 1fr}.header-actions{width:100%}.backfill-flow{align-items:flex-start;gap:7px}.backfill-flow div{flex-direction:column;text-align:center;font-size:12px}.form-grid{grid-template-columns:1fr}}
 .change-preview{display:grid;grid-template-columns:1fr auto 1fr 1fr;align-items:center;gap:12px;padding:14px;margin-bottom:18px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}.change-preview div{display:flex;flex-direction:column;gap:4px}.change-preview span,.change-preview small{color:#64748b;font-size:12px}.change-preview strong{font-size:17px}.change-preview .change-arrow{color:#94a3b8;font-size:20px}.change-preview .change-result{padding-left:12px;border-left:1px solid #dbe3ee}
+.import-columns{line-height:1.7;color:#64748b}.import-preview{display:flex;flex-direction:column;gap:10px;margin-top:16px;padding:14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}
 </style>

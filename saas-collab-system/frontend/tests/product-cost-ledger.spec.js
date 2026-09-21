@@ -34,6 +34,9 @@ describe('商品成本菜单与页面契约', () => {
     expect(page).toContain('回填不会覆盖或改写任何历史成本');
     expect(page).toContain('dry_run: true');
     expect(api).toContain('/api/internal/products/costs/backfill-preview/');
+    expect(api).toContain('/api/internal/products/costs/backfill-execute/');
+    expect(api).toContain('/confirm/');
+    expect(page).toContain('写入待核对版本');
     expect(api).toContain('/api/internal/products/costs/');
   });
   it('成本调整新增版本且不覆盖历史', () => {
@@ -56,5 +59,15 @@ describe('商品成本菜单与页面契约', () => {
     expect(page).toContain('成本变化');
     expect(page).toContain('changeAmount');
     expect(page).toContain('changeRate');
+  });
+
+  it('支持每期 CSV/XLSX 成本预检后确认导入', () => {
+    expect(page).toContain('每期成本导入');
+    expect(page).toContain('accept=".csv,.xlsx"');
+    expect(page).toContain('导入只追加成本版本');
+    expect(page).toContain('cost-import-preview');
+    expect(api).toContain('/api/internal/products/costs/import/preview/');
+    expect(api).toContain('/api/internal/products/costs/import/confirm/');
+    expect(api).toContain('Idempotency-Key');
   });
 });

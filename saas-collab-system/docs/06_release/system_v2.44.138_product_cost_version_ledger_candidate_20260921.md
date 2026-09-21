@@ -5,7 +5,7 @@
 - 版本：`V2.44.138`
 - 登记日期：`2026-09-21`
 - 主题：基础档案新增“商品成本”菜单，支持商品成本人工维护、系统生成回填预览、差异核对和历史版本展示。
-- 状态：`READY_FOR_REVIEW`；已在 `v2.44.137-deployed` 干净基线上完成前后端、迁移、时态成本解析、送样成本快照和独立权限，未部署。
+- 状态：`READY_FOR_REVIEW`；已在 `v2.44.137-deployed` 干净基线上完成成本版本、每期 CSV/XLSX 导入、回填执行、人工确认、数据库级区间互斥、时态解析和下游快照，未部署。
 - 直接父基线：`V2.44.137` / `v2.44.137-deployed` / `c228080fa6982a9971c7de06ea0d47fa5312d0f5`。
 - 版本占用复核：`V2.44.137` 已完成生产部署并占用不可变标签 `v2.44.137-deployed`，因此本次顺延登记 `V2.44.138`。
 - 发布边界：本记录不创建 deployed 标签、不合并主线、不触发虚拟机或生产部署。
@@ -99,4 +99,24 @@
 - 处理日期：`2026-09-21`。
 - 干净候选：`codex/v244138-product-cost`，直接基于 `v2.44.137-deployed`。
 - 实现结论：已移除 Mock fallback，补齐后端模型/API/迁移/时态解析/独立权限，送样成本已固化版本和金额并进入归因报表。
-- 当前结论：由 `REGISTERED_BLOCKED` 转为 `READY_FOR_REVIEW`；在 PR/CI/审批前不创建 `v2.44.138-deployed`、不执行虚拟机部署。
+- 当前结论：候选已进入复审，但复审结论为 `REVIEW_BLOCKED`；在下列缺口修复并复审通过前不创建 `v2.44.138-deployed`、不执行虚拟机部署。
+
+## 候选复审结论（2026-09-21）
+
+- 候选身份核验通过：分支 `codex/v244138-product-cost`，提交 `1b2fb52aa101cabb1cce1b0636b021ac50182643`，与 `v2.44.137-deployed`（`c228080fa6982a9971c7de06ea0d47fa5312d0f5`）的 merge-base 一致，且候选仅领先 1 个提交。
+- 已确认真实 API、时点成本解析、送样 `cost_version_id`/金额快照和四项独立权限存在；前端 `productCosts.js` 已无 Mock fallback。
+- 阻断 1：当前只实现 `POST /api/internal/products/costs/backfill-preview/`，没有把系统计算结果持久化为 `pending` 成本版本的回填执行服务或接口，未满足“系统回填只生成新的待核对版本”。
+- 阻断 2：没有针对既有 `pending` 版本的审核/确认生效接口；现有新增接口可直接创建 `confirmed` 版本，不能替代“待核对版本经人工确认后接续生效”的受控状态流转。
+- 阻断 3：同一租户、SKU 的已确认生效区间防重叠仅由 `append_cost_version()` 服务层检查保证；模型迁移只有版本唯一、区间正向和金额非负约束，没有数据库级区间互斥约束，无法防止绕过服务层的重叠写入。
+- 验证复跑：后端聚焦测试 `8 passed`；Django system check 0 问题；`makemigrations --check --dry-run` 无漂移；前端合同测试 `10 passed`；`git diff --check` 通过。
+- 发布决定：维持登记但阻断部署。补齐上述三项并增加回填执行、人工确认和绕过服务层重叠写入的测试后，方可重新申请候选复审。
+
+## 阻断修复与导入能力补记（2026-09-21）
+
+- 每期导入：新增 CSV/XLSX 两阶段导入，预检返回行级错误、文件摘要和有时效的确认 token；确认阶段要求 `products.cost.backfill` + `products.cost.approve` 双权限。
+- 导入安全：确认导入整批原子追加，使用 `Idempotency-Key` + 文件摘要持久化防重；批次内或已有版本的区间冲突均拒绝入账，不覆盖历史金额。
+- 回填闭环：新增 backfill execute，将系统计算结果持久化为 `pending` 版本；相同 SKU/时点/成本重放返回 unchanged。
+- 确认闭环：新增待核对版本 confirm API，只有 `products.cost.approve` 可将 pending 版本确认生效，并在事务内结束上一个开放区间。
+- 数据库约束：PostgreSQL 迁移新增 `btree_gist` 的确认版本时间区间排斥约束，防止绕过服务层写入重叠区间。
+- 验证：后端导入/回填/确认/时态快照 14/14 通过；前端商品成本与菜单契约 11/11 通过；Django check、迁移漂移检查、Vite 生产构建和 `git diff --check` 通过。
+- 当前结论：上次复审三项实现型阻断已修复，状态回到 `READY_FOR_REVIEW`；仍需重新复审及 PR/CI/发布审批，不视为已部署。

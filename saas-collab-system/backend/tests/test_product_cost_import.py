@@ -1,0 +1,145 @@
+import io
+import zipfile
+from datetime import timedelta
+
+import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
+from rest_framework.test import APIClient
+
+from apps.accounts.models import CustomUser
+from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.products.cost_services import append_cost_version
+from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
+from apps.tenants.models import Tenant
+
+
+HEADERS = "sku_code,effective_from,effective_to,currency,purchase_cost,freight_cost,duty_cost,packaging_cost,other_cost,confirmed_cost,reason\n"
+
+
+def make_context(code="import"):
+    tenant = Tenant.objects.create(name=f"Cost {code}", code=f"cost-{code}")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code=f"SPU-{code}", product_name="Imported product")
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=f"SKU-{code}", product_name="Imported product")
+    user = CustomUser.objects.create_user(
+        username=f"cost-{code}", tenant=tenant, user_type=CustomUser.UserType.INTERNAL
+    )
+    return tenant, sku, user
+
+
+def grant(user, *codes):
+    role = Role.objects.create(tenant=user.tenant, name=f"Cost {user.id}", code=f"cost-import-{user.id}")
+    role.permissions.add(*Permission.objects.filter(code__in=codes))
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+
+
+def client_for(user):
+    client = APIClient()
+    client.force_authenticate(user=user)
+    return client
+
+
+def csv_file(sku_code, start="2026-01-01", end="2026-02-01", purchase="10.0000"):
+    body = HEADERS + f"{sku_code},{start},{end},CNY,{purchase},2,1,0.5,0.5,14,monthly import\n"
+    return body.encode("utf-8-sig")
+
+
+def upload(raw, name="costs.csv"):
+    content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if name.endswith("xlsx") else "text/csv"
+    return SimpleUploadedFile(name, raw, content_type=content_type)
+
+
+def xlsx_file(rows):
+    strings = []
+    for row_number, row in enumerate(rows, start=1):
+        cells = []
+        for column_number, value in enumerate(row, start=1):
+            column = ""
+            number = column_number
+            while number:
+                number, remainder = divmod(number - 1, 26)
+                column = chr(65 + remainder) + column
+            cells.append(f'<c r="{column}{row_number}" t="inlineStr"><is><t>{value}</t></is></c>')
+        strings.append(f'<row r="{row_number}">{"".join(cells)}</row>')
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Costs" sheetId="1" r:id="rId1"/></sheets></workbook>')
+        archive.writestr("xl/_rels/workbook.xml.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>')
+        archive.writestr("xl/worksheets/sheet1.xml", f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{"".join(strings)}</sheetData></worksheet>')
+    return stream.getvalue()
+
+
+@pytest.mark.django_db
+def test_csv_preview_confirm_and_idempotent_replay():
+    tenant, sku, user = make_context("csv")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    client = client_for(user)
+    raw = csv_file(sku.sku_code)
+    preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw)}, format="multipart")
+    assert preview.status_code == 200
+    detail = preview.json()["data"]
+    assert (detail["total"], detail["valid"], detail["errors"]) == (1, 1, [])
+    assert len(detail["digest"]) == 64 and detail["token"]
+
+    payload = {"file": upload(raw), "token": detail["token"]}
+    first = client.post("/api/internal/products/costs/import/confirm/", payload, format="multipart", HTTP_IDEMPOTENCY_KEY="cost-import-0001")
+    assert first.status_code == 201
+    replay = client.post(
+        "/api/internal/products/costs/import/confirm/",
+        {"file": upload(raw), "token": detail["token"]}, format="multipart", HTTP_IDEMPOTENCY_KEY="cost-import-0001",
+    )
+    assert replay.status_code == 201
+    assert replay.json()["data"] == first.json()["data"]
+    assert ProductCostVersion.objects.filter(tenant=tenant, source=ProductCostVersion.Source.IMPORT).count() == 1
+
+
+@pytest.mark.django_db
+def test_same_idempotency_key_rejects_different_file():
+    _, sku, user = make_context("key")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    client = client_for(user)
+    raw = csv_file(sku.sku_code)
+    preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw)}, format="multipart").json()["data"]
+    assert client.post("/api/internal/products/costs/import/confirm/", {"file": upload(raw), "token": preview["token"]}, format="multipart", HTTP_IDEMPOTENCY_KEY="same-key-0001").status_code == 201
+    changed = csv_file(sku.sku_code, start="2026-03-01", end="2026-04-01", purchase="12")
+    changed_preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(changed)}, format="multipart").json()["data"]
+    response = client.post("/api/internal/products/costs/import/confirm/", {"file": upload(changed), "token": changed_preview["token"]}, format="multipart", HTTP_IDEMPOTENCY_KEY="same-key-0001")
+    assert response.status_code == 400
+    assert ProductCostVersion.objects.filter(sku=sku).count() == 1
+
+
+@pytest.mark.django_db
+def test_preview_reports_batch_and_database_overlap():
+    tenant, sku, user = make_context("overlap")
+    grant(user, "products.cost.backfill")
+    start = timezone.now()
+    append_cost_version(
+        tenant=tenant, sku=sku, actor=user, status="confirmed", source="manual", currency="CNY",
+        purchase_cost=10, freight_cost=0, duty_cost=0, packaging_cost=0, other_cost=0,
+        system_cost=None, confirmed_cost=10, effective_from=start, effective_to=start + timedelta(days=30), reason="existing",
+    )
+    date = start.strftime("%Y-%m-%dT%H:%M:%S%z")
+    body = HEADERS + f"{sku.sku_code},{date},,CNY,10,0,0,0,0,10,one\n{sku.sku_code},{date},,CNY,11,0,0,0,0,11,two\n"
+    response = client_for(user).post("/api/internal/products/costs/import/preview/", {"file": upload(body.encode())}, format="multipart")
+    assert response.status_code == 200
+    errors = response.json()["data"]["errors"]
+    assert any("import row" in item["message"] for item in errors)
+    assert any("existing version" in item["message"] for item in errors)
+
+
+@pytest.mark.django_db
+def test_xlsx_preview_and_confirm_requires_both_permissions():
+    _, sku, user = make_context("xlsx")
+    grant(user, "products.cost.backfill")
+    row = [sku.sku_code, "2026-01-01", "2026-02-01", "CNY", "10", "2", "1", "0.5", "0.5", "14", "xlsx"]
+    raw = xlsx_file([list(EXPECTED_HEADERS := HEADERS.strip().split(",")), row])
+    client = client_for(user)
+    preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw, "costs.xlsx")}, format="multipart")
+    assert preview.status_code == 200 and preview.json()["data"]["valid"] == 1
+    confirm = client.post(
+        "/api/internal/products/costs/import/confirm/",
+        {"file": upload(raw, "costs.xlsx"), "token": preview.json()["data"]["token"]},
+        format="multipart", HTTP_IDEMPOTENCY_KEY="xlsx-import-0001",
+    )
+    assert confirm.status_code == 403
