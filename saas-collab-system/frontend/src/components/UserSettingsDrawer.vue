@@ -9,7 +9,7 @@
     :close-on-press-escape="!busy"
     @opened="loadProfile"
   >
-    <p class="settings-intro">管理您的个人资料和登录密码。</p>
+    <p class="settings-intro">管理您的个人资料、页面使用偏好和登录密码。</p>
 
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon />
 
@@ -40,6 +40,25 @@
             <el-input v-model.trim="profileForm.phone" maxlength="32" placeholder="请输入手机号码" />
           </el-form-item>
           <el-button type="primary" native-type="submit" :loading="savingProfile">保存个人资料</el-button>
+        </el-form>
+      </el-tab-pane>
+
+      <el-tab-pane label="使用偏好" name="preferences">
+        <el-form label-position="top" @submit.prevent="savePreferences">
+          <el-form-item label="最大打开页签数">
+            <el-input-number v-model="preferencesForm.tab_limit" :min="5" :max="30" :step="1" />
+          </el-form-item>
+          <p class="setting-help">
+            默认最多打开 15 个页签，可设置为 5–30 个。达到上限后，系统会提示您先关闭不需要的页签，以免影响系统性能。
+          </p>
+          <el-alert
+            v-if="openTabCount > preferencesForm.tab_limit"
+            :title="`当前已打开 ${openTabCount} 个页签，请关闭至少 ${openTabCount - preferencesForm.tab_limit} 个。`"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <el-button type="primary" native-type="submit">保存使用偏好</el-button>
         </el-form>
       </el-tab-pane>
 
@@ -100,9 +119,11 @@ import { changeMyPassword, getMyProfile, updateMyProfile } from '../api/auth';
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   currentUser: { type: Object, default: null },
+  tabLimit: { type: Number, default: 15 },
+  openTabCount: { type: Number, default: 1 },
 });
 
-const emit = defineEmits(['update:modelValue', 'profile-updated', 'password-changed']);
+const emit = defineEmits(['update:modelValue', 'profile-updated', 'password-changed', 'tab-limit-changed']);
 const activeTab = ref('profile');
 const loadingProfile = ref(false);
 const savingProfile = ref(false);
@@ -112,6 +133,7 @@ const profileFormRef = ref();
 const passwordFormRef = ref();
 const profileForm = reactive({ username: '', full_name: '', email: '', phone: '' });
 const passwordForm = reactive({ current_password: '', new_password: '', confirm_password: '' });
+const preferencesForm = reactive({ tab_limit: 15 });
 
 const drawerVisible = computed({
   get: () => props.modelValue,
@@ -156,6 +178,10 @@ function applyProfile(profile = {}) {
   profileForm.full_name = profile.full_name || '';
   profileForm.email = profile.email || '';
   profileForm.phone = profile.phone || '';
+}
+
+function savePreferences() {
+  emit('tab-limit-changed', preferencesForm.tab_limit);
 }
 
 async function loadProfile() {
@@ -215,10 +241,17 @@ async function savePassword() {
 }
 
 watch(drawerVisible, (visible) => {
-  if (visible) return;
+  if (visible) {
+    preferencesForm.tab_limit = props.tabLimit;
+    return;
+  }
   errorMessage.value = '';
   activeTab.value = 'profile';
   Object.assign(passwordForm, { current_password: '', new_password: '', confirm_password: '' });
+});
+
+watch(() => props.tabLimit, (limit) => {
+  preferencesForm.tab_limit = limit;
 });
 </script>
 
@@ -227,4 +260,5 @@ watch(drawerVisible, (visible) => {
 .settings-tabs :deep(.el-alert) { margin-bottom: 18px; }
 .settings-tabs :deep(.el-form) { padding-top: 12px; }
 .settings-tabs :deep(.el-button[type='submit']) { min-width: 144px; }
+.setting-help { margin: -8px 0 18px; color: #64748b; font-size: 13px; line-height: 1.7; }
 </style>

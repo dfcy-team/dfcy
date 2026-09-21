@@ -26,6 +26,30 @@ describe('MainLayout navigation shell', () => {
     expect(source).toContain('sessionStorage.setItem(tabsStorageKey, JSON.stringify(tabs));');
   });
 
+  it('limits new tabs with a per-user preference and defaults to 15', () => {
+    expect(source).toContain('const defaultTabLimit = 15;');
+    expect(source).toContain('business-workbench:tab-limit:');
+    expect(source).toContain('openTabs.value.length < tabLimit.value');
+    expect(source).toContain('最多可打开 ${tabLimit.value} 个页签');
+    expect(source).toContain('return false;');
+    expect(source).toContain('const navigationFailure = await router.push(item.path);');
+    expect(source).toContain('if (navigationFailure) menuRenderVersion.value += 1;');
+  });
+
+  it('renders the tab strip as left-aligned compact buttons', () => {
+    expect(source).toContain('class="header-primary"');
+    expect(source).toContain('justify-content: flex-start;');
+    expect(source).toContain('border-radius: 5px;');
+    expect(source).toContain('background: linear-gradient(#fff, #f3f4f6);');
+    expect(source).toContain('background: #334155; font-weight: 600;');
+    expect(source).toContain('height: calc(100vh - 104px);');
+  });
+
+  it('explains tab move and close interactions on hover', () => {
+    expect(source).toContain('可以移动TAB页，可以关闭TAB页');
+    expect(source).toContain('可以移动TAB页，固定页签不可关闭');
+  });
+
   it('shows position-aware controls for the main content scroll container', () => {
     expect(source).toContain('ref="mainScrollContainer"');
     expect(source).toContain('@scroll="updateScrollControls"');
