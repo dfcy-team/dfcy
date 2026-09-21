@@ -25,6 +25,19 @@ EXPECTED_COLUMNS = (
     "sku_code", "effective_from", "effective_to", "currency", "purchase_cost",
     "freight_cost", "duty_cost", "packaging_cost", "other_cost", "confirmed_cost", "reason",
 )
+HEADER_ALIASES = {
+    "SKU编码": "sku_code",
+    "生效开始": "effective_from",
+    "生效结束": "effective_to",
+    "币种": "currency",
+    "采购成本": "purchase_cost",
+    "物流分摊": "freight_cost",
+    "税费": "duty_cost",
+    "包装费": "packaging_cost",
+    "其他费用": "other_cost",
+    "确认成本": "confirmed_cost",
+    "调整原因": "reason",
+}
 AMOUNT_COLUMNS = ("purchase_cost", "freight_cost", "duty_cost", "packaging_cost", "other_cost")
 TOKEN_SALT = "products.cost.import.v1"
 
@@ -174,7 +187,10 @@ def parse_and_validate(*, tenant, raw, filename=""):
     if not rows:
         errors.append({"row": 1, "field": "file", "message": "The import file is empty."})
         return parsed, errors, digest
-    headers = [str(value or "").strip().lower() for value in rows[0]]
+    headers = []
+    for value in rows[0]:
+        label = str(value or "").strip().lstrip("*").strip()
+        headers.append(HEADER_ALIASES.get(label, label.lower()))
     missing = [field for field in EXPECTED_COLUMNS if field not in headers]
     if missing:
         errors.append({"row": 1, "field": "headers", "message": "Missing columns: %s." % ", ".join(missing)})

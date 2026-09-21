@@ -95,6 +95,22 @@ def test_csv_preview_confirm_and_idempotent_replay():
 
 
 @pytest.mark.django_db
+def test_downloadable_chinese_csv_template_headers_are_accepted():
+    _, sku, user = make_context("zh-template")
+    grant(user, "products.cost.backfill")
+    headers = "*SKU编码,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
+    raw = (headers + f"{sku.sku_code},2026-07-01,2026-08-01,CNY,10,2,1,0.5,0.5,14,月度导入\n").encode("utf-8-sig")
+    response = client_for(user).post(
+        "/api/internal/products/costs/import/preview/",
+        {"file": upload(raw, "商品成本导入模板.csv")},
+        format="multipart",
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["errors"] == []
+    assert response.json()["data"]["valid"] == 1
+
+
+@pytest.mark.django_db
 def test_same_idempotency_key_rejects_different_file():
     _, sku, user = make_context("key")
     grant(user, "products.cost.backfill", "products.cost.approve")

@@ -154,9 +154,16 @@
 
     <el-dialog v-model="importVisible" title="每期商品成本导入" width="min(720px, 94vw)" @closed="resetImport">
       <el-alert title="支持 CSV / XLSX。导入只追加成本版本，不覆盖历史；须先通过预检，再确认入账。" type="info" :closable="false" />
-      <p class="import-columns">CSV/XLSX 列：<code>sku_code</code>、<code>effective_from</code>、<code>effective_to</code>、<code>currency</code>、<code>purchase_cost</code>、<code>freight_cost</code>、<code>duty_cost</code>、<code>packaging_cost</code>、<code>other_cost</code>、<code>confirmed_cost</code>、<code>reason</code>。</p>
+      <div class="template-guide">
+        <div><strong>第一步：下载模板</strong><span>模板已包含中文列名，按表格填写即可。</span></div>
+        <el-button type="primary" plain data-testid="cost-template-download" @click="downloadImportTemplate">下载导入模板</el-button>
+      </div>
+      <div class="import-tips">
+        <strong>第二步：填写并上传</strong>
+        <span>模板中带 * 的列为必填项；生效结束留空表示持续有效。</span>
+      </div>
       <el-upload drag :auto-upload="false" :limit="1" accept=".csv,.xlsx" :on-change="selectImportFile" :on-remove="resetImportFile">
-        <div>拖入文件，或点击选择 CSV / XLSX</div>
+        <div><strong>上传已填写的成本模板</strong><small>拖入文件，或点击选择 CSV / XLSX</small></div>
       </el-upload>
       <div v-if="importPreview" class="import-preview" data-testid="cost-import-preview">
         <strong>预检结果：{{ importPreview.valid }} / {{ importPreview.total }} 行可导入</strong>
@@ -277,6 +284,18 @@ async function save() {
 }
 function openBackfill() { preview.value = null; backfillVisible.value = true; }
 function openImport() { resetImport(); importVisible.value = true; }
+function downloadImportTemplate() {
+  const headers = ['*SKU编码', '*生效开始', '生效结束', '*币种', '采购成本', '物流分摊', '税费', '包装费', '其他费用', '*确认成本', '调整原因'];
+  const blob = new Blob([`\uFEFF${headers.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = '商品成本导入模板.csv';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 function selectImportFile(uploadFile) { importFile.value = uploadFile.raw; importPreview.value = null; }
 function resetImportFile() { importFile.value = null; importPreview.value = null; }
 function resetImport() { resetImportFile(); importing.value = false; }
@@ -324,5 +343,5 @@ onMounted(load);
 <style scoped>
 .cost-page{min-width:980px;color:#172033}.page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:16px}.page-header h1{margin:0;font-size:26px}.page-header p{max-width:760px;margin:7px 0 0;color:#64748b;line-height:1.6}.header-actions{display:flex;gap:10px}.definition-alert{margin-bottom:16px}.summary-strip{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:16px;border:1px solid #dbe3ee;border-radius:8px;background:#fff}.summary-strip div{padding:17px 20px;border-right:1px solid #e6ebf2}.summary-strip div:last-child{border-right:0}.summary-strip span,.summary-strip small{display:block;color:#718096;font-size:12px}.summary-strip strong{display:block;margin:7px 0 4px;font-size:25px}.summary-strip .warning{color:#d97706}.summary-strip .danger,.difference-value{color:#dc2626}.summary-strip .success{color:#16845b}.content-panel{border:1px solid #dbe3ee;border-radius:8px;background:#fff;overflow:hidden}.filters{display:flex;align-items:flex-end;gap:4px;padding:16px 16px 0}.filters :deep(.el-input){width:250px}.filters :deep(.el-select){width:160px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#1d4ed8}.system-cost{color:#2563eb;font-weight:600}.muted{color:#94a3b8}.sku-heading{display:flex;flex-direction:column;gap:6px;padding:14px 16px;margin-bottom:18px;border-radius:7px;background:#f5f8fc}.sku-heading strong{font-size:15px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}.audit-note{padding-top:14px;border-top:1px solid #e6ebf2;color:#718096;font-size:12px}.backfill-flow{display:flex;align-items:center;justify-content:center;gap:16px;margin:4px 0 22px}.backfill-flow div{display:flex;align-items:center;gap:8px;color:#334155}.backfill-flow b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#2563eb;color:#fff}.backfill-flow i{color:#94a3b8;font-style:normal}.backfill-form{margin-top:20px}.backfill-form :deep(.el-select){width:100%}.preview-result{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid #bbf7d0;border-radius:7px;background:#f0fdf4;color:#166534}@media(max-width:1100px){.summary-strip{grid-template-columns:repeat(2,1fr)}.summary-strip div:nth-child(2){border-right:0}.summary-strip div:nth-child(-n+2){border-bottom:1px solid #e6ebf2}}@media(max-width:720px){.cost-page{min-width:0}.page-header{flex-direction:column}.summary-strip{grid-template-columns:1fr 1fr}.header-actions{width:100%}.backfill-flow{align-items:flex-start;gap:7px}.backfill-flow div{flex-direction:column;text-align:center;font-size:12px}.form-grid{grid-template-columns:1fr}}
 .change-preview{display:grid;grid-template-columns:1fr auto 1fr 1fr;align-items:center;gap:12px;padding:14px;margin-bottom:18px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}.change-preview div{display:flex;flex-direction:column;gap:4px}.change-preview span,.change-preview small{color:#64748b;font-size:12px}.change-preview strong{font-size:17px}.change-preview .change-arrow{color:#94a3b8;font-size:20px}.change-preview .change-result{padding-left:12px;border-left:1px solid #dbe3ee}
-.import-columns{line-height:1.7;color:#64748b}.import-preview{display:flex;flex-direction:column;gap:10px;margin-top:16px;padding:14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}
+.template-guide{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:16px 0 12px;padding:16px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff}.template-guide div,.import-tips{display:flex;flex-direction:column;gap:5px}.template-guide span,.import-tips span{color:#64748b;font-size:13px}.import-tips{margin-bottom:12px}.import-preview{display:flex;flex-direction:column;gap:10px;margin-top:16px;padding:14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}.template-guide+ .import-tips+ :deep(.el-upload) small{display:block;margin-top:8px;color:#94a3b8}
 </style>
