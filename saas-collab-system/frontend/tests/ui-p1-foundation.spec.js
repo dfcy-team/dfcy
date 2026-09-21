@@ -117,7 +117,7 @@ describe('UI-P1 trusted menu and workspace', () => {
     const configPageSource = read('src/views/settings/ConfigCenterList.vue');
 
     expect(routerSource).toContain("path: 'influencers/bd-config'");
-    expect(routerSource).toContain("configKey: 'influencers.bd.performance'");
+    expect(routerSource).toContain("../views/influencers/BdPerformanceConfig.vue");
     expect(configPageSource).toContain('item.config_key === props.configKey');
     expect(configPageSource).toContain('config_key: props.configKey || undefined');
   });
