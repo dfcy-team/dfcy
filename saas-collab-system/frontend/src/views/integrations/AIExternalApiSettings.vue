@@ -1,162 +1,44 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { createInternalReadonlyClient, fetchInternalReadonlyAudit, fetchInternalReadonlyClients, rotateInternalReadonlyCredential, setInternalReadonlyClientStatus, updateInternalReadonlyClient } from '../../api/internalReadonly';
 
-const activeSection = ref('boundary');
-
+const activeSection=ref('clients'), clients=ref([]), auditRows=ref([]), loading=ref(false), saving=ref(false);
+const editorVisible=ref(false), auditVisible=ref(false), secretVisible=ref(false), editingId=ref(null), oneTimeCredential=ref(null), formRef=ref();
 const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
 const blockedMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
-
-const capabilityRows = [
-  { capability: '业务数据查询', owner: 'SaaS 协同系统', status: '允许', detail: '按租户、资源、字段和时间范围限定' },
-  { capability: '增量同步', owner: '调用方系统', status: '允许', detail: '使用 updated_at、deleted_at、version 和 next_cursor' },
-  { capability: '业务内容写入', owner: '调用方系统', status: '禁止', detail: '不开放新增、修改、删除、审批、发布或任务触发' },
-  { capability: 'AI 生成内容回写', owner: '知识库项目', status: '禁止', detail: '摘要、标签、分类、评分和提示词都不回写' },
-  { capability: '访问审计', owner: 'SaaS 协同系统', status: '系统记录', detail: '只写独立审计日志，不修改被读取的业务对象' }
-];
-
-const contractFields = [
-  ['resource_type', '资源类型'],
-  ['resource_id', '资源稳定唯一标识'],
-  ['tenant_id', '租户隔离标识'],
-  ['updated_at', '增量同步水位'],
-  ['deleted_at', '删除传播标识'],
-  ['version', '数据版本'],
-  ['content_hash', '内容幂等校验'],
-  ['next_cursor', '分页与断点续传']
-];
-
-const boundarySummary = computed(() => `${safeMethods.join(' / ')} 只读，${blockedMethods.join(' / ')} 全部拒绝`);
+const resources=[['products','商品'],['suppliers','供应商'],['purchase_orders','采购订单']];
+const resourceFields={products:['id','sku','name','status','updated_at'],suppliers:['id','code','name','status','updated_at'],purchase_orders:['id','order_number','supplier_id','status','ordered_at','updated_at']};
+const fields=[...new Set(Object.values(resourceFields).flat())];
+const blank=()=>({name:'',caller_type:'internal_system',resources:[],fields:[],cidrs:[''],rate_limit:120,page_size:100,expires_at:''});
+const form=reactive(blank());
+const cidr=/^(?:\d{1,3}\.){3}\d{1,3}(?:\/(?:[0-9]|[12][0-9]|3[0-2]))?$/;
+const rules={name:[{required:true,message:'请输入系统名称'}],caller_type:[{required:true,message:'请选择调用方类型'}],resources:[{type:'array',required:true,min:1,message:'至少选择一个资源'}],fields:[{type:'array',required:true,min:1,message:'至少选择一个字段'}],cidrs:[{validator:(_,v,done)=>v?.length&&v.every(x=>cidr.test(x))?done():done(new Error('请输入有效 IPv4 或 CIDR'))}],rate_limit:[{type:'number',min:1,max:10000,message:'限流须为 1–10000'}],page_size:[{type:'number',min:1,max:1000,message:'分页上限须为 1–1000'}],expires_at:[{required:true,message:'请选择有效期'}]};
+const boundarySummary=computed(()=>`${safeMethods.join(' / ')} 只读，${blockedMethods.join(' / ')} 全部拒绝`);
+const capabilityRows=[{capability:'业务数据查询',status:'允许',detail:'按租户、资源、字段和时间范围限定'},{capability:'增量同步',status:'允许',detail:'使用 updated_at、deleted_at、version 和 next_cursor'},{capability:'业务内容写入',status:'禁止',detail:'不开放新增、修改、删除、审批、发布或任务触发'},{capability:'AI 生成内容回写',status:'禁止',detail:'摘要、标签、分类和提示词都不回写'}];
+const contractFields=[['resource_type','资源类型'],['resource_id','资源稳定唯一标识'],['tenant_id','租户隔离标识'],['updated_at','增量同步水位'],['deleted_at','删除传播标识'],['version','数据版本'],['content_hash','内容幂等校验'],['next_cursor','分页与断点续传']];
+async function load(){loading.value=true;const r=await fetchInternalReadonlyClients();loading.value=false;if(r.success)clients.value=r.data.items||[];else ElMessage.error(r.message)}
+function resourceNames(value){return Object.keys(value||{}).join('、')}
+function edit(row){editingId.value=row?.id||null;const configured=row?.resources&& !Array.isArray(row.resources)?row.resources:{};Object.assign(form,blank(),{...row,resources:Object.keys(configured),fields:[...new Set(Object.values(configured).flat())],cidrs:[...(row?.allowed_cidrs||[''])],rate_limit:row?.rate_limit_per_minute??120,page_size:row?.page_size_limit??100,expires_at:row?.expires_at?.slice?.(0,10)||''});editorVisible.value=true}
+function payload(){const mapped=Object.fromEntries(form.resources.map(code=>[code,form.fields.filter(field=>resourceFields[code].includes(field))]));if(Object.values(mapped).some(items=>!items.length))throw new Error('每个资源至少选择一个适用字段');return{name:form.name,caller_type:form.caller_type,resources:mapped,allowed_cidrs:form.cidrs,rate_limit_per_minute:form.rate_limit,page_size_limit:form.page_size,expires_at:`${form.expires_at}T23:59:59+08:00`}}
+async function save(){if(!(await formRef.value.validate().catch(()=>false)))return;let data;try{data=payload()}catch(error){return ElMessage.error(error.message)}await ElMessageBox.confirm(`确认${editingId.value?'更新':'创建'}此只读调用系统？`,'二次确认',{type:'warning'});saving.value=true;const r=editingId.value?await updateInternalReadonlyClient(editingId.value,data):await createInternalReadonlyClient(data);saving.value=false;if(!r.success)return ElMessage.error(r.message);editorVisible.value=false;await load();const credential=r.data?.credential||r.data;if(credential?.client_secret){oneTimeCredential.value={client_id:credential.client_id,client_secret:credential.client_secret};secretVisible.value=true}else ElMessage.success('配置已保存')}
+async function status(row){const next=row.status==='active'?'disabled':'active';await ElMessageBox.confirm(`确认${next==='active'?'启用':'停用'}“${row.name}”？`,'二次确认',{type:'warning'});const r=await setInternalReadonlyClientStatus(row.id,next);if(r.success){ElMessage.success('状态已更新');await load()}else ElMessage.error(r.message)}
+async function rotate(row){await ElMessageBox.confirm(`轮换“${row.name}”密钥后旧密钥立即失效，是否继续？`,'二次确认',{type:'warning'});saving.value=true;const key=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`;const r=await rotateInternalReadonlyCredential(row.id,key);saving.value=false;if(r.success){oneTimeCredential.value={client_id:r.data.client_id,client_secret:r.data.client_secret};secretVisible.value=true}else ElMessage.error(r.message)}
+async function audit(row){auditVisible.value=true;const r=await fetchInternalReadonlyAudit(row.id);auditRows.value=r.success?(r.data.items||[]).map(item=>({...item,client_name:row.name,method:'配置',source_ip:'--',result:'成功'})):[]}
+onMounted(load);
 </script>
-
-<template>
-  <main class="knowledge-api-page">
-    <header class="page-header">
-      <div>
-        <p class="section-path">系统管理 · API 数据接入</p>
-        <h1>内部系统数据接口</h1>
-        <p>本系统向知识库及经授权的内部系统提供统一、受控的业务数据读取能力，不接收调用方回写。</p>
-      </div>
-      <el-tag type="success" effect="plain" size="large">强制只读</el-tag>
-    </header>
-
-    <el-alert
-      title="调用方不能新增、修改、删除、审批、发布或触发本系统任务；知识库的索引、切片、向量和 AI 生成内容全部留在知识库项目。"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
-
-    <section class="status-grid" aria-label="内部系统接口边界状态">
-      <article>
-        <span>集成方式</span>
-        <strong>HTTPS API</strong>
-        <small>不直连业务数据库</small>
-      </article>
-      <article>
-        <span>访问身份</span>
-        <strong>独立服务身份</strong>
-        <small>不共用管理员账号或人员 JWT</small>
-      </article>
-      <article>
-        <span>HTTP 方法</span>
-        <strong>{{ safeMethods.join(' · ') }}</strong>
-        <small>所有写方法双重拒绝</small>
-      </article>
-      <article>
-        <span>数据边界</span>
-        <strong>租户与字段白名单</strong>
-        <small>未显式授权的数据默认拒绝</small>
-      </article>
-    </section>
-
-    <el-tabs v-model="activeSection" class="content-tabs">
-      <el-tab-pane label="读写边界" name="boundary">
-        <section class="panel">
-          <header><div><h2>只读能力矩阵</h2><p>{{ boundarySummary }}</p></div></header>
-          <el-table :data="capabilityRows" stripe>
-            <el-table-column prop="capability" label="能力" min-width="160" />
-            <el-table-column prop="owner" label="责任项目" min-width="150" />
-            <el-table-column label="结论" width="110">
-              <template #default="scope">
-                <el-tag :type="scope.row.status === '禁止' ? 'danger' : 'success'" effect="plain">{{ scope.row.status }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="detail" label="约束" min-width="300" />
-          </el-table>
-        </section>
-      </el-tab-pane>
-
-      <el-tab-pane label="数据合同" name="contract">
-        <section class="panel">
-          <header><div><h2>增量同步字段</h2><p>用于知识库幂等更新、断点续传和删除传播，不包含任何回写协议。</p></div></header>
-          <dl class="contract-grid">
-            <div v-for="field in contractFields" :key="field[0]">
-              <dt>{{ field[0] }}</dt>
-              <dd>{{ field[1] }}</dd>
-            </div>
-          </dl>
-        </section>
-      </el-tab-pane>
-
-      <el-tab-pane label="安全要求" name="security">
-        <section class="panel policy-list">
-          <h2>必须满足的安全门</h2>
-          <ul>
-            <li>凭据固定绑定租户、资源白名单、字段白名单和来源 IP/CIDR。</li>
-            <li>路由层和权限层同时拒绝 POST、PUT、PATCH 和 DELETE。</li>
-            <li>不开放 webhook、回调、消息队列、RPA、导入、任务触发或共享数据库账号。</li>
-            <li>审计只记录请求元数据，不保存凭据原文或完整业务响应。</li>
-            <li>连续读取不得改变业务对象的 updated_at、版本、状态或归属。</li>
-          </ul>
-        </section>
-      </el-tab-pane>
-
-      <el-tab-pane label="实施状态" name="delivery">
-        <section class="panel delivery-panel">
-          <h2>增量交付边界</h2>
-          <el-steps direction="vertical" :active="1" finish-status="success">
-            <el-step title="菜单与权限入口" description="已建立内部管理入口和只读原则说明" />
-            <el-step title="服务身份与授权模型" description="待后端实现，不在本次菜单增量中生成凭据" />
-            <el-step title="只读 API 与 OpenAPI 合同" description="待资源和字段白名单审定后实施" />
-            <el-step title="虚拟机与阿里云验收" description="先虚拟机验证，再使用独立凭据发布阿里云" />
-          </el-steps>
-        </section>
-      </el-tab-pane>
-    </el-tabs>
-  </main>
-</template>
-
-<style scoped>
-.knowledge-api-page { display: grid; gap: 20px; padding: 4px 0 28px; color: #172033; }
-.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
-.page-header h1 { margin: 4px 0 8px; font-size: 28px; line-height: 1.25; }
-.page-header p { max-width: 760px; margin: 0; color: #5f6b7a; line-height: 1.7; }
-.section-path { color: #7a8699 !important; font-size: 13px; }
-.status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.status-grid article { display: grid; gap: 8px; padding: 18px; border: 1px solid #e4e9f0; border-radius: 10px; background: #fff; }
-.status-grid span, .status-grid small { color: #6b7788; }
-.status-grid strong { font-size: 17px; }
-.content-tabs { padding: 0 20px 20px; border: 1px solid #e4e9f0; border-radius: 10px; background: #fff; }
-.panel { padding-top: 8px; }
-.panel header { display: flex; justify-content: space-between; margin-bottom: 16px; }
-.panel h2 { margin: 0 0 6px; font-size: 19px; }
-.panel p { margin: 0; color: #6b7788; line-height: 1.6; }
-.contract-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; margin: 0; border: 1px solid #e4e9f0; border-radius: 8px; overflow: hidden; }
-.contract-grid div { display: grid; grid-template-columns: 150px 1fr; gap: 16px; padding: 14px 16px; border-bottom: 1px solid #edf0f4; }
-.contract-grid div:nth-child(odd) { border-right: 1px solid #edf0f4; }
-.contract-grid dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #2457a7; }
-.contract-grid dd { margin: 0; color: #4f5b6b; }
-.policy-list ul { display: grid; gap: 12px; padding-left: 20px; color: #3f4a5a; line-height: 1.65; }
-.delivery-panel { min-height: 320px; }
-@media (max-width: 960px) {
-  .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .contract-grid { grid-template-columns: 1fr; }
-  .contract-grid div:nth-child(odd) { border-right: 0; }
-}
-@media (max-width: 640px) {
-  .page-header { flex-direction: column; }
-  .status-grid { grid-template-columns: 1fr; }
-  .content-tabs { padding-inline: 12px; }
-  .contract-grid div { grid-template-columns: 1fr; gap: 6px; }
-}
-</style>
+<template><main class="api-page">
+ <header class="page-header"><div><p class="path">系统管理 · API 数据接入</p><h1>内部系统数据接口</h1><p>管理员可配置调用系统、最小读取范围和独立凭据；本系统不接收调用方回写，调用方始终不能回写业务数据。</p></div><el-tag type="success" size="large" effect="plain">强制只读</el-tag></header>
+ <el-alert title="配置管理能力已就绪；业务数据端点 /api/internal-readonly/v1/ 尚未上线，创建凭据不代表数据接口已开放。" type="warning" :closable="false" show-icon/>
+ <el-tabs v-model="activeSection" class="content-tabs">
+  <el-tab-pane label="调用系统配置" name="clients"><section class="panel"><header><div><h2>调用系统</h2><p>权限默认拒绝，按资源、字段和来源地址显式授权。</p></div><el-button type="primary" @click="edit()">新增调用系统</el-button></header><el-table v-loading="loading" :data="clients" stripe><el-table-column prop="name" label="系统名称" min-width="160"/><el-table-column prop="caller_type" label="调用方类型" width="130"/><el-table-column label="资源" min-width="170"><template #default="s">{{ resourceNames(s.row.resources) }}</template></el-table-column><el-table-column label="状态" width="90"><template #default="s"><el-tag :type="s.row.status==='active'?'success':'info'">{{s.row.status==='active'?'启用':'停用'}}</el-tag></template></el-table-column><el-table-column prop="expires_at" label="有效期" width="180"/><el-table-column prop="last_rotated_at" label="最近轮换" width="180"/><el-table-column label="操作" width="290" fixed="right"><template #default="s"><el-button link type="primary" @click="edit(s.row)">编辑</el-button><el-button link @click="status(s.row)">{{s.row.status==='active'?'停用':'启用'}}</el-button><el-button link type="warning" :loading="saving" @click="rotate(s.row)">轮换密钥</el-button><el-button link @click="audit(s.row)">审计</el-button></template></el-table-column></el-table></section></el-tab-pane>
+  <el-tab-pane label="读写边界" name="boundary"><section class="panel"><header><div><h2>只读能力矩阵</h2><p>{{boundarySummary}}</p></div></header><el-table :data="capabilityRows" stripe><el-table-column prop="capability" label="能力"/><el-table-column label="结论" width="100"><template #default="s"><el-tag :type="s.row.status==='禁止'?'danger':'success'">{{s.row.status}}</el-tag></template></el-table-column><el-table-column prop="detail" label="约束" min-width="300"/></el-table></section></el-tab-pane>
+  <el-tab-pane label="数据合同" name="contract"><section class="panel"><h2>增量同步字段</h2><dl class="contract-grid"><div v-for="f in contractFields" :key="f[0]"><dt>{{f[0]}}</dt><dd>{{f[1]}}</dd></div></dl></section></el-tab-pane>
+  <el-tab-pane label="安全要求" name="security"><section class="panel"><h2>必须满足的安全门</h2><ul><li>凭据固定绑定租户、资源、字段与来源 IP/CIDR。</li><li>路由层与权限层同时拒绝 POST、PUT、PATCH 和 DELETE 业务写入。</li><li>密钥仅在创建或轮换后显示一次，列表和审计不保存明文。</li><li>审计只记录请求元数据，不记录完整业务响应。</li></ul></section></el-tab-pane>
+  <el-tab-pane label="实施状态" name="delivery"><section class="panel"><h2>交付状态</h2><el-steps direction="vertical" :active="2" finish-status="success"><el-step title="管理入口" description="菜单、权限与只读原则已发布"/><el-step title="服务身份配置" description="调用系统、授权、启停、轮换与审计控制台已实现"/><el-step title="业务只读 API" description="/api/internal-readonly/v1/ 尚未上线，不得宣称可读取业务数据"/></el-steps></section></el-tab-pane>
+ </el-tabs>
+ <el-dialog v-model="editorVisible" :title="editingId?'编辑调用系统':'新增调用系统'" width="720px" destroy-on-close><el-form ref="formRef" :model="form" :rules="rules" label-width="110px"><el-form-item label="系统名称" prop="name"><el-input v-model="form.name" maxlength="80"/></el-form-item><el-form-item label="调用方类型" prop="caller_type"><el-select v-model="form.caller_type"><el-option label="内部业务系统" value="internal_system"/><el-option label="知识库" value="knowledge_base"/></el-select></el-form-item><el-form-item label="允许资源" prop="resources"><el-checkbox-group v-model="form.resources"><el-checkbox v-for="r in resources" :key="r[0]" :value="r[0]">{{r[1]}}</el-checkbox></el-checkbox-group></el-form-item><el-form-item label="允许字段" prop="fields"><el-select v-model="form.fields" multiple filterable style="width:100%"><el-option v-for="f in fields" :key="f" :label="f" :value="f"/></el-select></el-form-item><el-form-item label="来源 IP/CIDR" prop="cidrs"><div class="cidrs"><div v-for="(_,i) in form.cidrs" :key="i"><el-input v-model="form.cidrs[i]" placeholder="10.20.0.0/16"/><el-button link type="danger" @click="form.cidrs.length>1&&form.cidrs.splice(i,1)">移除</el-button></div><el-button link type="primary" @click="form.cidrs.push('')">添加地址</el-button></div></el-form-item><el-form-item label="每分钟限流" prop="rate_limit"><el-input-number v-model="form.rate_limit" :min="1" :max="10000"/></el-form-item><el-form-item label="分页上限" prop="page_size"><el-input-number v-model="form.page_size" :min="1" :max="1000"/></el-form-item><el-form-item label="凭据有效期" prop="expires_at"><el-date-picker v-model="form.expires_at" type="date" value-format="YYYY-MM-DD"/></el-form-item></el-form><template #footer><el-button @click="editorVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">确认保存</el-button></template></el-dialog>
+ <el-dialog v-model="secretVisible" title="一次性凭据" width="560px" :close-on-click-modal="false" @closed="oneTimeCredential=null"><el-alert title="请立即复制并安全保管。关闭后系统不会再次显示密钥。" type="warning" :closable="false"/><el-descriptions v-if="oneTimeCredential" :column="1" border class="secret"><el-descriptions-item label="Client ID"><code>{{oneTimeCredential.client_id}}</code></el-descriptions-item><el-descriptions-item label="Client Secret"><code>{{oneTimeCredential.client_secret}}</code></el-descriptions-item></el-descriptions><template #footer><el-button type="primary" @click="secretVisible=false">我已保存并关闭</el-button></template></el-dialog>
+ <el-drawer v-model="auditVisible" title="调用审计" size="60%"><el-table :data="auditRows"><el-table-column prop="created_at" label="时间" width="170"/><el-table-column prop="client_name" label="调用系统"/><el-table-column prop="method" label="方法" width="80"/><el-table-column prop="action" label="动作"/><el-table-column prop="source_ip" label="来源 IP"/><el-table-column prop="result" label="结果" width="80"/></el-table></el-drawer>
+</main></template>
+<style scoped>.api-page{display:grid;gap:20px;padding:4px 0 28px;color:#172033}.page-header{display:flex;justify-content:space-between;gap:24px}.page-header h1{margin:4px 0 8px;font-size:28px}.page-header p,.panel p,.path{margin:0;color:#667285;line-height:1.6}.content-tabs{padding:0 20px 20px;border:1px solid #e4e9f0;border-radius:10px;background:#fff}.panel{padding-top:8px}.panel>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.panel h2{margin:0 0 7px}.contract-grid{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid #e4e9f0}.contract-grid div{display:grid;grid-template-columns:150px 1fr;padding:14px;border-bottom:1px solid #edf0f4}.contract-grid dt{font-family:monospace;color:#2457a7}.contract-grid dd{margin:0}.cidrs{display:grid;gap:8px;width:100%}.cidrs>div{display:flex;gap:8px}.secret{margin-top:16px}code{word-break:break-all}@media(max-width:760px){.page-header{flex-direction:column}.contract-grid{grid-template-columns:1fr}}</style>

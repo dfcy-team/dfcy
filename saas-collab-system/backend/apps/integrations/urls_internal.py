@@ -5,9 +5,15 @@ from .manual_callback import manual_store_callback
 from . import production_settings_api
 from . import warehouse_credential_views
 from . import feishu_api
+from . import internal_api_clients
 
 
 urlpatterns = [
+    path("internal-api-clients/", internal_api_clients.client_collection, name="internal-api-client-collection"),
+    path("internal-api-clients/<int:pk>/", internal_api_clients.client_detail, name="internal-api-client-detail"),
+    path("internal-api-clients/<int:pk>/status/", internal_api_clients.client_status, name="internal-api-client-status"),
+    path("internal-api-clients/<int:pk>/rotate/", internal_api_clients.client_rotate, name="internal-api-client-rotate"),
+    path("internal-api-clients/<int:pk>/audit/", internal_api_clients.client_audit, name="internal-api-client-audit"),
     path("feishu/connection/", feishu_api.connection_detail, name="feishu-connection"),
     path("feishu/identities/", feishu_api.identity_collection, name="feishu-identity-collection"),
     path("feishu/identities/<int:pk>/", feishu_api.identity_detail, name="feishu-identity-detail"),
