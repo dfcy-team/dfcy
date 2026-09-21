@@ -1,10 +1,12 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.responses import success_response
+from apps.audit.models import DataImportLog
 
 from .cost_services import (
     append_cost_version,
@@ -116,7 +118,22 @@ def _uploaded_cost_file(request):
 @permission_classes([IsProductCostBackfillOperator])
 def product_cost_import_preview(request):
     raw, filename = _uploaded_cost_file(request)
-    return success_response(preview_cost_import(tenant=request.user.tenant, raw=raw, filename=filename))
+    result = preview_cost_import(tenant=request.user.tenant, raw=raw, filename=filename)
+    if result["errors"]:
+        log = DataImportLog.objects.create(
+            tenant=request.user.tenant,
+            import_type="product_cost_preview",
+            file_name=filename[:255],
+            status=DataImportLog.Status.FAILED,
+            total_count=result["total"],
+            success_count=result["valid"],
+            failed_count=len({item.get("row") for item in result["errors"] if item.get("row")}),
+            error_summary={"digest": result["digest"], "errors": result["errors"], "stage": "preview"},
+            created_by=request.user,
+            finished_at=timezone.now(),
+        )
+        result["error_batch_id"] = log.pk
+    return success_response(result)
 
 
 @api_view(["POST"])

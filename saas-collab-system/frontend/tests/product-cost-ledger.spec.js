@@ -80,4 +80,15 @@ describe('商品成本菜单与页面契约', () => {
     expect(page).toContain('模板中带 * 的列为必填项');
     expect(page).not.toContain('CSV/XLSX 列：<code>sku_code</code>');
   });
+
+  it('展示导入阶段进度并可导出完整异常记录', () => {
+    expect(page).toContain('cost-import-progress');
+    expect(page).toContain('正在上传文件');
+    expect(page).toContain('正在解析并校验数据');
+    expect(page).toContain('正在写入成本版本');
+    expect(page).toContain('cost-error-export');
+    expect(page).toContain('导出完整异常明细');
+    expect(page).toContain('商品成本导入异常_');
+    expect(page).toContain('error_batch_id');
+  });
 });

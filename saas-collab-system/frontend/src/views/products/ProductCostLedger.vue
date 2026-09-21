@@ -165,9 +165,15 @@
       <el-upload drag :auto-upload="false" :limit="1" accept=".csv,.xlsx" :on-change="selectImportFile" :on-remove="resetImportFile">
         <div><strong>上传已填写的成本模板</strong><small>拖入文件，或点击选择 CSV / XLSX</small></div>
       </el-upload>
+      <div v-if="importing || importProgress" class="import-progress" data-testid="cost-import-progress">
+        <div><strong>{{ importStage }}</strong><span>{{ importProgress }}%</span></div>
+        <el-progress :percentage="importProgress" :status="importProgress === 100 ? 'success' : undefined" />
+      </div>
       <div v-if="importPreview" class="import-preview" data-testid="cost-import-preview">
         <strong>预检结果：{{ importPreview.valid }} / {{ importPreview.total }} 行可导入</strong>
         <span>失败 {{ importPreview.errors?.length || 0 }} 行。只有零错误才可确认入账。</span>
+        <span v-if="importPreview.error_batch_id">异常批次：{{ importPreview.error_batch_id }}（已记录）</span>
+        <el-button v-if="importPreview.errors?.length" plain type="danger" data-testid="cost-error-export" @click="exportImportErrors">导出完整异常明细</el-button>
         <el-table v-if="importPreview.errors?.length" :data="importPreview.errors.slice(0, 20)" size="small" border>
           <el-table-column prop="row" label="行" width="70" />
           <el-table-column prop="code" label="错误码" width="150" />
@@ -210,6 +216,8 @@ const importVisible = ref(false);
 const importFile = ref(null);
 const importPreview = ref(null);
 const importing = ref(false);
+const importProgress = ref(0);
+const importStage = ref('');
 const backfill = reactive({ scope: 'pending', rule: 'latest', effective_from: new Date().toISOString().slice(0, 10) });
 const form = reactive({});
 const statusMeta = {
@@ -296,24 +304,56 @@ function downloadImportTemplate() {
   anchor.remove();
   URL.revokeObjectURL(url);
 }
-function selectImportFile(uploadFile) { importFile.value = uploadFile.raw; importPreview.value = null; }
-function resetImportFile() { importFile.value = null; importPreview.value = null; }
+function selectImportFile(uploadFile) { importFile.value = uploadFile.raw; importPreview.value = null; importProgress.value = 0; importStage.value = ''; }
+function resetImportFile() { importFile.value = null; importPreview.value = null; importProgress.value = 0; importStage.value = ''; }
 function resetImport() { resetImportFile(); importing.value = false; }
+function updateImportUploadProgress(event, uploadStage, processingStage) {
+  if (!event.total) return;
+  const ratio = Math.min(event.loaded / event.total, 1);
+  if (ratio >= 1) {
+    importStage.value = processingStage;
+    importProgress.value = 60;
+    return;
+  }
+  importStage.value = uploadStage;
+  importProgress.value = Math.max(5, Math.round(ratio * 45));
+}
+function exportImportErrors() {
+  const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  const rows = [['异常批次', '行号', '字段', '错误原因'], ...(importPreview.value?.errors || []).map((item) => [importPreview.value.error_batch_id || '', item.row || '', item.field || item.code || '', item.message || ''])];
+  const blob = new Blob([`\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\r\n')}\r\n`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `商品成本导入异常_${importPreview.value?.error_batch_id || 'preview'}.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 async function previewImport() {
   if (!importFile.value) return;
   importing.value = true;
-  const response = await previewProductCostImport(importFile.value);
+  importProgress.value = 5;
+  importStage.value = '正在上传文件';
+  const response = await previewProductCostImport(importFile.value, (event) => updateImportUploadProgress(event, '正在上传文件', '正在解析并校验数据'));
   importing.value = false;
-  if (!response.success) return ElMessage.error(response.message || '成本导入预检失败');
+  if (!response.success) { importStage.value = '预检失败'; return ElMessage.error(response.message || '成本导入预检失败'); }
   importPreview.value = response.data;
+  importProgress.value = 100;
+  importStage.value = response.data?.errors?.length ? '预检完成，请处理异常' : '预检完成，可确认导入';
 }
 async function confirmImport() {
   if (!importFile.value || !importPreview.value || importPreview.value.errors?.length) return;
   importing.value = true;
+  importProgress.value = 5;
+  importStage.value = '正在上传确认批次';
   const key = globalThis.crypto?.randomUUID?.() || `cost-import-${Date.now()}`;
-  const response = await confirmProductCostImport(importFile.value, importPreview.value.token, key);
+  const response = await confirmProductCostImport(importFile.value, importPreview.value.token, key, (event) => updateImportUploadProgress(event, '正在上传确认批次', '正在写入成本版本'));
   importing.value = false;
-  if (!response.success) return ElMessage.error(response.message || '成本导入失败');
+  if (!response.success) { importStage.value = '导入失败'; return ElMessage.error(response.message || '成本导入失败'); }
+  importProgress.value = 100;
+  importStage.value = '导入完成';
   ElMessage.success(`已导入 ${response.data?.created || 0} 个成本版本`);
   importVisible.value = false;
   await load();
@@ -344,4 +384,5 @@ onMounted(load);
 .cost-page{min-width:980px;color:#172033}.page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:16px}.page-header h1{margin:0;font-size:26px}.page-header p{max-width:760px;margin:7px 0 0;color:#64748b;line-height:1.6}.header-actions{display:flex;gap:10px}.definition-alert{margin-bottom:16px}.summary-strip{display:grid;grid-template-columns:repeat(4,1fr);margin-bottom:16px;border:1px solid #dbe3ee;border-radius:8px;background:#fff}.summary-strip div{padding:17px 20px;border-right:1px solid #e6ebf2}.summary-strip div:last-child{border-right:0}.summary-strip span,.summary-strip small{display:block;color:#718096;font-size:12px}.summary-strip strong{display:block;margin:7px 0 4px;font-size:25px}.summary-strip .warning{color:#d97706}.summary-strip .danger,.difference-value{color:#dc2626}.summary-strip .success{color:#16845b}.content-panel{border:1px solid #dbe3ee;border-radius:8px;background:#fff;overflow:hidden}.filters{display:flex;align-items:flex-end;gap:4px;padding:16px 16px 0}.filters :deep(.el-input){width:250px}.filters :deep(.el-select){width:160px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#1d4ed8}.system-cost{color:#2563eb;font-weight:600}.muted{color:#94a3b8}.sku-heading{display:flex;flex-direction:column;gap:6px;padding:14px 16px;margin-bottom:18px;border-radius:7px;background:#f5f8fc}.sku-heading strong{font-size:15px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}.audit-note{padding-top:14px;border-top:1px solid #e6ebf2;color:#718096;font-size:12px}.backfill-flow{display:flex;align-items:center;justify-content:center;gap:16px;margin:4px 0 22px}.backfill-flow div{display:flex;align-items:center;gap:8px;color:#334155}.backfill-flow b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#2563eb;color:#fff}.backfill-flow i{color:#94a3b8;font-style:normal}.backfill-form{margin-top:20px}.backfill-form :deep(.el-select){width:100%}.preview-result{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid #bbf7d0;border-radius:7px;background:#f0fdf4;color:#166534}@media(max-width:1100px){.summary-strip{grid-template-columns:repeat(2,1fr)}.summary-strip div:nth-child(2){border-right:0}.summary-strip div:nth-child(-n+2){border-bottom:1px solid #e6ebf2}}@media(max-width:720px){.cost-page{min-width:0}.page-header{flex-direction:column}.summary-strip{grid-template-columns:1fr 1fr}.header-actions{width:100%}.backfill-flow{align-items:flex-start;gap:7px}.backfill-flow div{flex-direction:column;text-align:center;font-size:12px}.form-grid{grid-template-columns:1fr}}
 .change-preview{display:grid;grid-template-columns:1fr auto 1fr 1fr;align-items:center;gap:12px;padding:14px;margin-bottom:18px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}.change-preview div{display:flex;flex-direction:column;gap:4px}.change-preview span,.change-preview small{color:#64748b;font-size:12px}.change-preview strong{font-size:17px}.change-preview .change-arrow{color:#94a3b8;font-size:20px}.change-preview .change-result{padding-left:12px;border-left:1px solid #dbe3ee}
 .template-guide{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:16px 0 12px;padding:16px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff}.template-guide div,.import-tips{display:flex;flex-direction:column;gap:5px}.template-guide span,.import-tips span{color:#64748b;font-size:13px}.import-tips{margin-bottom:12px}.import-preview{display:flex;flex-direction:column;gap:10px;margin-top:16px;padding:14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}.template-guide+ .import-tips+ :deep(.el-upload) small{display:block;margin-top:8px;color:#94a3b8}
+.import-progress{margin-top:14px}.import-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:#475569;font-size:13px}
 </style>
