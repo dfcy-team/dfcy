@@ -1,9 +1,9 @@
 <template>
   <Phase3DecisionPage
     ref="pageRef"
-    eyebrow="系统治理"
-    title="配置中心"
-    subtitle="维护租户配置版本、审批状态与生效时间。"
+    :eyebrow="pageEyebrow"
+    :title="pageTitle"
+    :subtitle="pageSubtitle"
     boundary-note="配置中心不提供真实平台密钥、银行密码、Cookie、Session 或明文 Token 输入；敏感项仅允许占位引用并由后端再次校验。"
     :loader="loadConfigCenter"
     :filters="filters"
@@ -83,6 +83,12 @@ import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
 
 const auth = useAuthStore();
+const props = defineProps({
+  configKey: { type: String, default: '' },
+  pageEyebrow: { type: String, default: '系统治理' },
+  pageTitle: { type: String, default: '配置中心' },
+  pageSubtitle: { type: String, default: '维护租户配置版本、审批状态与生效时间。' }
+});
 const pageRef = ref(null);
 const definitions = ref([]);
 const apiStatus = ref(useMock ? 'mock' : 'pending');
@@ -181,14 +187,21 @@ async function loadConfigCenter(query = {}) {
     apiStatus.value = definitionResponse?.http_status ? 'pending' : 'degraded';
     return definitionResponse;
   }
-  const definitionRows = unpack(definitionResponse);
+  const definitionRows = unpack(definitionResponse).filter(
+    (item) => !props.configKey || item.config_key === props.configKey
+  );
   definitions.value = definitionRows;
   if (definitionResponse.data?.api_status !== 'connected') {
     apiStatus.value = definitionResponse.data?.api_status || (useMock ? 'mock' : 'pending');
     return definitionResponse;
   }
 
-  const valueResponse = await fetchConfigValues({ page: 1, page_size: 100, scope: query.scope || undefined });
+  const valueResponse = await fetchConfigValues({
+    page: 1,
+    page_size: 100,
+    scope: query.scope || undefined,
+    config_key: props.configKey || undefined
+  });
   if (!valueResponse?.success) {
     apiStatus.value = valueResponse?.http_status ? 'pending' : 'degraded';
     return valueResponse;

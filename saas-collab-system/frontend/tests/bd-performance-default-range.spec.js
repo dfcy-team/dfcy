@@ -45,6 +45,12 @@ const successResponse = () => ({
     start_date: '2026-08-30',
     end_date: '2026-09-05',
     currency: 'CNY',
+    settings: {
+      default_currency: 'CNY',
+      default_attribution: 'fallback',
+      default_metrics: 'full',
+      daily_attribution_reconciliation_enabled: true
+    },
     results: [{ owner: '李明', sample_count: 3, gmv: '100.00', roi: '2.5' }],
     totals: { owner_count: 1, sample_count: 3, gmv: '100.00', roi: '2.5' }
   }
@@ -62,11 +68,7 @@ describe('BD performance data-aware default range', () => {
     const wrapper = mountPanel();
     await flushPromises();
 
-    expect(influencerApi.fetchBdPerformance).toHaveBeenNthCalledWith(1, {
-      currency: 'CNY',
-      attribution: 'strict',
-      metrics: 'core'
-    });
+    expect(influencerApi.fetchBdPerformance).toHaveBeenNthCalledWith(1, {});
     expect(wrapper.text()).toContain('统计范围：2026-08-30 至 2026-09-05');
 
     const [startDate, endDate] = wrapper.findAll('.date-picker');
@@ -79,8 +81,8 @@ describe('BD performance data-aware default range', () => {
 
     expect(influencerApi.fetchBdPerformance).toHaveBeenNthCalledWith(2, {
       currency: 'CNY',
-      attribution: 'strict',
-      metrics: 'core',
+      attribution: 'fallback',
+      metrics: 'full',
       start_date: '2026-09-01',
       end_date: '2026-09-04'
     });

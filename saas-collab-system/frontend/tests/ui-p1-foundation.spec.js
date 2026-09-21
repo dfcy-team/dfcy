@@ -98,7 +98,28 @@ describe('UI-P1 trusted menu and workspace', () => {
     expect(paths).toContain('/finance/analytics');
     expect(paths).toContain('/integrations/configs');
     expect(paths).toContain('/settings/config-center');
+    expect(paths).toContain('/influencers/bd-config');
     expect(summarizeDataScope(superuser)).toBe('全部租户内数据');
+  });
+
+  it('guards the BD configuration menu with the existing config view permission', () => {
+    const configViewer = { ...financeUser, permissions: ['config.view'] };
+    const basicInternal = { ...financeUser, permissions: ['mock.view'] };
+    const visiblePaths = flattenMenuItems(filterMenuItems(configViewer)).map((item) => item.path);
+
+    expect(visiblePaths).toContain('/influencers/bd-config');
+    expect(canAccessPath(configViewer, '/influencers/bd-config')).toBe(true);
+    expect(canAccessPath(basicInternal, '/influencers/bd-config')).toBe(false);
+  });
+
+  it('scopes the BD configuration route to the BD performance definition', () => {
+    const routerSource = read('src/router/index.js');
+    const configPageSource = read('src/views/settings/ConfigCenterList.vue');
+
+    expect(routerSource).toContain("path: 'influencers/bd-config'");
+    expect(routerSource).toContain("configKey: 'influencers.bd.performance'");
+    expect(configPageSource).toContain('item.config_key === props.configKey');
+    expect(configPageSource).toContain('config_key: props.configKey || undefined');
   });
 
   it('selects a finance workspace from trusted permissions', () => {

@@ -75,6 +75,7 @@ from .services import (
     update_outreach_task,
     update_outreach_target,
 )
+from .bd_config import bd_performance_settings
 
 
 class Conflict(APIException):
@@ -1492,6 +1493,7 @@ class BdPerformanceView(APIView):
             raise PermissionDenied("Both outreach and fulfillment view permissions are required.")
         require_all_scope(request.user, fulfillment_permission)
 
+        report_settings = bd_performance_settings(request.user.tenant_id)
         default_start, default_end = default_performance_dates(tenant=request.user.tenant)
         start_date = parse_performance_date(
             request.query_params.get("start_date") or default_start.isoformat(),
@@ -1516,9 +1518,16 @@ class BdPerformanceView(APIView):
             tenant=request.user.tenant,
             start_date=start_date,
             end_date=end_date,
-            attribution=(request.query_params.get("attribution") or "strict").strip().lower(),
-            currency=(request.query_params.get("currency") or "CNY").strip().upper(),
+            attribution=(
+                request.query_params.get("attribution")
+                or report_settings["default_attribution"]
+            ).strip().lower(),
+            currency=(
+                request.query_params.get("currency")
+                or report_settings["default_currency"]
+            ).strip().upper(),
         )
+        payload["settings"] = report_settings
         return success_response(payload)
 
 

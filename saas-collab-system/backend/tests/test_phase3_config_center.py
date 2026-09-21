@@ -8,7 +8,12 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.configcenter.models import ConfigChangeLog, SystemConfigDefinition, TenantConfigVersion
-from apps.configcenter.services import approve_config_version, create_config_version, rollback_config_version
+from apps.configcenter.services import (
+    activate_due_config_versions,
+    approve_config_version,
+    create_config_version,
+    rollback_config_version,
+)
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -78,6 +83,44 @@ def test_config_approval_requires_separate_authorized_actor():
     version = approve_config_version(version=version, actor=approver)
     assert version.status == TenantConfigVersion.Status.EFFECTIVE
     assert version.approved_by == approver
+
+
+@pytest.mark.django_db
+def test_approved_future_config_activates_when_effective_time_arrives():
+    tenant = Tenant.objects.create(name="Tenant", code="config-future-activation")
+    creator = create_user(tenant, "future-creator")
+    approver = create_user(tenant, "future-approver")
+    grant(creator, "config.manage")
+    grant(approver, "config.approve")
+    item = definition(key="tests.future.activation", value_type="json", approval=True)
+    effective_at = timezone.now() + timedelta(hours=1)
+    version = create_config_version(
+        definition=item,
+        actor=creator,
+        value={"daily_attribution_reconciliation_enabled": False},
+        effective_at=effective_at,
+    )
+    version = approve_config_version(version=version, actor=approver)
+    assert version.status == TenantConfigVersion.Status.APPROVED
+    later_version = create_config_version(
+        definition=item,
+        actor=creator,
+        value={"daily_attribution_reconciliation_enabled": True},
+        effective_at=effective_at + timedelta(hours=1),
+    )
+    later_version = approve_config_version(version=later_version, actor=approver)
+
+    result = activate_due_config_versions(now=effective_at + timedelta(seconds=1))
+
+    version.refresh_from_db()
+    later_version.refresh_from_db()
+    assert result == {"activated": 1, "superseded": 0}
+    assert version.status == TenantConfigVersion.Status.EFFECTIVE
+    assert later_version.status == TenantConfigVersion.Status.APPROVED
+    assert ConfigChangeLog.objects.filter(
+        action=ConfigChangeLog.Action.ACTIVATE,
+        to_version=version.version,
+    ).exists()
 
 
 @pytest.mark.django_db

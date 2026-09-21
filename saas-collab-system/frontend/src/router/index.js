@@ -121,6 +121,7 @@ const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
 const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
 const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
 const BdPerformance = () => import('../views/influencers/BdPerformance.vue');
+const BdPerformanceConfig = () => import('../views/settings/ConfigCenterList.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
@@ -318,6 +319,16 @@ const routes = [
       { path: 'influencers/outreach-tasks', component: OutreachTaskList },
       { path: 'influencers/sample-fulfillments', component: SampleFulfillmentList },
       { path: 'influencers/bd-performance', component: BdPerformance },
+      {
+        path: 'influencers/bd-config',
+        component: BdPerformanceConfig,
+        props: {
+          configKey: 'influencers.bd.performance',
+          pageEyebrow: '达人管理',
+          pageTitle: 'BD 配置',
+          pageSubtitle: '维护 BD 绩效默认口径和每日订单归因补偿开关。'
+        }
+      },
       { path: 'releases/contracts', component: ReleaseContractConsole },
       { path: 'audit/operations', component: OperationLogList }
     ]

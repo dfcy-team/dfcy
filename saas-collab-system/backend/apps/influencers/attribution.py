@@ -424,7 +424,9 @@ def _order_attribution_key(order):
 
 
 @transaction.atomic
-def refresh_order_attributions(*, tenant, attribution="strict", rule_version=None):
+def refresh_order_attributions(
+    *, tenant, attribution="strict", rule_version=None, changed_since=None, order_ids=None
+):
     if attribution not in {"strict", "fallback"}:
         raise ValidationError({"attribution": "Attribution must be strict or fallback."})
     effective_rule_version = rule_version or rule_version_for(attribution)
@@ -442,20 +444,42 @@ def refresh_order_attributions(*, tenant, attribution="strict", rule_version=Non
         samples,
         product_required=attribution == "strict",
     )
+    order_queryset = AffiliateOrderSnapshot.objects.filter(tenant=tenant)
+    selected_order_ids = tuple(order_ids or ())
+    if changed_since is not None or selected_order_ids:
+        scope_filter = Q()
+        if changed_since is not None:
+            scope_filter |= Q(updated_at__gte=changed_since)
+        if selected_order_ids:
+            scope_filter |= Q(pk__in=selected_order_ids)
+        order_queryset = order_queryset.filter(scope_filter)
     orders_by_key = {}
-    for order in AffiliateOrderSnapshot.objects.filter(tenant=tenant).order_by("data_time", "id").iterator(chunk_size=1000):
+    target_keys = set()
+    changed_order_ids = set()
+    for order in order_queryset.order_by("data_time", "id").iterator(chunk_size=1000):
+        key = _order_attribution_key(order)
+        target_keys.add(key)
+        changed_order_ids.add(order.pk)
         if _valid_order(order):
-            orders_by_key.setdefault(_order_attribution_key(order), order)
+            orders_by_key.setdefault(key, order)
     existing = {}
     duplicate_existing_ids = []
     for item in BdOrderAttributionSnapshot.objects.filter(
         tenant=tenant, rule_version=effective_rule_version
     ).select_related("order_snapshot").order_by("id"):
         key = _order_attribution_key(item.order_snapshot)
+        if (changed_since is not None or selected_order_ids) and key not in target_keys:
+            continue
         if key in existing:
             duplicate_existing_ids.append(item.pk)
         else:
             existing[key] = item
+    if changed_since is not None or selected_order_ids:
+        for key, item in existing.items():
+            current_order = item.order_snapshot
+            if current_order_id := getattr(current_order, "pk", None):
+                if current_order_id not in changed_order_ids and _valid_order(current_order):
+                    orders_by_key[key] = current_order
     created = updated = noop = rejected = deleted = 0
     desired_keys = set()
     for key, order in sorted(orders_by_key.items(), key=lambda item: (item[1].data_time, item[1].id)):
@@ -552,6 +576,9 @@ def refresh_order_attributions(*, tenant, attribution="strict", rule_version=Non
         "rejected": rejected,
         "deleted": deleted,
         "rule_version": effective_rule_version,
+        "scope": "incremental" if changed_since is not None or selected_order_ids else "full",
+        "changed_since": changed_since.isoformat() if changed_since is not None else None,
+        "selected_order_count": len(selected_order_ids),
     }
 
 

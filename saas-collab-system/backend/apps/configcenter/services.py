@@ -288,6 +288,57 @@ def approve_config_version(*, version, actor, change_reason=None, detail=None):
     return version
 
 
+def activate_due_config_versions(*, now=None, config_key=None):
+    """Activate approved versions whose effective time has arrived."""
+    now = now or timezone.now()
+    due = TenantConfigVersion.objects.filter(
+        status=TenantConfigVersion.Status.APPROVED,
+        effective_at__lte=now,
+        approved_by__isnull=False,
+    )
+    if config_key:
+        due = due.filter(config_key=config_key)
+    due_ids = list(due.order_by("definition_id", "scope_key", "version").values_list("id", flat=True))
+    activated = superseded = 0
+    for version_id in due_ids:
+        with transaction.atomic():
+            candidate = TenantConfigVersion.objects.select_related("definition").get(pk=version_id)
+            definition = SystemConfigDefinition.objects.select_for_update().get(pk=candidate.definition_id)
+            version = TenantConfigVersion.objects.select_for_update().select_related("approved_by").get(pk=version_id)
+            if version.status != TenantConfigVersion.Status.APPROVED or version.effective_at > now:
+                continue
+            latest = TenantConfigVersion.objects.filter(
+                scope_key=version.scope_key,
+                config_key=version.config_key,
+                status=TenantConfigVersion.Status.APPROVED,
+                effective_at__lte=now,
+                approved_by__isnull=False,
+            ).order_by("-version", "-id").first()
+            if latest is None or latest.pk != version.pk:
+                version.status = TenantConfigVersion.Status.SUPERSEDED
+                version._config_service_write = True
+                version.save(update_fields=["status", "updated_at"])
+                superseded += 1
+                continue
+            version.definition = definition
+            version.status = TenantConfigVersion.Status.EFFECTIVE
+            version._config_service_write = True
+            version.save(update_fields=["status", "updated_at"])
+            _supersede_effective(
+                _effective_versions(scope_key=version.scope_key, config_key=version.config_key),
+                except_id=version.id,
+            )
+            _write_log(
+                version=version,
+                actor=version.approved_by,
+                action=ConfigChangeLog.Action.ACTIVATE,
+                from_version=version.version,
+                detail={"status": version.status, "value_masked": version.definition.is_sensitive},
+            )
+            activated += 1
+    return {"activated": activated, "superseded": superseded}
+
+
 @transaction.atomic
 def rollback_config_version(*, target_version, actor, effective_at=None, change_reason=None, detail=None):
     _assert_permission(actor, "config.rollback")

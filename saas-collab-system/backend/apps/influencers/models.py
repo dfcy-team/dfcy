@@ -1016,6 +1016,7 @@ class AffiliateOrderSnapshot(TenantValidatedModel):
                 fields=["tenant", "shop_abbr", "site", "order_id", "sku_id"],
                 name="idx_aff_order_shop_order_sku",
             ),
+            models.Index(fields=["tenant", "updated_at"], name="idx_aff_order_updated"),
         ]
 
     def clean(self):

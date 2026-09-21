@@ -148,6 +148,7 @@ class ConfigChangeLog(models.Model):
     class Action(models.TextChoices):
         CREATE_VERSION = "create_version", "Create version"
         APPROVE = "approve", "Approve"
+        ACTIVATE = "activate", "Activate"
         ROLLBACK = "rollback", "Rollback"
 
     tenant = models.ForeignKey(
