@@ -102,7 +102,9 @@ def _xlsx_rows(raw):
         for sheet in workbook.findall("x:sheets/x:sheet", {**ns, "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}):
             rel_id = sheet.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
             target = rel_map.get(rel_id, "")
-            path = target if target.startswith("xl/") else "xl/" + target.lstrip("/")
+            path = target.lstrip("/") if target.startswith("/xl/") else (
+                target if target.startswith("xl/") else "xl/" + target.lstrip("/")
+            )
             if path not in archive.namelist():
                 continue
             root = ElementTree.fromstring(archive.read(path))
@@ -323,21 +325,45 @@ def confirm_legacy_migration(*, tenant, actor, token):
         raise ValueError("preview token is invalid, expired, or already consumed")
     if not batch.normalized_rows:
         raise ValueError("preview contains no migratable bundles")
-    migrated_count = len(batch.normalized_rows)
+    migrated_count = 0
+    runtime_rejected = []
+    bundle_ids = {item["bundle_sku_id"] for item in batch.normalized_rows}
     for item in batch.normalized_rows:
         bundle = ProductSKU.objects.select_for_update().select_related("spu").get(tenant=tenant, pk=item["bundle_sku_id"])
+        # A legacy bundle may reference another SKU that is also being converted
+        # in this batch. Migrating both would create an unsupported nested bundle.
+        # Skip only the dependent bundle and retain the independent migrations.
+        if any(component["component_sku_id"] in bundle_ids for component in item["components"]):
+            runtime_rejected.extend({
+                **row,
+                "code": "nested_bundle_component",
+            } for row in item.get("preview_rows", []))
+            continue
         before = component_payload(bundle.bundle_components.select_related("component_sku"))
-        normalized = validate_component_rows(tenant, item["components"], bundle)
+        try:
+            normalized = validate_component_rows(tenant, item["components"], bundle)
+        except ValueError as exc:
+            if str(exc) != "nested or self-referencing bundles are not supported":
+                raise
+            runtime_rejected.extend({
+                **row,
+                "code": "nested_bundle_component",
+            } for row in item.get("preview_rows", []))
+            continue
         bundle.spu.product_type = ProductSPU.ProductType.BUNDLE
         bundle.spu.save(update_fields=["product_type", "updated_at"])
         bundle.bundle_components.all().delete()
         for component, quantity in normalized:
             ProductBundleComponent.objects.create(tenant=tenant, bundle_sku=bundle, component_sku=component, quantity=quantity)
         create_bundle_version(bundle_sku=bundle, actor=actor, reason="legacy bundle migration", action="legacy_migrated", before=before)
+        migrated_count += 1
+    rejected_rows = [*batch.preview_summary.get("rejected_rows", []), *runtime_rejected]
     batch.preview_summary = {
         **batch.preview_summary,
         "migrated": migrated_count,
-        "skipped_errors": batch.preview_summary.get("error_count", 0),
+        "skipped_errors": batch.preview_summary.get("error_count", 0) + len(runtime_rejected),
+        "runtime_rejected_bundles": len({row.get("legacy_bundle_sku") for row in runtime_rejected}),
+        "rejected_rows": rejected_rows,
     }
     batch.status = batch.Status.CONFIRMED
     batch.confirmed_at = timezone.now()

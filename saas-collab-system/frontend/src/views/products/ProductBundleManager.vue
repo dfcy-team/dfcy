@@ -556,6 +556,7 @@ function migrationErrorMessage(error) {
     bundle_not_unique: '组合 SKU 未找到或匹配到多条商品',
     component_not_unique: '子 SKU 未找到或匹配到多条商品',
     self_or_duplicate: '子 SKU 与组合 SKU 相同或在同一组合内重复',
+    nested_bundle_component: '子 SKU 同时也是组合商品，为避免嵌套组合本组合未迁移',
     bundle_contains_blocked_component: '同一组合存在其他阻断的子 SKU，本行未迁移',
   })[error.code] || error.code || '校验失败';
 }
