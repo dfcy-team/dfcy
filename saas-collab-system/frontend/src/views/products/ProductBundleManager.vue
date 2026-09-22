@@ -342,6 +342,7 @@ const bundleRows = computed(() => bundles.value.flatMap((spu) => skus.value
     spu_id: spu.id,
     sku_id: sku.id,
     sku_code: sku.sku_code,
+    image_url: sku.image_url || spu.image_url || '',
   }))));
 const activeBundleSpus = computed(() => bundles.value.filter((item) => item.lifecycle_status !== 'archived'));
 const leaves = computed(() => categories.value.filter((item) => item.level === 3 && item.is_active));

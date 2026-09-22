@@ -97,7 +97,7 @@ def test_confirm_migrates_ready_bundles_and_keeps_blocked_rows_skipped():
     component = ProductSKU.objects.create(tenant=tenant, spu=component_spu, sku_code="READY-PART", product_name="Part")
 
     token, batch = preview_legacy_migration(tenant=tenant, actor=actor, rows=[
-        {"line": 2, "legacy_bundle_spu": "", "legacy_bundle_sku": "READY-BUNDLE", "legacy_component_sku": "READY-PART", "quantity": 2},
+        {"line": 2, "legacy_bundle_spu": "", "legacy_bundle_sku": "READY-BUNDLE", "legacy_component_sku": "READY-PART", "quantity": 2, "image_url": "https://example.com/bundle.jpg"},
         {"line": 3, "legacy_bundle_spu": "", "legacy_bundle_sku": "MISSING-BUNDLE", "legacy_component_sku": "READY-PART", "quantity": 1},
     ])
 
@@ -109,6 +109,8 @@ def test_confirm_migrates_ready_bundles_and_keeps_blocked_rows_skipped():
     assert confirmed.preview_summary["migrated"] == 1
     assert confirmed.preview_summary["skipped_errors"] == 1
     assert ProductBundleComponent.objects.get(bundle_sku=bundle, component_sku=component).quantity == 2
+    bundle.refresh_from_db()
+    assert bundle.image_url == "https://example.com/bundle.jpg"
 
 
 @pytest.mark.django_db

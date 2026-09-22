@@ -204,6 +204,7 @@ def parse_legacy_bundle_file(raw, filename=""):
 
 def preview_legacy_migration(*, tenant, actor, rows):
     grouped = defaultdict(list)
+    group_metadata = defaultdict(dict)
     errors = []
     rejected_rows = []
     for index, row in enumerate(rows, start=1):
@@ -214,6 +215,10 @@ def preview_legacy_migration(*, tenant, actor, rows):
             if not key[1] or not component or quantity < 1:
                 raise ValueError
             grouped[key].append((component, quantity, row.get("line", index)))
+            if _text(row.get("image_url")):
+                group_metadata[key]["image_url"] = _text(row.get("image_url"))
+            if _text(row.get("bundle_name")):
+                group_metadata[key]["bundle_name"] = _text(row.get("bundle_name"))
         except (KeyError, TypeError, ValueError):
             errors.append({"row": index, "code": "invalid_row"})
     requested_codes = {legacy_sku for _legacy_spu, legacy_sku in grouped}
@@ -285,7 +290,12 @@ def preview_legacy_migration(*, tenant, actor, rows):
                 "status": "matched",
             })
         if len(resolved) == len(components):
-            normalized.append({"bundle_sku_id": bundle_matches[0].id, "components": resolved, "preview_rows": preview_rows})
+            normalized.append({
+                "bundle_sku_id": bundle_matches[0].id,
+                "components": resolved,
+                "preview_rows": preview_rows,
+                **group_metadata.get((legacy_spu, legacy_sku), {}),
+            })
         else:
             for component, quantity, line in components:
                 component_error = component_errors.get((line, component), {"code": "bundle_contains_blocked_component"})
@@ -352,6 +362,9 @@ def confirm_legacy_migration(*, tenant, actor, token):
             continue
         bundle.spu.product_type = ProductSPU.ProductType.BUNDLE
         bundle.spu.save(update_fields=["product_type", "updated_at"])
+        if item.get("image_url"):
+            bundle.image_url = item["image_url"][:500]
+            bundle.save(update_fields=["image_url", "updated_at"])
         bundle.bundle_components.all().delete()
         for component, quantity in normalized:
             ProductBundleComponent.objects.create(tenant=tenant, bundle_sku=bundle, component_sku=component, quantity=quantity)
