@@ -1268,6 +1268,11 @@ class SampleFulfillmentCollectionView(APIView):
                 item_payloads=items,
             )
         except ValidationError as exc:
+            owner_errors = exc.detail.get("owner", []) if isinstance(exc.detail, dict) else []
+            if not isinstance(owner_errors, (list, tuple)):
+                owner_errors = [owner_errors]
+            if any("需要该建联任务负责人创建送样" in str(item) for item in owner_errors):
+                raise Conflict("需要该建联任务负责人创建送样。") from exc
             if (
                 {"idempotency_key", "fulfillment_no"}.intersection(exc.detail)
                 or "conflict" in str(exc.get_codes())
@@ -1512,20 +1517,12 @@ class BdPerformanceView(APIView):
             raise ValidationError({"end_date": "end_date must not exceed yesterday."})
         if start_date > end_date:
             raise ValidationError({"date": "start_date must not be after end_date."})
-        if (end_date - start_date).days > 30:
-            raise ValidationError({"date": "The date range must not exceed 31 days."})
         payload = build_bd_performance(
             tenant=request.user.tenant,
             start_date=start_date,
             end_date=end_date,
-            attribution=(
-                request.query_params.get("attribution")
-                or report_settings["default_attribution"]
-            ).strip().lower(),
-            currency=(
-                request.query_params.get("currency")
-                or report_settings["default_currency"]
-            ).strip().upper(),
+            attribution=(request.query_params.get("attribution") or "strict").strip().lower(),
+            currency=(request.query_params.get("currency") or "CNY").strip().upper(),
         )
         payload["settings"] = report_settings
         return success_response(payload)

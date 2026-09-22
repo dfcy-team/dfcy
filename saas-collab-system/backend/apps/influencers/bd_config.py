@@ -2,16 +2,15 @@ from django.utils import timezone
 
 from apps.configcenter.models import SystemConfigDefinition, TenantConfigVersion
 
-from .models import SUPPORTED_CURRENCY_CHOICES
-
-
 BD_PERFORMANCE_CONFIG_KEY = "influencers.bd.performance"
 BD_PERFORMANCE_CONFIG_DEFAULTS = {
-    "default_currency": "CNY",
-    "default_attribution": "strict",
     "default_metrics": "core",
     "daily_attribution_reconciliation_enabled": True,
+    "sample_video_overdue_days": 20,
+    "sample_overdue_notification_enabled": False,
 }
+SAMPLE_VIDEO_OVERDUE_DAYS_MIN = 1
+SAMPLE_VIDEO_OVERDUE_DAYS_MAX = 365
 
 
 def bd_performance_settings(tenant_id):
@@ -31,20 +30,26 @@ def bd_performance_settings(tenant_id):
         return settings
 
     value = version.value
-    currency = str(value.get("default_currency") or "").strip().upper()
-    attribution = str(value.get("default_attribution") or "").strip().lower()
     metrics = str(value.get("default_metrics") or "").strip().lower()
-    supported_currencies = {code for code, _label in SUPPORTED_CURRENCY_CHOICES}
-    if currency in supported_currencies:
-        settings["default_currency"] = currency
-    if attribution in {"strict", "fallback"}:
-        settings["default_attribution"] = attribution
     if metrics in {"core", "full"}:
         settings["default_metrics"] = metrics
     enabled = value.get("daily_attribution_reconciliation_enabled")
     if isinstance(enabled, bool):
         settings["daily_attribution_reconciliation_enabled"] = enabled
+    notification_enabled = value.get("sample_overdue_notification_enabled")
+    if isinstance(notification_enabled, bool):
+        settings["sample_overdue_notification_enabled"] = notification_enabled
+    overdue_days = value.get("sample_video_overdue_days")
+    # bool is an int subclass, but must never be accepted as a duration.
+    if isinstance(overdue_days, int) and not isinstance(overdue_days, bool):
+        if SAMPLE_VIDEO_OVERDUE_DAYS_MIN <= overdue_days <= SAMPLE_VIDEO_OVERDUE_DAYS_MAX:
+            settings["sample_video_overdue_days"] = overdue_days
     return settings
+
+
+def sample_video_overdue_days(tenant_id):
+    """Return the validated per-tenant deadline used for newly dated samples."""
+    return bd_performance_settings(tenant_id)["sample_video_overdue_days"]
 
 
 def bd_performance_config_definition():

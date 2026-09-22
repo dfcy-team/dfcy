@@ -149,6 +149,7 @@ const ifMatchHeaders = (version) => {
 const requestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
 export function formatInfluencerError(response, fallback = '操作失败，请稍后重试。') {
+  const responseDetails = `${response?.message || ''} ${JSON.stringify(response?.data || {})}`;
   const nestedMessage = (() => {
     const visit = (value) => {
       if (typeof value === 'string') return value.trim();
@@ -168,6 +169,9 @@ export function formatInfluencerError(response, fallback = '操作失败，请�
     return visit(response?.data);
   })();
   const message = nestedMessage || response?.message || '';
+  if (/需要该建联任务负责人创建送样|Sample owner must be assigned to the outreach task/i.test(responseDetails)) {
+    return '需要该建联任务负责人创建送样。';
+  }
   if (/blacklist|blacklisted|黑名单/i.test(message)) return '该达人已被加入黑名单，不能执行本次操作。';
   if (response?.http_status === 409 || response?.code === 'STATE_CONFLICT' || response?.code === 'CONFLICT') {
     if (/terminal|completed|cancelled|终态/i.test(message)) return `任务已进入终态，不能再修改目标或送样。${message ? ` ${message}` : ''}`;

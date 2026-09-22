@@ -122,7 +122,7 @@ const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
 const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
 const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
 const BdPerformance = () => import('../views/influencers/BdPerformance.vue');
-const BdPerformanceConfig = () => import('../views/settings/ConfigCenterList.vue');
+const BdPerformanceConfig = () => import('../views/influencers/BdPerformanceConfig.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');

@@ -768,6 +768,124 @@ def test_pending_sample_record_completes_task_when_unique_sample_target_is_reach
     assert payload["completion_validation"]["target_reached"] is True
 
 
+def test_sample_creation_uses_configured_video_overdue_days(monkeypatch):
+    _, user, store, influencer = _records("configured-sample-overdue")
+    task = _task(user, store, influencer, target_count=1)
+    monkeypatch.setattr(influencer_services, "sample_video_overdue_days", lambda tenant_id: 45)
+
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="configured-sample-overdue-key",
+        validated_data={"outreach_task": task, "influencer": influencer},
+        item_payloads=[],
+    )
+
+    assert fulfillment.video_deadline_at - fulfillment.sample_sent_at == timedelta(days=45)
+
+
+def test_shipping_reanchors_video_deadline_to_actual_shipping_time(monkeypatch):
+    _, user, store, influencer = _records("shipping-reanchors-deadline")
+    task = _task(user, store, influencer, target_count=1)
+    monkeypatch.setattr(influencer_services, "sample_video_overdue_days", lambda tenant_id: 45)
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="shipping-reanchors-deadline-key",
+        validated_data={"outreach_task": task, "influencer": influencer},
+        item_payloads=[],
+    )
+    creation_deadline = fulfillment.sample_sent_at + timedelta(days=1)
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        video_deadline_at=creation_deadline,
+    )
+    fulfillment.refresh_from_db()
+
+    fulfillment = influencer_services.transition_sample_fulfillment(
+        user=user,
+        fulfillment=fulfillment,
+        status=SampleFulfillment.Status.SHIPPED,
+        expected_version=fulfillment.version,
+    )
+
+    assert fulfillment.shipped_at is not None
+    assert fulfillment.video_deadline_at - fulfillment.shipped_at == timedelta(days=45)
+    assert fulfillment.video_deadline_at != creation_deadline
+
+
+def test_sample_order_auto_ship_reanchors_video_deadline(monkeypatch):
+    _, user, store, influencer = _records("auto-ship-reanchors-deadline")
+    task = _task(user, store, influencer, target_count=1)
+    monkeypatch.setattr(influencer_services, "sample_video_overdue_days", lambda tenant_id: 30)
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="auto-ship-reanchors-deadline-key",
+        validated_data={"outreach_task": task, "influencer": influencer},
+        item_payloads=[],
+    )
+    creation_deadline = fulfillment.sample_sent_at + timedelta(days=1)
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        video_deadline_at=creation_deadline,
+    )
+    fulfillment.refresh_from_db()
+
+    fulfillment = influencer_services.update_sample_fulfillment(
+        user=user,
+        fulfillment=fulfillment,
+        expected_version=fulfillment.version,
+        validated_data={"sample_order_no": "ORDER-REANCHOR-1"},
+    )
+
+    assert fulfillment.status == SampleFulfillment.Status.SHIPPED
+    assert fulfillment.video_deadline_at - fulfillment.shipped_at == timedelta(days=30)
+    assert fulfillment.video_deadline_at != creation_deadline
+
+
+def test_source_shipping_chronology_uses_newer_fact_and_ignores_older_snapshot(monkeypatch):
+    _, user, store, influencer = _records("source-shipping-chronology")
+    monkeypatch.setattr(influencer_services, "sample_video_overdue_days", lambda tenant_id: 20)
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="source-shipping-chronology-key",
+        validated_data={
+            "influencer": influencer,
+            "store": store,
+            "link_type": "direct",
+        },
+        item_payloads=[],
+    )
+    existing_shipped_at = timezone.now() - timedelta(days=4)
+    existing_deadline = existing_shipped_at + timedelta(days=20)
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=fulfillment.pk),
+        status=SampleFulfillment.Status.SHIPPED,
+        shipped_at=existing_shipped_at,
+        video_deadline_at=existing_deadline,
+    )
+    fulfillment.refresh_from_db()
+
+    influencer_services._apply_source_chronology(
+        user=user,
+        fulfillment=fulfillment,
+        desired_status=SampleFulfillment.Status.SHIPPED,
+        sample_sent_at=fulfillment.sample_sent_at,
+        shipped_at=existing_shipped_at - timedelta(days=2),
+    )
+    assert fulfillment.shipped_at == existing_shipped_at
+    assert fulfillment.video_deadline_at == existing_deadline
+
+    newer_shipped_at = existing_shipped_at + timedelta(days=2)
+    influencer_services._apply_source_chronology(
+        user=user,
+        fulfillment=fulfillment,
+        desired_status=SampleFulfillment.Status.SHIPPED,
+        sample_sent_at=fulfillment.sample_sent_at,
+        shipped_at=newer_shipped_at,
+    )
+    assert fulfillment.shipped_at == newer_shipped_at
+    assert fulfillment.video_deadline_at == newer_shipped_at + timedelta(days=20)
+
+
 def test_lowering_target_recomputes_completion_from_existing_sample_records():
     _, user, store, influencer = _records("lower-target-sample-completion")
     task = _task(user, store, target_count=2)

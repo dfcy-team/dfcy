@@ -1395,6 +1395,57 @@ def test_sample_accepts_any_assigned_outreach_task_owner():
     assert sample.data["data"]["owner"] == user.pk
 
 
+def test_linked_sample_rejects_unassigned_user_with_clear_owner_message():
+    tenant = Tenant.objects.create(name="Unassigned Owner Tenant", code="unassigned-owner")
+    user, client = user_with_permissions(
+        tenant,
+        "unassigned-owner-manager",
+        "influencers.outreach.manage",
+        "influencers.fulfillment.manage",
+    )
+    make_bd_owner(tenant, user)
+    task_owner = CustomUser.objects.create_user(
+        username="unassigned-owner-primary",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    make_bd_owner(tenant, task_owner)
+    store = store_for(tenant, "unassigned-owner-store")
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_name": "Unassigned owner sample task",
+            "store": store,
+            "owners": [task_owner],
+        },
+    )
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="unassigned-owner-creator",
+        name="Unassigned owner creator",
+        platform="tiktok",
+    )
+
+    sample = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="unassigned-owner-sample",
+    )
+
+    assert sample.status_code == 409, sample.data
+    assert sample.data["message"] == "需要该建联任务负责人创建送样。"
+    assert not SampleFulfillment.objects.filter(
+        tenant=tenant,
+        request_key="unassigned-owner-sample",
+    ).exists()
+
+
 def test_linked_sample_defaults_to_signed_in_assigned_owner():
     tenant = Tenant.objects.create(name="Signed In Owner Tenant", code="signed-in-owner")
     user, client = user_with_permissions(
@@ -2391,6 +2442,27 @@ def test_bd_performance_allows_completed_range_after_latest_imported_order():
 
     assert response.status_code == 200
     assert response.data["data"]["data_as_of"] == order_day.isoformat()
+
+
+def test_bd_performance_allows_ranges_longer_than_31_days():
+    tenant = Tenant.objects.create(name="Performance long range tenant", code="performance-long-range")
+    _, client = user_with_permissions(
+        tenant,
+        "performance-long-range-viewer",
+        "influencers.outreach.view",
+        "influencers.fulfillment.view",
+    )
+    end_date = timezone.localdate() - timedelta(days=1)
+    start_date = end_date - timedelta(days=120)
+
+    response = client.get(
+        "/api/internal/influencers/bd-performance/",
+        {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["start_date"] == start_date.isoformat()
+    assert response.data["data"]["end_date"] == end_date.isoformat()
 
 
 @pytest.mark.parametrize("days_from_today", [0, 1])
