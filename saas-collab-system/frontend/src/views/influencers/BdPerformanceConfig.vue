@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">CREATOR OPERATIONS</p>
         <h1>BD 配置</h1>
-        <p>设置绩效报表默认口径，并控制每日订单归因补偿。</p>
+        <p>设置绩效指标视图、每日归因补偿及送样逾期提醒。</p>
       </div>
       <el-tag :type="apiStatus === 'connected' ? 'success' : 'warning'">
         {{ apiStatus === 'connected' ? '配置服务已连接' : '配置服务不可用' }}
@@ -33,21 +33,6 @@
 
         <el-form label-position="top" :model="form" class="settings-form">
           <div class="field-grid">
-            <el-form-item label="默认币种">
-              <el-select v-model="form.default_currency" class="full-width">
-                <el-option v-for="item in currencies" :key="item.value" :label="item.label" :value="item.value" />
-              </el-select>
-              <small>打开 BD 绩效时默认展示的换算币种。</small>
-            </el-form-item>
-
-            <el-form-item label="默认归因方式">
-              <el-radio-group v-model="form.default_attribution">
-                <el-radio-button value="strict">方式一</el-radio-button>
-                <el-radio-button value="fallback">方式二</el-radio-button>
-              </el-radio-group>
-              <small>{{ form.default_attribution === 'strict' ? '达人 + 店铺 + 商品严格匹配' : '达人 + 店铺匹配' }}</small>
-            </el-form-item>
-
             <el-form-item label="默认指标视图">
               <el-radio-group v-model="form.default_metrics">
                 <el-radio-button value="core">核心</el-radio-button>
@@ -62,6 +47,25 @@
                 <span>{{ form.daily_attribution_reconciliation_enabled ? '已开启' : '已关闭' }}</span>
               </div>
               <small>开启后每天处理近期增量，并分批回扫历史遗漏。</small>
+            </el-form-item>
+
+            <el-form-item label="送样逾期时长">
+              <el-input-number
+                v-model="form.sample_video_overdue_days"
+                :min="1"
+                :max="365"
+                :step="1"
+                class="full-width"
+              />
+              <small>新建、发货或同步重算截止时间时，从送样或发货日起计算；已存在的截止时间不变。</small>
+            </el-form-item>
+
+            <el-form-item label="送样逾期提醒">
+              <div class="switch-line">
+                <el-switch v-model="form.sample_overdue_notification_enabled" />
+                <span>{{ form.sample_overdue_notification_enabled ? '已开启' : '已关闭' }}</span>
+              </div>
+              <small>逾期状态生成时，向该送样负责人创建一条站内提醒；同一送样仅提醒一次。</small>
             </el-form-item>
           </div>
 
@@ -117,19 +121,11 @@ import { getActionAccess } from '../../utils/actionAccess';
 
 const CONFIG_KEY = 'influencers.bd.performance';
 const defaults = {
-  default_currency: 'CNY',
-  default_attribution: 'strict',
   default_metrics: 'core',
-  daily_attribution_reconciliation_enabled: true
+  daily_attribution_reconciliation_enabled: true,
+  sample_video_overdue_days: 20,
+  sample_overdue_notification_enabled: false
 };
-
-const currencies = [
-  { label: '人民币 CNY', value: 'CNY' },
-  { label: '菲律宾比索 PHP', value: 'PHP' },
-  { label: '马来西亚林吉特 MYR', value: 'MYR' },
-  { label: '泰铢 THB', value: 'THB' },
-  { label: '美元 USD', value: 'USD' }
-];
 const auth = useAuthStore();
 const form = reactive({ ...defaults });
 const definition = ref(null);

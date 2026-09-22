@@ -18,6 +18,7 @@ from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import write_operation_log
+from apps.audit.models import NotificationMessage
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
@@ -39,6 +40,7 @@ from .models import (
     influencer_identity_queryset,
 )
 from .attribution import create_sample_attribution_snapshot
+from .bd_config import sample_video_overdue_days
 
 
 TERMINAL_OUTREACH_TASK_STATUSES = frozenset(
@@ -481,7 +483,7 @@ def _lock_task_relations(
     )
     if not owner_is_assigned and source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
         raise ValidationError(
-            {"owner": "Sample owner must be assigned to the outreach task for this source."},
+            {"owner": "需要该建联任务负责人创建送样。"},
             code="conflict",
         )
 
@@ -675,7 +677,7 @@ def _apply_source_chronology(
     else:
         source_shipped_at = None
     deadline_base = source_shipped_at or source_sample_sent_at
-    source_deadline = deadline_base + timedelta(days=20)
+    source_deadline = deadline_base + timedelta(days=sample_video_overdue_days(user.tenant_id))
     desired = {
         "sample_sent_at": source_sample_sent_at,
         "shipped_at": source_shipped_at,
@@ -2264,7 +2266,7 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             "status": initial_status,
             "sample_sent_at": sample_sent_at,
             "shipped_at": None,
-            "video_deadline_at": deadline_base + timedelta(days=20),
+            "video_deadline_at": deadline_base + timedelta(days=sample_video_overdue_days(user.tenant_id)),
             "quick_tags": _normalize_quick_tags(data.get("quick_tags", [])),
             "is_deleted": False,
             "deleted_at": None,
@@ -4672,7 +4674,7 @@ def transition_sample_fulfillment(
     if status == SampleFulfillment.Status.SHIPPED and fulfillment.shipped_at is None:
         changes["shipped_at"] = now
         if fulfillment.video_deadline_at is None:
-            changes["video_deadline_at"] = now + timedelta(days=20)
+            changes["video_deadline_at"] = now + timedelta(days=sample_video_overdue_days(user.tenant_id))
     if status in SAMPLE_TERMINAL_STATUSES:
         changes["finalized_at"] = now
     _cas_state_update(
@@ -4785,7 +4787,8 @@ def update_sample_fulfillment(
         changes.update(
             status=SampleFulfillment.Status.SHIPPED,
             shipped_at=fulfillment.shipped_at or now,
-            video_deadline_at=fulfillment.video_deadline_at or now + timedelta(days=20),
+            video_deadline_at=fulfillment.video_deadline_at
+            or now + timedelta(days=sample_video_overdue_days(user.tenant_id)),
         )
     changes.update(version=fulfillment.version + 1, updated_at=now)
     updated = QuerySet.update(
@@ -5298,7 +5301,9 @@ def refresh_sample_fulfillment_video_status(*, user, fulfillment):
     return fulfillment
 
 
-def mark_overdue_sample_fulfillments(*, actor, tenant=None, now=None, batch_size=100):
+def mark_overdue_sample_fulfillments(
+    *, actor, tenant=None, now=None, batch_size=100, notify_overdue=False
+):
     """Idempotently mark expired, unmatched active samples as overdue."""
     if actor is None or getattr(actor, "tenant_id", None) is None:
         raise ValidationError({"actor": "An internal tenant actor is required."})
@@ -5311,6 +5316,7 @@ def mark_overdue_sample_fulfillments(*, actor, tenant=None, now=None, batch_size
         raise ValidationError({"batch_size": "Batch size must be between 1 and 500."})
     marked = 0
     skipped_with_video = 0
+    notifications_created = 0
     while True:
         published_video = VideoResult.objects.filter(
             tenant=tenant,
@@ -5398,6 +5404,22 @@ def mark_overdue_sample_fulfillments(*, actor, tenant=None, now=None, batch_size
                         fulfillment,
                         after={"status": fulfillment.status, "version": fulfillment.version},
                     )
+                    if notify_overdue:
+                        message_type = f"sample_overdue:{fulfillment.pk}"
+                        notification, created = NotificationMessage.objects.get_or_create(
+                            tenant=tenant,
+                            user=fulfillment.owner,
+                            message_type=message_type,
+                            defaults={
+                                "title": f"送样已逾期：{fulfillment.fulfillment_no}",
+                                "message": (
+                                    f"送样 {fulfillment.fulfillment_no} 已超过视频截止时间，"
+                                    "请跟进达人内容发布情况。"
+                                ),
+                            },
+                        )
+                        if created:
+                            notifications_created += 1
                     if fulfillment.outreach_task_id:
                         affected_task_ids.add(fulfillment.outreach_task_id)
                     marked += 1
@@ -5408,4 +5430,8 @@ def mark_overdue_sample_fulfillments(*, actor, tenant=None, now=None, batch_size
                     user=actor,
                     fulfillment=fulfillment_id,
                 )
-    return {"marked": marked, "skipped_with_video": skipped_with_video}
+    return {
+        "marked": marked,
+        "skipped_with_video": skipped_with_video,
+        "notifications_created": notifications_created,
+    }

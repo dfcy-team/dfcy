@@ -1518,14 +1518,8 @@ class BdPerformanceView(APIView):
             tenant=request.user.tenant,
             start_date=start_date,
             end_date=end_date,
-            attribution=(
-                request.query_params.get("attribution")
-                or report_settings["default_attribution"]
-            ).strip().lower(),
-            currency=(
-                request.query_params.get("currency")
-                or report_settings["default_currency"]
-            ).strip().upper(),
+            attribution=(request.query_params.get("attribution") or "strict").strip().lower(),
+            currency=(request.query_params.get("currency") or "CNY").strip().upper(),
         )
         payload["settings"] = report_settings
         return success_response(payload)
