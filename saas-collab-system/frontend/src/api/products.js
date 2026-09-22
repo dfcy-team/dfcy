@@ -100,7 +100,7 @@ export const previewProductBundleMigration = (data = {}) => requestWithMockFallb
 );
 
 export const confirmProductBundleMigration = (token, data = {}) => requestWithMockFallback(
-  { method: 'post', url: `/api/internal/products/bundles/migrations/${encodeURIComponent(token)}/confirm/`, data },
+  { method: 'post', url: `/api/internal/products/bundles/migrations/${encodeURIComponent(token)}/confirm/`, data, timeout: 120000 },
   () => ({ success: true, data: { migrated: 0 } }),
   'products.bundles.migrations.confirm'
 );
