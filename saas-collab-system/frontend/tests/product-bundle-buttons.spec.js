@@ -63,6 +63,13 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('accept=".csv,.xlsx');
     expect(page).toContain("payload.append('file', file)");
     expect(page).toContain('服务端未返回迁移确认令牌');
+    expect(page).toContain(':disabled="!migrationPreview.token || migrationPreview.bundleCount === 0"');
+    expect(page).toContain('迁移可用组合');
+    expect(page).toContain("matched: '匹配成功'");
+    expect(page).toContain('旧组合关系迁移异常_');
+    expect(page).toContain('已生成异常文件');
+    expect(page).toContain('downloadMigrationErrors(migrationPreview.rejectedRows)');
+    expect(page).toContain('同一组合存在其他阻断的子 SKU');
     expect(api).toContain("url: `/api/internal/products/bundles/${skuId}/`");
     expect(api).toContain("url: '/api/internal/products/bundles/migrations/preview/'");
     expect(api).toContain('migrations/${encodeURIComponent(token)}/confirm/');
