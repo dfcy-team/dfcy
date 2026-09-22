@@ -1,10 +1,15 @@
 import hashlib
+import csv
+import io
+import re
 import secrets
+import zipfile
 from collections import defaultdict
 from datetime import timedelta
+from xml.etree import ElementTree
 
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from .models import (
@@ -74,46 +79,191 @@ def validate_component_rows(tenant, rows, bundle_sku=None):
     return normalized
 
 
+def _text(value):
+    return str(value or "").strip()
+
+
+def _header_key(value):
+    return re.sub(r"[\s_*（）()]", "", _text(value)).casefold()
+
+
+def _xlsx_rows(raw):
+    """Read the first populated XLSX worksheet using only the stdlib."""
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        shared = []
+        ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        if "xl/sharedStrings.xml" in archive.namelist():
+            root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+            shared = ["".join(node.itertext()) for node in root.findall("x:si", ns)]
+        workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+        rels = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        rel_ns = {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}
+        rel_map = {item.attrib["Id"]: item.attrib["Target"] for item in rels.findall("r:Relationship", rel_ns)}
+        for sheet in workbook.findall("x:sheets/x:sheet", {**ns, "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}):
+            rel_id = sheet.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+            target = rel_map.get(rel_id, "")
+            path = target if target.startswith("xl/") else "xl/" + target.lstrip("/")
+            if path not in archive.namelist():
+                continue
+            root = ElementTree.fromstring(archive.read(path))
+            output = []
+            for row in root.findall(".//x:sheetData/x:row", ns):
+                cells = {}
+                for cell in row.findall("x:c", ns):
+                    ref = cell.attrib.get("r", "A1")
+                    column = re.match(r"[A-Z]+", ref).group(0)
+                    value = cell.find("x:v", ns)
+                    text = "" if value is None else value.text or ""
+                    if cell.attrib.get("t") == "s" and text.isdigit() and int(text) < len(shared):
+                        text = shared[int(text)]
+                    inline = cell.find("x:is", ns)
+                    if inline is not None:
+                        text = "".join(inline.itertext())
+                    cells[column] = text
+                output.append(cells)
+            if output:
+                columns = sorted({key for row in output for key in row}, key=lambda value: (len(value), value))
+                return [[row.get(column, "") for column in columns] for row in output]
+    return []
+
+
+def parse_legacy_bundle_file(raw, filename=""):
+    """Normalize canonical CSV or BigSeller horizontal CSV/XLSX to relation rows."""
+    if filename.lower().endswith(".xlsx") or raw[:2] == b"PK":
+        table = _xlsx_rows(raw)
+    else:
+        text = raw.decode("utf-8-sig", errors="replace")
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096])
+        except csv.Error:
+            dialect = csv.excel
+        table = list(csv.reader(io.StringIO(text), dialect))
+    if len(table) < 2:
+        raise ValueError("文件中没有可迁移数据")
+
+    headers = [_header_key(value) for value in table[0]]
+    aliases = {
+        "legacy_bundle_spu": {"旧组合spu编码", "组合spu", "spu"},
+        "legacy_bundle_sku": {"旧组合sku编码", "旧组合sku编号", "组合sku", "组合sku编号", "sku", "sku编号", "sku编号必填"},
+        "legacy_component_sku": {"子sku旧编码", "子sku", "单品sku"},
+        "quantity": {"数量", "单品数量"},
+        "bundle_name": {"组合商品名称", "名称"},
+        "image_url": {"imageurl", "图片链接", "图片"},
+    }
+
+    def index_for(field):
+        return next((i for i, value in enumerate(headers) if value in aliases[field]), None)
+
+    bundle_sku_index = index_for("legacy_bundle_sku")
+    if bundle_sku_index is None:
+        raise ValueError("未识别到组合 SKU 列")
+    spu_index = index_for("legacy_bundle_spu")
+    name_index = index_for("bundle_name")
+    image_index = index_for("image_url")
+    component_index = index_for("legacy_component_sku")
+    quantity_index = index_for("quantity")
+    component_columns = []
+    for index, header in enumerate(headers):
+        match = re.fullmatch(r"单品sku(\d+)", header)
+        if not match:
+            continue
+        number = match.group(1)
+        qty = next((i for i, value in enumerate(headers) if value == f"sku{number}数量"), None)
+        component_columns.append((index, qty))
+    if component_index is not None:
+        component_columns = [(component_index, quantity_index)]
+    if not component_columns:
+        raise ValueError("未识别到子 SKU 关系列")
+
+    rows = []
+    for line, values in enumerate(table[1:], start=2):
+        if not any(_text(value) for value in values):
+            continue
+        value = lambda index: _text(values[index]) if index is not None and index < len(values) else ""
+        bundle_sku = value(bundle_sku_index)
+        for component_col, quantity_col in component_columns:
+            component_sku = value(component_col)
+            quantity = value(quantity_col)
+            if not component_sku and not quantity:
+                continue
+            rows.append({
+                "line": line,
+                "legacy_bundle_spu": value(spu_index),
+                "legacy_bundle_sku": bundle_sku,
+                "legacy_component_sku": component_sku,
+                "quantity": quantity,
+                "bundle_name": value(name_index),
+                "image_url": value(image_index),
+            })
+    if not rows:
+        raise ValueError("文件中没有可迁移的组合关系")
+    return rows
+
+
 def preview_legacy_migration(*, tenant, actor, rows):
     grouped = defaultdict(list)
     errors = []
     for index, row in enumerate(rows, start=1):
         try:
-            key = (str(row["legacy_bundle_spu"]).strip(), str(row["legacy_bundle_sku"]).strip())
+            key = (_text(row.get("legacy_bundle_spu")), _text(row["legacy_bundle_sku"]))
             component = str(row["legacy_component_sku"]).strip()
             quantity = int(row["quantity"])
-            if not all((*key, component)) or quantity < 1:
+            if not key[1] or not component or quantity < 1:
                 raise ValueError
-            grouped[key].append((component, quantity))
+            grouped[key].append((component, quantity, row.get("line", index)))
         except (KeyError, TypeError, ValueError):
             errors.append({"row": index, "code": "invalid_row"})
+    requested_codes = {legacy_sku for _legacy_spu, legacy_sku in grouped}
+    requested_codes.update(component for components in grouped.values() for component, _quantity, _line in components)
+    matches_by_code = defaultdict(list)
+    candidates = ProductSKU.objects.select_related("spu").filter(
+        Q(legacy_sku_code__in=requested_codes) | Q(sku_code__in=requested_codes),
+        tenant=tenant,
+        is_active=True,
+    )
+    for candidate in candidates:
+        for code in {candidate.legacy_sku_code, candidate.sku_code} & requested_codes:
+            matches_by_code[code].append(candidate)
+
     normalized = []
     for (legacy_spu, legacy_sku), components in grouped.items():
-        bundle_matches = list(ProductSKU.objects.select_related("spu").filter(
-            tenant=tenant, legacy_sku_code=legacy_sku, spu__legacy_spu_code=legacy_spu
-        )[:2])
+        bundle_matches = matches_by_code[legacy_sku][:2]
+        if legacy_spu:
+            bundle_matches = [item for item in bundle_matches if legacy_spu in {item.spu.legacy_spu_code, item.spu.spu_code}]
         if len(bundle_matches) != 1:
             errors.append({"legacy_bundle_sku": legacy_sku, "code": "bundle_not_unique"})
             continue
         resolved = []
+        preview_rows = []
         seen = set()
-        for legacy_component, quantity in components:
-            matches = list(ProductSKU.objects.filter(tenant=tenant, legacy_sku_code=legacy_component)[:2])
+        for legacy_component, quantity, line in components:
+            matches = matches_by_code[legacy_component][:2]
             if len(matches) != 1:
-                errors.append({"legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "component_not_unique"})
+                errors.append({"line": line, "legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "component_not_unique"})
                 continue
             if matches[0].id == bundle_matches[0].id or matches[0].id in seen:
-                errors.append({"legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "self_or_duplicate"})
+                errors.append({"line": line, "legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "self_or_duplicate"})
                 continue
             seen.add(matches[0].id)
             resolved.append({"component_sku_id": matches[0].id, "quantity": quantity})
+            preview_rows.append({
+                "line": line,
+                "legacy_bundle_spu": legacy_spu or bundle_matches[0].spu.legacy_spu_code or bundle_matches[0].spu.spu_code,
+                "legacy_bundle_sku": legacy_sku,
+                "legacy_component_sku": legacy_component,
+                "quantity": quantity,
+                "status": "matched",
+            })
         if len(resolved) == len(components):
-            normalized.append({"bundle_sku_id": bundle_matches[0].id, "components": resolved})
+            normalized.append({"bundle_sku_id": bundle_matches[0].id, "components": resolved, "preview_rows": preview_rows})
     raw_token = secrets.token_urlsafe(32)
     batch = ProductBundleMigrationBatch.objects.create(
         tenant=tenant, token_hash=hashlib.sha256(raw_token.encode()).hexdigest(), created_by=actor,
         normalized_rows=normalized,
-        preview_summary={"input_rows": len(rows), "bundles_ready": len(normalized), "error_count": len(errors), "errors": errors[:20]},
+        preview_summary={
+            "input_rows": len(rows), "bundles_ready": len(normalized), "error_count": len(errors),
+            "rows": [row for item in normalized for row in item["preview_rows"]][:200], "errors": errors[:20],
+        },
         expires_at=timezone.now() + timedelta(hours=24),
     )
     return raw_token, batch
@@ -136,7 +286,7 @@ def confirm_legacy_migration(*, tenant, actor, token):
         bundle.bundle_components.all().delete()
         for component, quantity in normalized:
             ProductBundleComponent.objects.create(tenant=tenant, bundle_sku=bundle, component_sku=component, quantity=quantity)
-        create_bundle_version(bundle_sku=bundle, actor=actor, reason="legacy ZH migration", action="legacy_migrated", before=before)
+        create_bundle_version(bundle_sku=bundle, actor=actor, reason="legacy bundle migration", action="legacy_migrated", before=before)
     batch.status = batch.Status.CONFIRMED
     batch.confirmed_at = timezone.now()
     batch.save(update_fields=["status", "confirmed_at"])

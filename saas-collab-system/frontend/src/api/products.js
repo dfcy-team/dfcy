@@ -95,7 +95,7 @@ export const fetchProductBundleAvailability = (skuId, params = {}) => requestWit
 
 export const previewProductBundleMigration = (data = {}) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/products/bundles/migrations/preview/', data },
-  () => ({ success: true, data: { token: `mock-${Date.now()}`, rows: data.rows || [], errors: [] } }),
+  () => ({ success: true, data: { token: `mock-${Date.now()}`, rows: data instanceof FormData ? [] : (data.rows || []), errors: [] } }),
   'products.bundles.migrations.preview'
 );
 

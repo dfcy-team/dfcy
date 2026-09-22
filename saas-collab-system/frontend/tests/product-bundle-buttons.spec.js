@@ -50,12 +50,15 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('downloadBigSellerBundleWorkbook(selectedBundles.value, skus.value, bundleComponents.value)');
   });
 
-  it('二期支持组合版本、库存可用量和旧 ZH 关系的预览确认迁移', () => {
+  it('二期支持组合版本、库存可用量和全部旧组合关系的预览确认迁移', () => {
     expect(page).toContain('保存新版本');
     expect(page).toContain('已同步订单继续使用下单时快照');
     expect(page).toContain('库存可用量');
     expect(page).toContain('仅供业务判断，不直接扣减库存');
     expect(page).toContain('data-testid="bundle-legacy-migration-button"');
+    expect(page).toContain('不按 ZH 前缀筛选');
+    expect(page).toContain('accept=".csv,.xlsx');
+    expect(page).toContain("payload.append('file', file)");
     expect(page).toContain('服务端未返回迁移确认令牌');
     expect(api).toContain("url: `/api/internal/products/bundles/${skuId}/`");
     expect(api).toContain("url: '/api/internal/products/bundles/migrations/preview/'");
