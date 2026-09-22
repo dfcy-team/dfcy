@@ -109,3 +109,28 @@ def test_confirm_migrates_ready_bundles_and_keeps_blocked_rows_skipped():
     assert confirmed.preview_summary["migrated"] == 1
     assert confirmed.preview_summary["skipped_errors"] == 1
     assert ProductBundleComponent.objects.get(bundle_sku=bundle, component_sku=component).quantity == 2
+
+
+@pytest.mark.django_db
+def test_confirm_skips_bundle_that_would_become_nested_and_migrates_independent_bundle():
+    tenant = Tenant.objects.create(name="Nested bundle", code="nested-bundle")
+    actor = CustomUser.objects.create_user(username="nested-bundle-user", tenant=tenant, user_type=CustomUser.UserType.INTERNAL)
+    parent_spu = ProductSPU.objects.create(tenant=tenant, spu_code="PARENT-SPU", product_name="Parent")
+    parent = ProductSKU.objects.create(tenant=tenant, spu=parent_spu, sku_code="PARENT", product_name="Parent")
+    child_spu = ProductSPU.objects.create(tenant=tenant, spu_code="CHILD-SPU", product_name="Child")
+    child = ProductSKU.objects.create(tenant=tenant, spu=child_spu, sku_code="CHILD", product_name="Child")
+    part_spu = ProductSPU.objects.create(tenant=tenant, spu_code="PART-SPU", product_name="Part")
+    part = ProductSKU.objects.create(tenant=tenant, spu=part_spu, sku_code="PART", product_name="Part")
+
+    token, _batch = preview_legacy_migration(tenant=tenant, actor=actor, rows=[
+        {"line": 2, "legacy_bundle_spu": "", "legacy_bundle_sku": "PARENT", "legacy_component_sku": "CHILD", "quantity": 1},
+        {"line": 3, "legacy_bundle_spu": "", "legacy_bundle_sku": "CHILD", "legacy_component_sku": "PART", "quantity": 1},
+    ])
+
+    confirmed = confirm_legacy_migration(tenant=tenant, actor=actor, token=token)
+
+    assert confirmed.preview_summary["migrated"] == 1
+    assert confirmed.preview_summary["runtime_rejected_bundles"] == 1
+    assert confirmed.preview_summary["rejected_rows"][-1]["code"] == "nested_bundle_component"
+    assert not ProductBundleComponent.objects.filter(bundle_sku=parent).exists()
+    assert ProductBundleComponent.objects.get(bundle_sku=child, component_sku=part).quantity == 1
