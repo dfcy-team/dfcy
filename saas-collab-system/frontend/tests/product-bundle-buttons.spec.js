@@ -56,6 +56,9 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('库存可用量');
     expect(page).toContain('仅供业务判断，不直接扣减库存');
     expect(page).toContain('data-testid="bundle-legacy-migration-button"');
+    expect(page).toContain("if (props.initialAction === 'legacy-migration') openMigration();");
+    expect(page).toContain("breakdown['bundle_not_unique:not_found']");
+    expect(page).toContain("breakdown['component_not_unique:multiple_matches']");
     expect(page).toContain('不按 ZH 前缀筛选');
     expect(page).toContain('accept=".csv,.xlsx');
     expect(page).toContain("payload.append('file', file)");

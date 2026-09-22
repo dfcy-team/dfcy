@@ -17,19 +17,20 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-dropdown v-if="canManage" trigger="click" @command="handleIoCommand">
+        <el-dropdown v-if="canManage || canManageBundles" trigger="click" @command="handleIoCommand">
           <el-button data-testid="detail-io-menu">导入与导出 <span class="io-menu-caret">⌄</span></el-button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item disabled>导入</el-dropdown-item>
-              <el-dropdown-item command="create-import" data-testid="detail-import-button">商品新增导入</el-dropdown-item>
-              <el-dropdown-item command="legacy-import" data-testid="legacy-import-button">旧商品档案导入</el-dropdown-item>
-              <el-dropdown-item command="image-import" data-testid="image-batch-open">批量导入图片</el-dropdown-item>
-              <el-dropdown-item divided disabled>导出</el-dropdown-item>
-              <el-dropdown-item command="bigseller-export" data-testid="bigseller-create-product-export" :disabled="!exportableSelectedRows.length || bigsellerExporting">
+              <el-dropdown-item v-if="canManage" command="create-import" data-testid="detail-import-button">商品新增导入</el-dropdown-item>
+              <el-dropdown-item v-if="canManage" command="legacy-import" data-testid="legacy-import-button">旧商品档案导入</el-dropdown-item>
+              <el-dropdown-item v-if="canManage" command="image-import" data-testid="image-batch-open">批量导入图片</el-dropdown-item>
+              <el-dropdown-item v-if="canManageBundles" command="bundle-legacy-migration" data-testid="detail-bundle-legacy-migration-button">旧组合关系迁移</el-dropdown-item>
+              <el-dropdown-item v-if="canManage" divided disabled>导出</el-dropdown-item>
+              <el-dropdown-item v-if="canManage" command="bigseller-export" data-testid="bigseller-create-product-export" :disabled="!exportableSelectedRows.length || bigsellerExporting">
                 下载 BigSeller 商品SKU表
               </el-dropdown-item>
-              <el-dropdown-item command="detail-export" data-testid="product-detail-export">导出商品明细 CSV</el-dropdown-item>
+              <el-dropdown-item v-if="canManage" command="detail-export" data-testid="product-detail-export">导出商品明细 CSV</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -1474,6 +1475,7 @@ function handleIoCommand(command) {
   if (command === 'create-import') openCreateImport();
   else if (command === 'legacy-import') openLegacyImport();
   else if (command === 'image-import') openImageBatch();
+  else if (command === 'bundle-legacy-migration') openBundleWorkspace('legacy-migration');
   else if (command === 'bigseller-export') exportBigSellerProducts();
   else if (command === 'detail-export') exportProductDetails(filters);
 }

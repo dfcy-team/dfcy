@@ -42,3 +42,29 @@ def test_preview_derives_spu_and_matches_current_or_legacy_sku_without_zh_prefix
     assert batch.preview_summary["rows"][0]["legacy_bundle_spu"] == "OLD-SPU"
     assert batch.normalized_rows[0]["bundle_sku_id"] == bundle.id
     assert batch.normalized_rows[0]["components"] == [{"component_sku_id": component.id, "quantity": 2}]
+
+
+@pytest.mark.django_db
+def test_preview_reports_not_found_and_multiple_match_counts_separately():
+    tenant = Tenant.objects.create(name="Bundle blockers", code="bundle-blockers")
+    actor = CustomUser.objects.create_user(username="bundle-blocker-user", tenant=tenant, user_type=CustomUser.UserType.INTERNAL)
+    bundle_spu = ProductSPU.objects.create(tenant=tenant, spu_code="BUNDLE-SPU", product_name="Bundle")
+    ProductSKU.objects.create(tenant=tenant, spu=bundle_spu, sku_code="BUNDLE-1", product_name="Bundle")
+    duplicate_spu = ProductSPU.objects.create(tenant=tenant, spu_code="DUPLICATE-SPU", product_name="Duplicate")
+    ProductSKU.objects.create(tenant=tenant, spu=duplicate_spu, sku_code="DUPLICATE-A", legacy_sku_code="OLD-DUP")
+    ProductSKU.objects.create(tenant=tenant, spu=duplicate_spu, sku_code="DUPLICATE-B", legacy_sku_code="OLD-DUP")
+
+    _token, batch = preview_legacy_migration(tenant=tenant, actor=actor, rows=[
+        {"line": 2, "legacy_bundle_spu": "", "legacy_bundle_sku": "MISSING-BUNDLE", "legacy_component_sku": "MISSING-PART", "quantity": 1},
+        {"line": 3, "legacy_bundle_spu": "", "legacy_bundle_sku": "BUNDLE-1", "legacy_component_sku": "OLD-DUP", "quantity": 1},
+    ])
+
+    assert batch.preview_summary["error_count"] == 2
+    assert batch.preview_summary["error_breakdown"] == {
+        "bundle_not_unique:not_found": 1,
+        "component_not_unique:multiple_matches": 1,
+    }
+    assert batch.preview_summary["errors"] == [
+        {"legacy_bundle_sku": "MISSING-BUNDLE", "code": "bundle_not_unique", "match_reason": "not_found", "match_count": 0},
+        {"line": 3, "legacy_bundle_sku": "BUNDLE-1", "legacy_component_sku": "OLD-DUP", "code": "component_not_unique", "match_reason": "multiple_matches", "match_count": 2},
+    ]

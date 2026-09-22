@@ -4,7 +4,7 @@ import io
 import re
 import secrets
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import timedelta
 from xml.etree import ElementTree
 
@@ -227,19 +227,31 @@ def preview_legacy_migration(*, tenant, actor, rows):
 
     normalized = []
     for (legacy_spu, legacy_sku), components in grouped.items():
-        bundle_matches = matches_by_code[legacy_sku][:2]
+        bundle_matches = matches_by_code[legacy_sku]
         if legacy_spu:
             bundle_matches = [item for item in bundle_matches if legacy_spu in {item.spu.legacy_spu_code, item.spu.spu_code}]
         if len(bundle_matches) != 1:
-            errors.append({"legacy_bundle_sku": legacy_sku, "code": "bundle_not_unique"})
+            errors.append({
+                "legacy_bundle_sku": legacy_sku,
+                "code": "bundle_not_unique",
+                "match_reason": "not_found" if not bundle_matches else "multiple_matches",
+                "match_count": len(bundle_matches),
+            })
             continue
         resolved = []
         preview_rows = []
         seen = set()
         for legacy_component, quantity, line in components:
-            matches = matches_by_code[legacy_component][:2]
+            matches = matches_by_code[legacy_component]
             if len(matches) != 1:
-                errors.append({"line": line, "legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "component_not_unique"})
+                errors.append({
+                    "line": line,
+                    "legacy_bundle_sku": legacy_sku,
+                    "legacy_component_sku": legacy_component,
+                    "code": "component_not_unique",
+                    "match_reason": "not_found" if not matches else "multiple_matches",
+                    "match_count": len(matches),
+                })
                 continue
             if matches[0].id == bundle_matches[0].id or matches[0].id in seen:
                 errors.append({"line": line, "legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "self_or_duplicate"})
@@ -256,12 +268,17 @@ def preview_legacy_migration(*, tenant, actor, rows):
             })
         if len(resolved) == len(components):
             normalized.append({"bundle_sku_id": bundle_matches[0].id, "components": resolved, "preview_rows": preview_rows})
+    error_breakdown = Counter(
+        f"{error['code']}:{error.get('match_reason', 'other')}"
+        for error in errors
+    )
     raw_token = secrets.token_urlsafe(32)
     batch = ProductBundleMigrationBatch.objects.create(
         tenant=tenant, token_hash=hashlib.sha256(raw_token.encode()).hexdigest(), created_by=actor,
         normalized_rows=normalized,
         preview_summary={
             "input_rows": len(rows), "bundles_ready": len(normalized), "error_count": len(errors),
+            "error_breakdown": dict(error_breakdown),
             "rows": [row for item in normalized for row in item["preview_rows"]][:200], "errors": errors[:20],
         },
         expires_at=timezone.now() + timedelta(hours=24),
