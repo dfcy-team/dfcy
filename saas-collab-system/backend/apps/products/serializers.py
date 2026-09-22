@@ -520,6 +520,8 @@ class ProductCategoryBackgroundColorBulkSerializer(serializers.Serializer):
 
 class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    spu_code = serializers.CharField(source="spu.spu_code", read_only=True)
+    product_type = serializers.CharField(source="spu.product_type", read_only=True)
     # Declared on the concrete serializer because DRF does not collect fields
     # declared only on a plain mixin into ModelSerializer._declared_fields.
     clear_fields = serializers.ListField(
@@ -552,6 +554,8 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             "id",
             "tenant_id",
             "spu",
+            "spu_code",
+            "product_type",
             "sku_code",
             "product_name",
             "product_name_source",

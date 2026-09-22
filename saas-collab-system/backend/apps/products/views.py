@@ -1064,11 +1064,14 @@ def product_sku_collection(request):
         queryset = filter_product_skus(request.user, queryset, "products.master.view")
         search = request.query_params.get("search", "").strip()
         spu_id = request.query_params.get("spu_id", "").strip()
+        product_type = request.query_params.get("product_type", "").strip()
         active_status = request.query_params.get("active_status", "active").strip()
         if search:
             queryset = queryset.filter(sku_code__icontains=search)
         if spu_id.isdigit():
             queryset = queryset.filter(spu_id=int(spu_id))
+        if product_type in ProductSPU.ProductType.values:
+            queryset = queryset.filter(spu__product_type=product_type)
         if active_status == "active":
             queryset = queryset.filter(is_active=True)
         elif active_status == "inactive":

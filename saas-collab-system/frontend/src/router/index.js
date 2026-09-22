@@ -31,6 +31,7 @@ const ProductMasterDetail = () => import('../views/products/ProductMasterDetail.
 const ProductDetailData = () => import('../views/products/ProductDetailData.vue');
 const ProductCostLedger = () => import('../views/products/ProductCostLedger.vue');
 const ProductSkuEditor = () => import('../views/products/ProductSkuEditor.vue');
+const ProductBundleEditor = () => import('../views/products/ProductBundleEditor.vue');
 const ProductDictionarySettings = () => import('../views/products/ProductDictionarySettings.vue');
 const FoundationSettings = () => import('../views/masterdata/FoundationSettings.vue');
 const ProductStatusList = () => import('../views/products/ProductStatusList.vue');
@@ -210,6 +211,7 @@ const routes = [
       { path: 'products/details', component: ProductDetailData },
       { path: 'products/costs', component: ProductCostLedger },
       { path: 'products/details/:id/edit', component: ProductSkuEditor },
+      { path: 'products/bundles/:id/edit', component: ProductBundleEditor },
       { path: 'products/platform-details', component: PlatformProductDetailList },
       { path: 'products/categories', component: ProductDictionarySettings, props: { kind: 'categories' } },
       { path: 'products/attributes', component: ProductDictionarySettings, props: { kind: 'attributes' } },
