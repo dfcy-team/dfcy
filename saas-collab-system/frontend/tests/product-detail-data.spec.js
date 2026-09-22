@@ -27,6 +27,12 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('批量新增组合商品');
     expect(page).toContain('<ProductBundleManager');
   });
+
+  it('从商品明细导入菜单直接进入旧组合关系迁移', () => {
+    expect(page).toContain('data-testid="detail-bundle-legacy-migration-button"');
+    expect(page).toContain('command="bundle-legacy-migration"');
+    expect(page).toContain("openBundleWorkspace('legacy-migration')");
+  });
   it('使用分类树、服务端筛选和分页', () => {
     expect(page).toContain('分类目录');
     expect(page).toContain('categoryTree');

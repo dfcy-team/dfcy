@@ -240,6 +240,9 @@
         <el-descriptions-item label="待迁移组合">{{ migrationPreview.bundleCount }}</el-descriptions-item>
         <el-descriptions-item label="关系行">{{ migrationPreview.relationCount }}</el-descriptions-item>
         <el-descriptions-item label="阻断错误">{{ migrationPreview.errorCount }}</el-descriptions-item>
+        <el-descriptions-item v-if="migrationPreview.errorCount" label="组合 SKU 未找到">{{ migrationPreview.errorBreakdown.bundleNotFound }}</el-descriptions-item>
+        <el-descriptions-item v-if="migrationPreview.errorCount" label="组合 SKU 重复匹配">{{ migrationPreview.errorBreakdown.bundleMultiple }}</el-descriptions-item>
+        <el-descriptions-item v-if="migrationPreview.errorCount" label="子 SKU 未找到/重复">{{ migrationPreview.errorBreakdown.componentNotFound }} / {{ migrationPreview.errorBreakdown.componentMultiple }}</el-descriptions-item>
       </el-descriptions>
       <el-table v-if="migrationPreview.rows.length" class="phase2-table" :data="migrationPreview.rows" border max-height="260">
         <el-table-column prop="legacy_bundle_spu" label="旧组合 SPU" min-width="140" />
@@ -319,7 +322,8 @@ const migrationVisible = ref(false);
 const migrationInput = ref(null);
 const migrationFileName = ref('');
 const migrationConfirming = ref(false);
-const migrationPreview = reactive({ token: '', bundleCount: 0, relationCount: 0, errorCount: 0, rows: [], errors: [] });
+const emptyMigrationBreakdown = () => ({ bundleNotFound: 0, bundleMultiple: 0, componentNotFound: 0, componentMultiple: 0 });
+const migrationPreview = reactive({ token: '', bundleCount: 0, relationCount: 0, errorCount: 0, errorBreakdown: emptyMigrationBreakdown(), rows: [], errors: [] });
 const form = reactive({
   spuMode: 'new', existingSpu: null, name: '', category: null, season: '5', color: null,
   components: [{ sku: null, quantity: 1 }],
@@ -634,7 +638,7 @@ async function openAvailability(row) {
 }
 
 function resetMigrationPreview() {
-  Object.assign(migrationPreview, { token: '', bundleCount: 0, relationCount: 0, errorCount: 0, rows: [], errors: [] });
+  Object.assign(migrationPreview, { token: '', bundleCount: 0, relationCount: 0, errorCount: 0, errorBreakdown: emptyMigrationBreakdown(), rows: [], errors: [] });
 }
 
 function openMigration() {
@@ -665,21 +669,32 @@ async function selectMigrationFile(event) {
     if (response.success === false) throw new Error(response.message || '迁移预览失败');
     const preview = detailData(response.data) || {};
     const previewRows = preview.rows || preview.items || [];
+    const breakdown = preview.error_breakdown || {};
     Object.assign(migrationPreview, {
       token: preview.token || preview.preview_token || '',
       bundleCount: preview.bundle_count ?? preview.bundles_ready ?? 0,
       relationCount: preview.input_rows ?? previewRows.length,
       errorCount: preview.error_count ?? (preview.errors || []).length,
+      errorBreakdown: {
+        bundleNotFound: breakdown['bundle_not_unique:not_found'] || 0,
+        bundleMultiple: breakdown['bundle_not_unique:multiple_matches'] || 0,
+        componentNotFound: breakdown['component_not_unique:not_found'] || 0,
+        componentMultiple: breakdown['component_not_unique:multiple_matches'] || 0,
+      },
       rows: previewRows,
       errors: (preview.errors || []).map((error) => ({
         ...error,
         line: error.line ?? error.row ?? '-',
-        message: error.message || ({
+        message: error.message || (error.match_reason === 'not_found'
+          ? (error.code === 'bundle_not_unique' ? '组合 SKU 未找到' : '子 SKU 未找到')
+          : error.match_reason === 'multiple_matches'
+            ? `${error.code === 'bundle_not_unique' ? '组合 SKU' : '子 SKU'}匹配到 ${error.match_count} 条商品`
+            : ({
           invalid_row: '组合 SKU、子 SKU 或数量格式不正确',
           bundle_not_unique: '组合 SKU 未找到或匹配到多条商品',
           component_not_unique: '子 SKU 未找到或匹配到多条商品',
           self_or_duplicate: '子 SKU 与组合 SKU 相同或在同一组合内重复',
-        }[error.code] || error.code || '校验失败'),
+        }[error.code] || error.code || '校验失败')),
       })),
     });
     if (!migrationPreview.token) throw new Error('服务端未返回迁移确认令牌');
@@ -812,6 +827,7 @@ onMounted(async () => {
   await load();
   if (props.initialAction === 'create') visible.value = true;
   if (props.initialAction === 'import') openBundleImport();
+  if (props.initialAction === 'legacy-migration') openMigration();
 });
 </script>
 
