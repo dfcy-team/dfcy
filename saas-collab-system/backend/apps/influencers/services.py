@@ -19,7 +19,6 @@ from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import write_operation_log
 from apps.audit.models import NotificationMessage
-from apps.common.exceptions import StateConflict
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.products.cost_services import effective_cost_for
@@ -484,7 +483,10 @@ def _lock_task_relations(
         or task.owners.filter(pk=requested_owner_id).exists()
     )
     if not owner_is_assigned and source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
-        raise StateConflict("需要该建联任务负责人创建送样。")
+        raise ValidationError(
+            {"owner": "需要该建联任务负责人创建送样。"},
+            code="conflict",
+        )
 
     # Any assigned owner may execute a multi-owner task. The legacy primary
     # owner remains accepted before/after backfill; the controlled Feishu
