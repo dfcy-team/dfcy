@@ -203,6 +203,7 @@ def parse_legacy_bundle_file(raw, filename=""):
 def preview_legacy_migration(*, tenant, actor, rows):
     grouped = defaultdict(list)
     errors = []
+    rejected_rows = []
     for index, row in enumerate(rows, start=1):
         try:
             key = (_text(row.get("legacy_bundle_spu")), _text(row["legacy_bundle_sku"]))
@@ -231,30 +232,45 @@ def preview_legacy_migration(*, tenant, actor, rows):
         if legacy_spu:
             bundle_matches = [item for item in bundle_matches if legacy_spu in {item.spu.legacy_spu_code, item.spu.spu_code}]
         if len(bundle_matches) != 1:
-            errors.append({
+            bundle_error = {
+                "line": min(line for _component, _quantity, line in components),
                 "legacy_bundle_sku": legacy_sku,
                 "code": "bundle_not_unique",
                 "match_reason": "not_found" if not bundle_matches else "multiple_matches",
                 "match_count": len(bundle_matches),
-            })
+            }
+            errors.append(bundle_error)
+            rejected_rows.extend({
+                "line": line,
+                "legacy_bundle_spu": legacy_spu,
+                "legacy_bundle_sku": legacy_sku,
+                "legacy_component_sku": component,
+                "quantity": quantity,
+                **{key: bundle_error[key] for key in ("code", "match_reason", "match_count")},
+            } for component, quantity, line in components)
             continue
         resolved = []
         preview_rows = []
         seen = set()
+        component_errors = {}
         for legacy_component, quantity, line in components:
             matches = matches_by_code[legacy_component]
             if len(matches) != 1:
-                errors.append({
+                component_error = {
                     "line": line,
                     "legacy_bundle_sku": legacy_sku,
                     "legacy_component_sku": legacy_component,
                     "code": "component_not_unique",
                     "match_reason": "not_found" if not matches else "multiple_matches",
                     "match_count": len(matches),
-                })
+                }
+                errors.append(component_error)
+                component_errors[(line, legacy_component)] = component_error
                 continue
             if matches[0].id == bundle_matches[0].id or matches[0].id in seen:
-                errors.append({"line": line, "legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "self_or_duplicate"})
+                component_error = {"line": line, "legacy_bundle_sku": legacy_sku, "legacy_component_sku": legacy_component, "code": "self_or_duplicate"}
+                errors.append(component_error)
+                component_errors[(line, legacy_component)] = component_error
                 continue
             seen.add(matches[0].id)
             resolved.append({"component_sku_id": matches[0].id, "quantity": quantity})
@@ -268,6 +284,17 @@ def preview_legacy_migration(*, tenant, actor, rows):
             })
         if len(resolved) == len(components):
             normalized.append({"bundle_sku_id": bundle_matches[0].id, "components": resolved, "preview_rows": preview_rows})
+        else:
+            for component, quantity, line in components:
+                component_error = component_errors.get((line, component), {"code": "bundle_contains_blocked_component"})
+                rejected_rows.append({
+                    "line": line,
+                    "legacy_bundle_spu": legacy_spu or bundle_matches[0].spu.legacy_spu_code or bundle_matches[0].spu.spu_code,
+                    "legacy_bundle_sku": legacy_sku,
+                    "legacy_component_sku": component,
+                    "quantity": quantity,
+                    **{key: component_error[key] for key in ("code", "match_reason", "match_count") if key in component_error},
+                })
     error_breakdown = Counter(
         f"{error['code']}:{error.get('match_reason', 'other')}"
         for error in errors
@@ -279,7 +306,9 @@ def preview_legacy_migration(*, tenant, actor, rows):
         preview_summary={
             "input_rows": len(rows), "bundles_ready": len(normalized), "error_count": len(errors),
             "error_breakdown": dict(error_breakdown),
-            "rows": [row for item in normalized for row in item["preview_rows"]][:200], "errors": errors[:20],
+            "rows": [row for item in normalized for row in item["preview_rows"]][:200],
+            "errors": errors,
+            "rejected_rows": rejected_rows,
         },
         expires_at=timezone.now() + timedelta(hours=24),
     )
@@ -292,8 +321,9 @@ def confirm_legacy_migration(*, tenant, actor, token):
     batch = ProductBundleMigrationBatch.objects.select_for_update().filter(tenant=tenant, token_hash=token_hash).first()
     if not batch or batch.status != batch.Status.PREVIEWED or batch.expires_at <= timezone.now():
         raise ValueError("preview token is invalid, expired, or already consumed")
-    if batch.preview_summary.get("error_count"):
-        raise ValueError("preview contains errors")
+    if not batch.normalized_rows:
+        raise ValueError("preview contains no migratable bundles")
+    migrated_count = len(batch.normalized_rows)
     for item in batch.normalized_rows:
         bundle = ProductSKU.objects.select_for_update().select_related("spu").get(tenant=tenant, pk=item["bundle_sku_id"])
         before = component_payload(bundle.bundle_components.select_related("component_sku"))
@@ -304,7 +334,12 @@ def confirm_legacy_migration(*, tenant, actor, token):
         for component, quantity in normalized:
             ProductBundleComponent.objects.create(tenant=tenant, bundle_sku=bundle, component_sku=component, quantity=quantity)
         create_bundle_version(bundle_sku=bundle, actor=actor, reason="legacy bundle migration", action="legacy_migrated", before=before)
+    batch.preview_summary = {
+        **batch.preview_summary,
+        "migrated": migrated_count,
+        "skipped_errors": batch.preview_summary.get("error_count", 0),
+    }
     batch.status = batch.Status.CONFIRMED
     batch.confirmed_at = timezone.now()
-    batch.save(update_fields=["status", "confirmed_at"])
+    batch.save(update_fields=["preview_summary", "status", "confirmed_at"])
     return batch

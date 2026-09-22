@@ -229,7 +229,7 @@
     </el-dialog>
 
     <el-dialog v-model="migrationVisible" title="旧组合关系迁移" width="min(920px, 96vw)">
-      <el-alert title="以文件中的全部组合 SKU 为准，不按 ZH 前缀筛选。系统会按旧 SKU 或当前 SKU 反查所属 SPU，预览无误后才能确认迁移。" type="warning" :closable="false" show-icon />
+      <el-alert title="以文件中的全部组合 SKU 为准，不按 ZH 前缀筛选。确认后仅迁移完整匹配的组合，阻断项不写入并自动生成异常文件。" type="warning" :closable="false" show-icon />
       <input ref="migrationInput" hidden type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="selectMigrationFile" />
       <div class="migration-actions">
         <el-button @click="migrationInput?.click()">选择关系 Excel / CSV</el-button>
@@ -249,14 +249,18 @@
         <el-table-column prop="legacy_bundle_sku" label="旧组合 SKU" min-width="150" />
         <el-table-column prop="legacy_component_sku" label="子 SKU 旧编码" min-width="160" />
         <el-table-column prop="quantity" label="数量" width="80" />
-        <el-table-column prop="status" label="校验状态" width="110" />
+        <el-table-column label="校验状态" width="110">
+          <template #default="{ row }"><el-tag type="success">{{ migrationStatusText(row.status) }}</el-tag></template>
+        </el-table-column>
       </el-table>
       <el-table v-if="migrationPreview.errors.length" class="phase2-table" :data="migrationPreview.errors" border max-height="180">
         <el-table-column prop="line" label="行号" width="80" /><el-table-column prop="message" label="阻断原因" />
       </el-table>
       <template #footer>
         <el-button @click="migrationVisible = false">取消</el-button>
-        <el-button type="primary" :loading="migrationConfirming" :disabled="!migrationPreview.token || migrationPreview.errorCount > 0" @click="confirmMigration">确认迁移</el-button>
+        <el-button type="primary" :loading="migrationConfirming" :disabled="!migrationPreview.token || migrationPreview.bundleCount === 0" @click="confirmMigration">
+          {{ migrationPreview.errorCount > 0 ? `迁移可用组合（${migrationPreview.bundleCount}）` : '确认迁移' }}
+        </el-button>
       </template>
     </el-dialog>
   </section>
@@ -323,7 +327,7 @@ const migrationInput = ref(null);
 const migrationFileName = ref('');
 const migrationConfirming = ref(false);
 const emptyMigrationBreakdown = () => ({ bundleNotFound: 0, bundleMultiple: 0, componentNotFound: 0, componentMultiple: 0 });
-const migrationPreview = reactive({ token: '', bundleCount: 0, relationCount: 0, errorCount: 0, errorBreakdown: emptyMigrationBreakdown(), rows: [], errors: [] });
+const migrationPreview = reactive({ token: '', bundleCount: 0, relationCount: 0, errorCount: 0, errorBreakdown: emptyMigrationBreakdown(), rows: [], errors: [], rejectedRows: [] });
 const form = reactive({
   spuMode: 'new', existingSpu: null, name: '', category: null, season: '5', color: null,
   components: [{ sku: null, quantity: 1 }],
@@ -519,13 +523,41 @@ function csvCell(value) {
 }
 
 function downloadCsv(filename, headers, values) {
-  const csv = `\ufeff${headers.map(csvCell).join(',')}\n${values.map(csvCell).join(',')}\n`;
+  const rows = Array.isArray(values[0]) ? values : [values];
+  const csv = `\ufeff${headers.map(csvCell).join(',')}\n${rows.map((row) => row.map(csvCell).join(',')).join('\n')}\n`;
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function migrationStatusText(status) {
+  return ({ matched: '匹配成功' })[status] || status || '-';
+}
+
+function downloadMigrationErrors(errors) {
+  if (!errors.length) return;
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  downloadCsv(
+    `旧组合关系迁移异常_${stamp}.csv`,
+    ['源文件行号', '旧组合SKU编码', '子SKU旧编码', '数量', '旧组合SPU编码', '错误类型', '阻断原因'],
+    errors.map((error) => [error.line, error.legacy_bundle_sku, error.legacy_component_sku, error.quantity, error.legacy_bundle_spu, error.code, error.message])
+  );
+}
+
+function migrationErrorMessage(error) {
+  if (error.message) return error.message;
+  if (error.match_reason === 'not_found') return error.code === 'bundle_not_unique' ? '组合 SKU 未找到' : '子 SKU 未找到';
+  if (error.match_reason === 'multiple_matches') return `${error.code === 'bundle_not_unique' ? '组合 SKU' : '子 SKU'}匹配到 ${error.match_count} 条商品`;
+  return ({
+    invalid_row: '组合 SKU、子 SKU 或数量格式不正确',
+    bundle_not_unique: '组合 SKU 未找到或匹配到多条商品',
+    component_not_unique: '子 SKU 未找到或匹配到多条商品',
+    self_or_duplicate: '子 SKU 与组合 SKU 相同或在同一组合内重复',
+    bundle_contains_blocked_component: '同一组合存在其他阻断的子 SKU，本行未迁移',
+  })[error.code] || error.code || '校验失败';
 }
 
 function bundleImportHeaders() {
@@ -638,7 +670,7 @@ async function openAvailability(row) {
 }
 
 function resetMigrationPreview() {
-  Object.assign(migrationPreview, { token: '', bundleCount: 0, relationCount: 0, errorCount: 0, errorBreakdown: emptyMigrationBreakdown(), rows: [], errors: [] });
+  Object.assign(migrationPreview, { token: '', bundleCount: 0, relationCount: 0, errorCount: 0, errorBreakdown: emptyMigrationBreakdown(), rows: [], errors: [], rejectedRows: [] });
 }
 
 function openMigration() {
@@ -685,17 +717,9 @@ async function selectMigrationFile(event) {
       errors: (preview.errors || []).map((error) => ({
         ...error,
         line: error.line ?? error.row ?? '-',
-        message: error.message || (error.match_reason === 'not_found'
-          ? (error.code === 'bundle_not_unique' ? '组合 SKU 未找到' : '子 SKU 未找到')
-          : error.match_reason === 'multiple_matches'
-            ? `${error.code === 'bundle_not_unique' ? '组合 SKU' : '子 SKU'}匹配到 ${error.match_count} 条商品`
-            : ({
-          invalid_row: '组合 SKU、子 SKU 或数量格式不正确',
-          bundle_not_unique: '组合 SKU 未找到或匹配到多条商品',
-          component_not_unique: '子 SKU 未找到或匹配到多条商品',
-          self_or_duplicate: '子 SKU 与组合 SKU 相同或在同一组合内重复',
-        }[error.code] || error.code || '校验失败')),
+        message: migrationErrorMessage(error),
       })),
+      rejectedRows: (preview.rejected_rows || []).map((error) => ({ ...error, message: migrationErrorMessage(error) })),
     });
     if (!migrationPreview.token) throw new Error('服务端未返回迁移确认令牌');
   } catch (error) {
@@ -712,7 +736,12 @@ async function confirmMigration() {
     const response = await confirmProductBundleMigration(migrationPreview.token);
     if (response.success === false) throw new Error(response.message || '迁移确认失败');
     const result = detailData(response.data) || {};
-    ElMessage.success(`旧组合关系迁移完成，共处理 ${result.migrated ?? result.bundle_count ?? result.bundles_ready ?? migrationPreview.bundleCount} 个组合`);
+    const migrated = result.migrated ?? result.bundle_count ?? result.bundles_ready ?? migrationPreview.bundleCount;
+    const skipped = result.skipped_errors ?? result.error_count ?? migrationPreview.errorCount;
+    if (skipped > 0) downloadMigrationErrors(migrationPreview.rejectedRows);
+    ElMessage.success(skipped > 0
+      ? `已迁移 ${migrated} 个匹配组合，${skipped} 条异常未写入，已生成异常文件`
+      : `旧组合关系迁移完成，共处理 ${migrated} 个组合`);
     migrationVisible.value = false;
     await load();
   } catch (error) {
