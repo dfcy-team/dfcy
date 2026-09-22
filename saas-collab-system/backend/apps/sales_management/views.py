@@ -226,15 +226,15 @@ def _currency_metrics(row):
     net = gross - refunds
     orders = int(row["orders"] or 0)
     return [
-        _metric("gross_sales", "Sales", gross, row["currency"], "Order total grouped by currency."),
-        _metric("net_sales", "Net sales", net, row["currency"], "Order total less completed refund facts."),
-        _metric("order_count", "Orders", orders, "orders", "Distinct sales orders."),
-        _metric("valid_order_count", "Valid orders", row["valid_orders"], "orders", "Orders excluding cancelled orders."),
-        _metric("cancelled_order_count", "Cancelled orders", row["cancelled_orders"], "orders", "Orders whose normalized status is cancelled."),
-        _metric("units_sold", "Units", row["units"], "units", "Sales-order item quantity."),
-        _metric("average_order_value", "Average order value", net / orders if orders else 0, row["currency"], "Net sales divided by order count."),
-        _metric("refund_amount", "Refund amount", refunds, row["currency"], "Refund amount from refund_return only."),
-        _metric("refund_rate", "Refund rate", refunds / gross if gross else 0, "ratio", "Refund amount divided by order total."),
+        _metric("gross_sales", "销售额", gross, row["currency"], "按币种汇总的订单金额。"),
+        _metric("net_sales", "净销售额", net, row["currency"], "订单金额扣除已完成退款金额。"),
+        _metric("order_count", "订单数", orders, "orders", "去重后的销售订单数。"),
+        _metric("valid_order_count", "有效订单数", row["valid_orders"], "orders", "不含已取消订单。"),
+        _metric("cancelled_order_count", "取消订单数", row["cancelled_orders"], "orders", "标准状态为已取消的订单数。"),
+        _metric("units_sold", "销售件数", row["units"], "units", "销售订单商品数量合计。"),
+        _metric("average_order_value", "平均订单金额", (net / orders).quantize(Decimal("0.01")) if orders else 0, row["currency"], "净销售额除以订单数。"),
+        _metric("refund_amount", "退款金额", refunds, row["currency"], "来自退款事实表的退款金额。"),
+        _metric("refund_rate", "退款率", refunds / gross if gross else 0, "ratio", "退款金额除以订单金额。"),
     ]
 
 

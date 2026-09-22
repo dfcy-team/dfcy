@@ -56,10 +56,10 @@
       <section v-if="metrics.length" class="metric-grid" aria-label="核心经营指标">
         <article v-for="metric in metrics" :key="metric.code" class="metric-card">
           <div class="metric-heading">
-            <span>{{ metric.label }}</span>
-            <el-tag size="small" effect="plain">{{ metric.code_label || metric.label }}</el-tag>
+            <span>{{ metricLabel(metric) }}</span>
+            <el-tag size="small" effect="plain">{{ metricLabel(metric) }}</el-tag>
           </div>
-          <strong>{{ metric.value ?? '暂无数据' }}<small>{{ metric.unit || '' }}</small></strong>
+          <strong>{{ metricValue(metric) }}<small>{{ metricUnit(metric.unit) }}</small></strong>
           <p :class="['metric-change', metric.change_direction]">
             {{ metric.change || '暂无对比数据' }}
           </p>
@@ -162,6 +162,20 @@ let loadSequence = 0;
 let activeRequest = null;
 const pageSize = 20;
 
+const metricLabels = {
+  gross_sales: '销售额',
+  net_sales: '净销售额',
+  order_count: '订单数',
+  valid_order_count: '有效订单数',
+  cancelled_order_count: '取消订单数',
+  units_sold: '销售件数',
+  average_order_value: '平均订单金额',
+  refund_amount: '退款金额',
+  refund_rate: '退款率'
+};
+const countMetricCodes = new Set(['order_count', 'valid_order_count', 'cancelled_order_count', 'units_sold']);
+const moneyMetricCodes = new Set(['gross_sales', 'net_sales', 'average_order_value', 'refund_amount']);
+
 const apiStatusLabel = computed(() => ({
   connected: 'API 已连接',
   fallback: 'API 异常 · Mock 回退',
@@ -219,6 +233,30 @@ function formatValue(value) {
   if (value === true) return '是';
   if (value === false) return '否';
   return value ?? '--';
+}
+
+function metricLabel(metric) {
+  return metricLabels[metric?.code] || metric?.label || metric?.code_label || '未命名指标';
+}
+
+function metricUnit(unit) {
+  return ({ orders: '单', units: '件', ratio: '%' })[unit] || unit || '';
+}
+
+function metricValue(metric) {
+  if (metric?.value === null || metric?.value === undefined || metric?.value === '') return '暂无数据';
+  const value = Number(metric.value);
+  if (!Number.isFinite(value)) return metric.value;
+  if (metric.unit === 'ratio' || metric.code === 'refund_rate') {
+    return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value * 100);
+  }
+  if (moneyMetricCodes.has(metric.code)) {
+    return new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  }
+  if (countMetricCodes.has(metric.code)) {
+    return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value);
+  }
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value);
 }
 
 function statusType(value) {
