@@ -2444,6 +2444,27 @@ def test_bd_performance_allows_completed_range_after_latest_imported_order():
     assert response.data["data"]["data_as_of"] == order_day.isoformat()
 
 
+def test_bd_performance_allows_ranges_longer_than_31_days():
+    tenant = Tenant.objects.create(name="Performance long range tenant", code="performance-long-range")
+    _, client = user_with_permissions(
+        tenant,
+        "performance-long-range-viewer",
+        "influencers.outreach.view",
+        "influencers.fulfillment.view",
+    )
+    end_date = timezone.localdate() - timedelta(days=1)
+    start_date = end_date - timedelta(days=120)
+
+    response = client.get(
+        "/api/internal/influencers/bd-performance/",
+        {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["start_date"] == start_date.isoformat()
+    assert response.data["data"]["end_date"] == end_date.isoformat()
+
+
 @pytest.mark.parametrize("days_from_today", [0, 1])
 def test_bd_performance_rejects_today_and_future_end_dates(days_from_today):
     tenant = Tenant.objects.create(

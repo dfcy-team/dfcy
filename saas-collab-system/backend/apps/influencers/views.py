@@ -1517,8 +1517,6 @@ class BdPerformanceView(APIView):
             raise ValidationError({"end_date": "end_date must not exceed yesterday."})
         if start_date > end_date:
             raise ValidationError({"date": "start_date must not be after end_date."})
-        if (end_date - start_date).days > 30:
-            raise ValidationError({"date": "The date range must not exceed 31 days."})
         payload = build_bd_performance(
             tenant=request.user.tenant,
             start_date=start_date,
