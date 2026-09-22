@@ -26,9 +26,21 @@ describe('MainLayout navigation shell', () => {
     expect(source).toContain('sessionStorage.setItem(tabsStorageKey, JSON.stringify(tabs));');
   });
 
+  it('creates tabs only from visible left-menu entries', () => {
+    expect(source).toContain('flattenMenuItems(visibleMenuItems.value)');
+    expect(source).toContain('function resolveMenuTab(path)');
+    expect(source).toContain('routePath.startsWith(`${item.path}/`)');
+    expect(source).toContain('const menuTab = resolveMenuTab(currentRoute.path);');
+    expect(source).toContain('if (!menuTab)');
+    expect(source).toContain('label: menuTab.label');
+    expect(source).toContain("allowedPaths.has(tab.path)");
+    expect(source).toContain("activeMenuTabPath === tab.path");
+  });
+
   it('limits new tabs with a per-user preference and defaults to 15', () => {
     expect(source).toContain('const defaultTabLimit = 15;');
     expect(source).toContain('business-workbench:tab-limit:');
+    expect(source).toContain('if (!menuTab) return true;');
     expect(source).toContain('openTabs.value.length < tabLimit.value');
     expect(source).toContain('最多可打开 ${tabLimit.value} 个页签');
     expect(source).toContain('return false;');

@@ -39,9 +39,9 @@
             v-for="tab in openTabs"
             :key="tab.path"
             class="route-tab"
-            :class="{ 'is-active': route.fullPath === tab.path }"
+            :class="{ 'is-active': activeMenuTabPath === tab.path }"
             role="tab"
-            :aria-selected="route.fullPath === tab.path"
+            :aria-selected="activeMenuTabPath === tab.path"
             :draggable="true"
             :title="tab.closable
               ? `${tab.label}：可以移动TAB页，可以关闭TAB页`
@@ -117,7 +117,7 @@ import 'element-plus/theme-chalk/el-drawer.css';
 import 'element-plus/theme-chalk/el-breadcrumb.css';
 import 'element-plus/theme-chalk/el-button.css';
 import { useAuthStore } from '../stores/auth';
-import { filterMenuItems, findMenuLabel } from '../router/menu';
+import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
 
 const auth = useAuthStore();
@@ -162,7 +162,17 @@ let contentObserver;
 let removeTabLimitGuard;
 
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
-const currentLabel = computed(() => findMenuLabel(route.path, visibleMenuItems.value));
+const visibleMenuEntries = computed(() => flattenMenuItems(visibleMenuItems.value));
+
+function resolveMenuTab(path) {
+  const routePath = String(path || '').split('?')[0].split('#')[0] || '/';
+  return visibleMenuEntries.value
+    .filter((item) => item.path === routePath || (item.path !== '/' && routePath.startsWith(`${item.path}/`)))
+    .sort((left, right) => right.path.length - left.path.length)[0] || null;
+}
+
+const activeMenuTabPath = computed(() => resolveMenuTab(route.path)?.path || '');
+const currentLabel = computed(() => resolveMenuTab(route.path)?.label || findMenuLabel(route.path, visibleMenuItems.value));
 const roleLabel = computed(() => {
   if (auth.currentUser?.identity_label) return auth.currentUser.identity_label;
   if (auth.currentUser?.is_superuser) return '平台超级管理员';
@@ -171,18 +181,29 @@ const roleLabel = computed(() => {
 });
 
 function updateOpenTabs(currentRoute) {
-  const path = currentRoute.fullPath;
+  const menuTab = resolveMenuTab(currentRoute.path);
+  if (!menuTab) {
+    nextTick(updateScrollControls);
+    return;
+  }
+  const path = menuTab.path;
   if (!openTabs.value.some((tab) => tab.path === path)) {
     openTabs.value.push({
       path,
-      label: currentLabel.value || currentRoute.meta?.title || currentRoute.path,
+      label: menuTab.label,
       closable: path !== '/'
     });
   }
   nextTick(updateScrollControls);
 }
 
-watch(() => route.fullPath, () => updateOpenTabs(route), { immediate: true });
+watch(visibleMenuEntries, (menuEntries) => {
+  const allowedPaths = new Set(menuEntries.map((item) => item.path));
+  openTabs.value = openTabs.value.filter((tab) => tab.path === '/' || allowedPaths.has(tab.path));
+  if (!openTabs.value.some((tab) => tab.path === '/')) openTabs.value.unshift(homeTab);
+  updateOpenTabs(route);
+}, { immediate: true });
+watch(() => route.fullPath, () => updateOpenTabs(route));
 watch(openTabs, (tabs) => {
   sessionStorage.setItem(tabsStorageKey, JSON.stringify(tabs));
 }, { deep: true });
@@ -242,7 +263,9 @@ function scrollMainTo(direction) {
 
 onMounted(() => {
   removeTabLimitGuard = router.beforeEach((to) => {
-    const alreadyOpen = openTabs.value.some((tab) => tab.path === to.fullPath);
+    const menuTab = resolveMenuTab(to.path);
+    if (!menuTab) return true;
+    const alreadyOpen = openTabs.value.some((tab) => tab.path === menuTab.path);
     if (alreadyOpen || openTabs.value.length < tabLimit.value) return true;
     ElMessage.warning(`最多可打开 ${tabLimit.value} 个页签，请先关闭不需要的页签后再试。`);
     return false;
