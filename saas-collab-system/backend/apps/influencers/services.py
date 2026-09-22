@@ -662,7 +662,13 @@ def _apply_source_chronology(
         SampleFulfillment.Status.PUBLISHED,
     }
     if desired_status in advanced_statuses:
-        source_shipped_at = supplied_shipped_at or fulfillment.shipped_at
+        source_shipped_at = fulfillment.shipped_at
+        if supplied_shipped_at is not None and (
+            source_shipped_at is None or supplied_shipped_at > source_shipped_at
+        ):
+            # A newer explicit source shipping fact becomes the deadline anchor.
+            # Older/out-of-order snapshots must not move a known shipment back.
+            source_shipped_at = supplied_shipped_at
     elif (
         fulfillment.status in advanced_statuses
         or fulfillment.status
@@ -4685,8 +4691,9 @@ def transition_sample_fulfillment(
     }
     if status == SampleFulfillment.Status.SHIPPED and fulfillment.shipped_at is None:
         changes["shipped_at"] = now
-        if fulfillment.video_deadline_at is None:
-            changes["video_deadline_at"] = now + timedelta(days=sample_video_overdue_days(user.tenant_id))
+        changes["video_deadline_at"] = now + timedelta(
+            days=sample_video_overdue_days(user.tenant_id)
+        )
     if status in SAMPLE_TERMINAL_STATUSES:
         changes["finalized_at"] = now
     _cas_state_update(
@@ -4796,11 +4803,12 @@ def update_sample_fulfillment(
     )
     before_status = fulfillment.status
     if auto_ship:
+        shipped_at = now
         changes.update(
             status=SampleFulfillment.Status.SHIPPED,
-            shipped_at=fulfillment.shipped_at or now,
-            video_deadline_at=fulfillment.video_deadline_at
-            or now + timedelta(days=sample_video_overdue_days(user.tenant_id)),
+            shipped_at=shipped_at,
+            video_deadline_at=shipped_at
+            + timedelta(days=sample_video_overdue_days(user.tenant_id)),
         )
     changes.update(version=fulfillment.version + 1, updated_at=now)
     updated = QuerySet.update(

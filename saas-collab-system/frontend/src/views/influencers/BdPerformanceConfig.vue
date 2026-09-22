@@ -126,6 +126,7 @@ const defaults = {
   sample_video_overdue_days: 20,
   sample_overdue_notification_enabled: false
 };
+const CONFIG_FIELDS = Object.freeze(Object.keys(defaults));
 const auth = useAuthStore();
 const form = reactive({ ...defaults });
 const definition = ref(null);
@@ -153,8 +154,22 @@ function items(response) {
 }
 
 function applyValue(value) {
-  const safe = value && typeof value === 'object' ? value : defaults;
-  Object.assign(form, defaults, safe);
+  const safe = value && typeof value === 'object' ? value : {};
+  const supported = Object.fromEntries(
+    CONFIG_FIELDS
+      .filter((key) => Object.prototype.hasOwnProperty.call(safe, key))
+      .map((key) => [key, safe[key]])
+  );
+  Object.assign(form, defaults, supported);
+}
+
+function configValuePayload() {
+  return {
+    default_metrics: form.default_metrics,
+    daily_attribution_reconciliation_enabled: form.daily_attribution_reconciliation_enabled,
+    sample_video_overdue_days: form.sample_video_overdue_days,
+    sample_overdue_notification_enabled: form.sample_overdue_notification_enabled
+  };
 }
 
 async function load() {
@@ -175,7 +190,11 @@ async function load() {
 async function saveVersion() {
   if (!createAccess.value.allowed || saving.value) return;
   saving.value = true;
-  const response = await createConfigValue({ config_key: CONFIG_KEY, value: { ...form }, effective_at: effectiveAt.value });
+  const response = await createConfigValue({
+    config_key: CONFIG_KEY,
+    value: configValuePayload(),
+    effective_at: effectiveAt.value
+  });
   saving.value = false;
   if (!response?.success) return ElMessage.error(response?.message || '配置版本创建失败');
   ElMessage.success('配置版本已提交审批');

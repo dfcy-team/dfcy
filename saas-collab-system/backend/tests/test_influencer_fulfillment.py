@@ -1439,7 +1439,7 @@ def test_linked_sample_rejects_unassigned_user_with_clear_owner_message():
     )
 
     assert sample.status_code == 409, sample.data
-    assert "需要该建联任务负责人创建送样" in str(sample.data)
+    assert sample.data["message"] == "需要该建联任务负责人创建送样。"
     assert not SampleFulfillment.objects.filter(
         tenant=tenant,
         request_key="unassigned-owner-sample",

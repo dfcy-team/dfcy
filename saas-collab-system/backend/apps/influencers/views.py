@@ -1269,6 +1269,8 @@ class SampleFulfillmentCollectionView(APIView):
             )
         except ValidationError as exc:
             owner_errors = exc.detail.get("owner", []) if isinstance(exc.detail, dict) else []
+            if not isinstance(owner_errors, (list, tuple)):
+                owner_errors = [owner_errors]
             if any("需要该建联任务负责人创建送样" in str(item) for item in owner_errors):
                 raise Conflict("需要该建联任务负责人创建送样。") from exc
             if (
