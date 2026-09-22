@@ -117,7 +117,13 @@ def mark_overdue_sample_fulfillments_task():
         .values_list("tenant_id", flat=True)
         .distinct()
     )
-    result = {"tenants": 0, "marked": 0, "skipped_with_video": 0, "skipped_without_actor": 0}
+    result = {
+        "tenants": 0,
+        "marked": 0,
+        "skipped_with_video": 0,
+        "skipped_without_actor": 0,
+        "notifications_created": 0,
+    }
     for tenant_id in tenant_ids:
         actor = (
             CustomUser.objects.filter(
@@ -141,8 +147,10 @@ def mark_overdue_sample_fulfillments_task():
             actor=actor,
             tenant=actor.tenant,
             now=now,
+            notify_overdue=bd_performance_settings(tenant_id)["sample_overdue_notification_enabled"],
         )
         result["tenants"] += 1
         result["marked"] += tenant_result["marked"]
         result["skipped_with_video"] += tenant_result["skipped_with_video"]
+        result["notifications_created"] += tenant_result["notifications_created"]
     return result

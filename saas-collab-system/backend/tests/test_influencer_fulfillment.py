@@ -1395,6 +1395,57 @@ def test_sample_accepts_any_assigned_outreach_task_owner():
     assert sample.data["data"]["owner"] == user.pk
 
 
+def test_linked_sample_rejects_unassigned_user_with_clear_owner_message():
+    tenant = Tenant.objects.create(name="Unassigned Owner Tenant", code="unassigned-owner")
+    user, client = user_with_permissions(
+        tenant,
+        "unassigned-owner-manager",
+        "influencers.outreach.manage",
+        "influencers.fulfillment.manage",
+    )
+    make_bd_owner(tenant, user)
+    task_owner = CustomUser.objects.create_user(
+        username="unassigned-owner-primary",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    make_bd_owner(tenant, task_owner)
+    store = store_for(tenant, "unassigned-owner-store")
+    task = create_outreach_task(
+        user=user,
+        validated_data={
+            "task_name": "Unassigned owner sample task",
+            "store": store,
+            "owners": [task_owner],
+        },
+    )
+    influencer = Influencer.objects.create(
+        tenant=tenant,
+        code="unassigned-owner-creator",
+        name="Unassigned owner creator",
+        platform="tiktok",
+    )
+
+    sample = client.post(
+        "/api/internal/influencers/sample-fulfillments/",
+        {
+            "outreach_task": task.pk,
+            "influencer": influencer.pk,
+            "store": store.pk,
+            "items": [],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="unassigned-owner-sample",
+    )
+
+    assert sample.status_code == 409, sample.data
+    assert "需要该建联任务负责人创建送样" in str(sample.data)
+    assert not SampleFulfillment.objects.filter(
+        tenant=tenant,
+        request_key="unassigned-owner-sample",
+    ).exists()
+
+
 def test_linked_sample_defaults_to_signed_in_assigned_owner():
     tenant = Tenant.objects.create(name="Signed In Owner Tenant", code="signed-in-owner")
     user, client = user_with_permissions(

@@ -768,6 +768,21 @@ def test_pending_sample_record_completes_task_when_unique_sample_target_is_reach
     assert payload["completion_validation"]["target_reached"] is True
 
 
+def test_sample_creation_uses_configured_video_overdue_days(monkeypatch):
+    _, user, store, influencer = _records("configured-sample-overdue")
+    task = _task(user, store, influencer, target_count=1)
+    monkeypatch.setattr(influencer_services, "sample_video_overdue_days", lambda tenant_id: 45)
+
+    fulfillment, _ = create_sample_fulfillment(
+        user=user,
+        request_key="configured-sample-overdue-key",
+        validated_data={"outreach_task": task, "influencer": influencer},
+        item_payloads=[],
+    )
+
+    assert fulfillment.video_deadline_at - fulfillment.sample_sent_at == timedelta(days=45)
+
+
 def test_lowering_target_recomputes_completion_from_existing_sample_records():
     _, user, store, influencer = _records("lower-target-sample-completion")
     task = _task(user, store, target_count=2)

@@ -114,12 +114,14 @@ describe('UI-P1 trusted menu and workspace', () => {
 
   it('scopes the BD configuration route to the BD performance definition', () => {
     const routerSource = read('src/router/index.js');
-    const configPageSource = read('src/views/settings/ConfigCenterList.vue');
+    const configPageSource = read('src/views/influencers/BdPerformanceConfig.vue');
 
     expect(routerSource).toContain("path: 'influencers/bd-config'");
+    expect(routerSource).toContain("import('../views/influencers/BdPerformanceConfig.vue')");
     expect(routerSource).toContain("configKey: 'influencers.bd.performance'");
-    expect(configPageSource).toContain('item.config_key === props.configKey');
-    expect(configPageSource).toContain('config_key: props.configKey || undefined');
+    expect(configPageSource).toContain("const CONFIG_KEY = 'influencers.bd.performance'");
+    expect(configPageSource).toContain('fetchConfigDefinitions({ config_key: CONFIG_KEY })');
+    expect(configPageSource).toContain('fetchConfigValues({ config_key: CONFIG_KEY');
   });
 
   it('selects a finance workspace from trusted permissions', () => {
