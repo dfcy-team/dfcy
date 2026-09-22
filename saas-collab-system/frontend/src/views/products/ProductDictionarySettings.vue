@@ -7,6 +7,14 @@
       </div>
       <div class="header-actions">
         <el-button
+          data-testid="dictionary-export"
+          :loading="exporting"
+          :disabled="loading || !rows.length"
+          @click="exportDictionary"
+        >
+          导出
+        </el-button>
+        <el-button
           v-if="canManage && supportsCreate"
           data-testid="dictionary-create"
           type="primary"
@@ -430,6 +438,7 @@ const CONFIG = {
 const auth = useAuthStore();
 const rows = ref([]);
 const loading = ref(false);
+const exporting = ref(false);
 const saving = ref(false);
 const message = ref('');
 const visible = ref(false);
@@ -564,6 +573,77 @@ function formatDimensions(dimensions) {
       return `${item.name || item.code}(${item.code})${values}`;
     })
     .join('、');
+}
+
+function csvCell(value) {
+  const text = value == null ? '' : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function exportRows() {
+  if (currentKind.value === 'categories') {
+    return {
+      headers: ['层级', '分类编码', '分类名称', '上级分类编码', '上级分类名称', '完整分类路径', '状态'],
+      values: rows.value.map((row) => {
+        const parent = rows.value.find((item) => String(item.id) === String(parentIdOf(row)));
+        return [`L${row.level}`, row.code, row.name, parent?.code || '', parent?.name || '', categoryPath(row), row.is_active === false ? '停用' : '启用'];
+      })
+    };
+  }
+  if (currentKind.value === 'attributes') {
+    return {
+      headers: ['属性编码', '属性名称', '状态'],
+      values: rows.value.map((row) => [row.code, row.name, row.is_active === false ? '停用' : '启用'])
+    };
+  }
+  if (currentKind.value === 'colors') {
+    return {
+      headers: ['颜色编码', '颜色名称', '状态'],
+      values: rows.value.map((row) => [row.code, row.name, row.is_active === false ? '停用' : '启用'])
+    };
+  }
+  const values = [];
+  specificationRows.value.forEach((row) => {
+    const dimensions = Array.isArray(row.spec_dimensions) ? row.spec_dimensions : [];
+    if (!dimensions.length) {
+      values.push([categoryPath(row), `L${row.level}`, row.code, row.name, '', '', '', row.is_active === false ? '停用' : '启用']);
+      return;
+    }
+    dimensions.forEach((dimension) => values.push([
+      categoryPath(row),
+      `L${row.level}`,
+      row.code,
+      row.name,
+      dimension.code || '',
+      dimension.name || '',
+      Array.isArray(dimension.values) ? dimension.values.join('、') : (dimension.values || ''),
+      row.is_active === false ? '停用' : '启用'
+    ]));
+  });
+  return {
+    headers: ['完整分类路径', '层级', '分类编码', '分类名称', '规格编码', '规格名称', '规格选项值', '分类状态'],
+    values
+  };
+}
+
+function exportDictionary() {
+  if (exporting.value || loading.value || !rows.value.length) return;
+  exporting.value = true;
+  try {
+    const { headers, values } = exportRows();
+    const csv = [headers, ...values].map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}\r\n`], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${title.value}_${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    ElMessage.success(`已导出 ${values.length} 条数据`);
+  } catch (error) {
+    ElMessage.error(error?.message || '导出失败');
+  } finally {
+    exporting.value = false;
+  }
 }
 
 function cloneValue(value) {

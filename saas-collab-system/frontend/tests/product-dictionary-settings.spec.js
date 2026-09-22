@@ -135,8 +135,40 @@ describe('ProductDictionarySettings mounted kind matrix', () => {
     expect(wrapper.text()).toContain(title);
     expect(wrapper.text()).toContain(contentTitle);
     expect(wrapper.find('[data-testid="dictionary-refresh"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="dictionary-export"]').exists()).toBe(true);
     if (kind === 'categories') expect(wrapper.find('[data-testid="category-tree"]').exists()).toBe(true);
     if (kind === 'specifications') expect(wrapper.find('[data-testid="dictionary-create"]').exists()).toBe(false);
+  });
+
+  it.each([
+    ['categories', '分类设置_'],
+    ['attributes', '属性设置_'],
+    ['colors', '颜色设置_'],
+    ['specifications', '规格设置_']
+  ])('exports the %s dictionary as a UTF-8 CSV', async (kind, filenamePrefix) => {
+    if (!URL.createObjectURL) Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn() });
+    if (!URL.revokeObjectURL) Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:dictionary-export');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    let downloadedFilename = '';
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function captureDownload() {
+      downloadedFilename = this.download;
+    });
+    const wrapper = mountPage(kind);
+    await flushPromises();
+
+    await wrapper.find('[data-testid="dictionary-export"]').trigger('click');
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(createObjectURL.mock.calls[0][0]).toBeInstanceOf(Blob);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(downloadedFilename).toMatch(new RegExp(`^${filenamePrefix}\\d{4}-\\d{2}-\\d{2}\\.csv$`));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:dictionary-export');
+    expect(elementPlus.ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('已导出'));
+
+    createObjectURL.mockRestore();
+    revokeObjectURL.mockRestore();
+    click.mockRestore();
   });
 
   it('keeps the old mode prop compatible with the category page', async () => {
