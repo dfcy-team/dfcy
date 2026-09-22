@@ -10,8 +10,10 @@ import socket
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from xml.etree import ElementTree
 
 from django.conf import settings
 from django.core.cache import cache
@@ -93,6 +95,7 @@ from .bundle_services import (
     component_payload,
     confirm_legacy_migration,
     create_bundle_version,
+    parse_legacy_bundle_file,
     preview_legacy_migration,
     validate_component_rows,
 )
@@ -2858,7 +2861,14 @@ def product_bundle_availability(request, sku_id):
 @permission_classes([IsProductBundleReadOrManage])
 def product_bundle_migration_preview(request):
     _require_manage_scope(request.user, "products.bundle.manage", "products.master.manage")
-    rows = request.data.get("rows")
+    uploaded = request.FILES.get("file")
+    if uploaded:
+        try:
+            rows = parse_legacy_bundle_file(uploaded.read(), uploaded.name)
+        except (ValueError, zipfile.BadZipFile, KeyError, ElementTree.ParseError) as exc:
+            return error_response(ErrorCode.VALIDATION_ERROR, str(exc), status=400)
+    else:
+        rows = request.data.get("rows")
     if not isinstance(rows, list) or not rows:
         return error_response(ErrorCode.VALIDATION_ERROR, "rows must be a non-empty array", status=400)
     token, batch = preview_legacy_migration(tenant=request.user.tenant, actor=request.user, rows=rows)
