@@ -28,7 +28,8 @@ describe('库存分析真实页面', () => {
     fetchInventoryAnalysis.mockReset();
     fetchInventoryAnalysis.mockResolvedValue(normalizeInventoryAnalysisResponse({ success: true, data: {
       api_status: 'connected', count: 965, warehouse_options: [{ value: 11, label: '测试仓（THCS）' }],
-      quality: { score: 0, total_count: 965, mapped_count: 0, metric_version: 'inventory_snapshot.v1' },
+      quality: { score: 0, status: 'warning', total_count: 965, mapped_count: 0, metric_version: 'inventory_snapshot.v1' },
+      metrics: [{ code: 'inventory_total', label: '在手库存', value: 12, unit: '件' }],
       results: [{ source_sku: 'FAKE-SKU-001', warehouse_code: 'THCS', warehouse_name: '测试仓', on_hand_qty: 12, available_qty: 10, reserved_qty: 2, in_transit_qty: 0, risk_label: '正常' }],
       trend: [{ date: '2026-09-11', total: 12 }],
     } }));
@@ -41,6 +42,8 @@ describe('库存分析真实页面', () => {
     expect(wrapper.text()).not.toContain('数据可信度');
     expect(wrapper.text()).toContain('FAKE-SKU-001');
     expect(wrapper.text()).toContain('未关联');
+    expect(wrapper.text()).toContain('待关联');
+    expect(wrapper.text()).not.toContain('inventory_total');
     expect(wrapper.text()).toContain('仅有 1 天');
     expect(wrapper.text()).not.toContain('演示');
     expect(wrapper.findAll('option').map(option => option.text())).toContain('测试仓（THCS）');
@@ -55,7 +58,10 @@ describe('库存分析真实页面', () => {
     page.vm.query.risk = 'low';
     await wrapper.find('form').trigger('submit');
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low' }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, risk: 'low' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     wrapper.unmount();
   });
 
@@ -76,13 +82,19 @@ describe('库存分析真实页面', () => {
     page.vm.query.risk = 'low';
     await checkbox.setValue(false);
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', include_virtual: false }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, risk: 'low', include_virtual: false }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     page.vm.changePage(2);
     await flushPromises();
     expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(false);
     await checkbox.setValue(true);
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, include_virtual: true }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, include_virtual: true }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     wrapper.unmount();
   });
 
@@ -95,10 +107,16 @@ describe('库存分析真实页面', () => {
     page.vm.query.risk = 'low';
     wrapper.findComponent(stubs['el-table']).vm.$emit('sort-change', { prop: 'on_hand_qty', order: 'descending' });
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', ordering: '-on_hand_qty' }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, risk: 'low', ordering: '-on_hand_qty' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     page.vm.changePage(2);
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, ordering: '-on_hand_qty' }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, ordering: '-on_hand_qty' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     page.vm.changeSort({ prop: 'on_hand_qty', order: 'ascending' });
     await flushPromises();
     expect(fetchInventoryAnalysis.mock.lastCall[0].ordering).toBe('on_hand_qty');

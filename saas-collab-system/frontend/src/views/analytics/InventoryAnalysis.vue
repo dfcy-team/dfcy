@@ -37,8 +37,8 @@ const filters = ref([
   { key: 'risk', label: '数量风险', options: [{ label: '缺货', value: 'out' }, { label: '低库存（1–5）', value: 'low' }, { label: '锁定偏高', value: 'locked' }, { label: '正常', value: 'healthy' }] }
 ]);
 
-async function loadInventory(params) {
-  const response = await fetchInventoryAnalysis({ ...params, include_virtual: includeVirtual.value });
+async function loadInventory(params, { signal } = {}) {
+  const response = await fetchInventoryAnalysis({ ...params, include_virtual: includeVirtual.value }, { signal });
   if (response?.success) filters.value[1].options = response.data.warehouse_options || [];
   return response;
 }

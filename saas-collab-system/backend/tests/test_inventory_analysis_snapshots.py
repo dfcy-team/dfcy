@@ -35,6 +35,37 @@ def test_latest_snapshot_and_daily_trend_do_not_sum_repeat_syncs(inventory):
     assert data['warehouse_options'] == [{'value': warehouse.id, 'label': f'{warehouse.name}（{warehouse.code}）'}]
 
 
+def test_latest_snapshot_excludes_other_sources_and_combines_quality_counts(inventory):
+    from django.db import connection
+    from apps.products.models import ProductSKU, ProductSPU
+
+    client, warehouse, snapshot = inventory
+    tenant = warehouse.tenant
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code='COUNT-SPU', product_name='Count test')
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code='COUNT-SKU')
+    mapped = snapshot('MAPPED-OUT', NOW, 0)
+    mapped.internal_sku = sku
+    mapped.save()
+    snapshot('LOW', NOW, 4)
+
+    other_run = create_run(tenant, 'inventory_snapshot', 'other-source', platform='amazon')
+    # Simulate a legacy/imported source mismatch without invoking model validation.
+    other_source = snapshot('OTHER-SOURCE', NOW + timedelta(days=2), 999)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            'UPDATE inventory_snapshot SET source_run_id = %s, source_sku = %s WHERE id = %s',
+            [other_run.id, 'FAKE-SKU', other_source.pk],
+        )
+
+    data = client.get('/api/internal/analytics/inventory/').json()['data']
+    assert data['count'] == 3
+    assert data['quality']['total_count'] == 3
+    assert data['quality']['mapped_count'] == 1
+    assert data['summary_metrics'][-1]['value'] == 3
+    assert data['summary_metrics'][-1]['change'] == '缺货 1 · 低库存 2'
+    assert data['metrics'][0]['value'] == '7'
+
+
 def test_date_range_selects_latest_snapshot_within_range(inventory):
     client, _, _ = inventory
     data = client.get('/api/internal/analytics/inventory/', {'period_start': '2026-08-17', 'period_end': '2026-08-17'}).json()['data']

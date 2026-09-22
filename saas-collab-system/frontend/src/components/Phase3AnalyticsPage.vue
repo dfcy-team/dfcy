@@ -33,7 +33,10 @@
       </el-form-item>
     </el-form>
 
-    <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
+    <div v-if="errorMessage" class="analytics-error">
+      <el-alert :title="errorMessage" type="error" show-icon :closable="false" />
+      <el-button :loading="loading" @click="loadData">重新加载</el-button>
+    </div>
 
     <div v-loading="loading" class="analytics-content">
       <section class="quality-rail" :aria-label="qualityLabel">
@@ -43,7 +46,7 @@
         </div>
         <el-progress :percentage="quality.score || 0" :stroke-width="8" :show-text="false" :status="qualityProgressStatus" />
         <dl>
-          <div><dt>状态</dt><dd>{{ quality.status_label || quality.status || 'unknown' }}</dd></div>
+          <div><dt>状态</dt><dd>{{ displayStatus(quality.status_label || quality.status) }}</dd></div>
           <div><dt>口径版本</dt><dd>{{ quality.metric_version || '--' }}</dd></div>
           <div><dt>刷新时间</dt><dd>{{ quality.refreshed_at || '--' }}</dd></div>
         </dl>
@@ -54,9 +57,9 @@
         <article v-for="metric in metrics" :key="metric.code" class="metric-card">
           <div class="metric-heading">
             <span>{{ metric.label }}</span>
-            <el-tag size="small" effect="plain">{{ metric.code }}</el-tag>
+            <el-tag size="small" effect="plain">{{ metric.code_label || metric.label }}</el-tag>
           </div>
-          <strong>{{ metric.value ?? 'N/A' }}<small>{{ metric.unit || '' }}</small></strong>
+          <strong>{{ metric.value ?? '暂无数据' }}<small>{{ metric.unit || '' }}</small></strong>
           <p :class="['metric-change', metric.change_direction]">
             {{ metric.change || '暂无对比数据' }}
           </p>
@@ -98,7 +101,7 @@
           >
             <template #default="{ row }">
               <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="light">
-                {{ row[column.prop] || '--' }}
+                {{ displayStatus(row[column.prop]) }}
               </el-tag>
               <span v-else>{{ formatValue(row[column.prop]) }}</span>
             </template>
@@ -121,7 +124,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { formatApiError } from '../api/request';
 
 const props = defineProps({
@@ -156,6 +159,7 @@ const currentPage = ref(1);
 const tableRef = ref(null);
 const ordering = ref('');
 let loadSequence = 0;
+let activeRequest = null;
 const pageSize = 20;
 
 const apiStatusLabel = computed(() => ({
@@ -164,7 +168,7 @@ const apiStatusLabel = computed(() => ({
   degraded: 'API 异常 · 降级数据',
   pending: 'API 待联调',
   mock: 'Mock 数据'
-}[apiStatus.value] || apiStatus.value));
+}[apiStatus.value] || '未知状态'));
 const statusTagType = computed(() => ({ connected: 'success', degraded: 'warning', fallback: 'warning', pending: 'info', mock: 'info' }[apiStatus.value] || 'info'));
 const qualityProgressStatus = computed(() => {
   if ((quality.value.score || 0) >= 95) return 'success';
@@ -233,13 +237,48 @@ function statusType(value) {
   }[value] || 'info';
 }
 
+function displayStatus(value) {
+  if (!value) return '--';
+  return {
+    healthy: '正常',
+    good: '良好',
+    passed: '通过',
+    resolved: '已解决',
+    ready: '数据已就绪',
+    active: '已启用',
+    pending: '待更新',
+    warning: '需关注',
+    degraded: '已降级',
+    failed: '失败',
+    missing: '缺失',
+    unknown: '未知',
+    high: '高',
+    medium: '中',
+    low: '低',
+    critical: '严重',
+    mapped: '已关联',
+    unmapped: '未关联',
+    out: '缺货',
+    locked: '锁定偏高',
+    single_currency: '单币种汇总',
+    grouped_by_currency: '按币种分别汇总',
+    empty: '暂无数据'
+  }[value] || value;
+}
+
 async function loadData() {
+  activeRequest?.abort();
+  activeRequest = new AbortController();
+  const controller = activeRequest;
   const sequence = ++loadSequence;
   loading.value = true;
   errorMessage.value = '';
   trendMessage.value = '';
   try {
-    const response = await props.loader({ ...query, ...(ordering.value ? { ordering: ordering.value } : {}), page: currentPage.value, page_size: pageSize });
+    const response = await props.loader(
+      { ...query, ...(ordering.value ? { ordering: ordering.value } : {}), page: currentPage.value, page_size: pageSize },
+      { signal: controller.signal }
+    );
     if (sequence !== loadSequence) return;
     if (!response?.success) {
       apiStatus.value = 'pending';
@@ -262,6 +301,7 @@ async function loadData() {
     if (['fallback', 'degraded'].includes(data.api_status)) errorMessage.value = response.message || data.api_error || '接口异常，已显示降级数据';
   } catch (error) {
     if (sequence !== loadSequence) return;
+    if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') return;
     apiStatus.value = 'pending';
     errorMessage.value = formatApiError(error?.response || { message: error?.message });
     quality.value = {};
@@ -271,11 +311,13 @@ async function loadData() {
     total.value = 0;
   } finally {
     if (sequence === loadSequence) loading.value = false;
+    if (activeRequest === controller) activeRequest = null;
   }
 }
 
 initializeFilters();
 onMounted(loadData);
+onBeforeUnmount(() => activeRequest?.abort());
 </script>
 
 <style scoped>
@@ -287,6 +329,8 @@ onMounted(loadData);
 .analytics-filters { padding: 12px 14px 0; border: 1px solid #dce3ec; border-radius: 8px; background: #fff; }
 .analytics-filters :deep(.el-select) { width: 150px; }
 .analytics-content { display: grid; gap: 16px; min-height: 220px; }
+.analytics-error { display: flex; align-items: center; gap: 12px; }
+.analytics-error :deep(.el-alert) { flex: 1; }
 .quality-note { margin: 0; color: #475569; font-size: 13px; line-height: 1.6; }
 .quality-rail { display: grid; grid-template-columns: 150px minmax(180px, 1fr) minmax(420px, 1.6fr); align-items: center; gap: 20px; padding: 14px 16px; border: 1px solid #cfd9e6; border-left: 4px solid #0f766e; border-radius: 6px; background: #fff; }
 .quality-rail > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #475569; font-size: 13px; }
