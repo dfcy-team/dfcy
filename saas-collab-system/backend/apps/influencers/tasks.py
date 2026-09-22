@@ -152,5 +152,5 @@ def mark_overdue_sample_fulfillments_task():
         result["tenants"] += 1
         result["marked"] += tenant_result["marked"]
         result["skipped_with_video"] += tenant_result["skipped_with_video"]
-        result["notifications_created"] += tenant_result["notifications_created"]
+        result["notifications_created"] += tenant_result.get("notifications_created", 0)
     return result

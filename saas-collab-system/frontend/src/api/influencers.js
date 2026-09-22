@@ -149,7 +149,7 @@ const ifMatchHeaders = (version) => {
 const requestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 
 export function formatInfluencerError(response, fallback = '操作失败，请稍后重试。') {
-  const responseDetails = JSON.stringify(response?.data || {});
+  const responseDetails = `${response?.message || ''} ${JSON.stringify(response?.data || {})}`;
   const nestedMessage = (() => {
     const visit = (value) => {
       if (typeof value === 'string') return value.trim();

@@ -6,15 +6,10 @@ describe('达人模块错误提示', () => {
   it('将建联任务负责人冲突显示为明确的送样提示', () => {
     const response = {
       success: false,
-      code: 'VALIDATION_ERROR',
-      message: '提交内容校验失败，请检查字段提示。',
+      code: 'STATE_CONFLICT',
+      message: '需要该建联任务负责人创建送样。',
       http_status: 409,
-      data: {
-        message: '提交内容校验失败，请检查字段提示。',
-        errors: {
-          owner: ['需要该建联任务负责人创建送样。']
-        }
-      }
+      data: null
     };
 
     expect(formatInfluencerError(response, '送样创建失败')).toBe('需要该建联任务负责人创建送样。');
