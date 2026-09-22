@@ -325,6 +325,10 @@ class InventorySnapshot(ValidatedWriteModel):
         indexes = [
             models.Index(fields=["tenant", "site_code", "snapshot_at_utc"], name="idx_inventory_site_time"),
             models.Index(fields=["tenant", "source_sku", "snapshot_at_utc"], name="idx_inventory_sku_time"),
+            models.Index(
+                fields=["tenant", "site_code", "warehouse", "source_sku", "-snapshot_at_utc", "-id"],
+                name="idx_inv_latest_lookup",
+            ),
             models.Index(fields=["source_run"], name="idx_inventory_source_run"),
         ]
 

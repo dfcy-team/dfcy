@@ -33,9 +33,9 @@ export const fetchSalesAnalysis = (params = {}) =>
     'analytics.sales'
   );
 
-export const fetchInventoryAnalysis = async (params = {}) =>
+export const fetchInventoryAnalysis = async (params = {}, { signal } = {}) =>
   normalizeInventoryAnalysisResponse(await requestWithMockFallback(
-    { method: 'get', url: '/api/internal/analytics/inventory/', params: buildAnalyticsQuery(params) },
+    { method: 'get', url: '/api/internal/analytics/inventory/', params: buildAnalyticsQuery(params), signal },
     mockInventoryAnalysis,
     'analytics.inventory'
   ));

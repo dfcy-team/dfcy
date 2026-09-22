@@ -148,6 +148,7 @@ export function formatApiError(response) {
     422: '业务规则或字段校验未通过'
   };
   const status = response?.http_status;
+  if (/timeout/i.test(response?.message || '')) return '数据读取超时，请缩小筛选范围后重试';
   return `${response?.code || 'API_ERROR'}: ${labels[status] || response?.message || '请求失败'}`;
 }
 
