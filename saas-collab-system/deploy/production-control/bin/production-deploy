@@ -56,34 +56,6 @@ EOF
   COMPOSE+=( -f "$candidate_compose_overlay" )
 }
 
-pull_immutable_image() {
-  local role=$1 image=$2 pull_log pull_status=0 failure_class=unknown
-  pull_log=$(mktemp "$CONTROL_ROOT/ledger/image-pull.XXXXXX.log")
-  chmod 600 "$pull_log"
-  log_info "pulling $role image (timeout ${image_pull_timeout_seconds}s)."
-  timeout --foreground --signal=TERM --kill-after=30s "${image_pull_timeout_seconds}s" \
-    docker pull "$image" >"$pull_log" 2>&1 || pull_status=$?
-  if (( pull_status == 0 )); then
-    rm -f -- "$pull_log"
-    log_info "$role image pull completed."
-    return 0
-  fi
-  if (( pull_status == 124 || pull_status == 137 )); then
-    failure_class=timeout
-  elif grep -Eiq 'unauthorized|authentication required|denied|forbidden' "$pull_log"; then
-    failure_class=registry_auth
-  elif grep -Eiq 'no space left|input/output error|write.*failed' "$pull_log"; then
-    failure_class=host_storage
-  elif grep -Eiq 'no such host|dial tcp|connection refused|i/o timeout|TLS handshake timeout|context deadline exceeded|unexpected EOF' "$pull_log"; then
-    failure_class=registry_network
-  elif grep -Eiq 'Cannot connect to the Docker daemon|daemon.*not running' "$pull_log"; then
-    failure_class=docker_daemon
-  fi
-  # The root-only local log preserves the Docker detail. Never send it to CI:
-  # registry/daemon diagnostics may contain deployment infrastructure details.
-  die "$role image pull failed (class=$failure_class, exit=$pull_status, vm_log=$pull_log)."
-}
-
 while (($#)); do
   case "$1" in
     --release-sha=*) release_sha=${1#*=} ;;
@@ -155,16 +127,14 @@ chmod 600 "$previous_file"
 new_docker_config
 trap 'remove_candidate_compose_overlay; remove_docker_config' EXIT
 create_candidate_compose_overlay
-image_pull_timeout_seconds=${PRODUCTION_IMAGE_PULL_TIMEOUT_SECONDS:-900}
-[[ "$image_pull_timeout_seconds" =~ ^[0-9]+$ ]] || die 'image pull timeout must be an integer number of seconds.'
-(( image_pull_timeout_seconds >= 60 && image_pull_timeout_seconds <= 1800 )) || die 'image pull timeout must be between 60 and 1800 seconds.'
+configure_image_pull_timeout
 log_info 'authenticating to GHCR.'
 docker_login_from_stdin "$registry_user"
 
 # Pull exactly the digests built by CI. The target host never builds source.
-pull_immutable_image backend "$backend_image"
-pull_immutable_image frontend "$frontend_image"
-pull_immutable_image Redis "$redis_image"
+pull_immutable_image backend "$backend_image" || die 'backend image pull did not complete.'
+pull_immutable_image frontend "$frontend_image" || die 'frontend image pull did not complete.'
+pull_immutable_image Redis "$redis_image" || die 'Redis image pull did not complete.'
 
 [[ "$(image_revision "$backend_image")" = "$release_sha" ]] || die 'backend OCI revision does not match the release SHA.'
 [[ "$(image_revision "$frontend_image")" = "$release_sha" ]] || die 'frontend OCI revision does not match the release SHA.'
@@ -216,9 +186,9 @@ rollback_previous() {
   export PRODUCTION_BACKEND_IMAGE="$old_backend"
   export PRODUCTION_FRONTEND_IMAGE="$old_frontend"
   export PRODUCTION_REDIS_IMAGE="$old_redis"
-  docker pull "$old_backend" >/dev/null 2>&1 || return 1
-  docker pull "$old_frontend" >/dev/null 2>&1 || return 1
-  docker pull "$old_redis" >/dev/null 2>&1 || return 1
+  ensure_rollback_image backend "$old_backend" || return 1
+  ensure_rollback_image frontend "$old_frontend" || return 1
+  ensure_rollback_image Redis "$old_redis" || return 1
   "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null || return 1
   IFS=, read -r -a services_array <<< "$required_services"
   "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null || return 1

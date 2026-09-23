@@ -31,6 +31,7 @@ done
 require_control_identity
 require_command jq
 require_command date
+require_command timeout
 [[ "$emergency" -eq 1 ]] || die 'rollback requires the explicit emergency flag.'
 validate_reason "$reason"
 validate_actor "$actor"
@@ -42,6 +43,7 @@ init_compose
 [[ -x "$SCRIPT_DIR/production-baseline-check" ]] || die 'runtime baseline checker is not installed.'
 "$SCRIPT_DIR/production-baseline-check" --runtime >/dev/null
 ensure_control_dirs
+configure_image_pull_timeout
 
 current_file=${PRODUCTION_CURRENT_FILE:-$CONTROL_ROOT/current.json}
 previous_file=${PRODUCTION_PREVIOUS_FILE:-$CONTROL_ROOT/previous.json}
@@ -63,9 +65,9 @@ export PRODUCTION_BACKEND_IMAGE="$target_backend"
 export PRODUCTION_FRONTEND_IMAGE="$target_frontend"
 export PRODUCTION_REDIS_IMAGE="$target_redis"
 
-docker pull "$target_backend" >/dev/null 2>&1 || die 'previous backend image pull failed.'
-docker pull "$target_frontend" >/dev/null 2>&1 || die 'previous frontend image pull failed.'
-docker pull "$target_redis" >/dev/null 2>&1 || die 'previous Redis image pull failed.'
+ensure_rollback_image backend "$target_backend" || die 'previous backend image pull failed.'
+ensure_rollback_image frontend "$target_frontend" || die 'previous frontend image pull failed.'
+ensure_rollback_image Redis "$target_redis" || die 'previous Redis image pull failed.'
 [[ "$(image_revision "$target_backend")" = "$target_sha" ]] || die 'previous backend OCI revision does not match its release SHA.'
 [[ "$(image_revision "$target_frontend")" = "$target_sha" ]] || die 'previous frontend OCI revision does not match its release SHA.'
 

@@ -1,4 +1,9 @@
+import os
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def _deploy_script() -> str:
@@ -32,6 +37,13 @@ def _health_script() -> str:
 def _common_script() -> str:
     system_root = Path(__file__).resolve().parents[2]
     return (system_root / "deploy" / "production-control" / "lib" / "production-common.sh").read_text(encoding="utf-8")
+
+
+def _rollback_script() -> str:
+    system_root = Path(__file__).resolve().parents[2]
+    return (
+        system_root / "deploy" / "production-control" / "bin" / "production-rollback"
+    ).read_text(encoding="utf-8")
 
 
 def test_cli_digests_are_exported_before_compose_initialization():
@@ -82,16 +94,90 @@ def test_database_migration_has_bounded_runtime_and_visible_output():
 
 
 def test_image_pull_is_bounded_and_failure_is_classified_without_printing_raw_log():
-    script = _deploy_script()
-    assert "PRODUCTION_IMAGE_PULL_TIMEOUT_SECONDS:-900" in script
-    assert 'timeout --foreground --signal=TERM --kill-after=30s "${image_pull_timeout_seconds}s"' in script
-    assert 'docker pull "$image" >"$pull_log" 2>&1' in script
-    assert "failure_class=registry_auth" in script
-    assert "failure_class=host_storage" in script
-    assert "failure_class=registry_network" in script
-    assert "failure_class=docker_daemon" in script
-    assert 'die "$role image pull failed (class=$failure_class, exit=$pull_status, vm_log=$pull_log)."' in script
-    assert 'docker pull "$backend_image" >/dev/null 2>&1' not in script
+    common = _common_script()
+    deploy = _deploy_script()
+    rollback = _rollback_script()
+    assert "PRODUCTION_IMAGE_PULL_TIMEOUT_SECONDS:-900" in common
+    assert 'timeout --foreground --signal=TERM --kill-after=30s "${image_pull_timeout_seconds}s"' in common
+    assert 'docker pull "$image" >"$pull_log" 2>&1' in common
+    assert "failure_class=registry_auth" in common
+    assert "failure_class=host_storage" in common
+    assert "failure_class=registry_network" in common
+    assert "failure_class=docker_daemon" in common
+    assert '"$role" "$failure_class" "$pull_status" "$pull_log" >&2' in common
+    assert 'configure_image_pull_timeout' in deploy
+    assert 'configure_image_pull_timeout' in rollback
+    assert 'ensure_rollback_image backend "$old_backend" || return 1' in deploy
+    assert 'ensure_rollback_image backend "$target_backend" || die' in rollback
+    assert 'docker pull "$old_backend"' not in deploy
+    assert 'docker pull "$target_backend"' not in rollback
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell behavior is exercised in Linux CI")
+@pytest.mark.parametrize("cached", [False, True])
+def test_rollback_uses_cached_image_or_bounded_pull_without_leaking_raw_log(tmp_path, cached):
+    common_copy = tmp_path / "control" / "lib" / "production-common.sh"
+    common_copy.parent.mkdir(parents=True)
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2]
+        / "deploy" / "production-control" / "lib" / "production-common.sh",
+        common_copy,
+    )
+    (common_copy.parent.parent / "ledger").mkdir()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text(
+        '#!/bin/sh\n'
+        'if [ "$1" = image ] && [ "$2" = inspect ]; then\n'
+        '  [ "$FAKE_CACHED" = 1 ]; exit $?\n'
+        'fi\n'
+        'printf "TLS handshake timeout; private diagnostic\\n" >&2\n'
+        'exit 1\n',
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    timeout = fake_bin / "timeout"
+    timeout.write_text(
+        '#!/bin/sh\n'
+        'printf "%s\\n" "$*" > "$TIMEOUT_TRACE"\n'
+        'shift 4\n'
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    timeout.chmod(0o755)
+    trace = tmp_path / "timeout.trace"
+    env = os.environ | {
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_CACHED": "1" if cached else "0",
+        "TIMEOUT_TRACE": str(trace),
+        "PRODUCTION_IMAGE_PULL_TIMEOUT_SECONDS": "60",
+    }
+    result = subprocess.run(
+        [
+            "bash", "-c",
+            'source "$1"; configure_image_pull_timeout; '
+            'if ensure_rollback_image backend "$2"; then echo READY; else echo FAILED; fi',
+            "bash", str(common_copy), "ghcr.io/example/backend@sha256:" + "a" * 64,
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    if cached:
+        assert "READY" in result.stdout
+        assert not trace.exists()
+        assert not list((common_copy.parent.parent / "ledger").iterdir())
+    else:
+        assert "FAILED" in result.stdout
+        assert "class=registry_network" in result.stderr
+        assert "private diagnostic" not in result.stdout + result.stderr
+        assert "--kill-after=30s 60s docker pull" in trace.read_text(encoding="utf-8")
+        logs = list((common_copy.parent.parent / "ledger").iterdir())
+        assert len(logs) == 1
+        assert logs[0].stat().st_mode & 0o777 == 0o600
+        assert "private diagnostic" in logs[0].read_text(encoding="utf-8")
 
 
 def test_registry_login_has_timeout_without_logging_token():

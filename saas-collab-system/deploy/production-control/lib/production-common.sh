@@ -306,6 +306,51 @@ docker_login_from_stdin() {
   (( login_status == 0 )) || die 'GHCR authentication failed.'
 }
 
+configure_image_pull_timeout() {
+  image_pull_timeout_seconds=${PRODUCTION_IMAGE_PULL_TIMEOUT_SECONDS:-900}
+  [[ "$image_pull_timeout_seconds" =~ ^[0-9]+$ ]] || die 'image pull timeout must be an integer number of seconds.'
+  (( image_pull_timeout_seconds >= 60 && image_pull_timeout_seconds <= 1800 )) || die 'image pull timeout must be between 60 and 1800 seconds.'
+  require_command timeout
+}
+
+pull_immutable_image() {
+  local role=$1 image=$2 pull_log pull_status=0 failure_class=unknown
+  pull_log=$(mktemp "$CONTROL_ROOT/ledger/image-pull.XXXXXX.log")
+  chmod 600 "$pull_log"
+  log_info "pulling $role image (timeout ${image_pull_timeout_seconds}s)."
+  timeout --foreground --signal=TERM --kill-after=30s "${image_pull_timeout_seconds}s" \
+    docker pull "$image" >"$pull_log" 2>&1 || pull_status=$?
+  if (( pull_status == 0 )); then
+    rm -f -- "$pull_log"
+    log_info "$role image pull completed."
+    return 0
+  fi
+  if (( pull_status == 124 || pull_status == 137 )); then
+    failure_class=timeout
+  elif grep -Eiq 'unauthorized|authentication required|denied|forbidden' "$pull_log"; then
+    failure_class=registry_auth
+  elif grep -Eiq 'no space left|input/output error|write.*failed' "$pull_log"; then
+    failure_class=host_storage
+  elif grep -Eiq 'no such host|dial tcp|connection refused|i/o timeout|TLS handshake timeout|context deadline exceeded|unexpected EOF' "$pull_log"; then
+    failure_class=registry_network
+  elif grep -Eiq 'Cannot connect to the Docker daemon|daemon.*not running' "$pull_log"; then
+    failure_class=docker_daemon
+  fi
+  # Keep raw Docker details in the VM-local root-only log, never in CI output.
+  printf 'Production release: %s image pull failed (class=%s, exit=%s, vm_log=%s).\n' \
+    "$role" "$failure_class" "$pull_status" "$pull_log" >&2
+  return 1
+}
+
+ensure_rollback_image() {
+  local role=$1 image=$2
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    log_info "$role rollback image is already cached."
+    return 0
+  fi
+  pull_immutable_image "$role rollback" "$image"
+}
+
 remove_docker_config() {
   if [[ -n "${DOCKER_CONFIG:-}" && -d "$DOCKER_CONFIG" ]]; then
     rm -rf -- "$DOCKER_CONFIG"
