@@ -81,7 +81,12 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).not.toContain('createProductSpu');
     expect(page).not.toContain('createProductSku');
     expect(page).not.toContain('createBundleComponent');
-    expect(page).toContain('const result = await createBundle(prepareImportRow');
+    expect(page).toContain('const input = prepareImportRow(rows[index], headers, index + 1)');
+    expect(page).toContain('const result = await createBundle(input)');
+    expect(page).toContain("'图片URL'");
+    expect(page).toContain("const imageUrl = importValue(values, headers, '图片URL')");
+    expect(page).toContain('cacheProductBundleImage(result.sku.id, input.imageUrl)');
+    expect(page).toContain('result.sku.image_url = cachedImageUrl');
     expect(page).toContain('cost_allocation_ratio: component.costRatio ?? 1');
     expect(page).toContain('const components = detailData(response.data)?.components || []');
     expect(page).toContain('bundle_sku: sku.id');
