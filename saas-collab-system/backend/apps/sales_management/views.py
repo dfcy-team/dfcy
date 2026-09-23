@@ -1108,6 +1108,12 @@ def commerce_inventory_payload(request, permission_code):
         raise ValidationError({"risk": "请选择缺货、低库存、锁定偏高或正常。"})
     condition = risk_conditions.get(risk, Q())
     queryset = queryset.filter(condition)
+    mapping_status = request.query_params.get("mapping_status", "")
+    if mapping_status not in ("", "mapped", "unmapped"):
+        raise ValidationError({"mapping_status": "请选择已关联或未关联。"})
+    if mapping_status:
+        mapping_condition = Q(internal_sku__isnull=(mapping_status == "unmapped"))
+        queryset = queryset.filter(mapping_condition)
     # Inventory is a stock, not a flow: retain only each SKU's last snapshot per UTC day.
     daily_latest_ids = trend_source.annotate(
         date=TruncDate("snapshot_at_utc", tzinfo=UTC),
@@ -1120,6 +1126,8 @@ def commerce_inventory_payload(request, permission_code):
     trend_queryset = trend_source.filter(pk__in=Subquery(daily_latest_ids)).annotate(
         date=TruncDate("snapshot_at_utc", tzinfo=UTC)
     ).filter(condition)
+    if mapping_status:
+        trend_queryset = trend_queryset.filter(mapping_condition)
     if include_virtual == "false":
         # Filter after selecting latest snapshots so older rows cannot reappear.
         queryset = queryset.exclude(internal_sku__inventory_type="virtual")
@@ -1144,11 +1152,15 @@ def commerce_inventory_payload(request, permission_code):
                 reserved_qty__lte=F("available_qty"),
             ),
         ),
+        locked_stock=Count("id", filter=Q(reserved_qty__gt=F("available_qty"), available_qty__gt=0)),
     )
     result_count = aggregates["result_count"]
     mapped_count = aggregates["mapped_count"]
     out_of_stock = aggregates["out_of_stock"]
     low_stock = aggregates["low_stock"]
+    refreshed_at = aggregates["refreshed_at"]
+    age_hours = max(0, round((timezone.now() - refreshed_at).total_seconds() / 3600, 1)) if refreshed_at else None
+    freshness_status = "pending" if age_hours is None else ("fresh" if age_hours <= 24 else ("delayed" if age_hours <= 72 else "stale"))
     trend = list(
         trend_queryset.values("date")
         .annotate(
@@ -1165,6 +1177,7 @@ def commerce_inventory_payload(request, permission_code):
         "warehouse_name": "warehouse__name", "warehouse_code": "warehouse__code",
         "on_hand_qty": "on_hand_qty", "available_qty": "available_qty",
         "reserved_qty": "reserved_qty", "in_transit_qty": "in_transit_qty",
+        "pending_putaway_qty": "pending_putaway_qty", "defective_qty": "defective_qty",
         "snapshot_time": "snapshot_at_utc", "risk_label": "risk_rank", "mapping_status": "mapping_rank",
     }
     if ordering:
@@ -1192,6 +1205,15 @@ def commerce_inventory_payload(request, permission_code):
         "source_status": "ready" if data["count"] else "pending",
         "warehouse_options": warehouse_options,
         "refreshed_at": aggregates["refreshed_at"],
+        "freshness": {"status": freshness_status, "age_hours": age_hours, "refreshed_at": refreshed_at},
+        "risk_summary": {
+            "out_of_stock": out_of_stock,
+            "low_stock": low_stock,
+            "locked_stock": aggregates["locked_stock"],
+            "data_insufficient": result_count,
+            "replenishment_status": "insufficient_sales_velocity",
+        },
+        "trend_status": "ready" if len(trend) >= 2 else ("single_day" if trend else "empty"),
         "metrics": [
             _metric("inventory_total", "在手库存", aggregates["total"], "件", "最新极风 WMS 快照在手数量。"),
             _metric("inventory_available", "可用库存", aggregates["available"], "件", "最新快照可用数量。"),
@@ -1244,6 +1266,8 @@ def commerce_inventory_payload(request, permission_code):
         "quality": {
             "score": round(mapped_count * 100 / result_count) if result_count else 0,
             "mapped_count": mapped_count,
+            "unmapped_count": result_count - mapped_count,
+            "mapping_rate": round(mapped_count * 100 / result_count, 1) if result_count else None,
             "total_count": result_count,
             "status": "healthy" if result_count and mapped_count == result_count else ("warning" if result_count else "pending"),
             "metric_version": "inventory_snapshot.v1",
@@ -1252,7 +1276,9 @@ def commerce_inventory_payload(request, permission_code):
         "trend": trend,
         "definition": {
             "inventory_basis": "按站点、仓库和 SKU 取极风 WMS 最新库存快照。",
-            "risk_basis": "缺货：可用库存≤0；低库存：可用库存 1–5；锁定偏高：占用库存>可用库存；正常：可用库存>5。"
+            "risk_basis": "缺货：可用库存≤0；低库存：可用库存 1–5；锁定偏高：占用库存>可用库存；正常：可用库存>5。",
+            "freshness_basis": "最新快照距今不超过 24 小时为新鲜，24–72 小时为延迟，超过 72 小时为过期；仅作同步时效提示。",
+            "replenishment_basis": "尚无可核验的销量速度与采购在途口径，暂不计算可售天数或补货建议。",
         },
     })
     return data
