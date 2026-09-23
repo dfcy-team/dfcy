@@ -39,8 +39,8 @@ done
 # Recovery never starts the migration service.  It only reconciles the
 # owner-registered application services and then performs the existing health
 # check, preserving the production-control lock and audit boundary.
-"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null
-"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
+"${COMPOSE[@]}" up --no-build -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null
+"${COMPOSE[@]}" up --no-build -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
 "$SCRIPT_DIR/production-health-check" --quiet >/dev/null
 append_audit 'recovery' 'success' "$(json_field "$current_file" '.release_sha')" 'pilot-runner' 'reconciled owner-registered current release; migration service was not started'
 printf 'PRODUCTION_RECOVERY=PASS\n'

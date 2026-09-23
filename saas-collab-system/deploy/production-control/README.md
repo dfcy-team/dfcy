@@ -4,10 +4,12 @@
 
 这不是生产凭据或现成上线授权。当前仓库的 `AGENTS.md` 要求生产发布由架构员审查和启用；本文件提供的自助发布仅在系统负责人明确批准、完成下列安装和验收后启用。
 
+现场提示（2026-09-23）：应用 VM 的 `ci-control` 仍是 `dfcy01` 拥有的旧式控制树，`dfcy01` 属于 `sudo`/`docker` 组，live `.env.pilot` 和 `control.env` 也不是 root-owned。旧版 `--runtime` 检查在该现场返回 PASS，不代表满足下文的新控制边界。**下面的首次安装示例不能直接在该 VM 执行**；须先审查账号分离、live env 迁移、旧账本保存、安装差异及回退方案，之后由系统负责人批准实施。
+
 ## 控制边界
 
 - GitHub workflow：`.github/workflows/developer-a-production-release.yml`。
-- VM 固定入口：`/opt/saas-collab/release-control/unified/bin/developer-a-ci-dispatch`。
+- VM 固定入口以现场 `authorized_keys` 的 `command=` 为准。2026-09-23 核对的应用虚拟机入口是 `/opt/saas-collab/release-control/unified/ci-control/bin/developer-a-ci-dispatch`；对应发布账本是该 `ci-control/current.json`，不是上一级 `unified/current.json`。
 - 允许的远程操作只有 `deploy`、`rollback` 和 `check`，入口拒绝 shell 元字符、路径跳转和任意命令。
 - V2.44.59 runner 只能通过 root-owned、无参数 bridge 调用本控制面；bridge
   仅消费 owner/CI 原子发布的候选 manifest，不接受 API 传入镜像、SHA、actor、reason
@@ -33,7 +35,7 @@
    绝对可执行文件。控制树、baseline 和 live env 不得由 `dfcy01` 或 runner 用户写入。
 7. 发布人、SHA、镜像摘要、迁移摘要、结果和时间写入 JSON Lines 审计账本；不会写入 SSH 私钥、GHCR token、数据库密码或 `.env` 内容。
 
-紧急回滚通过单独的 `rollback --emergency` 路径执行，不受 10 分钟普通发布限频限制，但仍需要强制命令、环境锁、镜像摘要校验、健康检查和审计。回滚只切换已登记的应用镜像，不自动逆向数据库迁移；不可逆迁移必须按备份恢复/向前修复方案由架构员处理。
+紧急回滚通过单独的 `rollback --emergency` 路径执行，不受 10 分钟普通发布限频限制，但仍需要强制命令、环境锁、镜像摘要校验、健康检查和审计。自动/紧急回滚优先使用本机已缓存的旧版不可变镜像；缺失时才按 `PRODUCTION_IMAGE_PULL_TIMEOUT_SECONDS`（默认 900 秒，允许 60–1800 秒）限时拉取。拉取失败只向 CI 输出安全分类，原始诊断留在 VM 的受控日志中，不能无限等待。回滚只切换已登记的应用镜像，不自动逆向数据库迁移；不可逆迁移必须按备份恢复/向前修复方案由架构员处理。
 
 ## 架构员首次安装（VM 上执行）
 
@@ -41,7 +43,7 @@
 
 ```sh
 sudo bash saas-collab-system/deploy/production-control/bin/install-control.sh \
-  --control-root=/opt/saas-collab/release-control/unified \
+  --control-root=/opt/saas-collab/release-control/unified/ci-control \
   --deploy-user=dfcy01 \
   --env-file=/etc/saas-collab/production/.env.production \
   --initialize-baseline \
@@ -51,7 +53,7 @@ sudo bash saas-collab-system/deploy/production-control/bin/install-control.sh \
 如果控制文件已安装，先复核差异，再显式增加 `--force`。安装脚本只安装固定入口、脚本、公共 Compose 和 root-owned 基线账本；它不会生成生产密钥，也不会改写授权 key。建议使用单独生成的 CI key，并在 `~dfcy01/.ssh/authorized_keys` 加入类似以下的一行（路径、指纹和 key 内容由 owner 实际生成）：
 
 ```text
-restrict,command="/opt/saas-collab/release-control/unified/bin/developer-a-ci-dispatch" ssh-ed25519 AAAA... production-ci
+restrict,command="/opt/saas-collab/release-control/unified/ci-control/bin/developer-a-ci-dispatch" ssh-ed25519 AAAA... production-ci
 ```
 
 如果 OpenSSH 版本不接受 `restrict`，使用等价的 `no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty` 选项，并保留 `command=`。不要复用开发 A 的个人 key，也不要在 authorized_keys 中允许普通 shell。
