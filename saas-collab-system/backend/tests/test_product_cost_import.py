@@ -112,6 +112,50 @@ def test_downloadable_chinese_csv_template_headers_are_accepted():
 
 
 @pytest.mark.django_db
+def test_cost_import_accepts_legacy_sku_code_without_current_sku_code():
+    _, sku, user = make_context("legacy-code")
+    sku.legacy_sku_code = "OLD-SKU-001"
+    sku.save(update_fields=["legacy_sku_code"])
+    grant(user, "products.cost.backfill")
+    headers = "旧SKU编码（二选一）,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
+    raw = (headers + "OLD-SKU-001,2026-09-01,,CNY,10,2,1,0.5,0.5,14,旧编码导入\n").encode("utf-8-sig")
+    response = client_for(user).post(
+        "/api/internal/products/costs/import/preview/",
+        {"file": upload(raw, "商品成本导入模板.csv")},
+        format="multipart",
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["errors"] == []
+    assert response.json()["data"]["valid"] == 1
+
+
+@pytest.mark.django_db
+def test_cost_import_rejects_conflicting_current_and_legacy_sku_codes():
+    tenant, sku, user = make_context("code-conflict")
+    sku.legacy_sku_code = "OLD-SKU-A"
+    sku.save(update_fields=["legacy_sku_code"])
+    other_spu = ProductSPU.objects.create(tenant=tenant, spu_code="SPU-OTHER", product_name="Other")
+    ProductSKU.objects.create(
+        tenant=tenant,
+        spu=other_spu,
+        sku_code="SKU-OTHER",
+        legacy_sku_code="OLD-SKU-B",
+        product_name="Other",
+    )
+    grant(user, "products.cost.backfill")
+    headers = "SKU编码（二选一）,旧SKU编码（二选一）,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
+    raw = (headers + f"{sku.sku_code},OLD-SKU-B,2026-09-01,,CNY,10,2,1,0.5,0.5,14,冲突校验\n").encode("utf-8-sig")
+    response = client_for(user).post(
+        "/api/internal/products/costs/import/preview/",
+        {"file": upload(raw)},
+        format="multipart",
+    )
+    assert response.status_code == 200
+    errors = response.json()["data"]["errors"]
+    assert any(item["field"] == "legacy_sku_code" and "不一致" in item["message"] for item in errors)
+
+
+@pytest.mark.django_db
 def test_same_idempotency_key_rejects_different_file():
     _, sku, user = make_context("key")
     grant(user, "products.cost.backfill", "products.cost.approve")

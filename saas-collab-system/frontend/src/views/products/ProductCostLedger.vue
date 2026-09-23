@@ -160,7 +160,7 @@
       </div>
       <div class="import-tips">
         <strong>第二步：填写并上传</strong>
-        <span>模板中带 * 的列为必填项；生效结束留空表示持续有效。</span>
+                <span>SKU编码和旧SKU编码二选一；其余带 * 的列为必填项。生效结束留空表示持续有效。</span>
       </div>
       <el-upload drag :auto-upload="false" :limit="1" accept=".csv,.xlsx" :on-change="selectImportFile" :on-remove="resetImportFile">
         <div><strong>上传已填写的成本模板</strong><small>拖入文件，或点击选择 CSV / XLSX</small></div>
@@ -293,7 +293,7 @@ async function save() {
 function openBackfill() { preview.value = null; backfillVisible.value = true; }
 function openImport() { resetImport(); importVisible.value = true; }
 function downloadImportTemplate() {
-  const headers = ['*SKU编码', '*生效开始', '生效结束', '*币种', '采购成本', '物流分摊', '税费', '包装费', '其他费用', '*确认成本', '调整原因'];
+  const headers = ['SKU编码（二选一）', '旧SKU编码（二选一）', '*生效开始', '生效结束', '*币种', '采购成本', '物流分摊', '税费', '包装费', '其他费用', '*确认成本', '调整原因'];
   const blob = new Blob([`\uFEFF${headers.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
