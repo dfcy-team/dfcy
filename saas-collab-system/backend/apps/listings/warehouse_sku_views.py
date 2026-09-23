@@ -115,6 +115,8 @@ class WarehouseRowSerializer(serializers.ModelSerializer):
             "internal_legacy_sku_code",
             "snapshot_at_utc",
             "on_hand_qty",
+            "reserved_qty",
+            "available_qty",
         ]
 
 

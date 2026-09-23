@@ -14,8 +14,10 @@ describe('single SKU editor', () => {
   });
 
   it('contains the accepted mapping, inventory and audit workspaces', () => {
-    expect(editor).toContain('平台 SKU 映射');
+    expect(editor).toContain('店铺 SKU 匹配');
     expect(editor).toContain('仓库与库存');
+    expect(editor).toContain('reserved_qty');
+    expect(editor).toContain('available_qty');
     expect(editor).toContain('修改记录');
     expect(editor).toContain('internal_sku_id: route.params.id');
     expect(editor).toContain("object_type: 'ProductSKU'");

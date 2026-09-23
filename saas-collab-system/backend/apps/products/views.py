@@ -2741,6 +2741,7 @@ def _bundle_version_data(version):
                 "component_sku_code": row.component_sku_code,
                 "component_name": row.component_name,
                 "quantity": row.quantity,
+                "cost_allocation_ratio": str(row.cost_allocation_ratio),
             }
             for row in version.components.all()
         ],
@@ -2751,7 +2752,7 @@ def _bundle_version_data(version):
 @permission_classes([IsProductBundleReadOrManage])
 def product_bundle_detail(request, sku_id):
     bundle = get_object_or_404(
-        ProductSKU.objects.select_related("spu").prefetch_related("bundle_components__component_sku"),
+        ProductSKU.objects.select_related("spu").prefetch_related("bundle_components__component_sku__spu"),
         pk=sku_id, tenant=request.user.tenant, spu__product_type=ProductSPU.ProductType.BUNDLE,
     )
     if request.method == "PUT":
@@ -2792,9 +2793,10 @@ def product_bundle_detail(request, sku_id):
             locked = ProductSKU.objects.select_for_update().get(pk=bundle.pk)
             before = component_payload(locked.bundle_components.select_related("component_sku"))
             locked.bundle_components.all().delete()
-            for component, quantity in normalized:
+            for index, (component, quantity) in enumerate(normalized):
                 ProductBundleComponent.objects.create(
-                    tenant=request.user.tenant, bundle_sku=locked, component_sku=component, quantity=quantity
+                    tenant=request.user.tenant, bundle_sku=locked, component_sku=component, quantity=quantity,
+                    cost_allocation_ratio=request.data["components"][index].get("cost_allocation_ratio", 1),
                 )
             create_bundle_version(
                 bundle_sku=locked, actor=request.user, effective_at=effective_at,

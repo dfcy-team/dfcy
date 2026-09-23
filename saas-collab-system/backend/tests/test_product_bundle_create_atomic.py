@@ -91,6 +91,32 @@ def test_bundle_create_commits_spu_sku_and_components_together():
 
 
 @pytest.mark.django_db
+def test_bundle_edit_persists_cost_allocation_ratio_in_current_and_version_data():
+    tenant = Tenant.objects.create(name="Bundle ratio tenant", code="bundle-ratio")
+    client = _bundle_client(tenant, "bundle-ratio-user")
+    category = _catalog(tenant, "分摊")
+    component = _component_sku(tenant, "RATIO-A")
+    created = client.post("/api/internal/products/bundles/create/", _payload(category, [component]), format="json")
+    assert created.status_code == 201
+    sku_id = created.json()["data"]["sku"]["id"]
+    url = f"/api/internal/products/bundles/{sku_id}/"
+
+    changed = client.put(url, {"reason": "调整分摊", "components": [
+        {"component_sku": component.id, "quantity": 2, "cost_allocation_ratio": "1.2500"}
+    ]}, format="json")
+    assert changed.status_code == 200
+    data = client.get(url).json()["data"]
+    assert data["components"][0]["cost_allocation_ratio"] == "1.2500"
+    assert data["versions"][0]["components"][0]["cost_allocation_ratio"] == "1.2500"
+
+    invalid = client.put(url, {"reason": "无效分摊", "components": [
+        {"component_sku": component.id, "quantity": 2, "cost_allocation_ratio": "0"}
+    ]}, format="json")
+    assert invalid.status_code == 400
+    assert ProductBundleComponent.objects.get(bundle_sku_id=sku_id).cost_allocation_ratio == 1.25
+
+
+@pytest.mark.django_db
 def test_bundle_image_url_is_cached_through_bundle_scoped_endpoint(monkeypatch):
     tenant = Tenant.objects.create(name="Bundle image tenant", code="bundle-image")
     client = _bundle_client(tenant, "bundle-image-user")

@@ -1066,12 +1066,13 @@ class ProductBundleComponentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     component_sku_code = serializers.CharField(source="component_sku.sku_code", read_only=True)
     component_product_name = serializers.CharField(source="component_sku.spu.product_name", read_only=True)
+    cost_allocation_ratio = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal("0.0001"), required=False)
 
     class Meta:
         model = ProductBundleComponent
         fields = (
             "id", "tenant_id", "bundle_sku", "component_sku", "component_sku_code",
-            "component_product_name", "quantity", "created_at", "updated_at",
+            "component_product_name", "quantity", "cost_allocation_ratio", "created_at", "updated_at",
         )
         read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
 

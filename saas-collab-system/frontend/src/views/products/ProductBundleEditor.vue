@@ -20,10 +20,10 @@
       </aside>
 
       <main class="editor-main">
-        <el-alert title="组合商品由多个普通 SKU 组成。修改组成关系会创建新版本，历史订单仍使用下单时的组合快照。" type="warning" :closable="false" show-icon />
+        <el-alert title="修改组合信息会创建新版本；已存在订单仍使用下单时的组合快照。存在活跃订单或采购单时不能修改组成。" type="warning" :closable="false" show-icon />
 
         <section id="bundle-basic" class="editor-card">
-          <div class="section-title"><h2>组合商品信息</h2><span>维护组合商品自身的名称、图片和销售状态</span></div>
+          <div class="section-title"><h2>基本信息</h2><span>维护组合 SKU 自身的信息</span></div>
           <div class="basic-grid">
             <div class="image-box" @click="previewVisible = Boolean(form.image_url)">
               <el-image v-if="form.image_url" :src="imageSrc(form.image_url)" fit="contain" />
@@ -45,16 +45,17 @@
 
         <section id="bundle-components" class="editor-card">
           <div class="section-title section-title-actions">
-            <div><h2>组合内容</h2><span>选择普通商品 SKU，并设置每套组合的使用数量</span></div>
-            <el-button type="primary" plain :disabled="components.length >= 20" @click="components.push({ sku: null, quantity: 1 })">添加子商品</el-button>
+            <div><h2>组合信息</h2><span>选择普通商品 SKU，并设置数量和成本价分摊比</span></div>
+            <el-button type="primary" plain :disabled="components.length >= 20" @click="components.push({ sku: null, quantity: 1, cost_allocation_ratio: 1 })">选择商品 SKU</el-button>
           </div>
-          <div class="component-head component-row"><span>子商品 SKU</span><span>商品名称</span><span>每套数量</span><span>操作</span></div>
+          <div class="component-head component-row"><span>SKU 信息</span><span>商品名称</span><span>数量</span><span>成本价分摊比</span><span>操作</span></div>
           <div v-for="(item, index) in components" :key="`${index}-${item.sku}`" class="component-row">
-            <el-select v-model="item.sku" filterable placeholder="搜索普通 SKU">
+            <el-select v-model="item.sku" filterable remote :remote-method="searchNormalSkus" placeholder="搜索普通 SKU 编码或名称">
               <el-option v-for="sku in normalSkus" :key="sku.id" :label="`${sku.sku_code} ${sku.product_name || ''}`" :value="sku.id" />
             </el-select>
             <span>{{ skuName(item.sku) }}</span>
             <el-input-number v-model="item.quantity" :min="1" :precision="0" />
+            <el-input-number v-model="item.cost_allocation_ratio" :min="0.0001" :precision="4" :step="0.1" />
             <el-button link type="danger" :disabled="components.length <= 1" @click="components.splice(index, 1)">删除</el-button>
           </div>
           <el-form label-position="top" class="version-form">
@@ -66,9 +67,15 @@
         </section>
 
         <section id="bundle-price" class="editor-card">
-          <div class="section-title"><h2>价格与包装</h2><span>维护组合商品整体采购成本和发货包装</span></div>
+          <div class="section-title"><h2>价格信息</h2><span>维护组合商品整体参考成本</span></div>
           <el-form label-position="top" class="measure-grid">
-            <el-form-item label="组合采购价"><el-input-number v-model="form.purchase_price" :min="0" :precision="4" /></el-form-item>
+            <el-form-item label="参考成本价"><el-input-number v-model="form.purchase_price" :min="0" :precision="4" /></el-form-item>
+          </el-form>
+        </section>
+
+        <section id="bundle-weight" class="editor-card">
+          <div class="section-title"><h2>重量信息</h2><span>重量使用克，尺寸使用厘米</span></div>
+          <el-form label-position="top" class="measure-grid">
             <el-form-item label="包装重量 (g)"><el-input-number v-model="form.package_weight" :min="0" :precision="3" /></el-form-item>
             <el-form-item label="长 (cm)"><el-input-number v-model="form.package_length_cm" :min="0" :precision="3" /></el-form-item>
             <el-form-item label="宽 (cm)"><el-input-number v-model="form.package_width_cm" :min="0" :precision="3" /></el-form-item>
@@ -78,7 +85,7 @@
         </section>
 
         <section id="bundle-mapping" class="editor-card">
-          <div class="section-title"><h2>平台 SKU 映射</h2><span>组合商品在各平台和店铺的映射关系</span></div>
+          <div class="section-title"><h2>店铺 SKU 匹配</h2><span>组合商品在各平台和店铺的映射关系</span></div>
           <el-table :data="platformRows" empty-text="暂无平台 SKU 映射">
             <el-table-column prop="platform_name" label="平台" width="120" /><el-table-column prop="store_name" label="店铺" min-width="150" />
             <el-table-column prop="title" label="平台商品" min-width="210" show-overflow-tooltip /><el-table-column prop="platform_product_id" label="Item ID" min-width="140" />
@@ -87,7 +94,7 @@
         </section>
 
         <section id="bundle-inventory" class="editor-card">
-          <div class="section-title"><h2>组合库存</h2><span>按仓库中各子 SKU 的可用量计算最大可组套数量</span></div>
+          <div class="section-title"><h2>仓库</h2><span>按各子 SKU 的可用量计算组合可用库存</span></div>
           <el-table :data="availabilityRows" empty-text="暂无组合库存快照">
             <el-table-column prop="warehouse_name" label="仓库" min-width="160" /><el-table-column prop="available_quantity" label="可组套数量" width="130" align="right" />
             <el-table-column label="子商品库存明细" min-width="360"><template #default="{ row }">{{ availabilitySummary(row) }}</template></el-table-column>
@@ -131,17 +138,25 @@ const platformRows = ref([]); const availabilityRows = ref([]); const auditRows 
 const changeReason = ref(''); const effectiveAt = ref(''); const originalActive = ref(true);
 const canEditLegacyCodes = computed(() => Boolean(auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')));
 const anchors = [
-  { id: 'bundle-basic', label: '组合商品信息' }, { id: 'bundle-components', label: '组合内容' },
-  { id: 'bundle-price', label: '价格与包装' }, { id: 'bundle-mapping', label: '平台 SKU 映射' },
-  { id: 'bundle-inventory', label: '组合库存' }, { id: 'bundle-history', label: '版本与修改记录' },
+  { id: 'bundle-basic', label: '基本信息' }, { id: 'bundle-components', label: '组合信息' },
+  { id: 'bundle-price', label: '价格信息' }, { id: 'bundle-weight', label: '重量信息' },
+  { id: 'bundle-mapping', label: '店铺 SKU 匹配' },
+  { id: 'bundle-inventory', label: '仓库' }, { id: 'bundle-history', label: '版本与修改记录' },
 ];
-const normalizedComponents = computed(() => components.value.map((item) => ({ component_sku: Number(item.sku), quantity: Number(item.quantity) })));
+const normalizedComponents = computed(() => components.value.map((item) => ({ component_sku: Number(item.sku), quantity: Number(item.quantity), cost_allocation_ratio: Number(item.cost_allocation_ratio) })));
 const componentsChanged = computed(() => JSON.stringify(normalizedComponents.value) !== originalComponents.value);
 const rowsOf = (response) => collectionRows(response?.data);
 const imageSrc = (url) => !url || /^https?:/i.test(url) ? url : `${apiBaseUrl}${url}`;
 const goBack = () => router.push({ path: '/products/details', query: { product_type: 'bundle' } });
 const componentId = (row) => row.component_sku_id ?? row.component_sku?.id ?? row.component_sku;
 const skuName = (id) => normalSkus.value.find((sku) => Number(sku.id) === Number(id))?.product_name || '-';
+async function searchNormalSkus(search = '') {
+  const response = await fetchProductSkuList({ product_type: 'standard', search, page: 1, page_size: 100 });
+  if (!response.success) return;
+  const known = new Map(normalSkus.value.map((sku) => [Number(sku.id), sku]));
+  rowsOf(response).filter((sku) => sku.product_type !== 'bundle').forEach((sku) => known.set(Number(sku.id), sku));
+  normalSkus.value = [...known.values()];
+}
 const availabilitySummary = (row) => (row.components || []).map((item) => `${item.component_sku_code}：${item.available_quantity} / 每套${item.required_quantity}`).join('；') || '-';
 const currentIsoMinute = () => { const date = new Date(); date.setSeconds(0, 0); return date.toISOString(); };
 
@@ -154,9 +169,9 @@ async function reload() {
     const sku = detailData(skuResponse.data) || {}; const detail = detailData(detailResponse.data) || {};
     if (sku.product_type && sku.product_type !== 'bundle') { await router.replace(`/products/details/${route.params.id}/edit`); return; }
     Object.assign(form, sku); Object.assign(bundleDetail, detail);
-    const nextComponents = (detail.components || []).map((item) => ({ sku: Number(componentId(item)), quantity: Number(item.quantity || 1) }));
-    components.value = nextComponents.length ? nextComponents : [{ sku: null, quantity: 1 }];
-    originalComponents.value = JSON.stringify(nextComponents.map((item) => ({ component_sku: item.sku, quantity: item.quantity })));
+    const nextComponents = (detail.components || []).map((item) => ({ sku: Number(componentId(item)), quantity: Number(item.quantity || 1), cost_allocation_ratio: Number(item.cost_allocation_ratio || 1) }));
+    components.value = nextComponents.length ? nextComponents : [{ sku: null, quantity: 1, cost_allocation_ratio: 1 }];
+    originalComponents.value = JSON.stringify(nextComponents.map((item) => ({ component_sku: item.sku, quantity: item.quantity, cost_allocation_ratio: item.cost_allocation_ratio })));
     originalActive.value = Boolean(sku.is_active); changeReason.value = ''; effectiveAt.value = currentIsoMinute();
     const code = sku.sku_code || '';
     const [skuList, platform, availability, audit] = await Promise.allSettled([
@@ -165,7 +180,9 @@ async function reload() {
       fetchProductBundleAvailability(route.params.id),
       fetchOperationLogs({ object_type: 'ProductSKU', object_id: String(route.params.id), page: 1, page_size: 50 }),
     ]);
-    normalSkus.value = skuList.status === 'fulfilled' ? rowsOf(skuList.value).filter((item) => item.product_type !== 'bundle') : [];
+    const selected = (detail.components || []).map((item) => ({ id: Number(componentId(item)), sku_code: item.component_sku_code, product_name: item.component_product_name || '' }));
+    const options = skuList.status === 'fulfilled' ? rowsOf(skuList.value).filter((item) => item.product_type !== 'bundle') : [];
+    normalSkus.value = [...new Map([...selected, ...options].map((item) => [Number(item.id), item])).values()];
     platformRows.value = platform.status === 'fulfilled' ? rowsOf(platform.value).filter((item) => Number(item.internal_sku) === Number(route.params.id) || item.internal_sku_code === code) : [];
     availabilityRows.value = availability.status === 'fulfilled' ? (detailData(availability.value.data)?.warehouses || []) : [];
     auditRows.value = audit.status === 'fulfilled' ? rowsOf(audit.value) : [];
@@ -176,6 +193,7 @@ async function reload() {
 async function save() {
   if (!components.value.length || components.value.some((item) => !item.sku || !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1)) { ElMessage.warning('请完整填写组合子商品和每套数量'); return; }
   if (new Set(components.value.map((item) => Number(item.sku))).size !== components.value.length) { ElMessage.warning('同一子商品不能重复添加'); return; }
+  if (components.value.some((item) => !Number.isFinite(Number(item.cost_allocation_ratio)) || Number(item.cost_allocation_ratio) <= 0)) { ElMessage.warning('成本价分摊比必须大于 0'); return; }
   if (componentsChanged.value && (!changeReason.value.trim() || !effectiveAt.value)) { ElMessage.warning('修改组合内容时必须填写变更原因和生效时间'); return; }
   saving.value = true;
   try {
@@ -202,4 +220,6 @@ onMounted(reload);
 
 <style scoped>
 .bundle-editor{min-height:calc(100vh - 64px);background:#f4f6f9;color:#1f2937}.editor-head{position:sticky;top:0;z-index:12;display:flex;justify-content:space-between;align-items:center;gap:24px;padding:16px 24px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 2px 8px rgb(15 23 42 / 5%)}.head-main,.head-actions{display:flex;align-items:center;gap:14px}.head-main h1{margin:2px 0 0;font-size:21px}.eyebrow{color:#64748b;font-size:12px}.editor-layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:20px;max-width:1480px;margin:0 auto;padding:22px 24px 60px}.anchor-nav{position:sticky;top:100px;align-self:start;display:flex;flex-direction:column;padding:16px;background:#fff;border:1px solid #e5e7eb;border-radius:8px}.anchor-nav strong{margin-bottom:10px}.anchor-nav a{padding:9px 8px;color:#475569;text-decoration:none;border-left:2px solid transparent}.anchor-nav a:hover{color:#d97706;border-left-color:#d97706;background:#fffbeb}.editor-main{min-width:0;display:flex;flex-direction:column;gap:16px}.editor-card{scroll-margin-top:96px;padding:22px 24px;background:#fff;border:1px solid #e5e7eb;border-radius:8px}.section-title{display:flex;align-items:baseline;gap:14px;margin-bottom:18px}.section-title h2{margin:0;font-size:18px}.section-title span{color:#64748b;font-size:13px}.section-title-actions{justify-content:space-between}.section-title-actions>div{display:flex;align-items:baseline;gap:14px}.basic-grid{display:grid;grid-template-columns:180px 1fr;gap:24px}.image-box{height:210px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;cursor:pointer;color:#94a3b8;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc}.image-box .el-image{width:100%;height:170px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}.span-2{grid-column:span 2}.component-row{display:grid;grid-template-columns:minmax(240px,1.3fr) minmax(180px,1fr) 130px 70px;gap:14px;align-items:center;padding:10px 12px;border-bottom:1px solid #eef2f7}.component-head{color:#64748b;font-size:13px;font-weight:600;background:#f8fafc}.version-form{margin-top:20px;max-width:760px}.measure-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 18px}@media(max-width:1100px){.editor-layout{grid-template-columns:1fr}.anchor-nav{position:static;flex-direction:row;flex-wrap:wrap}.basic-grid{grid-template-columns:1fr}.image-box{width:180px}.measure-grid{grid-template-columns:1fr 1fr}.component-row{grid-template-columns:1fr 1fr}}
+.component-row{grid-template-columns:minmax(220px,1.3fr) minmax(180px,1fr) 120px 150px 70px}
+@media(max-width:1100px){.component-row{grid-template-columns:repeat(2,minmax(0,1fr))}.component-head{display:none}}
 </style>

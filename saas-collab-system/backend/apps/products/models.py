@@ -476,6 +476,7 @@ class ProductBundleComponent(models.Model):
     bundle_sku = models.ForeignKey(ProductSKU, on_delete=models.CASCADE, related_name="bundle_components")
     component_sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, related_name="used_in_bundles")
     quantity = models.PositiveIntegerField(default=1)
+    cost_allocation_ratio = models.DecimalField(max_digits=10, decimal_places=4, default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -487,6 +488,7 @@ class ProductBundleComponent(models.Model):
                 name="uniq_component_per_bundle_sku",
             ),
             models.CheckConstraint(condition=models.Q(quantity__gte=1), name="bundle_component_quantity_positive"),
+            models.CheckConstraint(condition=models.Q(cost_allocation_ratio__gt=0), name="bundle_component_ratio_positive"),
             models.CheckConstraint(
                 condition=~models.Q(bundle_sku=models.F("component_sku")),
                 name="bundle_component_not_self",
@@ -534,12 +536,14 @@ class ProductBundleVersionComponent(models.Model):
     component_sku_code = models.CharField(max_length=80)
     component_name = models.CharField(max_length=200, blank=True)
     quantity = models.PositiveIntegerField()
+    cost_allocation_ratio = models.DecimalField(max_digits=10, decimal_places=4, default=1)
 
     class Meta:
         ordering = ["version_id", "id"]
         constraints = [
             models.UniqueConstraint(fields=["version", "component_sku"], name="uniq_bundle_version_component"),
             models.CheckConstraint(condition=models.Q(quantity__gte=1), name="bundle_version_component_qty_positive"),
+            models.CheckConstraint(condition=models.Q(cost_allocation_ratio__gt=0), name="bundle_version_component_ratio_positive"),
         ]
 
 

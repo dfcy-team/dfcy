@@ -55,9 +55,9 @@
         </section>
 
         <section id="price" class="editor-card">
-          <div class="section-title"><h2>价格信息</h2><span>维护采购成本</span></div>
+          <div class="section-title"><h2>价格信息</h2><span>维护参考成本价</span></div>
           <el-form label-position="top" class="compact-grid">
-            <el-form-item label="采购价"><el-input-number v-model="form.purchase_price" :min="0" :precision="4" controls-position="right" /></el-form-item>
+            <el-form-item label="参考成本价"><el-input-number v-model="form.purchase_price" :min="0" :precision="4" controls-position="right" /></el-form-item>
           </el-form>
         </section>
 
@@ -67,14 +67,25 @@
             <el-form-item label="产地国家"><el-input v-model="form.origin_country" /></el-form-item>
             <el-form-item label="HS 编码"><el-input v-model="form.hs_code" /></el-form-item>
             <el-form-item label="材质"><el-input v-model="form.material" /></el-form-item>
-            <el-form-item label="库存类型"><el-input v-model="form.inventory_type" /></el-form-item>
             <el-form-item label="卖点" class="span-2"><el-input v-model="form.selling_points" type="textarea" :rows="2" /></el-form-item>
             <el-form-item label="商品描述" class="span-2"><el-input v-model="form.product_description" type="textarea" :rows="4" /></el-form-item>
           </el-form>
         </section>
 
+        <section id="other" class="editor-card">
+          <div class="section-title"><h2>其他信息</h2><span>普通 SKU 的附加设置</span></div>
+          <el-form label-position="top" class="compact-grid">
+            <el-form-item label="库存类型">
+              <el-select v-model="form.inventory_type" clearable placeholder="请选择">
+                <el-option label="实体商品" value="physical" />
+                <el-option label="虚拟商品" value="virtual" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+        </section>
+
         <section id="package" class="editor-card">
-          <div class="section-title"><h2>包装与重量</h2><span>尺寸统一使用厘米，重量使用克</span></div>
+          <div class="section-title"><h2>重量信息</h2><span>尺寸统一使用厘米，重量使用克</span></div>
           <el-form label-position="top" class="measure-grid">
             <el-form-item label="包装重量 (g)"><el-input-number v-model="form.package_weight" :min="0" :precision="3" /></el-form-item>
             <el-form-item label="长 (cm)"><el-input-number v-model="form.package_length_cm" :min="0" :precision="3" /></el-form-item>
@@ -86,7 +97,7 @@
         </section>
 
         <section id="mapping" class="editor-card">
-          <div class="section-title"><h2>平台 SKU 映射</h2><span>展示各店铺与当前内部 SKU 的对应关系</span></div>
+          <div class="section-title"><h2>店铺 SKU 匹配</h2><span>展示各店铺与当前内部 SKU 的对应关系</span></div>
           <el-table :data="platformRows" empty-text="暂无平台 SKU 映射">
             <el-table-column prop="platform_name" label="平台" width="120" />
             <el-table-column prop="store_name" label="店铺" min-width="150" />
@@ -105,6 +116,8 @@
             <el-table-column prop="warehouse_code" label="仓库编码" width="130" />
             <el-table-column prop="source_sku" label="仓库 SKU" min-width="150" />
             <el-table-column prop="on_hand_qty" label="在库数量" width="110" align="right" />
+            <el-table-column prop="reserved_qty" label="已锁" width="90" align="right" />
+            <el-table-column prop="available_qty" label="可用库存" width="110" align="right" />
             <el-table-column prop="snapshot_at_utc" label="库存更新时间" min-width="180" />
           </el-table>
         </section>
@@ -152,8 +165,8 @@ const canEditLegacyCodes = computed(() => Boolean(
 const form = reactive({});
 const anchors = [
   { id: 'basic', label: '基本信息' }, { id: 'price', label: '价格信息' },
-  { id: 'attributes', label: '商品属性' }, { id: 'package', label: '包装与重量' },
-  { id: 'mapping', label: '平台 SKU 映射' }, { id: 'inventory', label: '仓库与库存' },
+  { id: 'attributes', label: '商品属性' }, { id: 'other', label: '其他信息' }, { id: 'package', label: '重量信息' },
+  { id: 'mapping', label: '店铺 SKU 匹配' }, { id: 'inventory', label: '仓库与库存' },
   { id: 'history', label: '修改记录' },
 ];
 const variantText = computed(() => [form.color_code, form.specification].filter(Boolean).join(' / ') || '-');

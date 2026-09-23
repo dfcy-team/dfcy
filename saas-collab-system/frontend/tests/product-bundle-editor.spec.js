@@ -15,15 +15,16 @@ describe('bundle product editor separation', () => {
   });
 
   it('shows bundle-specific composition, calculated stock and version workspaces', () => {
-    expect(editor).toContain('组合内容');
-    expect(editor).toContain('组合库存');
+    expect(editor).toContain('组合信息');
+    expect(editor).toContain('成本价分摊比');
+    expect(editor).toContain('组合可用库存');
     expect(editor).toContain('版本与修改记录');
     expect(editor).toContain('fetchProductBundleAvailability');
     expect(editor).toContain('updateProductBundle');
   });
 
   it('retains platform mappings and protects relationship changes with audit fields', () => {
-    expect(editor).toContain('平台 SKU 映射');
+    expect(editor).toContain('店铺 SKU 匹配');
     expect(editor).toContain('internal_sku_id: route.params.id');
     expect(editor).toContain('修改组合内容时必须填写变更原因和生效时间');
   });
