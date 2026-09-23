@@ -29,6 +29,11 @@ def _health_script() -> str:
     ).read_text(encoding="utf-8")
 
 
+def _common_script() -> str:
+    system_root = Path(__file__).resolve().parents[2]
+    return (system_root / "deploy" / "production-control" / "lib" / "production-common.sh").read_text(encoding="utf-8")
+
+
 def test_cli_digests_are_exported_before_compose_initialization():
     script = _deploy_script()
     validation = script.index(
@@ -74,6 +79,26 @@ def test_database_migration_has_bounded_runtime_and_visible_output():
     assert 'run --rm --name "$migration_container" "$migration_service"' in script
     assert 'docker rm -f "$migration_container"' in script
     assert 'run --rm "$migration_service" >/dev/null' not in script
+
+
+def test_image_pull_is_bounded_and_failure_is_classified_without_printing_raw_log():
+    script = _deploy_script()
+    assert "PRODUCTION_IMAGE_PULL_TIMEOUT_SECONDS:-900" in script
+    assert 'timeout --foreground --signal=TERM --kill-after=30s "${image_pull_timeout_seconds}s"' in script
+    assert 'docker pull "$image" >"$pull_log" 2>&1' in script
+    assert "failure_class=registry_auth" in script
+    assert "failure_class=host_storage" in script
+    assert "failure_class=registry_network" in script
+    assert "failure_class=docker_daemon" in script
+    assert 'die "$role image pull failed (class=$failure_class, exit=$pull_status, vm_log=$pull_log)."' in script
+    assert 'docker pull "$backend_image" >/dev/null 2>&1' not in script
+
+
+def test_registry_login_has_timeout_without_logging_token():
+    script = _common_script()
+    assert 'timeout --foreground --signal=TERM --kill-after=10s 90s' in script
+    assert "GHCR authentication timed out after 90 seconds" in script
+    assert 'printf \'%s\' "$token"' in script
 
 
 def test_baseline_tracks_control_environment_and_its_compose_override():

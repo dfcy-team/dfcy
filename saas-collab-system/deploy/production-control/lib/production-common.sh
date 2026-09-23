@@ -291,13 +291,19 @@ read_registry_token() {
 }
 
 docker_login_from_stdin() {
-  local username=$1 token
+  local username=$1 token login_status=0
   validate_actor "$username"
+  require_command timeout
   token=$(read_registry_token)
   # Docker's credential file is temporary and is removed by the caller's
   # EXIT trap. No token is written to release metadata or the audit ledger.
-  printf '%s' "$token" | docker --config "$DOCKER_CONFIG" login ghcr.io --username "$username" --password-stdin >/dev/null 2>&1 || die 'GHCR authentication failed.'
+  printf '%s' "$token" | timeout --foreground --signal=TERM --kill-after=10s 90s \
+    docker --config "$DOCKER_CONFIG" login ghcr.io --username "$username" --password-stdin >/dev/null 2>&1 || login_status=$?
   unset token
+  if (( login_status == 124 || login_status == 137 )); then
+    die 'GHCR authentication timed out after 90 seconds.'
+  fi
+  (( login_status == 0 )) || die 'GHCR authentication failed.'
 }
 
 remove_docker_config() {
