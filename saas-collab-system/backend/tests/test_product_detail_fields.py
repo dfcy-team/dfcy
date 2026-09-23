@@ -64,6 +64,30 @@ def test_sku_detail_fields_are_nullable_and_patchable_without_changing_name():
 
 
 @pytest.mark.django_db
+def test_sku_api_exposes_product_type_and_filters_standard_from_bundles():
+    tenant = Tenant.objects.create(name="SKU type tenant", code="sku-type")
+    user = _user(tenant, "sku-type-user")
+    standard_spu = ProductSPU.objects.create(
+        tenant=tenant, spu_code="SPU-STANDARD", product_name="Standard", product_type=ProductSPU.ProductType.STANDARD,
+    )
+    bundle_spu = ProductSPU.objects.create(
+        tenant=tenant, spu_code="SPU-BUNDLE", product_name="Bundle", product_type=ProductSPU.ProductType.BUNDLE,
+    )
+    standard_sku = ProductSKU.objects.create(tenant=tenant, spu=standard_spu, sku_code="SKU-STANDARD")
+    ProductSKU.objects.create(tenant=tenant, spu=bundle_spu, sku_code="SKU-BUNDLE")
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    detail = client.get(f"/api/internal/products/skus/{standard_sku.id}/").json()["data"]
+    assert detail["spu_code"] == "SPU-STANDARD"
+    assert detail["product_type"] == ProductSPU.ProductType.STANDARD
+
+    response = client.get("/api/internal/products/skus/", {"product_type": "standard", "active_status": "all"})
+    assert response.status_code == 200
+    assert [row["sku_code"] for row in response.json()["data"]["results"]] == ["SKU-STANDARD"]
+
+
+@pytest.mark.django_db
 def test_only_platform_or_tenant_administrator_can_edit_legacy_product_codes():
     tenant = Tenant.objects.create(name="Legacy code tenant", code="legacy-code-admin")
     regular = _user(tenant, "legacy-code-regular")

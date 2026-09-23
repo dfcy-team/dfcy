@@ -520,6 +520,8 @@ class ProductCategoryBackgroundColorBulkSerializer(serializers.Serializer):
 
 class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    spu_code = serializers.CharField(source="spu.spu_code", read_only=True)
+    product_type = serializers.CharField(source="spu.product_type", read_only=True)
     # Declared on the concrete serializer because DRF does not collect fields
     # declared only on a plain mixin into ModelSerializer._declared_fields.
     clear_fields = serializers.ListField(
@@ -552,6 +554,8 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             "id",
             "tenant_id",
             "spu",
+            "spu_code",
+            "product_type",
             "sku_code",
             "product_name",
             "product_name_source",
@@ -1027,6 +1031,7 @@ class ProductDetailBulkUpdateSerializer(serializers.Serializer):
 class ProductBundleCreateComponentInputSerializer(serializers.Serializer):
     component_sku = serializers.IntegerField(min_value=1)
     quantity = serializers.IntegerField(min_value=1)
+    cost_allocation_ratio = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal("0.0001"), default=Decimal("1"))
 
 
 class ProductBundleCreateInputSerializer(serializers.Serializer):
@@ -1062,12 +1067,13 @@ class ProductBundleComponentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     component_sku_code = serializers.CharField(source="component_sku.sku_code", read_only=True)
     component_product_name = serializers.CharField(source="component_sku.spu.product_name", read_only=True)
+    cost_allocation_ratio = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal("0.0001"), required=False)
 
     class Meta:
         model = ProductBundleComponent
         fields = (
             "id", "tenant_id", "bundle_sku", "component_sku", "component_sku_code",
-            "component_product_name", "quantity", "created_at", "updated_at",
+            "component_product_name", "quantity", "cost_allocation_ratio", "created_at", "updated_at",
         )
         read_only_fields = ("id", "tenant_id", "created_at", "updated_at")
 

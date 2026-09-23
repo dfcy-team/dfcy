@@ -6,6 +6,7 @@ import secrets
 import zipfile
 from collections import Counter, defaultdict
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree
 
 from django.db import transaction
@@ -25,7 +26,9 @@ from .models import (
 
 def component_payload(rows):
     return [
-        {"component_sku_id": row.component_sku_id, "component_sku_code": row.component_sku.sku_code, "quantity": row.quantity}
+        {"component_sku_id": row.component_sku_id, "component_sku_code": row.component_sku.sku_code,
+         "component_product_name": row.component_sku.product_name or row.component_sku.spu.product_name, "quantity": row.quantity,
+         "cost_allocation_ratio": str(row.cost_allocation_ratio)}
         for row in rows
     ]
 
@@ -48,6 +51,7 @@ def create_bundle_version(*, bundle_sku, actor, effective_at=None, reason="", ac
             component_sku_code=row.component_sku.sku_code,
             component_name=row.component_sku.product_name or row.component_sku.spu.product_name,
             quantity=row.quantity,
+            cost_allocation_ratio=row.cost_allocation_ratio,
         ) for row in components
     ])
     after = component_payload(components)
@@ -75,6 +79,12 @@ def validate_component_rows(tenant, rows, bundle_sku=None):
         quantity = int(row["quantity"])
         if quantity < 1:
             raise ValueError("component quantity must be positive")
+        try:
+            ratio = Decimal(str(row.get("cost_allocation_ratio", 1)))
+        except (InvalidOperation, TypeError):
+            raise ValueError("cost allocation ratio must be a positive number")
+        if not ratio.is_finite() or ratio <= 0 or ratio > Decimal("999999.9999") or ratio.as_tuple().exponent < -4:
+            raise ValueError("cost allocation ratio must be a positive number with at most four decimals")
         normalized.append((skus[sku_id], quantity))
     return normalized
 

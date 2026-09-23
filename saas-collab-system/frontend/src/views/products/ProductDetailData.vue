@@ -1209,6 +1209,10 @@ function openGenerate(row) {
 
 function openEdit(row) {
   if (row.sku_id) {
+    if (row.product_type === 'bundle') {
+      router.push(`/products/bundles/${row.sku_id}/edit`);
+      return;
+    }
     router.push(`/products/details/${row.sku_id}/edit`);
     return;
   }
