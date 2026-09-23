@@ -102,6 +102,31 @@ class InternalAPIClientTests(APITestCase):
             response = self.client.post("/api/internal/integrations/internal-api-clients/", payload, format="json")
             self.assertEqual(response.status_code, 400, response.content)
 
+    def test_extended_business_resource_catalog_is_supported(self):
+        resources = {
+            "platform_products": ["id", "platform_sku"],
+            "stores": ["id", "name"],
+            "warehouses": ["id", "code"],
+            "supplier_shipments": ["id", "tracking_number"],
+            "sales_orders": ["id", "order_number"],
+            "sales_returns": ["id", "return_number"],
+            "inventory_snapshots": ["id", "available_quantity"],
+            "shipments": ["id", "shipment_number"],
+            "influencers": ["id", "handle"],
+            "outreach_tasks": ["id", "influencer_id"],
+            "sample_fulfillments": ["id", "sku"],
+        }
+        response = self.client.post(
+            "/api/internal/integrations/internal-api-clients/",
+            {**self.payload, "name": "Extended reader", "resources": resources},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        saved_resources = response.json()["data"]["resources"]
+        self.assertEqual(set(saved_resources), set(resources))
+        for resource, fields in resources.items():
+            self.assertEqual(set(saved_resources[resource]), set(fields))
+
     def test_permissions_fail_closed_without_scope_and_business_read_api_is_absent(self):
         limited = get_user_model().objects.create_user(
             username="limited-internal-api", password=None, tenant=self.tenant,

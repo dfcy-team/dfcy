@@ -38,8 +38,19 @@ PILOT_LOOPBACK_CALLBACKS = {
 
 INTERNAL_API_RESOURCE_FIELDS = {
     "products": {"id", "sku", "name", "status", "updated_at"},
+    "platform_products": {"id", "platform", "store_id", "platform_sku", "title", "status", "updated_at"},
     "suppliers": {"id", "code", "name", "status", "updated_at"},
+    "stores": {"id", "platform", "code", "name", "status", "updated_at"},
+    "warehouses": {"id", "code", "name", "status", "updated_at"},
     "purchase_orders": {"id", "order_number", "supplier_id", "status", "ordered_at", "updated_at"},
+    "supplier_shipments": {"id", "purchase_order_id", "tracking_number", "status", "shipped_at", "updated_at"},
+    "sales_orders": {"id", "order_number", "store_id", "status", "ordered_at", "updated_at"},
+    "sales_returns": {"id", "sales_order_id", "return_number", "status", "created_at", "updated_at"},
+    "inventory_snapshots": {"id", "warehouse_id", "sku", "available_quantity", "reserved_quantity", "snapshot_at", "updated_at"},
+    "shipments": {"id", "shipment_number", "warehouse_id", "tracking_number", "status", "shipped_at", "updated_at"},
+    "influencers": {"id", "platform", "handle", "display_name", "status", "updated_at"},
+    "outreach_tasks": {"id", "influencer_id", "owner_id", "status", "due_at", "updated_at"},
+    "sample_fulfillments": {"id", "influencer_id", "sku", "tracking_number", "status", "shipped_at", "updated_at"},
 }
 
 
