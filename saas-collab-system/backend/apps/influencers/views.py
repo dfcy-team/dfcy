@@ -17,7 +17,7 @@ from apps.audit.services import write_operation_log
 from apps.accounts.models import CustomUser
 from apps.common.responses import paginated_data, success_response
 from apps.development.permissions import any_permission_class
-from apps.masterdata.models import StatusChoices, StoreMaster
+from apps.masterdata.models import StatusChoices, StoreMaster, WarehouseMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope
@@ -885,6 +885,12 @@ class SampleFulfillmentOptionsView(APIView):
             is_deleted=False,
             status__in=(OutreachTask.Status.PENDING, OutreachTask.Status.IN_PROGRESS),
         ).select_related("store").order_by("-dispatch_time", "-id")[:200]
+        stores = StoreMaster.objects.filter(
+            tenant=request.user.tenant, status=StatusChoices.ACTIVE,
+        ).order_by("code")
+        warehouses = WarehouseMaster.objects.filter(
+            tenant=request.user.tenant, status=StatusChoices.ACTIVE,
+        ).order_by("code")
         return success_response({
             "tasks": [
                 {
@@ -893,6 +899,7 @@ class SampleFulfillmentOptionsView(APIView):
                     "task_name": task.task_name,
                     "store": task.store_id,
                     "store_name": task.store.name,
+                    "store_country_code": task.store.country_code,
                     "product_name_snapshot": task.product_name_snapshot,
                     "external_product_id": task.external_product_id,
                     "sku_prefix": task.sku_prefix,
@@ -901,6 +908,14 @@ class SampleFulfillmentOptionsView(APIView):
                 for task in tasks
             ],
             "owners": owner_payload,
+            "stores": [
+                {"id": store.id, "code": store.code, "name": store.name, "country_code": store.country_code}
+                for store in stores
+            ],
+            "warehouses": [
+                {"id": warehouse.id, "code": warehouse.code, "name": warehouse.name, "country_code": warehouse.country_code}
+                for warehouse in warehouses
+            ],
         })
 
 

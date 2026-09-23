@@ -51,6 +51,7 @@ from .cost_views import (
     product_cost_backfill_preview,
     product_cost_backfill_execute,
     product_cost_collection,
+    product_cost_warehouses,
     product_cost_confirm,
     product_cost_create,
     product_cost_import_confirm,
@@ -60,6 +61,7 @@ from .cost_views import (
 
 urlpatterns = [
     path("costs/", product_cost_collection, name="product-cost-collection"),
+    path("costs/warehouses/", product_cost_warehouses, name="product-cost-warehouses"),
     path("costs/versions/", product_cost_create, name="product-cost-create"),
     path("costs/backfill-preview/", product_cost_backfill_preview, name="product-cost-backfill-preview"),
     path("costs/backfill-execute/", product_cost_backfill_execute, name="product-cost-backfill-execute"),

@@ -1,6 +1,7 @@
 import { requestApi } from './request';
 
 export const fetchProductCosts = (params = {}) => requestApi({ method: 'get', url: '/api/internal/products/costs/', params });
+export const fetchCostWarehouses = () => requestApi({ method: 'get', url: '/api/internal/products/costs/warehouses/' });
 
 export const createProductCostVersion = (data) => requestApi({ method: 'post', url: '/api/internal/products/costs/versions/', data });
 

@@ -15,6 +15,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.audit.models import DataImportLog
+from apps.masterdata.models import WarehouseMaster, StatusChoices
 from apps.tenants.models import Tenant
 
 from .cost_services import append_cost_version
@@ -22,10 +23,11 @@ from .models import ProductCostVersion, ProductSKU
 
 
 EXPECTED_COLUMNS = (
-    "effective_from", "effective_to", "currency", "purchase_cost",
+    "warehouse_code", "effective_from", "effective_to", "currency", "purchase_cost",
     "freight_cost", "duty_cost", "packaging_cost", "other_cost", "confirmed_cost", "reason",
 )
 HEADER_ALIASES = {
+    "仓库编码": "warehouse_code",
     "SKU编码": "sku_code",
     "SKU编码（二选一）": "sku_code",
     "旧SKU编码": "legacy_sku_code",
@@ -205,6 +207,7 @@ def parse_and_validate(*, tenant, raw, filename=""):
         if optional_identifier in headers:
             index[optional_identifier] = headers.index(optional_identifier)
     tenant_skus = list(ProductSKU.objects.filter(tenant=tenant))
+    warehouse_map = {item.code: item for item in WarehouseMaster.objects.filter(tenant=tenant, status=StatusChoices.ACTIVE)}
     sku_map = {item.sku_code: item for item in tenant_skus}
     legacy_sku_map = {}
     duplicate_legacy_codes = set()
@@ -221,6 +224,10 @@ def parse_and_validate(*, tenant, raw, filename=""):
             continue
         record = {field: (values[position] if position < len(values) else "") for field, position in index.items()}
         row_errors = []
+        warehouse_code = str(record.get("warehouse_code") or "").strip()
+        warehouse = warehouse_map.get(warehouse_code)
+        if not warehouse:
+            row_errors.append(("warehouse_code", "Warehouse code is missing, inactive, or outside this tenant."))
         sku_code = str(record.get("sku_code") or "").strip()
         legacy_sku_code = str(record.get("legacy_sku_code") or "").strip()
         current_match = sku_map.get(sku_code) if sku_code else None
@@ -238,7 +245,8 @@ def parse_and_validate(*, tenant, raw, filename=""):
             row_errors.append(("legacy_sku_code", "SKU编码与旧SKU编码对应的商品不一致。"))
         sku = current_match or legacy_match
         canonical_sku_code = sku.sku_code if sku else sku_code
-        cleaned = {"sku": sku, "sku_code": canonical_sku_code, "legacy_sku_code": legacy_sku_code}
+        cleaned = {"sku": sku, "sku_code": canonical_sku_code, "legacy_sku_code": legacy_sku_code,
+                   "warehouse": warehouse, "warehouse_code": warehouse_code}
         for field in ("effective_from", "effective_to"):
             try:
                 cleaned[field] = _datetime(record[field], field)
@@ -270,15 +278,16 @@ def parse_and_validate(*, tenant, raw, filename=""):
     # Reject overlaps within this batch.
     by_sku = {}
     for item in parsed:
-        for prior in by_sku.setdefault(item["sku_code"], []):
+        key = (item["sku_code"], item["warehouse_code"])
+        for prior in by_sku.setdefault(key, []):
             if _overlaps(item["effective_from"], item["effective_to"], prior["effective_from"], prior["effective_to"]):
                 errors.append({"row": item["row"], "field": "effective_from", "message": f"Overlaps import row {prior['row']}."})
-        by_sku[item["sku_code"]].append(item)
+        by_sku[key].append(item)
 
     # Match append_cost_version semantics: one preceding open interval may be
     # closed at the first imported boundary; every other database overlap is a conflict.
-    for sku_code, imports in by_sku.items():
-        existing = list(ProductCostVersion.objects.filter(tenant=tenant, sku=imports[0]["sku"]))
+    for _key, imports in by_sku.items():
+        existing = list(ProductCostVersion.objects.filter(tenant=tenant, sku=imports[0]["sku"], warehouse=imports[0]["warehouse"]))
         for position, item in enumerate(sorted(imports, key=lambda value: value["effective_from"])):
             overlaps = [version for version in existing if _overlaps(item["effective_from"], item["effective_to"], version.effective_from, version.effective_to)]
             closable = [version for version in overlaps if position == 0 and version.effective_to is None and version.effective_from < item["effective_from"]]
@@ -329,16 +338,16 @@ def confirm_cost_import(*, tenant, actor, raw, filename, token, idempotency_key)
         raise ValidationError({"errors": errors or [{"message": "The preview contained errors."}]})
 
     created = []
-    for item in sorted(rows, key=lambda value: (value["sku_id"] if "sku_id" in value else value["sku"].pk, value["effective_from"])):
+    for item in sorted(rows, key=lambda value: (value["sku"].pk, value["warehouse"].pk, value["effective_from"])):
         version = append_cost_version(
-            tenant=tenant, sku=item["sku"], actor=actor,
+            tenant=tenant, sku=item["sku"], warehouse=item["warehouse"], actor=actor,
             status=ProductCostVersion.Status.CONFIRMED, source=ProductCostVersion.Source.IMPORT,
             currency=item["currency"], purchase_cost=item["purchase_cost"], freight_cost=item["freight_cost"],
             duty_cost=item["duty_cost"], packaging_cost=item["packaging_cost"], other_cost=item["other_cost"],
             system_cost=None, confirmed_cost=item["confirmed_cost"], effective_from=item["effective_from"],
             effective_to=item["effective_to"], reason=item["reason"],
         )
-        created.append({"id": version.pk, "sku_code": item["sku_code"], "version_no": version.version_no})
+        created.append({"id": version.pk, "sku_code": item["sku_code"], "warehouse_code": item["warehouse_code"], "version_no": version.version_no})
     result = {"created": len(created), "versions": created, "digest": digest, "replayed": False}
     DataImportLog.objects.create(
         tenant=tenant, import_type="product_cost", file_name=filename[:255], status=DataImportLog.Status.SUCCESS,

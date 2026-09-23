@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from apps.masterdata.models import StoreMaster
+from apps.masterdata.models import StoreMaster, WarehouseMaster
 
 from .models import (
     Influencer,
@@ -424,10 +424,15 @@ class OutreachTargetSerializer(serializers.ModelSerializer):
 
 
 class SampleItemSerializer(serializers.ModelSerializer):
+    warehouse = serializers.PrimaryKeyRelatedField(queryset=WarehouseMaster.objects.all(), required=False, allow_null=True)
+    warehouse_code = serializers.CharField(source="warehouse.code", read_only=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    warehouse_country_code = serializers.CharField(source="warehouse.country_code", read_only=True)
+
     class Meta:
         model = SampleItem
         fields = (
-            "id", "sku", "cost_version", "external_product_id", "site_code", "requested_sku", "normalized_sku",
+            "id", "sku", "warehouse", "warehouse_code", "warehouse_name", "warehouse_country_code", "cost_version", "external_product_id", "site_code", "requested_sku", "normalized_sku",
             "matched_sku_code", "matched_legacy_sku_code", "product_name", "quantity", "cost_amount",
             "unit_cost", "cost_match_status", "cost_source", "cost_snapshot_at", "match_notes",
             "created_at", "updated_at",

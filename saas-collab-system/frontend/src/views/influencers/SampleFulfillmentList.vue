@@ -58,6 +58,7 @@
             <template v-if="row.items?.length">
               <div v-for="item in row.items" :key="item.id || item.requested_sku" class="sku-match">
                 <small>{{ displayValue(item.requested_sku || item.matched_sku_code) }} × {{ displayValue(item.quantity) }}</small>
+                <small>仓库：{{ displayValue(item.warehouse_name || item.warehouse_code) }}</small>
                 <div>
                   <el-tag size="small" :type="matchTagType(item.cost_match_status)">{{ statusLabel(COST_MATCH_STATUS_LABELS, item.cost_match_status) }}</el-tag>
                 </div>
@@ -72,7 +73,7 @@
         <el-table-column prop="sample_order_no" label="样品订单" min-width="135">
           <template #default="{ row }">{{ displayValue(row.sample_order_no) }}</template>
         </el-table-column>
-        <el-table-column label="采购成本" min-width="125">
+        <el-table-column label="商品成本" min-width="125">
           <template #default="{ row }">
             <b>{{ displayValue(row.calculated_cost) }}</b>
             <small>{{ costMatchLabel(row) }}</small>
@@ -110,7 +111,7 @@
       <el-pagination v-if="total" v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="load" />
     </el-card>
 
-    <el-dialog v-model="visible" class="sample-dialog" width="720px" @closed="discardDraft">
+    <el-dialog v-model="visible" class="sample-dialog" width="min(900px, 94vw)" @closed="discardDraft">
       <template #header>
         <div class="dialog-heading">
           <span>送样履约</span>
@@ -182,15 +183,18 @@
                 :closable="false"
                 :title="`任务 SKU 前缀：${inheritedTask.sku_prefix}。请填写实际送样 SKU。`"
               />
-              <div class="sku-header"><span>站点</span><span>SKU</span><span>数量</span><span /></div>
+              <div class="sku-header"><span>站点</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
               <div v-for="(item, index) in items" :key="index" class="sku-row">
                 <el-input v-model="item.site_code" placeholder="站点" />
                 <el-input v-model="item.requested_sku" placeholder="SKU 可暂时为空" />
+                <el-select v-model="item.warehouse" clearable filterable placeholder="请选择发货仓库">
+                  <el-option v-for="warehouse in eligibleWarehouses" :key="warehouse.id" :label="`${warehouse.name}（${warehouse.code}）`" :value="warehouse.id" />
+                </el-select>
                 <el-input-number v-model="item.quantity" :min="1" />
                 <el-button link type="danger" :disabled="items.length === 1" @click="items.splice(index, 1)">删除</el-button>
               </div>
               <el-button link type="primary" @click="items.push(newItem())">+ 添加 SKU</el-button>
-              <el-alert class="fulfillment-note" type="warning" :closable="false" title="采购成本未匹配不会阻止送样记录保存。" />
+              <el-alert class="fulfillment-note" type="warning" :closable="false" title="每个 SKU 须指定发货仓库；仓库国家必须与店铺国家一致。未匹配到该仓库有效成本时，不会借用其他仓库成本。" />
             </div>
           </el-form-item>
           <el-form-item label="备注" class="form-span-2">
@@ -223,8 +227,8 @@
           <div><span>视频截止</span><b>{{ displayValue(detailSample.video_deadline_at) }}</b></div>
           <div><span>视频匹配</span><b>{{ detailSample.video_match_count || 0 }} 条</b></div>
         </div><div class="tag-row"><el-tag v-for="tag in detailSample.quick_tags || []" :key="tag" size="small">{{ tag }}</el-tag></div><p class="detail-note">{{ displayValue(detailSample.notes) }}</p></section>
-        <section class="detail-section"><h3>采购成本</h3><div class="detail-facts">
-          <div><span>采购成本</span><b>{{ displayValue(detailSample.calculated_cost) }}</b></div>
+        <section class="detail-section"><h3>商品成本</h3><div class="detail-facts">
+          <div><span>商品成本</span><b>{{ displayValue(detailSample.calculated_cost) }}</b></div>
           <div><span>成本匹配</span><b>{{ costMatchLabel(detailSample) }}</b></div>
         </div></section>
         <section class="detail-section"><h3>视频匹配结果</h3><div v-if="detailSample.video_matches?.length" class="video-list"><p v-for="video in detailSample.video_matches" :key="video.id">{{ displayValue(video.title || video.external_content_id) }} · {{ displayValue(video.published_at) }}</p></div><div v-else class="empty-state">暂无已发布匹配视频</div></section>
@@ -266,6 +270,7 @@ const router = useRouter();
 const rows = ref([]);
 const tasks = ref([]);
 const storeOptions = ref([]);
+const warehouseOptions = ref([]);
 const influencerOptions = ref([]);
 const ownerOptions = ref([]);
 const total = ref(0);
@@ -303,7 +308,7 @@ const editableStatusOptions = computed(() => {
 const selectableLinkTypes = computed(() => inheritedTask.value
   ? { DRJL: FULFILLMENT_LINK_TYPE_LABELS.DRJL }
   : Object.fromEntries(Object.entries(FULFILLMENT_LINK_TYPE_LABELS).filter(([value]) => value !== 'DRJL')));
-const newItem = () => ({ site_code: 'PH', external_product_id: '', requested_sku: null, quantity: 1 });
+const newItem = () => ({ site_code: 'PH', external_product_id: '', requested_sku: null, warehouse: null, quantity: 1 });
 const items = ref([newItem()]);
 const canManage = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
 const fulfilledStatuses = ['shipped', 'delivered', 'received', 'creating', 'published', 'completed', 'live_creator'];
@@ -315,6 +320,8 @@ const hasValue = (value) => value !== undefined && value !== null && value !== '
 const sampleInfluencerName = (row) => creatorHandleFirst(row);
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
+const selectedStore = computed(() => storeOptions.value.find((store) => String(store.id) === String(form.store)) || null);
+const eligibleWarehouses = computed(() => warehouseOptions.value.filter((warehouse) => String(warehouse.country_code || '').toUpperCase() === String(selectedStore.value?.country_code || '').toUpperCase()));
 const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedInfluencer.value));
 const todayLabel = (() => {
   const today = new Date();
@@ -408,6 +415,7 @@ async function openCreate(selection = {}) {
   ]);
   tasks.value = optionResponse.success ? (optionResponse.data?.tasks || []) : [];
   storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
+  warehouseOptions.value = optionResponse.success ? (optionResponse.data?.warehouses || []) : [];
   influencerOptions.value = [];
   ownerOptions.value = optionResponse.success ? (optionResponse.data?.owners || []) : [];
   if (!optionResponse.success) ElMessage.error(formatInfluencerError(optionResponse, '送样选项加载失败，可稍后重试'));
@@ -484,7 +492,7 @@ function outreachDate(row) {
 
 function costMatchLabel(row) {
   const statuses = (row?.items || []).map((item) => item.cost_match_status).filter(hasValue);
-  if (!statuses.length) return '采购成本待匹配';
+  if (!statuses.length) return '商品成本待匹配';
   const unmatched = statuses.find((status) => !String(status).startsWith('matched'));
   return statusLabel(COST_MATCH_STATUS_LABELS, unmatched || statuses[0]);
 }
@@ -504,6 +512,9 @@ async function openDetail(row) {
 
 async function openEdit(row) {
   if (!canManage.value || row.is_deleted) return;
+  const [optionResponse, taskOptionResponse] = await Promise.all([fetchSampleFulfillmentOptions(), fetchOutreachTaskOptions({ include_influencers: 'false' })]);
+  warehouseOptions.value = optionResponse.success ? (optionResponse.data?.warehouses || []) : [];
+  storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
   editingSample.value = { ...row };
   Object.assign(form, {
     outreach_task: row.outreach_task,
@@ -554,6 +565,8 @@ async function restoreSample(row) {
 
 async function submit() {
   if (!form.influencer || !form.store || !form.external_product_id.trim()) return ElMessage.warning('请填写达人、店铺和产品 ID');
+  if (items.value.some((item) => item.requested_sku?.trim() && !item.warehouse)) return ElMessage.warning('每个已填写 SKU 都须指定发货仓库');
+  if (items.value.some((item) => item.warehouse && !eligibleWarehouses.value.some((warehouse) => String(warehouse.id) === String(item.warehouse)))) return ElMessage.warning('发货仓库国家必须与店铺国家一致');
   if (editingSample.value) return submitEdit();
   if (!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)) return;
   if (selectedInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能保存送样');
@@ -584,6 +597,8 @@ async function submit() {
 }
 
 async function submitEdit() {
+  if (items.value.some((item) => item.requested_sku?.trim() && !item.warehouse)) return ElMessage.warning('每个已填写 SKU 都须指定发货仓库');
+  if (items.value.some((item) => item.warehouse && !eligibleWarehouses.value.some((warehouse) => String(warehouse.id) === String(item.warehouse)))) return ElMessage.warning('发货仓库国家必须与店铺国家一致');
   let confirmTerminal = false;
   const terminalStatuses = ['completed', 'cancelled', 'blacklisted'];
   if (form.status && terminalStatuses.includes(form.status)) {
@@ -605,6 +620,7 @@ async function submitEdit() {
     items: items.value.map((item) => ({
       site_code: item.site_code,
       requested_sku: item.requested_sku?.trim() || null,
+      warehouse: item.warehouse || null,
       quantity: item.quantity,
       external_product_id: editingSample.value.external_product_id || ''
     })),
@@ -653,8 +669,9 @@ onMounted(async () => {
 .sample-form :deep(.el-form-item) { margin-bottom: 14px; }
 .sample-form :deep(.el-form-item__label) { padding-bottom: 5px; color: #374151; font-weight: 600; }
 .sample-form :deep(.el-select), .sample-form :deep(.el-input), .sample-form :deep(.el-input-number) { width: 100%; }
-.sku-editor { width: 100%; }
-.sku-header, .sku-row { display: grid; grid-template-columns: 105px minmax(0, 1fr) 125px 42px; gap: 10px; align-items: center; }
+.sku-editor { width: 100%; overflow-x: auto; }
+.sku-header, .sku-row { display: grid; grid-template-columns: 85px minmax(0, 1fr) 180px 110px 42px; gap: 10px; align-items: center; }
+.sku-header, .sku-row { min-width: 690px; }
 .sku-header { margin-bottom: 6px; color: #84909c; font-size: 12px; }
 .sku-row { margin-bottom: 8px; }
 .sku-row .el-button { padding: 0; }

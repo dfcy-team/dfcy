@@ -325,6 +325,10 @@ class ProductCostVersion(models.Model):
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_cost_versions")
     sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, related_name="cost_versions")
+    warehouse = models.ForeignKey(
+        "masterdata.WarehouseMaster", on_delete=models.PROTECT, related_name="product_cost_versions",
+        null=True, blank=True,
+    )
     version_no = models.PositiveIntegerField()
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     source = models.CharField(max_length=16, choices=Source.choices, default=Source.MANUAL)
@@ -346,6 +350,7 @@ class ProductCostVersion(models.Model):
         ordering = ["tenant_id", "sku_id", "-effective_from", "-version_no"]
         indexes = [
             models.Index(fields=["tenant", "sku", "status", "effective_from"], name="idx_cost_tenant_sku_asof"),
+            models.Index(fields=["tenant", "warehouse", "sku", "status", "effective_from"], name="idx_cost_warehouse_asof"),
         ]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "sku", "version_no"], name="uniq_cost_version_per_sku"),
@@ -370,6 +375,8 @@ class ProductCostVersion(models.Model):
             raise ValidationError("Product cost versions are append-only.")
         if self.sku_id and self.tenant_id != self.sku.tenant_id:
             raise ValidationError({"sku": "SKU must belong to the same tenant."})
+        if self.warehouse_id and self.tenant_id != self.warehouse.tenant_id:
+            raise ValidationError({"warehouse": "Warehouse must belong to the same tenant."})
         self.currency = str(self.currency or "").upper()
         self.full_clean()
         return super().save(*args, **kwargs)

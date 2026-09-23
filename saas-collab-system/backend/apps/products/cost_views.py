@@ -7,6 +7,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.responses import success_response
 from apps.audit.models import DataImportLog
+from apps.masterdata.models import StoreMaster, WarehouseMaster, StatusChoices
 
 from .cost_services import (
     append_cost_version,
@@ -24,7 +25,11 @@ from .serializers import ProductCostVersionSerializer
 @api_view(["GET"])
 @permission_classes([IsProductCostViewer])
 def product_cost_collection(request):
-    queryset = ProductCostVersion.objects.filter(tenant=request.user.tenant).select_related("sku", "created_by")
+    queryset = ProductCostVersion.objects.filter(tenant=request.user.tenant).select_related("sku", "warehouse", "created_by")
+    warehouse_id = request.query_params.get("warehouse_id")
+    if warehouse_id:
+        warehouse = get_object_or_404(WarehouseMaster, tenant=request.user.tenant, pk=warehouse_id)
+        queryset = queryset.filter(warehouse=warehouse)
     sku_id = request.query_params.get("sku_id")
     if sku_id:
         queryset = queryset.filter(sku_id=sku_id)
@@ -34,9 +39,35 @@ def product_cost_collection(request):
         if parsed is None:
             raise ValidationError({"occurred_at": "Use an ISO-8601 datetime."})
         sku = get_object_or_404(ProductSKU, tenant=request.user.tenant, pk=sku_id)
-        item = effective_cost_for(tenant=request.user.tenant, sku=sku, occurred_at=parsed)
+        if not warehouse_id:
+            raise ValidationError({"warehouse_id": "Select a warehouse for effective cost lookup."})
+        store_id = request.query_params.get("store_id")
+        if not store_id:
+            raise ValidationError({"store_id": "Select a store for effective cost lookup."})
+        store = get_object_or_404(StoreMaster, tenant=request.user.tenant, pk=store_id)
+        if store.country_code.strip().upper() != warehouse.country_code.strip().upper():
+            raise ValidationError({"warehouse_id": "Warehouse country must match store country."})
+        item = effective_cost_for(tenant=request.user.tenant, sku=sku, warehouse=warehouse, occurred_at=parsed)
         return success_response(ProductCostVersionSerializer(item).data if item else None)
     return success_response(ProductCostVersionSerializer(queryset, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsProductCostViewer])
+def product_cost_warehouses(request):
+    warehouses = WarehouseMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).order_by("country_code", "code")
+    return success_response([{"id": item.pk, "code": item.code, "name": item.name,
+                              "country_code": item.country_code} for item in warehouses])
+
+
+def _warehouse_for_request(request):
+    warehouse_id = request.data.get("warehouse_id") or request.data.get("warehouse")
+    if not warehouse_id:
+        raise ValidationError({"warehouse_id": "Select a warehouse."})
+    try:
+        return WarehouseMaster.objects.get(pk=warehouse_id, tenant=request.user.tenant, status=StatusChoices.ACTIVE)
+    except (WarehouseMaster.DoesNotExist, ValueError, TypeError) as exc:
+        raise ValidationError({"warehouse_id": "Select an active warehouse in this tenant."}) from exc
 
 
 @api_view(["POST"])
@@ -44,10 +75,14 @@ def product_cost_collection(request):
 def product_cost_create(request):
     serializer = ProductCostVersionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
+    if not serializer.validated_data.get("warehouse"):
+        raise ValidationError({"warehouse": "Select a warehouse."})
     if serializer.validated_data.get("status", ProductCostVersion.Status.PENDING) == ProductCostVersion.Status.CONFIRMED:
         if not IsProductCostApprover().has_permission(request, None):
             raise PermissionDenied("products.cost.approve permission is required to confirm a version.")
     sku = get_object_or_404(ProductSKU, tenant=request.user.tenant, pk=serializer.validated_data.pop("sku").pk)
+    warehouse = _warehouse_for_request(request)
+    serializer.validated_data["warehouse"] = warehouse
     try:
         item = append_cost_version(
             tenant=request.user.tenant, sku=sku, actor=request.user, **serializer.validated_data
@@ -60,15 +95,17 @@ def product_cost_create(request):
 @api_view(["POST"])
 @permission_classes([IsProductCostBackfillOperator])
 def product_cost_backfill_preview(request):
+    warehouse = _warehouse_for_request(request)
     sku_ids = request.data.get("sku_ids") or []
     if not isinstance(sku_ids, list):
         raise ValidationError({"sku_ids": "Must be a list."})
-    return success_response({"dry_run": True, "results": preview_system_backfill(tenant=request.user.tenant, sku_ids=sku_ids)})
+    return success_response({"dry_run": True, "results": preview_system_backfill(tenant=request.user.tenant, warehouse=warehouse, sku_ids=sku_ids)})
 
 
 @api_view(["POST"])
 @permission_classes([IsProductCostBackfillOperator])
 def product_cost_backfill_execute(request):
+    warehouse = _warehouse_for_request(request)
     sku_ids = request.data.get("sku_ids") or []
     if not isinstance(sku_ids, list):
         raise ValidationError({"sku_ids": "Must be a list."})
@@ -77,6 +114,7 @@ def product_cost_backfill_execute(request):
         raise ValidationError({"effective_from": "Use an ISO-8601 datetime."})
     return success_response(execute_system_backfill(
         tenant=request.user.tenant,
+        warehouse=warehouse,
         actor=request.user,
         effective_from=effective_from,
         sku_ids=sku_ids,

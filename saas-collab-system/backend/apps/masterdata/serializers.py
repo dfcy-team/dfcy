@@ -464,6 +464,13 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
             from apps.integrations.models import WarehouseAuthorization
             if WarehouseAuthorization.objects.filter(warehouse=self.instance, status="active").exists():
                 raise serializers.ValidationError("请先在 API 接入中撤销现有绑定，再更改仓库平台、国家或类型。")
+        if self.instance and "country_code" in attrs:
+            previous_country = str(self.instance.country_code or "").strip().upper()
+            next_country = str(attrs["country_code"] or "").strip().upper()
+            if previous_country != next_country:
+                from apps.products.models import ProductCostVersion
+                if ProductCostVersion.objects.filter(warehouse=self.instance).exists():
+                    raise serializers.ValidationError({"country_code": "该仓库已有成本历史，不能更改所属国家；请新建仓库档案。"})
         if not self.instance and provider == "jifeng_wms" and any(key.startswith("api_") for key in attrs):
             missing = [key for key in ("api_integration_config_id", "api_email", "api_token") if not attrs.get(key)]
             if missing:

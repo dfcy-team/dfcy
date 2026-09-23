@@ -3,15 +3,17 @@ from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
+from apps.masterdata.models import WarehouseMaster, StatusChoices
 
 from .models import ProductCostVersion, ProductSKU
 
 
-def effective_cost_for(*, tenant, sku, occurred_at):
+def effective_cost_for(*, tenant, sku, occurred_at, warehouse=None):
     return (
         ProductCostVersion.objects.filter(
             tenant=tenant,
             sku=sku,
+            warehouse=warehouse,
             status=ProductCostVersion.Status.CONFIRMED,
             effective_from__lte=occurred_at,
         )
@@ -24,7 +26,11 @@ def effective_cost_for(*, tenant, sku, occurred_at):
 @transaction.atomic
 def append_cost_version(*, tenant, sku, actor, **values):
     locked_sku = ProductSKU.objects.select_for_update().get(pk=sku.pk, tenant=tenant)
-    existing = ProductCostVersion.objects.select_for_update().filter(tenant=tenant, sku=locked_sku)
+    warehouse = values.get("warehouse")
+    if warehouse is not None:
+        if not WarehouseMaster.objects.filter(pk=warehouse.pk, tenant=tenant, status=StatusChoices.ACTIVE).exists():
+            raise ValidationError({"warehouse": "Select an active warehouse in this tenant."})
+    existing = ProductCostVersion.objects.select_for_update().filter(tenant=tenant, sku=locked_sku, warehouse=warehouse)
     start = values["effective_from"]
     end = values.get("effective_to")
     if values.get("status") == ProductCostVersion.Status.CONFIRMED:
@@ -39,13 +45,17 @@ def append_cost_version(*, tenant, sku, actor, **values):
             raise ValidationError({"effective_from": "Cost effective interval overlaps an existing confirmed version."})
         if closable:
             ProductCostVersion.objects.filter(pk=closable[0].pk, effective_to__isnull=True).update(effective_to=start)
-    version_no = (existing.order_by("-version_no").values_list("version_no", flat=True).first() or 0) + 1
+    # The historical unique constraint allocates version numbers per SKU, while
+    # interval conflicts are scoped to one warehouse.
+    version_no = (ProductCostVersion.objects.filter(tenant=tenant, sku=locked_sku).order_by("-version_no").values_list("version_no", flat=True).first() or 0) + 1
     return ProductCostVersion.objects.create(
         tenant=tenant, sku=locked_sku, created_by=actor, version_no=version_no, **values
     )
 
 
-def preview_system_backfill(*, tenant, sku_ids=None):
+def preview_system_backfill(*, tenant, warehouse, sku_ids=None):
+    if not WarehouseMaster.objects.filter(pk=warehouse.pk, tenant=tenant, status=StatusChoices.ACTIVE).exists():
+        raise ValidationError({"warehouse": "Select an active warehouse in this tenant."})
     queryset = ProductSKU.objects.filter(tenant=tenant, is_active=True).order_by("sku_code")
     if sku_ids:
         queryset = queryset.filter(id__in=sku_ids)
@@ -55,6 +65,8 @@ def preview_system_backfill(*, tenant, sku_ids=None):
         rows.append({
             "sku_id": sku.id,
             "sku_code": sku.sku_code,
+            "warehouse_id": warehouse.pk,
+            "warehouse_code": warehouse.code,
             "purchase_cost": purchase,
             "system_cost": purchase,
             "status": ProductCostVersion.Status.PENDING,
@@ -64,8 +76,8 @@ def preview_system_backfill(*, tenant, sku_ids=None):
 
 
 @transaction.atomic
-def execute_system_backfill(*, tenant, actor, effective_from, sku_ids=None, reason="System cost backfill"):
-    rows = preview_system_backfill(tenant=tenant, sku_ids=sku_ids)
+def execute_system_backfill(*, tenant, warehouse, actor, effective_from, sku_ids=None, reason="System cost backfill"):
+    rows = preview_system_backfill(tenant=tenant, warehouse=warehouse, sku_ids=sku_ids)
     created = []
     unchanged = []
     for row in rows:
@@ -73,6 +85,7 @@ def execute_system_backfill(*, tenant, actor, effective_from, sku_ids=None, reas
         existing = ProductCostVersion.objects.filter(
             tenant=tenant,
             sku=sku,
+            warehouse=warehouse,
             status=ProductCostVersion.Status.PENDING,
             source=ProductCostVersion.Source.SYSTEM,
             effective_from=effective_from,
@@ -84,6 +97,7 @@ def execute_system_backfill(*, tenant, actor, effective_from, sku_ids=None, reas
         version = append_cost_version(
             tenant=tenant,
             sku=sku,
+            warehouse=warehouse,
             actor=actor,
             status=ProductCostVersion.Status.PENDING,
             source=ProductCostVersion.Source.SYSTEM,
@@ -114,6 +128,7 @@ def confirm_pending_cost_version(*, tenant, version_id, actor, confirmed_cost=No
     overlap = ProductCostVersion.objects.select_for_update().filter(
         tenant=tenant,
         sku=version.sku,
+        warehouse=version.warehouse,
         status=ProductCostVersion.Status.CONFIRMED,
     ).filter(Q(effective_to__isnull=True) | Q(effective_to__gt=version.effective_from))
     if version.effective_to is not None:

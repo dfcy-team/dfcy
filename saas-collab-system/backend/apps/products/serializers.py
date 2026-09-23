@@ -35,13 +35,17 @@ from .category_metadata import category_metadata_from_spu
 
 class ProductCostVersionSerializer(serializers.ModelSerializer):
     sku_code = serializers.CharField(source="sku.sku_code", read_only=True)
+    warehouse_code = serializers.CharField(source="warehouse.code", read_only=True, allow_null=True)
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True, allow_null=True)
+    warehouse_country_code = serializers.CharField(source="warehouse.country_code", read_only=True, allow_null=True)
     product_name = serializers.CharField(source="sku.product_name", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True)
 
     class Meta:
         model = ProductCostVersion
         fields = (
-            "id", "sku", "sku_code", "product_name", "version_no", "status", "source", "currency",
+            "id", "sku", "sku_code", "product_name", "warehouse", "warehouse_code", "warehouse_name", "warehouse_country_code",
+            "version_no", "status", "source", "currency",
             "purchase_cost", "freight_cost", "duty_cost", "packaging_cost", "other_cost",
             "system_cost", "confirmed_cost", "effective_from", "effective_to", "reason",
             "created_by_name", "created_at",
