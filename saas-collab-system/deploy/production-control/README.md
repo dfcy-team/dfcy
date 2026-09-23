@@ -4,6 +4,8 @@
 
 这不是生产凭据或现成上线授权。当前仓库的 `AGENTS.md` 要求生产发布由架构员审查和启用；本文件提供的自助发布仅在系统负责人明确批准、完成下列安装和验收后启用。
 
+现场提示（2026-09-23）：应用 VM 的 `ci-control` 仍是 `dfcy01` 拥有的旧式控制树，`dfcy01` 属于 `sudo`/`docker` 组，live `.env.pilot` 和 `control.env` 也不是 root-owned。旧版 `--runtime` 检查在该现场返回 PASS，不代表满足下文的新控制边界。**下面的首次安装示例不能直接在该 VM 执行**；须先审查账号分离、live env 迁移、旧账本保存、安装差异及回退方案，之后由系统负责人批准实施。
+
 ## 控制边界
 
 - GitHub workflow：`.github/workflows/developer-a-production-release.yml`。
