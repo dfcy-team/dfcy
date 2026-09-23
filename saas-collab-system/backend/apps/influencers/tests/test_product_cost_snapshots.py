@@ -3,11 +3,12 @@ from decimal import Decimal
 
 import pytest
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from apps.accounts.models import CustomUser
 from apps.influencers.models import Influencer, SampleFulfillment
 from apps.influencers.services import _recalculate_sample_costs
-from apps.masterdata.models import PlatformMaster, StoreMaster
+from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
@@ -60,14 +61,19 @@ def _records(code):
         owner=user,
         sample_sent_at=sampled_at,
     )
-    return tenant, user, sku, fulfillment, sampled_at
+    warehouse = WarehouseMaster.objects.create(
+        tenant=tenant, code=f"wh-{code}", name="PH warehouse",
+        country_code="PH", warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    return tenant, user, sku, fulfillment, sampled_at, warehouse
 
 
 def test_sample_item_snapshots_effective_confirmed_cost_version():
-    tenant, user, sku, fulfillment, sampled_at = _records("cost-snapshot")
+    tenant, user, sku, fulfillment, sampled_at, warehouse = _records("cost-snapshot")
     version = ProductCostVersion.objects.create(
         tenant=tenant,
         sku=sku,
+        warehouse=warehouse,
         version_no=1,
         status=ProductCostVersion.Status.CONFIRMED,
         source=ProductCostVersion.Source.MANUAL,
@@ -80,7 +86,7 @@ def test_sample_item_snapshots_effective_confirmed_cost_version():
     _recalculate_sample_costs(
         user=user,
         fulfillment=fulfillment,
-        item_payloads=[{"sku": sku, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 2}],
+        item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 2}],
     )
 
     item = fulfillment.items.get()
@@ -93,6 +99,7 @@ def test_sample_item_snapshots_effective_confirmed_cost_version():
     ProductCostVersion.objects.create(
         tenant=tenant,
         sku=sku,
+        warehouse=warehouse,
         version_no=2,
         status=ProductCostVersion.Status.CONFIRMED,
         source=ProductCostVersion.Source.MANUAL,
@@ -108,12 +115,12 @@ def test_sample_item_snapshots_effective_confirmed_cost_version():
 
 
 def test_sample_item_without_effective_version_is_explicitly_unmatched():
-    _tenant, user, sku, fulfillment, _sampled_at = _records("cost-unmatched")
+    _tenant, user, sku, fulfillment, _sampled_at, warehouse = _records("cost-unmatched")
 
     _recalculate_sample_costs(
         user=user,
         fulfillment=fulfillment,
-        item_payloads=[{"sku": sku, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
+        item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
     )
 
     item = fulfillment.items.get()
@@ -125,3 +132,55 @@ def test_sample_item_without_effective_version_is_explicitly_unmatched():
     assert item.cost_snapshot_at is not None
     fulfillment.refresh_from_db()
     assert fulfillment.calculated_cost is None
+
+
+def test_sample_item_requires_explicit_warehouse_even_with_same_country_candidates():
+    tenant, user, sku, fulfillment, sampled_at, warehouse = _records("cost-explicit")
+    other = WarehouseMaster.objects.create(
+        tenant=tenant, code="wh-second", name="Second PH warehouse",
+        country_code="PH", warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    ProductCostVersion.objects.create(
+        tenant=tenant, sku=sku, warehouse=warehouse, version_no=1,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL, currency="PHP",
+        confirmed_cost=Decimal("4.0000"), effective_from=sampled_at - timedelta(days=1), created_by=user,
+    )
+    second_cost = ProductCostVersion.objects.create(
+        tenant=tenant, sku=sku, warehouse=other, version_no=2,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL, currency="PHP",
+        confirmed_cost=Decimal("8.0000"), effective_from=sampled_at - timedelta(days=1), created_by=user,
+    )
+    with pytest.raises(ValidationError, match="explicit warehouse"):
+        _recalculate_sample_costs(
+            user=user, fulfillment=fulfillment,
+            item_payloads=[{"sku": sku, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
+        )
+    assert fulfillment.items.count() == 0
+    _recalculate_sample_costs(
+        user=user, fulfillment=fulfillment,
+        item_payloads=[{"sku": sku, "warehouse": other, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
+    )
+    assert fulfillment.items.get().cost_version_id == second_cost.id
+
+
+def test_sample_item_rejects_warehouse_country_mismatch_and_cross_tenant():
+    tenant, user, sku, fulfillment, _, warehouse = _records("cost-country")
+    warehouse.country_code = "US"
+    warehouse.save(update_fields=["country_code"])
+    with pytest.raises(ValidationError, match="country"):
+        _recalculate_sample_costs(
+            user=user, fulfillment=fulfillment,
+            item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
+        )
+    other_tenant = Tenant.objects.create(name="Other", code="other-cost-country")
+    cross_tenant = WarehouseMaster.objects.create(
+        tenant=other_tenant, code="foreign", name="Foreign warehouse", country_code="PH",
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    with pytest.raises(ValidationError, match="active warehouse"):
+        _recalculate_sample_costs(
+            user=user, fulfillment=fulfillment,
+            item_payloads=[{"sku": sku, "warehouse": cross_tenant, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
+        )

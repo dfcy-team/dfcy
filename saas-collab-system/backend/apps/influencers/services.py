@@ -19,7 +19,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import write_operation_log
 from apps.audit.models import NotificationMessage
-from apps.masterdata.models import StoreMaster
+from apps.masterdata.models import StatusChoices, StoreMaster, WarehouseMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.products.cost_services import effective_cost_for
 from apps.tenants.models import Tenant
@@ -1035,6 +1035,7 @@ def _sample_item_payload(item):
     """Keep only editable item facts when an append operation reuses an existing row."""
     return {
         "sku": item.sku,
+        "warehouse": item.warehouse,
         "external_product_id": item.external_product_id,
         "site_code": item.site_code,
         "requested_sku": item.requested_sku,
@@ -1046,6 +1047,27 @@ def _sample_item_payload(item):
 def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     """Replace item cost snapshots and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
+    # Resolve and validate every requested warehouse before removing the old
+    # snapshots. Country alone cannot select a warehouse when several exist.
+    for payload in item_payloads:
+        selected = payload.get("warehouse")
+        warehouse_id = getattr(selected, "pk", selected)
+        if warehouse_id in (None, ""):
+            if payload.get("sku") is not None or payload.get("requested_sku"):
+                raise ValidationError({"items": "Each SKU-bearing sample item requires an explicit warehouse."})
+            payload["warehouse"] = None
+            continue
+        try:
+            warehouse = WarehouseMaster.objects.filter(
+                pk=warehouse_id, tenant=user.tenant, status=StatusChoices.ACTIVE,
+            ).first()
+        except (TypeError, ValueError):
+            warehouse = None
+        if warehouse is None:
+            raise ValidationError({"items": "Select an active warehouse in this tenant."})
+        if warehouse.country_code.strip().upper() != fulfillment.store.country_code.strip().upper():
+            raise ValidationError({"items": "Warehouse country must match the fulfillment store country."})
+        payload["warehouse"] = warehouse
     SampleItem.objects.filter(
         tenant=user.tenant,
         fulfillment=fulfillment,
@@ -1088,8 +1110,8 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         normalized_sku, cost_sku, cost_status = _purchase_cost_for_payload(user.tenant, payload)
         quantity = payload.get("quantity", 1)
         cost_version = (
-            effective_cost_for(tenant=user.tenant, sku=cost_sku, occurred_at=occurred_at)
-            if cost_sku else None
+            effective_cost_for(tenant=user.tenant, sku=cost_sku, warehouse=payload["warehouse"], occurred_at=occurred_at)
+            if cost_sku and payload["warehouse"] is not None else None
         )
         if cost_version is not None and cost_version.confirmed_cost is None:
             cost_version = None

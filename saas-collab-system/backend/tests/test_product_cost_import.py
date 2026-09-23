@@ -9,19 +9,22 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.audit.models import DataImportLog
+from apps.masterdata.models import WarehouseMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.cost_services import append_cost_version
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
 
-HEADERS = "sku_code,effective_from,effective_to,currency,purchase_cost,freight_cost,duty_cost,packaging_cost,other_cost,confirmed_cost,reason\n"
+HEADERS = "sku_code,warehouse_code,effective_from,effective_to,currency,purchase_cost,freight_cost,duty_cost,packaging_cost,other_cost,confirmed_cost,reason\n"
 
 
 def make_context(code="import"):
     tenant = Tenant.objects.create(name=f"Cost {code}", code=f"cost-{code}")
     spu = ProductSPU.objects.create(tenant=tenant, spu_code=f"SPU-{code}", product_name="Imported product")
     sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=f"SKU-{code}", product_name="Imported product")
+    WarehouseMaster.objects.create(tenant=tenant, code="WH-CN", name="China warehouse",
+                                   country_code="CN", warehouse_type="owned")
     user = CustomUser.objects.create_user(
         username=f"cost-{code}", tenant=tenant, user_type=CustomUser.UserType.INTERNAL
     )
@@ -42,7 +45,7 @@ def client_for(user):
 
 
 def csv_file(sku_code, start="2026-01-01", end="2026-02-01", purchase="10.0000"):
-    body = HEADERS + f"{sku_code},{start},{end},CNY,{purchase},2,1,0.5,0.5,14,monthly import\n"
+    body = HEADERS + f"{sku_code},WH-CN,{start},{end},CNY,{purchase},2,1,0.5,0.5,14,monthly import\n"
     return body.encode("utf-8-sig")
 
 
@@ -99,8 +102,8 @@ def test_csv_preview_confirm_and_idempotent_replay():
 def test_downloadable_chinese_csv_template_headers_are_accepted():
     _, sku, user = make_context("zh-template")
     grant(user, "products.cost.backfill")
-    headers = "*SKU编码,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
-    raw = (headers + f"{sku.sku_code},2026-07-01,2026-08-01,CNY,10,2,1,0.5,0.5,14,月度导入\n").encode("utf-8-sig")
+    headers = "*SKU编码,*仓库编码,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
+    raw = (headers + f"{sku.sku_code},WH-CN,2026-07-01,2026-08-01,CNY,10,2,1,0.5,0.5,14,月度导入\n").encode("utf-8-sig")
     response = client_for(user).post(
         "/api/internal/products/costs/import/preview/",
         {"file": upload(raw, "商品成本导入模板.csv")},
@@ -117,8 +120,8 @@ def test_cost_import_accepts_legacy_sku_code_without_current_sku_code():
     sku.legacy_sku_code = "OLD-SKU-001"
     sku.save(update_fields=["legacy_sku_code"])
     grant(user, "products.cost.backfill")
-    headers = "旧SKU编码（二选一）,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
-    raw = (headers + "OLD-SKU-001,2026-09-01,,CNY,10,2,1,0.5,0.5,14,旧编码导入\n").encode("utf-8-sig")
+    headers = "旧SKU编码（二选一）,*仓库编码,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
+    raw = (headers + "OLD-SKU-001,WH-CN,2026-09-01,,CNY,10,2,1,0.5,0.5,14,旧编码导入\n").encode("utf-8-sig")
     response = client_for(user).post(
         "/api/internal/products/costs/import/preview/",
         {"file": upload(raw, "商品成本导入模板.csv")},
@@ -143,8 +146,8 @@ def test_cost_import_rejects_conflicting_current_and_legacy_sku_codes():
         product_name="Other",
     )
     grant(user, "products.cost.backfill")
-    headers = "SKU编码（二选一）,旧SKU编码（二选一）,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
-    raw = (headers + f"{sku.sku_code},OLD-SKU-B,2026-09-01,,CNY,10,2,1,0.5,0.5,14,冲突校验\n").encode("utf-8-sig")
+    headers = "SKU编码（二选一）,旧SKU编码（二选一）,*仓库编码,*生效开始,生效结束,*币种,采购成本,物流分摊,税费,包装费,其他费用,*确认成本,调整原因\n"
+    raw = (headers + f"{sku.sku_code},OLD-SKU-B,WH-CN,2026-09-01,,CNY,10,2,1,0.5,0.5,14,冲突校验\n").encode("utf-8-sig")
     response = client_for(user).post(
         "/api/internal/products/costs/import/preview/",
         {"file": upload(raw)},
@@ -176,12 +179,13 @@ def test_preview_reports_batch_and_database_overlap():
     grant(user, "products.cost.backfill")
     start = timezone.now()
     append_cost_version(
-        tenant=tenant, sku=sku, actor=user, status="confirmed", source="manual", currency="CNY",
+        tenant=tenant, sku=sku, warehouse=WarehouseMaster.objects.get(tenant=tenant, code="WH-CN"),
+        actor=user, status="confirmed", source="manual", currency="CNY",
         purchase_cost=10, freight_cost=0, duty_cost=0, packaging_cost=0, other_cost=0,
         system_cost=None, confirmed_cost=10, effective_from=start, effective_to=start + timedelta(days=30), reason="existing",
     )
     date = start.strftime("%Y-%m-%dT%H:%M:%S%z")
-    body = HEADERS + f"{sku.sku_code},{date},,CNY,10,0,0,0,0,10,one\n{sku.sku_code},{date},,CNY,11,0,0,0,0,11,two\n"
+    body = HEADERS + f"{sku.sku_code},WH-CN,{date},,CNY,10,0,0,0,0,10,one\n{sku.sku_code},WH-CN,{date},,CNY,11,0,0,0,0,11,two\n"
     response = client_for(user).post("/api/internal/products/costs/import/preview/", {"file": upload(body.encode())}, format="multipart")
     assert response.status_code == 200
     errors = response.json()["data"]["errors"]
@@ -197,7 +201,7 @@ def test_preview_reports_batch_and_database_overlap():
 def test_xlsx_preview_and_confirm_requires_both_permissions():
     _, sku, user = make_context("xlsx")
     grant(user, "products.cost.backfill")
-    row = [sku.sku_code, "2026-01-01", "2026-02-01", "CNY", "10", "2", "1", "0.5", "0.5", "14", "xlsx"]
+    row = [sku.sku_code, "WH-CN", "2026-01-01", "2026-02-01", "CNY", "10", "2", "1", "0.5", "0.5", "14", "xlsx"]
     raw = xlsx_file([list(EXPECTED_HEADERS := HEADERS.strip().split(",")), row])
     client = client_for(user)
     preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw, "costs.xlsx")}, format="multipart")
@@ -221,6 +225,7 @@ def test_real_openpyxl_workbook_with_date_cells_previews_and_confirms():
     sheet.append(HEADERS.strip().split(","))
     sheet.append([
         sku.sku_code,
+        "WH-CN",
         datetime(2026, 5, 1),
         datetime(2026, 6, 1),
         "CNY", 10, 2, 1, 0.5, 0.5, 14, "real workbook",
@@ -247,3 +252,44 @@ def test_real_openpyxl_workbook_with_date_cells_previews_and_confirms():
     version = ProductCostVersion.objects.get(tenant=tenant, sku=sku)
     assert timezone.localtime(version.effective_from).date().isoformat() == "2026-05-01"
     assert timezone.localtime(version.effective_to).date().isoformat() == "2026-06-01"
+
+
+@pytest.mark.django_db
+def test_import_rejects_missing_or_other_tenant_warehouse_code():
+    tenant, sku, user = make_context("warehouse-invalid")
+    grant(user, "products.cost.backfill")
+    other = Tenant.objects.create(name="Other warehouse owner", code="cost-other-wh")
+    WarehouseMaster.objects.create(tenant=other, code="WH-US", name="Other warehouse",
+                                   country_code="US", warehouse_type="owned")
+    body = HEADERS + f"{sku.sku_code},WH-US,2026-01-01,,CNY,10,0,0,0,0,10,bad warehouse\n"
+    response = client_for(user).post("/api/internal/products/costs/import/preview/",
+                                     {"file": upload(body.encode())}, format="multipart")
+    assert response.status_code == 200
+    errors = response.json()["data"]["errors"]
+    assert any(error["row"] == 2 and error["field"] == "warehouse_code" for error in errors)
+    missing_header = HEADERS.replace("warehouse_code,", "")
+    response = client_for(user).post("/api/internal/products/costs/import/preview/",
+                                     {"file": upload(missing_header.encode())}, format="multipart")
+    assert any(error["field"] == "headers" for error in response.json()["data"]["errors"])
+
+
+@pytest.mark.django_db
+def test_import_allows_same_sku_and_period_in_two_warehouses():
+    tenant, sku, user = make_context("warehouse-pair")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    WarehouseMaster.objects.create(tenant=tenant, code="WH-US", name="US warehouse",
+                                   country_code="US", warehouse_type="owned")
+    body = HEADERS + (
+        f"{sku.sku_code},WH-CN,2026-01-01,2026-02-01,CNY,10,0,0,0,0,10,CN\n"
+        f"{sku.sku_code},WH-US,2026-01-01,2026-02-01,USD,20,0,0,0,0,20,US\n"
+    )
+    raw = body.encode()
+    client = client_for(user)
+    preview = client.post("/api/internal/products/costs/import/preview/",
+                          {"file": upload(raw)}, format="multipart").json()["data"]
+    assert preview["valid"] == 2 and preview["errors"] == []
+    result = client.post("/api/internal/products/costs/import/confirm/",
+                         {"file": upload(raw), "token": preview["token"]}, format="multipart",
+                         HTTP_IDEMPOTENCY_KEY="warehouse-pair-0001")
+    assert result.status_code == 201
+    assert set(ProductCostVersion.objects.filter(sku=sku).values_list("warehouse__code", flat=True)) == {"WH-CN", "WH-US"}

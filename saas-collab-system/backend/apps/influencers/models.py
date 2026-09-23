@@ -9,7 +9,7 @@ from django.db import models, transaction
 from django.db.models import OuterRef, Q
 from django.utils import timezone
 
-from apps.masterdata.models import StoreMaster
+from apps.masterdata.models import StoreMaster, WarehouseMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
@@ -791,6 +791,7 @@ SampleFulfillment.Status.PROCESSING = "processing"
 class SampleItem(TenantValidatedModel):
     fulfillment = models.ForeignKey(SampleFulfillment, on_delete=models.CASCADE, related_name="items")
     sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, null=True, blank=True, related_name="sample_items")
+    warehouse = models.ForeignKey(WarehouseMaster, on_delete=models.PROTECT, null=True, blank=True, related_name="sample_items")
     cost_version = models.ForeignKey(
         "products.ProductCostVersion",
         on_delete=models.PROTECT,
@@ -820,7 +821,7 @@ class SampleItem(TenantValidatedModel):
     match_notes = models.CharField(max_length=240, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    tenant_relation_fields = ("fulfillment", "sku", "cost_version")
+    tenant_relation_fields = ("fulfillment", "sku", "warehouse", "cost_version")
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["tenant", "fulfillment", "requested_sku"], name="uniq_sample_item_requested_sku")]

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from urllib.parse import quote
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -7,6 +8,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
+from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
+from apps.masterdata.serializers import WarehouseMasterSerializer
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.cost_services import append_cost_version, effective_cost_for
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
@@ -17,6 +20,21 @@ def make_sku(tenant, suffix, purchase_price="10.0000"):
     spu = ProductSPU.objects.create(tenant=tenant, spu_code=f"SPU-{suffix}", product_name=f"Product {suffix}")
     return ProductSKU.objects.create(
         tenant=tenant, spu=spu, sku_code=f"SKU-{suffix}", product_name=f"Product {suffix}", purchase_price=purchase_price
+    )
+
+
+def make_warehouse(tenant, suffix="CN"):
+    return WarehouseMaster.objects.create(tenant=tenant, code=f"WH-{suffix}", name=f"Warehouse {suffix}",
+                                         country_code=suffix, warehouse_type="owned")
+
+
+def make_store(tenant, suffix):
+    platform = PlatformMaster.objects.create(
+        tenant=tenant, code=f"platform-{suffix.lower()}", name=f"Platform {suffix}", platform_type="other"
+    )
+    return StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code=f"store-{suffix.lower()}", name=f"Store {suffix}",
+        country_code=suffix, currency="CNY",
     )
 
 
@@ -136,9 +154,10 @@ def test_create_confirmed_version_requires_manage_and_approve():
     grant(manager, "products.cost.manage")
     grant(approver, "products.cost.manage", "products.cost.approve")
     sku = make_sku(tenant, "API")
+    warehouse = make_warehouse(tenant)
     start = timezone.now()
     payload = {
-        "sku": sku.id, "status": "confirmed", "source": "manual", "currency": "CNY",
+        "sku": sku.id, "warehouse": warehouse.id, "status": "confirmed", "source": "manual", "currency": "CNY",
         "purchase_cost": "10", "freight_cost": "2", "duty_cost": "1", "packaging_cost": "0.5",
         "other_cost": "0.5", "system_cost": "14", "confirmed_cost": "14",
         "effective_from": start.isoformat(), "effective_to": (start + timedelta(days=1)).isoformat(),
@@ -158,9 +177,10 @@ def test_backfill_is_dry_run_and_has_independent_permission():
     grant(operator, "products.cost.backfill")
     grant(viewer, "products.cost.view")
     sku = make_sku(tenant, "BACKFILL", "12.3400")
+    warehouse = make_warehouse(tenant)
     url = "/api/internal/products/costs/backfill-preview/"
     assert client_for(viewer).post(url, {"sku_ids": [sku.id]}, format="json").status_code == 403
-    response = client_for(operator).post(url, {"sku_ids": [sku.id]}, format="json")
+    response = client_for(operator).post(url, {"sku_ids": [sku.id], "warehouse_id": warehouse.id}, format="json")
     assert response.status_code == 200
     assert response.json()["data"]["results"][0]["system_cost"] == 12.34
     assert ProductCostVersion.objects.count() == 0
@@ -174,10 +194,12 @@ def test_backfill_execute_creates_pending_version_then_approver_confirms_it():
     grant(operator, "products.cost.backfill")
     grant(approver, "products.cost.approve")
     sku = make_sku(tenant, "FLOW", "18.2500")
+    warehouse = make_warehouse(tenant)
     effective_from = timezone.now() + timedelta(days=1)
 
     execute_url = "/api/internal/products/costs/backfill-execute/"
-    payload = {"sku_ids": [sku.id], "effective_from": effective_from.isoformat(), "reason": "monthly backfill"}
+    payload = {"sku_ids": [sku.id], "warehouse_id": warehouse.id,
+               "effective_from": effective_from.isoformat(), "reason": "monthly backfill"}
     first = client_for(operator).post(execute_url, payload, format="json")
     replay = client_for(operator).post(execute_url, payload, format="json")
     assert first.status_code == 201
@@ -207,3 +229,82 @@ def test_postgres_migration_declares_confirmed_interval_exclusion_constraint():
     assert "EXCLUDE USING gist" in source
     assert "tstzrange" in source
     assert "status = 'confirmed'" in source
+
+
+@pytest.mark.django_db
+def test_cost_intervals_and_lookup_are_scoped_to_warehouse():
+    tenant = Tenant.objects.create(name="Regional cost", code="cost-warehouse-scope")
+    user = make_user(tenant, "warehouse-scope")
+    sku = make_sku(tenant, "WAREHOUSE")
+    china = make_warehouse(tenant, "CN")
+    usa = make_warehouse(tenant, "US")
+    start = timezone.now()
+    china_cost = append_cost_version(
+        tenant=tenant, sku=sku, warehouse=china, actor=user,
+        **values(start, start + timedelta(days=10)),
+    )
+    usa_values = values(start, start + timedelta(days=10))
+    usa_values["confirmed_cost"] = Decimal("25")
+    usa_cost = append_cost_version(tenant=tenant, sku=sku, warehouse=usa, actor=user, **usa_values)
+    assert usa_cost.version_no != china_cost.version_no
+    assert effective_cost_for(tenant=tenant, sku=sku, warehouse=china, occurred_at=start) == china_cost
+    assert effective_cost_for(tenant=tenant, sku=sku, warehouse=usa, occurred_at=start) == usa_cost
+    assert effective_cost_for(tenant=tenant, sku=sku, occurred_at=start) is None
+    with pytest.raises(ValidationError, match="overlaps"):
+        append_cost_version(
+            tenant=tenant, sku=sku, warehouse=china, actor=user,
+            **values(start + timedelta(days=1), start + timedelta(days=2)),
+        )
+
+
+@pytest.mark.django_db
+def test_cost_api_requires_warehouse_and_lists_options_under_cost_permission():
+    tenant = Tenant.objects.create(name="Cost warehouse API", code="cost-wh-api")
+    user = make_user(tenant, "warehouse-view")
+    grant(user, "products.cost.view", "products.cost.manage")
+    warehouse = make_warehouse(tenant)
+    sku = make_sku(tenant, "WAREHOUSE-API")
+    options = client_for(user).get("/api/internal/products/costs/warehouses/")
+    assert options.status_code == 200
+    assert options.json()["data"] == [{"id": warehouse.pk, "code": warehouse.code,
+                                        "name": warehouse.name, "country_code": warehouse.country_code}]
+    payload = {"sku": sku.pk, "effective_from": timezone.now().isoformat(), "purchase_cost": "10"}
+    response = client_for(user).post("/api/internal/products/costs/versions/", payload, format="json")
+    assert response.status_code == 400
+    assert ProductCostVersion.objects.filter(sku=sku).count() == 0
+
+
+@pytest.mark.django_db
+def test_effective_cost_api_requires_store_country_match():
+    tenant = Tenant.objects.create(name="Cost country match", code="cost-country-match")
+    user = make_user(tenant, "country-match")
+    grant(user, "products.cost.view")
+    warehouse = make_warehouse(tenant, "US")
+    us_store = make_store(tenant, "US")
+    cn_store = make_store(tenant, "CN")
+    sku = make_sku(tenant, "COUNTRY-MATCH")
+    moment = timezone.now()
+    append_cost_version(tenant=tenant, sku=sku, warehouse=warehouse, actor=user,
+                        **values(moment - timedelta(days=1), None))
+    path = f"/api/internal/products/costs/?sku_id={sku.pk}&warehouse_id={warehouse.pk}&occurred_at={quote(moment.isoformat(), safe='')}"
+    assert client_for(user).get(path).status_code == 400
+    assert client_for(user).get(f"{path}&store_id={cn_store.pk}").status_code == 400
+    response = client_for(user).get(f"{path}&store_id={us_store.pk}")
+    assert response.status_code == 200
+    assert response.json()["data"]["warehouse"] == warehouse.pk
+
+
+@pytest.mark.django_db
+def test_warehouse_country_cannot_change_after_cost_history_exists():
+    tenant = Tenant.objects.create(name="Cost country history", code="cost-country-history")
+    user = make_user(tenant, "country-history")
+    warehouse = make_warehouse(tenant, "US")
+    sku = make_sku(tenant, "COUNTRY-HISTORY")
+    append_cost_version(tenant=tenant, sku=sku, warehouse=warehouse, actor=user,
+                        **values(timezone.now(), None))
+    serializer = WarehouseMasterSerializer(
+        warehouse, data={"country_code": "CN"}, partial=True,
+        context={"request": type("Request", (), {"user": user})()},
+    )
+    assert not serializer.is_valid()
+    assert "country_code" in serializer.errors

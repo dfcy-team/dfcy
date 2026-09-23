@@ -1737,6 +1737,7 @@ def test_fulfillment_options_require_view_permission_tenant_scope_and_minimal_ta
         "task_name",
         "store",
         "store_name",
+        "store_country_code",
         "product_name_snapshot",
         "external_product_id",
         "sku_prefix",
@@ -1744,6 +1745,8 @@ def test_fulfillment_options_require_view_permission_tenant_scope_and_minimal_ta
     }
     assert "notes" not in payload["tasks"][0]
     assert "external_id" not in payload["tasks"][0]
+    assert payload["stores"] == [{"id": store.id, "code": store.code, "name": store.name, "country_code": "PH"}]
+    assert payload["warehouses"] == []
 
     outreach_permission, _ = Permission.objects.get_or_create(
         code="influencers.outreach.view",

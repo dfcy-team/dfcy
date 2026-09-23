@@ -34,7 +34,7 @@ from apps.influencers.models import (
     StoreProductListing,
     VideoResult,
 )
-from apps.masterdata.models import PlatformMaster, StoreMaster
+from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
@@ -70,6 +70,13 @@ from apps.influencers.tasks import (
 
 
 pytestmark = pytest.mark.django_db
+
+
+def _sample_warehouse(tenant, code):
+    return WarehouseMaster.objects.create(
+        tenant=tenant, code=code, name=code, country_code="PH",
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
 
 
 def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
@@ -397,6 +404,7 @@ def test_sample_pricing_data_migration_backfills_historical_values():
     tenant = Tenant.objects.create(name="Backfill Tenant", code="backfill-tenant")
     user = CustomUser.objects.create_user(username="backfill-user", tenant=tenant)
     _, _, task = base_records(tenant, user, "backfill")
+    warehouse = _sample_warehouse(tenant, "backfill-ph")
     target = OutreachTarget.objects.get(task=task, is_deleted=False)
     fulfillment, _ = create_sample_fulfillment(
         user=user,
@@ -406,7 +414,7 @@ def test_sample_pricing_data_migration_backfills_historical_values():
             "outreach_task": task,
             "outreach_target": target,
         },
-        item_payloads=[{"site_code": "PH", "requested_sku": "HISTORICAL-SKU", "quantity": 2}],
+        item_payloads=[{"site_code": "PH", "warehouse": warehouse, "requested_sku": "HISTORICAL-SKU", "quantity": 2}],
     )
     QuerySet.update(
         SampleItem.objects.filter(fulfillment=fulfillment),
@@ -658,13 +666,14 @@ def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
     tenant = Tenant.objects.create(name="Tenant", code="sample-idempotent")
     user, client = user_with_permissions(tenant, "sample-manager", "influencers.fulfillment.manage")
     store, influencer, task = base_records(tenant, user, "idem")
+    warehouse = _sample_warehouse(tenant, "idem-ph")
     payload = {
         "fulfillment_no": "SAMPLE-1",
         "outreach_task": task.pk,
         "influencer": influencer.pk,
         "store": store.pk,
         "owner": user.pk,
-        "items": [{"site_code": "PH", "requested_sku": "UNKNOWN-SKU", "external_product_id": "P-1", "quantity": 1}],
+        "items": [{"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "UNKNOWN-SKU", "external_product_id": "P-1", "quantity": 1}],
     }
 
     first = client.post(
@@ -960,6 +969,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         "influencers.fulfillment.manage",
     )
     store, influencer, task = base_records(tenant, user, "cost-only")
+    warehouse = _sample_warehouse(tenant, "cost-only-ph")
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="SAMPLE-COST-SPU", product_name="Sample product")
     first_sku = ProductSKU.objects.create(
         tenant=tenant,
@@ -978,6 +988,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         ProductCostVersion.objects.create(
             tenant=tenant,
             sku=sku,
+            warehouse=warehouse,
             version_no=version_no,
             status=ProductCostVersion.Status.CONFIRMED,
             source=ProductCostVersion.Source.MANUAL,
@@ -1039,6 +1050,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
                     "site_code": "PH",
                     "external_product_id": "SAMPLE-COST-PRODUCT",
                     "requested_sku": first_sku.sku_code,
+                    "warehouse": warehouse.pk,
                     "quantity": 2,
                 }
             ],
@@ -1089,6 +1101,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
                     "site_code": "PH",
                     "external_product_id": "SAMPLE-COST-PRODUCT",
                     "requested_sku": second_sku.sku_code,
+                    "warehouse": warehouse.pk,
                     "quantity": 3,
                 }
             ]
@@ -2519,6 +2532,7 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_cost_refresh
         "influencers.fulfillment.manage",
     )
     store, influencer, task = base_records(tenant, user, "sample-lifecycle")
+    warehouse = _sample_warehouse(tenant, "lifecycle-ph")
     task.target_count = 2
     task.save()
 
@@ -2531,7 +2545,7 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_cost_refresh
             "store": store.pk,
             "owner": user.pk,
             "quick_tags": ["重点", "重点"],
-            "items": [{"site_code": "PH", "requested_sku": "SKU-A", "quantity": 1}],
+            "items": [{"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "SKU-A", "quantity": 1}],
         },
         format="json",
         HTTP_IDEMPOTENCY_KEY="sample-lifecycle-key",
@@ -2554,8 +2568,8 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_cost_refresh
             "link_type": "TKOne",
             "quick_tags": ["已发货"],
             "items": [
-                {"site_code": "PH", "requested_sku": "SKU-A", "quantity": 2},
-                {"site_code": "PH", "requested_sku": "SKU-B", "quantity": 1},
+                {"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "SKU-A", "quantity": 2},
+                {"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "SKU-B", "quantity": 1},
             ],
         },
         format="json",
