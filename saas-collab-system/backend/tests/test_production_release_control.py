@@ -46,6 +46,13 @@ def _rollback_script() -> str:
     ).read_text(encoding="utf-8")
 
 
+def _recovery_script() -> str:
+    system_root = Path(__file__).resolve().parents[2]
+    return (
+        system_root / "deploy" / "production-control" / "bin" / "production-recovery"
+    ).read_text(encoding="utf-8")
+
+
 def test_cli_digests_are_exported_before_compose_initialization():
     script = _deploy_script()
     validation = script.index(
@@ -111,6 +118,13 @@ def test_image_pull_is_bounded_and_failure_is_classified_without_printing_raw_lo
     assert 'ensure_rollback_image backend "$target_backend" || die' in rollback
     assert 'docker pull "$old_backend"' not in deploy
     assert 'docker pull "$target_backend"' not in rollback
+
+
+def test_production_compose_never_builds_from_mutable_vm_source():
+    for script in (_deploy_script(), _rollback_script(), _recovery_script()):
+        up_calls = [line for line in script.splitlines() if '"${COMPOSE[@]}" up ' in line]
+        assert up_calls
+        assert all('up --no-build ' in line for line in up_calls)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell behavior is exercised in Linux CI")

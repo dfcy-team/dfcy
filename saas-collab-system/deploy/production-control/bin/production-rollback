@@ -75,8 +75,8 @@ required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-be
 redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
 IFS=, read -r -a services_array <<< "$required_services"
 "${COMPOSE[@]}" config --quiet >/dev/null
-"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null
-"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
+"${COMPOSE[@]}" up --no-build -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null
+"${COMPOSE[@]}" up --no-build -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
 "$SCRIPT_DIR/production-health-check" --quiet >/dev/null || die 'health check failed while restoring the previous release.'
 
 failed_release="$CONTROL_ROOT/releases/$(date -u '+%Y%m%dT%H%M%SZ')-failed.json"

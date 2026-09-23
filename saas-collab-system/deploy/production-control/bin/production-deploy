@@ -158,7 +158,7 @@ required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-be
 
 # Validate interpolation before changing any running container.
 "${COMPOSE[@]}" config --quiet >/dev/null
-"${COMPOSE[@]}" up -d --wait --wait-timeout 180 "$redis_service" >/dev/null
+"${COMPOSE[@]}" up --no-build -d --wait --wait-timeout 180 "$redis_service" >/dev/null
 migration_container="production-migrate-${release_sha}"
 log_info "running database migrations with a ${migration_timeout_seconds}s timeout."
 migration_status=0
@@ -189,9 +189,9 @@ rollback_previous() {
   ensure_rollback_image backend "$old_backend" || return 1
   ensure_rollback_image frontend "$old_frontend" || return 1
   ensure_rollback_image Redis "$old_redis" || return 1
-  "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null || return 1
+  "${COMPOSE[@]}" up --no-build -d --remove-orphans --wait --wait-timeout 180 "$redis_service" >/dev/null || return 1
   IFS=, read -r -a services_array <<< "$required_services"
-  "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null || return 1
+  "${COMPOSE[@]}" up --no-build -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null || return 1
   "$SCRIPT_DIR/production-health-check" --quiet >/dev/null || return 1
   cp -p -- "$current_file" "$CONTROL_ROOT/releases/$release_id.failed.json" || return 1
   cp -p -- "$previous_file" "$current_file" || return 1
@@ -224,7 +224,7 @@ trap on_exit EXIT
 
 deployment_started=1
 IFS=, read -r -a services_array <<< "$required_services"
-"${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
+"${COMPOSE[@]}" up --no-build -d --remove-orphans --wait --wait-timeout 180 "${services_array[@]}" >/dev/null
 "$SCRIPT_DIR/production-health-check" --quiet >/dev/null
 
 completed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
