@@ -28,26 +28,26 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(api).toContain('`/api/internal/products/skus/${skuId}/image/`');
     expect(api).toContain('`/api/internal/products/bundles/${skuId}/image-cache/`');
   });
-  it('将组合商品导入导出归集到一个下拉菜单', () => {
-    expect(page).toContain('data-testid="bundle-io-menu"');
-    expect(page).toContain('导入与导出');
+  it('组合商品导入导出归集到商品明细外部菜单', () => {
+    expect(page).not.toContain('data-testid="bundle-io-menu"');
+    expect(detailPage).toContain('data-testid="detail-io-menu"');
     expect(page).toContain('data-testid="bundle-import-template"');
     expect(page).toContain('下载组合商品导入模板');
-    expect(page).toContain('data-testid="bundle-import-button"');
-    expect(page).toContain('command="bundle-import"');
+    expect(detailPage).toContain('data-testid="detail-bundle-import-button"');
+    expect(detailPage).toContain('command="bundle-import"');
     expect(page).toContain('data-testid="bundle-import-file"');
     expect(page.indexOf('title="组合商品导入"')).toBeLessThan(page.indexOf('data-testid="bundle-import-template"'));
-    expect(detailPage).not.toContain('组合商品导入');
+    expect(detailPage).toContain('组合商品导入');
   });
 
   it('保留新建入口并增加可选择的 BigSeller 组合表生成入口', () => {
     expect(page).toContain('data-testid="bundle-create-button"');
     expect(page).toContain('新建组合 SKU');
-    expect(page).toContain('data-testid="bigseller-create-bundle-export"');
-    expect(page).toContain('下载 BigSeller 组合商品SKU表');
-    expect(page).toContain('@selection-change="selectBundleRows"');
-    expect(page).toContain(':disabled="!selectedBundles.length || importing || exporting"');
-    expect(page).toContain('downloadBigSellerBundleWorkbook(selectedBundles.value, selectedSkus, relations)');
+    expect(detailPage).toContain('data-testid="bigseller-create-bundle-export"');
+    expect(detailPage).toContain('下载 BigSeller 组合商品SKU表');
+    expect(detailPage).toContain('exportableSelectedBundleRows');
+    expect(detailPage).toContain('fetchProductBundleDetail(row.sku_id)');
+    expect(detailPage).toContain('downloadBigSellerBundleWorkbook(spus, skus, relations)');
   });
 
   it('二期支持组合版本、库存可用量和全部旧组合关系的预览确认迁移', () => {
@@ -55,7 +55,7 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('已同步订单继续使用下单时快照');
     expect(page).toContain('库存可用量');
     expect(page).toContain('仅供业务判断，不直接扣减库存');
-    expect(page).toContain('data-testid="bundle-legacy-migration-button"');
+    expect(detailPage).toContain('data-testid="detail-bundle-legacy-migration-button"');
     expect(page).toContain("if (props.initialAction === 'legacy-migration') openMigration();");
     expect(page).toContain("breakdown['bundle_not_unique:not_found']");
     expect(page).toContain("breakdown['component_not_unique:multiple_matches']");
@@ -88,8 +88,8 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('cacheProductBundleImage(result.sku.id, input.imageUrl)');
     expect(page).toContain('result.sku.image_url = cachedImageUrl');
     expect(page).toContain('cost_allocation_ratio: component.costRatio ?? 1');
-    expect(page).toContain('const components = detailData(response.data)?.components || []');
-    expect(page).toContain('bundle_sku: sku.id');
+    expect(detailPage).toContain('const components = detailData(response.data)?.components || []');
+    expect(detailPage).toContain('bundle_sku: row.sku_id');
     expect(page).toContain('downloadBigSellerBundleWorkbook(createdSpus, createdSkus, createdComponents)');
     expect(page).toContain("'*组合商品名称', '*末级分类编码', '*季节编码', '*组合颜色英文编码'");
     expect(page).toContain('index <= 20');

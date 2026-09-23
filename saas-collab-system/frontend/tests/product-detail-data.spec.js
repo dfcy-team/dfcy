@@ -19,12 +19,16 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('formatComponentSummary(row)');
   });
 
-  it('将普通与组合商品的单个/批量新增收口到同一下拉菜单', () => {
+  it('新增商品菜单保留单个创建，组合批量导入归入外部导入导出菜单', () => {
     expect(page).toContain('data-testid="product-create-menu"');
     expect(page).toContain('新增普通商品');
     expect(page).toContain('新增组合商品');
     expect(page).toContain('批量新增普通商品');
-    expect(page).toContain('批量新增组合商品');
+    expect(page).not.toContain('批量新增组合商品');
+    expect(page).toContain('data-testid="detail-bundle-import-button"');
+    expect(page).toContain('data-testid="bigseller-create-bundle-export"');
+    expect(page).toContain("openBundleWorkspace('import')");
+    expect(page).toContain('exportSelectedBundleProducts()');
     expect(page).toContain('<ProductBundleManager');
   });
 
@@ -174,7 +178,7 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain(':disabled="!exportableSelectedRows.length || bigsellerExporting"');
     expect(page).toContain('selectedRows.value.filter((row) => row?.sku_code)');
     expect(page).toContain('downloadBigSellerProductWorkbook(exportableSelectedRows.value)');
-    expect(page).not.toContain('组合商品导入');
+    expect(page).toContain('data-testid="detail-bundle-import-button"');
   });
 
   it('按当前筛选导出全部商品明细数据', () => {

@@ -13,7 +13,6 @@
               <el-dropdown-item v-if="canManage" command="standard-single">新增普通商品</el-dropdown-item>
               <el-dropdown-item v-if="canManageBundles" command="bundle-single">新增组合商品</el-dropdown-item>
               <el-dropdown-item v-if="canManage" divided command="standard-batch">批量新增普通商品</el-dropdown-item>
-              <el-dropdown-item v-if="canManageBundles" command="bundle-batch">批量新增组合商品</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -25,12 +24,14 @@
               <el-dropdown-item v-if="canManage" command="create-import" data-testid="detail-import-button">商品新增导入</el-dropdown-item>
               <el-dropdown-item v-if="canManage" command="legacy-import" data-testid="legacy-import-button">旧商品档案导入</el-dropdown-item>
               <el-dropdown-item v-if="canManage" command="image-import" data-testid="image-batch-open">批量导入图片</el-dropdown-item>
+              <el-dropdown-item v-if="canManageBundles" command="bundle-import" data-testid="detail-bundle-import-button">组合商品导入</el-dropdown-item>
               <el-dropdown-item v-if="canManageBundles" command="bundle-legacy-migration" data-testid="detail-bundle-legacy-migration-button">旧组合关系迁移</el-dropdown-item>
-              <el-dropdown-item v-if="canManage" divided disabled>导出</el-dropdown-item>
+              <el-dropdown-item divided disabled>导出</el-dropdown-item>
               <el-dropdown-item v-if="canManage" command="bigseller-export" data-testid="bigseller-create-product-export" :disabled="!exportableSelectedRows.length || bigsellerExporting">
                 下载 BigSeller 商品SKU表
               </el-dropdown-item>
               <el-dropdown-item v-if="canManage" command="detail-export" data-testid="product-detail-export">导出商品明细 CSV</el-dropdown-item>
+              <el-dropdown-item v-if="canManageBundles" command="bundle-export" data-testid="bigseller-create-bundle-export" :disabled="!exportableSelectedBundleRows.length || bundleExporting">下载 BigSeller 组合商品SKU表</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -607,6 +608,7 @@ import { parseImageCsv, yieldToPage } from '../../utils/imageBatchCsv';
 import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import {
+  fetchProductBundleDetail,
   fetchProductCategories,
   fetchProductCategoryBackgroundColors,
   fetchProductColors,
@@ -636,7 +638,7 @@ import {
   productDictionaryCacheScope,
   subscribeProductDictionaryCacheInvalidation,
 } from '../../utils/productDictionaryCache';
-import { downloadBigSellerProductWorkbook } from '../../utils/bigsellerWorkbook';
+import { downloadBigSellerBundleWorkbook, downloadBigSellerProductWorkbook } from '../../utils/bigsellerWorkbook';
 import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 import ProductBundleManager from './ProductBundleManager.vue';
 
@@ -676,6 +678,7 @@ const viewVisible = ref(false);
 const selectedRow = ref(null);
 const selectedRows = ref([]);
 const bigsellerExporting = ref(false);
+const bundleExporting = ref(false);
 const form = reactive({ id: null, product_name: '', category_node: null, attribute_code: '', color_code: '', specification: '', purchase_price: '' });
 const editVisible = ref(false);
 const editableDetailFields = [
@@ -734,6 +737,7 @@ const legacyImportModeLabel = computed(() => ({
   update: '仅更新已有档案',
 })[legacyImportMode.value] || '自动判断新增/更新');
 const exportableSelectedRows = computed(() => selectedRows.value.filter((row) => row?.sku_code));
+const exportableSelectedBundleRows = computed(() => selectedRows.value.filter((row) => row?.product_type === 'bundle' && row?.sku_id && row?.sku_code));
 
 const categoryTree = computed(() => buildCategoryTree(categories.value));
 const productRowClassName = ({ row }) => categoryRowClass(row, categories.value);
@@ -1479,9 +1483,11 @@ function handleIoCommand(command) {
   if (command === 'create-import') openCreateImport();
   else if (command === 'legacy-import') openLegacyImport();
   else if (command === 'image-import') openImageBatch();
+  else if (command === 'bundle-import') openBundleWorkspace('import');
   else if (command === 'bundle-legacy-migration') openBundleWorkspace('legacy-migration');
   else if (command === 'bigseller-export') exportBigSellerProducts();
   else if (command === 'detail-export') exportProductDetails(filters);
+  else if (command === 'bundle-export') exportSelectedBundleProducts();
 }
 
 function openBundleWorkspace(action) {
@@ -1497,8 +1503,6 @@ function handleCreateCommand(command) {
     openCreateImport();
   } else if (command === 'bundle-single') {
     openBundleWorkspace('create');
-  } else if (command === 'bundle-batch') {
-    openBundleWorkspace('import');
   }
 }
 
@@ -1706,6 +1710,39 @@ function exportBigSellerProducts() {
     show(error?.message || '生成 BigSeller 商品SKU表失败', 'warning');
   } finally {
     bigsellerExporting.value = false;
+  }
+}
+
+async function exportSelectedBundleProducts() {
+  if (bundleExporting.value) return;
+  bundleExporting.value = true;
+  try {
+    const selected = [...new Map(exportableSelectedBundleRows.value.map((row) => [String(row.sku_id), row])).values()];
+    if (!selected.length) throw new Error('请先勾选组合商品 SKU');
+    const details = await Promise.all(selected.map(async (row) => {
+      if (!row.spu_code) throw new Error(`组合 SKU ${row.sku_code} 缺少所属 SPU 编码`);
+      const response = await fetchProductBundleDetail(row.sku_id);
+      if (!response.success) throw new Error(response.message || `读取组合 SKU ${row.sku_code} 成分失败`);
+      const components = detailData(response.data)?.components || [];
+      if (!components.length || components.length > 20 || components.some((item) => !item.component_sku_code)) {
+        throw new Error(`组合 SKU ${row.sku_code} 缺少完整成分信息，无法导出`);
+      }
+      return { row, components };
+    }));
+    const spus = [...new Map(details.map(({ row }) => [row.spu_code, {
+      id: row.spu_code, product_name: row.spu_product_name, category_name: row.category_name,
+    }])).values()];
+    const skus = details.map(({ row }) => ({
+      id: row.sku_id, spu: row.spu_code, sku_code: row.sku_code,
+      sku_product_name: row.sku_product_name, image_url: row.image_url, purchase_price: row.purchase_price,
+    }));
+    const relations = details.flatMap(({ row, components }) => components.map((item) => ({ ...item, bundle_sku: row.sku_id })));
+    const count = downloadBigSellerBundleWorkbook(spus, skus, relations);
+    show(`已生成 ${count} 条 BigSeller 组合商品 SKU 数据`);
+  } catch (error) {
+    show(error?.message || '生成 BigSeller 组合商品SKU表失败', 'warning');
+  } finally {
+    bundleExporting.value = false;
   }
 }
 

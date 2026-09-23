@@ -3,23 +3,9 @@
     <header class="page-header">
       <div>
         <h1>组合商品</h1>
-        <p>选择多个已有普通 SKU，生成组合 SPU / SKU；也可批量导入并生成 BigSeller 表。</p>
+        <p>选择多个已有普通 SKU，生成组合 SPU / SKU。</p>
       </div>
       <div class="header-actions">
-        <el-dropdown v-if="canManage" trigger="click" @command="handleIoCommand">
-          <el-button data-testid="bundle-io-menu">导入与导出 <span class="io-menu-caret">⌄</span></el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item disabled>导入</el-dropdown-item>
-              <el-dropdown-item command="bundle-import" data-testid="bundle-import-button">组合商品导入</el-dropdown-item>
-              <el-dropdown-item command="legacy-migration" data-testid="bundle-legacy-migration-button">旧组合关系迁移</el-dropdown-item>
-              <el-dropdown-item divided disabled>导出</el-dropdown-item>
-              <el-dropdown-item command="bigseller-export" data-testid="bigseller-create-bundle-export" :disabled="!selectedBundles.length || importing || exporting">
-                下载 BigSeller 组合商品SKU表
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
         <el-button
           v-if="canManage"
           data-testid="bundle-create-button"
@@ -36,8 +22,7 @@
       show-icon
     />
 
-    <el-table :data="bundleRows" row-key="sku_id" border @selection-change="selectBundleRows">
-      <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
+    <el-table :data="bundleRows" row-key="sku_id" border>
       <el-table-column label="图片" width="76">
         <template #default="{ row }">
           <el-image v-if="row.image_url" class="bundle-list-image" :src="row.image_url" fit="cover" preview-teleported :preview-src-list="[row.image_url]" />
@@ -315,12 +300,10 @@ const bundleImageFile = ref(null);
 const bundleImagePreview = ref('');
 const bundleImageUrl = ref('');
 const importing = ref(false);
-const exporting = ref(false);
 const bundleImportVisible = ref(false);
 const bundleImportInput = ref(null);
 const bundleImportUpload = ref(null);
 const bundleImportFileName = ref('');
-const selectedBundles = ref([]);
 const importSummaryVisible = ref(false);
 const importSummary = reactive({ fileName: '', created: 0, errors: [], imageErrors: [] });
 const editVisible = ref(false);
@@ -377,11 +360,6 @@ function componentSkuCode(component) {
 function componentSummary(skuId) {
   const values = bundleComponents.value.filter((item) => String(item.bundle_sku?.id ?? item.bundle_sku) === String(skuId));
   return values.length ? values.map((item) => `${componentSkuCode(item)} × ${item.quantity}`).join('、') : '尚未维护组成关系';
-}
-
-function selectBundleRows(rows) {
-  const ids = new Set(rows.map((row) => String(row.spu_id)));
-  selectedBundles.value = bundles.value.filter((spu) => ids.has(String(spu.id)));
 }
 
 async function load() {
@@ -593,12 +571,6 @@ function openBundleImport() {
   bundleImportUpload.value = null;
   bundleImportFileName.value = '';
   bundleImportVisible.value = true;
-}
-
-function handleIoCommand(command) {
-  if (command === 'bundle-import') openBundleImport();
-  else if (command === 'legacy-migration') openMigration();
-  else if (command === 'bigseller-export') exportSelectedBundles();
 }
 
 function currentIsoMinute() {
@@ -868,40 +840,6 @@ async function importBundleFile(file) {
   }
 }
 
-async function exportSelectedBundles() {
-  if (exporting.value) return;
-  exporting.value = true;
-  try {
-    const selectedSkus = [];
-    for (const spu of selectedBundles.value) {
-      for (let page = 1; ; page += 1) {
-        const response = await fetchProductSkuList({ spu_id: spu.id, page, page_size: 100 });
-        if (!response.success) throw new Error(response.message || '读取组合 SKU 失败');
-        const rows = collectionRows(response.data);
-        selectedSkus.push(...rows);
-        if (rows.length < 100) break;
-      }
-    }
-    if (!selectedSkus.length) throw new Error('所选组合商品没有 SKU');
-    const relations = [];
-    for (const sku of selectedSkus) {
-      const response = await fetchProductBundleDetail(sku.id);
-      if (!response.success) throw new Error(response.message || `读取组合 SKU ${sku.sku_code} 成分失败`);
-      const components = detailData(response.data)?.components || [];
-      if (!components.length || components.some((item) => !item.component_sku_code)) {
-        throw new Error(`组合 SKU ${sku.sku_code} 缺少完整成分信息，无法导出`);
-      }
-      relations.push(...components.map((item) => ({ ...item, bundle_sku: sku.id })));
-    }
-    const count = downloadBigSellerBundleWorkbook(selectedBundles.value, selectedSkus, relations);
-    ElMessage.success(`已生成 ${count} 条 BigSeller 组合商品 SKU 数据`);
-  } catch (error) {
-    ElMessage.warning(error?.message || '生成 BigSeller 组合商品SKU表失败');
-  } finally {
-    exporting.value = false;
-  }
-}
-
 onMounted(async () => {
   await load();
   if (props.initialAction === 'create') visible.value = true;
@@ -916,7 +854,6 @@ onMounted(async () => {
 .page-header h1 { margin: 0 0 8px; }
 .page-header p { margin: 0; color: #64748b; }
 .header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-.io-menu-caret { margin-left: 4px; color: #64748b; }
 .import-upload-box { display: grid; justify-items: center; gap: 8px; padding: 28px 20px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fafcff; color: #475569; cursor: pointer; outline: none; }
 .import-upload-box:hover, .import-upload-box:focus { border-color: #6366f1; background: #f8f7ff; }
 .import-upload-box strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
