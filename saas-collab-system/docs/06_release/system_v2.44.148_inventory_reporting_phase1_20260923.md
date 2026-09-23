@@ -1,13 +1,16 @@
-# V2.44.148 库存首期报表候选
+# V2.44.148 库存首期报表发布回执
 
 ## 版本登记
 
 - 登记日期：2026-09-23（Asia/Shanghai）
-- 状态：`REGISTERED_FOR_CONTROLLED_RELEASE`；未部署，不得视为生产版本
+- 状态：`DEPLOYED`；2026-09-23 由受控虚拟机发布通道部署并通过健康检查
 - 发布通道：虚拟机功能发布通道
 - 当前已部署父基线：`V2.44.147` / `v2.44.147-deployed` / `a70ab2a5b95b69df31e87b37a966e0c2b7c1df1c`
 - 库存候选分支：`codex/v244148-inventory-release`；重放后的功能提交：`e5fe94c`
-- 最终生产提交与镜像摘要：待受保护合并和发布通道生成，不能用候选 SHA 代替
+- 最终生产提交：`6c719d2d4e3e2d936f5abfe4c292c0dc60206ac4`；已部署标签：`v2.44.148-deployed`
+- 后端镜像：`ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:8e1e7c42960f3e32116b44cc82c1c09fbdf08d680a316c3d700a743d23af212e`
+- 前端镜像：`ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:ee35625a47e0cb1dbf8d30b021aee6a1e3b232ca063c51b4554d9fc2d91bdb5f`
+- Redis 镜像：沿用 V2.44.147 的 `redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99`
 - 数据库迁移：本候选无新增迁移
 - 版本边界：V2.44.147 的基础档案导出与 SKU 编辑页已单独部署；本次 V2.44.148 增量**不修改**分类、属性、颜色、规格菜单导出，也不改基础档案菜单。正式镜像继承 V2.44.147，不得回退其已有能力。
 
@@ -24,14 +27,20 @@
 - V2.44.147 基线重放后，后端库存定向测试：42 项通过；前端全部单测：121 个文件、736 项通过。
 - V2.44.147 基线重放后的前端生产构建：通过，菜单权限快照 107 项菜单、140 项路由一致；迁移漂移检查无变化。
 - 只读 VM 受控通道检查：2026-09-23 GitHub Actions [35808542576](https://github.com/dfcy-team/dfcy/actions/runs/35808542576) 成功，输出 `PRODUCTION_BASELINE_RUNTIME=PASS`。该检查证明控制面门禁通过，不替代当前运行镜像摘要与双账本的发布前核验。
-- 后端完整测试及最终合并 SHA 的 CI：尚待发布流程执行。
+- PR [#192](https://github.com/dfcy-team/dfcy/pull/192) 两组后端完整 CI 及前端/仓库门禁全部通过；最终主干 SHA 的 [dry-run](https://github.com/dfcy-team/dfcy/actions/runs/35809641937) 成功。
 
-## 虚拟机发布准备与阻断条件
+## 正式部署回执
 
-1. 核查当前 VM 实际运行 V2.44.147 revision、镜像摘要与双账本；已部署标签及成功的 CI 任务不能代替实时探针。
-2. 库存增量已重放到 V2.44.147 最终生产提交。发布前再次确认候选没有引入 V2.44.147 以外的基础档案改动，避免覆盖正式功能。
-3. 通过受保护主干审阅合并，在最终合并 SHA 上运行完整 CI、受控发布 `dry_run`，构建并固定不可变镜像摘要；部署前核验备份和恢复可用性。
-4. 部署后验收库存真实数据、筛选、排序、分页、数据质量、时效、权限隔离及健康检查。全部通过后才创建 `v2.44.148-deployed` 标签，并登记实际生产 SHA、镜像摘要、备份及回退信息。
+- 受控[生产部署](https://github.com/dfcy-team/dfcy/actions/runs/35810484707)：最终 SHA `6c719d2…` 的质量门禁、不可变镜像构建和 VM 部署作业均成功；VM 日志输出 `PRODUCTION_DEPLOY=PASS`。
+- 部署流程已执行迁移服务并确认 backend、frontend、Celery、Beat、Redis 容器健康；迁移树摘要为 `a1691368e1e52a6864544431a6a2de9a4cd0f88a517d73dd41d8b7495b83d6bf`。本版本相对 V2.44.147 没有新增迁移。
+- 部署后[只读 VM 控制面复查](https://github.com/dfcy-team/dfcy/actions/runs/35812316243) 成功，输出 `PRODUCTION_BASELINE_RUNTIME=PASS`。
+- 受控部署脚本以备份 hook 成功为继续条件，并写入 VM 审计账本；当前通道不回显备份文件标识及双账本条目，因此这里不宣称已独立读取这些记录。需要 VM owner 在账本中复核备份与镜像摘要。
+
+## 本次发布闸门
+
+1. V2.44.147 为受保护主干父版本；本次库存增量没有修改基础档案菜单或导出实现。
+2. PR 门禁、最终 SHA dry-run、部署前后 VM 控制面检查及受控部署均已通过；`v2.44.148-deployed` 已指向最终主干 SHA。
+3. 菜单真实业务数据与角色权限的人工页面验收、备份文件标识及双账本条目的独立读取，仍需 VM owner 按运维账本复核；自动化成功不代替这些业务验收。
 
 ## 回退
 
