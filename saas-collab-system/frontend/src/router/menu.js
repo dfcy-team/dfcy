@@ -31,8 +31,9 @@ export const menuItems = [
   {
     label: '库存管理',
     internal: true,
-    permissions: ['alerts.view', 'replenishment.view'],
+    permissions: ['sales_management.view', 'alerts.view', 'replenishment.view'],
     children: [
+      { path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
       { path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
       { path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] }
     ]
@@ -316,6 +317,7 @@ export const routeCapabilities = [
   { path: '/analytics/overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/sales', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/inventory/workbench', permissions: ['sales_management.view'], userTypes: ['internal'] },
   { path: '/analytics/advertising-overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/advertising-performance', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/decision/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },

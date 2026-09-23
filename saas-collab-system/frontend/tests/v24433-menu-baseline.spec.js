@@ -12,8 +12,8 @@ describe('current deployment menu baseline', () => {
     ]);
 
     const inventory = menuItems.find((item) => item.label === '库存管理');
-    expect(inventory).toMatchObject({ internal: true, permissions: ['alerts.view', 'replenishment.view'] });
-    expect(inventory.children.map((item) => item.label)).toEqual(['库存预警', '补货建议']);
+    expect(inventory).toMatchObject({ internal: true, permissions: ['sales_management.view', 'alerts.view', 'replenishment.view'] });
+    expect(inventory.children.map((item) => item.label)).toEqual(['库存工作台', '库存预警', '补货建议']);
 
     const development = menuItems.find((item) => item.label === '产品开发');
     expect(development.children.map((item) => item.label)).toEqual([
@@ -57,7 +57,7 @@ describe('current deployment menu baseline', () => {
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
     // entries; the detail routes remain in the route contract.
-    expect(flattenMenuItems(menuItems)).toHaveLength(109);
+    expect(flattenMenuItems(menuItems)).toHaveLength(110);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
@@ -108,7 +108,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(109);
+    expect(flatItems).toHaveLength(110);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

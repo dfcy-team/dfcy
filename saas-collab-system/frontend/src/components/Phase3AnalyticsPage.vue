@@ -23,6 +23,7 @@
           end-placeholder="结束日期"
           value-format="YYYY-MM-DD"
         />
+        <el-input v-else-if="filter.type === 'text'" v-model.trim="query[filter.key]" :placeholder="filter.placeholder || '请输入'" clearable />
         <el-select v-else v-model="query[filter.key]" :placeholder="filter.placeholder || '全部'" clearable>
           <el-option v-for="option in filter.options || []" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
@@ -145,6 +146,7 @@ const props = defineProps({
   tableNote: { type: String, default: '' },
   emptyText: { type: String, default: '当前筛选条件下暂无数据' }
 });
+const emit = defineEmits(['reset']);
 
 const query = reactive({});
 const loading = ref(false);
@@ -204,6 +206,7 @@ function resetFilters() {
   initializeFilters();
   ordering.value = '';
   tableRef.value?.clearSort?.();
+  emit('reset');
   loadData();
 }
 

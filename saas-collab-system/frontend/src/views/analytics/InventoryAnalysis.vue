@@ -7,6 +7,7 @@
     :loader="loadInventory"
     :filters="filters"
     :columns="columns"
+    @reset="includeVirtual = false"
     quality-label="SKU 映射率"
     trend-title="在手库存历史快照"
     trend-note="按 UTC 日期统计各仓库 SKU 当天最后一次快照，不累加同日重复同步；缺少销量口径，暂不计算覆盖天数。"
@@ -35,14 +36,17 @@
 
 <script setup>
 import { ref } from 'vue';
+import { useRoute } from 'vue-router';
 import Phase3AnalyticsPage from '../../components/Phase3AnalyticsPage.vue';
 import { fetchInventoryAnalysis } from '../../api/analytics';
 
-const includeVirtual = ref(true);
+const includeVirtual = ref(false);
+const route = useRoute();
 
 const filters = ref([
   { key: 'date_range', label: '快照日期（UTC）', type: 'daterange' },
-  { key: 'warehouse', label: '仓库', options: [] },
+  { key: 'warehouse', label: '仓库', defaultValue: String(route?.query?.warehouse_id || ''), options: [] },
+  { key: 'sku', label: '来源／内部 SKU', type: 'text', defaultValue: String(route?.query?.sku || ''), placeholder: '搜索 SKU' },
   { key: 'risk', label: '数量风险', options: [{ label: '缺货', value: 'out' }, { label: '低库存（1–5）', value: 'low' }, { label: '锁定偏高', value: 'locked' }, { label: '正常', value: 'healthy' }] },
   { key: 'mapping_status', label: 'SKU 关联', options: [{ label: '已关联', value: 'mapped' }, { label: '未关联', value: 'unmapped' }] }
 ]);

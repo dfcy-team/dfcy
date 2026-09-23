@@ -5,6 +5,7 @@ import router from '../src/router';
 import { hasRouteCapability, menuItems } from '../src/router/menu';
 
 const inventoryRoutes = [
+  ['/inventory/workbench', 'InventoryWorkbench'],
   ['/decision/inventory/alerts', 'InventoryAlertList'],
   ['/decision/inventory/replenishment', 'ReplenishmentSuggestionList']
 ];
@@ -31,7 +32,7 @@ describe('Vue decision routing', () => {
   it('places inventory alerts and replenishment under the dedicated inventory menu', () => {
     const inventory = menuItems.find((item) => item.label === '库存管理');
     expect(inventory.children.map((item) => item.path)).toEqual(inventoryRoutes.map(([path]) => path));
-    expect(inventory.permissions).toEqual(['alerts.view', 'replenishment.view']);
+    expect(inventory.permissions).toEqual(['sales_management.view', 'alerts.view', 'replenishment.view']);
 
     for (const [path] of inventoryRoutes) {
       expect(router.resolve(path).matched.length, path).toBeGreaterThan(0);
