@@ -3,23 +3,9 @@
     <header class="page-header">
       <div>
         <h1>组合商品</h1>
-        <p>选择多个已有普通 SKU，生成组合 SPU / SKU；也可批量导入并生成 BigSeller 表。</p>
+        <p>选择多个已有普通 SKU，生成组合 SPU / SKU。</p>
       </div>
       <div class="header-actions">
-        <el-dropdown v-if="canManage" trigger="click" @command="handleIoCommand">
-          <el-button data-testid="bundle-io-menu">导入与导出 <span class="io-menu-caret">⌄</span></el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item disabled>导入</el-dropdown-item>
-              <el-dropdown-item command="bundle-import" data-testid="bundle-import-button">组合商品导入</el-dropdown-item>
-              <el-dropdown-item command="legacy-migration" data-testid="bundle-legacy-migration-button">旧组合关系迁移</el-dropdown-item>
-              <el-dropdown-item divided disabled>导出</el-dropdown-item>
-              <el-dropdown-item command="bigseller-export" data-testid="bigseller-create-bundle-export" :disabled="!selectedBundles.length || importing || exporting">
-                下载 BigSeller 组合商品SKU表
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
         <el-button
           v-if="canManage"
           data-testid="bundle-create-button"
@@ -36,8 +22,7 @@
       show-icon
     />
 
-    <el-table :data="bundleRows" row-key="sku_id" border @selection-change="selectBundleRows">
-      <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
+    <el-table :data="bundleRows" row-key="sku_id" border>
       <el-table-column label="图片" width="76">
         <template #default="{ row }">
           <el-image v-if="row.image_url" class="bundle-list-image" :src="row.image_url" fit="cover" preview-teleported :preview-src-list="[row.image_url]" />
@@ -159,7 +144,7 @@
       <div class="import-upload-box" role="button" tabindex="0" @click="bundleImportInput?.click()" @keydown.enter="bundleImportInput?.click()">
         <span class="import-upload-icon">⇧</span>
         <strong>{{ bundleImportFileName || '点击选择 CSV 文件' }}</strong>
-        <small>导入成功后将自动生成组合 SPU / SKU 并下载 BigSeller 表</small>
+        <small>旧 SPU/SKU 编码和图片URL均可选；填写公网 HTTP(S) 图片链接后自动缓存</small>
       </div>
       <el-button data-testid="bundle-import-template" class="import-template-link" link type="primary" @click="downloadBundleImportTemplate">下载组合商品导入模板</el-button>
       <template #footer>
@@ -173,6 +158,7 @@
         <el-descriptions-item label="文件">{{ importSummary.fileName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="成功">{{ importSummary.created }}</el-descriptions-item>
         <el-descriptions-item label="失败">{{ importSummary.errors.length }}</el-descriptions-item>
+        <el-descriptions-item label="图片失败">{{ importSummary.imageErrors.length }}</el-descriptions-item>
       </el-descriptions>
       <el-alert
         v-if="importSummary.created"
@@ -184,6 +170,10 @@
       <el-table v-if="importSummary.errors.length" :data="importSummary.errors" border max-height="300">
         <el-table-column prop="line" label="CSV 行号" width="100" />
         <el-table-column prop="message" label="错误原因" min-width="480" />
+      </el-table>
+      <el-table v-if="importSummary.imageErrors.length" :data="importSummary.imageErrors" border max-height="200">
+        <el-table-column prop="line" label="CSV 行号" width="100" />
+        <el-table-column prop="message" label="图片处理结果" min-width="480" />
       </el-table>
       <template #footer><el-button type="primary" @click="importSummaryVisible = false">关闭</el-button></template>
     </el-dialog>
@@ -310,14 +300,12 @@ const bundleImageFile = ref(null);
 const bundleImagePreview = ref('');
 const bundleImageUrl = ref('');
 const importing = ref(false);
-const exporting = ref(false);
 const bundleImportVisible = ref(false);
 const bundleImportInput = ref(null);
 const bundleImportUpload = ref(null);
 const bundleImportFileName = ref('');
-const selectedBundles = ref([]);
 const importSummaryVisible = ref(false);
-const importSummary = reactive({ fileName: '', created: 0, errors: [] });
+const importSummary = reactive({ fileName: '', created: 0, errors: [], imageErrors: [] });
 const editVisible = ref(false);
 const editSaving = ref(false);
 const bundleVersions = ref([]);
@@ -374,11 +362,6 @@ function componentSummary(skuId) {
   return values.length ? values.map((item) => `${componentSkuCode(item)} × ${item.quantity}`).join('、') : '尚未维护组成关系';
 }
 
-function selectBundleRows(rows) {
-  const ids = new Set(rows.map((row) => String(row.spu_id)));
-  selectedBundles.value = bundles.value.filter((spu) => ids.has(String(spu.id)));
-}
-
 async function load() {
   const [spuResponse, skuResponse, categoryResponse, colorResponse, optionResponse, componentResponse] = await Promise.all([
     fetchProductMasterList({ page_size: 100 }),
@@ -431,13 +414,15 @@ function selectBundleImage(event) {
   bundleImageUrl.value = '';
 }
 
-async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, components }) {
+async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, legacySpuCode = '', legacySkuCode = '', components }) {
   const response = await createProductBundle({
     spu_mode: spuMode,
     existing_spu: spuMode === 'existing' ? existingSpu : null,
     product_name: name,
     category_node: category,
     season_code: season,
+    legacy_spu_code: legacySpuCode,
+    legacy_sku_code: legacySkuCode,
     color_code: color,
     components: components.map((component) => ({
       component_sku: component.sku,
@@ -568,7 +553,7 @@ function migrationErrorMessage(error) {
 
 function bundleImportHeaders() {
   return [
-    '*组合商品名称', '*末级分类编码', '*季节编码', '*组合颜色英文编码',
+    '旧SPU编码', '旧SKU编码', '*组合商品名称', '*末级分类编码', '*季节编码', '*组合颜色英文编码', '图片URL',
     ...Array.from({ length: 20 }, (_, index) => {
       const number = index + 1;
       const required = number === 1 ? '*' : '';
@@ -580,7 +565,7 @@ function bundleImportHeaders() {
 function downloadBundleImportTemplate() {
   const headers = bundleImportHeaders();
   const values = Array(headers.length).fill('');
-  [values[0], values[1], values[2], values[3], values[4], values[5], values[6]] = ['示例组合商品', '10101', '5', 'white', 'NORMAL-SKU-001', 1, 1];
+  [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9]] = ['', '', '示例组合商品', '10101', '5', 'white', '', 'NORMAL-SKU-001', 1, 1];
   downloadCsv('组合商品导入模板.csv', headers, values);
 }
 
@@ -588,12 +573,6 @@ function openBundleImport() {
   bundleImportUpload.value = null;
   bundleImportFileName.value = '';
   bundleImportVisible.value = true;
-}
-
-function handleIoCommand(command) {
-  if (command === 'bundle-import') openBundleImport();
-  else if (command === 'legacy-migration') openMigration();
-  else if (command === 'bigseller-export') exportSelectedBundles();
 }
 
 function currentIsoMinute() {
@@ -784,11 +763,15 @@ function importValue(values, headers, name) {
 }
 
 function prepareImportRow(values, headers, line) {
+  const legacySpuCode = importValue(values, headers, '旧SPU编码');
+  const legacySkuCode = importValue(values, headers, '旧SKU编码');
   const name = importValue(values, headers, '组合商品名称');
   const categoryCode = importValue(values, headers, '末级分类编码');
   const season = importValue(values, headers, '季节编码');
   const color = importValue(values, headers, '组合颜色英文编码');
+  const imageUrl = importValue(values, headers, '图片URL');
   if (!name || !categoryCode || !season || !color) throw new Error('组合商品名称、末级分类编码、季节编码、组合颜色英文编码为必填');
+  if (imageUrl && (!/^https?:\/\//i.test(imageUrl) || imageUrl.length > 500)) throw new Error('图片URL必须是不超过500字符的HTTP(S)链接');
   const category = leaves.value.find((item) => String(item.code) === categoryCode);
   if (!category) throw new Error(`末级分类编码 ${categoryCode} 不存在或已停用`);
   if (!colors.value.some((item) => String(item.code) === color && item.is_active !== false)) throw new Error(`颜色编码 ${color} 不存在或已停用`);
@@ -807,7 +790,7 @@ function prepareImportRow(values, headers, line) {
     components.push({ sku: sku.id, skuCode, quantity, costRatio });
   }
   if (!components.length) throw new Error('至少填写一个单品 SKU 及数量');
-  return { line, name, category: category.id, season, color, components };
+  return { line, name, category: category.id, season, color, legacySpuCode, legacySkuCode, imageUrl, components };
 }
 
 async function importBundleFile(file) {
@@ -815,6 +798,7 @@ async function importBundleFile(file) {
   importSummary.fileName = file.name;
   importSummary.created = 0;
   importSummary.errors = [];
+  importSummary.imageErrors = [];
   const createdSpus = [];
   const createdSkus = [];
   const createdComponents = [];
@@ -824,11 +808,22 @@ async function importBundleFile(file) {
     const headers = rows[0];
     for (let index = 1; index < rows.length; index += 1) {
       try {
-        const result = await createBundle(prepareImportRow(rows[index], headers, index + 1));
+        const input = prepareImportRow(rows[index], headers, index + 1);
+        const result = await createBundle(input);
+        importSummary.created += 1;
+        if (input.imageUrl) {
+          try {
+            const imageResponse = await cacheProductBundleImage(result.sku.id, input.imageUrl);
+            const cachedImageUrl = detailData(imageResponse.data)?.image_url;
+            if (!imageResponse.success || !cachedImageUrl) throw new Error(imageResponse.message || '图片缓存失败');
+            result.sku.image_url = cachedImageUrl;
+          } catch (imageError) {
+            importSummary.imageErrors.push({ line: index + 1, message: `组合 SKU ${result.sku.sku_code} 已创建，但图片保存失败：${imageError?.message || '请稍后重试'}` });
+          }
+        }
         createdSpus.push(result.spu);
         createdSkus.push(result.sku);
         createdComponents.push(...result.components);
-        importSummary.created += 1;
       } catch (error) {
         importSummary.errors.push({ line: index + 1, message: error?.message || '导入失败' });
       }
@@ -849,40 +844,6 @@ async function importBundleFile(file) {
   }
 }
 
-async function exportSelectedBundles() {
-  if (exporting.value) return;
-  exporting.value = true;
-  try {
-    const selectedSkus = [];
-    for (const spu of selectedBundles.value) {
-      for (let page = 1; ; page += 1) {
-        const response = await fetchProductSkuList({ spu_id: spu.id, page, page_size: 100 });
-        if (!response.success) throw new Error(response.message || '读取组合 SKU 失败');
-        const rows = collectionRows(response.data);
-        selectedSkus.push(...rows);
-        if (rows.length < 100) break;
-      }
-    }
-    if (!selectedSkus.length) throw new Error('所选组合商品没有 SKU');
-    const relations = [];
-    for (const sku of selectedSkus) {
-      const response = await fetchProductBundleDetail(sku.id);
-      if (!response.success) throw new Error(response.message || `读取组合 SKU ${sku.sku_code} 成分失败`);
-      const components = detailData(response.data)?.components || [];
-      if (!components.length || components.some((item) => !item.component_sku_code)) {
-        throw new Error(`组合 SKU ${sku.sku_code} 缺少完整成分信息，无法导出`);
-      }
-      relations.push(...components.map((item) => ({ ...item, bundle_sku: sku.id })));
-    }
-    const count = downloadBigSellerBundleWorkbook(selectedBundles.value, selectedSkus, relations);
-    ElMessage.success(`已生成 ${count} 条 BigSeller 组合商品 SKU 数据`);
-  } catch (error) {
-    ElMessage.warning(error?.message || '生成 BigSeller 组合商品SKU表失败');
-  } finally {
-    exporting.value = false;
-  }
-}
-
 onMounted(async () => {
   await load();
   if (props.initialAction === 'create') visible.value = true;
@@ -897,7 +858,6 @@ onMounted(async () => {
 .page-header h1 { margin: 0 0 8px; }
 .page-header p { margin: 0; color: #64748b; }
 .header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-.io-menu-caret { margin-left: 4px; color: #64748b; }
 .import-upload-box { display: grid; justify-items: center; gap: 8px; padding: 28px 20px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fafcff; color: #475569; cursor: pointer; outline: none; }
 .import-upload-box:hover, .import-upload-box:focus { border-color: #6366f1; background: #f8f7ff; }
 .import-upload-box strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

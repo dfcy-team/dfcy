@@ -2585,7 +2585,6 @@ def product_bundle_create(request):
     input_serializer.is_valid(raise_exception=True)
     payload = input_serializer.validated_data
     tenant = request.user.tenant
-
     spu_mode = payload["spu_mode"]
     existing_spu = None
     if spu_mode == "existing":
@@ -2641,6 +2640,7 @@ def product_bundle_create(request):
                         "product_name": payload["product_name"],
                         "category_node": category.id,
                         "season_code": payload["season_code"],
+                        "legacy_spu_code": payload.get("legacy_spu_code", ""),
                         "product_type": ProductSPU.ProductType.BUNDLE,
                     },
                     context=context,
@@ -2656,7 +2656,12 @@ def product_bundle_create(request):
                 if isinstance(item, dict) and item.get("code")
             }
             sku_serializer = ProductSKUSerializer(
-                data={"spu": spu.id, "color_code": color_code, "spec_values": spec_values},
+                data={
+                    "spu": spu.id,
+                    "color_code": color_code,
+                    "spec_values": spec_values,
+                    "legacy_sku_code": payload.get("legacy_sku_code", ""),
+                },
                 context=context,
             )
             sku_serializer.is_valid(raise_exception=True)

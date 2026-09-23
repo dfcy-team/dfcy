@@ -91,6 +91,24 @@ def test_bundle_create_commits_spu_sku_and_components_together():
 
 
 @pytest.mark.django_db
+def test_bundle_create_imports_optional_legacy_codes_with_bundle_manage_permission():
+    tenant = Tenant.objects.create(name="Bundle legacy code tenant", code="bundle-legacy-codes")
+    client = _bundle_client(tenant, "bundle-legacy-regular")
+    category = _catalog(tenant, "旧编码")
+    component = _component_sku(tenant, "LEGACY-COMPONENT")
+    payload = _payload(category, [component])
+    payload.update(legacy_spu_code="OLD-BUNDLE-SPU", legacy_sku_code="OLD-BUNDLE-SKU")
+
+    created = client.post("/api/internal/products/bundles/create/", payload, format="json")
+    assert created.status_code == 201
+    data = created.json()["data"]
+    assert data["spu"]["legacy_spu_code"] == "OLD-BUNDLE-SPU"
+    assert data["sku"]["legacy_sku_code"] == "OLD-BUNDLE-SKU"
+    assert ProductSPU.objects.get(pk=data["spu"]["id"]).legacy_spu_code == "OLD-BUNDLE-SPU"
+    assert ProductSKU.objects.get(pk=data["sku"]["id"]).legacy_sku_code == "OLD-BUNDLE-SKU"
+
+
+@pytest.mark.django_db
 def test_bundle_create_keeps_imported_ratios_in_components_and_first_version():
     tenant = Tenant.objects.create(name="Bundle create ratio tenant", code="bundle-create-ratio")
     client = _bundle_client(tenant, "bundle-create-ratio-user")
