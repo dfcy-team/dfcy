@@ -144,7 +144,7 @@
       <div class="import-upload-box" role="button" tabindex="0" @click="bundleImportInput?.click()" @keydown.enter="bundleImportInput?.click()">
         <span class="import-upload-icon">⇧</span>
         <strong>{{ bundleImportFileName || '点击选择 CSV 文件' }}</strong>
-        <small>旧 SPU/SKU 编码仅管理员可填写；图片URL可选，填写公网 HTTP(S) 链接后自动缓存</small>
+        <small>旧 SPU/SKU 编码和图片URL均可选；填写公网 HTTP(S) 图片链接后自动缓存</small>
       </div>
       <el-button data-testid="bundle-import-template" class="import-template-link" link type="primary" @click="downloadBundleImportTemplate">下载组合商品导入模板</el-button>
       <template #footer>
