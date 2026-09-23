@@ -7,7 +7,7 @@
 ## 控制边界
 
 - GitHub workflow：`.github/workflows/developer-a-production-release.yml`。
-- VM 固定入口：`/opt/saas-collab/release-control/unified/bin/developer-a-ci-dispatch`。
+- VM 固定入口以现场 `authorized_keys` 的 `command=` 为准。2026-09-23 核对的应用虚拟机入口是 `/opt/saas-collab/release-control/unified/ci-control/bin/developer-a-ci-dispatch`；对应发布账本是该 `ci-control/current.json`，不是上一级 `unified/current.json`。
 - 允许的远程操作只有 `deploy`、`rollback` 和 `check`，入口拒绝 shell 元字符、路径跳转和任意命令。
 - V2.44.59 runner 只能通过 root-owned、无参数 bridge 调用本控制面；bridge
   仅消费 owner/CI 原子发布的候选 manifest，不接受 API 传入镜像、SHA、actor、reason
@@ -41,7 +41,7 @@
 
 ```sh
 sudo bash saas-collab-system/deploy/production-control/bin/install-control.sh \
-  --control-root=/opt/saas-collab/release-control/unified \
+  --control-root=/opt/saas-collab/release-control/unified/ci-control \
   --deploy-user=dfcy01 \
   --env-file=/etc/saas-collab/production/.env.production \
   --initialize-baseline \
@@ -51,7 +51,7 @@ sudo bash saas-collab-system/deploy/production-control/bin/install-control.sh \
 如果控制文件已安装，先复核差异，再显式增加 `--force`。安装脚本只安装固定入口、脚本、公共 Compose 和 root-owned 基线账本；它不会生成生产密钥，也不会改写授权 key。建议使用单独生成的 CI key，并在 `~dfcy01/.ssh/authorized_keys` 加入类似以下的一行（路径、指纹和 key 内容由 owner 实际生成）：
 
 ```text
-restrict,command="/opt/saas-collab/release-control/unified/bin/developer-a-ci-dispatch" ssh-ed25519 AAAA... production-ci
+restrict,command="/opt/saas-collab/release-control/unified/ci-control/bin/developer-a-ci-dispatch" ssh-ed25519 AAAA... production-ci
 ```
 
 如果 OpenSSH 版本不接受 `restrict`，使用等价的 `no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty` 选项，并保留 `command=`。不要复用开发 A 的个人 key，也不要在 authorized_keys 中允许普通 shell。

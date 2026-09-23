@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Forced-command target for the dedicated CI SSH key. The authorized_keys entry
-# must contain command="/opt/saas-collab/release-control/unified/bin/developer-a-ci-dispatch",restrict.
+# must contain command="<installed-control-root>/bin/developer-a-ci-dispatch",restrict.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
