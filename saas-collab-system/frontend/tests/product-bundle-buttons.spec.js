@@ -84,6 +84,11 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('const input = prepareImportRow(rows[index], headers, index + 1)');
     expect(page).toContain('const result = await createBundle(input)');
     expect(page).toContain("'图片URL'");
+    expect(page).toContain("'旧SPU编码', '旧SKU编码', '*组合商品名称'");
+    expect(page).toContain("const legacySpuCode = importValue(values, headers, '旧SPU编码')");
+    expect(page).toContain("const legacySkuCode = importValue(values, headers, '旧SKU编码')");
+    expect(page).toContain('legacy_spu_code: legacySpuCode');
+    expect(page).toContain('legacy_sku_code: legacySkuCode');
     expect(page).toContain("const imageUrl = importValue(values, headers, '图片URL')");
     expect(page).toContain('cacheProductBundleImage(result.sku.id, input.imageUrl)');
     expect(page).toContain('result.sku.image_url = cachedImageUrl');

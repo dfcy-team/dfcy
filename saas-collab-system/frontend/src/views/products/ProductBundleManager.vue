@@ -144,7 +144,7 @@
       <div class="import-upload-box" role="button" tabindex="0" @click="bundleImportInput?.click()" @keydown.enter="bundleImportInput?.click()">
         <span class="import-upload-icon">⇧</span>
         <strong>{{ bundleImportFileName || '点击选择 CSV 文件' }}</strong>
-        <small>图片URL列可选；填写公网 HTTP(S) 链接后会自动缓存图片，成功后下载 BigSeller 表</small>
+        <small>旧 SPU/SKU 编码仅管理员可填写；图片URL可选，填写公网 HTTP(S) 链接后自动缓存</small>
       </div>
       <el-button data-testid="bundle-import-template" class="import-template-link" link type="primary" @click="downloadBundleImportTemplate">下载组合商品导入模板</el-button>
       <template #footer>
@@ -414,13 +414,15 @@ function selectBundleImage(event) {
   bundleImageUrl.value = '';
 }
 
-async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, components }) {
+async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, legacySpuCode = '', legacySkuCode = '', components }) {
   const response = await createProductBundle({
     spu_mode: spuMode,
     existing_spu: spuMode === 'existing' ? existingSpu : null,
     product_name: name,
     category_node: category,
     season_code: season,
+    legacy_spu_code: legacySpuCode,
+    legacy_sku_code: legacySkuCode,
     color_code: color,
     components: components.map((component) => ({
       component_sku: component.sku,
@@ -551,7 +553,7 @@ function migrationErrorMessage(error) {
 
 function bundleImportHeaders() {
   return [
-    '*组合商品名称', '*末级分类编码', '*季节编码', '*组合颜色英文编码', '图片URL',
+    '旧SPU编码', '旧SKU编码', '*组合商品名称', '*末级分类编码', '*季节编码', '*组合颜色英文编码', '图片URL',
     ...Array.from({ length: 20 }, (_, index) => {
       const number = index + 1;
       const required = number === 1 ? '*' : '';
@@ -563,7 +565,7 @@ function bundleImportHeaders() {
 function downloadBundleImportTemplate() {
   const headers = bundleImportHeaders();
   const values = Array(headers.length).fill('');
-  [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7]] = ['示例组合商品', '10101', '5', 'white', '', 'NORMAL-SKU-001', 1, 1];
+  [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9]] = ['', '', '示例组合商品', '10101', '5', 'white', '', 'NORMAL-SKU-001', 1, 1];
   downloadCsv('组合商品导入模板.csv', headers, values);
 }
 
@@ -761,6 +763,8 @@ function importValue(values, headers, name) {
 }
 
 function prepareImportRow(values, headers, line) {
+  const legacySpuCode = importValue(values, headers, '旧SPU编码');
+  const legacySkuCode = importValue(values, headers, '旧SKU编码');
   const name = importValue(values, headers, '组合商品名称');
   const categoryCode = importValue(values, headers, '末级分类编码');
   const season = importValue(values, headers, '季节编码');
@@ -786,7 +790,7 @@ function prepareImportRow(values, headers, line) {
     components.push({ sku: sku.id, skuCode, quantity, costRatio });
   }
   if (!components.length) throw new Error('至少填写一个单品 SKU 及数量');
-  return { line, name, category: category.id, season, color, imageUrl, components };
+  return { line, name, category: category.id, season, color, legacySpuCode, legacySkuCode, imageUrl, components };
 }
 
 async function importBundleFile(file) {

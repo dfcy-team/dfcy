@@ -1040,6 +1040,8 @@ class ProductBundleCreateInputSerializer(serializers.Serializer):
     product_name = serializers.CharField(max_length=200, required=False)
     category_node = serializers.IntegerField(min_value=1, required=False)
     season_code = serializers.RegexField(r"^[0-9]$", required=False)
+    legacy_spu_code = serializers.CharField(max_length=120, required=False, allow_blank=True, trim_whitespace=True)
+    legacy_sku_code = serializers.CharField(max_length=160, required=False, allow_blank=True, trim_whitespace=True)
     color_code = serializers.CharField(max_length=40)
     components = ProductBundleCreateComponentInputSerializer(many=True, allow_empty=False, max_length=20)
 
@@ -1060,6 +1062,8 @@ class ProductBundleCreateInputSerializer(serializers.Serializer):
                 raise serializers.ValidationError({field: "This field is required." for field in missing})
         elif "existing_spu" not in attrs:
             raise serializers.ValidationError({"existing_spu": "This field is required when spu_mode is existing."})
+        if attrs["spu_mode"] == "existing" and attrs.get("legacy_spu_code"):
+            raise serializers.ValidationError({"legacy_spu_code": "旧 SPU 编码仅可在新建组合 SPU 时导入。"})
         return attrs
 
 

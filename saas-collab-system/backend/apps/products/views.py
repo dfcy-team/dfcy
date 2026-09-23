@@ -2585,6 +2585,11 @@ def product_bundle_create(request):
     input_serializer.is_valid(raise_exception=True)
     payload = input_serializer.validated_data
     tenant = request.user.tenant
+    if payload.get("legacy_spu_code") or payload.get("legacy_sku_code"):
+        from apps.permissions.role_catalog import user_is_tenant_administrator
+
+        if not (request.user.is_superuser or user_is_tenant_administrator(request.user, tenant)):
+            return error_response(ErrorCode.PERMISSION_DENIED, "只有平台超级管理员或租户管理员可以导入旧 SPU / SKU 编码。", status=403)
 
     spu_mode = payload["spu_mode"]
     existing_spu = None
@@ -2641,6 +2646,7 @@ def product_bundle_create(request):
                         "product_name": payload["product_name"],
                         "category_node": category.id,
                         "season_code": payload["season_code"],
+                        "legacy_spu_code": payload.get("legacy_spu_code", ""),
                         "product_type": ProductSPU.ProductType.BUNDLE,
                     },
                     context=context,
@@ -2656,7 +2662,12 @@ def product_bundle_create(request):
                 if isinstance(item, dict) and item.get("code")
             }
             sku_serializer = ProductSKUSerializer(
-                data={"spu": spu.id, "color_code": color_code, "spec_values": spec_values},
+                data={
+                    "spu": spu.id,
+                    "color_code": color_code,
+                    "spec_values": spec_values,
+                    "legacy_sku_code": payload.get("legacy_sku_code", ""),
+                },
                 context=context,
             )
             sku_serializer.is_valid(raise_exception=True)

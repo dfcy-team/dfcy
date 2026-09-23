@@ -16,13 +16,13 @@ from apps.products.models import (
 from apps.tenants.models import Tenant
 
 
-def _bundle_client(tenant, username="bundle-atomic-user"):
+def _bundle_client(tenant, username="bundle-atomic-user", administrator=False):
     user = CustomUser.objects.create_user(
         username=username,
         tenant=tenant,
         user_type=CustomUser.UserType.INTERNAL,
     )
-    role = Role.objects.create(tenant=tenant, code=f"{username}-role", name="Bundle atomic role")
+    role = Role.objects.create(tenant=tenant, code="administrator" if administrator else f"{username}-role", name="Bundle atomic role")
     role.permissions.add(*Permission.objects.filter(code__in=["products.bundle.view", "products.bundle.manage"]))
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
@@ -88,6 +88,29 @@ def test_bundle_create_commits_spu_sku_and_components_together():
     version = ProductBundleVersion.objects.get(bundle_sku_id=data["sku"]["id"])
     assert version.version == 1
     assert version.components.count() == 2
+
+
+@pytest.mark.django_db
+def test_bundle_create_imports_optional_legacy_codes_for_administrator_only():
+    tenant = Tenant.objects.create(name="Bundle legacy code tenant", code="bundle-legacy-codes")
+    client = _bundle_client(tenant, "bundle-legacy-regular")
+    admin_client = _bundle_client(tenant, "bundle-legacy-admin", administrator=True)
+    category = _catalog(tenant, "旧编码")
+    component = _component_sku(tenant, "LEGACY-COMPONENT")
+    payload = _payload(category, [component])
+    payload.update(legacy_spu_code="OLD-BUNDLE-SPU", legacy_sku_code="OLD-BUNDLE-SKU")
+
+    forbidden = client.post("/api/internal/products/bundles/create/", payload, format="json")
+    assert forbidden.status_code == 403
+    assert not ProductSPU.objects.filter(tenant=tenant, product_type=ProductSPU.ProductType.BUNDLE).exists()
+
+    created = admin_client.post("/api/internal/products/bundles/create/", payload, format="json")
+    assert created.status_code == 201
+    data = created.json()["data"]
+    assert data["spu"]["legacy_spu_code"] == "OLD-BUNDLE-SPU"
+    assert data["sku"]["legacy_sku_code"] == "OLD-BUNDLE-SKU"
+    assert ProductSPU.objects.get(pk=data["spu"]["id"]).legacy_spu_code == "OLD-BUNDLE-SPU"
+    assert ProductSKU.objects.get(pk=data["sku"]["id"]).legacy_sku_code == "OLD-BUNDLE-SKU"
 
 
 @pytest.mark.django_db
