@@ -204,7 +204,9 @@ export function downloadBigSellerProductWorkbook(details, filename = `BigSeller�
 
 export function downloadBigSellerBundleWorkbook(bundleSpus, skus, components, filename = `BigSeller组合商品SKU_${Date.now()}.xlsx`) {
   const rows = mapBundlesToBigSellerRows(bundleSpus, skus, components);
-  if (!rows.length) throw new Error('选中的组合商品没有完整的组合 SKU 关系');
+  const selectedSpuIds = new Set(bundleSpus.map((item) => String(item.id)));
+  const expectedSkuCount = skus.filter((sku) => selectedSpuIds.has(String(sku.spu))).length;
+  if (!rows.length || rows.length !== expectedSkuCount) throw new Error('选中的组合商品没有完整的组合 SKU 成分信息');
   downloadWorkbook(filename, BIGSELLER_BUNDLE_HEADERS, rows, 'Sheet1');
   return rows.length;
 }

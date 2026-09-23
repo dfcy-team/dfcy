@@ -2669,6 +2669,7 @@ def product_bundle_create(request):
                         "bundle_sku": sku.id,
                         "component_sku": component_payload["component_sku"],
                         "quantity": component_payload["quantity"],
+                        "cost_allocation_ratio": component_payload["cost_allocation_ratio"],
                     },
                     context=context,
                 )

@@ -46,8 +46,8 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('data-testid="bigseller-create-bundle-export"');
     expect(page).toContain('下载 BigSeller 组合商品SKU表');
     expect(page).toContain('@selection-change="selectBundleRows"');
-    expect(page).toContain(':disabled="!selectedBundles.length || importing"');
-    expect(page).toContain('downloadBigSellerBundleWorkbook(selectedBundles.value, skus.value, bundleComponents.value)');
+    expect(page).toContain(':disabled="!selectedBundles.length || importing || exporting"');
+    expect(page).toContain('downloadBigSellerBundleWorkbook(selectedBundles.value, selectedSkus, relations)');
   });
 
   it('二期支持组合版本、库存可用量和全部旧组合关系的预览确认迁移', () => {
@@ -82,6 +82,9 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).not.toContain('createProductSku');
     expect(page).not.toContain('createBundleComponent');
     expect(page).toContain('const result = await createBundle(prepareImportRow');
+    expect(page).toContain('cost_allocation_ratio: component.costRatio ?? 1');
+    expect(page).toContain('const components = detailData(response.data)?.components || []');
+    expect(page).toContain('bundle_sku: sku.id');
     expect(page).toContain('downloadBigSellerBundleWorkbook(createdSpus, createdSkus, createdComponents)');
     expect(page).toContain("'*组合商品名称', '*末级分类编码', '*季节编码', '*组合颜色英文编码'");
     expect(page).toContain('index <= 20');

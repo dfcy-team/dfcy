@@ -52,11 +52,15 @@ describe('BigSeller xlsx 生成', () => {
     const rows = mapBundlesToBigSellerRows(
       [{ id: 8, product_name: '组合商品' }],
       [{ id: 9, spu: 8, sku_code: 'BUNDLE-01' }],
-      [{ bundle_sku: 9, component_sku_code: 'SINGLE-01', quantity: 2, cost_allocation_ratio: 0.6 }],
+      [
+        { bundle_sku: 9, component_sku_code: 'SINGLE-01', quantity: 2, cost_allocation_ratio: 0.6 },
+        { bundle_sku: 9, component_sku_code: 'SINGLE-02', quantity: 3, cost_allocation_ratio: 0.4 },
+      ],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].slice(0, 2)).toEqual(['BUNDLE-01', '组合商品']);
     expect(rows[0].slice(14, 17)).toEqual(['SINGLE-01', 2, 0.6]);
+    expect(rows[0].slice(17, 20)).toEqual(['SINGLE-02', 3, 0.4]);
 
     const zeroRatio = mapBundlesToBigSellerRows(
       [{ id: 8, product_name: '组合商品' }],

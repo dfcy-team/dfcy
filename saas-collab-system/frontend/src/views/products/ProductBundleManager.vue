@@ -14,7 +14,7 @@
               <el-dropdown-item command="bundle-import" data-testid="bundle-import-button">组合商品导入</el-dropdown-item>
               <el-dropdown-item command="legacy-migration" data-testid="bundle-legacy-migration-button">旧组合关系迁移</el-dropdown-item>
               <el-dropdown-item divided disabled>导出</el-dropdown-item>
-              <el-dropdown-item command="bigseller-export" data-testid="bigseller-create-bundle-export" :disabled="!selectedBundles.length || importing">
+              <el-dropdown-item command="bigseller-export" data-testid="bigseller-create-bundle-export" :disabled="!selectedBundles.length || importing || exporting">
                 下载 BigSeller 组合商品SKU表
               </el-dropdown-item>
             </el-dropdown-menu>
@@ -129,11 +129,12 @@
           </section>
 
           <section id="bundle-components" class="bundle-section-card">
-            <div class="section-heading"><div><h3>组合信息</h3><p>选择普通商品 SKU 并设置每套组合所需数量，最多 20 项。</p></div><el-button type="primary" plain :disabled="form.components.length >= 20" @click="addFormComponent">+ 选择商品 SKU</el-button></div>
-            <div class="component-grid component-grid-head"><span>商品 SKU</span><span>每套数量</span><span>操作</span></div>
+            <div class="section-heading"><div><h3>组合信息</h3><p>选择普通商品 SKU，设置每套数量与成本价分摊比，最多 20 项。</p></div><el-button type="primary" plain :disabled="form.components.length >= 20" @click="addFormComponent">+ 选择商品 SKU</el-button></div>
+            <div class="component-grid component-grid-head"><span>商品 SKU</span><span>每套数量</span><span>成本价分摊比</span><span>操作</span></div>
             <div v-for="(item, index) in form.components" :key="index" class="component-grid">
               <el-select v-model="item.sku" filterable placeholder="搜索并选择普通 SKU"><el-option v-for="sku in normalSkus" :key="sku.id" :label="sku.sku_code" :value="sku.id" /></el-select>
               <el-input-number v-model="item.quantity" :min="1" />
+              <el-input-number v-model="item.costRatio" :min="0.0001" :precision="4" :step="0.1" />
               <el-button link type="danger" :disabled="form.components.length === 1" @click="form.components.splice(index, 1)">删除</el-button>
             </div>
           </section>
@@ -198,9 +199,10 @@
             <div v-for="(item, index) in editForm.components" :key="index">
               <el-select v-model="item.sku" filterable><el-option v-for="sku in normalSkus" :key="sku.id" :label="sku.sku_code" :value="sku.id" /></el-select>
               <el-input-number v-model="item.quantity" :min="1" />
+              <el-input-number v-model="item.costRatio" :min="0.0001" :precision="4" :step="0.1" />
               <el-button @click="editForm.components.splice(index, 1)">删除</el-button>
             </div>
-            <el-button :disabled="editForm.components.length >= 20" @click="editForm.components.push({ sku: null, quantity: 1 })">添加组成 SKU</el-button>
+            <el-button :disabled="editForm.components.length >= 20" @click="editForm.components.push({ sku: null, quantity: 1, costRatio: 1 })">添加组成 SKU</el-button>
           </div>
         </el-form-item>
       </el-form>
@@ -308,6 +310,7 @@ const bundleImageFile = ref(null);
 const bundleImagePreview = ref('');
 const bundleImageUrl = ref('');
 const importing = ref(false);
+const exporting = ref(false);
 const bundleImportVisible = ref(false);
 const bundleImportInput = ref(null);
 const bundleImportUpload = ref(null);
@@ -330,7 +333,7 @@ const emptyMigrationBreakdown = () => ({ bundleNotFound: 0, bundleMultiple: 0, c
 const migrationPreview = reactive({ token: '', bundleCount: 0, relationCount: 0, errorCount: 0, errorBreakdown: emptyMigrationBreakdown(), rows: [], errors: [], rejectedRows: [] });
 const form = reactive({
   spuMode: 'new', existingSpu: null, name: '', category: null, season: '5', color: null,
-  components: [{ sku: null, quantity: 1 }],
+  components: [{ sku: null, quantity: 1, costRatio: 1 }],
 });
 
 const bundles = computed(() => spus.value.filter((item) => item.product_type === 'bundle'));
@@ -394,7 +397,7 @@ async function load() {
 }
 
 function addFormComponent() {
-  if (form.components.length < 20) form.components.push({ sku: null, quantity: 1 });
+  if (form.components.length < 20) form.components.push({ sku: null, quantity: 1, costRatio: 1 });
 }
 
 function clearBundleImage() {
@@ -439,6 +442,7 @@ async function createBundle({ spuMode = 'new', existingSpu = null, name, categor
     components: components.map((component) => ({
       component_sku: component.sku,
       quantity: component.quantity,
+      cost_allocation_ratio: component.costRatio ?? 1,
     })),
   });
   if (!response.success) throw new Error(response.message || '组合商品原子创建失败');
@@ -449,7 +453,7 @@ async function createBundle({ spuMode = 'new', existingSpu = null, name, categor
       || components[index]?.skuCode
       || normalSkus.value.find((item) => String(item.id) === String(component.component_sku))?.sku_code
       || '',
-    cost_allocation_ratio: components[index]?.costRatio ?? 1,
+    cost_allocation_ratio: component.cost_allocation_ratio ?? components[index]?.costRatio ?? 1,
   }));
   return { spu: created.spu, sku: created.sku, components: createdComponents };
 }
@@ -457,7 +461,7 @@ async function createBundle({ spuMode = 'new', existingSpu = null, name, categor
 async function save() {
   if ((form.spuMode === 'new' && (!form.name || !form.category))
     || (form.spuMode === 'existing' && !form.existingSpu)
-    || !form.color || !form.components.length || form.components.some((item) => !item.sku)) {
+    || !form.color || !form.components.length || form.components.some((item) => !item.sku || !Number.isFinite(Number(item.costRatio)) || Number(item.costRatio) <= 0)) {
     ElMessage.warning('请完整填写组合商品及组成 SKU');
     return;
   }
@@ -612,7 +616,7 @@ async function openEdit(row) {
     const detail = detailData(response.data) || {};
     const current = detail.components || detail.current_components
       || bundleComponents.value.filter((item) => String(item.bundle_sku?.id ?? item.bundle_sku) === String(row.sku_id));
-    editForm.components = current.map((item) => ({ sku: componentSkuId(item), quantity: Number(item.quantity || 1) }));
+    editForm.components = current.map((item) => ({ sku: componentSkuId(item), quantity: Number(item.quantity || 1), costRatio: Number(item.cost_allocation_ratio ?? 1) }));
     bundleVersions.value = detail.versions || detail.version_history || [];
   } catch (error) {
     ElMessage.error(error?.message || '读取组合关系失败');
@@ -621,7 +625,7 @@ async function openEdit(row) {
 
 async function saveEdit() {
   if (!editForm.effectiveAt || !editForm.reason.trim() || !editForm.components.length
-    || editForm.components.some((item) => !item.sku || !Number.isInteger(Number(item.quantity)))) {
+    || editForm.components.some((item) => !item.sku || !Number.isInteger(Number(item.quantity)) || !Number.isFinite(Number(item.costRatio)) || Number(item.costRatio) <= 0)) {
     ElMessage.warning('请填写生效时间、变更原因和完整组成 SKU');
     return;
   }
@@ -630,7 +634,7 @@ async function saveEdit() {
     const response = await updateProductBundle(editForm.skuId, {
       effective_at: editForm.effectiveAt,
       reason: editForm.reason.trim(),
-      components: editForm.components.map((item) => ({ component_sku: item.sku, quantity: Number(item.quantity) })),
+      components: editForm.components.map((item) => ({ component_sku: item.sku, quantity: Number(item.quantity), cost_allocation_ratio: Number(item.costRatio) })),
     });
     if (response.success === false) throw new Error(response.message || '组合关系保存失败');
     editVisible.value = false;
@@ -799,7 +803,7 @@ function prepareImportRow(values, headers, line) {
     const quantity = Number(quantityValue);
     if (!Number.isInteger(quantity) || quantity < 1) throw new Error(`SKU${index}数量必须是大于 0 的整数`);
     const costRatio = costRatioValue === '' ? 1 : Number(costRatioValue);
-    if (!Number.isFinite(costRatio) || costRatio < 0) throw new Error(`SKU${index}成本价分摊比必须是非负数`);
+    if (!Number.isFinite(costRatio) || costRatio <= 0) throw new Error(`SKU${index}成本价分摊比必须大于 0`);
     components.push({ sku: sku.id, skuCode, quantity, costRatio });
   }
   if (!components.length) throw new Error('至少填写一个单品 SKU 及数量');
@@ -845,12 +849,37 @@ async function importBundleFile(file) {
   }
 }
 
-function exportSelectedBundles() {
+async function exportSelectedBundles() {
+  if (exporting.value) return;
+  exporting.value = true;
   try {
-    const count = downloadBigSellerBundleWorkbook(selectedBundles.value, skus.value, bundleComponents.value);
+    const selectedSkus = [];
+    for (const spu of selectedBundles.value) {
+      for (let page = 1; ; page += 1) {
+        const response = await fetchProductSkuList({ spu_id: spu.id, page, page_size: 100 });
+        if (!response.success) throw new Error(response.message || '读取组合 SKU 失败');
+        const rows = collectionRows(response.data);
+        selectedSkus.push(...rows);
+        if (rows.length < 100) break;
+      }
+    }
+    if (!selectedSkus.length) throw new Error('所选组合商品没有 SKU');
+    const relations = [];
+    for (const sku of selectedSkus) {
+      const response = await fetchProductBundleDetail(sku.id);
+      if (!response.success) throw new Error(response.message || `读取组合 SKU ${sku.sku_code} 成分失败`);
+      const components = detailData(response.data)?.components || [];
+      if (!components.length || components.some((item) => !item.component_sku_code)) {
+        throw new Error(`组合 SKU ${sku.sku_code} 缺少完整成分信息，无法导出`);
+      }
+      relations.push(...components.map((item) => ({ ...item, bundle_sku: sku.id })));
+    }
+    const count = downloadBigSellerBundleWorkbook(selectedBundles.value, selectedSkus, relations);
     ElMessage.success(`已生成 ${count} 条 BigSeller 组合商品 SKU 数据`);
   } catch (error) {
     ElMessage.warning(error?.message || '生成 BigSeller 组合商品SKU表失败');
+  } finally {
+    exporting.value = false;
   }
 }
 
@@ -876,7 +905,7 @@ onMounted(async () => {
 .import-upload-icon { color: #64748b; font-size: 28px; line-height: 1; }
 .import-template-link { margin-top: 8px; }
 .components { display: grid; gap: 10px; width: 100%; }
-.components > div { display: grid; grid-template-columns: 1fr 130px auto; gap: 10px; }
+.components > div { display: grid; grid-template-columns: 1fr 130px 150px auto; gap: 10px; }
 .field-help { margin-top: 6px; color: #64748b; font-size: 12px; }
 .summary-alert { margin: 16px 0; }
 .muted { color: #94a3b8; }
@@ -911,7 +940,7 @@ onMounted(async () => {
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .section-heading h3 { margin-bottom: 5px; }
 .section-heading p, .section-note { margin: 0; color: #64748b; line-height: 1.7; }
-.component-grid { display: grid; grid-template-columns: minmax(0, 1fr) 150px 70px; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #ebeef5; border-top: 0; }
+.component-grid { display: grid; grid-template-columns: minmax(0, 1fr) 130px 150px 70px; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #ebeef5; border-top: 0; }
 .component-grid-head { padding: 9px 12px; border-top: 1px solid #ebeef5; background: #f8fafc; color: #64748b; font-size: 12px; font-weight: 600; }
 .bundle-anchor-nav { position: sticky; top: 82px; padding: 4px 0; border-left: 1px solid #d8dee9; display: grid; gap: 2px; }
 .bundle-anchor-nav a { position: relative; padding: 9px 16px; color: #64748b; text-decoration: none; font-size: 13px; }
@@ -923,6 +952,6 @@ onMounted(async () => {
   .bundle-editor-shell { width: calc(100vw - 24px); grid-template-columns: 1fr; }
   .bundle-anchor-nav { display: none; }
   .inline-fields { grid-template-columns: 1fr; }
-  .component-grid { grid-template-columns: minmax(0, 1fr) 110px 54px; }
+  .component-grid { grid-template-columns: minmax(0, 1fr) 110px 130px 54px; }
 }
 </style>

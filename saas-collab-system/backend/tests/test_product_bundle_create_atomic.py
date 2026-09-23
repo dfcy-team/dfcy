@@ -91,6 +91,30 @@ def test_bundle_create_commits_spu_sku_and_components_together():
 
 
 @pytest.mark.django_db
+def test_bundle_create_keeps_imported_ratios_in_components_and_first_version():
+    tenant = Tenant.objects.create(name="Bundle create ratio tenant", code="bundle-create-ratio")
+    client = _bundle_client(tenant, "bundle-create-ratio-user")
+    category = _catalog(tenant, "创建分摊")
+    component = _component_sku(tenant, "CREATE-RATIO-A")
+    payload = _payload(category, [component])
+    payload["components"][0]["cost_allocation_ratio"] = "0.6250"
+
+    created = client.post("/api/internal/products/bundles/create/", payload, format="json")
+    assert created.status_code == 201
+    data = created.json()["data"]
+    assert data["components"][0]["cost_allocation_ratio"] == "0.6250"
+    sku_id = data["sku"]["id"]
+    detail = client.get(f"/api/internal/products/bundles/{sku_id}/").json()["data"]
+    assert detail["components"][0]["cost_allocation_ratio"] == "0.6250"
+    assert detail["versions"][0]["components"][0]["cost_allocation_ratio"] == "0.6250"
+
+    payload["components"][0]["cost_allocation_ratio"] = "0"
+    rejected = client.post("/api/internal/products/bundles/create/", payload, format="json")
+    assert rejected.status_code == 400
+    assert ProductBundleComponent.objects.filter(tenant=tenant).count() == 1
+
+
+@pytest.mark.django_db
 def test_bundle_edit_persists_cost_allocation_ratio_in_current_and_version_data():
     tenant = Tenant.objects.create(name="Bundle ratio tenant", code="bundle-ratio")
     client = _bundle_client(tenant, "bundle-ratio-user")

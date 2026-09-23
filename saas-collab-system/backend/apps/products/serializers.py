@@ -1031,6 +1031,7 @@ class ProductDetailBulkUpdateSerializer(serializers.Serializer):
 class ProductBundleCreateComponentInputSerializer(serializers.Serializer):
     component_sku = serializers.IntegerField(min_value=1)
     quantity = serializers.IntegerField(min_value=1)
+    cost_allocation_ratio = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal("0.0001"), default=Decimal("1"))
 
 
 class ProductBundleCreateInputSerializer(serializers.Serializer):
