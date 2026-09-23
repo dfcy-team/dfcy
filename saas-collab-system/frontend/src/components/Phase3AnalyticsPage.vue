@@ -52,6 +52,7 @@
         </dl>
       </section>
       <p v-if="quality.note" class="quality-note">{{ quality.note }}</p>
+      <slot name="after-quality" :data="reportData" />
 
       <section v-if="metrics.length" class="metric-grid" aria-label="核心经营指标">
         <article v-for="metric in metrics" :key="metric.code" class="metric-card">
@@ -150,6 +151,7 @@ const loading = ref(false);
 const errorMessage = ref('');
 const apiStatus = ref('mock');
 const quality = ref({});
+const reportData = ref({});
 const metrics = ref([]);
 const trend = ref([]);
 const trendMessage = ref('');
@@ -322,6 +324,7 @@ async function loadData() {
       apiStatus.value = 'pending';
       errorMessage.value = formatApiError(response);
       quality.value = {};
+      reportData.value = {};
       metrics.value = [];
       trend.value = [];
       items.value = [];
@@ -329,6 +332,7 @@ async function loadData() {
       return;
     }
     const data = response.data || {};
+    reportData.value = data;
     apiStatus.value = data.api_status || data.status || 'mock';
     quality.value = data.quality || {};
     metrics.value = Array.isArray(data.metrics) ? data.metrics : [];
@@ -343,6 +347,7 @@ async function loadData() {
     apiStatus.value = 'pending';
     errorMessage.value = formatApiError(error?.response || { message: error?.message });
     quality.value = {};
+    reportData.value = {};
     metrics.value = [];
     trend.value = [];
     items.value = [];

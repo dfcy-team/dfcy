@@ -32,6 +32,11 @@ def test_latest_snapshot_and_daily_trend_do_not_sum_repeat_syncs(inventory):
     assert [point['total'] for point in data['trend']] == [12, 3]
     assert data['quality']['mapped_count'] == 0
     assert data['quality']['total_count'] == 1
+    assert data['quality']['unmapped_count'] == 1
+    assert data['risk_summary']['low_stock'] == 1
+    assert data['risk_summary']['data_insufficient'] == 1
+    assert data['trend_status'] == 'ready'
+    assert data['freshness']['status'] in ('fresh', 'delayed', 'stale')
     assert data['warehouse_options'] == [{'value': warehouse.id, 'label': f'{warehouse.name}（{warehouse.code}）'}]
 
 
@@ -61,6 +66,8 @@ def test_latest_snapshot_excludes_other_sources_and_combines_quality_counts(inve
     assert data['count'] == 3
     assert data['quality']['total_count'] == 3
     assert data['quality']['mapped_count'] == 1
+    assert data['quality']['unmapped_count'] == 2
+    assert data['quality']['mapping_rate'] == 33.3
     assert data['summary_metrics'][-1]['value'] == 3
     assert data['summary_metrics'][-1]['change'] == '缺货 1 · 低库存 2'
     assert data['metrics'][0]['value'] == '7'
@@ -81,7 +88,24 @@ def test_risk_filter_applies_after_latest_and_to_trend(inventory):
     assert [point['total'] for point in data['trend']] == [12]
 
 
-@pytest.mark.parametrize('query', [{'include_virtual': 'invalid'}, {'risk': 'high'}, {'warehouse_id': 'demo'},
+def test_mapping_filter_does_not_resurrect_older_snapshot(inventory):
+    from apps.products.models import ProductSKU, ProductSPU
+
+    client, warehouse, snapshot = inventory
+    spu = ProductSPU.objects.create(tenant=warehouse.tenant, spu_code='MAP-SPU', product_name='Mapped')
+    sku = ProductSKU.objects.create(tenant=warehouse.tenant, spu=spu, sku_code='MAP-SKU')
+    older = snapshot('MAPPING-CHANGED', NOW, 8)
+    older.internal_sku = sku
+    older.save()
+    snapshot('MAPPING-CHANGED', NOW + timedelta(days=1), 4)
+    mapped = client.get('/api/internal/analytics/inventory/', {'mapping_status': 'mapped'}).json()['data']
+    assert mapped['count'] == 0
+    unmapped = client.get('/api/internal/analytics/inventory/', {'mapping_status': 'unmapped'}).json()['data']
+    assert unmapped['count'] == 2
+    assert unmapped['quality']['unmapped_count'] == 2
+
+
+@pytest.mark.parametrize('query', [{'include_virtual': 'invalid'}, {'risk': 'high'}, {'mapping_status': 'broken'}, {'warehouse_id': 'demo'},
     {'period_start': 'bad'}, {'period_start': '2026-08-19', 'period_end': '2026-08-17'}])
 def test_invalid_inventory_filters_fail_explicitly(inventory, query):
     client, _, _ = inventory
@@ -94,6 +118,8 @@ def test_empty_period_has_no_fabricated_inventory(inventory):
     assert data['count'] == 0
     assert data['trend'] == []
     assert data['quality']['total_count'] == 0
+    assert data['freshness']['status'] == 'pending'
+    assert data['risk_summary']['data_insufficient'] == 0
 
 
 def test_virtual_filter_controls_latest_rows_totals_trend_and_pagination(inventory):
