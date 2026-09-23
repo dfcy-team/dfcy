@@ -9,6 +9,7 @@ const Dashboard = () => import('../views/dashboard/Index.vue');
 const BusinessOverview = () => import('../views/analytics/BusinessOverview.vue');
 const SalesAnalysis = () => import('../views/analytics/SalesAnalysis.vue');
 const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue');
+const InventoryWorkbench = () => import('../views/inventory/InventoryWorkbench.vue');
 const AdvertisingOverview = () => import('../views/analytics/AdvertisingOverview.vue');
 const AdvertisingPerformance = () => import('../views/analytics/AdvertisingPerformance.vue');
 const InventoryAlertList = () => import('../views/inventory/InventoryAlertList.vue');
@@ -154,6 +155,7 @@ const routes = [
       { path: 'analytics/overview', component: BusinessOverview },
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
+      { path: 'inventory/workbench', component: InventoryWorkbench },
       { path: 'analytics/advertising-overview', component: AdvertisingOverview },
       { path: 'analytics/advertising-performance', component: AdvertisingPerformance },
       { path: 'decision/inventory/alerts', component: InventoryAlertList },

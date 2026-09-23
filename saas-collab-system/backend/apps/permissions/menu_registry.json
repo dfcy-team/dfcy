@@ -520,6 +520,25 @@
       }
     },
     {
+      "code": "menu.sales_management.inventory_workbench.view",
+      "name": "库存工作台",
+      "module": "sales_management",
+      "action": "inventory_workbench.view",
+      "description": "显示库存工作台入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/inventory/workbench",
+        "route": "/inventory/workbench",
+        "resource": "inventory_workbench",
+        "parent": "库存管理",
+        "action_codes": [
+          "sales_management.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.alerts.decision_inventory_alerts.view",
       "name": "库存预警",
       "module": "alerts",
@@ -2191,6 +2210,18 @@
       ],
       "menuPermissions": [
         "menu.analytics.analytics_inventory.view"
+      ]
+    },
+    {
+      "path": "/inventory/workbench",
+      "permissions": [
+        "sales_management.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.inventory_workbench.view"
       ]
     },
     {
