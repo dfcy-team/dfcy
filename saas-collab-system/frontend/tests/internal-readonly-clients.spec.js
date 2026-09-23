@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mockCreateInternalReadonlyClient, mockInternalReadonlyClients, mockRotateInternalReadonlyCredential } from '../src/mock/internalReadonly';
+import { internalReadonlyModules, internalReadonlyResources } from '../src/config/internalReadonlyResources';
 
 const read = (file) => fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
 
@@ -26,5 +27,16 @@ describe('内部系统只读调用方配置', () => {
     for (const field of ['name','caller_type','resources','fields','cidrs','rate_limit','page_size','expires_at']) expect(page).toContain(field);
     expect(page).toContain('/api/internal-readonly/v1/ 尚未上线');
     expect(page).toContain('@closed="oneTimeCredential=null"');
+  });
+
+  it('允许资源覆盖主要业务域并为每项定义字段白名单', () => {
+    expect(internalReadonlyModules).toHaveLength(5);
+    expect(internalReadonlyResources).toHaveLength(14);
+    expect(internalReadonlyResources.map((item) => item.code)).toEqual(expect.arrayContaining([
+      'products', 'platform_products', 'suppliers', 'stores', 'warehouses', 'purchase_orders',
+      'supplier_shipments', 'sales_orders', 'sales_returns', 'inventory_snapshots', 'shipments',
+      'influencers', 'outreach_tasks', 'sample_fulfillments',
+    ]));
+    expect(internalReadonlyResources.every((item) => item.module && item.fields.includes('id') && item.fields.length > 1)).toBe(true);
   });
 });
