@@ -32,6 +32,9 @@ describe('库存分析真实页面', () => {
       metrics: [{ code: 'inventory_total', label: '在手库存', value: 12, unit: '件' }],
       results: [{ source_sku: 'FAKE-SKU-001', warehouse_code: 'THCS', warehouse_name: '测试仓', on_hand_qty: 12, available_qty: 10, reserved_qty: 2, in_transit_qty: 0, risk_label: '正常' }],
       trend: [{ date: '2026-09-11', total: 12 }],
+      risk_summary: { out_of_stock: 2, low_stock: 3, locked_stock: 1, data_insufficient: 965 },
+      freshness: { status: 'delayed', age_hours: 48 },
+      definition: { replenishment_basis: '缺少销量速度，暂不计算补货建议。' },
     } }));
   });
 
@@ -45,8 +48,26 @@ describe('库存分析真实页面', () => {
     expect(wrapper.text()).toContain('待关联');
     expect(wrapper.text()).not.toContain('inventory_total');
     expect(wrapper.text()).toContain('仅有 1 天');
+    expect(wrapper.text()).toContain('快照时效');
+    expect(wrapper.text()).toContain('延迟');
+    expect(wrapper.text()).toContain('缺少销量速度');
     expect(wrapper.text()).not.toContain('演示');
     expect(wrapper.findAll('option').map(option => option.text())).toContain('测试仓（THCS）');
+    wrapper.unmount();
+  });
+
+  it('applies SKU mapping filter with pagination reset', async () => {
+    const wrapper = mount(InventoryAnalysis, { global: { stubs } });
+    await flushPromises();
+    const page = wrapper.findComponent(Phase3AnalyticsPage);
+    page.vm.currentPage = 4;
+    page.vm.query.mapping_status = 'unmapped';
+    await wrapper.find('form').trigger('submit');
+    await flushPromises();
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, mapping_status: 'unmapped' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     wrapper.unmount();
   });
 
