@@ -22,11 +22,14 @@ from .models import ProductCostVersion, ProductSKU
 
 
 EXPECTED_COLUMNS = (
-    "sku_code", "effective_from", "effective_to", "currency", "purchase_cost",
+    "effective_from", "effective_to", "currency", "purchase_cost",
     "freight_cost", "duty_cost", "packaging_cost", "other_cost", "confirmed_cost", "reason",
 )
 HEADER_ALIASES = {
     "SKU编码": "sku_code",
+    "SKU编码（二选一）": "sku_code",
+    "旧SKU编码": "legacy_sku_code",
+    "旧SKU编码（二选一）": "legacy_sku_code",
     "生效开始": "effective_from",
     "生效结束": "effective_to",
     "币种": "currency",
@@ -192,21 +195,50 @@ def parse_and_validate(*, tenant, raw, filename=""):
         label = str(value or "").strip().lstrip("*").strip()
         headers.append(HEADER_ALIASES.get(label, label.lower()))
     missing = [field for field in EXPECTED_COLUMNS if field not in headers]
+    if "sku_code" not in headers and "legacy_sku_code" not in headers:
+        missing.insert(0, "sku_code or legacy_sku_code")
     if missing:
         errors.append({"row": 1, "field": "headers", "message": "Missing columns: %s." % ", ".join(missing)})
         return parsed, errors, digest
     index = {field: headers.index(field) for field in EXPECTED_COLUMNS}
-    sku_map = {item.sku_code: item for item in ProductSKU.objects.filter(tenant=tenant)}
+    for optional_identifier in ("sku_code", "legacy_sku_code"):
+        if optional_identifier in headers:
+            index[optional_identifier] = headers.index(optional_identifier)
+    tenant_skus = list(ProductSKU.objects.filter(tenant=tenant))
+    sku_map = {item.sku_code: item for item in tenant_skus}
+    legacy_sku_map = {}
+    duplicate_legacy_codes = set()
+    for item in tenant_skus:
+        legacy_code = str(item.legacy_sku_code or "").strip()
+        if not legacy_code:
+            continue
+        if legacy_code in legacy_sku_map:
+            duplicate_legacy_codes.add(legacy_code)
+        else:
+            legacy_sku_map[legacy_code] = item
     for number, values in enumerate(rows[1:], start=2):
         if not any(str(value or "").strip() for value in values):
             continue
         record = {field: (values[position] if position < len(values) else "") for field, position in index.items()}
         row_errors = []
-        sku_code = str(record["sku_code"] or "").strip()
-        sku = sku_map.get(sku_code)
-        if not sku:
+        sku_code = str(record.get("sku_code") or "").strip()
+        legacy_sku_code = str(record.get("legacy_sku_code") or "").strip()
+        current_match = sku_map.get(sku_code) if sku_code else None
+        legacy_match = legacy_sku_map.get(legacy_sku_code) if legacy_sku_code else None
+        if not sku_code and not legacy_sku_code:
+            row_errors.append(("sku_code", "SKU编码和旧SKU编码至少填写一项。"))
+        if sku_code and not current_match:
             row_errors.append(("sku_code", "SKU does not exist in the current tenant."))
-        cleaned = {"sku": sku, "sku_code": sku_code}
+        if legacy_sku_code in duplicate_legacy_codes:
+            row_errors.append(("legacy_sku_code", "旧SKU编码对应多个SKU，无法唯一识别。"))
+            legacy_match = None
+        elif legacy_sku_code and not legacy_match:
+            row_errors.append(("legacy_sku_code", "旧SKU编码在当前租户不存在。"))
+        if current_match and legacy_match and current_match.pk != legacy_match.pk:
+            row_errors.append(("legacy_sku_code", "SKU编码与旧SKU编码对应的商品不一致。"))
+        sku = current_match or legacy_match
+        canonical_sku_code = sku.sku_code if sku else sku_code
+        cleaned = {"sku": sku, "sku_code": canonical_sku_code, "legacy_sku_code": legacy_sku_code}
         for field in ("effective_from", "effective_to"):
             try:
                 cleaned[field] = _datetime(record[field], field)

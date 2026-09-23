@@ -75,9 +75,10 @@ describe('商品成本菜单与页面契约', () => {
     expect(page).toContain('cost-template-download');
     expect(page).toContain('下载导入模板');
     expect(page).toContain('商品成本导入模板.csv');
-    expect(page).toContain("'*SKU编码', '*生效开始', '生效结束', '*币种'");
+    expect(page).toContain("'SKU编码（二选一）', '旧SKU编码（二选一）', '*生效开始', '生效结束', '*币种'");
+    expect(page).toContain('SKU编码和旧SKU编码二选一');
     expect(page).toContain("'*确认成本'");
-    expect(page).toContain('模板中带 * 的列为必填项');
+    expect(page).toContain('其余带 * 的列为必填项');
     expect(page).not.toContain('CSV/XLSX 列：<code>sku_code</code>');
   });
 
