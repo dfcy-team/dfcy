@@ -41,6 +41,10 @@ describe('飞书协同工作台', () => {
     expect(page).toContain('查询飞书用户');
     expect(page).toContain('选择飞书用户');
     expect(page).toContain('不会仅凭姓名自动绑定');
+    expect(page).toContain('匹配依据');
+    expect(page).toContain('row.match_reason');
+    expect(page).toContain('candidateMessage');
+    expect(page).toContain('请核对 Open ID 和匹配依据后绑定');
     expect(page).toContain('@click="confirmIdentityBinding"');
     expect(api).toContain('fetchFeishuIdentityCandidates');
     expect(api).toContain('identities/system-users/${systemUserId}/candidates/');
