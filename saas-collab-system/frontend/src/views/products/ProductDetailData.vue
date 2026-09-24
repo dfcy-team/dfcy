@@ -565,7 +565,7 @@
       <div class="import-upload-box" role="button" tabindex="0" @click="legacyImportInput?.click()" @keydown.enter="legacyImportInput?.click()">
         <span class="import-upload-icon">⇧</span>
         <strong>{{ legacyImportFileName || '点击选择 CSV 文件' }}</strong>
-        <small>支持旧商品档案的新增或增量更新</small>
+        <small>合并补充 BigSeller 已有商品，并生成系统内新 SPU / SKU 编码</small>
       </div>
       <el-button data-testid="legacy-import-template" class="import-template-link" link type="primary" @click="downloadLegacyTemplate">下载旧档案模板</el-button>
       <template #footer>
@@ -578,14 +578,14 @@
       <el-steps :active="importStep" finish-status="success" align-center>
         <el-step title="读取文件" />
         <el-step title="校验数据" />
-        <el-step :title="activeImportKind === 'create' ? '创建商品' : '写入档案'" />
+        <el-step :title="activeImportKind === 'create' ? '创建商品' : '写入档案并生成编码'" />
         <el-step v-if="activeImportKind === 'create'" title="生成 BigSeller 表" />
         <el-step title="完成" />
       </el-steps>
       <el-progress class="import-progress" :percentage="importPercent" :indeterminate="importing" :duration="8" />
       <p class="import-status">{{ importStage }} · 已用时 {{ formatDuration(importElapsed) }}</p>
       <p v-if="activeImportKind === 'create'" class="import-hint">填写“新 SPU 编码”可向已有 SPU 增加不同颜色或规格的 SKU；留空则按商品编码规则自动生成新 SPU / SKU。</p>
-      <p v-else class="import-hint">按“{{ legacyImportModeLabel }}”处理旧商品档案，不自动生成新编码或下载 BigSeller 表。</p>
+      <p v-else class="import-hint">按“{{ legacyImportModeLabel }}”处理旧商品档案；新增或尚未生成编码的档案会生成新 SPU / SKU，已有编码保持不变。</p>
     </el-dialog>
 
     <el-dialog v-model="summaryVisible" title="导入结果" width="min(720px, 94vw)">
@@ -596,7 +596,7 @@
         <el-descriptions-item label="跳过">{{ importResult.skipped || 0 }}</el-descriptions-item>
         <el-descriptions-item label="异常">{{ importResult.error_count || 0 }}</el-descriptions-item>
         <el-descriptions-item label="生成 SKU">{{ importResult.generated || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="BigSeller 表">{{ importResult.bigseller_file_name || '未生成' }}</el-descriptions-item>
+        <el-descriptions-item v-if="activeImportKind === 'create'" label="BigSeller 表">{{ importResult.bigseller_file_name || '未生成' }}</el-descriptions-item>
         <el-descriptions-item label="耗时">{{ formatDuration(importResult.duration_ms || importElapsed) }}</el-descriptions-item>
       </el-descriptions>
       <el-alert v-if="importResult.errors?.length" class="import-errors" title="请按行号修正异常数据后重新导入" type="warning" :closable="false" />
@@ -1580,18 +1580,23 @@ async function importLegacyFile(uploadedFile) {
     importStep.value = 2;
     const response = await importLegacyProductItems(normalizeImportHeaders(csvText), legacyImportMode.value);
     importPercent.value = 88;
-    importStage.value = '旧商品档案写入完成';
+    importStage.value = '旧商品档案写入完成，正在生成新编码';
     importResult.value = response.success
-      ? { ...(response.data || {}), generated: 0, bigseller_file_name: '' }
+      ? { ...(response.data || {}), errors: [...(response.data?.errors || [])], generated: 0, bigseller_file_name: '' }
       : { error_count: 1, errors: [{ line: '-', message: response.message || '导入失败' }] };
-    importStep.value = 3;
-    importPercent.value = 100;
     if (response.success) {
-      show(`旧档案导入完成：新增 ${response.data?.created || 0} 条，更新 ${response.data?.updated || 0} 条，无变化 ${response.data?.unchanged || 0} 条`);
+      const generationRows = response.data?.generation_rows || response.data?.created_rows || [];
+      const generated = await generateImportedProducts(generationRows);
+      importResult.value.generated = generated.generatedRows.length;
+      importResult.value.errors.push(...generated.errors);
+      importResult.value.error_count = importResult.value.errors.length;
+      show(`旧档案导入完成：新增 ${response.data?.created || 0} 条，更新 ${response.data?.updated || 0} 条，生成新 SKU ${generated.generatedRows.length} 条`);
       try { await load(); } catch { show('导入已完成，列表刷新失败，请手动刷新页面', 'warning'); }
     } else {
       show(response.message || '导入失败', 'error');
     }
+    importStep.value = 3;
+    importPercent.value = 100;
   } catch (error) {
     importResult.value = { error_count: 1, errors: [{ line: '-', message: error?.message || '网络请求失败' }] };
     show(error?.message || '导入失败', 'error');

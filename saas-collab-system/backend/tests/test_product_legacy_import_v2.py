@@ -52,6 +52,7 @@ def test_import_create_update_sparse_columns_and_modes():
     assert created.json()["data"]["created_rows"] == [
         {"id": created.json()["data"]["created_ids"][0], "line": 2}
     ]
+    assert created.json()["data"]["generation_rows"] == created.json()["data"]["created_rows"]
     item = ProductLegacyItem.objects.get(tenant=tenant, legacy_sku_code="OLD-V2-001")
     assert item.product_name == "Imported V2"
     assert item.purchase_price == Decimal("12.5000")
@@ -67,6 +68,9 @@ def test_import_create_update_sparse_columns_and_modes():
     )
     assert updated.status_code == 200
     assert updated.json()["data"]["updated"] == 1
+    assert updated.json()["data"]["generation_rows"] == [
+        {"id": created.json()["data"]["created_ids"][0], "line": 2}
+    ]
     item.refresh_from_db()
     assert item.purchase_price == Decimal("13.2500")
     assert item.product_name == "Imported V2"
@@ -127,6 +131,7 @@ def test_create_import_without_legacy_codes_returns_id_and_generates_compatible_
     payload = response.json()["data"]
     assert payload["created"] == 1
     assert len(payload["created_ids"]) == 1
+    assert payload["generation_rows"] == payload["created_rows"]
     item = ProductLegacyItem.objects.get(pk=payload["created_ids"][0], tenant=tenant)
     assert item.legacy_spu_code == ""
     assert item.legacy_sku_code is None
@@ -137,6 +142,14 @@ def test_create_import_without_legacy_codes_returns_id_and_generates_compatible_
     assert generated.json()["data"]["legacy_sku_code"] == ""
     item.refresh_from_db()
     assert item.generated_sku.legacy_sku_code == ""
+
+    existing = client.post(
+        "/api/internal/products/legacy-items/",
+        {"mode": "update", "csv_text": f"新SKU编码,采购价格\n{item.generated_sku.sku_code},18.0000\n"},
+        format="json",
+    )
+    assert existing.status_code == 200
+    assert existing.json()["data"]["generation_rows"] == []
 
     retried = client.post(f"/api/internal/products/legacy-items/{item.id}/generate/", format="json")
     assert retried.status_code == 200

@@ -166,6 +166,8 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('value="update"');
     expect(page).toContain('async function importLegacyFile(uploadedFile)');
     expect(page).toContain('importLegacyProductItems(normalizeImportHeaders(csvText), legacyImportMode.value)');
+    expect(page).toContain('generateImportedProducts(generationRows)');
+    expect(page).toContain('已有编码保持不变');
     expect(page).toContain("importLegacyProductItems(normalizedCsv, 'create')");
     expect(page).toContain('商品图片');
     expect(page).toContain('商品描述');
