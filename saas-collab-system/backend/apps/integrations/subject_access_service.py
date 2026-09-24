@@ -23,11 +23,22 @@ from .live_providers import integration_config_oauth_blockers
 from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, WarehouseAuthorization
 from .platform_capabilities import get_platform_capability
 from .platform_schema_service import integration_platform_key
+from .production_settings import get_runtime_platform_config
 
 
 VISIBLE_CONFIG_STATUSES = {"configured", "verified", "active"}
 ACTIVE_AUTHORIZATION_STATUSES = {"authorized", "active"}
 UNKNOWN_REGION_SENTINEL = "__UNKNOWN__"
+
+
+def _token_policy(platform):
+    if platform == "tiktok":
+        return "tiktok-split-policy"
+    if platform not in {"lazada", "shopee", "jifeng_wms"}:
+        return "platform-default"
+    if not get_runtime_platform_config(platform).get("auto_refresh_enabled", False):
+        return "manual-refresh"
+    return "oauth-auto-refresh" if platform == "lazada" else "auto-refresh"
 
 
 def _subject_regions(country_code):
@@ -264,7 +275,7 @@ def _store_access(user, subject_id):
         "api_types": ["marketplace"] if platform == "lazada" else ["marketplace", "advertising"],
         "configs": [_config_payload(config, api_type) for config, api_type in configs],
         "bindings": bindings,
-        "token_policy": "tiktok-split-policy" if platform == "tiktok" else "oauth-auto-refresh" if platform == "lazada" else "auto-refresh" if platform == "shopee" else "platform-default",
+        "token_policy": _token_policy(platform),
     }
 
 
@@ -416,7 +427,7 @@ def _warehouse_access(user, subject_id):
         "api_types": ["inventory"],
         "configs": [_config_payload(config, api_type) for config, api_type in configs],
         "bindings": _warehouse_bindings(user, subject, config_map),
-        "token_policy": "auto-refresh",
+        "token_policy": _token_policy(provider),
     }
 
 

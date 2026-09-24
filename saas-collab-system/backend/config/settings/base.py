@@ -149,8 +149,18 @@ LIVE_LAZADA_REDIRECT_URI = os.getenv("LIVE_LAZADA_REDIRECT_URI", "")
 LIVE_LAZADA_CONTRACT_APPROVED = env_bool("LIVE_LAZADA_CONTRACT_APPROVED", False)
 LIVE_LAZADA_AUTH_URL = os.getenv("LIVE_LAZADA_AUTH_URL", "https://auth.lazada.com/oauth/authorize")
 LIVE_LAZADA_API_HOST = os.getenv("LIVE_LAZADA_API_HOST", "https://api.lazada.com")
+LIVE_LAZADA_TOKEN_HOST = os.getenv("LIVE_LAZADA_TOKEN_HOST", "https://auth.lazada.com")
 LIVE_LAZADA_TOKEN_PATH = os.getenv("LIVE_LAZADA_TOKEN_PATH", "/rest/auth/token/create")
 LIVE_LAZADA_REFRESH_PATH = os.getenv("LIVE_LAZADA_REFRESH_PATH", "/rest/auth/token/refresh")
+LIVE_LAZADA_ORDER_LIST_PATH = os.getenv("LIVE_LAZADA_ORDER_LIST_PATH", "/rest/orders/get")
+LIVE_LAZADA_ORDER_ITEMS_PATH = os.getenv("LIVE_LAZADA_ORDER_ITEMS_PATH", "/rest/order/items/get")
+LIVE_LAZADA_RETURN_LIST_PATH = os.getenv(
+    "LIVE_LAZADA_RETURN_LIST_PATH", "/rest/reverse/getreverseordersforseller"
+)
+LIVE_LAZADA_FINANCE_TRANSACTION_PATH = os.getenv(
+    "LIVE_LAZADA_FINANCE_TRANSACTION_PATH",
+    "/rest/finance/transaction/details/get",
+)
 
 LIVE_SHOPEE_PARTNER_ID = os.getenv("LIVE_SHOPEE_PARTNER_ID", "")
 LIVE_SHOPEE_APP_SECRET_REFERENCE = os.getenv("LIVE_SHOPEE_APP_SECRET_REFERENCE", "")
@@ -173,6 +183,8 @@ LIVE_SHOPEE_RETURN_DETAIL_PATH = os.getenv("LIVE_SHOPEE_RETURN_DETAIL_PATH", "/a
 LIVE_SHOPEE_PRODUCT_LIST_PATH = os.getenv("LIVE_SHOPEE_PRODUCT_LIST_PATH", "/api/v2/product/get_item_list")
 LIVE_SHOPEE_PRODUCT_BASE_INFO_PATH = os.getenv("LIVE_SHOPEE_PRODUCT_BASE_INFO_PATH", "/api/v2/product/get_item_base_info")
 LIVE_SHOPEE_PRODUCT_MODEL_LIST_PATH = os.getenv("LIVE_SHOPEE_PRODUCT_MODEL_LIST_PATH", "/api/v2/product/get_model_list")
+LIVE_SHOPEE_FINANCE_LIST_PATH = os.getenv("LIVE_SHOPEE_FINANCE_LIST_PATH", "/api/v2/payment/get_escrow_list")
+LIVE_SHOPEE_FINANCE_DETAIL_PATH = os.getenv("LIVE_SHOPEE_FINANCE_DETAIL_PATH", "/api/v2/payment/get_escrow_detail")
 
 LIVE_TIKTOK_APP_KEY = os.getenv("LIVE_TIKTOK_APP_KEY", "")
 LIVE_TIKTOK_APP_SECRET_REFERENCE = os.getenv("LIVE_TIKTOK_APP_SECRET_REFERENCE", "")
@@ -192,6 +204,13 @@ LIVE_TIKTOK_REVOKE_PATH = os.getenv("LIVE_TIKTOK_REVOKE_PATH", "REPLACE_ME_CONFI
 LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH = os.getenv("LIVE_TIKTOK_AUTHORIZED_SHOPS_PATH", "/authorization/202309/shops")
 LIVE_TIKTOK_METADATA_PATH = os.getenv("LIVE_TIKTOK_METADATA_PATH", "/seller/202309/permissions")
 LIVE_TIKTOK_DEFAULT_SCOPE = os.getenv("LIVE_TIKTOK_DEFAULT_SCOPE", "")
+LIVE_TIKTOK_FINANCE_STATEMENT_PATH = os.getenv(
+    "LIVE_TIKTOK_FINANCE_STATEMENT_PATH", "/finance/202309/statements"
+)
+LIVE_TIKTOK_FINANCE_TRANSACTION_PATH = os.getenv(
+    "LIVE_TIKTOK_FINANCE_TRANSACTION_PATH",
+    "/finance/202501/statements/{statement_id}/statement_transactions",
+)
 LIVE_TIKTOK_ORDER_LIST_PATH = os.getenv("LIVE_TIKTOK_ORDER_LIST_PATH", "/order/202309/orders/search")
 LIVE_TIKTOK_ORDER_DETAIL_PATH = os.getenv("LIVE_TIKTOK_ORDER_DETAIL_PATH", "/order/202309/orders")
 LIVE_TIKTOK_RETURN_LIST_PATH = os.getenv("LIVE_TIKTOK_RETURN_LIST_PATH", "/return_refund/202602/returns/search")

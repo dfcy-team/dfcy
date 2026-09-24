@@ -1,4 +1,4 @@
-import { requestApi, requestWithMockFallback } from './request';
+import { downloadApiFile, requestApi, requestWithMockFallback } from './request';
 import {
   mockCreatePlatformProductDetail,
   mockPlatformProductDetails,
@@ -7,6 +7,11 @@ import {
 
 export const PLATFORM_PRODUCT_DETAIL_PAGE_SIZE = 20;
 export const fetchWarehouseSkus = (params = {}) => requestApi({ method: 'get', url: '/api/internal/listings/warehouse-skus/', params });
+export const downloadWarehouseSkus = (params = {}) => {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value !== null && value !== undefined));
+  const suffix = query.toString() ? `?${query}` : '';
+  return downloadApiFile(`/api/internal/listings/warehouse-skus/export/${suffix}`, `仓库SKU_${new Date().toISOString().slice(0, 10)}.csv`);
+};
 export const fetchWarehouseSkuMapping = (id, params = {}) => requestApi({ method: 'get', url: `/api/internal/listings/warehouse-skus/${id}/mapping/`, params });
 export const confirmWarehouseSkuMapping = (id, data) => requestApi({ method: 'patch', url: `/api/internal/listings/warehouse-skus/${id}/mapping/`, data });
 export const fetchPlatformProductDetails = ({ page = 1, page_size = PLATFORM_PRODUCT_DETAIL_PAGE_SIZE, ...params } = {}) => requestWithMockFallback(

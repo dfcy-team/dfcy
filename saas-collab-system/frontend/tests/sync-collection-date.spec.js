@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { syncCollectionDate, syncTime } from '../src/utils/syncPresentation';
+import { syncTime, syncCollectionDate } from '../src/utils/syncPresentation';
 
 it('correctly renders historical second timestamps without changing milliseconds or ISO dates', () => {
   for (const value of [1788321143, 1788321143000, '2026-09-02T03:52:23Z']) {

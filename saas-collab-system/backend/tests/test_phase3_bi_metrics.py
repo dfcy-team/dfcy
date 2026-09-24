@@ -829,7 +829,7 @@ def test_dashboard_aggregate_endpoints_apply_tenant_scope_and_standard_collectio
     now = timezone.now()
     create_point(definition, "dashboard-owner", Decimal("10"), now)
     create_point(other_definition, "dashboard-other", Decimal("20"), now)
-    aggregate_metric(
+    aggregate = aggregate_metric(
         tenant=tenant,
         metric_definition=definition,
         period_start=now - timedelta(hours=1),
@@ -843,11 +843,11 @@ def test_dashboard_aggregate_endpoints_apply_tenant_scope_and_standard_collectio
         period_end=now + timedelta(hours=1),
         granularity=MetricAggregate.Granularity.DAY,
     )
+    assert aggregate.is_formal is True
 
     for path, dashboard_type in (
         ("/api/internal/analytics/overview/", "overview"),
         ("/api/internal/analytics/sales/", "sales"),
-        ("/api/internal/analytics/inventory/", "inventory"),
     ):
         response = authenticated_client(viewer).get(path)
         assert response.status_code == 200
@@ -858,6 +858,14 @@ def test_dashboard_aggregate_endpoints_apply_tenant_scope_and_standard_collectio
         assert len(data["results"]) == 1
         assert data["results"][0]["tenant_id"] == tenant.id
         assert data["metrics"][0]["code"] == definition.metric_code
+
+    inventory = authenticated_client(viewer).get("/api/internal/analytics/inventory/")
+    assert inventory.status_code == 200
+    inventory_data = inventory.json()["data"]
+    assert inventory_data["dashboard_type"] == "inventory"
+    assert inventory_data["api_status"] == "connected"
+    assert inventory_data["count"] == 0
+    assert inventory_data["source_status"] == "pending"
 
     assert authenticated_client(external).get("/api/internal/analytics/overview/").status_code == 403
     assert "credential" not in str(response.json()).lower()

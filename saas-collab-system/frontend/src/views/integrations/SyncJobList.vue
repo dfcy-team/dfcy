@@ -23,6 +23,14 @@
       <el-form-item label="调度方式"><el-select v-model="filters.schedule" placeholder="全部调度方式" clearable @change="search"><el-option v-for="(label, value) in schedules" :key="value" :value="value" :label="label" /></el-select></el-form-item>
       <el-form-item label="运行健康"><el-select v-model="filters.health" placeholder="全部健康状态" clearable @change="search"><el-option v-for="value in ['healthy','failed','running','authorization','configuration','capability','disabled']" :key="value" :value="value" :label="stateLabel(value)" /></el-select></el-form-item>
     </el-form>
+    <el-alert
+      v-if="exactJobFilter"
+      type="info"
+      :closable="false"
+      :title="`当前仅显示任务 #${exactJobFilter}`"
+    >
+      <template #default><el-button link type="primary" @click="clearExactJobFilter">显示全部任务</el-button></template>
+    </el-alert>
     <AppState v-if="state !== 'ready' && state !== 'empty'" :status="state" :detail="errorMessage" @action="load" />
     <template v-else>
       <section class="sync-summary" aria-label="同步任务健康摘要">
@@ -154,13 +162,15 @@
         <el-descriptions-item label="接入配置">{{ configRow.config_name || '—' }}</el-descriptions-item>
         <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="采集范围">
-          <template v-if="['sales_order', 'refund_return'].includes(configRow.resource_type)">
+          <template v-if="['sales_order', 'refund_return', 'settlement_bill'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
+            <template v-if="configRow.resource_type === 'sales_order'">{{ configRow.collection_time_basis === 'created' ? '创建时间' : '更新时间' }} · </template>
             <template v-if="configRow.query_mode === 'range'">
               <template v-if="/^\d{4}-\d{2}-\d{2}$/.test(configRow.range_start_at || '')">{{ configRow.range_start_at }} 至 {{ configRow.range_end_at }}（北京时间，含结束日）</template>
               <template v-else>{{ syncTime(configRow.range_start_at) }} 至 {{ syncTime(configRow.range_end_at) }}（UTC）</template>
             </template>
             <template v-else>每次执行回看最近 {{ configRow.lookback_days ?? 1 }} 天</template>
           </template>
+          <template v-else-if="configRow.resource_type === 'platform_product'">全量采集</template>
           <template v-else>按资源自身的全量/快照策略采集</template>
         </el-descriptions-item>
         <el-descriptions-item label="最大页数">{{ configRow.max_pages ?? '—' }}</el-descriptions-item>
@@ -235,7 +245,13 @@ function search() { page.value = 1; load(); }
 function viewRuns(row, detail = false) { router.push({ path: '/integrations/sync-runs', query: { sync_job_id: String(row.id), ...(detail ? { detail: String(row.latest_run_pk) } : {}) } }); }
 function openSubjectConfig(row) { router.push({ path: row.subject_type === 'warehouse' ? '/master-data/warehouses' : '/master-data/stores', query: { ...(row.store_id ? { store_id: String(row.store_id) } : {}), ...(row.warehouse_id ? { warehouse_id: String(row.warehouse_id) } : {}), panel: 'api' } }); }
 function showExisting(id) { createOpen.value = false; Object.assign(filters, { platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' }); router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(id) } }); }
-function created(id) { ElMessage.success('任务已创建：手动、停用，尚未执行。'); showExisting(id); load(); }
+async function created() {
+  ElMessage.success('任务已创建：手动、停用，尚未执行。');
+  createOpen.value = false;
+  Object.assign(filters, { platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' });
+  await router.push({ path: '/integrations/sync-jobs', query: {} });
+  await load();
+}
 watch(() => route.query, () => { page.value = 1; load(); });
 
 const summary = ref({});
@@ -248,10 +264,17 @@ const errorMessage = ref('');
 
 
 const productSyncContext = computed(() => String(route.query.resource_type || '') === 'platform_product' && Boolean(route.query.store_id));
+const exactJobFilter = computed(() => String(route.query.sync_job_id || '').trim());
 const contextStoreLabel = computed(() => String(route.query.subject || route.query.store_name || route.query.store_id || '当前店铺'));
 const canOpenStoreApiConfig = computed(() => auth.hasPermission('masterdata.view')
   && auth.hasPermission('integrations.view')
   && auth.hasPermission('integrations.store.view'));
+
+function clearExactJobFilter() {
+  const query = { ...route.query };
+  delete query.sync_job_id;
+  router.push({ path: '/integrations/sync-jobs', query });
+}
 
 const summaryItems = computed(() => [
   { key: 'job_count', label: '任务总数', value: summary.value.job_count || 0, tone: '' },

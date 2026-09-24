@@ -28,6 +28,7 @@ from .scheduler import paused_until, scheduler_health
 RESOURCE_DESTINATIONS = {
     "platform_product": ("平台商品档案", "listings_platformproductdetail / integrations_marketplaceproductmapping"),
     "sales_order": ("销售订单", "sales_order / sales_order_item"),
+    "settlement_bill": ("财务流水", "platform_finance_transaction"),
     "refund_return": ("退款退货", "refund_return / refund_return_item"),
     "inventory_snapshot": ("库存分析", "inventory_snapshot"),
 }
@@ -262,12 +263,12 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "max_retry_count": job.max_retry_count,
         "backoff_base_seconds": job.backoff_base_seconds,
         "query_mode": str(query_scope.get("mode") or scope.get("query_mode") or "incremental"),
-        "lookback_days": int(
-            query_scope.get("lookback_days")
-            or scope.get("lookback_days")
-            or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days")
-            or 1
-        ),
+        "collection_time_basis": (
+            query_scope.get("time_basis")
+            or scope.get("time_basis")
+            or ("created" if str(query_scope.get("mode") or scope.get("query_mode") or "incremental") == "range" else "updated")
+        ) if job.resource_type == "sales_order" else None,
+        "lookback_days": int(query_scope.get("lookback_days") or scope.get("lookback_days") or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days") or 1),
         "overlap_minutes": int(query_scope.get("overlap_minutes") if query_scope.get("overlap_minutes") is not None else scope.get("overlap_minutes") or 5),
         "query_page_size": int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
         "max_pages": int(query_scope.get("max_pages") or scope.get("max_pages") or 100),
@@ -423,8 +424,7 @@ def _run_rows(runs, job_rows):
                 "trigger_type": "retry" if log.get("retry_of") else log.get("trigger_type", ""),
                 "scheduled_at": _format_datetime(dispatch.scheduled_at) if dispatch else log.get("scheduled_at"),
                 "schedule_snapshot": dispatch.schedule_snapshot if dispatch else log.get("schedule_snapshot"),
-                "enqueued_at": _format_datetime(run.enqueued_at)
-                or (_format_datetime(dispatch.enqueued_at) if dispatch else log.get("enqueued_at")),
+                "enqueued_at": _format_datetime(run.enqueued_at) or (_format_datetime(dispatch.enqueued_at) if dispatch else log.get("enqueued_at")),
                 "subject_name": job.get("subject_name", "历史未绑定"),
                 "subject_code": job.get("subject_code", ""),
                 "store_id": job.get("store_id"),
@@ -620,19 +620,7 @@ def integration_workspace(user, mode, params):
         if mode == "sync-jobs"
         else _run_rows(runs, job_rows) + _unexecuted_plan_rows(user, job_rows)
     )
-    all_rows.sort(
-        key=lambda row: (
-            str(
-                row.get("started_at")
-                or row.get("enqueued_at")
-                or row.get("scheduled_at")
-                or row.get("updated_at")
-                or ""
-            ),
-            str(row.get("id", 0)),
-        ),
-        reverse=True,
-    )
+    all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("enqueued_at") or row.get("scheduled_at") or row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
     filtered = [row for row in all_rows if _matches(row, params, mode)]
     page_size = min(max(int(params.get("page_size", 50)), 1), 100)
     page_count = max(1, (len(filtered) + page_size - 1) // page_size)

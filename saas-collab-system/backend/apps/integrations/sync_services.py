@@ -118,10 +118,7 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
     now = timezone.now()
     idempotency_key = idempotency_key or uuid.uuid4().hex
     with transaction.atomic():
-        locked_job = SyncJob.objects.select_for_update().get(
-            pk=sync_job.pk,
-            tenant_id=sync_job.tenant_id,
-        )
+        locked_job = SyncJob.objects.select_for_update().get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("任务已停用，请先启用任务。")
         if locked_job.status == SyncJob.Status.RUNNING or (
@@ -172,19 +169,10 @@ def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
     run.failed_count = 1
     run.error_code = error_code
     run.masked_error_message = sanitize_text(message)
-    run.masked_log = sanitize_payload(
-        {**(run.masked_log or {}), "error": run.masked_error_message}
-    )
-    run.save(
-        update_fields=[
-            "status",
-            "finished_at",
-            "failed_count",
-            "error_code",
-            "masked_error_message",
-            "masked_log",
-        ]
-    )
+    run.masked_log = sanitize_payload({**(run.masked_log or {}), "error": run.masked_error_message})
+    run.save(update_fields=[
+        "status", "finished_at", "failed_count", "error_code", "masked_error_message", "masked_log",
+    ])
     return run
 
 
@@ -207,12 +195,6 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         )
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("任务已停用，不能执行同步。")
-        if dispatch:
-            from .scheduler import DISPATCH_START_TIMEOUT
-            dispatch.refresh_from_db()
-            if (dispatch.sync_job_id != locked_job.pk or dispatch.status != "running"
-                    or not dispatch.started_at or dispatch.started_at <= timezone.now() - DISPATCH_START_TIMEOUT):
-                raise ValidationError("计划派发已终止或启动超时，禁止迟到执行。")
 
         selected_capability = require_sync_read_capability(
             locked_job,
@@ -262,15 +244,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             **((existing.masked_log or {}) if existing else {}),
             "execution_mode": "live_readonly" if adapter.execution_mode == "live_readonly" else "simulation",
             "trigger_type": "scheduled" if dispatch else "manual",
-            **(
-                {
-                    "scheduled_at": dispatch.scheduled_at.isoformat(),
-                    "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
-                    "schedule_snapshot": dispatch.schedule_snapshot,
-                }
-                if dispatch
-                else {}
-            ),
+            **({"scheduled_at": dispatch.scheduled_at.isoformat(),
+                "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
+                "schedule_snapshot": dispatch.schedule_snapshot} if dispatch else {}),
         }
         if existing:
             run = existing
@@ -280,16 +256,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             run.error_code = ""
             run.masked_error_message = ""
             run.masked_log = run_log
-            run.save(
-                update_fields=[
-                    "status",
-                    "started_at",
-                    "finished_at",
-                    "error_code",
-                    "masked_error_message",
-                    "masked_log",
-                ]
-            )
+            run.save(update_fields=[
+                "status", "started_at", "finished_at", "error_code", "masked_error_message", "masked_log",
+            ])
         else:
             run = SyncRun.objects.create(
                 tenant=locked_job.tenant,
@@ -323,9 +292,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             "started_from_initial_cursor": not bool(cursor.cursor_value),
             "coverage_certified": False,
         }
-        run.masked_log = sanitize_payload(
-            {**(run.masked_log or {}), "decision_source": decision_source}
-        )
+        run.masked_log = sanitize_payload({**(run.masked_log or {}), "decision_source": decision_source})
         run.save(update_fields=["masked_log"])
 
     last_retry_error = ""
@@ -337,13 +304,26 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             archive_raw_page(sync_job, run, adapter, previous_cursor, page)
             with transaction.atomic():
                 records = page.get("records", [])
+                normalized_records = []
                 for raw_record in records:
                     run.fetched_count += 1
                     normalized = adapter.normalize_record(raw_record)
                     if not adapter.validate_record(normalized):
                         run.failed_count += 1
                         continue
-                    result = adapter.persist_record(sync_job, normalized)
+                    normalized_records.append(normalized)
+
+                persist_records = getattr(adapter, "persist_records", None)
+                if callable(persist_records):
+                    results = list(persist_records(sync_job, normalized_records))
+                    if len(results) != len(normalized_records):
+                        raise ValidationError("Batch persistence returned an invalid result count.")
+                else:
+                    results = [
+                        adapter.persist_record(sync_job, normalized)
+                        for normalized in normalized_records
+                    ]
+                for result in results:
                     if result.get("action") == "created":
                         run.created_count += 1
                     elif result.get("action") == "updated":
@@ -364,6 +344,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         ]
                     )
                     continue
+                finalize_run = getattr(adapter, "finalize_run", None)
+                if callable(finalize_run):
+                    finalize_run(sync_job)
                 run.status = SyncRun.Status.SUCCESS
                 run.finished_at = timezone.now()
                 run.error_code = ""

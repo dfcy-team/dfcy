@@ -20,7 +20,7 @@ from apps.configcenter.services import (
 from apps.permissions.models import DataScope
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
-from .production_settings import CONFIG_KEY, merge_runtime_config, runtime_snapshot, validate_runtime_config
+from .production_settings import CONFIG_KEY, runtime_snapshot, validate_runtime_config
 
 
 def _has_all_scope(user, permission_code):
@@ -179,15 +179,11 @@ def production_settings_collection(request):
     serializer = ProductionRuntimeVersionCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     change_reason = normalize_change_reason(serializer.validated_data["change_reason"], required=True)
-    # Config-center versions are immutable documents, not JSON merge patches.
-    # Materialise section-only submissions over the resolved current runtime
-    # so approving a module switch cannot erase network/custody/platform data.
-    complete_value = merge_runtime_config(runtime_snapshot()["config"], serializer.validated_data["value"])
     try:
         version = create_config_version(
             definition=_definition(),
             actor=request.user,
-            value=complete_value,
+            value=serializer.validated_data["value"],
             effective_at=serializer.validated_data["effective_at"],
             change_reason=change_reason,
         )

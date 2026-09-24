@@ -6,7 +6,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import paginated_data, success_response
-from apps.commerce.models import InventorySnapshot, SalesOrder
+from apps.commerce.models import SalesOrder
 from apps.permissions.api_permissions import IsInternalUser
 from apps.sales_management.views import commerce_filters_payload, commerce_inventory_payload, commerce_overview_payload
 
@@ -258,9 +258,7 @@ def analytics_sales(request):
 @api_view(["GET"])
 @permission_classes([IsAnalyticsViewer])
 def analytics_inventory(request):
-    if InventorySnapshot.objects.filter(tenant=request.user.tenant).exists():
-        return success_response(commerce_inventory_payload(request, "analytics.view"))
-    return success_response(_dashboard_payload(request, "inventory"))
+    return success_response(commerce_inventory_payload(request, "analytics.view"))
 
 
 @api_view(["GET"])

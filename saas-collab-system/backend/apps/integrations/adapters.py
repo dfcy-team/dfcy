@@ -1,5 +1,8 @@
+import hashlib
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -13,6 +16,7 @@ from .models import MarketplaceStoreAuthorization, PlatformChoices, SyncJob
 from .platform_capabilities import supports_resource
 from .readonly_clients import (
     JifengWmsReadonlyClient,
+    LazadaReadonlyClient,
     ShopeeReadonlyClient,
     TikTokReadonlyClient,
     default_sync_scope,
@@ -28,6 +32,11 @@ def _text(*values):
     return ""
 
 
+def _canonical_payload_hash(payload):
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _amount(*values):
     for value in values:
         if isinstance(value, dict):
@@ -38,6 +47,14 @@ def _amount(*values):
             except (TypeError, ValueError, ArithmeticError):
                 pass
     return "0"
+
+
+def _lazada_amount(value):
+    """Lazada reverse-order monetary fields use the currency's minor unit."""
+    try:
+        return str(Decimal(str(value)) / Decimal("100"))
+    except (TypeError, ValueError, ArithmeticError):
+        return "0"
 
 
 def _quantity(*values):
@@ -62,6 +79,17 @@ def _iso(value):
     if timestamp > 10_000_000_000:
         timestamp /= 1000
     return datetime.fromtimestamp(timestamp, tz=UTC).isoformat()
+
+
+def _local_date_iso(value, timezone_name):
+    if isinstance(value, str):
+        try:
+            local_date = datetime.strptime(value.strip(), "%d %b %Y")
+        except ValueError:
+            pass
+        else:
+            return local_date.replace(tzinfo=ZoneInfo(timezone_name)).astimezone(UTC).isoformat()
+    return _iso(value)
 
 
 def _boolean(value):
@@ -227,7 +255,7 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         self.resource_type = sync_job.resource_type
         if not supports_resource(self.config.platform, sync_job.resource_type, self.execution_mode):
             raise ValidationError("Platform capability registry does not allow this resource and execution mode.")
-        if self.config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+        if self.config.platform in {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
             self.authorization = self._store_authorization(sync_job)
         if sync_job.warehouse_authorization_id:
             authorization = sync_job.warehouse_authorization
@@ -246,7 +274,9 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         if self.client is not None:
             self.client.resource_type = self.resource_type
             return self.client
-        if self.config.platform == PlatformChoices.SHOPEE:
+        if self.config.platform == PlatformChoices.LAZADA:
+            self.client = LazadaReadonlyClient(self.config, self.authorization)
+        elif self.config.platform == PlatformChoices.SHOPEE:
             self.client = ShopeeReadonlyClient(self.config, self.authorization)
         elif self.config.platform == PlatformChoices.TIKTOK:
             self.client = TikTokReadonlyClient(self.config, self.authorization)
@@ -267,6 +297,8 @@ class ProductionReadonlyAdapter(PlatformAdapter):
             return client.fetch_returns(cursor_value, self.scope)
         if sync_job.resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT:
             return client.fetch_inventory(cursor_value, self.scope)
+        if sync_job.resource_type == SyncJob.ResourceType.SETTLEMENT_BILL:
+            return client.fetch_finance_transactions(cursor_value, self.scope)
         raise ValidationError("The selected resource is not supported by the production readonly adapter.")
 
     def get_next_cursor(self, page):
@@ -439,6 +471,194 @@ class MarketplaceOrderAdapter(ProductionReadonlyAdapter):
         action = "created" if existing is None else "skipped" if before_hash == saved.payload_hash else "updated"
         return {"action": action, "idempotency_key": f"{sync_job.id}:{external_id}"}
 
+    def persist_records(self, sync_job, records):
+        run = self._require_run()
+        keys = [(str(record["store_id"]), record["source_order_id"]) for record in records]
+        existing_hashes = {
+            (str(store_id), external_id): payload_hash
+            for store_id, external_id, payload_hash in SalesOrder.objects.filter(
+                tenant=sync_job.tenant,
+                store_id__in={store_id for store_id, _external_id in keys},
+                external_order_id__in={external_id for _store_id, external_id in keys},
+            ).values_list("store_id", "external_order_id", "payload_hash")
+        }
+        results = []
+        for record, key in zip(records, keys):
+            payload_hash = str(record.get("payload_hash") or _canonical_payload_hash(record))
+            if existing_hashes.get(key) == payload_hash:
+                results.append({"action": "skipped", "idempotency_key": f"{sync_job.id}:{key[1]}"})
+                continue
+            before_hash = existing_hashes.get(key)
+            saved = upsert_normalized_order(tenant=sync_job.tenant, payload=record, source_run=run)
+            existing_hashes[key] = saved.payload_hash
+            action = "created" if before_hash is None else "skipped" if before_hash == saved.payload_hash else "updated"
+            results.append({"action": action, "idempotency_key": f"{sync_job.id}:{key[1]}"})
+        return results
+
+
+class LazadaOrderAdapter(MarketplaceOrderAdapter):
+    def normalize_record(self, record):
+        store = self.authorization.store
+        statuses = record.get("statuses")
+        raw_status = _text(statuses[-1] if isinstance(statuses, list) and statuses else statuses, record.get("status"), "UNKNOWN")
+        items = record.get("order_items") if isinstance(record.get("order_items"), list) else []
+        payload = {
+            "contract_version": "sales_order.v1",
+            "store_id": str(store.id),
+            "source_order_id": _text(record.get("order_id")),
+            "ordered_at": _iso(record.get("created_at")),
+            "source_updated_at": _iso(record.get("updated_at") or record.get("created_at")),
+            "currency": _text(record.get("currency"), store.currency).upper(),
+            "gross_amount": _amount(record.get("price"), record.get("total_amount")),
+            "shipping_amount": _amount(record.get("shipping_fee")),
+            "order_status": _normalized_order_status(raw_status),
+            "region": self.authorization.region,
+            "lines": [
+                {
+                    "source_line_id": _text(item.get("order_item_id"), f"{record.get('order_id')}:{index}"),
+                    "sku": _text(
+                        item.get("shop_sku"),
+                        item.get("sku"),
+                        item.get("seller_sku"),
+                        item.get("sku_id"),
+                        item.get("product_id"),
+                        item.get("item_id"),
+                    ),
+                    "product_name": _text(item.get("name"), item.get("item_name")),
+                    "quantity": _quantity(item.get("quantity"), 1),
+                    "unit_price": _amount(item.get("item_price"), item.get("paid_price")),
+                    "platform_product_id": _text(item.get("product_id"), item.get("item_id")),
+                    "platform_variant_id": _text(item.get("sku_id")),
+                    "raw_line_status": _text(item.get("status"), raw_status),
+                }
+                for index, item in enumerate(items, start=1)
+                if isinstance(item, dict)
+            ],
+        }
+        return normalize_sales_order_record(PlatformChoices.LAZADA, payload)
+
+
+class MarketplaceFinanceTransactionAdapter(ProductionReadonlyAdapter):
+    @staticmethod
+    def _source_key(record):
+        explicit = _text(record.get("source_key"))
+        if explicit:
+            return explicit
+        transaction_id = _text(record.get("transaction_id"))
+        if transaction_id:
+            return transaction_id
+        business_key = {
+            "transaction": _text(record.get("transaction_number")),
+            "reference": _text(record.get("reference")),
+            "statement": _text(record.get("statement_id"), record.get("statement")),
+            "order": _text(record.get("order_no"), record.get("order_id")),
+            "item": _text(
+                record.get("order_item_no"),
+                record.get("orderItem_no"),
+                record.get("order_item_id"),
+            ),
+            "sku": _text(record.get("seller_sku"), record.get("lazada_sku"), record.get("sku")),
+            "fee": _text(record.get("fee_name"), record.get("transaction_type"), record.get("fee_type")),
+            "amount": _amount(record.get("amount"), record.get("transaction_amount"), record.get("fee_amount")),
+            "currency": _text(record.get("currency")),
+            "occurred_at": _text(record.get("transaction_date"), record.get("created_at"), record.get("occurred_at")),
+        }
+        canonical = json.dumps(business_key, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def normalize_record(self, record):
+        from apps.finance.contracts import normalize_finance_transaction_record
+
+        store = self.authorization.store
+        occurred_at = (
+            _local_date_iso(
+                record.get("transaction_date") or record.get("created_at") or record.get("occurred_at"),
+                store.timezone,
+            )
+            if self.config.platform == PlatformChoices.LAZADA
+            else _iso(record.get("occurred_at") or record.get("created_at") or record.get("transaction_time"))
+        )
+        return normalize_finance_transaction_record(
+            {
+                "contract_version": "finance_transaction.v1",
+                "source_key": self._source_key(record),
+                "external_transaction_id": _text(
+                    record.get("transaction_id"),
+                    record.get("transaction_number"),
+                    record.get("statement_id"),
+                ),
+                "external_order_id": _text(record.get("order_no"), record.get("order_id")),
+                "external_order_item_id": _text(
+                    record.get("order_item_no"),
+                    record.get("orderItem_no"),
+                    record.get("order_item_id"),
+                ),
+                "seller_sku": _text(record.get("seller_sku"), record.get("sku")),
+                "platform_variant_id": _text(
+                    record.get("sku_id"),
+                    record.get("platform_variant_id"),
+                    record.get("lazada_sku"),
+                ),
+                "raw_fee_name": _text(
+                    record.get("fee_name"),
+                    record.get("transaction_type"),
+                    record.get("fee_type"),
+                    record.get("description"),
+                    "UNKNOWN",
+                ),
+                "raw_amount": _amount(
+                    record.get("amount"),
+                    record.get("transaction_amount"),
+                    record.get("fee_amount"),
+                ),
+                "currency": _text(record.get("currency"), store.currency).upper(),
+                "occurred_at_utc": occurred_at,
+            }
+        )
+
+    def persist_record(self, sync_job, record):
+        from apps.finance.ingestion import upsert_finance_transaction
+        from apps.finance.models import PlatformFinanceTransaction
+
+        run = self._require_run()
+        result = upsert_finance_transaction(
+            tenant=sync_job.tenant,
+            store=self.authorization.store,
+            authorization=self.authorization,
+            source_run=run,
+            raw_envelope=run.raw_envelopes.order_by("-sequence").first(),
+            payload=record,
+        )
+        masked_log = dict(run.masked_log or {})
+        if result.instance.match_status != PlatformFinanceTransaction.MatchStatus.MATCHED:
+            masked_log["finance_unmatched_count"] = int(masked_log.get("finance_unmatched_count") or 0) + 1
+        if result.instance.fee_code == "OTHER":
+            masked_log["finance_unknown_fee_count"] = int(masked_log.get("finance_unknown_fee_count") or 0) + 1
+            masked_log["finance_data_quality"] = "partial"
+        run.masked_log = masked_log
+        if self.config.platform == PlatformChoices.LAZADA:
+            affected_dates = getattr(self, "_finance_wide_dates", set())
+            affected_dates.add(result.instance.business_date)
+            self._finance_wide_dates = affected_dates
+        return {"action": result.action, "idempotency_key": f"{sync_job.id}:{record['source_key']}"}
+
+    def finalize_run(self, sync_job):
+        if self.config.platform != PlatformChoices.LAZADA:
+            return
+        from apps.finance.wide_service import rebuild_lazada_finance_wide
+
+        dates = getattr(self, "_finance_wide_dates", set())
+        if not dates:
+            return
+        rebuild_lazada_finance_wide(
+            tenant=sync_job.tenant,
+            store=self.authorization.store,
+            business_dates=dates,
+        )
+
+
+LazadaFinanceTransactionAdapter = MarketplaceFinanceTransactionAdapter
+
 
 class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
     def normalize_record(self, record):
@@ -474,6 +694,58 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
                 "is_partial_quantity_return": _boolean(record.get("is_partial_quantity_return")),
                 "is_refund_amount_adjusted": _boolean(record.get("is_refund_amount_adjusted")),
                 "items": [self._shopee_refund_item(item, return_id, index, currency) for index, item in enumerate(items, start=1) if isinstance(item, dict)],
+            }
+        elif self.config.platform == PlatformChoices.LAZADA:
+            lines = [item for item in record.get("reverse_order_lines", []) if isinstance(item, dict)]
+            latest_line = max(
+                lines,
+                key=lambda item: int(item.get("return_order_line_gmt_modified") or 0),
+                default={},
+            )
+            timestamps = [
+                int(item.get("return_order_line_gmt_create") or 0)
+                for item in lines
+                if item.get("return_order_line_gmt_create")
+            ]
+            updated_timestamps = [
+                int(item.get("return_order_line_gmt_modified") or 0)
+                for item in lines
+                if item.get("return_order_line_gmt_modified")
+            ]
+            return_id = _text(record.get("reverse_order_id"))
+            case_type = _text(record.get("request_type"), "refund")
+            raw_status = _text(latest_line.get("reverse_status"), "unknown")
+            currency = _text(store.currency).upper()
+            refund_total = sum(
+                (Decimal(_lazada_amount(item.get("refund_amount"))) for item in lines),
+                Decimal("0"),
+            )
+            payload = {
+                "contract_version": "refund_return.v1",
+                "store_id": str(store.id),
+                "external_return_id": return_id,
+                "external_refund_id": return_id if "REFUND" in case_type.upper() else "",
+                "external_order_id": _text(record.get("trade_order_id")),
+                "case_type": case_type,
+                "raw_status": raw_status,
+                "normalized_status": raw_status.lower(),
+                "arbitration_status": "disputed" if any(item.get("is_dispute") for item in lines) else "",
+                "reason_code": _text(latest_line.get("reason_code"), latest_line.get("reason_text")),
+                "requested_at_utc": _iso(min(timestamps) if timestamps else ""),
+                "updated_at_utc": _iso(max(updated_timestamps) if updated_timestamps else ""),
+                "completed_at_utc": None,
+                "currency": currency,
+                "refund_amount": str(refund_total),
+                "refund_subtotal": str(refund_total),
+                "refund_shipping_fee": "0",
+                "refund_tax": "0",
+                "requires_physical_return": case_type.upper() == "RETURN",
+                "is_partial_quantity_return": None,
+                "is_refund_amount_adjusted": None,
+                "items": [
+                    self._lazada_refund_item(item, return_id, index, currency)
+                    for index, item in enumerate(lines, start=1)
+                ],
             }
         else:
             return_id = _text(record.get("return_id"), record.get("reverse_order_id"), record.get("aftersales_id"))
@@ -523,6 +795,24 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
         }
 
     @staticmethod
+    def _lazada_refund_item(item, return_id, index, currency):
+        product = item.get("product") if isinstance(item.get("product"), dict) else {}
+        return {
+            "external_return_item_id": _text(
+                item.get("reverse_order_line_id"),
+                f"{return_id}:{index}",
+            ),
+            "external_order_item_id": _text(item.get("trade_order_line_id")),
+            "platform_product_id": _text(product.get("product_id")),
+            "platform_variant_id": _text(item.get("platform_sku_id")),
+            "seller_sku": _text(product.get("product_sku"), item.get("seller_sku_id")),
+            "item_name_snapshot": "",
+            "quantity": 1,
+            "currency": currency,
+            "refund_amount": _lazada_amount(item.get("refund_amount")),
+        }
+
+    @staticmethod
     def _tiktok_refund_item(item, return_id, index, currency):
         return {
             "external_return_item_id": _text(item.get("return_line_item_id"), item.get("id"), f"{return_id}:{index}"),
@@ -545,6 +835,30 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
         saved = upsert_normalized_refund(tenant=sync_job.tenant, payload=record, source_run=run)
         action = "created" if existing is None else "skipped" if before_hash == saved.payload_hash else "updated"
         return {"action": action, "idempotency_key": f"{sync_job.id}:{record['external_return_id']}"}
+
+    def persist_records(self, sync_job, records):
+        run = self._require_run()
+        keys = [(str(record["store_id"]), record["external_return_id"]) for record in records]
+        existing_hashes = {
+            (str(store_id), external_id): payload_hash
+            for store_id, external_id, payload_hash in RefundReturn.objects.filter(
+                tenant=sync_job.tenant,
+                store_id__in={store_id for store_id, _external_id in keys},
+                external_return_id__in={external_id for _store_id, external_id in keys},
+            ).values_list("store_id", "external_return_id", "payload_hash")
+        }
+        results = []
+        for record, key in zip(records, keys):
+            payload_hash = str(record.get("payload_hash") or _canonical_payload_hash(record))
+            if existing_hashes.get(key) == payload_hash:
+                results.append({"action": "skipped", "idempotency_key": f"{sync_job.id}:{key[1]}"})
+                continue
+            before_hash = existing_hashes.get(key)
+            saved = upsert_normalized_refund(tenant=sync_job.tenant, payload=record, source_run=run)
+            existing_hashes[key] = saved.payload_hash
+            action = "created" if before_hash is None else "skipped" if before_hash == saved.payload_hash else "updated"
+            results.append({"action": action, "idempotency_key": f"{sync_job.id}:{key[1]}"})
+        return results
 
 
 class JifengInventoryAdapter(ProductionReadonlyAdapter):
@@ -593,6 +907,22 @@ class JifengInventoryAdapter(ProductionReadonlyAdapter):
         action = "created" if existing is None else "skipped" if unchanged else "updated"
         return {"action": action, "idempotency_key": f"{sync_job.id}:{saved.id}"}
 
+    def persist_records(self, sync_job, records):
+        from apps.commerce.services import bulk_upsert_inventory_snapshots
+
+        results = bulk_upsert_inventory_snapshots(
+            tenant=sync_job.tenant,
+            payloads=records,
+            source_run=self._require_run(),
+        )
+        return [
+            {
+                "action": result["action"],
+                "idempotency_key": f"{sync_job.id}:{result['snapshot'].id}",
+            }
+            for result in results
+        ]
+
 
 def get_adapter_for_config(config, resource_type=None):
     if config.environment == "mock":
@@ -603,11 +933,23 @@ def get_adapter_for_config(config, resource_type=None):
         return DisabledProductionAdapter()
     if not supports_resource(config.platform, resource_type, "live_readonly"):
         return DisabledProductionAdapter()
+    if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform == PlatformChoices.LAZADA:
+        return LazadaOrderAdapter(config)
     if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
         return MarketplaceOrderAdapter(config)
+    if resource_type == SyncJob.ResourceType.SETTLEMENT_BILL and config.platform in {
+        PlatformChoices.LAZADA,
+        PlatformChoices.SHOPEE,
+        PlatformChoices.TIKTOK,
+    }:
+        return MarketplaceFinanceTransactionAdapter(config)
     if resource_type == SyncJob.ResourceType.PLATFORM_PRODUCT and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
         return MarketplaceProductAdapter(config)
-    if resource_type == SyncJob.ResourceType.REFUND_RETURN and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+    if resource_type == SyncJob.ResourceType.REFUND_RETURN and config.platform in {
+        PlatformChoices.LAZADA,
+        PlatformChoices.SHOPEE,
+        PlatformChoices.TIKTOK,
+    }:
         return MarketplaceRefundAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.JIFENG_WMS:
         return JifengInventoryAdapter(config)

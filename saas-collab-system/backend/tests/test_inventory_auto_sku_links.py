@@ -154,3 +154,23 @@ def test_adapter_reports_mapping_only_update_and_then_skips_replay(inventory_lin
     assert adapter.persist_record(run.sync_job, payload)['action'] == 'skipped'
     row.refresh_from_db()
     assert row.internal_sku_id == sku.id
+
+
+def test_inventory_adapter_batch_preserves_order_and_idempotency(inventory_link):
+    from apps.integrations.adapters import JifengInventoryAdapter
+    _, warehouse, run, sku, _, _ = inventory_link
+    adapter = JifengInventoryAdapter(run.sync_job.integration_config)
+    adapter.bind_run(run)
+    payloads = [
+        dict(warehouse_id=warehouse.pk, site_code='PH', source_sku='NEW-SKU',
+             snapshot_at_utc=NOW.isoformat(), on_hand_qty=4),
+        dict(warehouse_id=warehouse.pk, site_code='PH', source_sku='OLD-SKU',
+             snapshot_at_utc=(NOW + timedelta(minutes=1)).isoformat(), on_hand_qty=5),
+    ]
+    first = adapter.persist_records(run.sync_job, payloads)
+    second = adapter.persist_records(run.sync_job, payloads)
+    assert [item['action'] for item in first] == ['created', 'created']
+    assert [item['action'] for item in second] == ['skipped', 'skipped']
+    assert InventorySnapshot.objects.count() == 2
+    assert set(InventorySnapshot.objects.values_list('internal_sku_id', flat=True)) == {sku.id}
+    assert IntegrationAuditLog.objects.filter(action='inventory_auto_sku_link').count() == 2

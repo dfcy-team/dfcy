@@ -182,7 +182,7 @@
           <article v-for="platform in platformKeys" :key="platform" :ref="(element) => setPlatformSectionRef(platform, element)" class="platform-card">
             <header><div><strong>{{ platformLabels[platform] }}</strong><small>{{ platformDescriptions[platform] }}</small></div><el-tag effect="plain" :type="form.platforms[platform].contract_approved ? 'success' : 'warning'">{{ form.platforms[platform].contract_approved ? '合同已批准' : '合同未批准' }}</el-tag></header>
             <el-form-item label="合同审批状态"><el-switch v-model="form.platforms[platform].contract_approved" active-text="已批准" inactive-text="未批准" /></el-form-item>
-            <el-form-item v-if="platform === 'shopee' || platform === 'jifeng_wms'" label="自动刷新令牌">
+            <el-form-item v-if="['lazada', 'shopee', 'jifeng_wms'].includes(platform)" label="自动刷新令牌">
               <el-switch v-model="form.platforms[platform].auto_refresh_enabled" active-text="开启" inactive-text="关闭" />
               <small class="field-help">当前生效：{{ currentConfig?.platforms?.[platform]?.auto_refresh_enabled ? '开启' : '关闭' }}。修改须提交并由另一位管理员审批。</small>
               <small class="field-help">后台每分钟检查，到期前 15 分钟续期；仅处理已授权且记录到期时间的凭据。失败后暂停该凭据自动重试，请查看集成审计并手动处理；不会启用或执行同步任务。</small>
@@ -201,10 +201,7 @@
             <div v-else class="form-grid compact">
               <el-form-item label="公开 App ID *"><el-input v-model="form.platforms[platform].app_id" autocomplete="off" placeholder="填写平台公开应用 ID" /></el-form-item>
               <el-form-item v-if="platform === 'tiktok'" label="Service ID"><el-input v-model="form.platforms[platform].service_id" autocomplete="off" placeholder="TikTok Shop Service ID" /></el-form-item>
-              <el-form-item label="OAuth redirect_uri *">
-                <el-input v-model="form.platforms[platform].redirect_uri" type="url" autocomplete="off" :placeholder="platform === 'shopee' ? 'https://your-domain.example/' : 'https://.../callback'" />
-                <small v-if="platform === 'shopee'" class="field-help">Shopee 填写开放平台实际登记的 HTTPS 根地址；网关会仅在同时存在 OAuth code/error 和 state 时内部转交回调。</small>
-              </el-form-item>
+              <el-form-item label="OAuth redirect_uri *"><el-input v-model="form.platforms[platform].redirect_uri" type="url" autocomplete="off" placeholder="https://.../callback" /></el-form-item>
               <el-form-item label="market *"><el-input v-model="form.platforms[platform].market" maxlength="40" placeholder="SG" /></el-form-item>
               <el-form-item v-if="platform === 'shopee'" label="region"><el-input v-model="form.platforms[platform].region" maxlength="40" placeholder="SG" /></el-form-item>
             </div>
@@ -326,7 +323,10 @@ const platformEndpointFields = {
     { key: 'auth_url', label: '授权地址 auth_url', kind: 'url', placeholder: 'https://auth.lazada.com/oauth/authorize' },
     { key: 'api_host', label: 'API Host api_host', kind: 'url', placeholder: 'https://api.lazada.com' },
     { key: 'token_path', label: 'Token Path token_path', kind: 'path', placeholder: '/rest/auth/token/create' },
-    { key: 'refresh_path', label: 'Refresh Path refresh_path', kind: 'path', placeholder: '/rest/auth/token/refresh' }
+    { key: 'refresh_path', label: 'Refresh Path refresh_path', kind: 'path', placeholder: '/rest/auth/token/refresh' },
+    { key: 'order_list_path', label: 'Order List Path order_list_path', kind: 'path', placeholder: '/rest/orders/get' },
+    { key: 'order_items_path', label: 'Order Items Path order_items_path', kind: 'path', placeholder: '/rest/order/items/get' },
+    { key: 'finance_transaction_path', label: 'Finance Transaction Path finance_transaction_path', kind: 'path', placeholder: '/rest/finance/transaction/details/get' }
   ],
   shopee: [
     { key: 'auth_url', label: '授权地址 auth_url', kind: 'url', placeholder: 'https://partner.shopeemobile.com/api/v2/shop/auth_partner' },
@@ -341,7 +341,9 @@ const platformEndpointFields = {
     { key: 'return_detail_path', label: 'Return Detail Path return_detail_path', kind: 'path', placeholder: '/api/v2/returns/get_return_detail' },
     { key: 'product_list_path', label: '商品列表接口路径 product_list_path', kind: 'path', placeholder: '/api/v2/product/get_item_list' },
     { key: 'product_base_info_path', label: '商品基本信息接口路径 product_base_info_path', kind: 'path', placeholder: '/api/v2/product/get_item_base_info' },
-    { key: 'product_model_list_path', label: '商品变体接口路径 product_model_list_path', kind: 'path', placeholder: '/api/v2/product/get_model_list' }
+    { key: 'product_model_list_path', label: '商品变体接口路径 product_model_list_path', kind: 'path', placeholder: '/api/v2/product/get_model_list' },
+    { key: 'finance_list_path', label: '财务结算列表接口 finance_list_path', kind: 'path', placeholder: '/api/v2/payment/get_escrow_list' },
+    { key: 'finance_detail_path', label: '财务结算详情接口 finance_detail_path', kind: 'path', placeholder: '/api/v2/payment/get_escrow_detail' }
   ],
   tiktok: [
     { key: 'auth_url', label: '默认授权地址 auth_url', kind: 'url', placeholder: 'https://auth.tiktok-shops.com' },
@@ -358,14 +360,16 @@ const platformEndpointFields = {
     { key: 'order_detail_path', label: 'Order Detail Path order_detail_path', kind: 'path', placeholder: '/order/202309/orders' },
     { key: 'return_list_path', label: 'Return List Path return_list_path', kind: 'path', placeholder: '/return_refund/202602/returns/search' },
     { key: 'product_search_path', label: '商品搜索接口路径 product_search_path', kind: 'path', placeholder: '/product/202502/products/search' },
-    { key: 'product_detail_path', label: '商品详情接口路径 product_detail_path', kind: 'path', placeholder: '/product/202309/products/{product_id}' }
+    { key: 'product_detail_path', label: '商品详情接口路径 product_detail_path', kind: 'path', placeholder: '/product/202309/products/{product_id}' },
+    { key: 'finance_statement_path', label: '财务账单列表接口 finance_statement_path', kind: 'path', placeholder: '/finance/202309/statements' },
+    { key: 'finance_transaction_path', label: '财务流水接口 finance_transaction_path', kind: 'path', placeholder: '/finance/202501/statements/{statement_id}/statement_transactions' }
   ]
 };
 const platformPayloadKeys = {
   jifeng_wms: ['contract_approved', 'auto_refresh_enabled'],
-  lazada: ['contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'market'],
-  shopee: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'market', 'region'],
-  tiktok: ['contract_approved', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path']
+  lazada: ['contract_approved', 'auto_refresh_enabled', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'order_list_path', 'order_items_path', 'finance_transaction_path', 'market'],
+  shopee: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'finance_list_path', 'finance_detail_path', 'market', 'region'],
+  tiktok: ['contract_approved', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
 };
 
 function createEmptyConfig() {
@@ -398,7 +402,7 @@ function createEmptyConfig() {
     platforms: Object.fromEntries(platformKeys.map((platform) => [platform, {
       contract_approved: false, auto_refresh_enabled: false, product_contract_approved: false, app_id: '', service_id: '', redirect_uri: '', market: '', region: '',
       auth_url: '', api_host: '', auth_urls: {}, api_hosts: {}, token_host: '', token_path: '', refresh_path: '',
-      revoke_path: '', shop_path: '', authorized_shops_path: '', metadata_path: '', order_list_path: '',
+      revoke_path: '', shop_path: '', authorized_shops_path: '', metadata_path: '', order_list_path: '', order_items_path: '', finance_transaction_path: '',
       order_detail_path: '', return_list_path: '', return_detail_path: '', product_list_path: '', product_base_info_path: '',
       product_model_list_path: '', product_search_path: '', product_detail_path: ''
     }]))
@@ -579,7 +583,7 @@ function isDangerousChange() {
       || (form.network.security_approved && !previous.network.security_approved)
       || (form.network.readonly_sync_enabled && !previous.network.readonly_sync_enabled)
       || platformKeys.some((platform) => form.platforms[platform].contract_approved && !previous.platforms[platform].contract_approved)
-      || ['shopee', 'jifeng_wms'].some((platform) => form.platforms[platform].auto_refresh_enabled && !previous.platforms[platform].auto_refresh_enabled)
+      || ['lazada', 'shopee', 'jifeng_wms'].some((platform) => form.platforms[platform].auto_refresh_enabled && !previous.platforms[platform].auto_refresh_enabled)
       || ['shopee', 'tiktok'].some((platform) => form.platforms[platform].product_contract_approved && !previous.platforms[platform].product_contract_approved)
       || (form.listing_write.mode === 'controlled' && previous.listing_write.mode !== 'controlled')
       || (form.listing_write.emergency_stop === false && previous.listing_write.emergency_stop !== false)

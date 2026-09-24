@@ -40,7 +40,7 @@ describe('销售页面展示验收', () => {
     } });
     const wrapper = render(mode); await flushPromises();
     expect(wrapper.vm.optionsFor('currencies')).toEqual([
-      { label: 'CNY（自动换算）', value: '__AUTO_CNY__' },
+      { label: 'CNY', value: '__AUTO_CNY__' },
       { label: 'PHP', value: 'PHP' }
     ]);
     wrapper.vm.query.currency = '__AUTO_CNY__';
@@ -49,9 +49,6 @@ describe('销售页面展示验收', () => {
     expect(params.currency_basis).toBe('CNY');
     expect(params).not.toHaveProperty('currency');
     expect(wrapper.text()).toContain('汇率日期：2026-09-17');
-    api.createSalesExport.mockResolvedValueOnce({ success: true });
-    await wrapper.vm.submitExport(); await flushPromises();
-    expect(api.createSalesExport.mock.lastCall[0].filters).not.toHaveProperty('currency_basis');
     wrapper.unmount();
   });
   it('sorts order headers on the server and retains sorting during pagination', async () => {

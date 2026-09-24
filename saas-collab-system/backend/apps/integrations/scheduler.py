@@ -12,25 +12,6 @@ from .sync_alerts import upsert_sync_failure_alert
 
 # The dispatcher ticks every minute. Older slots are missed, not new executions.
 MISFIRE_GRACE_SECONDS = 60
-DISPATCH_START_TIMEOUT = timedelta(minutes=5)
-
-
-def recover_unstarted_dispatches(now, limit):
-    ids = list(SyncScheduleDispatch.objects.filter(
-        status="running", sync_run__isnull=True,
-        started_at__lte=now - DISPATCH_START_TIMEOUT,
-    ).values_list("pk", "sync_job_id")[:limit])
-    for pk, job_id in ids:
-        with transaction.atomic():
-            job = SyncJob.objects.select_for_update().get(pk=job_id)
-            if job.status == "running" or (job.lock_expires_at and job.lock_expires_at > now):
-                continue
-            if job.runs.filter(status="running").exists():
-                continue
-            SyncScheduleDispatch.objects.filter(pk=pk, status="running", sync_run__isnull=True).update(
-                status="failed", finished_at=now,
-                reason="派发启动超时：未取得执行锁或创建运行，已终止此计划时点；后续计划可继续。",
-            )
 
 
 def schedule_policy(job):
@@ -97,7 +78,6 @@ def next_after_missed(job, due, now):
 def dispatch_due_jobs(enqueue, now=None, limit=20):
     now = now or timezone.now()
     SyncSchedulerHeartbeat.objects.update_or_create(key="readonly", defaults={"last_seen_at": now})
-    recover_unstarted_dispatches(now, limit)
     initialized = dispatched = failed = skipped = 0
     ids = list(SyncJob.objects.filter(is_enabled=True).exclude(schedule_type__in=["manual", "cron"])
                .filter(next_run_at__isnull=True).values_list("id", flat=True)[:limit])

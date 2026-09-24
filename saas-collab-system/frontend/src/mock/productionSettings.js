@@ -51,6 +51,9 @@ const initialConfig = {
       api_host: 'https://api.lazada.com',
       token_path: '/rest/auth/token/create',
       refresh_path: '/rest/auth/token/refresh',
+      order_list_path: '/rest/orders/get',
+      order_items_path: '/rest/order/items/get',
+      finance_transaction_path: '/rest/finance/transaction/details/get',
       market: ''
     },
     shopee: {
@@ -71,6 +74,8 @@ const initialConfig = {
       product_list_path: '/api/v2/product/get_item_list',
       product_base_info_path: '/api/v2/product/get_item_base_info',
       product_model_list_path: '/api/v2/product/get_model_list',
+      finance_list_path: '/api/v2/payment/get_escrow_list',
+      finance_detail_path: '/api/v2/payment/get_escrow_detail',
       market: '',
       region: ''
     },
@@ -95,7 +100,9 @@ const initialConfig = {
       order_detail_path: '/order/202309/orders',
       return_list_path: '/return_refund/202602/returns/search',
       product_search_path: '/product/202502/products/search',
-      product_detail_path: '/product/202309/products/{product_id}'
+      product_detail_path: '/product/202309/products/{product_id}',
+      finance_statement_path: '/finance/202309/statements',
+      finance_transaction_path: '/finance/202501/statements/{statement_id}/statement_transactions'
     }
   }
 };

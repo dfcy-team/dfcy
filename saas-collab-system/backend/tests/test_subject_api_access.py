@@ -37,7 +37,11 @@ def _grant(user, permission_codes):
     DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
-def test_subject_api_access_links_store_config_authorization_and_masks_credentials():
+def test_subject_api_access_links_store_config_authorization_and_masks_credentials(monkeypatch):
+    monkeypatch.setattr(
+        "apps.integrations.subject_access_service.get_runtime_platform_config",
+        lambda platform: {"auto_refresh_enabled": True},
+    )
     tenant = Tenant.objects.create(name="Tenant A", code="subject-access-a")
     user = CustomUser.objects.create_user(
         username="subject-access-admin",

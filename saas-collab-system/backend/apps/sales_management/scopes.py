@@ -47,8 +47,8 @@ def filter_sales_queryset(user, permission_code, queryset, scope_field_map=None)
     return queryset.filter(combined) if has_custom_scope else queryset.none()
 
 
-def _custom_scope_configs(user, permission_code):
-    scopes = get_permission_data_scopes(user, permission_code)
+def _custom_scope_configs(user, permission_code, permission_cache=None):
+    scopes = get_permission_data_scopes(user, permission_code, cache=permission_cache)
     if getattr(user, "is_superuser", False) or any(
         scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes
     ):
@@ -68,8 +68,8 @@ def _stores_for_config(user, config):
     return stores
 
 
-def filter_inventory_queryset(user, permission_code, queryset):
-    configs = _custom_scope_configs(user, permission_code)
+def filter_inventory_queryset(user, permission_code, queryset, permission_cache=None):
+    configs = _custom_scope_configs(user, permission_code, permission_cache)
     if configs is None:
         return queryset
     allowed = Q(pk__in=[])

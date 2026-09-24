@@ -14,14 +14,13 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.exceptions import ValidationError
 
-from apps.masterdata.exchange_rates import tenant_cny_rates
-
 from .models import (
     AffiliateImportState,
     AffiliateOrderRevision,
     AffiliateOrderSnapshot,
     BdOrderAttributionSnapshot,
     BdSampleAttributionSnapshot,
+    ExchangeRate,
     OutreachTask,
     SampleFulfillment,
     SUPPORTED_CURRENCY_CHOICES,
@@ -30,10 +29,10 @@ from .models import (
 
 
 BD_ATTRIBUTION_RULE_VERSION = "bd-attribution-v1"
-RATE_SELECTION_VERSION = "country-site-master-latest-rate-date-v1"
+RATE_SELECTION_VERSION = "tenant-exchange-rate-effective-from-desc-id-desc-v1"
 RATE_SOURCE_DESCRIPTION = (
-    "Tenant CountrySiteMaster; CNY uses identity rate 1; other currencies use the "
-    "latest country-information rate where 1 CNY equals the configured currency amount."
+    "Tenant ExchangeRate; CNY uses identity rate 1; other currencies use the latest "
+    "active base_currency->CNY rate effective on the business date."
 )
 PERFORMANCE_CURRENCIES = frozenset(currency for currency, _ in SUPPORTED_CURRENCY_CHOICES)
 COMPLETED_ORDER_STATUSES = frozenset({"completed", "已完成"})
@@ -207,21 +206,27 @@ def _format_money(value):
 
 
 class _RateResolver:
-    """Resolve the tenant's current country-information exchange rates."""
+    """Resolve tenant exchange rates without a static or external fallback."""
 
     def __init__(self, tenant):
         self.tenant = tenant
         self._cache = {}
         self.used = {}
         self.missing = {}
-        self._country_rates = tenant_cny_rates(tenant)
+        self._rates_by_pair = defaultdict(list)
+        for row in ExchangeRate.objects.filter(
+            tenant=tenant,
+            is_active=True,
+        ).only(
+            "id", "base_currency", "quote_currency", "rate", "effective_from", "source"
+        ).order_by("base_currency", "quote_currency", "effective_from", "id"):
+            pair = (row.base_currency.strip().upper(), row.quote_currency.strip().upper())
+            self._rates_by_pair[pair].append(row)
 
     def _resolve(self, base_currency, quote_currency, on_date):
         base = str(base_currency or "").strip().upper()
         quote = str(quote_currency or "").strip().upper()
-        # Country information stores one current reference rate per currency,
-        # so the same value applies across the requested reporting range.
-        cache_key = (base, quote)
+        cache_key = (base, quote, on_date)
         if cache_key in self._cache:
             return self._cache[cache_key]
         if not base or not quote:
@@ -232,42 +237,32 @@ class _RateResolver:
                 "base_currency": base,
                 "quote_currency": quote,
                 "rate": "1.0000",
-                "effective_from": "",
+                "effective_from": on_date.isoformat(),
                 "version": "identity-cny-v1",
             })
-        elif quote != "CNY":
-            result = (None, {
-                "source": "missing",
-                "base_currency": base,
-                "quote_currency": quote,
-                "version": "missing",
-            })
         else:
-            info = self._country_rates.get(base)
-            reference_rate = Decimal(info["rate"]) if info and info.get("rate") else None
-            if reference_rate and reference_rate > 0:
-                rate_date = info.get("date")
-                cny_per_unit = Decimal("1") / reference_rate
-                result = (cny_per_unit, {
-                    "source": "country_site_master",
+            candidates = self._rates_by_pair.get((base, quote), ())
+            row = next(
+                (candidate for candidate in reversed(candidates) if candidate.effective_from <= on_date),
+                None,
+            )
+            if row is not None:
+                result = (Decimal(row.rate), {
+                    "source": "tenant_exchange_rate",
                     "base_currency": base,
                     "quote_currency": quote,
-                    "rate": str(cny_per_unit),
-                    "reference_rate": str(reference_rate),
-                    "reference_direction": f"1 CNY = {reference_rate} {base}",
-                    "exchange_rate_date": rate_date.isoformat() if rate_date else None,
-                    "effective_from": rate_date.isoformat() if rate_date else "",
-                    "source_name": info.get("source") or "",
-                    "version": (
-                        f"CountrySiteMaster:{base}:"
-                        f"{rate_date.isoformat() if rate_date else 'undated'}"
-                    ),
+                    "rate": str(Decimal(row.rate)),
+                    "effective_from": row.effective_from.isoformat(),
+                    "source_name": row.source,
+                    "id": row.pk,
+                    "version": f"ExchangeRate:{row.pk}:{row.effective_from.isoformat()}",
                 })
             else:
                 result = (None, {
                     "source": "missing",
                     "base_currency": base,
                     "quote_currency": quote,
+                    "effective_from": on_date.isoformat(),
                     "version": "missing",
                 })
         self._cache[cache_key] = result
@@ -429,9 +424,7 @@ def _order_attribution_key(order):
 
 
 @transaction.atomic
-def refresh_order_attributions(
-    *, tenant, attribution="strict", rule_version=None, changed_since=None, order_ids=None
-):
+def refresh_order_attributions(*, tenant, attribution="strict", rule_version=None):
     if attribution not in {"strict", "fallback"}:
         raise ValidationError({"attribution": "Attribution must be strict or fallback."})
     effective_rule_version = rule_version or rule_version_for(attribution)
@@ -449,42 +442,20 @@ def refresh_order_attributions(
         samples,
         product_required=attribution == "strict",
     )
-    order_queryset = AffiliateOrderSnapshot.objects.filter(tenant=tenant)
-    selected_order_ids = tuple(order_ids or ())
-    if changed_since is not None or selected_order_ids:
-        scope_filter = Q()
-        if changed_since is not None:
-            scope_filter |= Q(updated_at__gte=changed_since)
-        if selected_order_ids:
-            scope_filter |= Q(pk__in=selected_order_ids)
-        order_queryset = order_queryset.filter(scope_filter)
     orders_by_key = {}
-    target_keys = set()
-    changed_order_ids = set()
-    for order in order_queryset.order_by("data_time", "id").iterator(chunk_size=1000):
-        key = _order_attribution_key(order)
-        target_keys.add(key)
-        changed_order_ids.add(order.pk)
+    for order in AffiliateOrderSnapshot.objects.filter(tenant=tenant).order_by("data_time", "id").iterator(chunk_size=1000):
         if _valid_order(order):
-            orders_by_key.setdefault(key, order)
+            orders_by_key.setdefault(_order_attribution_key(order), order)
     existing = {}
     duplicate_existing_ids = []
     for item in BdOrderAttributionSnapshot.objects.filter(
         tenant=tenant, rule_version=effective_rule_version
     ).select_related("order_snapshot").order_by("id"):
         key = _order_attribution_key(item.order_snapshot)
-        if (changed_since is not None or selected_order_ids) and key not in target_keys:
-            continue
         if key in existing:
             duplicate_existing_ids.append(item.pk)
         else:
             existing[key] = item
-    if changed_since is not None or selected_order_ids:
-        for key, item in existing.items():
-            current_order = item.order_snapshot
-            if current_order_id := getattr(current_order, "pk", None):
-                if current_order_id not in changed_order_ids and _valid_order(current_order):
-                    orders_by_key[key] = current_order
     created = updated = noop = rejected = deleted = 0
     desired_keys = set()
     for key, order in sorted(orders_by_key.items(), key=lambda item: (item[1].data_time, item[1].id)):
@@ -581,9 +552,6 @@ def refresh_order_attributions(
         "rejected": rejected,
         "deleted": deleted,
         "rule_version": effective_rule_version,
-        "scope": "incremental" if changed_since is not None or selected_order_ids else "full",
-        "changed_since": changed_since.isoformat() if changed_since is not None else None,
-        "selected_order_count": len(selected_order_ids),
     }
 
 
@@ -678,6 +646,9 @@ def build_bd_performance(
         raise ValidationError({"attribution": "Attribution must be strict or fallback."})
     if start_date > end_date:
         raise ValidationError({"date": "start_date must not be after end_date."})
+    if (end_date - start_date).days > 30:
+        raise ValidationError({"date": "The date range must not exceed 31 days."})
+
     start_dt, end_dt = _performance_bounds(start_date, end_date)
     buckets = defaultdict(_owner_bucket)
     owner_ids = set()
@@ -964,7 +935,7 @@ def build_bd_performance(
         "attribution": attribution,
         "rates": rates,
         "rate_details": rate_details,
-        "rate_source": "country_site_master",
+        "rate_source": "tenant_exchange_rate",
         "rate_version": RATE_SELECTION_VERSION,
         "rate_config_version": RATE_SELECTION_VERSION,
         "rate_source_description": RATE_SOURCE_DESCRIPTION,

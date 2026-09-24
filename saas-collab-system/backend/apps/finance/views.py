@@ -8,10 +8,14 @@ from rest_framework.decorators import permission_classes
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsFinanceImporter, IsFinanceReconciler, IsFinanceUser, IsFinanceViewer
 from apps.permissions.ui_p6_scopes import filter_finance_queryset
-from .models import BankReceiptImport, FinanceAuditLog, PlatformStatement, ReconciliationException, ReconciliationMatch, WithdrawalRecord
+from .models import BankReceiptImport, FinanceAuditLog, LazadaFinanceWide, PlatformFinanceTransaction, PlatformStatement, ReconciliationException, ReconciliationMatch, WithdrawalRecord
 from .serializers import (
     BankReceiptImportSerializer,
     FinanceAnalyticsQuerySerializer,
+    FinanceTransactionQuerySerializer,
+    LazadaFinanceWideQuerySerializer,
+    LazadaFinanceWideSerializer,
+    PlatformFinanceTransactionSerializer,
     PlatformStatementSerializer,
     ReconciliationExceptionSerializer,
     ReconciliationMatchSerializer,
@@ -39,6 +43,63 @@ def health(request):
 def statement_collection(request):
     queryset = PlatformStatement.objects.filter(tenant=request.user.tenant)
     return success_response(PlatformStatementSerializer(queryset, many=True).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsFinanceViewer])
+def finance_transaction_collection(request):
+    serializer = FinanceTransactionQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    query = serializer.validated_data
+    queryset = PlatformFinanceTransaction.objects.filter(tenant=request.user.tenant).select_related("store")
+    for field in ("platform", "store_id", "currency", "fee_category", "match_status", "external_order_id"):
+        if query.get(field) not in (None, ""):
+            queryset = queryset.filter(**{field: query[field]})
+    if query.get("period_start"):
+        queryset = queryset.filter(business_date__gte=query["period_start"])
+    if query.get("period_end"):
+        queryset = queryset.filter(business_date__lte=query["period_end"])
+    queryset = queryset.order_by("-occurred_at_utc", "-id")
+    paginator = Paginator(queryset, query["page_size"])
+    page = paginator.get_page(query["page"])
+    return success_response(
+        {
+            "items": PlatformFinanceTransactionSerializer(page.object_list, many=True).data,
+            "pagination": {
+                "page": page.number,
+                "page_size": query["page_size"],
+                "total": paginator.count,
+                "pages": paginator.num_pages,
+            },
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsFinanceViewer])
+def lazada_finance_wide_collection(request):
+    serializer = LazadaFinanceWideQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    query = serializer.validated_data
+    queryset = LazadaFinanceWide.objects.filter(tenant=request.user.tenant).select_related("store")
+    for field in ("store_id", "currency", "external_order_id", "seller_sku"):
+        if query.get(field) not in (None, ""):
+            queryset = queryset.filter(**{field: query[field]})
+    if query.get("period_start"):
+        queryset = queryset.filter(transaction_date__gte=query["period_start"])
+    if query.get("period_end"):
+        queryset = queryset.filter(transaction_date__lte=query["period_end"])
+    paginator = Paginator(queryset, query["page_size"])
+    page = paginator.get_page(query["page"])
+    return success_response({
+        "items": LazadaFinanceWideSerializer(page.object_list, many=True).data,
+        "pagination": {
+            "page": page.number,
+            "page_size": query["page_size"],
+            "total": paginator.count,
+            "pages": paginator.num_pages,
+        },
+    })
 
 
 @api_view(["POST"])

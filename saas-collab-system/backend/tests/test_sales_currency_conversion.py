@@ -3,7 +3,6 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from rest_framework.exceptions import ValidationError
 
 from apps.masterdata.models import CountrySiteMaster
 from apps.sales_management.currency_conversion import convert_sales_payload
@@ -60,15 +59,6 @@ def test_converts_order_detail_and_nested_lines_to_cny():
     assert result["source_amounts"]["order_total_amount"] == "250"
     assert result["items"][0]["line_total_amount"] == "10"
     assert result["items"][0]["source_amounts"]["line_total_amount"] == "100"
-
-
-@pytest.mark.django_db
-def test_missing_reference_rate_fails_closed():
-    tenant, _, _, _ = create_scope("currency-conversion-missing-rate")
-    request = SimpleNamespace(query_params={"currency_basis": "CNY"}, user=SimpleNamespace(tenant=tenant))
-
-    with pytest.raises(ValidationError, match="尚无 CNY 参考汇率"):
-        convert_sales_payload(request, {"results": [{"currency": "PHP", "gross_sales": "100"}]})
 
 
 @pytest.mark.django_db

@@ -14,7 +14,11 @@ CAPABILITY_REGISTRY = {
     "lazada": PlatformCapability(
         api_types=("marketplace",),
         authorization="oauth_store",
-        resources={},
+        resources={
+            "sales_order": ("live_readonly",),
+            "refund_return": ("live_readonly",),
+            "settlement_bill": ("live_readonly",),
+        },
     ),
     "shopee": PlatformCapability(
         api_types=("marketplace", "advertising"),
@@ -23,6 +27,7 @@ CAPABILITY_REGISTRY = {
             "platform_product": ("live_readonly",),
             "sales_order": ("live_readonly",),
             "refund_return": ("live_readonly",),
+            "settlement_bill": ("live_readonly",),
         },
     ),
     "tiktok": PlatformCapability(
@@ -32,6 +37,7 @@ CAPABILITY_REGISTRY = {
             "platform_product": ("live_readonly",),
             "sales_order": ("live_readonly",),
             "refund_return": ("live_readonly",),
+            "settlement_bill": ("live_readonly",),
         },
     ),
     "jifeng_wms": PlatformCapability(

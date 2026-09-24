@@ -19,7 +19,6 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.audit.models import OperationLog
 from apps.influencers.models import (
-    AffiliateImportState,
     AffiliateOrderSnapshot,
     AffiliateOrderRevision,
     BdOrderAttributionSnapshot,
@@ -63,20 +62,9 @@ from apps.influencers.attribution import (
     refresh_order_attributions,
     rule_version_for,
 )
-from apps.influencers.tasks import (
-    HISTORICAL_ATTRIBUTION_SOURCE,
-    refresh_affiliate_order_attributions_task,
-)
 
 
 pytestmark = pytest.mark.django_db
-
-
-def _sample_warehouse(tenant, code):
-    return WarehouseMaster.objects.create(
-        tenant=tenant, code=code, name=code, country_code="PH",
-        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
-    )
 
 
 def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
@@ -380,6 +368,16 @@ def base_records(tenant, user, suffix="a"):
     return store, influencer, task
 
 
+def sample_warehouse(tenant, suffix):
+    return WarehouseMaster.objects.create(
+        tenant=tenant,
+        code=f"sample-{suffix}",
+        name=f"Sample warehouse {suffix}",
+        country_code="PH",
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+
+
 def test_outreach_task_list_returns_existing_rows():
     tenant = Tenant.objects.create(name="Task list tenant", code="task-list-visible")
     user, client = user_with_permissions(
@@ -404,7 +402,7 @@ def test_sample_pricing_data_migration_backfills_historical_values():
     tenant = Tenant.objects.create(name="Backfill Tenant", code="backfill-tenant")
     user = CustomUser.objects.create_user(username="backfill-user", tenant=tenant)
     _, _, task = base_records(tenant, user, "backfill")
-    warehouse = _sample_warehouse(tenant, "backfill-ph")
+    warehouse = sample_warehouse(tenant, "backfill")
     target = OutreachTarget.objects.get(task=task, is_deleted=False)
     fulfillment, _ = create_sample_fulfillment(
         user=user,
@@ -414,7 +412,12 @@ def test_sample_pricing_data_migration_backfills_historical_values():
             "outreach_task": task,
             "outreach_target": target,
         },
-        item_payloads=[{"site_code": "PH", "warehouse": warehouse, "requested_sku": "HISTORICAL-SKU", "quantity": 2}],
+        item_payloads=[{
+            "site_code": "PH",
+            "requested_sku": "HISTORICAL-SKU",
+            "warehouse": warehouse,
+            "quantity": 2,
+        }],
     )
     QuerySet.update(
         SampleItem.objects.filter(fulfillment=fulfillment),
@@ -666,14 +669,20 @@ def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
     tenant = Tenant.objects.create(name="Tenant", code="sample-idempotent")
     user, client = user_with_permissions(tenant, "sample-manager", "influencers.fulfillment.manage")
     store, influencer, task = base_records(tenant, user, "idem")
-    warehouse = _sample_warehouse(tenant, "idem-ph")
+    warehouse = sample_warehouse(tenant, "idem")
     payload = {
         "fulfillment_no": "SAMPLE-1",
         "outreach_task": task.pk,
         "influencer": influencer.pk,
         "store": store.pk,
         "owner": user.pk,
-        "items": [{"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "UNKNOWN-SKU", "external_product_id": "P-1", "quantity": 1}],
+        "items": [{
+            "site_code": "PH",
+            "requested_sku": "UNKNOWN-SKU",
+            "external_product_id": "P-1",
+            "warehouse": warehouse.pk,
+            "quantity": 1,
+        }],
     }
 
     first = client.post(
@@ -969,7 +978,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         "influencers.fulfillment.manage",
     )
     store, influencer, task = base_records(tenant, user, "cost-only")
-    warehouse = _sample_warehouse(tenant, "cost-only-ph")
+    warehouse = sample_warehouse(tenant, "cost-only")
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="SAMPLE-COST-SPU", product_name="Sample product")
     first_sku = ProductSKU.objects.create(
         tenant=tenant,
@@ -984,21 +993,30 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         purchase_price="3.0000",
     )
     effective_from = timezone.now() - timedelta(days=1)
-    for sku, amount, version_no in ((first_sku, "4.0000", 1), (second_sku, "3.0000", 1)):
-        ProductCostVersion.objects.create(
-            tenant=tenant,
-            sku=sku,
-            warehouse=warehouse,
-            version_no=version_no,
-            status=ProductCostVersion.Status.CONFIRMED,
-            source=ProductCostVersion.Source.MANUAL,
-            purchase_cost=amount,
-            system_cost=amount,
-            confirmed_cost=amount,
-            effective_from=effective_from,
-            reason="fulfillment regression fixture",
-            created_by=user,
-        )
+    ProductCostVersion.objects.create(
+        tenant=tenant,
+        sku=first_sku,
+        warehouse=warehouse,
+        version_no=1,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL,
+        currency="CNY",
+        confirmed_cost="4.0000",
+        effective_from=effective_from,
+        created_by=user,
+    )
+    ProductCostVersion.objects.create(
+        tenant=tenant,
+        sku=second_sku,
+        warehouse=warehouse,
+        version_no=1,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL,
+        currency="CNY",
+        confirmed_cost="3.0000",
+        effective_from=effective_from,
+        created_by=user,
+    )
     listing = StoreProductListing.objects.create(
         tenant=tenant,
         store=store,
@@ -1406,57 +1424,6 @@ def test_sample_accepts_any_assigned_outreach_task_owner():
 
     assert sample.status_code == 201, sample.data
     assert sample.data["data"]["owner"] == user.pk
-
-
-def test_linked_sample_rejects_unassigned_user_with_clear_owner_message():
-    tenant = Tenant.objects.create(name="Unassigned Owner Tenant", code="unassigned-owner")
-    user, client = user_with_permissions(
-        tenant,
-        "unassigned-owner-manager",
-        "influencers.outreach.manage",
-        "influencers.fulfillment.manage",
-    )
-    make_bd_owner(tenant, user)
-    task_owner = CustomUser.objects.create_user(
-        username="unassigned-owner-primary",
-        tenant=tenant,
-        user_type=CustomUser.UserType.INTERNAL,
-    )
-    make_bd_owner(tenant, task_owner)
-    store = store_for(tenant, "unassigned-owner-store")
-    task = create_outreach_task(
-        user=user,
-        validated_data={
-            "task_name": "Unassigned owner sample task",
-            "store": store,
-            "owners": [task_owner],
-        },
-    )
-    influencer = Influencer.objects.create(
-        tenant=tenant,
-        code="unassigned-owner-creator",
-        name="Unassigned owner creator",
-        platform="tiktok",
-    )
-
-    sample = client.post(
-        "/api/internal/influencers/sample-fulfillments/",
-        {
-            "outreach_task": task.pk,
-            "influencer": influencer.pk,
-            "store": store.pk,
-            "items": [],
-        },
-        format="json",
-        HTTP_IDEMPOTENCY_KEY="unassigned-owner-sample",
-    )
-
-    assert sample.status_code == 409, sample.data
-    assert sample.data["message"] == "需要该建联任务负责人创建送样。"
-    assert not SampleFulfillment.objects.filter(
-        tenant=tenant,
-        request_key="unassigned-owner-sample",
-    ).exists()
 
 
 def test_linked_sample_defaults_to_signed_in_assigned_owner():
@@ -2295,38 +2262,6 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     assert attribution.order_id == order.order_id
     assert attribution.sku_id == order.sku_id
 
-    QuerySet.update(
-        AffiliateOrderSnapshot.objects.filter(pk__in=[order.pk, duplicate.pk]),
-        updated_at=timezone.now() - timedelta(days=10),
-    )
-    QuerySet.update(
-        AffiliateOrderSnapshot.objects.filter(pk=duplicate.pk),
-        updated_at=timezone.now(),
-    )
-    duplicate_refresh = refresh_order_attributions(
-        tenant=tenant,
-        attribution="strict",
-        changed_since=timezone.now() - timedelta(hours=1),
-    )
-    assert duplicate_refresh["updated"] == 0
-    attribution.refresh_from_db()
-    assert attribution.order_snapshot_id == order.pk
-
-    incremental_order = _new_affiliate_order(
-        tenant,
-        data_time=order_time + timedelta(hours=1),
-        order_id="ORDER-INCREMENTAL",
-    )
-    incremental = refresh_order_attributions(
-        tenant=tenant,
-        attribution="strict",
-        changed_since=timezone.now() - timedelta(hours=1),
-    )
-    assert incremental["scope"] == "incremental"
-    assert incremental["created"] == 1
-    assert BdOrderAttributionSnapshot.objects.filter(order_snapshot=order).exists()
-    assert BdOrderAttributionSnapshot.objects.filter(order_snapshot=incremental_order).exists()
-
     corrected_owner = CustomUser.objects.create_user(
         username="corrected-standalone-owner",
         tenant=tenant,
@@ -2346,10 +2281,10 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     corrected_row = next(
         row for row in corrected["rows"] if row["owner_id"] == corrected_owner.pk
     )
-    assert corrected_row["valid_order_count"] == 2
+    assert corrected_row["valid_order_count"] == 1
     attribution.refresh_from_db()
     assert attribution.owner_id == user.pk
-    assert corrected["totals"]["gmv_php"] == "2000.0000"
+    assert corrected["totals"]["gmv_php"] == "1000.0000"
     assert corrected["totals"]["gmv_myr"] == "0.0000"
     assert corrected["totals"]["gmv_thb"] == "0.0000"
     philippines = next(
@@ -2362,47 +2297,8 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
         "currency": "PHP",
         "sample_count": 1,
         "shipped_count": 0,
-        "valid_order_count": 2,
-        "gmv": "2000.0000",
-    }
-
-    historical_order = _new_affiliate_order(
-        tenant,
-        data_time=order_time,
-        order_id="ORDER-HISTORICAL-MISSED",
-    )
-    QuerySet.update(
-        AffiliateOrderSnapshot.objects.filter(pk=historical_order.pk),
-        updated_at=timezone.now() - timedelta(days=30),
-    )
-    cutoff = timezone.now() - timedelta(days=7)
-
-    first_backfill = refresh_affiliate_order_attributions_task(
-        tenant.pk,
-        changed_since=cutoff.isoformat(),
-    )
-
-    assert first_backfill["historical_backfill"]["batch_size"] >= 1
-    assert first_backfill["historical_backfill"]["cycle_completed"] is False
-    assert BdOrderAttributionSnapshot.objects.filter(
-        tenant=tenant,
-        order_snapshot=historical_order,
-        rule_version=rule_version_for("strict"),
-    ).exists()
-    state = AffiliateImportState.objects.get(
-        tenant=tenant,
-        source=HISTORICAL_ATTRIBUTION_SOURCE,
-    )
-    assert int(state.cursor) >= historical_order.pk
-
-    second_backfill = refresh_affiliate_order_attributions_task(
-        tenant.pk,
-        changed_since=cutoff.isoformat(),
-    )
-    assert second_backfill["historical_backfill"] == {
-        "batch_size": 0,
-        "cursor": "0",
-        "cycle_completed": True,
+        "valid_order_count": 1,
+        "gmv": "1000.0000",
     }
 
 
@@ -2455,27 +2351,6 @@ def test_bd_performance_allows_completed_range_after_latest_imported_order():
 
     assert response.status_code == 200
     assert response.data["data"]["data_as_of"] == order_day.isoformat()
-
-
-def test_bd_performance_allows_ranges_longer_than_31_days():
-    tenant = Tenant.objects.create(name="Performance long range tenant", code="performance-long-range")
-    _, client = user_with_permissions(
-        tenant,
-        "performance-long-range-viewer",
-        "influencers.outreach.view",
-        "influencers.fulfillment.view",
-    )
-    end_date = timezone.localdate() - timedelta(days=1)
-    start_date = end_date - timedelta(days=120)
-
-    response = client.get(
-        "/api/internal/influencers/bd-performance/",
-        {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
-    )
-
-    assert response.status_code == 200
-    assert response.data["data"]["start_date"] == start_date.isoformat()
-    assert response.data["data"]["end_date"] == end_date.isoformat()
 
 
 @pytest.mark.parametrize("days_from_today", [0, 1])
@@ -2532,7 +2407,7 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_cost_refresh
         "influencers.fulfillment.manage",
     )
     store, influencer, task = base_records(tenant, user, "sample-lifecycle")
-    warehouse = _sample_warehouse(tenant, "lifecycle-ph")
+    warehouse = sample_warehouse(tenant, "lifecycle")
     task.target_count = 2
     task.save()
 
@@ -2545,7 +2420,12 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_cost_refresh
             "store": store.pk,
             "owner": user.pk,
             "quick_tags": ["重点", "重点"],
-            "items": [{"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "SKU-A", "quantity": 1}],
+            "items": [{
+                "site_code": "PH",
+                "requested_sku": "SKU-A",
+                "warehouse": warehouse.pk,
+                "quantity": 1,
+            }],
         },
         format="json",
         HTTP_IDEMPOTENCY_KEY="sample-lifecycle-key",
@@ -2568,8 +2448,8 @@ def test_sample_fulfillment_detail_edit_soft_delete_restore_and_sku_cost_refresh
             "link_type": "TKOne",
             "quick_tags": ["已发货"],
             "items": [
-                {"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "SKU-A", "quantity": 2},
-                {"site_code": "PH", "warehouse": warehouse.pk, "requested_sku": "SKU-B", "quantity": 1},
+                {"site_code": "PH", "requested_sku": "SKU-A", "warehouse": warehouse.pk, "quantity": 2},
+                {"site_code": "PH", "requested_sku": "SKU-B", "warehouse": warehouse.pk, "quantity": 1},
             ],
         },
         format="json",

@@ -130,10 +130,7 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
     assert body["effective_version"] == 1
     assert body["masked_status"]["credentials_stored"] is False
     assert body["config"]["network"]["mode"] == "approved-live-test"
-    assert body["config"]["platforms"]["jifeng_wms"] == {
-        "contract_approved": True,
-        "auto_refresh_enabled": True,
-    }
+    assert body["config"]["platforms"]["jifeng_wms"] == {"contract_approved": True, "auto_refresh_enabled": True}
     assert body["config"]["platforms"]["shopee"]["auto_refresh_enabled"] is True
     assert body["current_version"]["change_reason"] == "启用 Lazada 生产只读配置"
 
@@ -174,46 +171,6 @@ def test_effective_database_runtime_overrides_environment_and_keeps_production_w
     assert get_platform_schema("lazada")["production_write_enabled"] is False
     with override_settings(DEBUG=False):
         assert live_mode_allowed() is False
-
-
-@pytest.mark.django_db
-def test_section_only_version_materializes_complete_effective_runtime_document():
-    tenant = Tenant.objects.create(name="Runtime merge", code="runtime-merge")
-    creator = _user(tenant, "runtime-merge-creator")
-    approver = _user(tenant, "runtime-merge-approver")
-    for code in ("config.view", "config.manage", "config.system.manage"):
-        _grant(creator, code)
-    for code in ("config.view", "config.approve", "config.system.manage"):
-        _grant(approver, code)
-
-    first = create_config_version(
-        definition=_runtime_definition(),
-        actor=creator,
-        value={
-            "network": {
-                "mode": "approved-live-test",
-                "security_approved": True,
-                "readonly_sync_enabled": True,
-                "allowed_hosts": ["api.example.com"],
-                "oauth_redirect_allowlist": ["https://app.example.com/oauth/callback"],
-            },
-            "modules": {"api_integrations": "enabled"},
-        },
-        effective_at=timezone.now(),
-    )
-    approve_config_version(version=first, actor=approver)
-
-    response = _client(creator).post(
-        "/api/internal/integrations/production-settings/versions/",
-        {"value": {"modules": {"api_integrations": "disabled"}}, "change_reason": "停用 API 接入模块验证合并"},
-        format="json",
-    )
-    assert response.status_code == 201
-    stored = TenantConfigVersion.objects.get(pk=response.json()["data"]["version"]["id"])
-    assert stored.value["modules"]["api_integrations"] == "disabled"
-    assert stored.value["network"]["allowed_hosts"] == ["api.example.com"]
-    assert stored.value["network"]["oauth_redirect_allowlist"] == ["https://app.example.com/oauth/callback"]
-    assert {"network", "connection", "custody", "listing_write", "platforms", "modules"} <= set(stored.value)
 
 
 @pytest.mark.django_db

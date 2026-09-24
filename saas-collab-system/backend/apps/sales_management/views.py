@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import Case, Count, F, Max, Q, Subquery, Sum, Value, When, Window
+from django.db.models import Case, Count, F, Max, OuterRef, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import Coalesce, RowNumber, TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -811,9 +811,9 @@ def commerce_overview_payload(
         "dashboard_type": dashboard_type,
         "source_status": "ready" if orders.exists() else "pending",
         "definition": {
-            "currency_basis": "金额按币种分别汇总，不跨币种直接合计。",
-            "timezone_basis": "门店当地日期转换为 UTC 左闭右开时间区间。",
-            "refund_basis": "退款金额仅取自退款退货事实表。",
+            "currency_basis": "Amounts are grouped by currency and never directly combined.",
+            "timezone_basis": "Store-local dates are converted to UTC half-open intervals.",
+            "refund_basis": "Refund amounts come only from refund_return.",
         },
         "aggregation_status": "single_currency" if single else ("grouped_by_currency" if summaries else "empty"),
         "currency": single["currency"] if single else None,
@@ -1061,8 +1061,6 @@ def inventory_workbench_payload(request, permission_code):
         if len(sku) > 100 or "\x00" in sku:
             raise ValidationError({"sku": "SKU 关键词不能超过 100 个字符，且不能包含空字符。"})
 
-    # The tenant predicate is mandatory even for platform superusers without a
-    # tenant. Data scopes are applied before selecting each SKU's latest row.
     source_run_ids = list(
         SyncRun.objects.filter(
             tenant=request.user.tenant,
@@ -1084,8 +1082,6 @@ def inventory_workbench_payload(request, permission_code):
     ).filter(snapshot_rank=1).values("pk")
     latest = source.filter(pk__in=Subquery(latest_ids))
     if include_virtual == "false":
-        # Do this after ranking: an older physical/unlinked row must not replace
-        # a newer virtual snapshot for the same source SKU.
         latest = latest.exclude(internal_sku__inventory_type="virtual")
 
     out = Q(available_qty__lte=0)
@@ -1132,8 +1128,6 @@ def inventory_workbench_payload(request, permission_code):
         for row in warehouse_rows
     ]
 
-    # A trend point is the final snapshot for each source SKU on a UTC day,
-    # not a sum of repeated synchronizations. Limit to 14 observed days.
     daily_ids = source.annotate(
         date=TruncDate("snapshot_at_utc", tzinfo=UTC),
         snapshot_rank=Window(
@@ -1161,8 +1155,6 @@ def inventory_workbench_payload(request, permission_code):
         focus_source = latest.filter(internal_sku__isnull=True)
     else:
         focus_source = latest.filter(out | low | locked | Q(internal_sku__isnull=True))
-    # Apply drill-down filters to the full scoped queue, before counting and
-    # limiting it. The overview metrics intentionally remain global.
     if warehouse_id is not None:
         focus_source = focus_source.filter(warehouse_id=warehouse_id)
     if sku:
@@ -1223,21 +1215,17 @@ def commerce_inventory_payload(request, permission_code):
     include_virtual = str(request.query_params.get("include_virtual", "true")).lower()
     if include_virtual not in ("true", "false"):
         raise ValidationError({"include_virtual": "请选择是否包含虚拟商品。"})
-    # Resolve source runs once. Keeping the integration joins inside the correlated
-    # latest-snapshot subquery makes MySQL repeat those joins for every candidate
-    # inventory row.
-    source_run_ids = list(
-        SyncRun.objects.filter(
-            tenant=request.user.tenant,
-            sync_job__integration_config__platform="jifeng_wms",
-            sync_job__resource_type="inventory_snapshot",
-        ).values_list("id", flat=True)
-    )
     queryset = InventorySnapshot.objects.filter(
         tenant=request.user.tenant,
-        source_run_id__in=source_run_ids,
+        source_run__sync_job__integration_config__platform="jifeng_wms",
+        source_run__sync_job__resource_type="inventory_snapshot",
     ).select_related("warehouse", "internal_sku", "internal_sku__spu")
-    queryset = filter_inventory_queryset(request.user, permission_code, queryset)
+    queryset = filter_inventory_queryset(
+        request.user,
+        permission_code,
+        queryset,
+        getattr(request, "_permission_resolution_cache", None),
+    )
     warehouse_options = [
         {"value": row["warehouse_id"], "label": f'{row["warehouse__name"]}（{row["warehouse__code"]}）'}
         for row in queryset.order_by("warehouse__code").values(
@@ -1271,17 +1259,17 @@ def commerce_inventory_payload(request, permission_code):
             | Q(seller_sku__icontains=value)
             | Q(internal_sku__sku_code__icontains=value)
         )
-    trend_source = queryset
-    latest_snapshot_ids = queryset.annotate(
-        snapshot_rank=Window(
-            expression=RowNumber(),
-            partition_by=[F("site_code"), F("warehouse_id"), F("source_sku")],
-            order_by=[F("snapshot_at_utc").desc(), F("id").desc()],
-        )
-    ).filter(snapshot_rank=1).values("pk")
-    # Keep risk and virtual-product filters outside the ranked subquery. An
-    # older matching row must never reappear when the latest row is filtered.
-    queryset = queryset.filter(pk__in=Subquery(latest_snapshot_ids)).order_by(
+    trend_queryset = queryset
+    # InventorySnapshot is contractually limited to Jifeng inventory runs. Keep
+    # the correlated lookup on its composite identity so MySQL can use the
+    # existing unique index instead of repeating the sync-run joins per row.
+    latest_snapshot = InventorySnapshot.objects.filter(
+        tenant=request.user.tenant,
+        site_code=OuterRef("site_code"),
+        warehouse_id=OuterRef("warehouse_id"),
+        source_sku=OuterRef("source_sku"),
+    ).filter(**time_filters).order_by("-snapshot_at_utc", "-id")
+    queryset = queryset.filter(pk=Subquery(latest_snapshot.values("pk")[:1])).order_by(
         "site_code", "warehouse_id", "source_sku"
     )
     risk = request.query_params.get("risk") or request.query_params.get("risk_level")
@@ -1295,26 +1283,11 @@ def commerce_inventory_payload(request, permission_code):
         raise ValidationError({"risk": "请选择缺货、低库存、锁定偏高或正常。"})
     condition = risk_conditions.get(risk, Q())
     queryset = queryset.filter(condition)
-    mapping_status = request.query_params.get("mapping_status", "")
-    if mapping_status not in ("", "mapped", "unmapped"):
-        raise ValidationError({"mapping_status": "请选择已关联或未关联。"})
-    if mapping_status:
-        mapping_condition = Q(internal_sku__isnull=(mapping_status == "unmapped"))
-        queryset = queryset.filter(mapping_condition)
     # Inventory is a stock, not a flow: retain only each SKU's last snapshot per UTC day.
-    daily_latest_ids = trend_source.annotate(
-        date=TruncDate("snapshot_at_utc", tzinfo=UTC),
-        snapshot_rank=Window(
-            expression=RowNumber(),
-            partition_by=[F("site_code"), F("warehouse_id"), F("source_sku"), F("date")],
-            order_by=[F("snapshot_at_utc").desc(), F("id").desc()],
-        ),
-    ).filter(snapshot_rank=1).values("pk")
-    trend_queryset = trend_source.filter(pk__in=Subquery(daily_latest_ids)).annotate(
-        date=TruncDate("snapshot_at_utc", tzinfo=UTC)
+    daily_latest = latest_snapshot.filter(snapshot_at_utc__date=OuterRef("date"))
+    trend_queryset = trend_queryset.annotate(date=TruncDate("snapshot_at_utc", tzinfo=UTC)).filter(
+        pk=Subquery(daily_latest.values("pk")[:1])
     ).filter(condition)
-    if mapping_status:
-        trend_queryset = trend_queryset.filter(mapping_condition)
     if include_virtual == "false":
         # Filter after selecting latest snapshots so older rows cannot reappear.
         queryset = queryset.exclude(internal_sku__inventory_type="virtual")
@@ -1339,15 +1312,11 @@ def commerce_inventory_payload(request, permission_code):
                 reserved_qty__lte=F("available_qty"),
             ),
         ),
-        locked_stock=Count("id", filter=Q(reserved_qty__gt=F("available_qty"), available_qty__gt=0)),
     )
     result_count = aggregates["result_count"]
     mapped_count = aggregates["mapped_count"]
     out_of_stock = aggregates["out_of_stock"]
     low_stock = aggregates["low_stock"]
-    refreshed_at = aggregates["refreshed_at"]
-    age_hours = max(0, round((timezone.now() - refreshed_at).total_seconds() / 3600, 1)) if refreshed_at else None
-    freshness_status = "pending" if age_hours is None else ("fresh" if age_hours <= 24 else ("delayed" if age_hours <= 72 else "stale"))
     trend = list(
         trend_queryset.values("date")
         .annotate(
@@ -1364,7 +1333,6 @@ def commerce_inventory_payload(request, permission_code):
         "warehouse_name": "warehouse__name", "warehouse_code": "warehouse__code",
         "on_hand_qty": "on_hand_qty", "available_qty": "available_qty",
         "reserved_qty": "reserved_qty", "in_transit_qty": "in_transit_qty",
-        "pending_putaway_qty": "pending_putaway_qty", "defective_qty": "defective_qty",
         "snapshot_time": "snapshot_at_utc", "risk_label": "risk_rank", "mapping_status": "mapping_rank",
     }
     if ordering:
@@ -1385,22 +1353,20 @@ def commerce_inventory_payload(request, permission_code):
         direction = field.desc(nulls_last=True) if ordering.startswith("-") else field.asc(nulls_last=True)
         queryset = queryset.order_by(direction, "id")
     page, page_size = _pagination(request)
-    data = paginated_data(request, queryset, InventorySnapshotSerializer, page=page, page_size=page_size)
+    data = paginated_data(
+        request,
+        queryset,
+        InventorySnapshotSerializer,
+        page=page,
+        page_size=page_size,
+        total_count=result_count,
+    )
     data.update({
         "api_status": "connected",
         "dashboard_type": "inventory",
         "source_status": "ready" if data["count"] else "pending",
         "warehouse_options": warehouse_options,
         "refreshed_at": aggregates["refreshed_at"],
-        "freshness": {"status": freshness_status, "age_hours": age_hours, "refreshed_at": refreshed_at},
-        "risk_summary": {
-            "out_of_stock": out_of_stock,
-            "low_stock": low_stock,
-            "locked_stock": aggregates["locked_stock"],
-            "data_insufficient": result_count,
-            "replenishment_status": "insufficient_sales_velocity",
-        },
-        "trend_status": "ready" if len(trend) >= 2 else ("single_day" if trend else "empty"),
         "metrics": [
             _metric("inventory_total", "在手库存", aggregates["total"], "件", "最新极风 WMS 快照在手数量。"),
             _metric("inventory_available", "可用库存", aggregates["available"], "件", "最新快照可用数量。"),
@@ -1453,8 +1419,6 @@ def commerce_inventory_payload(request, permission_code):
         "quality": {
             "score": round(mapped_count * 100 / result_count) if result_count else 0,
             "mapped_count": mapped_count,
-            "unmapped_count": result_count - mapped_count,
-            "mapping_rate": round(mapped_count * 100 / result_count, 1) if result_count else None,
             "total_count": result_count,
             "status": "healthy" if result_count and mapped_count == result_count else ("warning" if result_count else "pending"),
             "metric_version": "inventory_snapshot.v1",
@@ -1462,10 +1426,8 @@ def commerce_inventory_payload(request, permission_code):
         },
         "trend": trend,
         "definition": {
-            "inventory_basis": "按站点、仓库和 SKU 取极风 WMS 最新库存快照。",
-            "risk_basis": "缺货：可用库存≤0；低库存：可用库存 1–5；锁定偏高：占用库存>可用库存；正常：可用库存>5。",
-            "freshness_basis": "最新快照距今不超过 24 小时为新鲜，24–72 小时为延迟，超过 72 小时为过期；仅作同步时效提示。",
-            "replenishment_basis": "尚无可核验的销量速度与采购在途口径，暂不计算可售天数或补货建议。",
+            "inventory_basis": "Latest Jifeng WMS inventory_snapshot per site, warehouse and SKU.",
+            "risk_basis": "out: available<=0; low: 1-5; locked: reserved>available; healthy: available>5."
         },
     })
     return data

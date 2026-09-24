@@ -15,7 +15,7 @@
           <el-option label="已关联" value="mapped" /><el-option label="未关联" value="unmapped" />
         </el-select>
       </el-form-item>
-      <el-form-item><el-button type="primary" native-type="submit" :loading="loading">查询</el-button><el-button @click="reset">重置</el-button></el-form-item>
+      <el-form-item><el-button type="primary" native-type="submit" :loading="loading">查询</el-button><el-button @click="reset">重置</el-button><el-button :loading="exporting" :disabled="loading || exporting || total === 0" @click="exportRows">导出</el-button></el-form-item>
     </el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-table v-loading="loading" :data="rows" border stripe empty-text="当前范围暂无仓库库存 SKU">
@@ -56,21 +56,19 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../stores/auth';
-import { fetchWarehouseSkus, fetchWarehouseSkuMapping, confirmWarehouseSkuMapping } from '../api/platformProductDetails';
-
+import { fetchWarehouseSkus, fetchWarehouseSkuMapping, confirmWarehouseSkuMapping, downloadWarehouseSkus } from '../api/platformProductDetails';
 const auth = useAuthStore();
 const canConfirm = computed(() => auth.hasPermission('integrations.product_mapping.confirm'));
 const query = reactive({ warehouse_id: '', search: '', status: '', page: 1, page_size: 20 });
 const rows = ref([]), warehouses = ref([]), total = ref(0), loading = ref(false), error = ref('');
+const exporting = ref(false);
 const selected = ref(null), mappingVisible = ref(false), mappingReady = ref(false), mappingError = ref('');
 const candidates = ref([]), skuId = ref(null), expectedIds = ref([]), confirmed = ref(false), saving = ref(false), candidateLoading = ref(false), rule = ref('');
 const ruleLabel = computed(() => ({ warehouse_history: '已存在仓库历史关联。', history_conflict: '历史关联冲突，请核对后确认。',
   exact_catalogue_code: '找到唯一精确匹配，可确认关联。', catalogue_conflict: '存在多个匹配，请人工确认。',
   seller_sku_conflict: '来源编码与卖家编码不一致，请人工核对。', unmatched: '未找到精确匹配，请搜索内部 SKU。' }[rule.value] || '正在读取映射信息。'));
 let sequence = 0, candidateSequence = 0;
-
 function utcTime(value) { return value ? new Date(value).toISOString().slice(0, 19).replace('T', ' ') : '—'; }
-
 async function load() {
   const current = ++sequence;
   loading.value = true; error.value = '';
@@ -83,11 +81,19 @@ async function load() {
   } catch (err) { if (current === sequence) { error.value = err.message; rows.value = []; total.value = 0; } }
   finally { if (current === sequence) loading.value = false; }
 }
-
 function search() { query.page = 1; load(); }
 function reset() { Object.assign(query, { warehouse_id: '', search: '', status: '', page: 1 }); load(); }
 function changePage(page) { query.page = page; load(); }
-
+async function exportRows() {
+  if (exporting.value || loading.value || total.value === 0) return;
+  exporting.value = true;
+  try {
+    const response = await downloadWarehouseSkus({ warehouse_id: query.warehouse_id, search: query.search, status: query.status });
+    if (!response?.success) throw new Error(response?.message || '仓库 SKU 导出失败');
+    ElMessage.success('已开始导出当前筛选结果');
+  } catch (err) { ElMessage.error(err.message || '仓库 SKU 导出失败'); }
+  finally { exporting.value = false; }
+}
 async function openMapping(row) {
   ++candidateSequence;
   selected.value = row; mappingVisible.value = true; mappingReady.value = false; confirmed.value = false;
@@ -101,7 +107,6 @@ async function openMapping(row) {
     rule.value = response.data.rule; mappingReady.value = true;
   } catch (err) { mappingError.value = err.message; }
 }
-
 async function searchCandidates(search) {
   const current = ++candidateSequence, id = selected.value.id;
   candidateLoading.value = true;
@@ -113,7 +118,6 @@ async function searchCandidates(search) {
   } catch (err) { if (current === candidateSequence) mappingError.value = err.message; }
   finally { if (current === candidateSequence) candidateLoading.value = false; }
 }
-
 async function save() {
   if (saving.value || !canConfirm.value || !confirmed.value || !mappingReady.value || !skuId.value) return;
   saving.value = true; mappingError.value = '';
@@ -124,7 +128,6 @@ async function save() {
   } catch (err) { mappingError.value = err.message; }
   finally { saving.value = false; }
 }
-
 onMounted(load);
 </script>
 

@@ -9,6 +9,5 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         result = refresh_country_exchange_rates()
         self.stdout.write(self.style.SUCCESS(
-            f"exchange rates refreshed: updated={result['updated']} missing={len(result['missing'])} "
-            f"date={result['date']} source={result['source']}"
+            f"exchange rates refreshed: updated={result['updated']} missing={len(result['missing'])} date={result['date']} source={result['source']}"
         ))
