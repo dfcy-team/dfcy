@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APITestCase
 from unittest.mock import Mock, patch
 
@@ -187,14 +188,84 @@ class FeishuApiTests(APITestCase):
         self.assertEqual(candidates[0]["open_id"], "ou_123")
         self.assertEqual(candidates[0]["email"], "o*******@example.com")
         self.assertEqual(candidates[0]["phone"], "*******8000")
+        self.assertEqual(candidates[0]["match_level"], "exact_contact")
         self.assertEqual(http.request.call_args_list[1].args[1], "https://open.feishu.cn/open-apis/contact/v3/users/batch_get_id?user_id_type=open_id")
+        self.assertEqual(len(http.request.call_args_list), 3)
         self.assertNotIn("never-return-this", str(candidates))
+
+    def test_feishu_candidate_service_falls_back_to_paginated_name_and_department_lookup(self):
+        from apps.accounts.models import InternalUserProfile
+        from apps.tenants.models import Department
+
+        department = Department.objects.create(tenant=self.tenant, name="技术部")
+        colleague = get_user_model().objects.create_user(
+            username="operator-name", full_name="张三", email="missing@example.com",
+            tenant=self.tenant, user_type="internal", is_active=True,
+        )
+        InternalUserProfile.objects.create(user=colleague, tenant=self.tenant, department=department)
+        connection = FeishuConnection.objects.create(
+            tenant=self.tenant, app_id="cli_test", app_secret_ref="cred_test", enabled=True,
+            created_by=self.user, updated_by=self.user,
+        )
+        custody = type("Custody", (), {"retrieve_secret": lambda self, ref: "secret"})()
+        http = type("Http", (), {})()
+        http.request = Mock(side_effect=[
+            FakeResponse({"code": 0, "tenant_access_token": "token-value"}),
+            FakeResponse({"code": 0, "data": {"user_list": []}}),
+            FakeResponse({"code": 0, "data": {"items": [], "has_more": False}}),
+            FakeResponse({"code": 0, "data": {"items": [
+                {"open_department_id": "od_tech", "name": "技术部"},
+            ], "has_more": False}}),
+            FakeResponse({"code": 0, "data": {"items": [
+                {"open_id": "ou_name", "user_id": "u_name", "name": "张三",
+                 "email": "zhangsan@example.com", "mobile": "13800138000",
+                 "department_ids": ["od_tech"]},
+            ], "has_more": False}}),
+            FakeResponse({"code": 0, "data": {"items": [], "has_more": False}}),
+        ])
+
+        candidates = FeishuIdentityService(http=http, custody=custody).find_candidates(
+            connection=connection, user=colleague,
+        )
+
+        self.assertEqual(candidates[0]["open_id"], "ou_name")
+        self.assertEqual(candidates[0]["match_level"], "name_department")
+        self.assertEqual(candidates[0]["match_reason"], "姓名与部门一致")
+        self.assertEqual(candidates[0]["email"], "z*******@example.com")
+        self.assertEqual(candidates[0]["phone"], "*******8000")
+        requested_urls = [call.args[1] for call in http.request.call_args_list]
+        self.assertTrue(any("departments/0/children" in url for url in requested_urls))
+        self.assertTrue(any("find_by_department" in url and "od_tech" in url for url in requested_urls))
+        self.assertNotIn("secret", str(candidates))
+
+    def test_feishu_candidate_service_returns_controlled_reason_when_no_name_match(self):
+        colleague = get_user_model().objects.create_user(
+            username="operator-none", full_name="不存在", tenant=self.tenant,
+            user_type="internal", is_active=True,
+        )
+        connection = FeishuConnection.objects.create(
+            tenant=self.tenant, app_id="cli_test", app_secret_ref="cred_test", enabled=True,
+            created_by=self.user, updated_by=self.user,
+        )
+        custody = type("Custody", (), {"retrieve_secret": lambda self, ref: "secret"})()
+        http = type("Http", (), {})()
+        http.request = Mock(side_effect=[
+            FakeResponse({"code": 0, "tenant_access_token": "token-value"}),
+            FakeResponse({"code": 0, "data": {"items": [], "has_more": False}}),
+            FakeResponse({"code": 0, "data": {"items": [], "has_more": False}}),
+        ])
+        with self.assertRaises(ValidationError) as caught:
+            FeishuIdentityService(http=http, custody=custody).find_candidates(
+                connection=connection, user=colleague,
+            )
+        self.assertEqual(caught.exception.detail["reason"], "no_matching_feishu_user")
+        self.assertIn("未找到匹配", str(caught.exception.detail["message"]))
 
     def test_feishu_candidate_service_requires_email_or_phone(self):
         colleague = get_user_model().objects.create_user(
             username="operator-no-contact", tenant=self.tenant, user_type="internal", is_active=True,
         )
-        with self.assertRaisesMessage(Exception, "未配置邮箱或手机号"):
+        with self.assertRaisesMessage(Exception, "未配置姓名、邮箱或手机号"):
             FeishuIdentityService(http=object(), custody=object()).find_candidates(
                 connection=None, user=colleague,
             )
