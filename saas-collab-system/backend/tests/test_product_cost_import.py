@@ -331,3 +331,35 @@ def test_unreadable_csv_returns_logged_exportable_error():
     assert "编码" in detail["errors"][0]["message"]
     assert detail["error_batch_id"]
     assert DataImportLog.objects.get(pk=detail["error_batch_id"], tenant=tenant).status == DataImportLog.Status.FAILED
+
+
+@pytest.mark.django_db
+def test_next_month_import_closes_open_previous_month_without_overwrite():
+    tenant, sku, user = make_context("next-month")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    client = client_for(user)
+    august = (HEADERS + f"{sku.sku_code},WH-CN,2026-08-01,,CNY,,,,,,10.98,August\n").encode()
+    august_preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(august)}, format="multipart").json()["data"]
+    assert august_preview["errors"] == []
+    august_confirm = client.post(
+        "/api/internal/products/costs/import/confirm/",
+        {"file": upload(august), "token": august_preview["token"]},
+        format="multipart", HTTP_IDEMPOTENCY_KEY="cost-august-0001",
+    )
+    assert august_confirm.status_code == 201
+
+    september = (HEADERS + f"{sku.sku_code},WH-CN,2026-09-01,,CNY,,,,,,12.34,September\n").encode()
+    september_preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(september)}, format="multipart").json()["data"]
+    assert (september_preview["total"], september_preview["valid"], september_preview["errors"]) == (1, 1, [])
+    september_confirm = client.post(
+        "/api/internal/products/costs/import/confirm/",
+        {"file": upload(september), "token": september_preview["token"]},
+        format="multipart", HTTP_IDEMPOTENCY_KEY="cost-september-0001",
+    )
+    assert september_confirm.status_code == 201
+    versions = list(ProductCostVersion.objects.filter(tenant=tenant, sku=sku).order_by("effective_from"))
+    assert len(versions) == 2
+    assert timezone.localtime(versions[0].effective_to).date().isoformat() == "2026-09-01"
+    assert timezone.localtime(versions[1].effective_from).date().isoformat() == "2026-09-01"
+    assert versions[0].confirmed_cost == Decimal("10.9800")
+    assert versions[1].confirmed_cost == Decimal("12.3400")
