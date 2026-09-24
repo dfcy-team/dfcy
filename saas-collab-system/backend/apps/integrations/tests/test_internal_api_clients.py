@@ -24,7 +24,7 @@ class InternalAPIClientTests(APITestCase):
         self.client.force_authenticate(self.user)
         self.payload = {
             "name": "Knowledge base",
-            "caller_type": "knowledge_base",
+            "caller_type": "internal_system",
             "resources": {"products": ["id", "sku", "updated_at"], "suppliers": ["id", "name"]},
             "allowed_cidrs": ["10.10.0.0/16"],
             "rate_limit_per_minute": 120,
@@ -92,6 +92,7 @@ class InternalAPIClientTests(APITestCase):
 
     def test_resource_field_cidr_and_limits_are_strictly_validated(self):
         bad_payloads = [
+            {**self.payload, "caller_type": "knowledge_base"},
             {**self.payload, "resources": {"unknown": ["id"]}},
             {**self.payload, "resources": {"products": ["password"]}},
             {**self.payload, "allowed_cidrs": ["10.0.0.1/24"]},
@@ -101,6 +102,27 @@ class InternalAPIClientTests(APITestCase):
         for payload in bad_payloads:
             response = self.client.post("/api/internal/integrations/internal-api-clients/", payload, format="json")
             self.assertEqual(response.status_code, 400, response.content)
+
+    def test_cidr_rejection_includes_field_detail_and_existing_knowledge_base_can_be_converted(self):
+        response = self.client.post(
+            "/api/internal/integrations/internal-api-clients/",
+            {**self.payload, "allowed_cidrs": ["27.154.92.0/16"]}, format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("allowed_cidrs", response.json()["data"])
+
+        legacy = InternalAPIClient.objects.create(
+            tenant=self.tenant, created_by=self.user, updated_by=self.user,
+            name="Legacy knowledge base", caller_type="knowledge_base",
+            client_id="intapi_legacy", resources={"products": ["id"]},
+            allowed_cidrs=["10.20.0.0/16"],
+        )
+        updated = self.client.patch(
+            f"/api/internal/integrations/internal-api-clients/{legacy.pk}/",
+            {"caller_type": "internal_system"}, format="json",
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.assertEqual(updated.json()["data"]["caller_type"], "internal_system")
 
     def test_extended_business_resource_catalog_is_supported(self):
         resources = {
