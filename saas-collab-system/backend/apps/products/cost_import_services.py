@@ -136,8 +136,12 @@ def _tabular_rows(raw, filename):
         return _xlsx_rows(raw)
     try:
         text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ValidationError({"file": "CSV must use UTF-8 encoding."}) from exc
+    except UnicodeDecodeError:
+        try:
+            # Excel on Chinese Windows commonly saves CSV in GB18030/GBK.
+            text = raw.decode("gb18030")
+        except UnicodeDecodeError as exc:
+            raise ValidationError({"file": "CSV 编码无法识别，请使用 UTF-8 或 GB18030 保存。"}) from exc
     try:
         dialect = csv.Sniffer().sniff(text[:4096])
     except csv.Error:
@@ -297,7 +301,16 @@ def parse_and_validate(*, tenant, raw, filename=""):
 
 
 def preview_cost_import(*, tenant, raw, filename=""):
-    rows, errors, digest = parse_and_validate(tenant=tenant, raw=raw, filename=filename)
+    try:
+        rows, errors, digest = parse_and_validate(tenant=tenant, raw=raw, filename=filename)
+    except ValidationError as exc:
+        rows, digest = [], hashlib.sha256(raw).hexdigest()
+        detail = exc.detail if isinstance(exc.detail, dict) else {"file": exc.detail}
+        errors = [
+            {"row": 1, "field": field, "message": str(message)}
+            for field, values in detail.items()
+            for message in (values if isinstance(values, list) else [values])
+        ]
     invalid_rows = {item["row"] for item in errors if isinstance(item.get("row"), int) and item["row"] > 1}
     total = len({item["row"] for item in rows}.union(invalid_rows))
     payload = {"tenant_id": tenant.pk, "digest": digest, "valid": not errors}

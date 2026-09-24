@@ -179,12 +179,12 @@
       </div>
       <div v-if="importPreview" class="import-preview" data-testid="cost-import-preview">
         <strong>预检结果：{{ importPreview.valid }} / {{ importPreview.total }} 行可导入</strong>
-        <span>失败 {{ importPreview.errors?.length || 0 }} 行。只有零错误才可确认入账。</span>
+        <span>异常 {{ importPreview.errors?.length || 0 }} 项。只有零错误才可确认入账。</span>
         <span v-if="importPreview.error_batch_id">异常批次：{{ importPreview.error_batch_id }}（已记录）</span>
         <el-button v-if="importPreview.errors?.length" plain type="danger" data-testid="cost-error-export" @click="exportImportErrors">导出完整异常明细</el-button>
         <el-table v-if="importPreview.errors?.length" :data="importPreview.errors.slice(0, 20)" size="small" border>
           <el-table-column prop="row" label="行" width="70" />
-          <el-table-column prop="code" label="错误码" width="150" />
+          <el-table-column prop="field" label="字段" width="160" />
           <el-table-column prop="message" label="原因" />
         </el-table>
       </div>
@@ -347,7 +347,15 @@ async function previewImport() {
   importStage.value = '正在上传文件';
   const response = await previewProductCostImport(importFile.value, (event) => updateImportUploadProgress(event, '正在上传文件', '正在解析并校验数据'));
   importing.value = false;
-  if (!response.success) { importStage.value = '预检失败'; return ElMessage.error(response.message || '成本导入预检失败'); }
+  if (!response.success) {
+    importStage.value = '预检失败';
+    const detail = response.data && typeof response.data === 'object' ? response.data : {};
+    const errors = Object.entries(detail).flatMap(([field, value]) =>
+      (Array.isArray(value) ? value : [value]).map((message) => ({ row: 1, field, message: String(message) }))
+    );
+    importPreview.value = errors.length ? { total: 0, valid: 0, errors } : null;
+    return ElMessage.error(errors[0]?.message || response.message || '成本导入预检失败');
+  }
   importPreview.value = response.data;
   importProgress.value = 100;
   importStage.value = response.data?.errors?.length ? '预检完成，请处理异常' : '预检完成，可确认导入';

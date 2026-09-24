@@ -92,6 +92,9 @@ describe('商品成本菜单与页面契约', () => {
     expect(page).toContain('导出完整异常明细');
     expect(page).toContain('商品成本导入异常_');
     expect(page).toContain('error_batch_id');
+    expect(page).toContain('prop="field" label="字段"');
+    expect(page).toContain('importPreview.value = errors.length ? { total: 0, valid: 0, errors } : null');
+    expect(page).toContain('errors[0]?.message || response.message');
   });
   it('按仓库所在地分组、维护、导入和回填', () => {
     expect(page).toContain('SKU × 仓库');
