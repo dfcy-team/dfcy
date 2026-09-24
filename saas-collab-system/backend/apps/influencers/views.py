@@ -818,6 +818,7 @@ class OutreachTaskOptionsView(APIView):
         ).distinct().order_by("full_name", "username")[:200]
         stores = stores[:200]
         payload = {
+            "outreach_task_number_edit_enabled": bd_performance_settings(request.user.tenant_id)["outreach_task_number_edit_enabled"],
             "stores": [
                 {
                     "id": store.id,
@@ -1002,6 +1003,8 @@ class OutreachTaskDetailView(APIView):
             )
         except ValidationError as exc:
             if "conflict" in str(exc.get_codes()):
+                if "task_no" in exc.detail:
+                    raise Conflict("任务编号已存在，请更换后重试。") from exc
                 raise Conflict(exc.detail) from exc
             raise
         return success_response(OutreachTaskSerializer(task).data)

@@ -1359,6 +1359,39 @@ def test_outreach_task_create_and_update_support_parallel_bd_owners():
     assert task.owner_id == user.pk
 
 
+def test_outreach_task_number_edit_api_reports_duplicate_and_exposes_switch(monkeypatch):
+    tenant = Tenant.objects.create(name="Number edit tenant", code="number-edit-api")
+    user, client = user_with_permissions(
+        tenant, "number-edit-manager", "influencers.outreach.view", "influencers.outreach.manage"
+    )
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "number-edit-store")
+    first = create_outreach_task(user=user, validated_data={"task_name": "First", "store": store, "owner": user})
+    second = create_outreach_task(user=user, validated_data={"task_name": "Second", "store": store, "owner": user})
+    settings = {"outreach_task_number_edit_enabled": True}
+    monkeypatch.setattr("apps.influencers.views.bd_performance_settings", lambda tenant_id: settings)
+    monkeypatch.setattr("apps.influencers.services.bd_performance_settings", lambda tenant_id: settings)
+
+    options = client.get("/api/internal/influencers/outreach-task-options/")
+    duplicate = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{first.pk}/",
+        {"task_no": second.task_no}, format="json", HTTP_IF_MATCH='"1"',
+    )
+    updated = client.patch(
+        f"/api/internal/influencers/outreach-tasks/{first.pk}/",
+        {"task_no": "DRJL-CUSTOM"}, format="json", HTTP_IF_MATCH='"1"',
+    )
+
+    assert options.status_code == 200
+    assert options.data["data"]["outreach_task_number_edit_enabled"] is True
+    assert duplicate.status_code == 409
+    assert "任务编号已存在" in duplicate.data["message"]
+    assert updated.status_code == 200
+    first.refresh_from_db()
+    assert first.task_no == "DRJL-CUSTOM"
+    assert first.task_no_manual_override is True
+
+
 def test_sample_accepts_any_assigned_outreach_task_owner():
     tenant = Tenant.objects.create(name="Assigned Owner Tenant", code="assigned-owner")
     user, client = user_with_permissions(
