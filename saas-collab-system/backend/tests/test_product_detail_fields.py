@@ -73,7 +73,7 @@ def test_sku_api_exposes_product_type_and_filters_standard_from_bundles():
     bundle_spu = ProductSPU.objects.create(
         tenant=tenant, spu_code="SPU-BUNDLE", product_name="Bundle", product_type=ProductSPU.ProductType.BUNDLE,
     )
-    standard_sku = ProductSKU.objects.create(tenant=tenant, spu=standard_spu, sku_code="SKU-STANDARD")
+    standard_sku = ProductSKU.objects.create(tenant=tenant, spu=standard_spu, sku_code="SKU-STANDARD", legacy_sku_code="OLD-STANDARD")
     ProductSKU.objects.create(tenant=tenant, spu=bundle_spu, sku_code="SKU-BUNDLE")
     client = APIClient()
     client.force_authenticate(user=user)
@@ -85,6 +85,11 @@ def test_sku_api_exposes_product_type_and_filters_standard_from_bundles():
     response = client.get("/api/internal/products/skus/", {"product_type": "standard", "active_status": "all"})
     assert response.status_code == 200
     assert [row["sku_code"] for row in response.json()["data"]["results"]] == ["SKU-STANDARD"]
+    selected = client.get("/api/internal/products/skus/", {"sku_codes": "SKU-STANDARD,SKU-BUNDLE", "product_type": "standard"})
+    assert selected.status_code == 200
+    assert [row["sku_code"] for row in selected.json()["data"]["results"]] == ["SKU-STANDARD"]
+    old_code = client.get("/api/internal/products/skus/", {"sku_codes": "OLD-STANDARD", "product_type": "standard"})
+    assert [row["sku_code"] for row in old_code.json()["data"]["results"]] == ["SKU-STANDARD"]
 
 
 @pytest.mark.django_db

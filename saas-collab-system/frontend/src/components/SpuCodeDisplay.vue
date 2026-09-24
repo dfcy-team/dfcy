@@ -7,7 +7,7 @@
     <template v-if="parts">
       <span class="spu-code-display__category" :title="`类目编码：${parts.category}`">{{ parts.category }}</span><span
         class="spu-code-display__tail"
-        :title="`属性/季节码及流水号：${parts.tail}`"
+        :title="`属性编码及流水号：${parts.tail}`"
       >{{ parts.tail }}</span>
     </template>
     <template v-else>{{ displayCode }}</template>
@@ -28,7 +28,7 @@ const displayCode = computed(() => {
 });
 
 /**
- * The formal SPU format is category code + one attribute/season digit + a
+ * The formal SPU format is category code + one attribute digit + a
  * three-digit sequence. Only an all-numeric code with at least seven digits
  * can be identified safely; legacy and ad-hoc codes remain untouched.
  */
@@ -40,7 +40,7 @@ const parts = computed(() => {
 
 const accessibleLabel = computed(() => {
   if (!parts.value) return `SPU编码：${displayCode.value}`;
-  return `SPU编码：${displayCode.value}；类目编码：${parts.value.category}；属性/季节码及流水号：${parts.value.tail}`;
+  return `SPU编码：${displayCode.value}；类目编码：${parts.value.category}；属性编码及流水号：${parts.value.tail}`;
 });
 </script>
 

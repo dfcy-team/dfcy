@@ -91,6 +91,20 @@ def test_bundle_create_commits_spu_sku_and_components_together():
 
 
 @pytest.mark.django_db
+def test_bundle_create_accepts_letter_attribute_code():
+    tenant = Tenant.objects.create(name="Bundle attribute tenant", code="bundle-attribute")
+    client = _bundle_client(tenant)
+    category = _catalog(tenant)
+    payload = _payload(category, [_component_sku(tenant, "NORMAL-ATTR")])
+    payload["season_code"] = "A"
+
+    response = client.post("/api/internal/products/bundles/create/", payload, format="json")
+
+    assert response.status_code == 201
+    assert response.json()["data"]["spu"]["season_code"] == "A"
+
+
+@pytest.mark.django_db
 def test_bundle_create_imports_optional_legacy_codes_with_bundle_manage_permission():
     tenant = Tenant.objects.create(name="Bundle legacy code tenant", code="bundle-legacy-codes")
     client = _bundle_client(tenant, "bundle-legacy-regular")

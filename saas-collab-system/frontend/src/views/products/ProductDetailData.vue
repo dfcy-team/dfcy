@@ -256,6 +256,14 @@
         :initial-action="bundleWorkspaceAction"
       />
     </el-drawer>
+    <ProductBundleManager
+      v-if="bundleOperationAction"
+      :key="bundleOperationKey"
+      import-only
+      :initial-action="bundleOperationAction"
+      @operation-closed="bundleOperationAction = ''"
+      @operation-completed="load"
+    />
 
     <el-dialog v-model="viewVisible" title="旧商品与新编码对应关系" width="min(720px, 94vw)">
       <el-descriptions v-if="selectedRow" :column="2" border>
@@ -660,6 +668,8 @@ const productTypeOptions = computed(() => [
 const bundleWorkspaceVisible = ref(false);
 const bundleWorkspaceAction = ref('');
 const bundleWorkspaceKey = ref(0);
+const bundleOperationAction = ref('');
+const bundleOperationKey = ref(0);
 const rows = ref([]);
 const total = ref(0);
 const page = ref(1);
@@ -1483,8 +1493,8 @@ function handleIoCommand(command) {
   if (command === 'create-import') openCreateImport();
   else if (command === 'legacy-import') openLegacyImport();
   else if (command === 'image-import') openImageBatch();
-  else if (command === 'bundle-import') openBundleWorkspace('import');
-  else if (command === 'bundle-legacy-migration') openBundleWorkspace('legacy-migration');
+  else if (command === 'bundle-import') openBundleOperation('import');
+  else if (command === 'bundle-legacy-migration') openBundleOperation('legacy-migration');
   else if (command === 'bigseller-export') exportBigSellerProducts();
   else if (command === 'detail-export') exportProductDetails(filters);
   else if (command === 'bundle-export') exportSelectedBundleProducts();
@@ -1494,6 +1504,11 @@ function openBundleWorkspace(action) {
   bundleWorkspaceAction.value = action;
   bundleWorkspaceKey.value += 1;
   bundleWorkspaceVisible.value = true;
+}
+
+function openBundleOperation(action) {
+  bundleOperationAction.value = action;
+  bundleOperationKey.value += 1;
 }
 
 function handleCreateCommand(command) {
