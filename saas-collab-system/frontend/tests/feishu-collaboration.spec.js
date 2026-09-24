@@ -33,4 +33,27 @@ describe('飞书协同工作台', () => {
     for (const resource of ['connection', 'identities', 'notifications', 'reports', 'approvals', 'operations']) expect(api).toContain(resource);
     expect(api).toContain('app_secret: undefined');
   });
+
+  it('身份映射展示系统用户并要求人工查询、选择和确认飞书候选', () => {
+    const page = read('src/views/integrations/FeishuCollaboration.vue');
+    const api = read('src/api/feishu.js');
+    for (const field of ['full_name', 'username', 'department', 'open_id']) expect(page).toContain(field);
+    expect(page).toContain('查询飞书用户');
+    expect(page).toContain('选择飞书用户');
+    expect(page).toContain('不会仅凭姓名自动绑定');
+    expect(page).toContain('@click="confirmIdentityBinding"');
+    expect(api).toContain('fetchFeishuIdentityCandidates');
+    expect(api).toContain('identities/system-users/${systemUserId}/candidates/');
+    expect(api).toContain('bindFeishuIdentity');
+    expect(api).toContain('identities/system-users/${systemUserId}/binding/');
+  });
+
+  it('已绑定用户明确显示状态，并可二次确认后解绑', () => {
+    const page = read('src/views/integrations/FeishuCollaboration.vue');
+    expect(page).toContain("row.open_id ? '已绑定' : '未绑定'");
+    expect(page).toContain('v-if="row.id"');
+    expect(page).toContain('解除飞书绑定');
+    expect(page).toContain("deleteFeishuResource('identities', row.id)");
+    expect(page).toContain('不会删除任何用户');
+  });
 });

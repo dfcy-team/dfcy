@@ -43,9 +43,21 @@ describe('MainLayout navigation shell', () => {
     expect(source).toContain('if (!menuTab) return true;');
     expect(source).toContain('openTabs.value.length < tabLimit.value');
     expect(source).toContain('最多可打开 ${tabLimit.value} 个页签');
+    expect(source).toContain("cancelButtonText: '自行关闭'");
+    expect(source).toContain("confirmButtonText: '清空后打开'");
+    expect(source).toContain('openTabs.value = [homeTab];');
     expect(source).toContain('return false;');
     expect(source).toContain('const navigationFailure = await router.push(item.path);');
     expect(source).toContain('if (navigationFailure) menuRenderVersion.value += 1;');
+  });
+
+  it('can clear all closable tabs while preserving the workbench', () => {
+    expect(source).toContain('v-if="openTabs.length > 1"');
+    expect(source).toContain('@click="clearAllTabs"');
+    expect(source).toContain('title="关闭全部页签，保留工作台"');
+    expect(source).toContain('async function clearAllTabs()');
+    expect(source).toContain("const navigationFailure = await router.push('/');");
+    expect(source).toContain('openTabs.value = [homeTab];');
   });
 
   it('renders the tab strip as left-aligned compact buttons', () => {

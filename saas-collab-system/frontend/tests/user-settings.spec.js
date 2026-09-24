@@ -35,7 +35,7 @@ describe('用户个人设置', () => {
     expect(layout).toContain(':tab-limit="tabLimit"');
     expect(layout).toContain('@tab-limit-changed="handleTabLimitChanged"');
     expect(layout).toContain('router.beforeEach');
-    expect(layout).toContain('请先关闭不需要的页签后再试');
+    expect(layout).toContain('自行关闭不需要的页签，或一键清空后打开当前页面');
     expect(drawer).toContain('label="使用偏好"');
     expect(drawer).toContain('label="最大打开页签数"');
     expect(drawer).toContain(':min="5" :max="30"');

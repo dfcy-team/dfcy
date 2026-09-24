@@ -30,13 +30,23 @@
     <section v-else class="panel">
       <header class="panel__header">
         <div><h2>{{ currentMeta.title }}</h2><p>{{ currentMeta.description }}</p></div>
-        <el-button v-if="currentMeta.resource !== 'operations'" type="primary" :disabled="!canManageCurrent" :title="manageHint" @click="openCreate">{{ currentMeta.createLabel }}</el-button>
+        <el-button v-if="currentMeta.resource !== 'operations' && currentMeta.resource !== 'identities'" type="primary" :disabled="!canManageCurrent" :title="manageHint" @click="openCreate">{{ currentMeta.createLabel }}</el-button>
       </header>
       <div v-if="activeTab === 'operations'" class="filters">
         <el-select v-model="operationType" clearable placeholder="全部类型" @change="loadActive"><el-option label="消息投递" value="notification" /><el-option label="报表运行" value="report" /><el-option label="审批事件" value="approval" /><el-option label="回调事件" value="event" /></el-select>
         <el-select v-model="operationStatus" clearable placeholder="全部状态" @change="loadActive"><el-option label="成功" value="success" /><el-option label="失败" value="failed" /><el-option label="处理中" value="processing" /></el-select>
       </div>
-      <el-table v-loading="loading" :data="rows" border stripe :empty-text="loading ? '正在加载' : currentMeta.emptyText">
+      <el-table v-if="activeTab === 'identity'" v-loading="loading" :data="rows" border stripe :empty-text="loading ? '正在加载' : currentMeta.emptyText">
+        <el-table-column label="系统用户" min-width="180">
+          <template #default="{ row }"><div class="user-cell"><strong>{{ row.full_name || row.name || row.username || '—' }}</strong><span v-if="row.username">{{ row.username }}</span></div></template>
+        </el-table-column>
+        <el-table-column prop="department" label="系统部门" min-width="150"><template #default="{ row }">{{ row.department || '—' }}</template></el-table-column>
+        <el-table-column prop="open_id" label="飞书用户" min-width="210"><template #default="{ row }"><div class="user-cell"><strong>{{ row.feishu_name || (row.open_id ? '已绑定' : '未绑定') }}</strong><span>{{ row.open_id || '—' }}</span></div></template></el-table-column>
+        <el-table-column label="飞书部门" min-width="150"><template #default="{ row }">{{ displayValue(row, 'feishu_department_name') !== '—' ? displayValue(row, 'feishu_department_name') : displayValue(row, 'department_ids') }}</template></el-table-column>
+        <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="row.open_id ? 'success' : 'info'">{{ row.open_id ? '已绑定' : '未绑定' }}</el-tag></template></el-table-column>
+        <el-table-column label="操作" width="210" fixed="right"><template #default="{ row }"><el-button link type="primary" :loading="candidateUserId === row.system_user_id" :disabled="!canManageCurrent" :title="manageHint" @click="queryCandidates(row)">{{ row.open_id ? '重新选择' : '查询飞书用户' }}</el-button><el-button v-if="row.id" link type="danger" :disabled="!canManageCurrent" :title="manageHint" @click="unbindIdentity(row)">解绑</el-button></template></el-table-column>
+      </el-table>
+      <el-table v-else v-loading="loading" :data="rows" border stripe :empty-text="loading ? '正在加载' : currentMeta.emptyText">
         <el-table-column v-for="column in currentMeta.columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 130">
           <template #default="{ row }">{{ displayValue(row, column.prop) }}</template>
         </el-table-column>
@@ -66,6 +76,19 @@
       </el-form>
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!canManageCurrent" :title="manageHint" @click="saveResource">保存</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="candidateDialogVisible" title="选择飞书用户" width="760px">
+      <div v-if="candidateSystemUser" class="candidate-summary">正在为系统用户 <strong>{{ candidateSystemUser.full_name || candidateSystemUser.name || candidateSystemUser.username }}</strong> 查询匹配候选。请选择并确认，不会仅凭姓名自动绑定。</div>
+      <el-alert v-if="candidateSystemUser?.open_id" :title="`该系统用户已绑定 ${candidateSystemUser.open_id}；确认其他候选将替换原绑定。`" type="warning" show-icon :closable="false" class="binding-alert" />
+      <el-table v-loading="candidateLoading" :data="candidates" border highlight-current-row @current-change="selectCandidate">
+        <el-table-column label="选择" width="64"><template #default="{ row }"><el-radio :model-value="selectedCandidate?.open_id" :label="row.open_id" @change="selectCandidate(row)"><span /></el-radio></template></el-table-column>
+        <el-table-column prop="name" label="飞书姓名" min-width="120" />
+        <el-table-column label="部门" min-width="140"><template #default="{ row }">{{ row.department_name || displayValue(row, 'department_names') }}</template></el-table-column>
+        <el-table-column label="邮箱 / 手机" min-width="180"><template #default="{ row }"><div class="user-cell"><span>{{ row.email || '—' }}</span><span>{{ row.phone || '—' }}</span></div></template></el-table-column>
+        <el-table-column prop="open_id" label="Open ID" min-width="210" />
+      </el-table>
+      <template #footer><el-button @click="candidateDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!selectedCandidate" @click="confirmIdentityBinding">确认绑定</el-button></template>
+    </el-dialog>
   </AppPage>
 </template>
 
@@ -76,13 +99,13 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
-import { createFeishuResource, deleteFeishuResource, fetchFeishuConnection, fetchFeishuOperations, fetchFeishuResources, updateFeishuConnection, updateFeishuResource } from '../../api/feishu';
+import { bindFeishuIdentity, createFeishuResource, deleteFeishuResource, fetchFeishuConnection, fetchFeishuIdentityCandidates, fetchFeishuOperations, fetchFeishuResources, updateFeishuConnection, updateFeishuResource } from '../../api/feishu';
 
 const route = useRoute(); const router = useRouter();
 const auth = useAuthStore();
 const tabs = [{ name: 'connection', label: '应用连接' }, { name: 'identity', label: '身份映射' }, { name: 'notification', label: '消息与预警' }, { name: 'report', label: '报表推送' }, { name: 'approval', label: '审批映射' }, { name: 'operations', label: '运行与事件' }];
 const metadata = {
-  identity: { resource: 'identities', title: '身份映射', singular: '身份映射', description: '维护系统用户与飞书用户的可审计绑定关系。', createLabel: '新增映射', emptyText: '暂无身份映射，请先建立系统用户与飞书账号的绑定。', columns: [{ prop: 'username', label: '系统用户' }, { prop: 'open_id', label: 'Open ID' }, { prop: 'department_ids', label: '飞书部门 ID' }, { prop: 'status', label: '状态' }] },
+  identity: { resource: 'identities', title: '身份映射', singular: '身份映射', description: '系统用户全部直接展示；查询飞书候选后，由用户人工确认绑定。', createLabel: '新增映射', emptyText: '暂无可配置的系统用户。', columns: [] },
   notification: { resource: 'notifications', title: '消息与预警', singular: '通知规则', description: '为库存、经营、同步异常和审批结果配置飞书投递策略。', createLabel: '新建通知规则', emptyText: '暂无消息与预警规则。', columns: [{ prop: 'name', label: '规则名称' }, { prop: 'scene', label: '业务场景' }, { prop: 'channel', label: '投递通道' }, { prop: 'enabled', label: '状态' }] },
   report: { resource: 'reports', title: '报表推送', singular: '报表任务', description: '配置经营摘要、库存预警、补货建议等综合报表的定时推送。', createLabel: '新建报表任务', emptyText: '暂无报表推送任务。', columns: [{ prop: 'name', label: '任务名称' }, { prop: 'report_type', label: '报表类型' }, { prop: 'schedule', label: '周期' }, { prop: 'next_run_at', label: '下次运行' }, { prop: 'enabled', label: '状态' }] },
   approval: { resource: 'approvals', title: '审批映射', singular: '审批映射', description: '将采购、价格、刊登、清仓、财务和报表导出审批映射到飞书模板。', createLabel: '新建审批映射', emptyText: '暂无审批模板映射，不会向飞书发起审批。', columns: [{ prop: 'name', label: '映射名称' }, { prop: 'approval_type', label: '本地审批类型' }, { prop: 'approval_code', label: 'Approval Code' }, { prop: 'enabled', label: '状态' }] },
@@ -93,6 +116,7 @@ const approvalTypes = [{ label: '采购审批', value: 'purchase' }, { label: '�
 const validTabs = new Set(tabs.map((item) => item.name));
 const activeTab = ref(validTabs.has(String(route.query.tab)) ? String(route.query.tab) : 'connection');
 const loading = ref(false); const saving = ref(false); const error = ref(''); const capability = ref(useMock ? 'mock' : 'pending'); const rows = ref([]); const dialogVisible = ref(false); const editingId = ref(null); const operationType = ref(''); const operationStatus = ref('');
+const candidateDialogVisible = ref(false); const candidateLoading = ref(false); const candidateUserId = ref(null); const candidateSystemUser = ref(null); const candidates = ref([]); const selectedCandidate = ref(null);
 const connection = reactive({ app_id: '', domain: 'feishu', enabled: false, status: 'not_configured', callback_url: '', credential_configured: false, verification_token_configured: false, encrypt_key_configured: false });
 const secrets = reactive({ app_secret: '', verification_token: '', encrypt_key: '' }); const editor = reactive({});
 const currentMeta = computed(() => metadata[activeTab.value] || metadata.identity);
@@ -105,7 +129,7 @@ const connectionStatusType = computed(() => ({ connected: 'success', active: 'su
 function displayValue(row, prop) { const value = row?.[prop] ?? row?.config?.[prop]; if (typeof value === 'boolean') return value ? '启用' : '停用'; if (Array.isArray(value)) return value.length ? value.join('、') : '—'; return value === null || value === undefined || value === '' ? '—' : value; }
 function listRows(response) { const data = response?.data; return Array.isArray(data) ? data : (data?.items || data?.results || []); }
 function setApiState(response) { capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded'); if (!response?.success) error.value = response?.message || '请求飞书集成数据失败。'; }
-async function loadActive() { loading.value = true; error.value = ''; const response = activeTab.value === 'connection' ? await fetchFeishuConnection() : activeTab.value === 'operations' ? await fetchFeishuOperations({ operation_type: operationType.value || undefined, status: operationStatus.value || undefined }) : await fetchFeishuResources(currentMeta.value.resource); setApiState(response); if (response?.success) { if (activeTab.value === 'connection') Object.assign(connection, response.data || {}); else rows.value = listRows(response); } loading.value = false; }
+async function loadActive() { loading.value = true; error.value = ''; const response = activeTab.value === 'connection' ? await fetchFeishuConnection() : activeTab.value === 'operations' ? await fetchFeishuOperations({ operation_type: operationType.value || undefined, status: operationStatus.value || undefined }) : await fetchFeishuResources(currentMeta.value.resource); setApiState(response); if (response?.success) { if (activeTab.value === 'connection') Object.assign(connection, response.data || {}); else { const items = listRows(response); rows.value = activeTab.value === 'identity' ? items.map((item) => ({ ...item, ...(item.mapping || {}) })) : items; } } loading.value = false; }
 function switchTab(name) { router.replace({ query: { ...route.query, tab: name === 'connection' ? undefined : name } }); loadActive(); }
 async function saveConnection() { if (!canManageCurrent.value) return; saving.value = true; error.value = ''; const payload = { app_id: connection.app_id, domain: connection.domain, enabled: connection.enabled }; for (const [key, value] of Object.entries(secrets)) if (value) payload[key] = value; const response = await updateFeishuConnection(payload); setApiState(response); if (response?.success) { Object.assign(connection, response.data || {}); Object.assign(secrets, { app_secret: '', verification_token: '', encrypt_key: '' }); ElMessage.success('飞书应用连接已保存'); } saving.value = false; }
 function resetEditor(row = {}) { for (const key of Object.keys(editor)) delete editor[key]; Object.assign(editor, row, { configText: JSON.stringify(row.config || {}, null, 2) }); }
@@ -114,6 +138,10 @@ function openEdit(row) { if (!canManageCurrent.value) return; editingId.value = 
 function stableCode() { return editor.code || `${currentMeta.value.resource}_${Date.now()}`; }
 async function saveResource() { if (!canManageCurrent.value) return; let config; try { config = editor.configText?.trim() ? JSON.parse(editor.configText) : {}; } catch (_error) { ElMessage.error('规则配置必须是有效 JSON'); return; } let payload; if (activeTab.value === 'identity') { payload = { ...editor }; delete payload.configText; } else { for (const key of ['scene', 'report_type', 'schedule', 'approval_type', 'approval_code']) if (editor[key] !== undefined && editor[key] !== '') config[key] = editor[key]; payload = { name: editor.name, code: stableCode(), enabled: editor.enabled !== false, config }; } saving.value = true; const response = editingId.value ? await updateFeishuResource(currentMeta.value.resource, editingId.value, payload) : await createFeishuResource(currentMeta.value.resource, payload); setApiState(response); if (response?.success) { dialogVisible.value = false; ElMessage.success('已保存'); await loadActive(); } saving.value = false; }
 async function remove(row) { if (!canManageCurrent.value) return; try { await ElMessageBox.confirm(`确定删除“${row.name || row.username || row.id}”吗？`, '删除确认', { type: 'warning' }); } catch (_error) { return; } const response = await deleteFeishuResource(currentMeta.value.resource, row.id); setApiState(response); if (response?.success) { ElMessage.success('已删除'); await loadActive(); } }
+async function queryCandidates(row) { if (!canManageCurrent.value) return; const systemUserId = row.system_user_id; candidateSystemUser.value = row; candidateUserId.value = systemUserId; candidateLoading.value = true; selectedCandidate.value = null; candidates.value = []; candidateDialogVisible.value = true; const response = await fetchFeishuIdentityCandidates(systemUserId); setApiState(response); if (response?.success) candidates.value = response?.data?.candidates || []; candidateLoading.value = false; candidateUserId.value = null; }
+function selectCandidate(row) { selectedCandidate.value = row || null; }
+async function confirmIdentityBinding() { if (!canManageCurrent.value || !candidateSystemUser.value || !selectedCandidate.value) return; const candidate = selectedCandidate.value; const currentOpenId = candidateSystemUser.value.open_id; if (currentOpenId && currentOpenId !== candidate.open_id) { try { await ElMessageBox.confirm(`该系统用户当前已绑定 ${currentOpenId}，确认替换为 ${candidate.open_id}？`, '替换飞书绑定', { type: 'warning', confirmButtonText: '确认替换' }); } catch (_error) { return; } } const systemUserId = candidateSystemUser.value.system_user_id; const payload = { open_id: candidate.open_id, user_id: candidate.user_id || '', union_id: candidate.union_id || '', department_ids: candidate.department_ids || [] }; saving.value = true; const response = await bindFeishuIdentity(systemUserId, payload); setApiState(response); if (response?.success) { candidateDialogVisible.value = false; ElMessage.success(currentOpenId && currentOpenId !== candidate.open_id ? '飞书绑定已替换' : '飞书用户已绑定'); await loadActive(); } saving.value = false; }
+async function unbindIdentity(row) { if (!canManageCurrent.value || !row.id) return; try { await ElMessageBox.confirm(`确认解除系统用户“${row.full_name || row.username}”与飞书用户 ${row.open_id || ''} 的绑定？不会删除任何用户。`, '解除飞书绑定', { type: 'warning', confirmButtonText: '确认解绑' }); } catch (_error) { return; } const response = await deleteFeishuResource('identities', row.id); setApiState(response); if (response?.success) { ElMessage.success('飞书绑定已解除'); await loadActive(); } }
 watch(() => route.query.tab, (value) => { const next = validTabs.has(String(value)) ? String(value) : 'connection'; if (next !== activeTab.value) { activeTab.value = next; loadActive(); } });
 onMounted(loadActive);
 </script>
@@ -129,5 +157,9 @@ onMounted(loadActive);
 .panel__actions { display: flex; justify-content: flex-end; padding-top: 8px; }
 .filters { display: flex; gap: 12px; margin-bottom: 16px; }
 .filters .el-select { width: 180px; }
+.user-cell { display: flex; flex-direction: column; gap: 3px; }
+.user-cell span { color: #64748b; font-size: 12px; }
+.candidate-summary { margin-bottom: 14px; color: #475569; line-height: 1.6; }
+.binding-alert { margin-bottom: 14px; }
 @media (max-width: 720px) { .panel__header { flex-direction: column; } .form-grid { grid-template-columns: 1fr; } }
 </style>

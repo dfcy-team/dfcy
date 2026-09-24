@@ -127,6 +127,44 @@ def test_sidecar_encrypts_and_resolves_tokens_with_contract(service):
     assert refresh["body"] == {"value": "refresh-token-value"}
 
 
+def test_sidecar_accepts_feishu_role_metadata_without_secret_named_key(service):
+    stored = _request(
+        service,
+        "/tokens",
+        payload={
+            "credential_type": "feishu_app_secret",
+            "reference_version": 1,
+            "metadata": {"tenant_id": 1, "value_role": "app_secret"},
+            "operation_id": "feishu-operation-001",
+            "app_secret": "feishu-app-secret-value",
+        },
+    )
+
+    assert stored["status"] == 200
+    assert stored["body"]["credential_id"].startswith("cred_")
+    resolved = _request(
+        service,
+        "/secrets/resolve",
+        payload={"reference_id": stored["body"]["credential_id"]},
+    )
+    assert resolved["body"] == {"value": "feishu-app-secret-value"}
+
+
+def test_sidecar_rejects_secret_named_metadata_keys(service):
+    rejected = _request(
+        service,
+        "/tokens",
+        payload={
+            "credential_type": "feishu_app_secret",
+            "metadata": {"tenant_id": 1, "secret_kind": "app_secret"},
+            "app_secret": "feishu-app-secret-value",
+        },
+    )
+
+    assert rejected["status"] == 400
+    assert "feishu-app-secret-value" not in json.dumps(rejected)
+
+
 def test_sidecar_rotation_is_atomic_and_revoke_is_contract_compatible(service):
     stored = _request(service, "/tokens", payload={"app_secret": "old-secret", "access_token": "old-access"})
     refs = stored["body"]
