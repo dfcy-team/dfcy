@@ -2454,6 +2454,7 @@ def _set_job_scope(job, values):
             schedule[key] = values[key]
     query_fields = {
         "query_mode": "mode",
+        "collection_time_basis": "time_basis",
         "lookback_days": "lookback_days",
         "overlap_minutes": "overlap_minutes",
         "query_page_size": "page_size",
@@ -2479,7 +2480,7 @@ def _validated_job_policy(data):
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
         "product_full_sync",
         "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
-        "query_mode", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
+        "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
     }
     if set(data) - allowed:
@@ -2490,6 +2491,7 @@ def _validated_job_policy(data):
         "execution_mode": {"simulation", "live_readonly"},
         "catch_up": {"run_once", "skip"},
         "query_mode": {"incremental", "range"},
+        "collection_time_basis": {"created", "updated"},
     }
     for key, valid in choices.items():
         if key in values and values[key] not in valid:
@@ -2572,14 +2574,18 @@ def preview_sync_schedule(request, pk):
     from .scheduler import preview_schedule
     job = _scoped_sync_job(request, pk)
     values = _validated_job_policy(request.data)
+    if "collection_time_basis" in values and job.resource_type != "sales_order":
+        raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
     if "schedule_type" in values:
         job.schedule_type = values["schedule_type"]
     _set_job_scope(job, values)
     from .readonly_clients import default_sync_scope
-
     resolved = default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
+    uses_time_range = job.resource_type in {"sales_order", "refund_return", "settlement_bill"} or (
+        job.resource_type == "platform_product" and not resolved["product_full_sync"]
+    )
     return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
-                             "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if job.resource_type in {"sales_order", "refund_return"} else None,
+                             "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if uses_time_range else None,
                              "timezone": (job.sync_scope.get("schedule") or {}).get("timezone", "Asia/Shanghai"),
                              "notice": "仅预览，未保存、启用或执行。超出计划时点 60 秒按漏跑策略处理。"})
 
@@ -2591,11 +2597,11 @@ def sync_job_detail(request, pk):
     job = _scoped_sync_job(request, pk, permission_code)
     if request.method == "GET":
         return success_response(SyncJobSerializer(job, context={"request": request}).data)
-    if job.status == SyncJob.Status.RUNNING or job.runs.filter(
-        status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]
-    ).exists():
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
         raise ValidationError("排队中或运行中的同步任务不能修改。")
     values = _validated_job_policy(request.data)
+    if "collection_time_basis" in values and job.resource_type != "sales_order":
+        raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
     core_fields = {"schedule_type", "max_retry_count", "backoff_base_seconds"}
     changed_core = [key for key in core_fields if key in values]
     with transaction.atomic():
@@ -2614,16 +2620,12 @@ def sync_job_detail(request, pk):
         previous_query = dict((job.sync_scope or {}).get("query") or {})
         _set_job_scope(job, values)
         from .readonly_clients import default_sync_scope
-
         default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
         if previous_query != job.sync_scope.get("query"):
             # Page cursors belong to the previous query, never reuse them for a new range.
             job.cursors.filter(cursor_key="default").update(cursor_value="")
             from .models import SyncCheckpoint
-
-            SyncCheckpoint.objects.filter(tenant=job.tenant, sync_job=job).update(
-                cursor_json={"default": ""}
-            )
+            SyncCheckpoint.objects.filter(tenant=job.tenant, sync_job=job).update(cursor_json={"default": ""})
         update_fields = [*changed_core, "sync_scope"]
         if plan_changed:
             job.next_run_at = calculate_next_run_at(job)
@@ -2641,9 +2643,7 @@ def toggle_sync_job(request, pk):
         raise ValidationError("API data integration module is disabled.")
     job = _scoped_sync_job(request, pk)
     job = SyncJob.objects.select_for_update().select_related("integration_config").get(pk=job.pk)
-    if job.status == SyncJob.Status.RUNNING or job.runs.filter(
-        status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]
-    ).exists():
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
         raise ValidationError("排队中或运行中的同步任务不能切换启用状态。")
     if not isinstance(request.data, dict) or type(request.data.get("enabled")) is not bool:
         raise ValidationError("enabled 必须明确为 true 或 false。")
@@ -2982,9 +2982,7 @@ def disable_sync_job(request, pk):
         ),
         pk=pk,
     )
-    if sync_job.status == SyncJob.Status.RUNNING or sync_job.runs.filter(
-        status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]
-    ).exists():
+    if sync_job.status == SyncJob.Status.RUNNING or sync_job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
         raise ValidationError("任务正在排队或运行，请等待当前运行结束后停用。")
     sync_job.is_enabled = False
     sync_job.status = SyncJob.Status.DISABLED

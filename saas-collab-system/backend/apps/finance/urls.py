@@ -16,6 +16,8 @@ from .views import (
     finance_analytics_exceptions,
     finance_analytics_overview,
     finance_analytics_reconciliation,
+    finance_transaction_collection,
+    lazada_finance_wide_collection,
 )
 
 
@@ -25,6 +27,8 @@ urlpatterns = [
     path("analytics/reconciliation/", finance_analytics_reconciliation, name="finance-analytics-reconciliation"),
     path("analytics/exceptions/", finance_analytics_exceptions, name="finance-analytics-exceptions"),
     path("statements/", statement_collection, name="finance-statement-collection"),
+    path("transactions/", finance_transaction_collection, name="finance-transaction-collection"),
+    path("lazada-income-wide/", lazada_finance_wide_collection, name="lazada-finance-wide-collection"),
     path("statements/import-demo/", import_demo_statement_view, name="finance-statement-import-demo"),
     path("withdrawals/", withdrawal_collection, name="finance-withdrawal-collection"),
     path("withdrawals/import-demo/", import_demo_withdrawal_view, name="finance-withdrawal-import-demo"),

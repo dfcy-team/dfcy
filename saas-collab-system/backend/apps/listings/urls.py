@@ -6,6 +6,7 @@ from . import warehouse_sku_views
 
 urlpatterns = [
     path("warehouse-skus/", warehouse_sku_views.warehouse_skus),
+    path("warehouse-skus/export/", warehouse_sku_views.export_warehouse_skus),
     path("warehouse-skus/<int:pk>/mapping/", warehouse_sku_views.warehouse_sku_mapping),
     path("templates/", views.template_collection),
     path("profiles/", views.profile_collection),

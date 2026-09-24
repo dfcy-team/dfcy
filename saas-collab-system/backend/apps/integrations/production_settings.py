@@ -82,13 +82,19 @@ SAFE_DEFAULTS = {
         "jifeng_wms": {"contract_approved": False, "auto_refresh_enabled": False},
         "lazada": {
             "contract_approved": False,
+            "auto_refresh_enabled": False,
             "product_contract_approved": False,
             "app_id": "",
             "redirect_uri": "",
             "auth_url": "https://auth.lazada.com/oauth/authorize",
             "api_host": "https://api.lazada.com",
+            "token_host": "https://auth.lazada.com",
             "token_path": "/rest/auth/token/create",
             "refresh_path": "/rest/auth/token/refresh",
+            "order_list_path": "/rest/orders/get",
+            "order_items_path": "/rest/order/items/get",
+            "return_list_path": "/rest/reverse/getreverseordersforseller",
+            "finance_transaction_path": "/rest/finance/transaction/details/get",
             "market": "",
         },
         "shopee": {
@@ -112,6 +118,8 @@ SAFE_DEFAULTS = {
             "product_list_path": "/api/v2/product/get_item_list",
             "product_base_info_path": "/api/v2/product/get_item_base_info",
             "product_model_list_path": "/api/v2/product/get_model_list",
+            "finance_list_path": "/api/v2/payment/get_escrow_list",
+            "finance_detail_path": "/api/v2/payment/get_escrow_detail",
             "market": "",
             "region": "",
         },
@@ -139,6 +147,8 @@ SAFE_DEFAULTS = {
             "return_list_path": "/return_refund/202602/returns/search",
             "product_search_path": "/product/202502/products/search",
             "product_detail_path": "/product/202309/products/{product_id}",
+            "finance_statement_path": "/finance/202309/statements",
+            "finance_transaction_path": "/finance/202501/statements/{statement_id}/statement_transactions",
         },
     },
 }
@@ -200,17 +210,23 @@ _PLATFORM_COMMON_KEYS = {
 }
 _PLATFORM_KEYS_BY_NAME = {
     "jifeng_wms": {"contract_approved", "auto_refresh_enabled"},
-    "lazada": _PLATFORM_COMMON_KEYS | {"auth_url", "api_host", "token_path", "refresh_path"},
+    "lazada": _PLATFORM_COMMON_KEYS | {
+        "auto_refresh_enabled",
+        "auth_url", "api_host", "token_host", "token_path", "refresh_path",
+        "order_list_path", "order_items_path", "return_list_path", "finance_transaction_path",
+    },
         "shopee": _PLATFORM_COMMON_KEYS | {
         "auto_refresh_enabled",
         "auth_url", "api_host", "token_path", "refresh_path", "revoke_path", "shop_path", "region",
         "order_list_path", "order_detail_path", "return_list_path", "return_detail_path",
         "product_list_path", "product_base_info_path", "product_model_list_path",
+        "finance_list_path", "finance_detail_path",
     },
     "tiktok": _PLATFORM_COMMON_KEYS | {
         "auth_url", "api_host", "auth_urls", "api_hosts", "token_host", "token_path", "refresh_path",
         "revoke_path", "authorized_shops_path", "metadata_path", "order_list_path", "order_detail_path",
         "return_list_path", "product_search_path", "product_detail_path",
+        "finance_statement_path", "finance_transaction_path",
     },
 }
 
@@ -393,9 +409,8 @@ def _validate_mapping_keys(value: dict, allowed: set[str], path: str):
 def validate_runtime_config(value: Any):
     """Validate a stored or submitted runtime config and return a copy.
 
-    Partial objects are accepted at this layer. The write API materialises a
-    complete document before creating a version so a section-only editor
-    cannot discard settings owned by another administration page.
+    Partial objects are accepted so an administrator can create a version for
+    one section; runtime loading merges it over safe/environment defaults.
     """
     _require_mapping(value, "runtime")
     _check_no_plaintext_secret(value)
@@ -529,10 +544,7 @@ def validate_runtime_config(value: Any):
             if "contract_approved" in item:
                 result["platforms"][platform]["contract_approved"] = _boolean(item["contract_approved"], f"{path}.contract_approved")
             if "auto_refresh_enabled" in item:
-                result["platforms"][platform]["auto_refresh_enabled"] = _boolean(
-                    item["auto_refresh_enabled"],
-                    f"{path}.auto_refresh_enabled",
-                )
+                result["platforms"][platform]["auto_refresh_enabled"] = _boolean(item["auto_refresh_enabled"], f"{path}.auto_refresh_enabled")
             if "product_contract_approved" in item:
                 result["platforms"][platform]["product_contract_approved"] = _boolean(
                     item["product_contract_approved"], f"{path}.product_contract_approved"
@@ -548,9 +560,11 @@ def validate_runtime_config(value: Any):
                 if key in item:
                     result["platforms"][platform][key] = _https_url(item[key], f"{path}.{key}")
             for key in _SAFE_PATH_KEYS | {
-                "shop_path", "order_list_path", "order_detail_path", "return_list_path", "return_detail_path",
+                "shop_path", "order_list_path", "order_detail_path", "order_items_path",
+                "finance_transaction_path", "return_list_path", "return_detail_path",
                 "product_list_path", "product_base_info_path", "product_model_list_path",
-                "product_search_path", "product_detail_path",
+                "product_search_path", "product_detail_path", "finance_list_path", "finance_detail_path",
+                "finance_statement_path",
             }:
                 if key in item:
                     result["platforms"][platform][key] = _path(item[key], f"{path}.{key}")
@@ -576,13 +590,6 @@ def _deep_merge(base: dict, override: dict):
         else:
             merged[key] = deepcopy(value)
     return merged
-
-
-def merge_runtime_config(base: dict, override: dict):
-    """Return one validated, fully merged runtime configuration document."""
-    validated_base = validate_runtime_config(base)
-    validated_override = validate_runtime_config(override)
-    return validate_runtime_config(_deep_merge(validated_base, validated_override))
 
 
 def _env_bool(name: str, default=False):
@@ -648,13 +655,31 @@ def _environment_config():
         "platforms": {
             "lazada": {
                 "contract_approved": bool(_setting("LIVE_LAZADA_CONTRACT_APPROVED", False)),
+                "auto_refresh_enabled": False,
                 "product_contract_approved": False,
                 "app_id": _setting("LIVE_LAZADA_APP_KEY", "") or "",
                 "redirect_uri": _setting("LIVE_LAZADA_REDIRECT_URI", "") or "",
                 "auth_url": _setting("LIVE_LAZADA_AUTH_URL", SAFE_DEFAULTS["platforms"]["lazada"]["auth_url"]),
                 "api_host": _setting("LIVE_LAZADA_API_HOST", SAFE_DEFAULTS["platforms"]["lazada"]["api_host"]),
+                "token_host": _setting("LIVE_LAZADA_TOKEN_HOST", SAFE_DEFAULTS["platforms"]["lazada"]["token_host"]),
                 "token_path": _setting("LIVE_LAZADA_TOKEN_PATH", SAFE_DEFAULTS["platforms"]["lazada"]["token_path"]),
                 "refresh_path": _setting("LIVE_LAZADA_REFRESH_PATH", SAFE_DEFAULTS["platforms"]["lazada"]["refresh_path"]),
+                "order_list_path": _setting(
+                    "LIVE_LAZADA_ORDER_LIST_PATH",
+                    SAFE_DEFAULTS["platforms"]["lazada"]["order_list_path"],
+                ),
+                "order_items_path": _setting(
+                    "LIVE_LAZADA_ORDER_ITEMS_PATH",
+                    SAFE_DEFAULTS["platforms"]["lazada"]["order_items_path"],
+                ),
+                "return_list_path": _setting(
+                    "LIVE_LAZADA_RETURN_LIST_PATH",
+                    SAFE_DEFAULTS["platforms"]["lazada"]["return_list_path"],
+                ),
+                "finance_transaction_path": _setting(
+                    "LIVE_LAZADA_FINANCE_TRANSACTION_PATH",
+                    SAFE_DEFAULTS["platforms"]["lazada"]["finance_transaction_path"],
+                ),
                 "market": _setting("LIVE_LAZADA_MARKET", "") or "",
             },
             "shopee": {
@@ -675,6 +700,8 @@ def _environment_config():
                 "product_list_path": _setting("LIVE_SHOPEE_PRODUCT_LIST_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["product_list_path"]),
                 "product_base_info_path": _setting("LIVE_SHOPEE_PRODUCT_BASE_INFO_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["product_base_info_path"]),
                 "product_model_list_path": _setting("LIVE_SHOPEE_PRODUCT_MODEL_LIST_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["product_model_list_path"]),
+                "finance_list_path": _setting("LIVE_SHOPEE_FINANCE_LIST_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["finance_list_path"]),
+                "finance_detail_path": _setting("LIVE_SHOPEE_FINANCE_DETAIL_PATH", SAFE_DEFAULTS["platforms"]["shopee"]["finance_detail_path"]),
                 "market": _setting("LIVE_SHOPEE_MARKET", "") or "",
                 "region": _setting("LIVE_SHOPEE_DEFAULT_REGION", "") or "",
             },
@@ -708,6 +735,8 @@ def _environment_config():
                 "return_list_path": _setting("LIVE_TIKTOK_RETURN_LIST_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["return_list_path"]),
                 "product_search_path": _setting("LIVE_TIKTOK_PRODUCT_SEARCH_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["product_search_path"]),
                 "product_detail_path": _setting("LIVE_TIKTOK_PRODUCT_DETAIL_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["product_detail_path"]),
+                "finance_statement_path": _setting("LIVE_TIKTOK_FINANCE_STATEMENT_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["finance_statement_path"]),
+                "finance_transaction_path": _setting("LIVE_TIKTOK_FINANCE_TRANSACTION_PATH", SAFE_DEFAULTS["platforms"]["tiktok"]["finance_transaction_path"]),
             },
         },
     }

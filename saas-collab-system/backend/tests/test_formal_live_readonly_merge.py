@@ -114,6 +114,22 @@ def test_shopee_adapter_persists_order_lines_without_duplicates():
 
 
 @pytest.mark.django_db
+def test_order_adapter_batch_skips_unchanged_page():
+    tenant, user, store, _warehouse = _scope("shopee-order-batch")
+    job, run = _run(tenant, user, "sales_order", "shopee")
+    adapter = MarketplaceOrderAdapter(job.integration_config)
+    adapter.authorization = SimpleNamespace(store=store, region="PH")
+    adapter.bind_run(run)
+    record = adapter.normalize_record({
+        "order_sn": "BATCH-ORDER", "order_status": "COMPLETED",
+        "create_time": int(NOW.timestamp()), "update_time": int(NOW.timestamp()),
+        "total_amount": 20, "item_list": [],
+    })
+    assert adapter.persist_records(job, [record])[0]["action"] == "created"
+    assert adapter.persist_records(job, [record])[0]["action"] == "skipped"
+
+
+@pytest.mark.django_db
 def test_refund_contract_persists_idempotently_to_existing_fact_tables():
     tenant, user, store, _warehouse = _scope("formal-refund")
     _job, run = _run(tenant, user, "refund_return", "shopee")
@@ -229,6 +245,18 @@ class _TwoPageAdapter(PlatformAdapter):
         return bool(page["next_cursor"])
 
 
+class _BatchAdapter(_TwoPageAdapter):
+    def __init__(self):
+        self.batch_calls = []
+
+    def persist_record(self, sync_job, record):
+        raise AssertionError("The per-record path must not run when a batch hook is available.")
+
+    def persist_records(self, sync_job, records):
+        self.batch_calls.append(list(records))
+        return [{"action": "skipped"} for _record in records]
+
+
 @pytest.mark.django_db
 def test_sync_service_completes_all_pages_before_success():
     tenant, user, _store, _warehouse = _scope("formal-pages")
@@ -244,6 +272,26 @@ def test_sync_service_completes_all_pages_before_success():
     assert created is True
     assert run.status == SyncRun.Status.SUCCESS
     assert run.fetched_count == 2
+
+
+@pytest.mark.django_db
+def test_sync_service_uses_page_batch_persistence_hook():
+    tenant, user, _store, _warehouse = _scope("formal-batch-pages")
+    config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant,
+        platform="mock",
+        account_alias="batch-pages",
+        environment="mock",
+        created_by=user,
+    )
+    job = SyncJob.objects.create(tenant=tenant, integration_config=config, resource_type="mock_record")
+    adapter = _BatchAdapter()
+    run, created = run_sync_job(job, adapter=adapter, retry_wait=lambda _delay: None)
+    assert created is True
+    assert run.status == SyncRun.Status.SUCCESS
+    assert run.fetched_count == 2
+    assert run.skipped_count == 2
+    assert adapter.batch_calls == [[{"external_id": "1"}], [{"external_id": "2"}]]
 
 
 class _NoCredentialAccess:

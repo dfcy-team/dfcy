@@ -6,7 +6,7 @@ from .models import PlatformChoices
 
 
 REFUND_RETURN_CONTRACT_VERSION = "refund_return.v1"
-SUPPORTED_PLATFORMS = {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+SUPPORTED_PLATFORMS = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
 FORBIDDEN_CREDENTIAL_KEYS = {
     "app_secret",
     "access_token",

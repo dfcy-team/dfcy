@@ -36,6 +36,179 @@ class PlatformStatement(models.Model):
         ]
 
 
+class PlatformFinanceTransaction(models.Model):
+    class FeeCategory(models.TextChoices):
+        INCOME = "income", "Income"
+        PLATFORM_FEE = "platform_fee", "Platform fee"
+        LOGISTICS_FEE = "logistics_fee", "Logistics fee"
+        DISCOUNT = "discount", "Discount"
+        REFUND = "refund", "Refund"
+        TAX = "tax", "Tax"
+        ADJUSTMENT = "adjustment", "Adjustment"
+        OTHER = "other", "Other"
+
+    class MatchStatus(models.TextChoices):
+        MATCHED = "matched", "Matched"
+        ORDER_ONLY = "order_only", "Order only"
+        UNMATCHED = "unmatched", "Unmatched"
+        CONFLICT = "conflict", "Conflict"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="platform_finance_transactions")
+    platform = models.CharField(max_length=30, default="lazada")
+    store = models.ForeignKey(
+        "masterdata.StoreMaster",
+        on_delete=models.PROTECT,
+        related_name="platform_finance_transactions",
+    )
+    authorization = models.ForeignKey(
+        "integrations.MarketplaceStoreAuthorization",
+        on_delete=models.PROTECT,
+        related_name="finance_transactions",
+    )
+    source_run = models.ForeignKey(
+        "integrations.SyncRun",
+        on_delete=models.PROTECT,
+        related_name="finance_transactions",
+    )
+    raw_envelope = models.ForeignKey(
+        "integrations.SyncRawEnvelope",
+        on_delete=models.PROTECT,
+        related_name="finance_transactions",
+        null=True,
+        blank=True,
+    )
+    source_key = models.CharField(max_length=191)
+    external_transaction_id = models.CharField(max_length=191, blank=True)
+    external_order_id = models.CharField(max_length=191, blank=True)
+    external_order_item_id = models.CharField(max_length=191, blank=True)
+    sales_order = models.ForeignKey(
+        "commerce.SalesOrder",
+        on_delete=models.PROTECT,
+        related_name="finance_transactions",
+        null=True,
+        blank=True,
+    )
+    sales_order_item = models.ForeignKey(
+        "commerce.SalesOrderItem",
+        on_delete=models.PROTECT,
+        related_name="finance_transactions",
+        null=True,
+        blank=True,
+    )
+    seller_sku = models.CharField(max_length=191, blank=True)
+    platform_variant_id = models.CharField(max_length=191, blank=True)
+    raw_fee_name = models.CharField(max_length=191)
+    fee_code = models.CharField(max_length=40)
+    fee_category = models.CharField(max_length=30, choices=FeeCategory.choices)
+    raw_amount = models.DecimalField(max_digits=20, decimal_places=4)
+    signed_amount = models.DecimalField(max_digits=20, decimal_places=4)
+    currency = models.CharField(max_length=8)
+    occurred_at_utc = models.DateTimeField()
+    business_date = models.DateField()
+    match_status = models.CharField(max_length=20, choices=MatchStatus.choices)
+    normalization_version = models.CharField(max_length=40)
+    payload_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant_id", "store_id", "-occurred_at_utc", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "store", "source_key"],
+                name="uniq_fin_tx_store_source",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(platform__in=("lazada", "shopee", "tiktok")),
+                name="chk_fin_tx_marketplace",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "store", "business_date"], name="idx_fin_tx_store_date"),
+            models.Index(fields=["tenant", "external_order_id"], name="idx_fin_tx_order"),
+            models.Index(fields=["tenant", "fee_code", "business_date"], name="idx_fin_tx_fee_date"),
+            models.Index(fields=["source_run"], name="idx_fin_tx_run"),
+            models.Index(fields=["match_status"], name="idx_fin_tx_match"),
+        ]
+
+
+class LazadaFinanceWide(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="lazada_finance_wide_rows")
+    store = models.ForeignKey(
+        "masterdata.StoreMaster", on_delete=models.PROTECT, related_name="lazada_finance_wide_rows"
+    )
+    authorization = models.ForeignKey(
+        "integrations.MarketplaceStoreAuthorization",
+        on_delete=models.PROTECT,
+        related_name="finance_wide_rows",
+    )
+    source_run = models.ForeignKey(
+        "integrations.SyncRun", on_delete=models.PROTECT, related_name="finance_wide_rows"
+    )
+    income_key = models.CharField(max_length=64)
+    site = models.CharField(max_length=20)
+    transaction_date = models.DateField()
+    transaction_month = models.CharField(max_length=7)
+    currency = models.CharField(max_length=8)
+    external_order_id = models.CharField(max_length=191, blank=True)
+    external_order_item_id = models.CharField(max_length=191)
+    seller_sku = models.CharField(max_length=191, blank=True)
+    lazada_sku = models.CharField(max_length=191, blank=True)
+    order_item_status = models.CharField(max_length=80, blank=True)
+    item_name = models.CharField(max_length=240, blank=True)
+
+    item_price_credit = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_item_price = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    commission = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    payment_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    payment_fee_credit = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_commission = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    free_shipping_max_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_free_shipping_max_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    shipping_fee_refund_to_customer = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    shipping_fee_voucher_refund_to_laz = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    sponsored_affiliates = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    promotional_charges_vouchers = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_promotional_charges_vouchers = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    promotional_charges_flexi_combo = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_promotional_charges_flexi_combo = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    lazcoins_discount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_lazcoins_discount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    lazcoins_discount_promotion_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_lazcoins_discount_promotion_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    order_processing_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_order_processing_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    spa_program_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    reversal_spa_program_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    wrong_shipping_fee_adjustment = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    withholding_tax = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    other_fee = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+
+    sales_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    refund_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    platform_fee_total = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    net_income = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    source_row_count = models.PositiveIntegerField(default=0)
+    allocation_methods = models.JSONField(default=list)
+    unknown_fee_names = models.JSONField(default=list)
+    fee_details = models.JSONField(default=list)
+    source_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "lazada_finance_wide"
+        ordering = ["-transaction_date", "store_id", "external_order_item_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "income_key"], name="uniq_lazada_income_key"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "store", "transaction_date"], name="idx_lz_wide_store_date"),
+            models.Index(fields=["tenant", "external_order_id"], name="idx_lz_wide_order"),
+            models.Index(fields=["tenant", "seller_sku"], name="idx_lz_wide_sku"),
+        ]
+
+
 class WithdrawalRecord(models.Model):
     class Status(models.TextChoices):
         REQUESTED = "requested", "Requested"

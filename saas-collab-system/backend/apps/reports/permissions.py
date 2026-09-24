@@ -12,16 +12,20 @@ class AnalyticsActionPermission(BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
+        cache = getattr(request, "_permission_resolution_cache", None)
+        if cache is None:
+            cache = {}
+            request._permission_resolution_cache = cache
         allowed = bool(
             self.permission_code
             and user
             and user.is_authenticated
             and user.user_type == CustomUser.UserType.INTERNAL
-            and check_user_permission(user, self.permission_code)
+            and check_user_permission(user, self.permission_code, cache=cache)
         )
         if not allowed:
             return False
-        if not get_permission_data_scopes(user, self.permission_code):
+        if not get_permission_data_scopes(user, self.permission_code, cache=cache):
             raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
         return True
 

@@ -11,7 +11,6 @@ from .sync_alerts import upsert_sync_failure_alert
 @shared_task
 def refresh_due_integration_credentials():
     from .automatic_refresh import refresh_due_authorizations
-
     return refresh_due_authorizations()
 
 
@@ -34,13 +33,12 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None):
             dispatch.status, dispatch.started_at = "running", timezone.now()
             dispatch.save(update_fields=["status", "started_at"])
     try:
-        controlled_mock = bool(dispatch and sync_job.integration_config.environment == "mock"
-                               and sync_job.resource_type == "mock_record")
-        validate_manual_sync_job(sync_job, live_only=not controlled_mock)
+        validate_manual_sync_job(sync_job, live_only=True)
         run, created = run_sync_job(sync_job, idempotency_key=idempotency_key, dispatch=dispatch)
         if dispatch:
-            dispatch.status, dispatch.finished_at = run.status, run.finished_at
-            dispatch.save(update_fields=["status", "finished_at"])
+            SyncScheduleDispatch.objects.filter(pk=dispatch.pk, status="running").update(
+                status=run.status, finished_at=run.finished_at,
+            )
     except Exception as exc:
         fail_queued_sync_run(
             sync_job,
@@ -50,7 +48,9 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None):
         )
         if dispatch:
             SyncScheduleDispatch.objects.filter(pk=dispatch.pk, status="running").update(
-                status="blocked", reason="执行校验或执行阶段失败，请核对授权、能力和只读准入，并查看同步异常。", finished_at=timezone.now())
+                status="blocked", reason="执行校验或执行阶段失败，请核对授权、能力和只读准入，并查看同步异常。",
+                finished_at=timezone.now(),
+            )
         upsert_sync_failure_alert(
             sync_job,
             error_code="SYNC_PREFLIGHT_FAILED",

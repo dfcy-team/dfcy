@@ -28,7 +28,7 @@
       <dl>
         <div><dt>来源更新时间（UTC）</dt><dd>{{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) : '尚无来源时间' }}</dd></div>
         <div><dt>数据范围</dt><dd>当前租户 · 当前角色 · 授权门店</dd></div>
-        <div><dt>币种口径</dt><dd>{{ currencyConversion ? '按每日参考汇率换算为 CNY' : '按来源币种分别展示，不跨币种相加' }}</dd></div>
+        <div><dt>币种口径</dt><dd>按来源币种分别展示，不跨币种相加</dd></div>
         <div><dt>质量检查评分</dt><dd>{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}</dd></div>
       </dl>
     </section>
@@ -213,7 +213,7 @@
             <el-option v-for="option in exportTypes" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
         </el-form-item>
-        <el-alert title="任务将继承当前租户、角色、数据范围和筛选条件，默认生成脱敏文件；页面 CNY 换算不进入导出，文件保留原币。" type="info" :closable="false" />
+        <el-alert title="任务将继承当前租户、角色、数据范围和筛选条件，默认生成脱敏文件。" type="info" :closable="false" />
         <p v-if="isReport" class="field-note">当前导出提供筛选范围内的销售事实明细，不是本页按日／SKU 聚合表。</p>
       </el-form>
       <template #footer><el-button @click="exportDialogOpen = false">取消</el-button><el-button type="primary" :loading="actionLoading" @click="submitExport">创建任务</el-button></template>
@@ -338,7 +338,7 @@ function optionsFor(source) {
     value
   }));
   return source === 'currencies'
-    ? [{ label: 'CNY（自动换算）', value: '__AUTO_CNY__' }, ...options]
+    ? [{ label: 'CNY', value: '__AUTO_CNY__' }, ...options]
     : options;
 }
 
@@ -542,7 +542,6 @@ async function submitExport() {
   delete filters.ordering;
   delete filters.report;
   delete filters.grouping;
-  delete filters.currency_basis;
   const response = await createSalesExport({ export_type: exportForm.export_type, filters }, newKey('sales-export'));
   actionLoading.value = false;
   if (!response?.success) return ElMessage.error(formatApiError(response));

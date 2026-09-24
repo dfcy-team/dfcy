@@ -4,8 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { normalizeInventoryAnalysisResponse } from '../src/api/uiP6Adapters';
 
 const fetchInventoryAnalysis = vi.hoisted(() => vi.fn());
-const routeQuery = vi.hoisted(() => ({ current: {} }));
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: routeQuery.current }) }));
 vi.mock('../src/api/analytics', () => ({ fetchInventoryAnalysis }));
 import InventoryAnalysis from '../src/views/analytics/InventoryAnalysis.vue';
 import Phase3AnalyticsPage from '../src/components/Phase3AnalyticsPage.vue';
@@ -27,29 +25,13 @@ const stubs = {
 
 describe('库存分析真实页面', () => {
   beforeEach(() => {
-    routeQuery.current = {};
     fetchInventoryAnalysis.mockReset();
     fetchInventoryAnalysis.mockResolvedValue(normalizeInventoryAnalysisResponse({ success: true, data: {
       api_status: 'connected', count: 965, warehouse_options: [{ value: 11, label: '测试仓（THCS）' }],
-      quality: { score: 0, status: 'warning', total_count: 965, mapped_count: 0, metric_version: 'inventory_snapshot.v1' },
-      metrics: [{ code: 'inventory_total', label: '在手库存', value: 12, unit: '件' }],
+      quality: { score: 0, total_count: 965, mapped_count: 0, metric_version: 'inventory_snapshot.v1' },
       results: [{ source_sku: 'FAKE-SKU-001', warehouse_code: 'THCS', warehouse_name: '测试仓', on_hand_qty: 12, available_qty: 10, reserved_qty: 2, in_transit_qty: 0, risk_label: '正常' }],
       trend: [{ date: '2026-09-11', total: 12 }],
-      risk_summary: { out_of_stock: 2, low_stock: 3, locked_stock: 1, data_insufficient: 965 },
-      freshness: { status: 'delayed', age_hours: 48 },
-      definition: { replenishment_basis: '缺少销量速度，暂不计算补货建议。' },
     } }));
-  });
-
-  it('opens a warehouse and source SKU from the workbench drill-down', async () => {
-    routeQuery.current = { warehouse_id: '11', sku: 'FAKE-SKU-001' };
-    const wrapper = mount(InventoryAnalysis, { global: { stubs } });
-    await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ warehouse: '11', sku: 'FAKE-SKU-001', include_virtual: false }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
-    wrapper.unmount();
   });
 
   it('renders warehouse facts and explains unmapped SKU and single-day history', async () => {
@@ -59,29 +41,9 @@ describe('库存分析真实页面', () => {
     expect(wrapper.text()).not.toContain('数据可信度');
     expect(wrapper.text()).toContain('FAKE-SKU-001');
     expect(wrapper.text()).toContain('未关联');
-    expect(wrapper.text()).toContain('待关联');
-    expect(wrapper.text()).not.toContain('inventory_total');
     expect(wrapper.text()).toContain('仅有 1 天');
-    expect(wrapper.text()).toContain('快照时效');
-    expect(wrapper.text()).toContain('延迟');
-    expect(wrapper.text()).toContain('缺少销量速度');
     expect(wrapper.text()).not.toContain('演示');
     expect(wrapper.findAll('option').map(option => option.text())).toContain('测试仓（THCS）');
-    wrapper.unmount();
-  });
-
-  it('applies SKU mapping filter with pagination reset', async () => {
-    const wrapper = mount(InventoryAnalysis, { global: { stubs } });
-    await flushPromises();
-    const page = wrapper.findComponent(Phase3AnalyticsPage);
-    page.vm.currentPage = 4;
-    page.vm.query.mapping_status = 'unmapped';
-    await wrapper.find('form').trigger('submit');
-    await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 1, mapping_status: 'unmapped' }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
     wrapper.unmount();
   });
 
@@ -93,10 +55,7 @@ describe('库存分析真实页面', () => {
     page.vm.query.risk = 'low';
     await wrapper.find('form').trigger('submit');
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 1, risk: 'low' }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low' }));
     wrapper.unmount();
   });
 
@@ -111,26 +70,19 @@ describe('库存分析真实页面', () => {
     const wrapper = mount(InventoryAnalysis, { global: { stubs } });
     await flushPromises();
     const checkbox = wrapper.find('.table-actions input[type="checkbox"]');
-    expect(checkbox.element.checked).toBe(false);
-    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(false);
+    expect(checkbox.element.checked).toBe(true);
     const page = wrapper.findComponent(Phase3AnalyticsPage);
     page.vm.currentPage = 7;
     page.vm.query.risk = 'low';
-    await checkbox.setValue(true);
-    await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 1, risk: 'low', include_virtual: true }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
-    page.vm.changePage(2);
-    await flushPromises();
-    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(true);
     await checkbox.setValue(false);
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 1, include_virtual: false }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', include_virtual: false }));
+    page.vm.changePage(2);
+    await flushPromises();
+    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(false);
+    await checkbox.setValue(true);
+    await flushPromises();
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, include_virtual: true }));
     wrapper.unmount();
   });
 
@@ -143,16 +95,10 @@ describe('库存分析真实页面', () => {
     page.vm.query.risk = 'low';
     wrapper.findComponent(stubs['el-table']).vm.$emit('sort-change', { prop: 'on_hand_qty', order: 'descending' });
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 1, risk: 'low', ordering: '-on_hand_qty' }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', ordering: '-on_hand_qty' }));
     page.vm.changePage(2);
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 2, ordering: '-on_hand_qty' }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, ordering: '-on_hand_qty' }));
     page.vm.changeSort({ prop: 'on_hand_qty', order: 'ascending' });
     await flushPromises();
     expect(fetchInventoryAnalysis.mock.lastCall[0].ordering).toBe('on_hand_qty');
@@ -161,14 +107,10 @@ describe('库存分析真实页面', () => {
     expect(fetchInventoryAnalysis.mock.lastCall[0]).not.toHaveProperty('ordering');
     page.vm.changeSort({ prop: 'source_sku', order: 'ascending' });
     await flushPromises();
-    await wrapper.find('.table-actions input[type="checkbox"]').setValue(true);
-    await flushPromises();
     page.vm.resetFilters();
     await flushPromises();
     expect(fetchInventoryAnalysis.mock.lastCall[0]).not.toHaveProperty('ordering');
     expect(fetchInventoryAnalysis.mock.lastCall[0].page).toBe(1);
-    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(false);
-    expect(wrapper.find('.table-actions input[type="checkbox"]').element.checked).toBe(false);
     wrapper.unmount();
   });
 

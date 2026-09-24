@@ -63,8 +63,18 @@ def test_lazada_schema_exposes_six_supported_countries():
     assert [field["key"] for field in schema["fields"]] == ["app_key", "account_reference"]
 
 
-def test_lazada_store_access_only_exposes_marketplace_api(lazada_context):
+@pytest.mark.parametrize("auto_refresh_enabled,expected_policy", [
+    (False, "manual-refresh"),
+    (True, "oauth-auto-refresh"),
+])
+def test_lazada_store_access_only_exposes_marketplace_api(
+    lazada_context, monkeypatch, auto_refresh_enabled, expected_policy,
+):
     client, store, _config = lazada_context
+    monkeypatch.setattr(
+        "apps.integrations.subject_access_service.get_runtime_platform_config",
+        lambda platform: {"auto_refresh_enabled": auto_refresh_enabled},
+    )
 
     response = client.get(
         "/api/internal/integrations/subject-api-access/",
@@ -73,7 +83,7 @@ def test_lazada_store_access_only_exposes_marketplace_api(lazada_context):
 
     assert response.status_code == 200
     assert response.data["data"]["api_types"] == ["marketplace"]
-    assert response.data["data"]["token_policy"] == "oauth-auto-refresh"
+    assert response.data["data"]["token_policy"] == expected_policy
 
 
 def test_lazada_oauth_start_and_callback_create_store_authorization(lazada_context):

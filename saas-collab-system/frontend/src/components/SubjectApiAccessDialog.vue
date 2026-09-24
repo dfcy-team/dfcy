@@ -678,6 +678,7 @@ const tokenPolicyLabel = computed(() => ({
   'tiktok-split-policy': '商城不自动刷新；广告独立长期 Token',
   'oauth-auto-refresh': 'OAuth Token 到期前自动刷新',
   'auto-refresh': '到期前自动刷新；检查时调用只读 API',
+  'manual-refresh': '不自动刷新；可手动刷新令牌',
   'manual-no-expiry-block': '不自动刷新，不设到期拦截',
   'manual-replace': '仅手动绑定或替换',
 }[access.value?.token_policy] || '遵循平台默认令牌策略'));

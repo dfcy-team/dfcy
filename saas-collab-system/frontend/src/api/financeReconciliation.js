@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { requestApi, requestWithMockFallback } from './request';
 import {
   mockBankReceipts,
   mockReconciliationExceptions,
@@ -10,6 +10,12 @@ import {
 
 export const fetchPlatformStatements = () =>
   requestWithMockFallback({ method: 'get', url: '/api/finance/statements/' }, mockStatements, 'finance.statements');
+
+export const fetchFinanceTransactions = (params = {}) =>
+  requestApi({ method: 'get', url: '/api/finance/transactions/', params });
+
+export const fetchLazadaFinanceWide = (params = {}) =>
+  requestApi({ method: 'get', url: '/api/finance/lazada-income-wide/', params });
 
 export const fetchWithdrawalRecords = () =>
   requestWithMockFallback({ method: 'get', url: '/api/finance/withdrawals/' }, mockWithdrawals, 'finance.withdrawals');

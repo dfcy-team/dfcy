@@ -74,3 +74,28 @@ def test_shopee_returns_start_at_page_zero_and_advance_page_index(monkeypatch):
     assert [query["page_no"] for query in list_queries] == [0, 1]
     assert first_page["next_cursor"] == "1"
     assert second_page["next_cursor"] == ""
+
+
+def test_shopee_returns_split_31_days_into_provider_safe_windows(monkeypatch):
+    client, _ = configured(monkeypatch, {})
+    list_queries = []
+
+    def request(path, query):
+        if path == client.RETURN_LIST_PATH:
+            list_queries.append(query)
+            return {"response": {"return": [], "more": False}}
+        raise AssertionError(f"Unexpected Shopee endpoint: {path}")
+
+    monkeypatch.setattr(client, "_request", request)
+    scope = {"time_from": 1, "time_to": 31 * 86400, "page_size": 50}
+    cursor = ""
+    for _ in range(3):
+        page = client.fetch_returns(cursor, scope)
+        cursor = page["next_cursor"]
+
+    assert [(query["create_time_from"], query["create_time_to"]) for query in list_queries] == [
+        (1, 15 * 86400),
+        (15 * 86400 + 1, 30 * 86400),
+        (30 * 86400 + 1, 31 * 86400),
+    ]
+    assert cursor == ""

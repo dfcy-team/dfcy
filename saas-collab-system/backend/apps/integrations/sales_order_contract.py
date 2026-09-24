@@ -6,7 +6,7 @@ from .models import PlatformChoices
 
 
 SALES_ORDER_CONTRACT_VERSION = "sales_order.v1"
-SUPPORTED_PLATFORMS = {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+SUPPORTED_PLATFORMS = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
 NORMALIZED_ORDER_STATUSES = {"pending", "confirmed", "fulfilled", "completed", "cancelled"}
 FORBIDDEN_CREDENTIAL_KEYS = {
     "app_secret",
@@ -41,7 +41,7 @@ def normalize_sales_order_record(platform, record):
 
     Platform-specific response fields and statuses must be mapped by the owning
     integration adapter before this contract is called. Sales management never
-    interprets raw Shopee or TikTok Shop response payloads.
+    interprets raw Lazada, Shopee or TikTok Shop response payloads.
     """
     platform = str(platform).lower()
     if platform not in SUPPORTED_PLATFORMS:

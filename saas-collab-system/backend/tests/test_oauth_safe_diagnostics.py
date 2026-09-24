@@ -1,10 +1,13 @@
 """Synthetic OAuth failures: no platform traffic or real credentials."""
+import hashlib
+import hmac
 import json
+import urllib.parse
 from unittest.mock import Mock
 
 import pytest
 
-from apps.integrations.live_providers import ShopeeLiveOAuthProvider
+from apps.integrations.live_providers import LazadaLiveOAuthProvider, ShopeeLiveOAuthProvider
 from apps.integrations.net_guard import HttpResponse, PlatformHttpClient
 from apps.integrations.oauth_errors import OAuthFlowError
 
@@ -33,6 +36,33 @@ def response(data, status=200):
 
 def tokens():
     return response({"access_token": "FAKE_ACCESS", "refresh_token": "FAKE_REFRESH", "expire_in": 3600})
+
+
+def test_lazada_token_exchange_uses_dedicated_auth_host(monkeypatch):
+    monkeypatch.setattr("apps.integrations.net_guard.assert_host_allowed", lambda url: None)
+    custody = Mock()
+    custody.retrieve_secret.return_value = "FAKE_DEVELOPER_SECRET"
+    transport = Mock(return_value=response({"code": "0"}))
+    provider = LazadaLiveOAuthProvider({
+        "app_id": "123",
+        "app_secret_reference": "fake-secret-ref",
+        "api_host": "https://api.example.test",
+        "token_host": "https://auth.example.test",
+    }, http_client=PlatformHttpClient(transport=transport, sleeper=lambda delay: None), custody=custody)
+
+    provider._token_request("/rest/auth/token/create", {"code": "FAKE_CODE"}, retry=False)
+
+    request_url = transport.call_args.args[1]
+    assert request_url.startswith("https://auth.example.test/rest/auth/token/create?")
+    params = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(request_url).query))
+    actual_sign = params.pop("sign")
+    parameter_text = "".join(f"{key}{params[key]}" for key in sorted(params))
+    expected_sign = hmac.new(
+        b"FAKE_DEVELOPER_SECRET",
+        f"/auth/token/create{parameter_text}".encode(),
+        hashlib.sha256,
+    ).hexdigest().upper()
+    assert actual_sign == expected_sign
 
 
 @pytest.mark.parametrize("failure,category", [

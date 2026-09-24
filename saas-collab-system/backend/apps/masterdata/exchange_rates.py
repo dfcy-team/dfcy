@@ -76,24 +76,15 @@ def refresh_country_exchange_rates(*, tenant=None, opener=urlopen):
             changed,
             ["cny_exchange_rate", "exchange_rate_date", "exchange_rate_source", "exchange_rate_updated_at"],
         )
-    return {
-        "updated": len(changed),
-        "missing": sorted(missing),
-        "date": result["date"].isoformat(),
-        "source": result["source"],
-    }
+    return {"updated": len(changed), "missing": sorted(missing), "date": result["date"].isoformat(), "source": result["source"]}
 
 
 def tenant_cny_rates(tenant):
     rates = {"CNY": {"rate": Decimal("1"), "date": None, "source": "identity"}}
     rows = CountrySiteMaster.objects.filter(
-        tenant=tenant,
-        cny_exchange_rate__isnull=False,
+        tenant=tenant, cny_exchange_rate__isnull=False,
     ).exclude(currency="").order_by("currency", "-exchange_rate_date", "id")
     for row in rows:
         code = row.currency.upper()
-        rates.setdefault(
-            code,
-            {"rate": row.cny_exchange_rate, "date": row.exchange_rate_date, "source": row.exchange_rate_source},
-        )
+        rates.setdefault(code, {"rate": row.cny_exchange_rate, "date": row.exchange_rate_date, "source": row.exchange_rate_source})
     return rates

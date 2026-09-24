@@ -30,10 +30,19 @@ def error_response(code, message, data=None, status=400):
 
 
 def paginated_data(
-    request, queryset, serializer_class, *, page, page_size, serializer_context=None
+    request,
+    queryset,
+    serializer_class,
+    *,
+    page,
+    page_size,
+    serializer_context=None,
+    total_count=None,
 ):
     """Return the Phase 3 collection envelope payload without legacy wrappers."""
     paginator = Paginator(queryset, page_size)
+    if total_count is not None:
+        paginator.__dict__["count"] = total_count
     if page > paginator.num_pages:
         raise NotFound("Requested page does not exist.")
     page_obj = paginator.page(page)

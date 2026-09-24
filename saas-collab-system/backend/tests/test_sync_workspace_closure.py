@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.integrations.missing_jobs import preview_missing_jobs
 from apps.integrations.models import SyncJob, SyncRun
-from apps.integrations.workspace_service import _matches, _run_rows
+from apps.integrations.workspace_service import _matches, _run_rows, _schedule_state
 from tests.test_mock_sync_isolation import context, assert_no_execution
 from tests.test_sync_capability_gate import make_job, grant_workspace_view
 
@@ -76,3 +76,23 @@ def test_uncollected_counts_are_unknown_and_mode_not_inferred(context):
     row = _run_rows([run], {})[0]
     assert row['fetched_count'] == 0 and row['created_count'] == 0
     assert row['execution_mode'] == 'simulation'
+
+
+def test_queued_manual_run_is_visible_and_blocks_another_submission(context):
+    _, job = context
+    enqueued_at = timezone.now()
+    run = SyncRun.objects.create(
+        tenant=job.tenant,
+        sync_job=job,
+        run_id='queued-run',
+        idempotency_key='queued-key',
+        status=SyncRun.Status.QUEUED,
+        enqueued_at=enqueued_at,
+        masked_log={'execution_mode': 'live_readonly', 'trigger_type': 'manual'},
+    )
+
+    row = _run_rows([run], {})[0]
+    assert row['status'] == 'queued'
+    assert row['enqueued_at'] is not None
+    assert row['started_at'] is None
+    assert _schedule_state(job, run) == 'queued'

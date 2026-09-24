@@ -335,7 +335,7 @@ const canManage = computed(() => authStore.hasPermission('integrations.manage'))
 const canRefresh = computed(() => !isWarehouseConfig.value && authStore.hasPermission('integrations.store.authorize') && authStore.hasPermission('integrations.credential.rotate'));
 const canRevoke = computed(() => !isWarehouseConfig.value && authStore.hasPermission('integrations.store.revoke'));
 const oauthReady = computed(() => Boolean(oauthForm.store_id && oauthForm.region && configDetail.value?.callback_url));
-const capabilityResourceMap = { PRODUCT: { value: 'platform_product', label: '平台商品' }, ORDER: { value: 'sales_order', label: '销售订单' }, RETURN_REFUND: { value: 'refund_return', label: '退货退款' }, INVENTORY: { value: 'inventory_snapshot', label: '库存快照' } };
+const capabilityResourceMap = { PRODUCT: { value: 'platform_product', label: '平台商品' }, ORDER: { value: 'sales_order', label: '销售订单' }, RETURN_REFUND: { value: 'refund_return', label: '退货退款' }, SETTLEMENT: { value: 'settlement_bill', label: '财务流水' }, INVENTORY: { value: 'inventory_snapshot', label: '库存快照' } };
 const creatableResources = computed(() => displayCapabilities.value
   .filter((item) => item.read_enabled && !item.write_enabled && item.status === 'active' && capabilityResourceMap[item.capability_code])
   .map((item) => capabilityResourceMap[item.capability_code])
@@ -356,7 +356,7 @@ const blockers = computed(() => steps.value.filter((item) => item.status !== 'su
 
 const platformLabels = { lazada: 'Lazada', shopee: 'Shopee', tiktok: 'TikTok Shop', jifeng_wms: '极风 WMS' };
 const environmentLabels = { sandbox: '沙箱', pilot: '试运行', production: '生产', mock: '模拟' };
-const resourceLabels = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单' };
+const resourceLabels = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单', settlement_bill: '财务流水' };
 const statusLabels = { active: '已启用', authorized: '已授权', configured: '已配置', verified: '已验证', disabled: '已停用', failed: '失败', running: '运行中', healthy: '健康', pending_review: '待审核' };
 const executionModeLabels = { simulation: '本地模拟', live_readonly: '生产只读' };
 function platformLabel(value) { return platformLabels[value] || value || '—'; }

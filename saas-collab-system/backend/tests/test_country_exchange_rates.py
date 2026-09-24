@@ -42,18 +42,10 @@ def test_fetch_uses_fallback_and_preserves_rate_direction():
 def test_refresh_updates_country_archives_without_overwriting_currency():
     tenant, _, _, _ = create_scope("exchange-rate")
     country = CountrySiteMaster.objects.create(
-        tenant=tenant,
-        code="country-ph",
-        name="菲律宾",
-        country_code="PH",
-        currency="PHP",
-        timezone="Asia/Manila",
+        tenant=tenant, code="country-ph", name="菲律宾", country_code="PH", currency="PHP", timezone="Asia/Manila"
     )
 
-    result = refresh_country_exchange_rates(
-        tenant=tenant,
-        opener=lambda request, timeout: payload({"php": 9.35}),
-    )
+    result = refresh_country_exchange_rates(tenant=tenant, opener=lambda request, timeout: payload({"php": 9.35}))
 
     country.refresh_from_db()
     assert result["updated"] == 1

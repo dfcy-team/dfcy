@@ -174,6 +174,32 @@ describe('平台商品同步任务上下文闭环', () => {
     expect(wrapper.findAll('button').some((button) => button.text().includes('去店铺配置并创建商品同步任务'))).toBe(false);
   });
 
+  it('makes an exact task deep-link filter visible and allows returning to all tasks', async () => {
+    routeState.query = { sync_job_id: '2' };
+    api.fetchSyncJobs.mockResolvedValue({
+      success: true,
+      data: { api_status: 'mock', summary: { job_count: 2 }, results: [{ id: 2 }] },
+    });
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('当前仅显示任务 #2');
+    await wrapper.vm.clearExactJobFilter();
+    expect(router.push).toHaveBeenCalledWith({ path: '/integrations/sync-jobs', query: {} });
+    wrapper.unmount();
+  });
+
+  it('returns to the complete task list after creating a task', async () => {
+    routeState.query = { sync_job_id: '1' };
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+
+    wrapper.vm.created(2);
+    expect(router.push).toHaveBeenCalledWith({ path: '/integrations/sync-jobs', query: {} });
+    expect(messages.success).toHaveBeenCalledWith(expect.stringContaining('任务已创建'));
+    wrapper.unmount();
+  });
+
   it.each([{ results: [] }, { results: [{ id: 1 }] }])('keeps the task body beside the administrator preview for $results', async ({ results }) => {
     routeState.query = {};
     api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'mock', summary: {}, results } });

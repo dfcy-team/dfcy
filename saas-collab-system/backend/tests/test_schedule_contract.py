@@ -1,11 +1,14 @@
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from unittest.mock import Mock, patch
 
 import pytest
+from django.test import override_settings
 
 from apps.integrations.models import SyncScheduleDispatch
 from apps.integrations.scheduler import calculate_next_run_at, dispatch_due_jobs, preview_schedule
 from apps.integrations.sync_services import run_sync_job
+from apps.integrations.sync_services import _lease_heartbeat, _recover_expired_lease, _renew_lease
 from apps.integrations.adapters import MockPlatformAdapter
 from apps.integrations.tasks import run_readonly_sync_job
 from apps.integrations.models import SyncRun
@@ -84,7 +87,9 @@ def test_scheduled_worker_links_run_and_ignores_redelivery(context):
     queue = Mock()
     dispatch_due_jobs(queue, NOW)
     key = queue.call_args.args[1]
-    with patch('apps.integrations.tasks.run_sync_job', wraps=run_sync_job) as execute_mock:
+    def execute(job, **kwargs):
+        return run_sync_job(job, adapter=MockPlatformAdapter(), **kwargs)
+    with patch('apps.integrations.tasks.validate_manual_sync_job'), patch('apps.integrations.tasks.run_sync_job', side_effect=execute) as execute_mock:
         first = run_readonly_sync_job.run(job.id, key)
         second = run_readonly_sync_job.run(job.id, key)
     assert first['status'] == 'success' and not second['created']
@@ -116,6 +121,7 @@ def test_crash_before_lease_recovers_and_fences_late_worker(context):
     with pytest.raises(ValidationError, match='派发已终止'):
         run_sync_job(job, adapter=MockPlatformAdapter(), dispatch=dispatch)
     assert not SyncRun.objects.exists()
+    assert run_readonly_sync_job.run(job.id, f'scheduled:{job.id}:{dispatch.id}')['status'] == 'not_executed'
     dispatch_due_jobs(queue, NOW + timedelta(hours=1))
     assert queue.call_count == 1
 
@@ -133,20 +139,51 @@ def test_recovery_preserves_active_lease(context):
     assert dispatch.status == 'running' and not queue.called
 
 
-@pytest.mark.parametrize('resource,environment', [('sales_order','mock'), ('mock_record','production')])
-def test_scheduled_worker_does_not_simulate_business_or_live_job(context, resource, environment):
-    _, job = context
-    scheduled(job)
-    job.resource_type = resource
-    job.save()
-    job.integration_config.environment = environment
-    job.integration_config.save()
-    dispatch = SyncScheduleDispatch.objects.create(tenant=job.tenant, sync_job=job,
-        scheduled_at=NOW, status='queued')
+@override_settings(SYNC_JOB_LEASE_SECONDS=3)
+def test_execution_heartbeat_renews_active_lease():
+    renewed = Event()
+    with patch('apps.integrations.sync_services.connection') as db_connection, \
+            patch('apps.integrations.sync_services.close_old_connections'), \
+            patch('apps.integrations.sync_services.connections'), \
+            patch('apps.integrations.sync_services._renew_lease', side_effect=lambda *_: renewed.set()) as renew:
+        db_connection.vendor = 'postgresql'
+        with _lease_heartbeat(Mock(), Mock()):
+            assert renewed.wait(2)
+    renew.assert_called()
+
+
+def test_expired_lease_cannot_be_renewed(context):
+    from django.utils import timezone
     from rest_framework.exceptions import ValidationError
-    with pytest.raises(ValidationError):
-        run_readonly_sync_job.run(job.id, f'scheduled:{job.id}:{dispatch.id}')
-    assert not SyncRun.objects.exists()
+    _, job = context
+    run = SyncRun.objects.create(tenant=job.tenant, sync_job=job,
+        run_id='expired-renewal', idempotency_key='expired-renewal', status=SyncRun.Status.RUNNING)
+    job.status = 'running'
+    job.lock_token = run.run_id
+    job.lock_expires_at = timezone.now() - timedelta(seconds=1)
+    job.save(update_fields=['status', 'lock_token', 'lock_expires_at'])
+    with pytest.raises(ValidationError, match='lease was lost'):
+        _renew_lease(job, run)
+    job.refresh_from_db()
+    assert job.lock_expires_at < timezone.now()
+
+
+def test_expired_worker_cannot_resume_writing_after_recovery(context):
+    from django.utils import timezone
+    from rest_framework.exceptions import ValidationError
+    _, job = context
+
+    class LostLeaseAdapter(MockPlatformAdapter):
+        def fetch_page(self, sync_job, cursor_value=None):
+            _recover_expired_lease(sync_job, timezone.now())
+            return super().fetch_page(sync_job, cursor_value)
+
+    with pytest.raises(ValidationError, match='lease was lost'):
+        run_sync_job(job, adapter=LostLeaseAdapter(), idempotency_key='lost-lease')
+    run = SyncRun.objects.get(sync_job=job)
+    job.refresh_from_db()
+    assert run.status == SyncRun.Status.FAILED and run.error_code == 'LEASE_EXPIRED'
+    assert job.status == 'failed' and not job.lock_token
 
 
 def test_disable_after_enqueue_prevents_execution(context):
@@ -191,6 +228,40 @@ def test_preview_and_save_keep_disabled_state_and_query_scope(context):
     assert not job.is_enabled and job.next_run_at is None
     assert job.sync_scope['query'] == {'mode': 'incremental', 'lookback_days': 30}
     assert not SyncRun.objects.exists() and not SyncScheduleDispatch.objects.exists()
+
+
+def test_incremental_product_preview_and_save_use_collection_range(context):
+    client, job = context
+    job.resource_type = 'platform_product'
+    job.sync_scope = {}
+    job.save()
+    payload = {
+        'schedule_type': 'manual',
+        'product_full_sync': False,
+        'query_mode': 'incremental',
+        'lookback_days': 7,
+    }
+    preview = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/schedule-preview/', payload, format='json')
+    assert preview.status_code == 200
+    assert preview.data['data']['collection_range']['time_from'] < preview.data['data']['collection_range']['time_to']
+    saved = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', payload, format='json')
+    assert saved.status_code == 200
+    job.refresh_from_db()
+    assert job.sync_scope['product_full_sync'] is False
+    assert job.sync_scope['query'] == {'mode': 'incremental', 'lookback_days': 7}
+
+
+def test_full_product_preview_has_no_collection_range(context):
+    client, job = context
+    job.resource_type = 'platform_product'
+    job.save()
+    preview = client.post(
+        f'/api/internal/integrations/sync-jobs/{job.id}/schedule-preview/',
+        {'schedule_type': 'manual', 'product_full_sync': True},
+        format='json',
+    )
+    assert preview.status_code == 200
+    assert preview.data['data']['collection_range'] is None
 
 
 @pytest.mark.parametrize('payload', [{'schedule_type': 'cron'}, {'timezone': 'Invalid/Zone'}, {'local_time': '27:90'}, {'pause_until': '2026-09-15T10:00:00'}, {'pause_until': '2026-99-15T10:00:00Z'}])

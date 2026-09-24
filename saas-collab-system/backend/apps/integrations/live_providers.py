@@ -57,6 +57,8 @@ def _tiktok_sign(path, params, secret, body=""):
 
 
 def _lazada_sign(path, params, secret):
+    if path.startswith("/rest/"):
+        path = path[len("/rest"):]
     parameter_text = "".join(f"{key}{params[key]}" for key in sorted(params) if key != "sign")
     return hmac.new(
         secret.encode("utf-8"),
@@ -353,6 +355,9 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
     def _host(self):
         return _required(self.config.get("api_host"), "lazada.api_host").rstrip("/")
 
+    def _token_host(self):
+        return _required(self.config.get("token_host"), "lazada.token_host").rstrip("/")
+
     def _signed_query(self, path, extra=None):
         params = {
             "app_key": self._app_id(),
@@ -395,7 +400,7 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
     def _token_request(self, path, extra, *, retry=True):
         payload = self._request_json(
             "POST",
-            f"{self._host()}{path}",
+            f"{self._token_host()}{path}",
             query=self._signed_query(path, extra),
             retry=retry,
         )

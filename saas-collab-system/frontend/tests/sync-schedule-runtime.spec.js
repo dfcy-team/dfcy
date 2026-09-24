@@ -61,3 +61,36 @@ it('displays existing timestamp ranges as Beijing dates', async () => {
   expect(wrapper.vm.form.range_start_at).toBe('2026-09-10');
   expect(wrapper.vm.form.range_end_at).toBe('2026-09-14');
 });
+it('allows settlement bills to configure a collection range', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 11, platform: 'lazada', resource_type: 'settlement_bill', schedule_type: 'manual', lookback_days: 3 } });
+  expect(wrapper.vm.supportsRange).toBe(true);
+  expect(wrapper.vm.form.lookback_days).toBe(3);
+  await wrapper.vm.preview();
+  expect(api.requestApi.mock.lastCall[0].data).toEqual(expect.objectContaining({ query_mode: 'incremental', lookback_days: 3 }));
+});
+it('defaults order time basis by range mode and saves an explicit choice', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 13, platform: 'lazada', resource_type: 'sales_order', schedule_type: 'manual', query_mode: 'range', range_start_at: '2026-08-01', range_end_at: '2026-08-31' } });
+  expect(wrapper.vm.form.collection_time_basis).toBe('created');
+  wrapper.vm.form.query_mode = 'incremental';
+  wrapper.vm.applyModeDefault();
+  expect(wrapper.vm.form.collection_time_basis).toBe('updated');
+  wrapper.vm.form.collection_time_basis = 'created';
+  await wrapper.vm.preview();
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(13, expect.objectContaining({ collection_time_basis: 'created' }));
+});
+it('shows product collection time only for incremental collection', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 12, platform: 'shopee', resource_type: 'platform_product', schedule_type: 'manual', product_full_sync: true } });
+  expect(wrapper.vm.form.product_full_sync).toBe(true);
+  expect(wrapper.vm.supportsRange).toBe(false);
+  wrapper.vm.form.product_full_sync = false;
+  await flushPromises();
+  expect(wrapper.vm.supportsRange).toBe(true);
+  expect(wrapper.vm.form.query_mode).toBe('incremental');
+  await wrapper.vm.preview();
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(12, expect.objectContaining({ product_full_sync: false, query_mode: 'incremental', lookback_days: 1 }));
+});
