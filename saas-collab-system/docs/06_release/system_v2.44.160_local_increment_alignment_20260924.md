@@ -18,6 +18,7 @@
 ## 发布安全约束
 
 - 保留生产部署控制中的不可变镜像、镜像拉取超时与失败分类、`--no-build` 以及回滚保护，不接受本地旧脚本覆盖。
+- 定时 worker 启动后若 5 分钟仍未取得执行锁，调度器回收该 `running` 派发并阻止迟到 worker 执行；已取得锁的抓取过程定期续租，失去租约的旧执行不得继续写入。
 - 只允许经受保护 PR、CI 和 `Developer A Production Release` 工作流发布；虚拟机不从可变源码现场构建。
 - 实际部署前再次核对远端主分支、V2.44.160 占用情况、迁移图、镜像摘要和回滚点。
 
@@ -42,6 +43,9 @@ BUILD_OK
 
 python -m pytest -q tests/test_production_release_control.py
 10 passed, 2 skipped
+
+python -m pytest -q tests/test_schedule_contract.py tests/test_phase2_sync_framework.py tests/test_sync_task_controls.py
+61 passed
 ```
 
 ## 登记说明
