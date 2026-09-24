@@ -73,6 +73,11 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
     def get_credential_configured(self, obj):
         return bool(obj.secret_hash)
 
+    def validate_caller_type(self, value):
+        if value == InternalAPIClient.CallerType.KNOWLEDGE_BASE:
+            raise serializers.ValidationError("Use internal_system for all internal callers, including knowledge bases.")
+        return value
+
     def to_internal_value(self, data):
         allowed = {
             "name", "caller_type", "resources", "allowed_cidrs", "rate_limit_per_minute",
