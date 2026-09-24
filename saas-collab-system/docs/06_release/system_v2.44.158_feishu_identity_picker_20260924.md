@@ -8,6 +8,8 @@
 - 只有管理员人工选择并确认后才创建或更新绑定；姓名不触发自动绑定。
 - 确认绑定时后端重新查询并验证候选，拒绝客户端注入候选列表外的 Open ID。
 - 同一租户内，同一飞书 Open ID 不允许绑定多个系统用户。
+- 已绑定行明确显示状态；重新选择时提示将替换原绑定，并提供二次确认的解绑功能。
+- 关闭旧的手工创建、修改身份接口，所有绑定写入只能经过候选核验；绑定检查与写入使用租户级事务锁串行化。
 
 ## 飞书开放平台前置条件
 
@@ -19,10 +21,10 @@
 
 ```text
 python manage.py test apps.integrations.tests.test_feishu_api
-Ran 10 tests, OK
+Ran 11 tests, OK
 
 npm test -- --run tests/feishu-collaboration.spec.js
-4 tests passed
+5 tests passed
 
 npm run build
 BUILD_OK

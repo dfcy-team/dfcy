@@ -44,7 +44,7 @@
         <el-table-column prop="open_id" label="飞书用户" min-width="210"><template #default="{ row }"><div class="user-cell"><strong>{{ row.feishu_name || (row.open_id ? '已绑定' : '未绑定') }}</strong><span>{{ row.open_id || '—' }}</span></div></template></el-table-column>
         <el-table-column label="飞书部门" min-width="150"><template #default="{ row }">{{ displayValue(row, 'feishu_department_name') !== '—' ? displayValue(row, 'feishu_department_name') : displayValue(row, 'department_ids') }}</template></el-table-column>
         <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag :type="row.open_id ? 'success' : 'info'">{{ row.open_id ? '已绑定' : '未绑定' }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" :loading="candidateUserId === row.system_user_id" :disabled="!canManageCurrent" :title="manageHint" @click="queryCandidates(row)">{{ row.open_id ? '重新选择' : '查询飞书用户' }}</el-button></template></el-table-column>
+        <el-table-column label="操作" width="210" fixed="right"><template #default="{ row }"><el-button link type="primary" :loading="candidateUserId === row.system_user_id" :disabled="!canManageCurrent" :title="manageHint" @click="queryCandidates(row)">{{ row.open_id ? '重新选择' : '查询飞书用户' }}</el-button><el-button v-if="row.id" link type="danger" :disabled="!canManageCurrent" :title="manageHint" @click="unbindIdentity(row)">解绑</el-button></template></el-table-column>
       </el-table>
       <el-table v-else v-loading="loading" :data="rows" border stripe :empty-text="loading ? '正在加载' : currentMeta.emptyText">
         <el-table-column v-for="column in currentMeta.columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 130">
@@ -79,6 +79,7 @@
 
     <el-dialog v-model="candidateDialogVisible" title="选择飞书用户" width="760px">
       <div v-if="candidateSystemUser" class="candidate-summary">正在为系统用户 <strong>{{ candidateSystemUser.full_name || candidateSystemUser.name || candidateSystemUser.username }}</strong> 查询匹配候选。请选择并确认，不会仅凭姓名自动绑定。</div>
+      <el-alert v-if="candidateSystemUser?.open_id" :title="`该系统用户已绑定 ${candidateSystemUser.open_id}；确认其他候选将替换原绑定。`" type="warning" show-icon :closable="false" class="binding-alert" />
       <el-table v-loading="candidateLoading" :data="candidates" border highlight-current-row @current-change="selectCandidate">
         <el-table-column label="选择" width="64"><template #default="{ row }"><el-radio :model-value="selectedCandidate?.open_id" :label="row.open_id" @change="selectCandidate(row)"><span /></el-radio></template></el-table-column>
         <el-table-column prop="name" label="飞书姓名" min-width="120" />
@@ -139,7 +140,8 @@ async function saveResource() { if (!canManageCurrent.value) return; let config;
 async function remove(row) { if (!canManageCurrent.value) return; try { await ElMessageBox.confirm(`确定删除“${row.name || row.username || row.id}”吗？`, '删除确认', { type: 'warning' }); } catch (_error) { return; } const response = await deleteFeishuResource(currentMeta.value.resource, row.id); setApiState(response); if (response?.success) { ElMessage.success('已删除'); await loadActive(); } }
 async function queryCandidates(row) { if (!canManageCurrent.value) return; const systemUserId = row.system_user_id; candidateSystemUser.value = row; candidateUserId.value = systemUserId; candidateLoading.value = true; selectedCandidate.value = null; candidates.value = []; candidateDialogVisible.value = true; const response = await fetchFeishuIdentityCandidates(systemUserId); setApiState(response); if (response?.success) candidates.value = response?.data?.candidates || []; candidateLoading.value = false; candidateUserId.value = null; }
 function selectCandidate(row) { selectedCandidate.value = row || null; }
-async function confirmIdentityBinding() { if (!canManageCurrent.value || !candidateSystemUser.value || !selectedCandidate.value) return; const candidate = selectedCandidate.value; const systemUserId = candidateSystemUser.value.system_user_id; const payload = { open_id: candidate.open_id, user_id: candidate.user_id || '', union_id: candidate.union_id || '', department_ids: candidate.department_ids || [] }; saving.value = true; const response = await bindFeishuIdentity(systemUserId, payload); setApiState(response); if (response?.success) { candidateDialogVisible.value = false; ElMessage.success('飞书用户已绑定'); await loadActive(); } saving.value = false; }
+async function confirmIdentityBinding() { if (!canManageCurrent.value || !candidateSystemUser.value || !selectedCandidate.value) return; const candidate = selectedCandidate.value; const currentOpenId = candidateSystemUser.value.open_id; if (currentOpenId && currentOpenId !== candidate.open_id) { try { await ElMessageBox.confirm(`该系统用户当前已绑定 ${currentOpenId}，确认替换为 ${candidate.open_id}？`, '替换飞书绑定', { type: 'warning', confirmButtonText: '确认替换' }); } catch (_error) { return; } } const systemUserId = candidateSystemUser.value.system_user_id; const payload = { open_id: candidate.open_id, user_id: candidate.user_id || '', union_id: candidate.union_id || '', department_ids: candidate.department_ids || [] }; saving.value = true; const response = await bindFeishuIdentity(systemUserId, payload); setApiState(response); if (response?.success) { candidateDialogVisible.value = false; ElMessage.success(currentOpenId && currentOpenId !== candidate.open_id ? '飞书绑定已替换' : '飞书用户已绑定'); await loadActive(); } saving.value = false; }
+async function unbindIdentity(row) { if (!canManageCurrent.value || !row.id) return; try { await ElMessageBox.confirm(`确认解除系统用户“${row.full_name || row.username}”与飞书用户 ${row.open_id || ''} 的绑定？不会删除任何用户。`, '解除飞书绑定', { type: 'warning', confirmButtonText: '确认解绑' }); } catch (_error) { return; } const response = await deleteFeishuResource('identities', row.id); setApiState(response); if (response?.success) { ElMessage.success('飞书绑定已解除'); await loadActive(); } }
 watch(() => route.query.tab, (value) => { const next = validTabs.has(String(value)) ? String(value) : 'connection'; if (next !== activeTab.value) { activeTab.value = next; loadActive(); } });
 onMounted(loadActive);
 </script>
@@ -158,5 +160,6 @@ onMounted(loadActive);
 .user-cell { display: flex; flex-direction: column; gap: 3px; }
 .user-cell span { color: #64748b; font-size: 12px; }
 .candidate-summary { margin-bottom: 14px; color: #475569; line-height: 1.6; }
+.binding-alert { margin-bottom: 14px; }
 @media (max-width: 720px) { .panel__header { flex-direction: column; } .form-grid { grid-template-columns: 1fr; } }
 </style>

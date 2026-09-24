@@ -78,6 +78,26 @@ class FeishuApiTests(APITestCase):
         self.assertEqual(item["contacts"]["email"], "z*******@example.com")
         self.assertEqual(item["contacts"]["phone"], "*******8000")
 
+    def test_legacy_identity_write_paths_cannot_bypass_candidate_verification(self):
+        colleague = get_user_model().objects.create_user(
+            username="operator-legacy", tenant=self.tenant, user_type="internal", is_active=True,
+        )
+        collection = self.client.post(
+            "/api/internal/integrations/feishu/identities/",
+            {"system_user_id": colleague.id, "open_id": "ou_injected"}, format="json",
+        )
+        self.assertEqual(collection.status_code, 405)
+        mapping = FeishuIdentity.objects.create(
+            tenant=self.tenant, user=colleague, open_id="ou_existing",
+        )
+        detail = self.client.patch(
+            f"/api/internal/integrations/feishu/identities/{mapping.id}/",
+            {"open_id": "ou_injected"}, format="json",
+        )
+        self.assertEqual(detail.status_code, 405)
+        mapping.refresh_from_db()
+        self.assertEqual(mapping.open_id, "ou_existing")
+
     @patch("apps.integrations.feishu_api.FeishuIdentityService")
     def test_candidate_lookup_is_scoped_to_system_user(self, service_class):
         colleague = get_user_model().objects.create_user(

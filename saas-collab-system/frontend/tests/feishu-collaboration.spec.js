@@ -47,4 +47,13 @@ describe('飞书协同工作台', () => {
     expect(api).toContain('bindFeishuIdentity');
     expect(api).toContain('identities/system-users/${systemUserId}/binding/');
   });
+
+  it('已绑定用户明确显示状态，并可二次确认后解绑', () => {
+    const page = read('src/views/integrations/FeishuCollaboration.vue');
+    expect(page).toContain("row.open_id ? '已绑定' : '未绑定'");
+    expect(page).toContain('v-if="row.id"');
+    expect(page).toContain('解除飞书绑定');
+    expect(page).toContain("deleteFeishuResource('identities', row.id)");
+    expect(page).toContain('不会删除任何用户');
+  });
 });
