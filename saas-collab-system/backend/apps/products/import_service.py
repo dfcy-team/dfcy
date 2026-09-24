@@ -640,11 +640,13 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
     tenant = request.user.tenant
     created = updated = unchanged = skipped = generated = 0
     created_ids = []
+    created_rows = []
     errors = []
     seen = set()
     rows_seen = 0
 
-    for line_no, raw_row in enumerate(reader, 2):
+    for raw_row in reader:
+        line_no = reader.line_num
         rows_seen += 1
         row = {_normalise_header(key): value for key, value in raw_row.items() if key is not None}
         try:
@@ -662,8 +664,9 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             outcome_name, outcome_id = outcome
             if outcome_name == "created":
                 created += 1
-                if outcome_id and not duplicate_keys:
+                if outcome_id:
                     created_ids.append(outcome_id)
+                    created_rows.append({"id": outcome_id, "line": line_no})
             elif outcome_name == "updated":
                 updated += 1
             else:
@@ -691,6 +694,7 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             "skipped": skipped,
             "generated": generated,
             "created_ids": created_ids,
+            "created_rows": created_rows,
             "processed": created + updated + unchanged + skipped,
             "error_count": len(errors),
             "errors": errors,

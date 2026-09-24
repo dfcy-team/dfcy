@@ -1588,7 +1588,7 @@ async function importLegacyFile(uploadedFile) {
     importPercent.value = 100;
     if (response.success) {
       show(`旧档案导入完成：新增 ${response.data?.created || 0} 条，更新 ${response.data?.updated || 0} 条，无变化 ${response.data?.unchanged || 0} 条`);
-      await load();
+      try { await load(); } catch { show('导入已完成，列表刷新失败，请手动刷新页面', 'warning'); }
     } else {
       show(response.message || '导入失败', 'error');
     }
@@ -1601,19 +1601,6 @@ async function importLegacyFile(uploadedFile) {
   }
 }
 
-function importedSkuTargets(csvText) {
-  const parsed = parseCsvRows(csvText);
-  if (parsed.length < 2) return [];
-  const headers = parsed[0];
-  const oldIndex = headers.indexOf('旧SKU编码');
-  const newIndex = headers.indexOf('新SKU编码');
-  return parsed.slice(1).map((values, index) => ({
-    line: index + 2,
-    legacySkuCode: oldIndex >= 0 ? String(values[oldIndex] || '').trim() : '',
-    skuCode: newIndex >= 0 ? String(values[newIndex] || '').trim() : '',
-  })).filter((item) => item.legacySkuCode || item.skuCode);
-}
-
 function normalizeGeneratedDetail(item) {
   return {
     ...item,
@@ -1623,47 +1610,17 @@ function normalizeGeneratedDetail(item) {
   };
 }
 
-async function generateImportedProducts(csvText, excludedLines = new Set(), createdIds = []) {
+async function generateImportedProducts(createdRows = []) {
   const generatedRows = [];
   const errors = [];
-  const seen = new Set();
-  for (const id of createdIds) {
-    const generateResponse = await generateLegacyProductItem(id);
-    if (generateResponse.success) generatedRows.push(normalizeGeneratedDetail(detailData(generateResponse.data)));
-    else errors.push({ line: '-', message: generateResponse.message || `商品记录 ${id} 生成失败` });
-  }
-  for (const target of importedSkuTargets(csvText)) {
-    if (excludedLines.has(Number(target.line))) continue;
-    const key = target.legacySkuCode || target.skuCode;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const listResponse = await fetchProductDetailList({ search: key, page: 1, page_size: 100 });
-    if (!listResponse.success) {
-      errors.push({ line: target.line, message: listResponse.message || `无法读取导入后的 SKU ${key}` });
-      continue;
+  for (const { id, line } of createdRows) {
+    try {
+      const response = await generateLegacyProductItem(id);
+      if (!response.success) throw new Error(response.message || `商品记录 ${id} 生成失败`);
+      generatedRows.push(normalizeGeneratedDetail(detailData(response.data)));
+    } catch (error) {
+      errors.push({ line, message: error?.message || `商品记录 ${id} 生成失败` });
     }
-    const matched = collectionRows(listResponse.data).find((row) => (
-      (!target.legacySkuCode || String(row.legacy_sku_code || '') === target.legacySkuCode)
-      && (!target.skuCode || String(row.sku_code || row.generated_sku_code || '') === target.skuCode)
-    ));
-    if (!matched) {
-      errors.push({ line: target.line, message: `未找到导入后的 SKU ${key}` });
-      continue;
-    }
-    if (matched.sku_code || matched.generated_sku_code) {
-      generatedRows.push(normalizeGeneratedDetail(matched));
-      continue;
-    }
-    if (matched.row_type !== 'legacy' || !matched.id) {
-      errors.push({ line: target.line, message: `SKU ${key} 不是可生成的待调整商品` });
-      continue;
-    }
-    const generateResponse = await generateLegacyProductItem(matched.id);
-    if (!generateResponse.success) {
-      errors.push({ line: target.line, message: generateResponse.message || `SKU ${key} 生成失败` });
-      continue;
-    }
-    generatedRows.push(normalizeGeneratedDetail(detailData(generateResponse.data)));
   }
   return { generatedRows, errors };
 }
@@ -1684,24 +1641,34 @@ async function importFile(uploadedFile) {
     importResult.value = response.success ? { ...(response.data || {}), errors: [...(response.data?.errors || [])] } : { error_count: 1, errors: [{ line: '-', message: response.message || '导入失败' }] };
     importStep.value = 3;
     if (response.success) {
-      const rejectedLines = new Set((response.data?.errors || []).map((item) => Number(item.line)));
-      const generated = await generateImportedProducts(normalizedCsv, rejectedLines, response.data?.created_ids || []);
+      const createdRows = response.data?.created_rows || (response.data?.created_ids || []).map((id) => ({ id, line: '-' }));
+      const generated = await generateImportedProducts(createdRows);
       importResult.value.generated = generated.generatedRows.length;
       importResult.value.errors.push(...generated.errors);
+      if (createdRows.length < Number(response.data?.created || 0)) {
+        importResult.value.errors.push({ line: '-', message: '服务端未返回全部新增档案 ID，部分 SKU 未生成，请检查导入结果' });
+      }
       importResult.value.error_count = importResult.value.errors.length;
       if (generated.generatedRows.length) {
         importPercent.value = 86;
         importStage.value = '正在生成 BigSeller 商品SKU表';
         importStep.value = 4;
         const filename = `BigSeller商品SKU_${Date.now()}.xlsx`;
-        downloadBigSellerProductWorkbook(generated.generatedRows, filename);
-        importResult.value.bigseller_file_name = filename;
-        show(`已新增导入并生成 ${generated.generatedRows.length} 个 SKU，BigSeller 表已自动下载`);
+        try {
+          downloadBigSellerProductWorkbook(generated.generatedRows, filename);
+          importResult.value.bigseller_file_name = filename;
+          show(`已新增导入并生成 ${generated.generatedRows.length} 个 SKU，BigSeller 表已自动下载`);
+        } catch (error) {
+          importResult.value.bigseller_file_name = '';
+          importResult.value.errors.push({ line: '-', message: `SKU 已生成，但 BigSeller 表下载失败：${error?.message || '请重新导出'}` });
+          importResult.value.error_count = importResult.value.errors.length;
+          show('SKU 已生成，但 BigSeller 表下载失败，请重新导出', 'warning');
+        }
       } else {
         importResult.value.bigseller_file_name = '';
         show('商品导入完成，但没有可生成 BigSeller 表的 SKU，请查看异常明细', 'warning');
       }
-      await load();
+      try { await load(); } catch { show('导入已完成，列表刷新失败，请手动刷新页面', 'warning'); }
     } else show(response.message || '导入失败', 'error');
     importStep.value = 5;
     importPercent.value = 100;

@@ -48,6 +48,10 @@ def test_import_create_update_sparse_columns_and_modes():
     )
     assert created.status_code == 201
     assert created.json()["data"]["created"] == 1
+    assert len(created.json()["data"]["created_ids"]) == 1
+    assert created.json()["data"]["created_rows"] == [
+        {"id": created.json()["data"]["created_ids"][0], "line": 2}
+    ]
     item = ProductLegacyItem.objects.get(tenant=tenant, legacy_sku_code="OLD-V2-001")
     assert item.product_name == "Imported V2"
     assert item.purchase_price == Decimal("12.5000")
@@ -68,6 +72,13 @@ def test_import_create_update_sparse_columns_and_modes():
     assert item.product_name == "Imported V2"
     assert item.package_weight == Decimal("1.250")
     assert item.product_description == "partial update"
+
+    physical_lines = client.post(
+        "/api/internal/products/legacy-items/",
+        {"mode": "update", "csv_text": "旧SKU编码,采购价格\n\nOLD-V2-001,invalid\n"},
+        format="json",
+    )
+    assert physical_lines.json()["data"]["errors"][0]["line"] == 3
 
     rejected_create = client.post(
         "/api/internal/products/legacy-items/",
