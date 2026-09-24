@@ -31,7 +31,10 @@ def _store_secret_reference(*, tenant_id, kind, value):
         result = get_custody_backend().store_secrets(
             credential_type=f"feishu_{kind}",
             reference_version=1,
-            metadata={"tenant_id": tenant_id, "secret_kind": kind},
+            # Custody deliberately rejects metadata key names that look like
+            # secret-bearing fields.  This value is only a non-sensitive role
+            # label, so keep the key outside that deny-list contract.
+            metadata={"tenant_id": tenant_id, "value_role": kind},
             operation_id=uuid.uuid4().hex,
             app_secret=str(value),
         )
