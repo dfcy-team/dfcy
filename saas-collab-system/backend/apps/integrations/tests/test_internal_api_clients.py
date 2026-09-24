@@ -127,6 +127,7 @@ class InternalAPIClientTests(APITestCase):
         )
         self.assertEqual(updated.status_code, 200, updated.content)
         self.assertEqual(updated.json()["data"]["caller_type"], "internal_system")
+        self.assertEqual(updated.json()["data"]["resources"]["products"], ["id"])
 
     def test_legacy_field_list_is_accepted_but_updated_block_uses_all_readable_fields(self):
         response = self.client.post(
