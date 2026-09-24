@@ -59,7 +59,7 @@ services:
       LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
       PLATFORM_NETWORK_MODE: approved-live-test
       LIVE_PLATFORM_SECURITY_APPROVED: "true"
-      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com
+      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com,open.feishu.cn
       LIVE_READONLY_SYNC_ENABLED: "true"
       LIVE_OAUTH_REDIRECT_ALLOWLIST: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
       LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
@@ -113,7 +113,7 @@ services:
       LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
       PLATFORM_NETWORK_MODE: approved-live-test
       LIVE_PLATFORM_SECURITY_APPROVED: "true"
-      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com
+      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com,open.feishu.cn
       LIVE_READONLY_SYNC_ENABLED: "true"
       LIVE_OAUTH_REDIRECT_ALLOWLIST: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
       LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
@@ -148,7 +148,7 @@ services:
       LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
       PLATFORM_NETWORK_MODE: approved-live-test
       LIVE_PLATFORM_SECURITY_APPROVED: "true"
-      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com
+      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com,open.feishu.cn
       LIVE_READONLY_SYNC_ENABLED: "true"
       LIVE_OAUTH_REDIRECT_ALLOWLIST: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
       LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/

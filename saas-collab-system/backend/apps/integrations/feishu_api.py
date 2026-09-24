@@ -1,11 +1,13 @@
 import uuid
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 
 from apps.common.responses import success_response
+from apps.tenants.models import Tenant
 from apps.permissions.api_permissions import (
     IsFeishuApprovalUser,
     IsFeishuConnectionUser,
@@ -17,6 +19,7 @@ from apps.permissions.api_permissions import (
 
 from .custody import CustodyError, get_custody_backend
 from .models import FeishuConfigRule, FeishuConnection, FeishuIdentity, FeishuOperation
+from .feishu_identity_service import FeishuIdentityService, masked_contacts
 
 
 SECRET_INPUTS = {
@@ -107,24 +110,75 @@ def _identity_data(obj):
     }
 
 
-@api_view(["GET", "POST"])
+@api_view(["GET"])
 @permission_classes([IsFeishuIdentityUser])
 def identity_collection(request):
-    qs = FeishuIdentity.objects.filter(tenant=request.user.tenant).select_related("user")
-    if request.method == "GET":
-        return success_response({"items": [_identity_data(item) for item in qs.order_by("id")]})
-    payload = request.data if isinstance(request.data, dict) else {}
-    system_user_id = payload.get("system_user_id")
-    user = get_object_or_404(get_user_model(), pk=system_user_id, tenant=request.user.tenant)
-    obj = FeishuIdentity.objects.create(
-        tenant=request.user.tenant, user=user, open_id=payload.get("open_id", ""),
-        feishu_user_id=payload.get("user_id", ""), union_id=payload.get("union_id", ""),
-        department_ids=payload.get("department_ids") or [], status=payload.get("status", "active"),
+    users = get_user_model().objects.filter(tenant=request.user.tenant).select_related(
+        "internal_profile", "internal_profile__department"
     )
-    return success_response(_identity_data(obj), status=201)
+    mappings = {
+        item.user_id: item for item in FeishuIdentity.objects.filter(tenant=request.user.tenant).select_related("user")
+    }
+    items = []
+    for user in users.order_by("id"):
+        mapping = mappings.get(user.id)
+        profile = getattr(user, "internal_profile", None)
+        items.append({
+            "system_user_id": user.id, "username": user.username, "full_name": user.full_name,
+            "employee_no": profile.employee_no if profile else "",
+            "department": profile.department.name if profile and profile.department else "",
+            "contacts": masked_contacts(user), "mapping": _identity_data(mapping) if mapping else None,
+        })
+    return success_response({"items": items})
 
 
-@api_view(["GET", "PATCH", "DELETE"])
+@api_view(["POST"])
+@permission_classes([IsFeishuIdentityUser])
+def identity_candidates(request, system_user_id):
+    user = get_object_or_404(get_user_model(), pk=system_user_id, tenant=request.user.tenant)
+    connection = FeishuConnection.objects.filter(tenant=request.user.tenant).first()
+    candidates = FeishuIdentityService().find_candidates(connection=connection, user=user)
+    return success_response({"system_user_id": user.id, "candidates": candidates})
+
+
+@api_view(["PUT"])
+@permission_classes([IsFeishuIdentityUser])
+def identity_bind(request, system_user_id):
+    user = get_object_or_404(get_user_model(), pk=system_user_id, tenant=request.user.tenant)
+    payload = request.data if isinstance(request.data, dict) else {}
+    open_id = str(payload.get("open_id") or "").strip()
+    if not open_id:
+        raise ValidationError({"open_id": "open_id is required."})
+    connection = FeishuConnection.objects.filter(tenant=request.user.tenant).first()
+    verified = next(
+        (
+            candidate for candidate in FeishuIdentityService().find_candidates(connection=connection, user=user)
+            if candidate["open_id"] == open_id
+        ),
+        None,
+    )
+    if verified is None:
+        raise ValidationError({"open_id": "该飞书用户不在当前系统用户的查询候选中，请重新查询。"})
+    with transaction.atomic():
+        # Serialize identity binding within one tenant so the duplicate check
+        # and update cannot race for two different system users.
+        Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
+        if FeishuIdentity.objects.filter(
+            tenant=request.user.tenant, open_id=open_id
+        ).exclude(user=user).exists():
+            raise ValidationError({"open_id": "该飞书用户已绑定其他系统用户。"})
+        obj, _ = FeishuIdentity.objects.update_or_create(
+            tenant=request.user.tenant, user=user,
+            defaults={
+                "open_id": open_id, "feishu_user_id": verified["user_id"],
+                "union_id": verified["union_id"],
+                "department_ids": verified["department_ids"], "status": "active",
+            },
+        )
+    return success_response(_identity_data(obj))
+
+
+@api_view(["GET", "DELETE"])
 @permission_classes([IsFeishuIdentityUser])
 def identity_detail(request, pk):
     obj = get_object_or_404(FeishuIdentity.objects.select_related("user"), pk=pk, tenant=request.user.tenant)
