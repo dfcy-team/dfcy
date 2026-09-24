@@ -202,10 +202,9 @@ describe('商品明细数据页面契约', () => {
   it('商品新增导入后生成 SPU/SKU 并自动下载 BigSeller 表', () => {
     expect(page).toContain('command="create-import"');
     expect(page).toContain('title="商品新增导入"');
-    expect(page).toContain('generateImportedProducts(normalizedCsv, rejectedLines, response.data?.created_ids || [])');
-    expect(page).toContain('for (const id of createdIds)');
-    expect(page).toContain('if (excludedLines.has(Number(target.line))) continue;');
-    expect(page).toContain('generateLegacyProductItem(matched.id)');
+    expect(page).toContain('generateImportedProducts(createdRows)');
+    expect(page).toContain('for (const { id, line } of createdRows)');
+    expect(page).toContain('generateLegacyProductItem(id)');
     expect(page).toContain('downloadBigSellerProductWorkbook(generated.generatedRows, filename)');
     expect(page).toContain('BigSeller 表已自动下载');
     expect(page).toContain('importResult.bigseller_file_name');
