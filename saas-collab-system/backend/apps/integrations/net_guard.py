@@ -37,7 +37,18 @@ class HttpResponse:
 
 
 def get_allowed_hosts():
-    hosts = {str(host).lower() for host in (get_runtime_setting("network", "allowed_hosts", default=[]) or [])}
+    # The root-owned deployment allowlist is a security approval in its own
+    # right.  An older effective database snapshot may extend or narrow the
+    # runtime configuration, but it must not accidentally hide hosts that are
+    # explicitly pinned by the immutable deployment manifest.
+    hosts = {
+        str(host).strip().lower()
+        for host in (
+            list(getattr(settings, "LIVE_PLATFORM_ALLOWED_HOSTS", []) or [])
+            + list(get_runtime_setting("network", "allowed_hosts", default=[]) or [])
+        )
+        if str(host).strip()
+    }
     custody = str(get_runtime_setting("custody", "service_host", default="") or "").lower()
     if custody:
         hosts.add(custody)
