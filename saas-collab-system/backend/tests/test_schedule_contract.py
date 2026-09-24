@@ -8,7 +8,7 @@ from django.test import override_settings
 from apps.integrations.models import SyncScheduleDispatch
 from apps.integrations.scheduler import calculate_next_run_at, dispatch_due_jobs, preview_schedule
 from apps.integrations.sync_services import run_sync_job
-from apps.integrations.sync_services import _heartbeat_during_fetch, _recover_expired_lease, _renew_lease
+from apps.integrations.sync_services import _lease_heartbeat, _recover_expired_lease, _renew_lease
 from apps.integrations.adapters import MockPlatformAdapter
 from apps.integrations.tasks import run_readonly_sync_job
 from apps.integrations.models import SyncRun
@@ -140,14 +140,14 @@ def test_recovery_preserves_active_lease(context):
 
 
 @override_settings(SYNC_JOB_LEASE_SECONDS=3)
-def test_fetch_heartbeat_renews_active_lease():
+def test_execution_heartbeat_renews_active_lease():
     renewed = Event()
     with patch('apps.integrations.sync_services.connection') as db_connection, \
             patch('apps.integrations.sync_services.close_old_connections'), \
             patch('apps.integrations.sync_services.connections'), \
             patch('apps.integrations.sync_services._renew_lease', side_effect=lambda *_: renewed.set()) as renew:
         db_connection.vendor = 'postgresql'
-        with _heartbeat_during_fetch(Mock(), Mock()):
+        with _lease_heartbeat(Mock(), Mock()):
             assert renewed.wait(2)
     renew.assert_called()
 

@@ -94,7 +94,7 @@ def _renew_lease(sync_job, run, not_before=None):
 
 
 @contextmanager
-def _heartbeat_during_fetch(sync_job, run):
+def _lease_heartbeat(sync_job, run):
     # SQLite test transactions do not share their connection with a worker thread.
     if connection.vendor == "sqlite":
         yield
@@ -349,11 +349,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         try:
             _renew_lease(sync_job, run)
             previous_cursor = cursor.cursor_value
-            with _heartbeat_during_fetch(sync_job, run):
+            with _lease_heartbeat(sync_job, run):
                 page = adapter.fetch_page(sync_job, previous_cursor)
             _renew_lease(sync_job, run)
-            archive_raw_page(sync_job, run, adapter, previous_cursor, page)
-            with transaction.atomic():
+            with _lease_heartbeat(sync_job, run):
+                archive_raw_page(sync_job, run, adapter, previous_cursor, page)
+            with _lease_heartbeat(sync_job, run), transaction.atomic():
                 records = page.get("records", [])
                 normalized_records = []
                 for raw_record in records:
