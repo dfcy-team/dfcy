@@ -122,6 +122,20 @@ def test_non_standard_port_is_allowed_only_for_exact_custody_endpoint():
             assert_host_allowed("https://other.example.test:8443/api")
 
 
+def test_root_deployment_allowlist_is_not_hidden_by_database_runtime_snapshot(monkeypatch):
+    def runtime_setting(*path, default=None):
+        if path == ("network", "allowed_hosts"):
+            return ["partner.shopeemobile.com"]
+        return default
+
+    monkeypatch.setattr(net_guard, "get_runtime_setting", runtime_setting)
+    with override_settings(LIVE_PLATFORM_ALLOWED_HOSTS=["open.feishu.cn"]):
+        assert net_guard.get_allowed_hosts() == {"open.feishu.cn", "partner.shopeemobile.com"}
+        assert_host_allowed("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal") is None
+        with pytest.raises(OAuthFlowError, match="Outbound host is not approved"):
+            assert_host_allowed("https://unapproved.example.test/api")
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode checks are not available on Windows")
 def test_private_custody_ca_is_loaded_only_for_exact_custody_endpoint(tmp_path, monkeypatch):
     ca_file = tmp_path / "custody-ca.pem"
