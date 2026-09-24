@@ -604,7 +604,8 @@ def _process_row(user, tenant, parsed, mode, categories):
         changed = _apply_legacy(legacy, parsed, category)
         # When both keys match, _apply_legacy already updates the generated
         # SKU.  If the row is pending there is no SKU to update yet.
-        return ("updated", None) if changed else ("unchanged", None)
+        generation_id = legacy.pk if not legacy.generated_sku_id else None
+        return ("updated", generation_id) if changed else ("unchanged", generation_id)
 
     bridge = (
         ProductLegacyItem.objects.select_for_update(of=("self",))
@@ -641,6 +642,7 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
     created = updated = unchanged = skipped = generated = 0
     created_ids = []
     created_rows = []
+    generation_rows = []
     errors = []
     seen = set()
     rows_seen = 0
@@ -671,6 +673,8 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
                 updated += 1
             else:
                 unchanged += 1
+            if outcome_id:
+                generation_rows.append({"id": outcome_id, "line": line_no})
         except (ImportRowError, IntegrityError, ProductCategory.DoesNotExist) as exc:
             skipped += 1
             message = str(exc) or "导入行保存失败。"
@@ -695,6 +699,7 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             "generated": generated,
             "created_ids": created_ids,
             "created_rows": created_rows,
+            "generation_rows": generation_rows,
             "processed": created + updated + unchanged + skipped,
             "error_count": len(errors),
             "errors": errors,
