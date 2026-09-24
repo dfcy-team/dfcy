@@ -604,7 +604,8 @@ def _process_row(user, tenant, parsed, mode, categories):
         changed = _apply_legacy(legacy, parsed, category)
         # When both keys match, _apply_legacy already updates the generated
         # SKU.  If the row is pending there is no SKU to update yet.
-        return ("updated", None) if changed else ("unchanged", None)
+        generation_id = legacy.pk if not legacy.generated_sku_id else None
+        return ("updated", generation_id) if changed else ("unchanged", generation_id)
 
     bridge = (
         ProductLegacyItem.objects.select_for_update(of=("self",))
@@ -640,11 +641,14 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
     tenant = request.user.tenant
     created = updated = unchanged = skipped = generated = 0
     created_ids = []
+    created_rows = []
+    generation_rows = []
     errors = []
     seen = set()
     rows_seen = 0
 
-    for line_no, raw_row in enumerate(reader, 2):
+    for raw_row in reader:
+        line_no = reader.line_num
         rows_seen += 1
         row = {_normalise_header(key): value for key, value in raw_row.items() if key is not None}
         try:
@@ -662,12 +666,15 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             outcome_name, outcome_id = outcome
             if outcome_name == "created":
                 created += 1
-                if outcome_id and not duplicate_keys:
+                if outcome_id:
                     created_ids.append(outcome_id)
+                    created_rows.append({"id": outcome_id, "line": line_no})
             elif outcome_name == "updated":
                 updated += 1
             else:
                 unchanged += 1
+            if outcome_id:
+                generation_rows.append({"id": outcome_id, "line": line_no})
         except (ImportRowError, IntegrityError, ProductCategory.DoesNotExist) as exc:
             skipped += 1
             message = str(exc) or "导入行保存失败。"
@@ -691,6 +698,8 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             "skipped": skipped,
             "generated": generated,
             "created_ids": created_ids,
+            "created_rows": created_rows,
+            "generation_rows": generation_rows,
             "processed": created + updated + unchanged + skipped,
             "error_count": len(errors),
             "errors": errors,
