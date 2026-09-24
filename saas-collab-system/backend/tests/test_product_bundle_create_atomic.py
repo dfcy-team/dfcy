@@ -82,6 +82,8 @@ def test_bundle_create_commits_spu_sku_and_components_together():
     data = response.json()["data"]
     assert data["spu"]["product_type"] == ProductSPU.ProductType.BUNDLE
     assert data["sku"]["spu"] == data["spu"]["id"]
+    assert data["sku"]["sku_code"] == f'{data["spu"]["spu_code"]}-Multi'
+    assert data["sku"]["specification"] == ""
     assert [item["component_sku"] for item in data["components"]] == [sku.id for sku in components]
     assert ProductSPU.objects.filter(tenant=tenant, product_type=ProductSPU.ProductType.BUNDLE).count() == 1
     assert ProductBundleComponent.objects.filter(tenant=tenant).count() == 2
