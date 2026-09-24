@@ -1063,11 +1063,17 @@ def product_sku_collection(request):
         )
         queryset = filter_product_skus(request.user, queryset, "products.master.view")
         search = request.query_params.get("search", "").strip()
+        requested_codes = request.query_params.get("sku_codes", "").strip()
         spu_id = request.query_params.get("spu_id", "").strip()
         product_type = request.query_params.get("product_type", "").strip()
         active_status = request.query_params.get("active_status", "active").strip()
         if search:
             queryset = queryset.filter(sku_code__icontains=search)
+        if requested_codes:
+            codes = [code.strip() for code in requested_codes.split(",") if code.strip()]
+            if len(codes) > 50:
+                return error_response(ErrorCode.VALIDATION_ERROR, "每次最多查询 50 个 SKU 编码。", status=400)
+            queryset = queryset.filter(Q(sku_code__in=codes) | Q(legacy_sku_code__in=codes))
         if spu_id.isdigit():
             queryset = queryset.filter(spu_id=int(spu_id))
         if product_type in ProductSPU.ProductType.values:

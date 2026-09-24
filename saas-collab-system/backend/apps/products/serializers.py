@@ -1043,7 +1043,7 @@ class ProductBundleCreateInputSerializer(serializers.Serializer):
     existing_spu = serializers.IntegerField(min_value=1, required=False)
     product_name = serializers.CharField(max_length=200, required=False)
     category_node = serializers.IntegerField(min_value=1, required=False)
-    season_code = serializers.RegexField(r"^[0-9]$", required=False)
+    season_code = serializers.RegexField(r"^[A-Za-z0-9]$", required=False)
     legacy_spu_code = serializers.CharField(max_length=120, required=False, allow_blank=True, trim_whitespace=True)
     legacy_sku_code = serializers.CharField(max_length=160, required=False, allow_blank=True, trim_whitespace=True)
     color_code = serializers.CharField(max_length=40)
