@@ -491,7 +491,6 @@ async function save() {
     if (imageUploaded) ElMessage.success(`组合 SKU ${result.sku.sku_code} 已生成`);
     else ElMessage.warning(`组合 SKU ${result.sku.sku_code} 已生成，但主图上传失败，可稍后在商品明细中补传`);
     await load();
-    dictionaryReady.value = true;
   } catch (error) {
     ElMessage.error(error?.message || '组合 SKU 创建失败');
   } finally {
@@ -857,6 +856,7 @@ onMounted(async () => {
   if (props.initialAction === 'legacy-migration') openMigration();
   try {
     await load();
+    dictionaryReady.value = true;
     if (props.initialAction === 'create') visible.value = true;
   } catch (error) {
     ElMessage.error(error?.message || '组合商品资料读取失败');
