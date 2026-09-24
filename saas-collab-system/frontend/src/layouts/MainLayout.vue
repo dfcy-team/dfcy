@@ -34,34 +34,43 @@
           </div>
         </div>
 
-        <nav class="route-tabs" aria-label="已打开页面" role="tablist">
+        <div class="route-tabs-row">
+          <nav class="route-tabs" aria-label="已打开页面" role="tablist">
+            <button
+              v-for="tab in openTabs"
+              :key="tab.path"
+              class="route-tab"
+              :class="{ 'is-active': activeMenuTabPath === tab.path }"
+              role="tab"
+              :aria-selected="activeMenuTabPath === tab.path"
+              :draggable="true"
+              :title="tab.closable
+                ? `${tab.label}：可以移动TAB页，可以关闭TAB页`
+                : `${tab.label}：可以移动TAB页，固定页签不可关闭`"
+              @click="activateTab(tab.path)"
+              @dragstart="startTabDrag(tab.path, $event)"
+              @dragover.prevent
+              @drop.prevent="dropTab(tab.path)"
+              @dragend="clearTabDrag"
+            >
+              <span class="route-tab__label">{{ tab.label }}</span>
+              <span
+                v-if="tab.closable"
+                class="route-tab__close"
+                role="button"
+                :aria-label="`关闭${tab.label}`"
+                @click.stop="closeTab(tab.path)"
+              >×</span>
+            </button>
+          </nav>
           <button
-            v-for="tab in openTabs"
-            :key="tab.path"
-            class="route-tab"
-            :class="{ 'is-active': activeMenuTabPath === tab.path }"
-            role="tab"
-            :aria-selected="activeMenuTabPath === tab.path"
-            :draggable="true"
-            :title="tab.closable
-              ? `${tab.label}：可以移动TAB页，可以关闭TAB页`
-              : `${tab.label}：可以移动TAB页，固定页签不可关闭`"
-            @click="activateTab(tab.path)"
-            @dragstart="startTabDrag(tab.path, $event)"
-            @dragover.prevent
-            @drop.prevent="dropTab(tab.path)"
-            @dragend="clearTabDrag"
-          >
-            <span class="route-tab__label">{{ tab.label }}</span>
-            <span
-              v-if="tab.closable"
-              class="route-tab__close"
-              role="button"
-              :aria-label="`关闭${tab.label}`"
-              @click.stop="closeTab(tab.path)"
-            >×</span>
-          </button>
-        </nav>
+            v-if="openTabs.length > 1"
+            class="clear-tabs-button"
+            type="button"
+            title="关闭全部页签，保留工作台"
+            @click="clearAllTabs"
+          >清空页签</button>
+        </div>
       </el-header>
 
       <el-main ref="mainScrollContainer" class="app-main" @scroll="updateScrollControls">
@@ -105,7 +114,7 @@
 <script setup>
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMenu, ElMenuItem, ElMessage, ElSubMenu } from 'element-plus';
+import { ElMenu, ElMenuItem, ElMessage, ElMessageBox, ElSubMenu } from 'element-plus';
 import 'element-plus/theme-chalk/el-container.css';
 import 'element-plus/theme-chalk/el-aside.css';
 import 'element-plus/theme-chalk/el-header.css';
@@ -116,6 +125,7 @@ import 'element-plus/theme-chalk/el-sub-menu.css';
 import 'element-plus/theme-chalk/el-drawer.css';
 import 'element-plus/theme-chalk/el-breadcrumb.css';
 import 'element-plus/theme-chalk/el-button.css';
+import 'element-plus/theme-chalk/el-message-box.css';
 import { useAuthStore } from '../stores/auth';
 import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
@@ -223,6 +233,15 @@ function closeTab(path) {
   }
 }
 
+async function clearAllTabs() {
+  if (openTabs.value.length <= 1) return;
+  if (route.path !== '/') {
+    const navigationFailure = await router.push('/');
+    if (navigationFailure) return;
+  }
+  openTabs.value = [homeTab];
+}
+
 function startTabDrag(path, event) {
   draggedTabPath.value = path;
   event.dataTransfer?.setData('text/plain', path);
@@ -262,13 +281,22 @@ function scrollMainTo(direction) {
 }
 
 onMounted(() => {
-  removeTabLimitGuard = router.beforeEach((to) => {
+  removeTabLimitGuard = router.beforeEach(async (to) => {
     const menuTab = resolveMenuTab(to.path);
     if (!menuTab) return true;
     const alreadyOpen = openTabs.value.some((tab) => tab.path === menuTab.path);
     if (alreadyOpen || openTabs.value.length < tabLimit.value) return true;
-    ElMessage.warning(`最多可打开 ${tabLimit.value} 个页签，请先关闭不需要的页签后再试。`);
-    return false;
+    try {
+      await ElMessageBox.confirm(
+        `最多可打开 ${tabLimit.value} 个页签。您可以自行关闭不需要的页签，或一键清空后打开当前页面（保留工作台）。`,
+        '已达页签上限',
+        { confirmButtonText: '清空后打开', cancelButtonText: '自行关闭', type: 'warning' }
+      );
+      openTabs.value = [homeTab];
+      return true;
+    } catch {
+      return false;
+    }
   });
   nextTick(updateScrollControls);
   window.addEventListener('resize', updateScrollControls);
@@ -489,18 +517,40 @@ const AppMenu = defineComponent({
   min-width: 0;
 }
 
+.route-tabs-row {
+  display: flex;
+  align-items: center;
+  flex: 0 0 48px;
+  min-width: 0;
+  border-top: 1px solid #edf0f4;
+  background: #f8fafc;
+}
+
 .route-tabs {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 4px;
-  flex: 0 0 48px;
+  flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   padding: 7px 20px;
-  border-top: 1px solid #edf0f4;
-  background: #f8fafc;
 }
+
+.clear-tabs-button {
+  flex: 0 0 auto;
+  margin-right: 20px;
+  padding: 5px 10px;
+  border: 1px solid #d9dee7;
+  border-radius: 5px;
+  color: #475569;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.clear-tabs-button:hover { border-color: #94a3b8; color: #1e293b; }
+.clear-tabs-button:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
 
 .route-tab {
   display: inline-flex;
@@ -554,6 +604,7 @@ const AppMenu = defineComponent({
   .header-primary { padding: 0 12px; }
   .app-main { width: 100%; padding: 14px; }
   .route-tabs { padding: 7px 12px; }
+  .clear-tabs-button { margin-right: 12px; }
   .header-user__identity { display: none; }
   .header-user { gap: 6px; }
   .user-settings-button { min-width: 36px; padding: 4px; }
