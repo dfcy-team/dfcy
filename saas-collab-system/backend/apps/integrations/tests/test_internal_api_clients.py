@@ -7,6 +7,7 @@ from apps.permissions.models import Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 from apps.integrations.models import InternalAPIClient, InternalAPIClientAudit
+from apps.integrations.serializers import INTERNAL_API_RESOURCE_FIELDS
 
 
 class InternalAPIClientTests(APITestCase):
@@ -25,7 +26,7 @@ class InternalAPIClientTests(APITestCase):
         self.payload = {
             "name": "Knowledge base",
             "caller_type": "internal_system",
-            "resources": {"products": ["id", "sku", "updated_at"], "suppliers": ["id", "name"]},
+            "resources": ["products", "suppliers"],
             "allowed_cidrs": ["10.10.0.0/16"],
             "rate_limit_per_minute": 120,
             "page_size_limit": 200,
@@ -47,12 +48,14 @@ class InternalAPIClientTests(APITestCase):
         self.assertNotIn(secret, str(self.client.get("/api/internal/integrations/internal-api-clients/").json()))
         self.assertNotIn(secret, str(self.client.get(f"/api/internal/integrations/internal-api-clients/{obj.pk}/").json()))
         self.assertEqual(obj.audit_logs.get().action, "created")
+        self.assertEqual(set(obj.resources["products"]), INTERNAL_API_RESOURCE_FIELDS["products"])
+        self.assertEqual(set(obj.resources["suppliers"]), INTERNAL_API_RESOURCE_FIELDS["suppliers"])
 
     def test_update_status_rotation_and_audit_are_closed_loop(self):
         obj_id = self.create_client().json()["data"]["id"]
         updated = self.client.patch(
             f"/api/internal/integrations/internal-api-clients/{obj_id}/",
-            {"page_size_limit": 50, "resources": {"purchase_orders": ["id", "status"]}}, format="json",
+            {"page_size_limit": 50, "resources": ["purchase_orders"]}, format="json",
         )
         self.assertEqual(updated.status_code, 200, updated.content)
         disabled = self.client.post(
@@ -90,11 +93,12 @@ class InternalAPIClientTests(APITestCase):
             response = method(f"/api/internal/integrations/internal-api-clients/{obj_id}/{suffix}", payload, format="json") if payload is not None else method(f"/api/internal/integrations/internal-api-clients/{obj_id}/{suffix}")
             self.assertEqual(response.status_code, 404, response.content)
 
-    def test_resource_field_cidr_and_limits_are_strictly_validated(self):
+    def test_resource_cidr_and_limits_are_strictly_validated(self):
         bad_payloads = [
             {**self.payload, "caller_type": "knowledge_base"},
-            {**self.payload, "resources": {"unknown": ["id"]}},
+            {**self.payload, "resources": ["unknown"]},
             {**self.payload, "resources": {"products": ["password"]}},
+            {**self.payload, "resources": []},
             {**self.payload, "allowed_cidrs": ["10.0.0.1/24"]},
             {**self.payload, "page_size_limit": 1001},
             {**self.payload, "rate_limit_per_minute": 0},
@@ -124,20 +128,20 @@ class InternalAPIClientTests(APITestCase):
         self.assertEqual(updated.status_code, 200, updated.content)
         self.assertEqual(updated.json()["data"]["caller_type"], "internal_system")
 
+    def test_legacy_field_list_is_accepted_but_updated_block_uses_all_readable_fields(self):
+        response = self.client.post(
+            "/api/internal/integrations/internal-api-clients/",
+            {**self.payload, "resources": {"products": ["id"]}}, format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(set(response.json()["data"]["resources"]["products"]), INTERNAL_API_RESOURCE_FIELDS["products"])
+
     def test_extended_business_resource_catalog_is_supported(self):
-        resources = {
-            "platform_products": ["id", "platform_sku"],
-            "stores": ["id", "name"],
-            "warehouses": ["id", "code"],
-            "supplier_shipments": ["id", "tracking_number"],
-            "sales_orders": ["id", "order_number"],
-            "sales_returns": ["id", "return_number"],
-            "inventory_snapshots": ["id", "available_quantity"],
-            "shipments": ["id", "shipment_number"],
-            "influencers": ["id", "handle"],
-            "outreach_tasks": ["id", "influencer_id"],
-            "sample_fulfillments": ["id", "sku"],
-        }
+        resources = [
+            "platform_products", "stores", "warehouses", "supplier_shipments", "sales_orders",
+            "sales_returns", "inventory_snapshots", "shipments", "influencers", "outreach_tasks",
+            "sample_fulfillments",
+        ]
         response = self.client.post(
             "/api/internal/integrations/internal-api-clients/",
             {**self.payload, "name": "Extended reader", "resources": resources},
@@ -146,8 +150,8 @@ class InternalAPIClientTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.content)
         saved_resources = response.json()["data"]["resources"]
         self.assertEqual(set(saved_resources), set(resources))
-        for resource, fields in resources.items():
-            self.assertEqual(set(saved_resources[resource]), set(fields))
+        for resource in resources:
+            self.assertEqual(set(saved_resources[resource]), INTERNAL_API_RESOURCE_FIELDS[resource])
 
     def test_permissions_fail_closed_without_scope_and_business_read_api_is_absent(self):
         limited = get_user_model().objects.create_user(
