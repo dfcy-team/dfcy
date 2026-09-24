@@ -43,6 +43,13 @@ class FeishuApiTests(APITestCase):
         connection = FeishuConnection.objects.get(tenant=self.tenant)
         self.assertTrue(connection.app_secret_ref.startswith("cred_"))
         self.assertNotIn("secret-value", connection.app_secret_ref)
+        calls = custody_factory.return_value.store_secrets.call_args_list
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(
+            [call.kwargs["metadata"]["value_role"] for call in calls],
+            ["app_secret", "verification_token", "encrypt_key"],
+        )
+        self.assertTrue(all("secret_kind" not in call.kwargs["metadata"] for call in calls))
 
     def test_six_tab_endpoints_are_available(self):
         for path in ("connection", "identities", "notifications", "reports", "approvals", "operations"):
