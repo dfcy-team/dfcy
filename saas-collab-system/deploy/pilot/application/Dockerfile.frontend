@@ -11,6 +11,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY backend/apps/permissions/menu_registry.json /backend/apps/permissions/menu_registry.json
+COPY backend/apps/integrations/serializers.py /backend/apps/integrations/serializers.py
 COPY frontend/ ./
 RUN VITE_USE_MOCK=true npm run test
 RUN npm run build
