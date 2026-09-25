@@ -27,14 +27,16 @@ def due_warehouse(monkeypatch):
 
 
 def test_only_supported_platforms_accept_strict_boolean_switch():
-    result = validate_runtime_config({"platforms": {"lazada": {"auto_refresh_enabled": True}, "shopee": {"auto_refresh_enabled": True}, "jifeng_wms": {"auto_refresh_enabled": False}}})
+    result = validate_runtime_config({"platforms": {"lazada": {"auto_refresh_enabled": True}, "shopee": {"auto_refresh_enabled": True}, "tiktok": {"auto_refresh_enabled": True}, "jifeng_wms": {"auto_refresh_enabled": False}}})
     assert result["platforms"]["lazada"]["auto_refresh_enabled"] is True
     assert result["platforms"]["shopee"]["auto_refresh_enabled"] is True
-    for platform, value in [("shopee", "true"), ("lazada", "true"), ("tiktok", True)]:
+    assert result["platforms"]["tiktok"]["auto_refresh_enabled"] is True
+    for platform, value in [("shopee", "true"), ("lazada", "true"), ("tiktok", "true")]:
         with pytest.raises(ValidationError):
             validate_runtime_config({"platforms": {platform: {"auto_refresh_enabled": value}}})
     assert SAFE_DEFAULTS["platforms"]["lazada"]["auto_refresh_enabled"] is False
     assert SAFE_DEFAULTS["platforms"]["shopee"]["auto_refresh_enabled"] is False
+    assert SAFE_DEFAULTS["platforms"]["tiktok"]["auto_refresh_enabled"] is False
 
 
 @pytest.mark.parametrize("case", ["disabled", "revoked", "not_due", "no_expiry", "inactive_actor", "wrong_tenant", "mock", "missing_identity"])
@@ -145,7 +147,7 @@ def test_permission_and_scope_are_rechecked(monkeypatch):
     assert not service.automatic_refresh_allowed(record)
 
 
-def test_only_shopee_rotates_and_duplicate_scan_does_not_repeat(marketplace_callback, monkeypatch):
+def test_shopee_and_tiktok_rotate_and_duplicate_scan_does_not_repeat(marketplace_callback, monkeypatch):
     from apps.integrations import marketplace_oauth_service
     from apps.integrations.models import MarketplaceStoreAuthorization, authorization_service_write
     client, store, config, _, payload = marketplace_callback
@@ -166,7 +168,7 @@ def test_only_shopee_rotates_and_duplicate_scan_does_not_repeat(marketplace_call
     monkeypatch.setattr(marketplace_oauth_service, "resolve_oauth_provider", lambda *args: provider)
     outcome = service.refresh_due_authorizations()
     record.refresh_from_db()
-    if config.platform == "shopee":
+    if config.platform in {"shopee", "tiktok"}:
         assert outcome["success"] == 1
         assert record.token_id == "tok_fake_renewed"
         assert record.expires_at > timezone.now() + timedelta(hours=3)

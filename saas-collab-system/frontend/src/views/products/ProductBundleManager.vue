@@ -281,7 +281,7 @@ import {
 } from '../../api/products';
 import { collectionRows, detailData } from '../../utils/businessResponse';
 import { downloadBigSellerBundleWorkbook } from '../../utils/bigsellerWorkbook';
-import { bundleCsvHeaderIndex, decodeBundleImportFile, parseBundleCsvRecords } from '../../utils/bundleImportCsv';
+import { bundleCsvHeaderIndex, decodeBundleImportFile, findBundleLeafCategory, parseBundleCsvRecords } from '../../utils/bundleImportCsv';
 
 const auth = useAuthStore();
 const props = defineProps({
@@ -760,9 +760,15 @@ function prepareImportRow(values, headers, line, skuByCode) {
   if (!name || !categoryCode || !season || !color) throw new Error('组合商品名称、末级分类编码、属性编码、组合颜色英文编码为必填');
   if (season !== '0' && !activeAttributes.value.some((item) => String(item.code).toUpperCase() === season)) throw new Error(`属性编码 ${season} 不存在或已停用`);
   if (imageUrl && (!/^https?:\/\//i.test(imageUrl) || imageUrl.length > 500)) throw new Error('图片URL必须是不超过500字符的HTTP(S)链接');
-  const category = leaves.value.find((item) => String(item.code) === categoryCode);
+  const category = findBundleLeafCategory(categories.value, categoryCode);
   if (!category) throw new Error(`末级分类编码 ${categoryCode} 不存在或已停用`);
-  if (!colors.value.some((item) => String(item.code) === color && item.is_active !== false)) throw new Error(`颜色编码 ${color} 不存在或已停用`);
+  const activeColors = colors.value.filter((item) => item.is_active !== false);
+  const colorMatch = activeColors.find((item) => String(item.code) === color)
+    || (() => {
+      const matches = activeColors.filter((item) => String(item.code).toLowerCase() === color.toLowerCase());
+      return matches.length === 1 ? matches[0] : null;
+    })();
+  if (!colorMatch) throw new Error(`颜色编码 ${color} 不存在、已停用或不唯一`);
   const components = [];
   for (let index = 1; index <= 20; index += 1) {
     const skuCode = importValue(values, headers, `单品SKU${index}`);
@@ -779,7 +785,7 @@ function prepareImportRow(values, headers, line, skuByCode) {
     components.push({ sku: sku.id, skuCode, quantity, costRatio });
   }
   if (!components.length) throw new Error('至少填写一个单品 SKU 及数量');
-  return { line, name, category: category.id, season, color, legacySpuCode, legacySkuCode, imageUrl, components };
+  return { line, name, category: category.id, season, color: colorMatch.code, legacySpuCode, legacySkuCode, imageUrl, components };
 }
 
 async function importBundleFile(file) {
@@ -788,9 +794,11 @@ async function importBundleFile(file) {
   importSummary.created = 0;
   importSummary.errors = [];
   importSummary.imageErrors = [];
-  const createdSpus = [];
   const createdSkus = [];
-  const createdComponents = [];
+  const newBundleSpus = [];
+  const newBundleSkus = [];
+  const newBundleComponents = [];
+  const importedSpusByLegacyCode = new Map();
   try {
     const rows = parseBundleCsvRecords(await decodeBundleImportFile(file));
     if (rows.length < 2) throw new Error('CSV 中没有可导入数据');
@@ -815,7 +823,15 @@ async function importBundleFile(file) {
       const { line, values } = rows[index];
       try {
         const input = prepareImportRow(values, headers, line, skuByCode);
-        const result = await createBundle(input);
+        const priorSpu = input.legacySpuCode && importedSpusByLegacyCode.get(input.legacySpuCode);
+        if (priorSpu && (String(priorSpu.category_node?.id ?? priorSpu.category_node) !== String(input.category)
+          || String(priorSpu.season_code) !== input.season)) {
+          throw new Error(`旧 SPU ${input.legacySpuCode} 的分类或属性编码与前面行不一致`);
+        }
+        const result = await createBundle(priorSpu
+          ? { ...input, spuMode: 'existing', existingSpu: priorSpu.id, legacySpuCode: '' }
+          : input);
+        if (input.legacySpuCode && !priorSpu) importedSpusByLegacyCode.set(input.legacySpuCode, result.spu);
         importSummary.created += 1;
         if (input.imageUrl) {
           try {
@@ -827,16 +843,19 @@ async function importBundleFile(file) {
             importSummary.imageErrors.push({ line, message: `组合 SKU ${result.sku.sku_code} 已创建，但图片保存失败：${imageError?.message || '请稍后重试'}` });
           }
         }
-        createdSpus.push(result.spu);
         createdSkus.push(result.sku);
-        createdComponents.push(...result.components);
+        if (!input.legacySpuCode && !input.legacySkuCode) {
+          newBundleSpus.push(result.spu);
+          newBundleSkus.push(result.sku);
+          newBundleComponents.push(...result.components);
+        }
       } catch (error) {
         importSummary.errors.push({ line, message: error?.message || '导入失败' });
       }
     }
     if (createdSkus.length) {
-      downloadBigSellerBundleWorkbook(createdSpus, createdSkus, createdComponents);
-      ElMessage.success(`已导入 ${createdSkus.length} 个组合 SKU 并生成 BigSeller 表`);
+      if (newBundleSkus.length) downloadBigSellerBundleWorkbook(newBundleSpus, newBundleSkus, newBundleComponents);
+      ElMessage.success(`已导入 ${createdSkus.length} 个组合 SKU${newBundleSkus.length ? ' 并生成 BigSeller 表' : ''}`);
       await load();
       emit('operation-completed');
     } else {

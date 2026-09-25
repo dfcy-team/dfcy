@@ -182,7 +182,7 @@
           <article v-for="platform in platformKeys" :key="platform" :ref="(element) => setPlatformSectionRef(platform, element)" class="platform-card">
             <header><div><strong>{{ platformLabels[platform] }}</strong><small>{{ platformDescriptions[platform] }}</small></div><el-tag effect="plain" :type="form.platforms[platform].contract_approved ? 'success' : 'warning'">{{ form.platforms[platform].contract_approved ? '合同已批准' : '合同未批准' }}</el-tag></header>
             <el-form-item label="合同审批状态"><el-switch v-model="form.platforms[platform].contract_approved" active-text="已批准" inactive-text="未批准" /></el-form-item>
-            <el-form-item v-if="['lazada', 'shopee', 'jifeng_wms'].includes(platform)" label="自动刷新令牌">
+            <el-form-item v-if="['lazada', 'shopee', 'tiktok', 'jifeng_wms'].includes(platform)" label="自动刷新令牌">
               <el-switch v-model="form.platforms[platform].auto_refresh_enabled" active-text="开启" inactive-text="关闭" />
               <small class="field-help">当前生效：{{ currentConfig?.platforms?.[platform]?.auto_refresh_enabled ? '开启' : '关闭' }}。修改须提交并由另一位管理员审批。</small>
               <small class="field-help">后台每分钟检查，到期前 15 分钟续期；仅处理已授权且记录到期时间的凭据。失败后暂停该凭据自动重试，请查看集成审计并手动处理；不会启用或执行同步任务。</small>
@@ -369,7 +369,7 @@ const platformPayloadKeys = {
   jifeng_wms: ['contract_approved', 'auto_refresh_enabled'],
   lazada: ['contract_approved', 'auto_refresh_enabled', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'order_list_path', 'order_items_path', 'finance_transaction_path', 'market'],
   shopee: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'finance_list_path', 'finance_detail_path', 'market', 'region'],
-  tiktok: ['contract_approved', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
+  tiktok: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
 };
 
 function createEmptyConfig() {
@@ -583,7 +583,7 @@ function isDangerousChange() {
       || (form.network.security_approved && !previous.network.security_approved)
       || (form.network.readonly_sync_enabled && !previous.network.readonly_sync_enabled)
       || platformKeys.some((platform) => form.platforms[platform].contract_approved && !previous.platforms[platform].contract_approved)
-      || ['lazada', 'shopee', 'jifeng_wms'].some((platform) => form.platforms[platform].auto_refresh_enabled && !previous.platforms[platform].auto_refresh_enabled)
+      || ['lazada', 'shopee', 'tiktok', 'jifeng_wms'].some((platform) => form.platforms[platform].auto_refresh_enabled && !previous.platforms[platform].auto_refresh_enabled)
       || ['shopee', 'tiktok'].some((platform) => form.platforms[platform].product_contract_approved && !previous.platforms[platform].product_contract_approved)
       || (form.listing_write.mode === 'controlled' && previous.listing_write.mode !== 'controlled')
       || (form.listing_write.emergency_stop === false && previous.listing_write.emergency_stop !== false)
@@ -642,6 +642,11 @@ async function submitVersion() {
     await load();
   } catch (submitError) {
     if (submitError === 'cancel' || submitError === 'close') return;
+    if (submitError?.code === 'ECONNABORTED' || /timeout/i.test(submitError?.message || '')) {
+      await load();
+      ElMessage.warning('提交请求超时，已刷新版本状态。请先核对待审批版本，避免重复提交。');
+      return;
+    }
     ElMessage.error(submitError?.message || '生产环境配置版本创建失败。');
   } finally {
     saving.value = false;

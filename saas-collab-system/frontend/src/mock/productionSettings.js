@@ -82,6 +82,7 @@ const initialConfig = {
     tiktok: {
       product_contract_approved: false,
       contract_approved: false,
+      auto_refresh_enabled: false,
       app_id: '',
       service_id: '',
       redirect_uri: 'https://saas.example.test/api/internal/integrations/store-authorizations/oauth/callback/tiktok/',

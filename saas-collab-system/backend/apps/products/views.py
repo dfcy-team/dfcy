@@ -2656,16 +2656,13 @@ def product_bundle_create(request):
             else:
                 spu = existing_spu
 
-            spec_values = {
-                str(item["code"]): "组合"
-                for item in (category.spec_dimensions or [])
-                if isinstance(item, dict) and item.get("code")
-            }
             sku_serializer = ProductSKUSerializer(
                 data={
                     "spu": spu.id,
                     "color_code": color_code,
-                    "spec_values": spec_values,
+                    # Bundle imports do not select a specification. Use the
+                    # same optional-specification coding rule as normal SKUs.
+                    "spec_values": {},
                     "legacy_sku_code": payload.get("legacy_sku_code", ""),
                 },
                 context=context,

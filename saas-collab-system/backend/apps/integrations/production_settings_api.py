@@ -103,7 +103,7 @@ def _definition():
     return SystemConfigDefinition.objects.get(config_key=CONFIG_KEY)
 
 
-def _version_data(version):
+def _version_data(version, change_reason=None):
     payload = TenantConfigVersionSerializer(version).data
     # The runtime validator rejects credentials, but do not expose a forged or
     # legacy invalid row if an operator imported old database data manually.
@@ -112,18 +112,26 @@ def _version_data(version):
     except DjangoValidationError:
         payload["value"] = "***"
         payload["value_masked"] = True
-    payload["change_reason"] = ""
-    for log in ConfigChangeLog.objects.filter(
-        config_key=version.config_key,
-        scope_key=version.scope_key,
-        to_version=version.version,
-        action__in=(ConfigChangeLog.Action.CREATE_VERSION, ConfigChangeLog.Action.ROLLBACK),
-    ).order_by("-created_at", "-id"):
-        detail = log.masked_detail if isinstance(log.masked_detail, dict) else {}
-        if detail.get("change_reason"):
-            payload["change_reason"] = str(detail["change_reason"])
-            break
+    if change_reason is None:
+        change_reason = _change_reasons([version]).get(version.version, "")
+    payload["change_reason"] = change_reason
     return payload
+
+
+def _change_reasons(versions):
+    if not versions:
+        return {}
+    reasons = {}
+    logs = ConfigChangeLog.objects.filter(
+        config_key=CONFIG_KEY,
+        scope_key="system",
+        to_version__in=[item.version for item in versions],
+        action__in=(ConfigChangeLog.Action.CREATE_VERSION, ConfigChangeLog.Action.ROLLBACK),
+    ).order_by("-created_at", "-id").values_list("to_version", "masked_detail")
+    for version_number, detail in logs:
+        if version_number not in reasons and isinstance(detail, dict) and detail.get("change_reason"):
+            reasons[version_number] = str(detail["change_reason"])
+    return reasons
 
 
 def _visible_versions():
@@ -144,10 +152,11 @@ def _runtime_payload(user):
     snapshot = runtime_snapshot()
     heartbeat = SyncSchedulerHeartbeat.objects.filter(key="credential-refresh").first()
     versions = _visible_versions()
+    change_reasons = _change_reasons(versions)
     effective = next((item for item in versions if item.status == TenantConfigVersion.Status.EFFECTIVE), None)
     pending = next((item for item in versions if item.status == TenantConfigVersion.Status.PENDING_APPROVAL), None)
-    effective_data = _version_data(effective) if effective is not None else None
-    pending_data = _version_data(pending) if pending is not None else None
+    effective_data = _version_data(effective, change_reasons.get(effective.version, "")) if effective is not None else None
+    pending_data = _version_data(pending, change_reasons.get(pending.version, "")) if pending is not None else None
     return {
         **snapshot,
         "auto_refresh_last_seen_at": heartbeat.last_seen_at.isoformat() if heartbeat else None,
@@ -158,7 +167,7 @@ def _runtime_payload(user):
         "current_version": effective_data,
         "pending_version": pending_data,
         "effective": effective_data,
-        "versions": [_version_data(item) for item in versions],
+        "versions": [_version_data(item, change_reasons.get(item.version, "")) for item in versions],
         "permissions": {
             "can_create": _has_all_scope(user, "config.manage"),
             "can_approve": _has_all_scope(user, "config.approve"),

@@ -75,14 +75,16 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(api).toContain('migrations/${encodeURIComponent(token)}/confirm/');
   });
 
-  it('批量导入复用服务端原子创建链路，成功后自动生成 BigSeller 表', () => {
+  it('批量导入复用服务端原子创建链路，仅新建商品自动生成 BigSeller 表', () => {
     expect(page).toContain('createProductBundle');
     expect(api).toContain("url: '/api/internal/products/bundles/create/'");
     expect(page).not.toContain('createProductSpu');
     expect(page).not.toContain('createProductSku');
     expect(page).not.toContain('createBundleComponent');
     expect(page).toContain('const input = prepareImportRow(values, headers, line, skuByCode)');
-    expect(page).toContain('const result = await createBundle(input)');
+    expect(page).toContain('const result = await createBundle(priorSpu');
+    expect(page).toContain("spuMode: 'existing'");
+    expect(page).toContain('if (!input.legacySpuCode && !input.legacySkuCode)');
     expect(page).toContain("'图片URL'");
     expect(page).toContain("'旧SPU编码', '旧SKU编码', '*组合商品名称'");
     expect(page).toContain("const legacySpuCode = importValue(values, headers, '旧SPU编码')");
@@ -95,7 +97,7 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('cost_allocation_ratio: component.costRatio ?? 1');
     expect(detailPage).toContain('const components = detailData(response.data)?.components || []');
     expect(detailPage).toContain('bundle_sku: row.sku_id');
-    expect(page).toContain('downloadBigSellerBundleWorkbook(createdSpus, createdSkus, createdComponents)');
+    expect(page).toContain('downloadBigSellerBundleWorkbook(newBundleSpus, newBundleSkus, newBundleComponents)');
     expect(page).toContain("'*组合商品名称', '*末级分类编码', '*属性编码', '*组合颜色英文编码'");
     expect(page).toContain('index <= 20');
     expect(api).toContain("url: dictionaryApi('bundle-components')");

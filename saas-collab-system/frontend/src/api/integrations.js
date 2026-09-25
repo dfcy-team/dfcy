@@ -101,7 +101,7 @@ export const fetchProductionIntegrationSettings = () =>
 
 export const createProductionIntegrationSettingsVersion = (payload = {}) =>
   requestWithMockFallback(
-    { method: 'post', url: '/api/internal/integrations/production-settings/versions/', data: payload },
+    { method: 'post', url: '/api/internal/integrations/production-settings/versions/', data: payload, timeout: 30000 },
     () => mockCreateProductionIntegrationSettingsVersion(payload),
     'integrations.production_settings.create'
   );
