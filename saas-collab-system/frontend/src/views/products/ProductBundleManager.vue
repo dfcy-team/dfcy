@@ -295,6 +295,7 @@ import { collectionRows, detailData } from '../../utils/businessResponse';
 import { downloadBigSellerBundleWorkbook } from '../../utils/bigsellerWorkbook';
 import { bundleCsvHeaderIndex, decodeBundleImportFile, findBundleLeafCategory, parseBundleCsvRecords } from '../../utils/bundleImportCsv';
 import { bundleImportErrorCsvRows, bundleImportErrorMessage } from '../../utils/bundleImportFeedback';
+import { buildBundleCreatePayload } from '../../utils/bundleCreatePayload';
 
 const auth = useAuthStore();
 const props = defineProps({
@@ -447,21 +448,9 @@ function selectBundleImage(event) {
 }
 
 async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, legacySpuCode = '', legacySkuCode = '', components }) {
-  const response = await createProductBundle({
-    spu_mode: spuMode,
-    existing_spu: spuMode === 'existing' ? existingSpu : null,
-    product_name: name,
-    category_node: category,
-    season_code: season,
-    legacy_spu_code: legacySpuCode,
-    legacy_sku_code: legacySkuCode,
-    color_code: color,
-    components: components.map((component) => ({
-      component_sku: component.sku,
-      quantity: component.quantity,
-      cost_allocation_ratio: component.costRatio ?? 1,
-    })),
-  });
+  const response = await createProductBundle(buildBundleCreatePayload({
+    spuMode, existingSpu, name, category, season, color, legacySpuCode, legacySkuCode, components,
+  }));
   if (!response.success) throw new Error(bundleImportErrorMessage(response));
   const created = detailData(response.data);
   const createdComponents = (created.components || []).map((component, index) => ({

@@ -10,19 +10,36 @@ const FIELD_LABELS = {
   quantity: '数量',
   cost_allocation_ratio: '成本价分摊比',
   sku_code: '生成的SKU编码',
+  existing_spu: '已有组合SPU',
+  spu_mode: '组合SPU创建方式',
   non_field_errors: '整行',
   detail: '详情',
 };
 
-function fieldErrors(value, path = '') {
+function readableValidationMessage(message, key) {
+  if (key === 'existing_spu' && message === 'This field may not be null.') {
+    return '选择已有组合SPU时必须提供编号；新建组合SPU时不应提交此字段';
+  }
+  if (key === 'existing_spu' && message === 'This field is required when spu_mode is existing.') {
+    return '选择已有组合SPU时必须填写已有组合SPU编号';
+  }
+  return ({
+    'This field may not be null.': '该字段不能为空',
+    'This field is required.': '该字段为必填项',
+    'This field may not be blank.': '该字段不能为空白',
+    'A valid integer is required.': '请填写有效的整数',
+  })[message] || message;
+}
+
+function fieldErrors(value, path = '', key = '') {
   if (Array.isArray(value)) {
-    return value.flatMap((item, index) => fieldErrors(item, typeof item === 'object' && item !== null ? `${path}${path ? ' ' : ''}第${index + 1}项` : path));
+    return value.flatMap((item, index) => fieldErrors(item, typeof item === 'object' && item !== null ? `${path}${path ? ' ' : ''}第${index + 1}项` : path, key));
   }
   if (value && typeof value === 'object') {
-    return Object.entries(value).flatMap(([key, item]) => fieldErrors(item, [path, FIELD_LABELS[key] || key].filter(Boolean).join(' / ')));
+    return Object.entries(value).flatMap(([field, item]) => fieldErrors(item, [path, FIELD_LABELS[field] || field].filter(Boolean).join(' / '), field));
   }
   const message = String(value ?? '').trim();
-  return message ? [`${path ? `${path}：` : ''}${message}`] : [];
+  return message ? [`${path ? `${path}：` : ''}${readableValidationMessage(message, key)}`] : [];
 }
 
 export function bundleImportErrorMessage(error) {
