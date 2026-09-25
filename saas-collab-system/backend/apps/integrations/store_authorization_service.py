@@ -12,6 +12,8 @@ from .models import (
     MarketplaceStoreAuthorization,
     authorization_service_write,
     marketplace_identity_key,
+    marketplace_active_identity_key,
+    marketplace_authorization_api_type,
     marketplace_store_binding_key,
 )
 from .audit_sanitizer import sanitize_audit_detail as _sanitize_audit_detail
@@ -96,7 +98,9 @@ def create_store_authorization(
         allow_live=allow_live_references,
     )
     identity_key = marketplace_identity_key(platform, region, platform_store_id)
-    if MarketplaceStoreAuthorization.objects.filter(active_platform_identity_key=identity_key).exists():
+    api_type = marketplace_authorization_api_type(integration_config)
+    active_identity_key = marketplace_active_identity_key(platform, region, platform_store_id, api_type)
+    if MarketplaceStoreAuthorization.objects.filter(active_platform_identity_key=active_identity_key).exists():
         raise StateConflict("The platform store is already bound in an authorized tenant scope.")
     record = MarketplaceStoreAuthorization(
         tenant=tenant,
@@ -106,8 +110,8 @@ def create_store_authorization(
         region=str(region).upper(),
         platform_store_id=str(platform_store_id),
         platform_identity_key=identity_key,
-        active_platform_identity_key=identity_key,
-        active_store_binding_key=marketplace_store_binding_key(tenant.id, platform, store.id),
+        active_platform_identity_key=active_identity_key,
+        active_store_binding_key=marketplace_store_binding_key(tenant.id, platform, store.id, api_type),
         merchant_subject_id=str(merchant_subject_id),
         shop_cipher=str(shop_cipher or ""),
         credential_id=metadata["credential_id"],
