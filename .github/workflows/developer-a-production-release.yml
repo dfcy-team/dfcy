@@ -309,8 +309,8 @@ jobs:
       VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
       VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
       VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
-      GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
-      REGISTRY_USER: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN && vars.PRODUCTION_GHCR_PULL_USER || github.actor }}
+      GHCR_TOKEN: ${{ github.token }}
+      REGISTRY_USER: ${{ github.actor }}
       RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
       BACKEND_IMAGE: ghcr.io/${{ github.repository }}/saas-collab-backend@${{ needs.build.outputs.backend_digest }}
       FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/saas-collab-frontend@${{ needs.build.outputs.frontend_digest }}
@@ -356,8 +356,8 @@ jobs:
       VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
       VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
       VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
-      GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
-      REGISTRY_USER: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN && vars.PRODUCTION_GHCR_PULL_USER || github.actor }}
+      GHCR_TOKEN: ${{ github.token }}
+      REGISTRY_USER: ${{ github.actor }}
       ROLLBACK_REASON: ${{ needs.validate.outputs.rollback_reason }}
     steps:
       - name: Invoke the fixed rollback entrypoint
