@@ -279,7 +279,7 @@ def test_failed_validation_allows_manual_warehouse_reauthorization(monkeypatch):
         actor=actor,
         authorization=record,
         email=record.email or "demo@example.test",
-        token="synthetic-new-bootstrap-token",
+        token="test-new-bootstrap-token",
         custody=custody,
     )
     assert recovered.status == "active"
