@@ -6,6 +6,7 @@ const read = (file) => fs.readFileSync(path.resolve(process.cwd(), file), 'utf8'
 const page = read('src/views/products/ProductBundleManager.vue');
 const detailPage = read('src/views/products/ProductDetailData.vue');
 const api = read('src/api/products.js');
+const payload = read('src/utils/bundleCreatePayload.js');
 
 describe('组合商品页面按钮与导入导出契约', () => {
   it('新增组合 SKU 可新建 SPU 或选择已有组合 SPU，并显示旧 SPU 映射', () => {
@@ -14,8 +15,9 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain('选择已有组合 SPU');
     expect(page).toContain('搜索新/旧 SPU 编码或商品名称');
     expect(page).toContain('legacy_spu_code');
-    expect(page).toContain("spu_mode: spuMode");
-    expect(page).toContain("existing_spu: spuMode === 'existing'");
+    expect(page).toContain('buildBundleCreatePayload({');
+    expect(payload).toContain("spu_mode: spuMode");
+    expect(payload).toContain("...(spuMode === 'existing' ? { existing_spu: existingSpu } : {})");
   });
   it('组合 SKU 支持独立主图上传、预览和列表展示', () => {
     expect(page).toContain('组合商品主图');
@@ -89,12 +91,12 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).toContain("'旧SPU编码', '旧SKU编码', '*组合商品名称'");
     expect(page).toContain("const legacySpuCode = importValue(values, headers, '旧SPU编码')");
     expect(page).toContain("const legacySkuCode = importValue(values, headers, '旧SKU编码')");
-    expect(page).toContain('legacy_spu_code: legacySpuCode');
-    expect(page).toContain('legacy_sku_code: legacySkuCode');
+    expect(payload).toContain('legacy_spu_code: legacySpuCode');
+    expect(payload).toContain('legacy_sku_code: legacySkuCode');
     expect(page).toContain("const imageUrl = importValue(values, headers, '图片URL')");
     expect(page).toContain('cacheProductBundleImage(result.sku.id, input.imageUrl)');
     expect(page).toContain('result.sku.image_url = cachedImageUrl');
-    expect(page).toContain('cost_allocation_ratio: component.costRatio ?? 1');
+    expect(payload).toContain('cost_allocation_ratio: component.costRatio ?? 1');
     expect(detailPage).toContain('const components = detailData(response.data)?.components || []');
     expect(detailPage).toContain('bundle_sku: row.sku_id');
     expect(page).toContain('downloadBigSellerBundleWorkbook(newBundleSpus, newBundleSkus, newBundleComponents)');

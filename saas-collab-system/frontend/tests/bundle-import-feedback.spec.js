@@ -28,4 +28,10 @@ describe('组合商品导入反馈', () => {
       [4, '图片缓存', '', 'OLD-IMAGE', '', '图片下载失败'],
     ]);
   });
+
+  it('把已有组合SPU的空值错误定位成可操作的中文提示', () => {
+    expect(bundleImportErrorMessage({
+      response: { data: { message: '提交内容校验失败，请检查字段提示。', data: { existing_spu: ['This field may not be null.'] } } },
+    })).toBe('已有组合SPU：选择已有组合SPU时必须提供编号；新建组合SPU时不应提交此字段');
+  });
 });
