@@ -38,19 +38,90 @@ PILOT_LOOPBACK_CALLBACKS = {
 
 INTERNAL_API_RESOURCE_FIELDS = {
     "products": {"id", "sku", "name", "status", "updated_at"},
+    "product_details": {"id", "product_id", "sku", "name", "specification", "status", "updated_at"},
+    "product_mappings": {"id", "product_id", "platform", "store_id", "platform_sku", "status", "updated_at"},
+    "product_costs": {"id", "product_id", "sku", "currency", "amount", "effective_at", "updated_at"},
+    "product_bundles": {"id", "product_id", "sku", "component_sku", "quantity", "status", "updated_at"},
     "platform_products": {"id", "platform", "store_id", "platform_sku", "title", "status", "updated_at"},
+    "product_categories": {"id", "code", "name", "parent_id", "status", "updated_at"},
+    "product_attributes": {"id", "code", "name", "status", "updated_at"},
+    "product_colors": {"id", "code", "name", "status", "updated_at"},
+    "product_specifications": {"id", "code", "name", "status", "updated_at"},
+    "platforms": {"id", "code", "name", "status", "updated_at"},
+    "country_sites": {"id", "platform_id", "country_code", "name", "status", "updated_at"},
+    "foundation_settings": {"id", "code", "name", "status", "updated_at"},
     "suppliers": {"id", "code", "name", "status", "updated_at"},
     "stores": {"id", "platform", "code", "name", "status", "updated_at"},
     "warehouses": {"id", "code", "name", "status", "updated_at"},
+    "listing_tasks": {"id", "platform", "store_id", "product_id", "status", "updated_at"},
+    "listing_workbench": {"id", "platform", "store_id", "status", "updated_at"},
+    "online_products": {"id", "platform", "store_id", "platform_sku", "status", "updated_at"},
+    "listing_category_mappings": {"id", "platform", "category_id", "platform_category_id", "status", "updated_at"},
+    "listing_attribute_mappings": {"id", "platform", "attribute_id", "platform_attribute_id", "status", "updated_at"},
+    "listing_logs": {"id", "task_id", "status", "created_at", "updated_at"},
+    "listing_exceptions": {"id", "task_id", "code", "status", "created_at", "updated_at"},
+    "listing_profiles": {"id", "platform", "site_id", "name", "status", "updated_at"},
+    "listing_templates": {"id", "platform", "name", "status", "updated_at"},
+    "consolidations": {"id", "supplier_id", "warehouse_id", "status", "updated_at"},
     "purchase_orders": {"id", "order_number", "supplier_id", "status", "ordered_at", "updated_at"},
     "supplier_shipments": {"id", "purchase_order_id", "tracking_number", "status", "shipped_at", "updated_at"},
+    "supplier_performance": {"id", "supplier_id", "period", "score", "updated_at"},
     "sales_orders": {"id", "order_number", "store_id", "status", "ordered_at", "updated_at"},
+    "sales_overview": {"id", "store_id", "period", "quantity", "amount", "updated_at"},
     "sales_returns": {"id", "sales_order_id", "return_number", "status", "created_at", "updated_at"},
+    "store_sales": {"id", "store_id", "period", "amount", "currency", "updated_at"},
+    "sku_sales": {"id", "sku", "store_id", "period", "quantity", "amount", "updated_at"},
+    "sales_exports": {"id", "period", "status", "created_at", "updated_at"},
+    "sales_data_quality": {"id", "store_id", "period", "status", "updated_at"},
     "inventory_snapshots": {"id", "warehouse_id", "sku", "available_quantity", "reserved_quantity", "snapshot_at", "updated_at"},
+    "inventory_workbench": {"id", "warehouse_id", "sku", "available_quantity", "updated_at"},
+    "inventory_alerts": {"id", "warehouse_id", "sku", "alert_type", "status", "updated_at"},
+    "replenishment_suggestions": {"id", "warehouse_id", "sku", "suggested_quantity", "status", "updated_at"},
+    "prices": {"id", "sku", "store_id", "currency", "amount", "effective_at", "updated_at"},
     "shipments": {"id", "shipment_number", "warehouse_id", "tracking_number", "status", "shipped_at", "updated_at"},
     "influencers": {"id", "platform", "handle", "display_name", "status", "updated_at"},
     "outreach_tasks": {"id", "influencer_id", "owner_id", "status", "due_at", "updated_at"},
     "sample_fulfillments": {"id", "influencer_id", "sku", "tracking_number", "status", "shipped_at", "updated_at"},
+    "influencer_performance": {"id", "owner_id", "period", "score", "updated_at"},
+    "influencer_bd_config": {"id", "code", "name", "status", "updated_at"},
+    "advertising_overview": {"id", "platform", "store", "spend", "attributed_sales", "orders", "roas", "acos", "quality_status", "updated_at"},
+    "advertising_performance": {"id", "campaign", "product", "sku", "impressions", "clicks", "ctr", "cpc", "orders", "quality_status", "updated_at"},
+    "advertising_reconciliation": {"id", "platform", "account", "period_start", "period_end", "currency", "report_spend", "statement_charge", "booked_amount", "difference_amount", "reconciliation_status", "updated_at"},
+    "product_research": {"id", "name", "status", "updated_at"},
+    "selection_requirements": {"id", "name", "owner_id", "status", "updated_at"},
+    "requirement_reviews": {"id", "requirement_id", "status", "updated_at"},
+    "development_projects": {"id", "code", "name", "status", "updated_at"},
+    "development_archives": {"id", "project_id", "sku", "status", "updated_at"},
+    "development_costs": {"id", "project_id", "currency", "amount", "updated_at"},
+    "development_sales": {"id", "project_id", "period", "amount", "updated_at"},
+    "selection_retrospectives": {"id", "project_id", "status", "updated_at"},
+    "development_dashboard": {"id", "period", "status", "updated_at"},
+    "analytics_overview": {"id", "period", "amount", "status", "updated_at"},
+    "analytics_sales": {"id", "period", "amount", "status", "updated_at"},
+    "analytics_inventory": {"id", "period", "quantity", "status", "updated_at"},
+    "lifecycle_reviews": {"id", "product_id", "status", "updated_at"},
+    "lifecycle_history": {"id", "product_id", "status", "updated_at"},
+    "clearance_requests": {"id", "product_id", "status", "updated_at"},
+    "business_alerts": {"id", "code", "status", "updated_at"},
+    "finance_imports": {"id", "platform", "period", "status", "updated_at"},
+    "finance_analytics": {"id", "period", "currency", "amount", "updated_at"},
+    "platform_statements": {"id", "platform", "period", "currency", "amount", "updated_at"},
+    "withdrawal_records": {"id", "platform", "currency", "amount", "status", "updated_at"},
+    "bank_receipts": {"id", "currency", "amount", "status", "updated_at"},
+    "reconciliation_exceptions": {"id", "platform", "currency", "amount", "status", "updated_at"},
+    "reconciliation_matches": {"id", "platform", "currency", "amount", "status", "updated_at"},
+    "basic_reports": {"id", "code", "name", "period", "updated_at"},
+    "report_exports": {"id", "report_id", "status", "created_at", "updated_at"},
+    "approval_records": {"id", "subject_id", "status", "updated_at"},
+    "workflow_exceptions": {"id", "code", "status", "updated_at"},
+    "collaboration_events": {"id", "subject_id", "status", "updated_at"},
+    "rpa_tasks": {"id", "code", "status", "updated_at"},
+    "rpa_runs": {"id", "task_id", "status", "created_at", "updated_at"},
+    "rpa_devices": {"id", "code", "status", "updated_at"},
+    "rpa_manual_queue": {"id", "task_id", "status", "updated_at"},
+    "rpa_stability": {"id", "period", "status", "updated_at"},
+    "rpa_account_locks": {"id", "status", "updated_at"},
+    "rpa_page_signatures": {"id", "status", "updated_at"},
 }
 
 
@@ -91,22 +162,29 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
         return super().to_internal_value(data)
 
     def validate_resources(self, value):
-        if not isinstance(value, dict) or not value:
-            raise serializers.ValidationError("At least one resource and field whitelist is required.")
-        unknown_resources = set(value) - set(INTERNAL_API_RESOURCE_FIELDS)
+        if isinstance(value, list):
+            if not value or any(not isinstance(resource, str) for resource in value):
+                raise serializers.ValidationError("Select at least one data block.")
+            resource_codes = value
+        elif isinstance(value, dict) and value:
+            resource_codes = list(value)
+            # Accept the former field-list shape, but do not let it narrow or
+            # expand a block beyond its server-defined readable field catalog.
+            for resource, fields in value.items():
+                if not isinstance(fields, list) or not fields or any(not isinstance(item, str) for item in fields):
+                    raise serializers.ValidationError(f"{resource} must contain a non-empty field list.")
+                if resource in INTERNAL_API_RESOURCE_FIELDS:
+                    unknown_fields = set(fields) - INTERNAL_API_RESOURCE_FIELDS[resource]
+                    if unknown_fields:
+                        raise serializers.ValidationError(
+                            f"Unsupported fields for {resource}: {', '.join(sorted(unknown_fields))}."
+                        )
+        else:
+            raise serializers.ValidationError("Select at least one data block.")
+        unknown_resources = set(resource_codes) - set(INTERNAL_API_RESOURCE_FIELDS)
         if unknown_resources:
             raise serializers.ValidationError(f"Unsupported resources: {', '.join(sorted(unknown_resources))}.")
-        normalized = {}
-        for resource, fields in value.items():
-            if not isinstance(fields, list) or not fields or any(not isinstance(item, str) for item in fields):
-                raise serializers.ValidationError(f"{resource} must contain a non-empty field list.")
-            unknown_fields = set(fields) - INTERNAL_API_RESOURCE_FIELDS[resource]
-            if unknown_fields:
-                raise serializers.ValidationError(
-                    f"Unsupported fields for {resource}: {', '.join(sorted(unknown_fields))}."
-                )
-            normalized[resource] = sorted(set(fields))
-        return normalized
+        return {resource: sorted(INTERNAL_API_RESOURCE_FIELDS[resource]) for resource in sorted(set(resource_codes))}
 
     def validate_allowed_cidrs(self, value):
         if not isinstance(value, list) or not value:
