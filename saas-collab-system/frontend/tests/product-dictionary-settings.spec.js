@@ -240,6 +240,27 @@ describe('ProductDictionarySettings mounted kind matrix', () => {
     expect(invalidateProductDictionaryCache).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ['attributes', '1', '材质', [{ id: 5, code: '1', name: '季节', is_active: true }, { id: 7, code: '2', name: '材质', is_active: true }]],
+    ['colors', 'black', '藏青', [{ id: 6, code: 'black', name: '黑色', is_active: true }, { id: 8, code: 'navy', name: '藏青', is_active: true }]]
+  ])('searches %s by code or name and clears the filter', async (kind, code, name, items) => {
+    if (kind === 'attributes') productApi.fetchProductAttributes.mockResolvedValue(success(items));
+    else productApi.fetchProductColors.mockResolvedValue(success(items));
+    const wrapper = mountPage(kind);
+    await flushPromises();
+    const input = wrapper.find('[data-testid="dictionary-search"]');
+
+    await input.setValue(code.toUpperCase());
+    expect(wrapper.vm.displayRows.map((item) => item.code)).toEqual([code]);
+    await input.setValue(name);
+    expect(wrapper.vm.displayRows.map((item) => item.name)).toEqual([name]);
+    await input.setValue('不存在');
+    expect(wrapper.vm.displayRows).toEqual([]);
+    expect(wrapper.vm.tableEmptyText).toBe('没有匹配的记录');
+    await input.setValue('');
+    expect(wrapper.vm.displayRows).toHaveLength(2);
+  });
+
   it('preserves existing specification values when saving a category', async () => {
     const wrapper = mountPage('specifications');
     await flushPromises();
@@ -268,6 +289,26 @@ describe('ProductDictionarySettings mounted kind matrix', () => {
     expect(wrapper.find('[data-testid="specification-detail"]').text()).toContain('01 床品');
     expect(wrapper.find('[data-testid="specification-dimensions"]').text()).toContain('尺寸');
     expect(wrapper.find('[data-testid="specification-edit"]').exists()).toBe(true);
+  });
+
+  it('searches specification dimensions and values while keeping matching ancestors visible', async () => {
+    const wrapper = mountPage('specifications');
+    await flushPromises();
+    const input = wrapper.find('[data-testid="specification-filter"]');
+
+    await input.setValue('10CM');
+    expect(wrapper.vm.matchingSpecificationRows.map((item) => item.id)).toEqual([20]);
+    expect(wrapper.vm.filterCategory('10CM', wrapper.vm.rows.find((item) => item.id === 1))).toBe(true);
+    expect(wrapper.vm.filterCategory('10CM', wrapper.vm.rows.find((item) => item.id === 10))).toBe(true);
+    expect(wrapper.vm.filterCategory('10CM', wrapper.vm.rows.find((item) => item.id === 20))).toBe(true);
+    expect(wrapper.vm.filterCategory('10CM', wrapper.vm.rows.find((item) => item.id === 11))).toBe(false);
+
+    await input.setValue('size');
+    expect(wrapper.vm.matchingSpecificationRows.map((item) => item.id)).toEqual([20]);
+    await input.setValue('未匹配');
+    expect(wrapper.vm.matchingSpecificationRows).toEqual([]);
+    await input.setValue('');
+    expect(wrapper.vm.matchingSpecificationRows.map((item) => item.id)).toEqual([11, 20]);
   });
 
   it('sends the backend field name used by the category specification endpoint', () => {
