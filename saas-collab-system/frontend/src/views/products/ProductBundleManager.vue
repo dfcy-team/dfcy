@@ -154,15 +154,23 @@
       </template>
     </el-dialog>
 
+    <el-dialog :model-value="importing" title="组合商品导入中" width="min(520px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
+      <p class="import-progress-stage">{{ importProgress.stage }}</p>
+      <el-progress :percentage="importProgress.total ? Math.round(importProgress.processed * 100 / importProgress.total) : 0" :indeterminate="!importProgress.total" />
+      <p class="import-progress-count">{{ importProgress.total ? `已处理 ${importProgress.processed} / ${importProgress.total} 行` : '正在准备导入资料' }}<span v-if="importProgress.line"> · 当前 CSV 第 {{ importProgress.line }} 行</span></p>
+      <p class="import-progress-count">成功 {{ importSummary.created }} · 失败 {{ importSummary.errors.length }} · 图片失败 {{ importSummary.imageErrors.length }}</p>
+    </el-dialog>
+
     <el-dialog v-model="importSummaryVisible" title="组合商品导入结果" width="min(760px, 94vw)">
       <el-descriptions :column="3" border>
         <el-descriptions-item label="文件">{{ importSummary.fileName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ importSummary.created && importSummary.errors.length ? '部分成功' : importSummary.created ? '导入完成' : '导入失败' }}</el-descriptions-item>
         <el-descriptions-item label="成功">{{ importSummary.created }}</el-descriptions-item>
         <el-descriptions-item label="失败">{{ importSummary.errors.length }}</el-descriptions-item>
         <el-descriptions-item label="图片失败">{{ importSummary.imageErrors.length }}</el-descriptions-item>
       </el-descriptions>
       <el-alert
-        v-if="importSummary.created"
+        v-if="importSummary.bigSellerGenerated"
         class="summary-alert"
         title="已为导入成功的组合 SKU 生成 BigSeller 组合商品SKU表。"
         type="success"
@@ -170,13 +178,17 @@
       />
       <el-table v-if="importSummary.errors.length" :data="importSummary.errors" border max-height="300">
         <el-table-column prop="line" label="CSV 行号" width="100" />
+        <el-table-column prop="legacySkuCode" label="旧SKU编码" min-width="150" show-overflow-tooltip />
         <el-table-column prop="message" label="错误原因" min-width="480" />
       </el-table>
       <el-table v-if="importSummary.imageErrors.length" :data="importSummary.imageErrors" border max-height="200">
         <el-table-column prop="line" label="CSV 行号" width="100" />
         <el-table-column prop="message" label="图片处理结果" min-width="480" />
       </el-table>
-      <template #footer><el-button type="primary" @click="importSummaryVisible = false">关闭</el-button></template>
+      <template #footer>
+        <el-button v-if="importSummary.errors.length || importSummary.imageErrors.length" @click="downloadBundleImportErrors">导出错误明细 CSV</el-button>
+        <el-button type="primary" @click="importSummaryVisible = false">关闭</el-button>
+      </template>
     </el-dialog>
 
     <el-dialog v-model="editVisible" title="编辑组合关系" width="min(820px, 96vw)">
@@ -282,6 +294,7 @@ import {
 import { collectionRows, detailData } from '../../utils/businessResponse';
 import { downloadBigSellerBundleWorkbook } from '../../utils/bigsellerWorkbook';
 import { bundleCsvHeaderIndex, decodeBundleImportFile, findBundleLeafCategory, parseBundleCsvRecords } from '../../utils/bundleImportCsv';
+import { bundleImportErrorCsvRows, bundleImportErrorMessage } from '../../utils/bundleImportFeedback';
 
 const auth = useAuthStore();
 const props = defineProps({
@@ -311,7 +324,8 @@ const bundleImportInput = ref(null);
 const bundleImportUpload = ref(null);
 const bundleImportFileName = ref('');
 const importSummaryVisible = ref(false);
-const importSummary = reactive({ fileName: '', created: 0, errors: [], imageErrors: [] });
+const importSummary = reactive({ fileName: '', created: 0, errors: [], imageErrors: [], bigSellerGenerated: false });
+const importProgress = reactive({ stage: '', total: 0, processed: 0, line: null });
 const editVisible = ref(false);
 const editSaving = ref(false);
 const bundleVersions = ref([]);
@@ -448,7 +462,7 @@ async function createBundle({ spuMode = 'new', existingSpu = null, name, categor
       cost_allocation_ratio: component.costRatio ?? 1,
     })),
   });
-  if (!response.success) throw new Error(response.message || '组合商品原子创建失败');
+  if (!response.success) throw new Error(bundleImportErrorMessage(response));
   const created = detailData(response.data);
   const createdComponents = (created.components || []).map((component, index) => ({
     ...component,
@@ -512,6 +526,17 @@ function downloadCsv(filename, headers, values) {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadBundleImportErrors() {
+  const rows = bundleImportErrorCsvRows(importSummary);
+  if (!rows.length) return;
+  const safeRows = rows.map((row) => row.map((value) => {
+    const text = String(value ?? '');
+    return /^[=+@\-\t\r]/.test(text) ? `'${text}` : text;
+  }));
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+  downloadCsv(`组合商品导入错误_${stamp}.csv`, ['CSV行号', '错误阶段', '旧SPU编码', '旧SKU编码', '组合商品名称', '错误原因'], safeRows);
 }
 
 function migrationStatusText(status) {
@@ -777,7 +802,7 @@ function prepareImportRow(values, headers, line, skuByCode) {
     if (!skuCode && !quantityValue && !costRatioValue) continue;
     const sku = skuByCode.get(skuCode);
     if (sku === null) throw new Error(`单品 SKU ${skuCode} 匹配到多条商品，请使用新 SKU 编码`);
-    if (!sku) throw new Error(`单品 SKU ${skuCode || index} 不存在`);
+    if (!sku) throw new Error(`单品 SKU ${skuCode || index} 未在当前租户的普通商品中找到；可填写新/旧 SKU 编码，请先确认该单品已导入且启用`);
     const quantity = Number(quantityValue);
     if (!Number.isInteger(quantity) || quantity < 1) throw new Error(`SKU${index}数量必须是大于 0 的整数`);
     const costRatio = costRatioValue === '' ? 1 : Number(costRatioValue);
@@ -790,10 +815,12 @@ function prepareImportRow(values, headers, line, skuByCode) {
 
 async function importBundleFile(file) {
   importing.value = true;
+  Object.assign(importProgress, { stage: '读取并校验 CSV', total: 0, processed: 0, line: null });
   importSummary.fileName = file.name;
   importSummary.created = 0;
   importSummary.errors = [];
   importSummary.imageErrors = [];
+  importSummary.bigSellerGenerated = false;
   const createdSkus = [];
   const newBundleSpus = [];
   const newBundleSkus = [];
@@ -802,12 +829,14 @@ async function importBundleFile(file) {
   try {
     const rows = parseBundleCsvRecords(await decodeBundleImportFile(file));
     if (rows.length < 2) throw new Error('CSV 中没有可导入数据');
+    importProgress.total = rows.length - 1;
     const headers = rows[0].values;
     const requiredHeaders = [['组合商品名称'], ['末级分类编码'], ['属性编码', '季节编码'], ['组合颜色英文编码'], ['单品SKU1'], ['SKU1数量']];
     const missingHeaders = requiredHeaders.filter((names) => names.every((name) => bundleCsvHeaderIndex(headers, name) < 0));
     if (missingHeaders.length) throw new Error(`CSV 缺少必需列：${missingHeaders.map((names) => names[0]).join('、')}`);
     const skuCodes = [...new Set(rows.slice(1).flatMap(({ values }) => Array.from({ length: 20 }, (_, index) => importValue(values, headers, `单品SKU${index + 1}`))).filter(Boolean))];
     const skuByCode = new Map();
+    importProgress.stage = `查找组成 SKU（共 ${skuCodes.length} 个编码）`;
     for (let offset = 0; offset < skuCodes.length; offset += 40) {
       const response = await fetchProductSkuList({ sku_codes: skuCodes.slice(offset, offset + 40).join(','), product_type: 'standard', page_size: 100 });
       if (!response.success) throw new Error(response.message || '单品 SKU 查询失败');
@@ -819,8 +848,10 @@ async function importBundleFile(file) {
         }
       }
     }
+    importProgress.stage = '逐行创建组合商品';
     for (let index = 1; index < rows.length; index += 1) {
       const { line, values } = rows[index];
+      importProgress.line = line;
       try {
         const input = prepareImportRow(values, headers, line, skuByCode);
         const priorSpu = input.legacySpuCode && importedSpusByLegacyCode.get(input.legacySpuCode);
@@ -835,13 +866,15 @@ async function importBundleFile(file) {
         importSummary.created += 1;
         if (input.imageUrl) {
           try {
+            importProgress.stage = `缓存第 ${line} 行图片`;
             const imageResponse = await cacheProductBundleImage(result.sku.id, input.imageUrl);
             const cachedImageUrl = detailData(imageResponse.data)?.image_url;
             if (!imageResponse.success || !cachedImageUrl) throw new Error(imageResponse.message || '图片缓存失败');
             result.sku.image_url = cachedImageUrl;
           } catch (imageError) {
-            importSummary.imageErrors.push({ line, message: `组合 SKU ${result.sku.sku_code} 已创建，但图片保存失败：${imageError?.message || '请稍后重试'}` });
+            importSummary.imageErrors.push({ line, legacySpuCode: input.legacySpuCode, legacySkuCode: input.legacySkuCode, name: input.name, message: `组合 SKU ${result.sku.sku_code} 已创建，但图片保存失败：${bundleImportErrorMessage(imageError)}` });
           }
+          importProgress.stage = '逐行创建组合商品';
         }
         createdSkus.push(result.sku);
         if (!input.legacySpuCode && !input.legacySkuCode) {
@@ -850,20 +883,34 @@ async function importBundleFile(file) {
           newBundleComponents.push(...result.components);
         }
       } catch (error) {
-        importSummary.errors.push({ line, message: error?.message || '导入失败' });
+        importSummary.errors.push({
+          line,
+          legacySpuCode: importValue(values, headers, '旧SPU编码'),
+          legacySkuCode: importValue(values, headers, '旧SKU编码'),
+          name: importValue(values, headers, '组合商品名称'),
+          message: bundleImportErrorMessage(error),
+        });
+      } finally {
+        importProgress.processed += 1;
       }
     }
     if (createdSkus.length) {
-      if (newBundleSkus.length) downloadBigSellerBundleWorkbook(newBundleSpus, newBundleSkus, newBundleComponents);
+      if (newBundleSkus.length) {
+        importProgress.stage = '生成 BigSeller 表';
+        downloadBigSellerBundleWorkbook(newBundleSpus, newBundleSkus, newBundleComponents);
+        importSummary.bigSellerGenerated = true;
+      }
       ElMessage.success(`已导入 ${createdSkus.length} 个组合 SKU${newBundleSkus.length ? ' 并生成 BigSeller 表' : ''}`);
+      importProgress.stage = '刷新商品列表';
       await load();
       emit('operation-completed');
     } else {
       ElMessage.warning('未导入任何组合商品，请根据错误修正后重试');
     }
   } catch (error) {
-    importSummary.errors.push({ line: '-', message: error?.message || '导入失败' });
-    ElMessage.error(error?.message || '组合商品导入失败');
+    const message = bundleImportErrorMessage(error);
+    importSummary.errors.push({ line: '-', message });
+    ElMessage.error(message);
   } finally {
     importing.value = false;
     importSummaryVisible.value = true;
@@ -904,6 +951,8 @@ watch([bundleImportVisible, importSummaryVisible, migrationVisible, importing], 
 .components > div { display: grid; grid-template-columns: 1fr 130px 150px auto; gap: 10px; }
 .field-help { margin-top: 6px; color: #64748b; font-size: 12px; }
 .summary-alert { margin: 16px 0; }
+.import-progress-stage { margin: 0 0 16px; color: #273142; font-weight: 600; }
+.import-progress-count { margin: 12px 0 0; color: #64748b; font-size: 13px; }
 .muted { color: #94a3b8; }
 .bundle-list-image { width: 44px; height: 44px; border: 1px solid #dbe3ec; border-radius: 6px; background: #f8fafc; }
 .bundle-list-image-empty { color: #94a3b8; font-size: 12px; }

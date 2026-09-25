@@ -103,4 +103,12 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(api).toContain("url: dictionaryApi('bundle-components')");
     expect(api).toContain("'products.bundle_components'");
   });
+
+  it('导入显示进度、字段错误并可导出逐行错误', () => {
+    expect(page).toContain('组合商品导入中');
+    expect(page).toContain('已处理 ${importProgress.processed} / ${importProgress.total} 行');
+    expect(page).toContain('导出错误明细 CSV');
+    expect(page).toContain('bundleImportErrorMessage(error)');
+    expect(page).toContain('downloadBundleImportErrors');
+  });
 });
