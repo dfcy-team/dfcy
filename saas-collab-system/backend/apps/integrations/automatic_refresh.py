@@ -49,7 +49,7 @@ def automatic_refresh_allowed(record):
         return False
     if warehouse and (record.provider != "jifeng_wms" or not record.oauth_user_id):
         return False
-    if not warehouse and record.platform not in {"lazada", "shopee"}:
+    if not warehouse and record.platform not in {"lazada", "shopee", "tiktok"}:
         return False
     expiry = record.oauth_expires_at if warehouse else record.expires_at
     if not expiry or expiry > timezone.now() + timedelta(minutes=15) or not _actor_allowed(record):
@@ -74,6 +74,7 @@ def refresh_due_authorizations(limit=100):
     sources = (
         ("lazada", MarketplaceStoreAuthorization.objects.filter(platform="lazada", status="active", expires_at__lte=due)),
         ("shopee", MarketplaceStoreAuthorization.objects.filter(platform="shopee", status="active", expires_at__lte=due)),
+        ("tiktok", MarketplaceStoreAuthorization.objects.filter(platform="tiktok", status="active", expires_at__lte=due)),
         ("jifeng_wms", WarehouseAuthorization.objects.filter(provider="jifeng_wms", status="active", oauth_expires_at__lte=due)),
     )
     counts = {"attempted": 0, "success": 0, "failed": 0}
@@ -97,7 +98,7 @@ def refresh_due_authorizations(limit=100):
             result = "failed"
             detail = {"automatic": True, "platform": platform, "authorization_id": record.pk}
             try:
-                if platform in {"lazada", "shopee"}:
+                if platform in {"lazada", "shopee", "tiktok"}:
                     refresh_marketplace_authorization(record, actor=record.updated_by, expected_token_id=record.token_id)
                 else:
                     refresh_warehouse_authorization(actor=record.updated_by, authorization=record,
@@ -111,7 +112,7 @@ def refresh_due_authorizations(limit=100):
             attempt.save(update_fields=["status", "finished_at"])
             IntegrationAuditLog.objects.create(
                 tenant_id=record.tenant_id, integration_config=record.integration_config,
-                store_authorization=record if platform in {"lazada", "shopee"} else None,
+                store_authorization=record if platform in {"lazada", "shopee", "tiktok"} else None,
                 actor=record.updated_by, action="automatic_refresh", result=result, masked_detail=detail,
             )
             counts[result] += 1

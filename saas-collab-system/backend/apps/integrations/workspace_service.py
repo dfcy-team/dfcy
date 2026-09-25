@@ -282,7 +282,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "catch_up": str(schedule_scope.get("catch_up") or scope.get("catch_up") or "skip"),
         "pause_until": schedule_scope.get("pause_until") or scope.get("pause_until"),
         "query_statuses": query_scope.get("statuses") or scope.get("query_statuses") or [],
-        "token_policy": "manual_no_refresh" if job.integration_config.platform == "tiktok" else "auto_refresh",
+        "token_policy": "auto_refresh",
         "data_destination": destination[0],
         "data_table": destination[1],
         "last_run_at": _format_datetime(job.last_run_at),

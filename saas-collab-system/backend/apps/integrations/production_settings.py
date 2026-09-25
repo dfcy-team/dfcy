@@ -125,6 +125,7 @@ SAFE_DEFAULTS = {
         },
         "tiktok": {
             "contract_approved": False,
+            "auto_refresh_enabled": False,
             # Search/Get Product scopes and lifecycle semantics are reviewed
             # independently from order/return contracts.
             "product_contract_approved": False,
@@ -223,6 +224,7 @@ _PLATFORM_KEYS_BY_NAME = {
         "finance_list_path", "finance_detail_path",
     },
     "tiktok": _PLATFORM_COMMON_KEYS | {
+        "auto_refresh_enabled",
         "auth_url", "api_host", "auth_urls", "api_hosts", "token_host", "token_path", "refresh_path",
         "revoke_path", "authorized_shops_path", "metadata_path", "order_list_path", "order_detail_path",
         "return_list_path", "product_search_path", "product_detail_path",
@@ -707,6 +709,7 @@ def _environment_config():
             },
             "tiktok": {
                 "contract_approved": bool(_setting("LIVE_TIKTOK_CONTRACT_APPROVED", False)),
+                "auto_refresh_enabled": False,
                 "product_contract_approved": bool(_setting("LIVE_TIKTOK_PRODUCT_CONTRACT_APPROVED", False)),
                 "app_id": _setting("LIVE_TIKTOK_APP_KEY", "") or "",
                 "service_id": _setting("LIVE_TIKTOK_SERVICE_ID", "") or "",
