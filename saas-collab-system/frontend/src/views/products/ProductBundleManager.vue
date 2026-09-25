@@ -763,7 +763,7 @@ function importValue(values, headers, name) {
   return index < 0 ? '' : String(values[index] ?? '').trim();
 }
 
-function prepareImportRow(values, headers, line, skuByCode) {
+function prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode) {
   const legacySpuCode = importValue(values, headers, '旧SPU编码');
   const legacySkuCode = importValue(values, headers, '旧SKU编码');
   const name = importValue(values, headers, '组合商品名称');
@@ -791,7 +791,12 @@ function prepareImportRow(values, headers, line, skuByCode) {
     if (!skuCode && !quantityValue && !costRatioValue) continue;
     const sku = skuByCode.get(skuCode);
     if (sku === null) throw new Error(`单品 SKU ${skuCode} 匹配到多条商品，请使用新 SKU 编码`);
-    if (!sku) throw new Error(`单品 SKU ${skuCode || index} 未在当前租户的普通商品中找到；可填写新/旧 SKU 编码，请先确认该单品已导入且启用`);
+    if (!sku) {
+      const reason = unavailableSkuByCode.get(skuCode);
+      if (reason === 'bundle') throw new Error(`组成 SKU ${skuCode} 已存在，但属于组合商品；当前仅支持普通商品作为组成，请填写其下的普通 SKU`);
+      if (reason === 'inactive') throw new Error(`组成 SKU ${skuCode} 已存在，但已停用；请先启用该 SKU`);
+      throw new Error(`组成 SKU ${skuCode || index} 在当前租户中不存在；请先导入该单品，或核对新/旧 SKU 编码`);
+    }
     const quantity = Number(quantityValue);
     if (!Number.isInteger(quantity) || quantity < 1) throw new Error(`SKU${index}数量必须是大于 0 的整数`);
     const costRatio = costRatioValue === '' ? 1 : Number(costRatioValue);
@@ -825,13 +830,22 @@ async function importBundleFile(file) {
     if (missingHeaders.length) throw new Error(`CSV 缺少必需列：${missingHeaders.map((names) => names[0]).join('、')}`);
     const skuCodes = [...new Set(rows.slice(1).flatMap(({ values }) => Array.from({ length: 20 }, (_, index) => importValue(values, headers, `单品SKU${index + 1}`))).filter(Boolean))];
     const skuByCode = new Map();
+    const unavailableSkuByCode = new Map();
     importProgress.stage = `查找组成 SKU（共 ${skuCodes.length} 个编码）`;
     for (let offset = 0; offset < skuCodes.length; offset += 40) {
-      const response = await fetchProductSkuList({ sku_codes: skuCodes.slice(offset, offset + 40).join(','), product_type: 'standard', page_size: 100 });
+      const response = await fetchProductSkuList({ sku_codes: skuCodes.slice(offset, offset + 40).join(','), active_status: 'all', page_size: 100 });
       if (!response.success) throw new Error(response.message || '单品 SKU 查询失败');
       for (const sku of collectionRows(response.data)) {
         for (const code of [sku.sku_code, sku.legacy_sku_code]) {
           if (!code || !skuCodes.includes(code)) continue;
+          if (!sku.is_active) {
+            if (!unavailableSkuByCode.has(code)) unavailableSkuByCode.set(code, 'inactive');
+            continue;
+          }
+          if (sku.product_type === 'bundle') {
+            unavailableSkuByCode.set(code, 'bundle');
+            continue;
+          }
           const existing = skuByCode.get(code);
           skuByCode.set(code, existing && existing.id !== sku.id ? null : (existing === null ? null : sku));
         }
@@ -842,7 +856,7 @@ async function importBundleFile(file) {
       const { line, values } = rows[index];
       importProgress.line = line;
       try {
-        const input = prepareImportRow(values, headers, line, skuByCode);
+        const input = prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode);
         const priorSpu = input.legacySpuCode && importedSpusByLegacyCode.get(input.legacySpuCode);
         if (priorSpu && (String(priorSpu.category_node?.id ?? priorSpu.category_node) !== String(input.category)
           || String(priorSpu.season_code) !== input.season)) {
