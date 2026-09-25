@@ -83,7 +83,7 @@ describe('组合商品页面按钮与导入导出契约', () => {
     expect(page).not.toContain('createProductSpu');
     expect(page).not.toContain('createProductSku');
     expect(page).not.toContain('createBundleComponent');
-    expect(page).toContain('const input = prepareImportRow(values, headers, line, skuByCode)');
+    expect(page).toContain('const input = prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode)');
     expect(page).toContain('const result = await createBundle(priorSpu');
     expect(page).toContain("spuMode: 'existing'");
     expect(page).toContain('if (!input.legacySpuCode && !input.legacySkuCode)');
