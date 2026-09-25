@@ -51,3 +51,10 @@ python -m pytest -q tests/test_schedule_contract.py tests/test_phase2_sync_frame
 ## 登记说明
 
 本文件登记的是 V2.44.160 候选范围，不是部署成功证明。只有 PR 合并、CI 通过、受控部署成功、六个生产容器健康、迁移和关键功能验收完成后，才能以实际合并 SHA 创建 `v2.44.160-deployed` 标签并登记生产账本；候选 SHA 不得作为生产 SHA。
+
+## 正式部署回执（2026-09-24）
+
+- PR [#210](https://github.com/dfcy-team/dfcy/pull/210) 经批准并合并；实际合并 SHA 为 `709d9dfbc281ffbd5f9f8eb39048bb616d058cf4`。
+- [受控生产部署](https://github.com/dfcy-team/dfcy/actions/runs/35982173039) 的质量门禁、不可变镜像构建和 VM 部署作业均成功；部署日志输出 `PRODUCTION_DEPLOY=PASS`，迁移服务执行完成，六个生产容器显示 Healthy。
+- 部署后[只读控制面检查](https://github.com/dfcy-team/dfcy/actions/runs/35983970426) 成功，输出 `PRODUCTION_BASELINE_RUNTIME=PASS`；用户于 2026-09-24 确认关键功能验收通过。
+- `v2.44.160-deployed` 为指向上述实际合并 SHA 的远端已部署标签。受控部署程序在返回 PASS 前写入 VM `ci-control/current.json` 和审计账本；现有只读检查不回显账本条目与镜像摘要，故本回执不声称已独立读取 VM 双账本或运行镜像摘要。
