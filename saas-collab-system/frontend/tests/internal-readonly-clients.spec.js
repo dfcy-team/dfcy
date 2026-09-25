@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mockCreateInternalReadonlyClient, mockInternalReadonlyClients, mockRotateInternalReadonlyCredential } from '../src/mock/internalReadonly';
 import { internalReadonlyModules, internalReadonlyResources } from '../src/config/internalReadonlyResources';
+import { menuItems } from '../src/router/menu';
 
 const read = (file) => fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
 
@@ -34,8 +35,8 @@ describe('内部系统只读调用方配置', () => {
   });
 
   it('所列模块的数据块均可选择，并由服务端确定块内可读字段', () => {
-    expect(internalReadonlyModules).toHaveLength(6);
-    expect(internalReadonlyResources).toHaveLength(50);
+    expect(internalReadonlyModules).toHaveLength(14);
+    expect(internalReadonlyResources).toHaveLength(85);
     expect(internalReadonlyResources.map((item) => item.code)).toEqual(expect.arrayContaining([
       'products', 'product_details', 'product_mappings', 'product_costs', 'product_bundles',
       'platform_products', 'product_categories', 'product_attributes', 'product_colors',
@@ -44,9 +45,26 @@ describe('内部系统只读调用方配置', () => {
       'supplier_shipments', 'sales_orders', 'sales_returns', 'inventory_snapshots', 'shipments',
       'influencers', 'outreach_tasks', 'sample_fulfillments',
       'advertising_overview', 'advertising_performance', 'advertising_reconciliation',
+      'product_research', 'development_projects', 'finance_imports', 'platform_statements',
+      'analytics_overview', 'lifecycle_reviews', 'basic_reports', 'approval_records', 'rpa_runs',
     ]));
     expect(internalReadonlyResources.every((item) => item.module && item.fields.includes('id') && item.fields.length > 1)).toBe(true);
-    expect(internalReadonlyResources.every((item) => internalReadonlyModules.some((module) => module.code === item.module))).toBe(true);
+    expect(internalReadonlyResources.every((item) =>
+      (Array.isArray(item.module) ? item.module : [item.module]).every((code) =>
+        internalReadonlyModules.some((module) => module.code === code)))).toBe(true);
+    const counts = Object.fromEntries(internalReadonlyModules.map((module) => [module.code,
+      internalReadonlyResources.filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code)).length]));
+    expect(counts).toEqual({ master_data: 16, product_development: 9, listing: 9, supply_chain: 5,
+      inventory: 4, sales: 8, influencer_collaboration: 5, advertising: 3, analytics: 5,
+      business_decision: 4, finance: 8, reports: 2, workflow: 3, rpa: 7 });
+    for (const module of internalReadonlyModules.filter((item) => item.code !== 'advertising')) {
+      const menu = menuItems.find((item) => item.label === module.label);
+      expect(menu, module.label).toBeTruthy();
+      const labels = new Set(internalReadonlyResources
+        .filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code))
+        .map((item) => item.label));
+      for (const child of menu.children) expect(labels.has(child.label), `${module.label} / ${child.label}`).toBe(true);
+    }
     const backendCatalog = read('../backend/apps/integrations/serializers.py')
       .split('INTERNAL_API_RESOURCE_FIELDS = {')[1].split('\n}')[0];
     const backendCodes = [...backendCatalog.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);

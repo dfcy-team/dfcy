@@ -11,18 +11,19 @@ const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
 const blockedMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
 const resources=internalReadonlyResources;
 const modules=internalReadonlyModules;
+const resourceModules=(item)=>Array.isArray(item.module)?item.module:[item.module];
 const blank=()=>({name:'',caller_type:'internal_system',modules:[],resources:[],cidrs:[''],rate_limit:120,page_size:100,expires_at:''});
 const form=reactive(blank());
 const serverErrors=reactive({});
 const rules={name:[{required:true,message:'请输入系统名称'}],caller_type:[{required:true,message:'请选择调用方类型'}],modules:[{type:'array',required:true,min:1,message:'至少选择一个模块'}],resources:[{type:'array',required:true,min:1,message:'至少选择一个数据块'}],cidrs:[{validator:(_,v,done)=>{const message=validateSourceCidrs(v);done(message?new Error(message):undefined)}}],rate_limit:[{type:'number',min:1,max:10000,message:'限流须为 1–10000'}],page_size:[{type:'number',min:1,max:1000,message:'分页上限须为 1–1000'}],expires_at:[{required:true,message:'请选择有效期'}]};
-const availableResources=computed(()=>resources.filter(item=>form.modules.includes(item.module)));
+const availableResources=computed(()=>resources.filter(item=>resourceModules(item).some(code=>form.modules.includes(code))));
 const boundarySummary=computed(()=>`${safeMethods.join(' / ')} 只读，${blockedMethods.join(' / ')} 全部拒绝`);
 const capabilityRows=[{capability:'业务数据查询',status:'允许',detail:'按租户、数据块和时间范围限定；选中数据块默认包含其全部可读字段'},{capability:'增量同步',status:'允许',detail:'使用 updated_at、deleted_at、version 和 next_cursor'},{capability:'业务内容写入',status:'禁止',detail:'不开放新增、修改、删除、审批、发布或任务触发'},{capability:'AI 生成内容回写',status:'禁止',detail:'摘要、标签、分类和提示词都不回写'}];
 const contractFields=[['resource_type','资源类型'],['resource_id','资源稳定唯一标识'],['tenant_id','租户隔离标识'],['updated_at','增量同步水位'],['deleted_at','删除传播标识'],['version','数据版本'],['content_hash','内容幂等校验'],['next_cursor','分页与断点续传']];
 async function load(){loading.value=true;const r=await fetchInternalReadonlyClients();loading.value=false;if(r.success)clients.value=r.data.items||[];else ElMessage.error(r.message)}
 function resourceNames(value){return Object.keys(value||{}).join('、')}
 function callerTypeName(value){return value==='knowledge_base'?'知识库（历史配置）':'内部业务系统'}
-function edit(row){Object.keys(serverErrors).forEach(key=>delete serverErrors[key]);editingId.value=row?.id||null;const configured=row?.resources||{};const resourceCodes=Array.isArray(configured)?configured:Object.keys(configured);Object.assign(form,blank(),{...row,caller_type:'internal_system',modules:[...new Set(resources.filter(item=>resourceCodes.includes(item.code)).map(item=>item.module))],resources:resourceCodes,cidrs:[...(row?.allowed_cidrs||[''])],rate_limit:row?.rate_limit_per_minute??120,page_size:row?.page_size_limit??100,expires_at:row?.expires_at?.slice?.(0,10)||''});editorVisible.value=true}
+function edit(row){Object.keys(serverErrors).forEach(key=>delete serverErrors[key]);editingId.value=row?.id||null;const configured=row?.resources||{};const resourceCodes=Array.isArray(configured)?configured:Object.keys(configured);Object.assign(form,blank(),{...row,caller_type:'internal_system',modules:[...new Set(resources.filter(item=>resourceCodes.includes(item.code)).flatMap(resourceModules))],resources:resourceCodes,cidrs:[...(row?.allowed_cidrs||[''])],rate_limit:row?.rate_limit_per_minute??120,page_size:row?.page_size_limit??100,expires_at:row?.expires_at?.slice?.(0,10)||''});editorVisible.value=true}
 watch(()=>form.modules.slice(),()=>{const allowed=new Set(availableResources.value.map(item=>item.code));form.resources=form.resources.filter(code=>allowed.has(code))});
 watch(()=>form.cidrs.slice(),()=>{delete serverErrors.allowed_cidrs});
 watch(()=>form.resources.slice(),()=>{delete serverErrors.resources});

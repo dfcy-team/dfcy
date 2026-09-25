@@ -141,7 +141,10 @@ class InternalAPIClientTests(APITestCase):
         resources = [
             "platform_products", "stores", "warehouses", "supplier_shipments", "sales_orders",
             "sales_returns", "inventory_snapshots", "shipments", "influencers", "outreach_tasks",
-            "sample_fulfillments",
+            "sample_fulfillments", "product_details", "product_mappings", "product_costs",
+            "advertising_overview", "advertising_performance", "advertising_reconciliation",
+            "product_research", "finance_imports", "analytics_overview", "basic_reports",
+            "approval_records", "rpa_runs",
         ]
         response = self.client.post(
             "/api/internal/integrations/internal-api-clients/",
