@@ -225,10 +225,9 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
         raise ValidationError("刷新授权失败，请检查网络及公共配置；若刷新凭据已失效，请更换 OMS Token 后重新授权。") from None
     record.token_id = metadata["token_id"]
     record.oauth_expires_at = timezone.now() + timedelta(hours=24)
-    if not automatic:
-        record.validation_status = "pending"
-        record.last_verified_at = None
-    record.last_error_code = ""
+    record.validation_status = "pending"
+    record.last_verified_at = None
+    record.last_error_code = "AUTO_REFRESH_VALIDATION_PENDING" if automatic else ""
     record.save(update_fields=["token_id", "oauth_expires_at", "validation_status", "last_verified_at", "last_error_code", "updated_at"])
     if not automatic:
         SyncJob.objects.filter(warehouse_authorization=record).update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
