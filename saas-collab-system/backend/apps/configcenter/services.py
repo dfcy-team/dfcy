@@ -75,6 +75,10 @@ def _normalize_value(definition, value):
         from apps.integrations.production_settings import validate_runtime_config
 
         return validate_runtime_config(value)
+    if definition.config_key == "system.module.release_control" and not definition.is_sensitive:
+        from apps.integrations.module_release import validate_module_release_config
+
+        return validate_module_release_config(value)
     if definition.is_sensitive:
         if not isinstance(value, dict) or set(value) - {"reference", "masked_metadata"}:
             raise ValidationError("Sensitive configs only accept placeholder reference metadata.")

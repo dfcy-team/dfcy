@@ -56,10 +56,10 @@
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
-  approveProductionIntegrationSettingsVersion,
-  createProductionIntegrationSettingsVersion,
-  fetchProductionIntegrationSettings,
-  rollbackProductionIntegrationSettingsVersion
+  approveModuleReleaseVersion,
+  createModuleReleaseVersion,
+  fetchModuleRelease,
+  rollbackModuleReleaseVersion
 } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
 
@@ -101,7 +101,7 @@ async function load() {
     error.value = '缺少查看模块发布状态的权限。'; loading.value = false; return;
   }
   try {
-    const response = await fetchProductionIntegrationSettings();
+    const response = await fetchModuleRelease();
     if (!response?.success) throw new Error(response?.message || '读取模块发布状态失败。');
     hydrate(response.data || {});
   } catch (loadError) { error.value = loadError.message || '读取模块发布状态失败。'; } finally { loading.value = false; }
@@ -114,7 +114,7 @@ async function submit() {
   if (enabling) await ElMessageBox.confirm('本次变更会正式启用模块，请确认已完成该模块的生产验收。', '确认启用模块', { type: 'warning' });
   saving.value = true;
   try {
-    const response = await createProductionIntegrationSettingsVersion({ value: { modules: { ...form.modules } }, change_reason: changeReason.value.trim() });
+    const response = await createModuleReleaseVersion({ value: { modules: { ...form.modules } }, change_reason: changeReason.value.trim() });
     if (!response?.success) throw new Error(response?.message || '提交失败。');
     ElMessage.success('模块配置已提交，等待审批。');
     await load();
@@ -125,7 +125,7 @@ async function approve(version) {
   if (!approvalAccess.allowed || isOwnVersion(version)) return;
   try {
     await ElMessageBox.confirm(`确认审批模块配置 v${version.version}？`, '审批确认', { type: 'warning' });
-    const response = await approveProductionIntegrationSettingsVersion(version.id);
+    const response = await approveModuleReleaseVersion(version.id);
     if (!response?.success) throw new Error(response?.message || '审批失败。');
     ElMessage.success('模块配置已审批生效。'); await load();
   } catch (approveError) { if (approveError !== 'cancel') ElMessage.error(approveError.message || '审批失败。'); }
@@ -135,7 +135,7 @@ async function rollback(version) {
   if (!rollbackAccess.allowed) return;
   try {
     await ElMessageBox.confirm(`确认创建回滚到 v${version.version} 的待审批版本？`, '回滚确认', { type: 'warning' });
-    const response = await rollbackProductionIntegrationSettingsVersion(version.id);
+    const response = await rollbackModuleReleaseVersion(version.id);
     if (!response?.success) throw new Error(response?.message || '回滚失败。');
     ElMessage.success('回滚版本已创建，等待审批。'); await load();
   } catch (rollbackError) { if (rollbackError !== 'cancel') ElMessage.error(rollbackError.message || '回滚失败。'); }

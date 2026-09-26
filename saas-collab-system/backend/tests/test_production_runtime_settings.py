@@ -14,10 +14,12 @@ from apps.integrations import custody as custody_module
 from apps.integrations.platform_schema_service import get_platform_schema
 from apps.integrations.production_settings import (
     CONFIG_KEY,
+    get_effective_runtime_version,
     get_runtime_platform_config,
     runtime_snapshot,
     validate_runtime_config,
 )
+from apps.integrations.module_release import MODULE_RELEASE_CONFIG_KEY, get_module_release_config
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -64,7 +66,7 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
     creator = _user(tenant, "runtime-creator")
     approver = _user(tenant, "runtime-approver")
     viewer = _user(tenant, "runtime-viewer")
-    for code in ("config.view", "config.manage", "config.system.manage"):
+    for code in ("config.view", "config.manage", "config.rollback", "config.system.manage"):
         _grant(creator, code)
     for code in ("config.view", "config.approve", "config.system.manage"):
         _grant(approver, code)
@@ -171,6 +173,89 @@ def test_effective_database_runtime_overrides_environment_and_keeps_production_w
     assert get_platform_schema("lazada")["production_write_enabled"] is False
     with override_settings(DEBUG=False):
         assert live_mode_allowed() is False
+
+
+@pytest.mark.django_db
+def test_legacy_module_only_version_does_not_replace_complete_runtime_or_its_history():
+    tenant = Tenant.objects.create(name="Separated runtime", code="separated-runtime")
+    creator = _user(tenant, "separated-runtime-creator")
+    approver = _user(tenant, "separated-runtime-approver")
+    viewer = _user(tenant, "separated-runtime-viewer")
+    for code in ("config.view", "config.manage", "config.rollback", "config.system.manage"):
+        _grant(creator, code)
+    for code in ("config.view", "config.approve", "config.system.manage"):
+        _grant(approver, code)
+    for code in ("config.view", "config.system.manage"):
+        _grant(viewer, code)
+
+    runtime = create_config_version(
+        definition=_runtime_definition(), actor=creator,
+        value={"network": {"mode": "approved-live-test", "allowed_hosts": ["runtime.example.com"]}},
+        effective_at=timezone.now(),
+    )
+    runtime = approve_config_version(version=runtime, actor=approver)
+    legacy_modules = {"modules": {code: "enabled" for code in get_module_release_config()}}
+    legacy_modules["modules"]["global_listing"] = "disabled"
+    legacy = create_config_version(
+        definition=_runtime_definition(), actor=creator, value=legacy_modules, effective_at=timezone.now(),
+    )
+    legacy = approve_config_version(version=legacy, actor=approver)
+
+    assert legacy.status == TenantConfigVersion.Status.EFFECTIVE
+    runtime.refresh_from_db()
+    assert runtime.status == TenantConfigVersion.Status.SUPERSEDED
+    assert get_effective_runtime_version().id == runtime.id
+    assert runtime_snapshot()["config"]["network"]["allowed_hosts"] == ["runtime.example.com"]
+    assert get_module_release_config()["global_listing"] == "disabled"
+
+    production_history = _client(viewer).get("/api/internal/integrations/production-settings/")
+    assert production_history.status_code == 200
+    production_data = production_history.json()["data"]
+    assert [item["id"] for item in production_data["versions"]] == [runtime.id]
+    assert production_data["current_version"]["id"] == runtime.id
+    assert production_data["effective"]["id"] == runtime.id
+    rejected = _client(creator).post(
+        "/api/internal/integrations/production-settings/versions/",
+        {"value": legacy_modules, "change_reason": "模块改由独立控制"}, format="json",
+    )
+    assert rejected.status_code == 400
+    mixed_value = {
+        **legacy_modules,
+        "network": {"mode": "approved-live-test", "allowed_hosts": ["mixed.example.com"]},
+    }
+    rejected_mixed = _client(creator).post(
+        "/api/internal/integrations/production-settings/versions/",
+        {"value": mixed_value, "change_reason": "混合配置应被拒绝"}, format="json",
+    )
+    assert rejected_mixed.status_code == 400
+    legacy_mixed = create_config_version(
+        definition=_runtime_definition(), actor=creator, value=mixed_value, effective_at=timezone.now(),
+    )
+    blocked_approval = _client(approver).post(
+        f"/api/internal/integrations/production-settings/versions/{legacy_mixed.id}/approve/", {}, format="json",
+    )
+    assert blocked_approval.status_code == 409
+    blocked_rollback = _client(creator).post(
+        f"/api/internal/integrations/production-settings/versions/{legacy_mixed.id}/rollback/", {}, format="json",
+    )
+    assert blocked_rollback.status_code == 409
+    legacy_mixed.refresh_from_db()
+    assert legacy_mixed.status == TenantConfigVersion.Status.PENDING_APPROVAL
+
+    module_version = _client(creator).post(
+        "/api/internal/integrations/module-release/versions/",
+        {"value": legacy_modules, "change_reason": "迁移模块发布控制"}, format="json",
+    )
+    assert module_version.status_code == 201
+    module_id = module_version.json()["data"]["version"]["id"]
+    assert TenantConfigVersion.objects.get(pk=module_id).config_key == MODULE_RELEASE_CONFIG_KEY
+    approved = _client(approver).post(
+        f"/api/internal/integrations/module-release/versions/{module_id}/approve/", {}, format="json",
+    )
+    assert approved.status_code == 200
+    runtime.refresh_from_db()
+    assert runtime.status == TenantConfigVersion.Status.SUPERSEDED
+    assert get_module_release_config()["global_listing"] == "disabled"
 
 
 @pytest.mark.django_db

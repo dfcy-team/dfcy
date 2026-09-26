@@ -750,22 +750,33 @@ def _environment_config():
 
 
 def get_effective_runtime_version():
-    """Return the current system-scope effective version, if the table exists."""
+    """Return the current complete system runtime version, if the table exists.
+
+    A previous UI stored module-release documents in this stream.  Those rows
+    are valid historical records but never represent a complete runtime
+    configuration.  Until the independent module-release key is populated,
+    keep resolving the most recent complete approved document instead.
+    """
     try:
         from apps.configcenter.models import SystemConfigDefinition, TenantConfigVersion
 
-        return (
+        versions = (
             TenantConfigVersion.objects.select_related("definition", "created_by", "approved_by")
             .filter(
                 config_key=CONFIG_KEY,
                 scope_key="system",
-                status=TenantConfigVersion.Status.EFFECTIVE,
+                status__in=(TenantConfigVersion.Status.EFFECTIVE, TenantConfigVersion.Status.SUPERSEDED),
                 definition__scope_type=SystemConfigDefinition.ScopeType.SYSTEM,
                 effective_at__lte=timezone.now(),
             )
             .order_by("-version", "-id")
-            .first()
         )
+        from .module_release import is_legacy_module_release_config
+
+        for version in versions:
+            if not is_legacy_module_release_config(version.value):
+                return version
+        return None
     # pytest-django (and a few management/health-check contexts) can install
     # a database blocker even though Django itself is configured.  Runtime
     # configuration must fail closed to safe defaults in that situation just

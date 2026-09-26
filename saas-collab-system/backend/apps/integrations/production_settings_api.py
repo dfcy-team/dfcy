@@ -20,6 +20,7 @@ from apps.configcenter.services import (
 from apps.permissions.models import DataScope
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
+from .module_release import contains_module_release_data, is_legacy_module_release_config
 from .production_settings import CONFIG_KEY, runtime_snapshot, validate_runtime_config
 
 
@@ -74,6 +75,8 @@ class ProductionRuntimeVersionCreateSerializer(serializers.Serializer):
         value = attrs.get("value", attrs.get("config"))
         if value is None:
             raise serializers.ValidationError({"value": "Runtime configuration is required."})
+        if contains_module_release_data(value):
+            raise serializers.ValidationError({"value": "Module release data must use the module-release control endpoint."})
         attrs["value"] = validate_runtime_config(value)
         return attrs
 
@@ -135,7 +138,7 @@ def _change_reasons(versions):
 
 
 def _visible_versions():
-    return list(
+    versions = (
         TenantConfigVersion.objects.select_related("definition", "created_by", "approved_by")
         .filter(
             config_key=CONFIG_KEY,
@@ -144,6 +147,9 @@ def _visible_versions():
         )
         .order_by("-version", "-id")
     )
+    # Keep accidental legacy module rows for audit/recovery, but do not expose
+    # them as production-environment configuration history.
+    return [item for item in versions if not is_legacy_module_release_config(item.value)]
 
 
 def _runtime_payload(user):
@@ -153,7 +159,13 @@ def _runtime_payload(user):
     heartbeat = SyncSchedulerHeartbeat.objects.filter(key="credential-refresh").first()
     versions = _visible_versions()
     change_reasons = _change_reasons(versions)
-    effective = next((item for item in versions if item.status == TenantConfigVersion.Status.EFFECTIVE), None)
+    # During migration a modules-only legacy row may be the database row with
+    # ``effective`` status while the runtime deliberately resolves the latest
+    # complete (now superseded) document.  The read model must identify the
+    # document actually governing production, not the legacy module row.
+    effective = next((item for item in versions if item.id == snapshot.get("version_id")), None)
+    if effective is None:
+        effective = next((item for item in versions if item.status == TenantConfigVersion.Status.EFFECTIVE), None)
     pending = next((item for item in versions if item.status == TenantConfigVersion.Status.PENDING_APPROVAL), None)
     effective_data = _version_data(effective, change_reasons.get(effective.version, "")) if effective is not None else None
     pending_data = _version_data(pending, change_reasons.get(pending.version, "")) if pending is not None else None
@@ -233,6 +245,8 @@ def production_settings_version(request, pk):
 
     if not IsProductionSettingsApprover().has_permission(request, production_settings_version):
         raise PermissionDenied("System production settings approver permission is required.")
+    if contains_module_release_data(version.value):
+        raise StateConflict("Legacy production configuration containing module release data cannot be approved. Create separate production and module-release versions instead.")
     serializer = ProductionRuntimeApprovalSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     try:
@@ -255,6 +269,8 @@ def production_settings_version_rollback(request, pk):
         raise Http404
     if not IsProductionSettingsRollbackManager().has_permission(request, production_settings_version_rollback):
         raise PermissionDenied("System production settings rollback permission is required.")
+    if contains_module_release_data(version.value):
+        raise StateConflict("Legacy production configuration containing module release data cannot be rolled back. Create separate production and module-release versions instead.")
     serializer = ProductionRuntimeRollbackSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     try:

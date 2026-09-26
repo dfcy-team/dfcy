@@ -45,6 +45,12 @@ import {
   mockApproveProductionIntegrationSettingsVersion,
   mockRollbackProductionIntegrationSettingsVersion
 } from '../mock/productionSettings';
+import {
+  mockModuleRelease,
+  mockCreateModuleReleaseVersion,
+  mockApproveModuleReleaseVersion,
+  mockRollbackModuleReleaseVersion
+} from '../mock/moduleRelease';
 
 
 const mockIntegrationAuditRows = [
@@ -126,6 +132,30 @@ export const fetchProductionSettings = fetchProductionIntegrationSettings;
 export const createProductionSettingsVersion = createProductionIntegrationSettingsVersion;
 export const approveProductionSettingsVersion = approveProductionIntegrationSettingsVersion;
 export const rollbackProductionSettingsVersion = rollbackProductionIntegrationSettingsVersion;
+
+export const fetchModuleRelease = () => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/integrations/module-release/' },
+  mockModuleRelease,
+  'integrations.module_release'
+);
+
+export const createModuleReleaseVersion = (payload = {}) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/integrations/module-release/versions/', data: payload, timeout: 30000 },
+  () => mockCreateModuleReleaseVersion(payload),
+  'integrations.module_release.create'
+);
+
+export const approveModuleReleaseVersion = (id) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/integrations/module-release/versions/${id}/` },
+  () => mockApproveModuleReleaseVersion(id),
+  'integrations.module_release.approve'
+);
+
+export const rollbackModuleReleaseVersion = (id) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/integrations/module-release/versions/${id}/rollback/` },
+  () => mockRollbackModuleReleaseVersion(id),
+  'integrations.module_release.rollback'
+);
 
 export const repairPlatformIntegrationContract = (id, payload) =>
   requestWithMockFallback(

@@ -3,6 +3,7 @@ from django.urls import path
 from . import views
 from .manual_callback import manual_store_callback
 from . import production_settings_api
+from . import module_release_api
 from . import warehouse_credential_views
 from . import feishu_api
 from . import internal_api_clients
@@ -61,6 +62,31 @@ urlpatterns = [
         "production-settings/versions/<int:pk>/rollback/",
         production_settings_api.production_settings_version_rollback,
         name="integration-production-settings-version-rollback",
+    ),
+    path(
+        "module-release/",
+        module_release_api.module_release_collection,
+        name="integration-module-release",
+    ),
+    path(
+        "module-release/versions/",
+        module_release_api.module_release_collection,
+        name="integration-module-release-versions",
+    ),
+    path(
+        "module-release/versions/<int:pk>/",
+        module_release_api.module_release_version,
+        name="integration-module-release-version",
+    ),
+    path(
+        "module-release/versions/<int:pk>/approve/",
+        module_release_api.module_release_version,
+        name="integration-module-release-version-approve",
+    ),
+    path(
+        "module-release/versions/<int:pk>/rollback/",
+        module_release_api.module_release_version_rollback,
+        name="integration-module-release-version-rollback",
     ),
     path("workspace/", views.integration_workspace_view, name="integration-workspace"),
     path("readiness/", views.platform_integration_readiness, name="platform-integration-readiness"),
