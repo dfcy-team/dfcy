@@ -368,6 +368,7 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = OutreachTask
         fields = (
+            "task_no",
             "task_name",
             "priority",
             "store",
@@ -378,6 +379,7 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
             "owners",
         )
         extra_kwargs = {
+            "task_no": {"required": False, "allow_blank": False},
             "task_name": {"required": False, "allow_blank": True},
             "external_product_id": {"required": False, "allow_blank": True},
             "sku_prefix": {"required": False, "allow_blank": True},

@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">CREATOR OPERATIONS</p>
         <h1>BD 配置</h1>
-        <p>设置绩效指标视图、每日归因补偿及送样逾期提醒。</p>
+        <p>设置建联任务、绩效指标视图、每日归因补偿及送样逾期提醒。</p>
       </div>
       <el-tag :type="apiStatus === 'connected' ? 'success' : 'warning'">
         {{ apiStatus === 'connected' ? '配置服务已连接' : '配置服务不可用' }}
@@ -24,7 +24,7 @@
         <template #header>
           <div class="card-heading">
             <div>
-              <strong>绩效默认设置</strong>
+              <strong>BD 业务设置</strong>
               <span>新设置提交后生成不可变版本</span>
             </div>
             <el-tag effect="plain">{{ versionLabel }}</el-tag>
@@ -66,6 +66,14 @@
                 <span>{{ form.sample_overdue_notification_enabled ? '已开启' : '已关闭' }}</span>
               </div>
               <small>逾期状态生成时，向该送样负责人创建一条站内提醒；同一送样仅提醒一次。</small>
+            </el-form-item>
+
+            <el-form-item label="允许修改建联任务编号">
+              <div class="switch-line">
+                <el-switch v-model="form.outreach_task_number_edit_enabled" />
+                <span>{{ form.outreach_task_number_edit_enabled ? '已开启' : '已关闭' }}</span>
+              </div>
+              <small>开启后可在修改建联任务时调整编号；同一租户内不得与其他任务（含已删除任务）重复。</small>
             </el-form-item>
           </div>
 
@@ -124,7 +132,8 @@ const defaults = {
   default_metrics: 'core',
   daily_attribution_reconciliation_enabled: true,
   sample_video_overdue_days: 20,
-  sample_overdue_notification_enabled: false
+  sample_overdue_notification_enabled: false,
+  outreach_task_number_edit_enabled: false
 };
 const CONFIG_FIELDS = Object.freeze(Object.keys(defaults));
 const auth = useAuthStore();
@@ -168,7 +177,8 @@ function configValuePayload() {
     default_metrics: form.default_metrics,
     daily_attribution_reconciliation_enabled: form.daily_attribution_reconciliation_enabled,
     sample_video_overdue_days: form.sample_video_overdue_days,
-    sample_overdue_notification_enabled: form.sample_overdue_notification_enabled
+    sample_overdue_notification_enabled: form.sample_overdue_notification_enabled,
+    outreach_task_number_edit_enabled: form.outreach_task_number_edit_enabled
   };
 }
 

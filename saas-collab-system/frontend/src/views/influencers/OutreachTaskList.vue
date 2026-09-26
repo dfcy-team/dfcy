@@ -129,8 +129,9 @@
       @closed="clearTaskDraft"
     >
       <el-form label-width="110px">
-        <el-form-item v-if="editingTask" label="任务编号">
-          <el-input :model-value="displayValue(editingTask.task_no)" readonly />
+        <el-form-item v-if="editingTask" label="任务编号" :error="taskNoError">
+          <el-input v-model="form.task_no" :readonly="!taskNumberEditEnabled" maxlength="80" @input="taskNoError = ''" />
+          <small v-if="!taskNumberEditEnabled">可在 BD 配置中开启任务编号修改。</small>
         </el-form-item>
         <el-form-item v-else label="任务编号">
           <el-input model-value="系统自动生成" readonly />
@@ -441,6 +442,8 @@ const storeOptions = ref([]);
 const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
+const taskNumberEditEnabled = ref(false);
+const taskNoError = ref('');
 const influencerOptionsLoaded = ref(false);
 const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
@@ -611,6 +614,7 @@ function resetFilters() {
 function applyTaskOptions(data = {}) {
   storeOptions.value = data.stores || [];
   bdOptions.value = data.bd_users || [];
+  taskNumberEditEnabled.value = data.outreach_task_number_edit_enabled === true;
   if (Array.isArray(data.influencers)) {
     influencerOptions.value = data.influencers.filter((influencer) => influencer?.id !== undefined && influencer?.id !== null);
     influencerOptionsLoaded.value = true;
@@ -618,7 +622,7 @@ function applyTaskOptions(data = {}) {
 }
 
 async function loadTaskOptions(required = false, includeInfluencers = false) {
-  if (taskOptionsLoaded.value && (!includeInfluencers || influencerOptionsLoaded.value)) return true;
+  if (!required && taskOptionsLoaded.value && (!includeInfluencers || influencerOptionsLoaded.value)) return true;
   const r = await fetchOutreachTaskOptions({ include_influencers: includeInfluencers ? 'true' : 'false' });
   if (!r.success) {
     if (required) ElMessage.error(formatInfluencerError(r, '店铺、BD 和达人选项加载失败'));
@@ -638,6 +642,7 @@ function clearProductMatch() {
 }
 
 async function openCreate() {
+  taskNoError.value = '';
   editingTask.value = null;
   Object.assign(form, {
     task_no: '',
@@ -659,6 +664,7 @@ async function openCreate() {
 
 async function openEdit(row) {
   if (!canManage.value || row.is_deleted) return;
+  taskNoError.value = '';
   if (!await loadTaskOptions(true)) return;
   editingTask.value = { ...row };
   Object.assign(form, {
@@ -749,6 +755,10 @@ async function submit() {
 
 async function submitEdit() {
   if (!form.task_name || !form.store || !form.owners.length) return ElMessage.warning('请填写必填字段');
+  if (taskNumberEditEnabled.value && !form.task_no.trim()) {
+    taskNoError.value = '请输入任务编号';
+    return;
+  }
   if (requiresCancellationConfirmation(editingTask.value?.status, form.status)) {
     try {
       await ElMessageBox.confirm('取消后不可恢复，确认取消该任务吗？', '确认取消', { type: 'warning' });
@@ -767,9 +777,16 @@ async function submitEdit() {
     owners: form.owners,
     status: form.status
   };
+  if (taskNumberEditEnabled.value && form.task_no.trim() !== editingTask.value.task_no) {
+    payload.task_no = form.task_no.trim();
+  }
   const r = await updateOutreachTask(editingTask.value.id, payload, editingTask.value.version);
   saving.value = false;
   if (!r.success) {
+    if (/任务编号已存在|Task number already exists/i.test(`${r.message || ''} ${JSON.stringify(r.data || {})}`)) {
+      taskNoError.value = '任务编号已存在，请更换';
+      return;
+    }
     ElMessage.error(formatInfluencerError(r));
     if (r.http_status === 409 || r.code === 'STATE_CONFLICT' || r.code === 'CONFLICT') await load();
     return;
