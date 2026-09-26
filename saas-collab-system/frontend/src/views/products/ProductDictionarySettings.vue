@@ -154,8 +154,11 @@
           v-model="categoryFilter"
           data-testid="specification-filter"
           clearable
-          placeholder="搜索分类"
+          placeholder="搜索分类、规格编码/名称或选项值"
         />
+        <span v-if="categoryFilter.trim()" class="panel-caption search-count">
+          匹配 {{ matchingSpecificationRows.length }} 个末级分类
+        </span>
         <el-tree
           ref="categoryTreeRef"
           class="category-tree"
@@ -217,6 +220,14 @@
           <strong>{{ contentTitle }}</strong>
           <span class="panel-caption">{{ contentCaption }}</span>
         </div>
+        <el-input
+          v-if="currentKind === 'attributes' || currentKind === 'colors'"
+          v-model="dictionarySearch"
+          data-testid="dictionary-search"
+          class="dictionary-search"
+          clearable
+          :placeholder="currentKind === 'attributes' ? '搜索属性编码或名称' : '搜索颜色编码或名称'"
+        />
       </div>
 
       <el-table
@@ -224,7 +235,7 @@
         :data="displayRows"
         row-key="id"
         border
-        :empty-text="emptyText"
+        :empty-text="tableEmptyText"
       >
         <template v-if="currentKind === 'attributes'">
           <el-table-column prop="code" label="属性编码" width="120" />
@@ -263,7 +274,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && !message && !displayRows.length" :description="emptyText" :image-size="72" />
+      <el-empty v-if="!loading && !message && !displayRows.length" :description="tableEmptyText" :image-size="72" />
     </div>
 
     <el-dialog v-model="visible" :title="dialogTitle" width="640px" destroy-on-close>
@@ -444,6 +455,7 @@ const message = ref('');
 const visible = ref(false);
 const dialogAction = ref('create');
 const categoryFilter = ref('');
+const dictionarySearch = ref('');
 const selectedCategory = ref(null);
 const categoryTreeRef = ref(null);
 const form = reactive({
@@ -495,7 +507,33 @@ const selectedSpecification = computed(() => {
   if (!selectedCategory.value) return null;
   return specificationRows.value.find((item) => String(item.id) === String(selectedCategory.value.id)) || null;
 });
-const displayRows = computed(() => (currentKind.value === 'specifications' ? specificationRows.value : rows.value));
+const matchingSpecificationRows = computed(() => {
+  const keyword = categoryFilter.value.trim().toLowerCase();
+  if (!keyword) return specificationRows.value;
+  return specificationRows.value.filter((item) => (
+    categoryPath(item).toLowerCase().includes(keyword)
+    || formatDimensions(item.spec_dimensions).toLowerCase().includes(keyword)
+  ));
+});
+const visibleSpecificationNodeIds = computed(() => {
+  const byId = new Map(rows.value.map((item) => [String(item.id), item]));
+  const visible = new Set();
+  matchingSpecificationRows.value.forEach((item) => {
+    let current = item;
+    while (current && !visible.has(String(current.id))) {
+      visible.add(String(current.id));
+      current = byId.get(String(parentIdOf(current)));
+    }
+  });
+  return visible;
+});
+const displayRows = computed(() => {
+  if (currentKind.value === 'specifications') return specificationRows.value;
+  const keyword = dictionarySearch.value.trim().toLowerCase();
+  if (!keyword) return rows.value;
+  return rows.value.filter((item) => `${item.code || ''} ${item.name || ''}`.toLowerCase().includes(keyword));
+});
+const tableEmptyText = computed(() => (dictionarySearch.value.trim() ? '没有匹配的记录' : emptyText.value));
 const categoryDisplayRows = computed(() => {
   if (!selectedCategory.value) return rows.value;
   return rows.value.filter((item) => (
@@ -725,6 +763,9 @@ async function load() {
 
 function filterCategory(value, data) {
   if (!value) return true;
+  if (currentKind.value === 'specifications') {
+    return visibleSpecificationNodeIds.value.has(String(data.id));
+  }
   return `${data.code || ''} ${data.name || ''}`.toLowerCase().includes(String(value).toLowerCase());
 }
 
@@ -935,6 +976,8 @@ watch(currentKind, () => {
   visible.value = false;
   dialogAction.value = 'create';
   selectedCategory.value = null;
+  categoryFilter.value = '';
+  dictionarySearch.value = '';
   resetForm();
   load();
 });
@@ -955,6 +998,8 @@ onMounted(load);
 .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; color: #243b53; }
 .panel-heading > div { display: grid; gap: 4px; }
 .panel-caption { color: #829ab1; font-size: 12px; font-weight: 400; }
+.dictionary-search { width: min(300px, 45%); }
+.search-count { display: block; margin-top: 8px; }
 .category-tree { margin-top: 14px; }
 .tree-node { display: flex; align-items: center; justify-content: space-between; width: 100%; min-width: 0; gap: 8px; padding: 2px 0; }
 .tree-node-copy { display: flex; min-width: 0; align-items: center; gap: 7px; overflow: hidden; }
@@ -968,6 +1013,8 @@ onMounted(load);
 .dialog-help, .generated-code-note { margin: -4px 0 4px; color: #64748b; font-size: 12px; line-height: 1.6; }
 @media (max-width: 900px) {
   .category-workspace { grid-template-columns: 1fr; }
+  .standalone-panel .panel-heading { align-items: stretch; flex-direction: column; }
+  .dictionary-search { width: 100%; }
   .tree-node-actions { display: flex; }
   .dimension-row { grid-template-columns: 1fr 1fr; }
 .dimension-row :deep(.el-button) { justify-self: start; }
