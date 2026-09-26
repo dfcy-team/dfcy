@@ -206,6 +206,25 @@ class InternalAPIClientTests(APITestCase):
         self.assertEqual(changed.json()["data"]["approval_status"], "pending")
         self.assertEqual(self.client.get(url, **header).status_code, 401)
 
+    def test_secret_rotation_does_not_let_config_editor_approve_their_changes(self):
+        client_id = self.create_client().json()["data"]["id"]
+        editor = get_user_model().objects.create_user(
+            username="config-editor", password=None, tenant=self.tenant,
+            user_type="internal", is_active=True, is_superuser=True,
+        )
+        rotator = get_user_model().objects.create_user(
+            username="credential-rotator", password=None, tenant=self.tenant,
+            user_type="internal", is_active=True, is_superuser=True,
+        )
+        url = f"/api/internal/integrations/internal-api-clients/{client_id}/"
+        self.client.force_authenticate(editor)
+        self.assertEqual(self.client.patch(url, {"name": "Edited configuration"}, format="json").status_code, 200)
+        self.client.force_authenticate(rotator)
+        self.assertEqual(self.client.post(url + "rotate/", {}, format="json", HTTP_IDEMPOTENCY_KEY="rotation-after-edit").status_code, 200)
+        self.client.force_authenticate(editor)
+        self.assertEqual(self.client.post(url + "review/", {"decision": "approve"}, format="json").status_code, 400)
+        self.assertEqual(InternalAPIClient.objects.get(pk=client_id).approval_status, "pending")
+
     def test_read_limit_is_enforced_and_capability_catalog_is_not_data(self):
         created = self.create_client().json()["data"]
         obj = InternalAPIClient.objects.get(pk=created["id"])

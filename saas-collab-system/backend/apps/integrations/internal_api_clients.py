@@ -172,7 +172,8 @@ def client_rotate(request, pk):
         client.secret_fingerprint = fingerprint
         client.last_rotated_at = timezone.now()
         client.last_rotation_operation_hash = operation_hash
-        client.updated_by = request.user
+        # Rotation is audited separately; keep the last configuration editor
+        # so that editor cannot approve their own pending changes.
         client.config_version += 1
         client.save()
         _audit(request=request, client=client, action="secret_rotated")
