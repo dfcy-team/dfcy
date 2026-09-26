@@ -2233,7 +2233,10 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
         },
         item_payloads=[],
     )
-    order_time = timezone.now() - timedelta(days=1)
+    # Keep the sample (one hour earlier) inside the same reporting day in UTC.
+    order_time = (timezone.now() - timedelta(days=1)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
     sample = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
     sample.sampled_at = order_time - timedelta(hours=1)
     sample.shop_abbr = "store-affiliate"
