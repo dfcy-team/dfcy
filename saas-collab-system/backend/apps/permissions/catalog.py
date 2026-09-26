@@ -7,6 +7,7 @@ PERMISSION_DEFINITIONS = (
         for code, name, action, description in (
             ("integrations.internal_api_client.view", "查看内部 API 调用方", "internal_api_client.view", "查看当前租户的内部只读 API 调用方脱敏配置。"),
             ("integrations.internal_api_client.manage", "管理内部 API 调用方", "internal_api_client.manage", "创建、更新和启停当前租户的调用方。"),
+            ("integrations.internal_api_client.approve", "审核内部 API 调用方", "internal_api_client.approve", "审核当前租户的只读 API 调用方配置。"),
             ("integrations.internal_api_client.rotate", "轮换内部 API 密钥", "internal_api_client.rotate", "轮换调用方密钥，明文仅在当次返回。"),
             ("integrations.internal_api_client.audit.view", "查看内部 API 审计", "internal_api_client.audit.view", "查看当前租户的不可变配置审计记录。"),
         )

@@ -343,5 +343,9 @@ class IsInternalAPIClientRotator(IntegrationActionPermission):
     permission_code = "integrations.internal_api_client.rotate"
 
 
+class IsInternalAPIClientApprover(IntegrationActionPermission):
+    permission_code = "integrations.internal_api_client.approve"
+
+
 class IsInternalAPIClientAuditViewer(IntegrationActionPermission):
     permission_code = "integrations.internal_api_client.audit.view"

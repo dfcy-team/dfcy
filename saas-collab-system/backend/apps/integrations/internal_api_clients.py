@@ -11,6 +11,7 @@ from rest_framework.exceptions import ValidationError
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import (
     IsInternalAPIClientAuditViewer,
+    IsInternalAPIClientApprover,
     IsInternalAPIClientReadOrManage,
     IsInternalAPIClientRotator,
 )
@@ -62,6 +63,8 @@ def client_collection(request):
             secret_prefix=prefix,
             secret_fingerprint=fingerprint,
             last_rotated_at=timezone.now(),
+            status=InternalAPIClient.Status.DISABLED,
+            approval_status=InternalAPIClient.ApprovalStatus.PENDING,
             **serializer.validated_data,
         )
         _audit(request=request, client=client, action="created", detail={"resources": sorted(client.resources)})
@@ -87,6 +90,12 @@ def client_detail(request, pk):
         for key, value in serializer.validated_data.items():
             setattr(client, key, value)
         client.updated_by = request.user
+        client.status = InternalAPIClient.Status.DISABLED
+        client.approval_status = InternalAPIClient.ApprovalStatus.PENDING
+        client.approved_by = None
+        client.approved_at = None
+        client.reviewed_at = None
+        client.rejection_reason = ""
         client.config_version += 1
         client.save()
         _audit(request=request, client=client, action="updated", detail={"changed_fields": changed})
@@ -101,12 +110,44 @@ def client_status(request, pk):
         raise ValidationError({"status": "Must be active or disabled."})
     with transaction.atomic():
         client = _client_for_request(request, pk, lock=True)
+        if status == InternalAPIClient.Status.ACTIVE and client.approval_status != InternalAPIClient.ApprovalStatus.APPROVED:
+            raise ValidationError({"status": "审批通过后才能启用调用方。"})
         if client.status != status:
             client.status = status
             client.updated_by = request.user
             client.config_version += 1
             client.save(update_fields=["status", "updated_by", "config_version", "updated_at"])
             _audit(request=request, client=client, action=status)
+    return success_response(InternalAPIClientSerializer(client).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsInternalAPIClientApprover])
+def client_review(request, pk):
+    decision = request.data.get("decision") if isinstance(request.data, dict) else None
+    reason = str(request.data.get("reason") or "").strip() if isinstance(request.data, dict) else ""
+    if decision not in ("approve", "reject"):
+        raise ValidationError({"decision": "Must be approve or reject."})
+    if decision == "reject" and not reason:
+        raise ValidationError({"reason": "拒绝时必须填写原因。"})
+    if len(reason) > 500:
+        raise ValidationError({"reason": "Must be at most 500 characters."})
+    with transaction.atomic():
+        client = _client_for_request(request, pk, lock=True)
+        if client.created_by_id == request.user.id or client.updated_by_id == request.user.id:
+            raise ValidationError({"decision": "创建或修改配置的人不能审核自己的配置。"})
+        if client.approval_status != InternalAPIClient.ApprovalStatus.PENDING:
+            raise ValidationError({"decision": "Only pending configurations can be reviewed."})
+        client.approval_status = (InternalAPIClient.ApprovalStatus.APPROVED if decision == "approve"
+                                  else InternalAPIClient.ApprovalStatus.REJECTED)
+        client.approved_by = request.user if decision == "approve" else None
+        client.approved_at = timezone.now() if decision == "approve" else None
+        client.reviewed_at = timezone.now()
+        client.rejection_reason = reason if decision == "reject" else ""
+        client.status = InternalAPIClient.Status.DISABLED
+        client.config_version += 1
+        client.save()
+        _audit(request=request, client=client, action="approved" if decision == "approve" else "rejected", detail={"reason": reason})
     return success_response(InternalAPIClientSerializer(client).data)
 
 

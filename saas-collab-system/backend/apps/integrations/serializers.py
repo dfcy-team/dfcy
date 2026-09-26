@@ -133,12 +133,12 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
         fields = (
             "id", "name", "caller_type", "client_id", "secret_prefix", "secret_fingerprint",
             "credential_configured", "resources", "allowed_cidrs", "rate_limit_per_minute",
-            "page_size_limit", "expires_at", "status", "config_version", "last_rotated_at",
+            "page_size_limit", "expires_at", "status", "approval_status", "approved_by", "approved_at", "reviewed_at", "rejection_reason", "config_version", "last_rotated_at",
             "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "client_id", "secret_prefix", "secret_fingerprint", "credential_configured",
-            "config_version", "last_rotated_at", "created_at", "updated_at",
+            "approval_status", "approved_by", "approved_at", "reviewed_at", "rejection_reason", "config_version", "last_rotated_at", "created_at", "updated_at",
         )
 
     def get_credential_configured(self, obj):
@@ -152,7 +152,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
         allowed = {
             "name", "caller_type", "resources", "allowed_cidrs", "rate_limit_per_minute",
-            "page_size_limit", "expires_at", "status",
+            "page_size_limit", "expires_at",
         }
         if not isinstance(data, dict):
             raise serializers.ValidationError("Expected an object.")

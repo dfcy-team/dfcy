@@ -1,9 +1,10 @@
-import { requestWithMockFallback } from './request';
+import { requestApi, requestWithMockFallback } from './request';
 import {
   mockCreateInternalReadonlyClient,
   mockInternalReadonlyAudit,
   mockInternalReadonlyClients,
   mockRotateInternalReadonlyCredential,
+  mockReviewInternalReadonlyClient,
   mockSetInternalReadonlyClientStatus,
   mockUpdateInternalReadonlyClient
 } from '../mock/internalReadonly';
@@ -15,3 +16,6 @@ export const updateInternalReadonlyClient = (id, data) => requestWithMockFallbac
 export const setInternalReadonlyClientStatus = (id, status) => requestWithMockFallback({ method: 'post', url: `${root}${id}/status/`, data: { status } }, () => mockSetInternalReadonlyClientStatus(id, status), 'internal_readonly.status');
 export const rotateInternalReadonlyCredential = (id, idempotencyKey) => requestWithMockFallback({ method: 'post', url: `${root}${id}/rotate/`, headers: { 'Idempotency-Key': idempotencyKey } }, () => mockRotateInternalReadonlyCredential(id), 'internal_readonly.rotate');
 export const fetchInternalReadonlyAudit = (id) => requestWithMockFallback({ method: 'get', url: `${root}${id}/audit/` }, () => mockInternalReadonlyAudit(id), 'internal_readonly.audit');
+export const reviewInternalReadonlyClient = (id, decision, reason = '') => requestWithMockFallback({ method: 'post', url: `${root}${id}/review/`, data: { decision, reason } }, () => mockReviewInternalReadonlyClient(id, decision, reason), 'internal_readonly.review');
+// Readiness is always reported by the live API; a mock must not imply business data is available.
+export const fetchInternalReadonlyCapabilities = () => requestApi({ method: 'get', url: '/api/internal-readonly/v1/capabilities/' });
