@@ -3,7 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.permissions.models import DataScope, Permission, Role, UserRole
-from apps.products.coding_services import SEASON_CODES, allocate_spu_code
+from apps.products.coding_services import SEASON_CODES, allocate_spu_code, build_sku_code
 from apps.products.models import ProductAttribute, ProductCategory, ProductCodeSequence, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
@@ -237,6 +237,13 @@ def test_category_can_set_first_specification_dimension_with_existing_unspecifie
     sku.refresh_from_db()
     assert category.spec_dimensions == dimensions
     assert sku.sku_code == "101010002-blue"
+    for value in ("2KG+10LB", "1KG+5LB", "2KG+5LB", "3KG+10LB"):
+        generated, specification, normalized = build_sku_code(
+            spu=spu, color_code="blue", spec_values={"SPEC": value},
+        )
+        assert generated == f"101010002-blue-{value}"
+        assert specification == value
+        assert normalized == {"SPEC": value}
 
 
 @pytest.mark.parametrize("attribute_code", ["0", "6", "9", "A", "Z"])
