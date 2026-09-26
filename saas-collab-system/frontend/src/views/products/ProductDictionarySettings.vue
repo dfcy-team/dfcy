@@ -883,6 +883,14 @@ function validForm() {
   return '';
 }
 
+function dictionarySaveError(error) {
+  const response = error?.response?.data;
+  const details = response?.data?.spec_dimensions;
+  if (Array.isArray(details) && details.length) return details.join('；');
+  if (typeof details === 'string' && details) return details;
+  return response?.message || error?.message || '保存失败';
+}
+
 async function save() {
   if (saving.value) return;
   if (!canManage.value) {
@@ -921,13 +929,13 @@ async function save() {
     } else {
       response = await updateProductAttributes(form.id, serializeDimensions());
     }
-    if (!response?.success) throw new Error(response?.message || '保存失败');
+    if (!response?.success) throw new Error(dictionarySaveError(response));
     invalidateProductDictionaryCache();
     ElMessage.success('保存成功');
     visible.value = false;
     await load();
   } catch (error) {
-    ElMessage.error(error?.message || '保存失败');
+    ElMessage.error(dictionarySaveError(error));
   } finally {
     saving.value = false;
   }

@@ -181,8 +181,13 @@ class ProductCategorySerializer(serializers.ModelSerializer):
                 old_codes = [item.get("code") for item in (self.instance.spec_dimensions or [])]
                 new_codes = [item.get("code") for item in attrs["spec_dimensions"]]
                 has_skus = ProductSKU.objects.filter(spu__category_node=self.instance).exists()
-                if has_skus and old_codes != new_codes:
-                    raise serializers.ValidationError({"spec_dimensions": "Specification structure cannot change after an SKU is generated."})
+                # Existing SKU codes and their spec_values are immutable. New
+                # dimensions can be appended without changing either; deleting,
+                # replacing or reordering old codes would reinterpret them.
+                if has_skus and new_codes[:len(old_codes)] != old_codes:
+                    raise serializers.ValidationError({
+                        "spec_dimensions": "已有 SKU 的规格维度不能删除、修改编码或调整顺序；可在末尾新增维度。"
+                    })
         return attrs
 
 
