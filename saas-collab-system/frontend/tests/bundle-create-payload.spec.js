@@ -18,4 +18,10 @@ describe('组合商品创建请求', () => {
   it('复用 SPU 时提交选中的编号', () => {
     expect(buildBundleCreatePayload({ ...base, spuMode: 'existing', existingSpu: 42 }).existing_spu).toBe(42);
   });
+
+  it('将组合规格传给服务端生成 SKU 编码', () => {
+    expect(buildBundleCreatePayload({ ...base, specValues: { size: '180cm×240cm' } }).spec_values)
+      .toEqual({ size: '180cm×240cm' });
+    expect(buildBundleCreatePayload(base).spec_values).toEqual({});
+  });
 });

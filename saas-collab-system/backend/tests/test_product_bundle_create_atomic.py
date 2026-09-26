@@ -107,6 +107,22 @@ def test_bundle_create_accepts_letter_attribute_code():
 
 
 @pytest.mark.django_db
+def test_bundle_create_uses_optional_category_specification_for_sku_code():
+    tenant = Tenant.objects.create(name="Bundle specification tenant", code="bundle-specification")
+    client = _bundle_client(tenant, "bundle-specification-user")
+    category = _catalog(tenant)
+    payload = _payload(category, [_component_sku(tenant, "NORMAL-SPEC")])
+    payload["spec_values"] = {"size": "180cmx240cm"}
+
+    response = client.post("/api/internal/products/bundles/create/", payload, format="json")
+
+    assert response.status_code == 201
+    sku = response.json()["data"]["sku"]
+    assert sku["sku_code"] == f'{response.json()["data"]["spu"]["spu_code"]}-Multi-180cmx240cm'
+    assert sku["spec_values"] == {"size": "180cmx240cm"}
+
+
+@pytest.mark.django_db
 def test_bundle_create_imports_optional_legacy_codes_with_bundle_manage_permission():
     tenant = Tenant.objects.create(name="Bundle legacy code tenant", code="bundle-legacy-codes")
     client = _bundle_client(tenant, "bundle-legacy-regular")

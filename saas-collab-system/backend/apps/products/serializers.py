@@ -1047,6 +1047,7 @@ class ProductBundleCreateInputSerializer(serializers.Serializer):
     legacy_spu_code = serializers.CharField(max_length=120, required=False, allow_blank=True, trim_whitespace=True)
     legacy_sku_code = serializers.CharField(max_length=160, required=False, allow_blank=True, trim_whitespace=True)
     color_code = serializers.CharField(max_length=40)
+    spec_values = serializers.DictField(child=serializers.CharField(allow_blank=False), required=False, default=dict)
     components = ProductBundleCreateComponentInputSerializer(many=True, allow_empty=False, max_length=20)
 
     def validate_components(self, value):

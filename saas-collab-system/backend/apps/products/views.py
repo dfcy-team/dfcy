@@ -2660,9 +2660,7 @@ def product_bundle_create(request):
                 data={
                     "spu": spu.id,
                     "color_code": color_code,
-                    # Bundle imports do not select a specification. Use the
-                    # same optional-specification coding rule as normal SKUs.
-                    "spec_values": {},
+                    "spec_values": payload.get("spec_values", {}),
                     "legacy_sku_code": payload.get("legacy_sku_code", ""),
                 },
                 context=context,

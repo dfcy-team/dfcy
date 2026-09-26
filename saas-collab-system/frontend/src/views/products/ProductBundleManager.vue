@@ -145,7 +145,7 @@
       <div class="import-upload-box" role="button" tabindex="0" @click="bundleImportInput?.click()" @keydown.enter="bundleImportInput?.click()">
         <span class="import-upload-icon">⇧</span>
         <strong>{{ bundleImportFileName || '点击选择 CSV 文件' }}</strong>
-        <small>旧 SPU/SKU 编码和图片URL均可选；填写公网 HTTP(S) 图片链接后自动缓存</small>
+        <small>旧 SPU/SKU 编码、组合规格和图片URL均可选；组合规格按“维度编码=规格值”填写，多维用分号分隔</small>
       </div>
       <el-button data-testid="bundle-import-template" class="import-template-link" link type="primary" @click="downloadBundleImportTemplate">下载组合商品导入模板</el-button>
       <template #footer>
@@ -296,6 +296,7 @@ import { downloadBigSellerBundleWorkbook } from '../../utils/bigsellerWorkbook';
 import { bundleCsvHeaderIndex, decodeBundleImportFile, findBundleLeafCategory, parseBundleCsvRecords } from '../../utils/bundleImportCsv';
 import { bundleImportErrorCsvRows, bundleImportErrorMessage } from '../../utils/bundleImportFeedback';
 import { buildBundleCreatePayload } from '../../utils/bundleCreatePayload';
+import { parseBundleImportSpecification } from '../../utils/bundleImportSpecification';
 
 const auth = useAuthStore();
 const props = defineProps({
@@ -447,9 +448,9 @@ function selectBundleImage(event) {
   bundleImageUrl.value = '';
 }
 
-async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, legacySpuCode = '', legacySkuCode = '', components }) {
+async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, specValues = {}, legacySpuCode = '', legacySkuCode = '', components }) {
   const response = await createProductBundle(buildBundleCreatePayload({
-    spuMode, existingSpu, name, category, season, color, legacySpuCode, legacySkuCode, components,
+    spuMode, existingSpu, name, category, season, color, specValues, legacySpuCode, legacySkuCode, components,
   }));
   if (!response.success) throw new Error(bundleImportErrorMessage(response));
   const created = detailData(response.data);
@@ -558,7 +559,7 @@ function migrationErrorMessage(error) {
 
 function bundleImportHeaders() {
   return [
-    '旧SPU编码', '旧SKU编码', '*组合商品名称', '*末级分类编码', '*属性编码', '*组合颜色英文编码', '图片URL',
+    '旧SPU编码', '旧SKU编码', '*组合商品名称', '*末级分类编码', '*属性编码', '*组合颜色英文编码', '组合规格', '图片URL',
     ...Array.from({ length: 20 }, (_, index) => {
       const number = index + 1;
       const required = number === 1 ? '*' : '';
@@ -570,7 +571,7 @@ function bundleImportHeaders() {
 function downloadBundleImportTemplate() {
   const headers = bundleImportHeaders();
   const values = Array(headers.length).fill('');
-  [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9]] = ['', '', '示例组合商品', '10101', '0', 'white', '', 'NORMAL-SKU-001', 1, 1];
+  [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], values[10]] = ['', '', '示例组合商品', '10101', '0', 'white', '', '', 'NORMAL-SKU-001', 1, 1];
   downloadCsv('组合商品导入模板.csv', headers, values);
 }
 
@@ -776,6 +777,7 @@ function prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode
   if (imageUrl && (!/^https?:\/\//i.test(imageUrl) || imageUrl.length > 500)) throw new Error('图片URL必须是不超过500字符的HTTP(S)链接');
   const category = findBundleLeafCategory(categories.value, categoryCode);
   if (!category) throw new Error(`末级分类编码 ${categoryCode} 不存在或已停用`);
+  const specValues = parseBundleImportSpecification(importValue(values, headers, '组合规格'), category);
   const activeColors = colors.value.filter((item) => item.is_active !== false);
   const colorMatch = activeColors.find((item) => String(item.code) === color)
     || (() => {
@@ -804,7 +806,7 @@ function prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode
     components.push({ sku: sku.id, skuCode, quantity, costRatio });
   }
   if (!components.length) throw new Error('至少填写一个单品 SKU 及数量');
-  return { line, name, category: category.id, season, color: colorMatch.code, legacySpuCode, legacySkuCode, imageUrl, components };
+  return { line, name, category: category.id, season, color: colorMatch.code, specValues, legacySpuCode, legacySkuCode, imageUrl, components };
 }
 
 async function importBundleFile(file) {
