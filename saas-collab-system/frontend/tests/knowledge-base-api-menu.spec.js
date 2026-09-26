@@ -44,6 +44,7 @@ describe('内部系统数据接口菜单', () => {
     expect(page).toContain("const blockedMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];");
     expect(page).toContain('不接收调用方回写');
     expect(page).toContain('调用方始终不能回写业务数据');
-    expect(page).toContain('业务数据端点 /api/internal-readonly/v1/ 尚未上线');
+    expect(page).toContain('只有标记“已接入”的数据块可实际读取');
+    expect(page).toContain('实时可用性未核实，不能宣称已开放');
   });
 });
