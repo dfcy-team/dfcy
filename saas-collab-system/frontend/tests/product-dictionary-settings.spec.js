@@ -273,6 +273,22 @@ describe('ProductDictionarySettings mounted kind matrix', () => {
     ]);
   });
 
+  it('shows the server reason when existing specification dimensions cannot be reordered', async () => {
+    productApi.updateProductAttributes.mockRejectedValue({
+      response: { data: {
+        message: '提交内容校验失败，请检查字段提示。',
+        data: { spec_dimensions: ['已有 SKU 的规格维度不能删除、修改编码或调整顺序；可在末尾新增维度。'] }
+      } }
+    });
+    const wrapper = mountPage('specifications');
+    await flushPromises();
+    wrapper.vm.edit(categories[3]);
+
+    await wrapper.vm.save();
+
+    expect(elementPlus.ElMessage.error).toHaveBeenCalledWith(expect.stringContaining('可在末尾新增维度'));
+  });
+
   it('shows a category tree and switches the specification workspace by leaf selection', async () => {
     const wrapper = mountPage('specifications');
     await flushPromises();

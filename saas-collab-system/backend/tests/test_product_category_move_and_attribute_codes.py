@@ -3,7 +3,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.permissions.models import DataScope, Permission, Role, UserRole
-from apps.products.coding_services import SEASON_CODES, allocate_spu_code
+from apps.products.coding_services import SEASON_CODES, allocate_spu_code, build_sku_code
 from apps.products.models import ProductAttribute, ProductCategory, ProductCodeSequence, ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 
@@ -183,6 +183,67 @@ def test_category_specification_put_supports_leaf_l2_and_l3_but_not_parent_l2():
     l3.refresh_from_db()
     assert leaf_l2.spec_dimensions == dimensions
     assert l3.spec_dimensions == dimensions
+
+
+def test_category_can_append_specification_dimensions_after_sku_creation():
+    tenant = Tenant.objects.create(name="Append specification tenant", code="category-spec-append")
+    client = _client(tenant, "category-spec-append-manager")
+    _, _, category = _tree(tenant)
+    spu = ProductSPU.objects.create(
+        tenant=tenant, spu_code="101010001", product_name="Existing", category_node=category,
+    )
+    sku = ProductSKU.objects.create(
+        tenant=tenant, spu=spu, sku_code="101010001-blue-M", color_code="blue",
+        specification="M", spec_values={"size": "M"},
+    )
+    url = f"/api/internal/products/categories/{category.pk}/attributes/"
+    appended = [
+        {"code": "size", "name": "尺寸", "values": ["M"]},
+        {"code": "weight", "name": "重量", "values": ["2KG+10LB", "1KG+5LB"]},
+    ]
+
+    response = client.put(url, {"spec_dimensions": appended}, format="json")
+    assert response.status_code == 200, response.content
+    category.refresh_from_db()
+    sku.refresh_from_db()
+    assert category.spec_dimensions == appended
+    assert sku.sku_code == "101010001-blue-M"
+    assert sku.spec_values == {"size": "M"}
+
+    reordered = client.put(url, {"spec_dimensions": list(reversed(appended))}, format="json")
+    removed = client.put(url, {"spec_dimensions": appended[1:]}, format="json")
+    assert reordered.status_code == 400
+    assert removed.status_code == 400
+
+
+def test_category_can_set_first_specification_dimension_with_existing_unspecified_skus():
+    tenant = Tenant.objects.create(name="First specification tenant", code="category-spec-first")
+    client = _client(tenant, "category-spec-first-manager")
+    _, _, category = _tree(tenant)
+    category.spec_dimensions = []
+    category.save(update_fields=["spec_dimensions", "updated_at"])
+    spu = ProductSPU.objects.create(
+        tenant=tenant, spu_code="101010002", product_name="Existing", category_node=category,
+    )
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="101010002-blue", color_code="blue")
+    dimensions = [{"code": "SPEC", "name": "规格", "values": ["2KG+10LB", "1KG+5LB", "2KG+5LB", "3KG+10LB"]}]
+
+    response = client.put(
+        f"/api/internal/products/categories/{category.pk}/attributes/",
+        {"spec_dimensions": dimensions}, format="json",
+    )
+    assert response.status_code == 200, response.content
+    category.refresh_from_db()
+    sku.refresh_from_db()
+    assert category.spec_dimensions == dimensions
+    assert sku.sku_code == "101010002-blue"
+    for value in ("2KG+10LB", "1KG+5LB", "2KG+5LB", "3KG+10LB"):
+        generated, specification, normalized = build_sku_code(
+            spu=spu, color_code="blue", spec_values={"SPEC": value},
+        )
+        assert generated == f"101010002-blue-{value}"
+        assert specification == value
+        assert normalized == {"SPEC": value}
 
 
 @pytest.mark.parametrize("attribute_code", ["0", "6", "9", "A", "Z"])
