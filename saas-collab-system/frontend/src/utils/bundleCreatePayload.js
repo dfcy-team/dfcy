@@ -1,4 +1,4 @@
-export function buildBundleCreatePayload({ spuMode = 'new', existingSpu = null, name, category, season, color, legacySpuCode = '', legacySkuCode = '', components }) {
+export function buildBundleCreatePayload({ spuMode = 'new', existingSpu = null, name, category, season, color, specValues = {}, legacySpuCode = '', legacySkuCode = '', components }) {
   return {
     spu_mode: spuMode,
     ...(spuMode === 'existing' ? { existing_spu: existingSpu } : {}),
@@ -8,6 +8,7 @@ export function buildBundleCreatePayload({ spuMode = 'new', existingSpu = null, 
     legacy_spu_code: legacySpuCode,
     legacy_sku_code: legacySkuCode,
     color_code: color,
+    spec_values: specValues,
     components: components.map((component) => ({
       component_sku: component.sku,
       quantity: component.quantity,
