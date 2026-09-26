@@ -340,6 +340,9 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+INTERNAL_READONLY_TRUSTED_PROXY_CIDRS = [
+    item.strip() for item in os.getenv("INTERNAL_READONLY_TRUSTED_PROXY_CIDRS", "").split(",") if item.strip()
+]
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_ACCEPT_CONTENT = ["json"]

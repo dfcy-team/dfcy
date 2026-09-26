@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { mockCreateInternalReadonlyClient, mockInternalReadonlyClients, mockRotateInternalReadonlyCredential } from '../src/mock/internalReadonly';
+import { mockCreateInternalReadonlyClient, mockInternalReadonlyClients, mockReviewInternalReadonlyClient, mockRotateInternalReadonlyCredential, mockSetInternalReadonlyClientStatus } from '../src/mock/internalReadonly';
 import { internalReadonlyModules, internalReadonlyResources } from '../src/config/internalReadonlyResources';
 import { menuItems } from '../src/router/menu';
 
@@ -13,6 +13,7 @@ describe('内部系统只读调用方配置', () => {
     expect(api).toContain("'/api/internal/integrations/internal-api-clients/'");
     expect(api).toContain("'Idempotency-Key': idempotencyKey");
     expect(api).toContain('/status/'); expect(api).toContain('/rotate/'); expect(api).toContain('audit/');
+    expect(api).toContain('/review/'); expect(api).toContain('/api/internal-readonly/v1/capabilities/');
   });
 
   it('创建和轮换仅在响应中返回一次性密钥，列表不泄露', () => {
@@ -21,16 +22,25 @@ describe('内部系统只读调用方配置', () => {
     expect(created.data.resources.products).toEqual(internalReadonlyResources.find((item) => item.code === 'products').fields);
     expect(JSON.stringify(mockInternalReadonlyClients().data.items)).not.toContain('client_secret');
     expect(mockRotateInternalReadonlyCredential(created.data.id).data.client_secret).toContain('only_once');
+    expect(created.data.status).toBe('disabled');
+    expect(created.data.approval_status).toBe('pending');
+    expect(mockSetInternalReadonlyClientStatus(created.data.id, 'active').success).toBe(false);
+    expect(mockReviewInternalReadonlyClient(created.data.id, 'approve').data.client.approval_status).toBe('approved');
+    expect(mockSetInternalReadonlyClientStatus(created.data.id, 'active').success).toBe(true);
   });
 
-  it('页面提供完整配置闭环并保留只读与未上线声明', () => {
+  it('页面提供审核闭环并只报告实时核实的数据块可读', () => {
     const page = read('src/views/integrations/AIExternalApiSettings.vue');
     for (const text of ['新增调用系统','编辑','停用','轮换密钥','调用审计','一次性凭据','二次确认','强制只读']) expect(page).toContain(text);
     for (const field of ['name','caller_type','resources','cidrs','rate_limit','page_size','expires_at']) expect(page).toContain(field);
     expect(page).not.toContain('允许字段');
     expect(page).toContain('无需逐字段配置');
     expect(page).toContain('resources:[...form.resources]');
-    expect(page).toContain('/api/internal-readonly/v1/ 尚未上线');
+    expect(page).toContain('另一位管理员审核');
+    expect(page).toContain('审核通过');
+    expect(page).toContain('驳回');
+    expect(page).toContain('readyCodes.has(r.code)');
+    expect(page).toContain('无法核实业务只读 API 的实时状态');
     expect(page).toContain('@closed="oneTimeCredential=null"');
   });
 

@@ -1736,6 +1736,11 @@ class InternalAPIClient(models.Model):
         ACTIVE = "active", "Active"
         DISABLED = "disabled", "Disabled"
 
+    class ApprovalStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="internal_api_clients")
     name = models.CharField(max_length=160)
     caller_type = models.CharField(max_length=32, choices=CallerType.choices)
@@ -1748,7 +1753,12 @@ class InternalAPIClient(models.Model):
     rate_limit_per_minute = models.PositiveIntegerField(default=60)
     page_size_limit = models.PositiveIntegerField(default=100)
     expires_at = models.DateTimeField(null=True, blank=True)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DISABLED)
+    approval_status = models.CharField(max_length=16, choices=ApprovalStatus.choices, default=ApprovalStatus.PENDING)
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="approved_internal_api_clients")
+    approved_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=500, blank=True)
     config_version = models.PositiveIntegerField(default=1)
     last_rotated_at = models.DateTimeField(null=True, blank=True)
     last_rotation_operation_hash = models.CharField(max_length=64, blank=True)
@@ -1785,3 +1795,12 @@ class InternalAPIClientAudit(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Internal API client audit records cannot be deleted.")
+
+
+class InternalAPIClientUsage(models.Model):
+    client = models.ForeignKey(InternalAPIClient, on_delete=models.CASCADE, related_name="usage_windows")
+    window_start = models.DateTimeField()
+    request_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["client", "window_start"], name="uniq_internal_api_client_minute")]
