@@ -65,9 +65,13 @@ def _database_state(code: str) -> str | None:
     if getattr(settings, "DEBUG", False):
         return None
     try:
-        from apps.integrations.production_settings import get_runtime_setting
+        from apps.integrations.module_release import get_effective_module_release_version, get_module_release_config
 
-        value = get_runtime_setting("modules", code, default=None)
+        # Preserve the deployment allowlist until an approved independent
+        # version (or a legacy modules-only version during migration) exists.
+        if get_effective_module_release_version() is None:
+            return None
+        value = get_module_release_config().get(code)
     except Exception:  # noqa: BLE001 - a missing DB/config must fail open to env compatibility
         return None
     return value if value in MODULE_STATES else None

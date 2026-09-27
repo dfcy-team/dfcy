@@ -256,7 +256,7 @@
               link
               type="primary"
               :loading="actionLoading === `approve:${scope.row.id}`"
-              :disabled="!approvalAccess.allowed || isOwnVersion(scope.row) || Boolean(actionLoading)"
+              :disabled="!approvalAccess.allowed || isOwnVersion(scope.row) || hasLegacyModuleData(scope.row) || Boolean(actionLoading)"
               :title="approvalDisabledReason(scope.row)"
               @click="approveVersion(scope.row)"
             >审批生效</el-button>
@@ -654,6 +654,10 @@ async function submitVersion() {
 }
 
 async function approveVersion(version) {
+  if (hasLegacyModuleData(version)) {
+    ElMessage.warning('该历史版本混入模块发布配置，请分别提交生产配置和模块版本。');
+    return;
+  }
   if (isOwnVersion(version)) {
     ElMessage.warning('创建人不能审批自己的版本。');
     return;
@@ -715,8 +719,12 @@ function isOwnVersion(version) {
   return currentIds.length > 0 && creatorIds.some((value) => currentIds.some((current) => String(current) === String(value)));
 }
 function approvalDisabledReason(version) {
+  if (hasLegacyModuleData(version)) return '该历史版本混入模块发布配置，不能审批；请拆分后重新提交';
   if (isOwnVersion(version)) return '创建人不能审批自己的版本';
   return approvalAccess.value.allowed ? '审批该生产环境配置版本' : approvalAccess.value.reason;
+}
+function hasLegacyModuleData(version) {
+  return Boolean(version?.value && typeof version.value === 'object' && 'modules' in version.value);
 }
 function dateLabel(value) { return value ? String(value).replace('T', ' ').slice(0, 19) : '—'; }
 function modeLabel(value) { return ({ '': '关闭生产访问', 'approved-live-test': '批准的生产只读' }[value] || value || '—'); }
