@@ -145,7 +145,7 @@
       <div class="import-upload-box" role="button" tabindex="0" @click="bundleImportInput?.click()" @keydown.enter="bundleImportInput?.click()">
         <span class="import-upload-icon">⇧</span>
         <strong>{{ bundleImportFileName || '点击选择 CSV 文件' }}</strong>
-        <small>旧 SPU/SKU 编码、组合规格和图片URL均可选；组合规格按“维度编码=规格值”填写，多维用分号分隔</small>
+        <small>旧 SPU/SKU 编码、组合规格和图片URL均可选；单维规格可直接填写规格值，多维规格可用“维度编码=规格值”，各维用分号分隔</small>
       </div>
       <el-button data-testid="bundle-import-template" class="import-template-link" link type="primary" @click="downloadBundleImportTemplate">下载组合商品导入模板</el-button>
       <template #footer>
