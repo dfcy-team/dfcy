@@ -177,7 +177,8 @@ def product_cost_import_preview(request):
             total_count=result["total"],
             success_count=result["valid"],
             failed_count=len({item.get("row") for item in result["errors"] if item.get("row")}),
-            error_summary={"digest": result["digest"], "errors": result["errors"], "stage": "preview"},
+            error_summary={"digest": result["digest"], "errors": result["errors"],
+                           "source_headers": result["source_headers"], "error_rows": result["error_rows"], "stage": "preview"},
             created_by=request.user,
             finished_at=timezone.now(),
         )

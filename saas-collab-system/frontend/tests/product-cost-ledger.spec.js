@@ -96,7 +96,10 @@ describe('商品成本菜单与页面契约', () => {
     expect(page).toContain('正在解析并校验数据');
     expect(page).toContain('正在写入成本版本');
     expect(page).toContain('cost-error-export');
-    expect(page).toContain('导出完整异常明细');
+    expect(page).toContain('导出异常行及原始内容');
+    expect(page).toContain('buildCostImportErrorCsv(importPreview.value)');
+    expect(page).toContain('导入通过项');
+    expect(page).toContain('跳过 ${skipped} 行异常');
     expect(page).toContain('商品成本导入异常_');
     expect(page).toContain('error_batch_id');
     expect(page).toContain('prop="field" label="字段"');

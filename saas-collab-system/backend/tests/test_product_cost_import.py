@@ -100,6 +100,109 @@ def test_csv_preview_confirm_and_idempotent_replay():
 
 
 @pytest.mark.django_db
+def test_cost_import_confirms_only_valid_rows_and_preserves_invalid_source_content():
+    tenant, sku, user = make_context("partial")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    raw = (HEADERS
+           + f"{sku.sku_code},WH-CN,2026-07-01,2026-08-01,CNY,10,0,0,0,0,10,valid\n"
+           + "UNKNOWN-SKU,WH-CN,2026-07-01,2026-08-01,CNY,11,0,0,0,0,11,fix this row\n").encode()
+    client = client_for(user)
+    preview = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw)}, format="multipart")
+    assert preview.status_code == 200
+    detail = preview.json()["data"]
+    assert (detail["total"], detail["valid"]) == (2, 1)
+    assert detail["error_rows"] == [{"row": 3, "values": ["UNKNOWN-SKU", "WH-CN", "2026-07-01", "2026-08-01", "CNY", "11", "0", "0", "0", "0", "11", "fix this row"]}]
+    assert detail["source_headers"][0] == "sku_code"
+    preview_log = DataImportLog.objects.get(pk=detail["error_batch_id"])
+    assert preview_log.error_summary["error_rows"] == detail["error_rows"]
+    first = client.post("/api/internal/products/costs/import/confirm/",
+                        {"file": upload(raw), "token": detail["token"]}, format="multipart",
+                        HTTP_IDEMPOTENCY_KEY="partial-cost-0001")
+    assert first.status_code == 201
+    assert (first.json()["data"]["created"], first.json()["data"]["skipped"]) == (1, 1)
+    replay = client.post("/api/internal/products/costs/import/confirm/",
+                         {"file": upload(raw), "token": detail["token"]}, format="multipart",
+                         HTTP_IDEMPOTENCY_KEY="partial-cost-0001")
+    assert replay.status_code == 201 and replay.json()["data"] == first.json()["data"]
+    assert ProductCostVersion.objects.filter(tenant=tenant, source=ProductCostVersion.Source.IMPORT).count() == 1
+    log = DataImportLog.objects.get(tenant=tenant, import_type="product_cost")
+    assert (log.status, log.total_count, log.success_count, log.failed_count) == (DataImportLog.Status.PARTIAL_SUCCESS, 2, 1, 1)
+    assert log.error_summary["error_rows"] == detail["error_rows"]
+    assert log.error_summary["source_headers"] == detail["source_headers"]
+
+
+@pytest.mark.django_db
+def test_cost_import_rejects_confirmation_when_no_valid_rows():
+    tenant, _sku, user = make_context("partial-empty")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    raw = (HEADERS + "UNKNOWN-SKU,WH-CN,2026-07-01,,CNY,10,0,0,0,0,10,bad\n").encode()
+    client = client_for(user)
+    detail = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw)}, format="multipart").json()["data"]
+    assert detail["valid"] == 0
+    result = client.post("/api/internal/products/costs/import/confirm/",
+                         {"file": upload(raw), "token": detail["token"]}, format="multipart",
+                         HTTP_IDEMPOTENCY_KEY="partial-empty-0001")
+    assert result.status_code == 400
+    assert ProductCostVersion.objects.filter(tenant=tenant).count() == 0
+
+
+@pytest.mark.django_db
+def test_cost_import_requires_new_preview_if_valid_row_plan_changes():
+    tenant, sku, user = make_context("partial-stale")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    raw = (HEADERS + f"{sku.sku_code},WH-CN,2026-07-01,2026-08-01,CNY,10,0,0,0,0,10,stale\n").encode()
+    client = client_for(user)
+    detail = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw)}, format="multipart").json()["data"]
+    append_cost_version(
+        tenant=tenant, sku=sku, warehouse=WarehouseMaster.objects.get(tenant=tenant, code="WH-CN"),
+        actor=user, status="confirmed", source="manual", currency="CNY",
+        purchase_cost=10, freight_cost=0, duty_cost=0, packaging_cost=0, other_cost=0,
+        system_cost=None, confirmed_cost=10,
+        effective_from=timezone.make_aware(datetime(2026, 7, 1)),
+        effective_to=timezone.make_aware(datetime(2026, 8, 1)), reason="competing change",
+    )
+    result = client.post("/api/internal/products/costs/import/confirm/",
+                         {"file": upload(raw), "token": detail["token"]}, format="multipart",
+                         HTTP_IDEMPOTENCY_KEY="partial-stale-0001")
+    assert result.status_code == 400
+    assert "preview" in str(result.json()).lower()
+    assert ProductCostVersion.objects.filter(tenant=tenant, source=ProductCostVersion.Source.IMPORT).count() == 0
+
+
+@pytest.mark.django_db
+def test_cost_import_excludes_parsed_rows_rejected_for_batch_overlap():
+    tenant, sku, user = make_context("partial-overlap")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    raw = (HEADERS
+           + f"{sku.sku_code},WH-CN,2026-07-01,2026-08-01,CNY,10,0,0,0,0,10,first\n"
+           + f"{sku.sku_code},WH-CN,2026-07-15,2026-08-15,CNY,11,0,0,0,0,11,overlap\n").encode()
+    client = client_for(user)
+    detail = client.post("/api/internal/products/costs/import/preview/", {"file": upload(raw)}, format="multipart").json()["data"]
+    assert (detail["total"], detail["valid"]) == (2, 1)
+    assert any(error["row"] == 3 and "Overlaps import row 2" in error["message"] for error in detail["errors"])
+    result = client.post("/api/internal/products/costs/import/confirm/",
+                         {"file": upload(raw), "token": detail["token"]}, format="multipart",
+                         HTTP_IDEMPOTENCY_KEY="partial-overlap-0001")
+    assert result.status_code == 201
+    assert (result.json()["data"]["created"], result.json()["data"]["skipped"]) == (1, 1)
+    assert ProductCostVersion.objects.get(tenant=tenant, sku=sku).confirmed_cost == Decimal("10.0000")
+
+
+@pytest.mark.django_db
+def test_xlsx_preview_returns_invalid_row_content_for_export():
+    _tenant, _sku, user = make_context("partial-xlsx")
+    grant(user, "products.cost.backfill")
+    source = ["UNKNOWN-XLSX", "WH-CN", "2026-07-01", "2026-08-01", "CNY", "10", "0", "0", "0", "0", "10", "fix xlsx"]
+    raw = xlsx_file([HEADERS.strip().split(","), source])
+    response = client_for(user).post("/api/internal/products/costs/import/preview/",
+                                     {"file": upload(raw, "costs.xlsx")}, format="multipart")
+    assert response.status_code == 200
+    detail = response.json()["data"]
+    assert detail["valid"] == 0
+    assert detail["error_rows"] == [{"row": 2, "values": source}]
+
+
+@pytest.mark.django_db
 def test_downloadable_chinese_csv_template_headers_are_accepted():
     _, sku, user = make_context("zh-template")
     grant(user, "products.cost.backfill")

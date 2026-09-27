@@ -2,6 +2,7 @@
 import csv
 import hashlib
 import io
+import json
 import re
 import zipfile
 from datetime import datetime, timedelta
@@ -195,7 +196,8 @@ def parse_and_validate(*, tenant, raw, filename=""):
     parsed = []
     if not rows:
         errors.append({"row": 1, "field": "file", "message": "The import file is empty."})
-        return parsed, errors, digest
+        return parsed, errors, digest, [], []
+    source_headers = [str(value or "") for value in rows[0]]
     headers = []
     for value in rows[0]:
         label = str(value or "").strip().lstrip("*").strip()
@@ -205,7 +207,7 @@ def parse_and_validate(*, tenant, raw, filename=""):
         missing.insert(0, "sku_code or legacy_sku_code")
     if missing:
         errors.append({"row": 1, "field": "headers", "message": "Missing columns: %s." % ", ".join(missing)})
-        return parsed, errors, digest
+        return parsed, errors, digest, source_headers, []
     index = {field: headers.index(field) for field in EXPECTED_COLUMNS}
     for optional_identifier in ("sku_code", "legacy_sku_code"):
         if optional_identifier in headers:
@@ -297,14 +299,27 @@ def parse_and_validate(*, tenant, raw, filename=""):
             closable = [version for version in overlaps if position == 0 and version.effective_to is None and version.effective_from < item["effective_from"]]
             if len(overlaps) != len(closable) or len(closable) > 1:
                 errors.append({"row": item["row"], "field": "effective_from", "message": "Cost interval overlaps an existing version."})
-    return parsed, errors, digest
+    invalid_rows = {item["row"] for item in errors if isinstance(item.get("row"), int) and item["row"] > 1}
+    error_rows = [
+        {"row": number, "values": [str(value or "") for value in values]}
+        for number, values in enumerate(rows[1:], start=2) if number in invalid_rows
+    ]
+    return parsed, errors, digest, source_headers, error_rows
+
+
+def _validation_plan(rows, errors):
+    invalid_rows = {item["row"] for item in errors if isinstance(item.get("row"), int) and item["row"] > 1}
+    valid_rows = sorted(item["row"] for item in rows if item["row"] not in invalid_rows)
+    canonical = json.dumps({"valid_rows": valid_rows, "errors": errors}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return valid_rows, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def preview_cost_import(*, tenant, raw, filename=""):
     try:
-        rows, errors, digest = parse_and_validate(tenant=tenant, raw=raw, filename=filename)
+        rows, errors, digest, source_headers, error_rows = parse_and_validate(tenant=tenant, raw=raw, filename=filename)
     except ValidationError as exc:
         rows, digest = [], hashlib.sha256(raw).hexdigest()
+        source_headers, error_rows = [], []
         detail = exc.detail if isinstance(exc.detail, dict) else {"file": exc.detail}
         errors = [
             {"row": 1, "field": field, "message": str(message)}
@@ -313,11 +328,14 @@ def preview_cost_import(*, tenant, raw, filename=""):
         ]
     invalid_rows = {item["row"] for item in errors if isinstance(item.get("row"), int) and item["row"] > 1}
     total = len({item["row"] for item in rows}.union(invalid_rows))
-    payload = {"tenant_id": tenant.pk, "digest": digest, "valid": not errors}
+    valid_rows, plan_digest = _validation_plan(rows, errors)
+    payload = {"tenant_id": tenant.pk, "digest": digest, "plan_digest": plan_digest}
     return {
         "total": total,
-        "valid": len({item["row"] for item in rows} - invalid_rows),
+        "valid": len(valid_rows),
         "errors": errors,
+        "source_headers": source_headers,
+        "error_rows": error_rows,
         "digest": digest,
         "token": signing.dumps(payload, salt=TOKEN_SALT, compress=True),
     }
@@ -332,7 +350,7 @@ def confirm_cost_import(*, tenant, actor, raw, filename, token, idempotency_key)
         token_data = signing.loads(token, salt=TOKEN_SALT, max_age=3600)
     except signing.BadSignature as exc:
         raise ValidationError({"token": "The preview token is invalid or expired."}) from exc
-    rows, errors, digest = parse_and_validate(tenant=tenant, raw=raw, filename=filename)
+    rows, errors, digest, source_headers, error_rows = parse_and_validate(tenant=tenant, raw=raw, filename=filename)
     if token_data.get("tenant_id") != tenant.pk or token_data.get("digest") != digest:
         raise ValidationError({"file": "The file does not match the preview token."})
     # The tenant row serializes competing imports and makes the audit log a
@@ -347,11 +365,15 @@ def confirm_cost_import(*, tenant, actor, raw, filename, token, idempotency_key)
             raise ValidationError({"Idempotency-Key": "This key was already used with a different file."})
         return detail["result"]
 
-    if errors or not token_data.get("valid"):
-        raise ValidationError({"errors": errors or [{"message": "The preview contained errors."}]})
+    valid_rows, plan_digest = _validation_plan(rows, errors)
+    if token_data.get("plan_digest") != plan_digest:
+        raise ValidationError({"token": "The validation result changed; preview the file again."})
+    if not valid_rows:
+        raise ValidationError({"errors": errors or [{"message": "No valid rows are available for import."}]})
 
     created = []
-    for item in sorted(rows, key=lambda value: (value["sku"].pk, value["warehouse"].pk, value["effective_from"])):
+    valid_row_set = set(valid_rows)
+    for item in sorted((item for item in rows if item["row"] in valid_row_set), key=lambda value: (value["sku"].pk, value["warehouse"].pk, value["effective_from"])):
         version = append_cost_version(
             tenant=tenant, sku=item["sku"], warehouse=item["warehouse"], actor=actor,
             status=ProductCostVersion.Status.CONFIRMED, source=ProductCostVersion.Source.IMPORT,
@@ -361,10 +383,14 @@ def confirm_cost_import(*, tenant, actor, raw, filename, token, idempotency_key)
             effective_to=item["effective_to"], reason=item["reason"],
         )
         created.append({"id": version.pk, "sku_code": item["sku_code"], "warehouse_code": item["warehouse_code"], "version_no": version.version_no})
-    result = {"created": len(created), "versions": created, "digest": digest, "replayed": False}
+    failed_count = len({item["row"] for item in errors if isinstance(item.get("row"), int) and item["row"] > 1})
+    total_count = len(valid_rows) + failed_count
+    result = {"created": len(created), "skipped": failed_count, "versions": created, "digest": digest, "replayed": False}
     DataImportLog.objects.create(
-        tenant=tenant, import_type="product_cost", file_name=filename[:255], status=DataImportLog.Status.SUCCESS,
-        total_count=len(rows), success_count=len(rows), failed_count=0, created_by=actor,
-        error_summary={"idempotency_key_hash": key_hash, "digest": digest, "result": result},
+        tenant=tenant, import_type="product_cost", file_name=filename[:255],
+        status=DataImportLog.Status.PARTIAL_SUCCESS if failed_count else DataImportLog.Status.SUCCESS,
+        total_count=total_count, success_count=len(created), failed_count=failed_count, created_by=actor,
+        error_summary={"idempotency_key_hash": key_hash, "digest": digest, "result": result,
+                       "errors": errors, "source_headers": source_headers, "error_rows": error_rows},
     )
     return result
