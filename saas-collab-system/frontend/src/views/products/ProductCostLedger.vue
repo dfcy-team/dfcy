@@ -184,9 +184,9 @@
       </div>
       <div v-if="importPreview" class="import-preview" data-testid="cost-import-preview">
         <strong>预检结果：{{ importPreview.valid }} / {{ importPreview.total }} 行可导入</strong>
-        <span>异常 {{ importPreview.errors?.length || 0 }} 项。只有零错误才可确认入账。</span>
+        <span>异常 {{ importPreview.error_rows?.length || importPreview.errors?.length || 0 }} 行不会导入；可先导入通过预检的 {{ importPreview.valid }} 行。</span>
         <span v-if="importPreview.error_batch_id">异常批次：{{ importPreview.error_batch_id }}（已记录）</span>
-        <el-button v-if="importPreview.errors?.length" plain type="danger" data-testid="cost-error-export" @click="exportImportErrors">导出完整异常明细</el-button>
+        <el-button v-if="importPreview.errors?.length" plain type="danger" data-testid="cost-error-export" @click="exportImportErrors">导出异常行及原始内容</el-button>
         <el-table v-if="importPreview.errors?.length" :data="importPreview.errors.slice(0, 20)" size="small" border>
           <el-table-column prop="row" label="行" width="70" />
           <el-table-column prop="field" label="字段" width="160" />
@@ -196,7 +196,7 @@
       <template #footer>
         <el-button @click="importVisible = false">取消</el-button>
         <el-button :disabled="!importFile" :loading="importing" @click="previewImport">校验预览</el-button>
-        <el-button type="primary" :disabled="!importPreview || importPreview.errors?.length || !importPreview.valid" :loading="importing" @click="confirmImport">确认导入</el-button>
+        <el-button type="primary" :disabled="!importPreview?.valid || importConfirmed" :loading="importing" @click="confirmImport">{{ importPreview?.errors?.length ? `导入通过项（${importPreview.valid} 行）` : '确认导入' }}</el-button>
       </template>
     </el-dialog>
   </section>
@@ -206,6 +206,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
+import { buildCostImportErrorCsv } from '../../utils/costImportErrors';
 import { confirmProductCostImport, confirmProductCostVersion, createProductCostVersion, executeProductCostBackfill, fetchCostWarehouses, fetchProductCosts, previewProductCostBackfill, previewProductCostImport } from '../../api/productCosts';
 
 const auth = useAuthStore();
@@ -232,6 +233,7 @@ const preview = ref(null);
 const importVisible = ref(false);
 const importFile = ref(null);
 const importPreview = ref(null);
+const importConfirmed = ref(false);
 const importing = ref(false);
 const importProgress = ref(0);
 const importStage = ref('');
@@ -319,8 +321,8 @@ function downloadImportTemplate() {
   anchor.remove();
   URL.revokeObjectURL(url);
 }
-function selectImportFile(uploadFile) { importFile.value = uploadFile.raw; importPreview.value = null; importProgress.value = 0; importStage.value = ''; }
-function resetImportFile() { importFile.value = null; importPreview.value = null; importProgress.value = 0; importStage.value = ''; }
+function selectImportFile(uploadFile) { importFile.value = uploadFile.raw; importPreview.value = null; importConfirmed.value = false; importProgress.value = 0; importStage.value = ''; }
+function resetImportFile() { importFile.value = null; importPreview.value = null; importConfirmed.value = false; importProgress.value = 0; importStage.value = ''; }
 function resetImport() { resetImportFile(); importing.value = false; }
 function updateImportUploadProgress(event, uploadStage, processingStage) {
   if (!event.total) return;
@@ -334,9 +336,7 @@ function updateImportUploadProgress(event, uploadStage, processingStage) {
   importProgress.value = Math.max(5, Math.round(ratio * 45));
 }
 function exportImportErrors() {
-  const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
-  const rows = [['异常批次', '行号', '字段', '错误原因'], ...(importPreview.value?.errors || []).map((item) => [importPreview.value.error_batch_id || '', item.row || '', item.field || item.code || '', item.message || ''])];
-  const blob = new Blob([`\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\r\n')}\r\n`], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([buildCostImportErrorCsv(importPreview.value)], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -364,21 +364,29 @@ async function previewImport() {
   }
   importPreview.value = response.data;
   importProgress.value = 100;
-  importStage.value = response.data?.errors?.length ? '预检完成，请处理异常' : '预检完成，可确认导入';
+  importStage.value = response.data?.errors?.length
+    ? (response.data?.valid ? '预检完成，可先导入通过项' : '预检完成，请处理异常')
+    : '预检完成，可确认导入';
 }
 async function confirmImport() {
-  if (!importFile.value || !importPreview.value || importPreview.value.errors?.length) return;
+  if (!importFile.value || !importPreview.value?.valid || importConfirmed.value) return;
   importing.value = true;
   importProgress.value = 5;
   importStage.value = '正在上传确认批次';
   const key = globalThis.crypto?.randomUUID?.() || `cost-import-${Date.now()}`;
   const response = await confirmProductCostImport(importFile.value, importPreview.value.token, key, (event) => updateImportUploadProgress(event, '正在上传确认批次', '正在写入成本版本'));
   importing.value = false;
-  if (!response.success) { importStage.value = '导入失败'; return ElMessage.error(response.message || '成本导入失败'); }
+  if (!response.success) {
+    importStage.value = '导入失败';
+    const tokenError = response.data?.token;
+    return ElMessage.error((Array.isArray(tokenError) ? tokenError[0] : tokenError) || response.message || '成本导入失败，请重新预检');
+  }
   importProgress.value = 100;
-  importStage.value = '导入完成';
-  ElMessage.success(`已导入 ${response.data?.created || 0} 个成本版本`);
-  importVisible.value = false;
+  importConfirmed.value = true;
+  const skipped = response.data?.skipped || 0;
+  importStage.value = skipped ? '通过项已导入，异常行未导入' : '导入完成';
+  ElMessage.success(`已导入 ${response.data?.created || 0} 个成本版本${skipped ? `，跳过 ${skipped} 行异常；请导出异常行修正后重传` : ''}`);
+  if (!skipped) importVisible.value = false;
   await load();
 }
 async function previewBackfill() {
