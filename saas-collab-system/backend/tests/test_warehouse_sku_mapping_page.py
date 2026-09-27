@@ -38,6 +38,27 @@ def test_list_is_readonly_and_latest_per_warehouse(inventory_link):
     assert IntegrationAuditLog.objects.count() == before
 
 
+def test_list_returns_total_with_page_and_only_visible_warehouse_options(inventory_link):
+    tenant, warehouse, _, _, ingest, history = inventory_link
+    history('OLD-SKU', at=NOW - timedelta(days=1))
+    latest = ingest('OLD-SKU')
+    another = ingest('UNKNOWN')
+    client = viewer(tenant)
+
+    first = client.get(URL, {'page': 1, 'page_size': 1}).json()['data']
+    second = client.get(URL, {'page': 2, 'page_size': 1}).json()['data']
+    assert first['count'] == second['count'] == 2
+    assert {first['results'][0]['id'], second['results'][0]['id']} == {latest.id, another.id}
+    assert first['next'] and 'page=2' in first['next'] and first['previous'] is None
+    assert second['next'] is None and second['previous'] and 'page=1' in second['previous']
+    assert first['warehouse_options'] == [{'value': warehouse.id, 'label': f'{warehouse.name}（{warehouse.code}）'}]
+    assert client.get(URL, {'page': 3, 'page_size': 1}).status_code == 404
+
+    hidden = viewer(tenant, scope={'warehouse_ids': [warehouse.id + 100]}).get(URL).json()['data']
+    assert hidden['count'] == 0
+    assert hidden['warehouse_options'] == []
+
+
 def test_export_uses_current_filters_and_chinese_headers(inventory_link):
     tenant, _, _, _, ingest, _ = inventory_link
     ingest('OLD-SKU')

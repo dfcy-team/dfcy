@@ -3,18 +3,19 @@ import csv
 from datetime import timezone as datetime_timezone
 
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Count, Exists, F, OuterRef, Q, Subquery, Window
+from django.db.models.functions import RowNumber
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 
 from apps.commerce.inventory_sku_mapping import resolve_inventory_sku
 from apps.commerce.models import InventorySnapshot
 from apps.common.query import pagination_query
-from apps.common.responses import paginated_data, success_response
+from apps.common.responses import success_response
 from apps.integrations.models import IntegrationAuditLog
 from apps.masterdata.models import WarehouseMaster
 from apps.permissions.ui_p6_scopes import (
@@ -85,9 +86,14 @@ class WarehouseRowSerializer(serializers.ModelSerializer):
 
 def _filtered_rows(user, params):
     rows = _scoped(user, VIEW)
-    latest = _facts(user).filter(warehouse_id=OuterRef('warehouse_id'),
-        site_code=OuterRef('site_code'), source_sku=OuterRef('source_sku')).order_by('-snapshot_at_utc', '-id')
-    rows = rows.filter(pk=Subquery(latest.values('pk')[:1]))
+    # Rank the eligible facts once. The old correlated latest-row subquery was
+    # re-evaluated for every historical snapshot, making counts and pages slow.
+    latest_ids = _facts(user).annotate(_latest_rank=Window(
+        expression=RowNumber(),
+        partition_by=[F('warehouse_id'), F('site_code'), F('source_sku')],
+        order_by=[F('snapshot_at_utc').desc(), F('id').desc()],
+    )).filter(_latest_rank=1).values('pk')
+    rows = rows.filter(pk__in=Subquery(latest_ids))
     warehouse = params.get('warehouse_id')
     if warehouse:
         if not str(warehouse).isdigit() or int(warehouse) <= 0:
@@ -105,6 +111,35 @@ def _filtered_rows(user, params):
     return rows.select_related('warehouse', 'internal_sku').order_by('warehouse_id', 'source_sku', 'id')
 
 
+def _warehouse_options(user):
+    visible_fact = _scoped(user, VIEW).filter(warehouse_id=OuterRef('pk'))
+    return WarehouseMaster.objects.filter(tenant=user.tenant).alias(
+        _has_visible_fact=Exists(visible_fact),
+    ).filter(_has_visible_fact=True).order_by('code', 'id').values('id', 'name', 'code')
+
+
+def _page_data(request, rows, page, size):
+    # A window count travels with the requested rows, avoiding a second scan
+    # of all historical inventory snapshots for Paginator.count.
+    page_rows = list(rows.annotate(_result_count=Window(expression=Count('pk')))[(page - 1) * size:page * size])
+    if not page_rows and page > 1:
+        raise NotFound('Requested page does not exist.')
+    total = page_rows[0]._result_count if page_rows else 0
+
+    def page_url(target):
+        params = request.query_params.copy()
+        params['page'] = target
+        params['page_size'] = size
+        return request.build_absolute_uri(f'{request.path}?{params.urlencode()}')
+
+    return {
+        'count': total,
+        'next': page_url(page + 1) if page * size < total else None,
+        'previous': page_url(page - 1) if page > 1 else None,
+        'results': WarehouseRowSerializer(page_rows, many=True).data,
+    }
+
+
 def _csv_text(value):
     text = '' if value is None else str(value)
     return "'" + text if text.startswith(('=', '+', '-', '@')) else text
@@ -113,13 +148,11 @@ def _csv_text(value):
 @api_view(['GET'])
 @permission_classes([permission_class(VIEW)])
 def warehouse_skus(request):
-    rows = _scoped(request.user, VIEW)
-    options = list(rows.order_by('warehouse__code').values('warehouse_id', 'warehouse__name', 'warehouse__code').distinct())
+    options = list(_warehouse_options(request.user))
     rows = _filtered_rows(request.user, request.query_params)
     page, size = pagination_query(request)
-    data = paginated_data(request, rows,
-                          WarehouseRowSerializer, page=page, page_size=size)
-    data['warehouse_options'] = [{'value': row['warehouse_id'], 'label': f"{row['warehouse__name']}（{row['warehouse__code']}）"} for row in options]
+    data = _page_data(request, rows, page, size)
+    data['warehouse_options'] = [{'value': row['id'], 'label': f"{row['name']}（{row['code']}）"} for row in options]
     return success_response(data)
 
 
