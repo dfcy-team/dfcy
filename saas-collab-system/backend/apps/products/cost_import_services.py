@@ -11,7 +11,6 @@ from xml.etree import ElementTree
 
 from django.core import signing
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -19,7 +18,6 @@ from apps.audit.models import DataImportLog
 from apps.masterdata.models import WarehouseMaster, StatusChoices
 from apps.tenants.models import Tenant
 
-from .cost_services import append_cost_version
 from .models import ProductCostVersion, ProductSKU
 
 
@@ -189,6 +187,20 @@ def _overlaps(left_start, left_end, right_start, right_end):
     return (left_end is None or left_end > right_start) and (right_end is None or right_end > left_start)
 
 
+def _casefold_index(items, field):
+    matches, ambiguous = {}, set()
+    for item in items:
+        code = str(getattr(item, field) or "").strip()
+        if not code:
+            continue
+        folded = code.casefold()
+        if folded in matches and matches[folded].pk != item.pk:
+            ambiguous.add(folded)
+        else:
+            matches[folded] = item
+    return matches, ambiguous
+
+
 def parse_and_validate(*, tenant, raw, filename=""):
     digest = hashlib.sha256(raw).hexdigest()
     rows = _tabular_rows(raw, filename)
@@ -215,6 +227,7 @@ def parse_and_validate(*, tenant, raw, filename=""):
     tenant_skus = list(ProductSKU.objects.filter(tenant=tenant))
     warehouse_map = {item.code: item for item in WarehouseMaster.objects.filter(tenant=tenant, status=StatusChoices.ACTIVE)}
     sku_map = {item.sku_code: item for item in tenant_skus}
+    folded_sku_map, ambiguous_sku_codes = _casefold_index(tenant_skus, "sku_code")
     legacy_sku_map = {}
     duplicate_legacy_codes = set()
     for item in tenant_skus:
@@ -225,6 +238,7 @@ def parse_and_validate(*, tenant, raw, filename=""):
             duplicate_legacy_codes.add(legacy_code)
         else:
             legacy_sku_map[legacy_code] = item
+    folded_legacy_map, ambiguous_legacy_codes = _casefold_index(tenant_skus, "legacy_sku_code")
     for number, values in enumerate(rows[1:], start=2):
         if not any(str(value or "").strip() for value in values):
             continue
@@ -236,13 +250,16 @@ def parse_and_validate(*, tenant, raw, filename=""):
             row_errors.append(("warehouse_code", "Warehouse code is missing, inactive, or outside this tenant."))
         sku_code = str(record.get("sku_code") or "").strip()
         legacy_sku_code = str(record.get("legacy_sku_code") or "").strip()
-        current_match = sku_map.get(sku_code) if sku_code else None
-        legacy_match = legacy_sku_map.get(legacy_sku_code) if legacy_sku_code else None
+        current_match = (sku_map.get(sku_code) or folded_sku_map.get(sku_code.casefold())) if sku_code else None
+        legacy_match = (legacy_sku_map.get(legacy_sku_code) or folded_legacy_map.get(legacy_sku_code.casefold())) if legacy_sku_code else None
         if not sku_code and not legacy_sku_code:
             row_errors.append(("sku_code", "SKU编码和旧SKU编码至少填写一项。"))
-        if sku_code and not current_match:
+        if sku_code and sku_code not in sku_map and sku_code.casefold() in ambiguous_sku_codes:
+            row_errors.append(("sku_code", "SKU编码仅大小写不同的记录不唯一，请填写系统中的精确编码。"))
+            current_match = None
+        elif sku_code and not current_match:
             row_errors.append(("sku_code", "SKU does not exist in the current tenant."))
-        if legacy_sku_code in duplicate_legacy_codes:
+        if legacy_sku_code in duplicate_legacy_codes or (legacy_sku_code not in legacy_sku_map and legacy_sku_code.casefold() in ambiguous_legacy_codes):
             row_errors.append(("legacy_sku_code", "旧SKU编码对应多个SKU，无法唯一识别。"))
             legacy_match = None
         elif legacy_sku_code and not legacy_match:
@@ -292,8 +309,16 @@ def parse_and_validate(*, tenant, raw, filename=""):
 
     # Match append_cost_version semantics: one preceding open interval may be
     # closed at the first imported boundary; every other database overlap is a conflict.
+    existing_by_key = {}
+    if by_sku:
+        sku_ids = {imports[0]["sku"].pk for imports in by_sku.values()}
+        warehouse_ids = {imports[0]["warehouse"].pk for imports in by_sku.values()}
+        for version in ProductCostVersion.objects.filter(
+            tenant=tenant, sku_id__in=sku_ids, warehouse_id__in=warehouse_ids,
+        ).only("sku_id", "warehouse_id", "effective_from", "effective_to"):
+            existing_by_key.setdefault((version.sku_id, version.warehouse_id), []).append(version)
     for _key, imports in by_sku.items():
-        existing = list(ProductCostVersion.objects.filter(tenant=tenant, sku=imports[0]["sku"], warehouse=imports[0]["warehouse"]))
+        existing = existing_by_key.get((imports[0]["sku"].pk, imports[0]["warehouse"].pk), [])
         for position, item in enumerate(sorted(imports, key=lambda value: value["effective_from"])):
             overlaps = [version for version in existing if _overlaps(item["effective_from"], item["effective_to"], version.effective_from, version.effective_to)]
             closable = [version for version in overlaps if position == 0 and version.effective_to is None and version.effective_from < item["effective_from"]]
@@ -371,18 +396,67 @@ def confirm_cost_import(*, tenant, actor, raw, filename, token, idempotency_key)
     if not valid_rows:
         raise ValidationError({"errors": errors or [{"message": "No valid rows are available for import."}]})
 
-    created = []
     valid_row_set = set(valid_rows)
-    for item in sorted((item for item in rows if item["row"] in valid_row_set), key=lambda value: (value["sku"].pk, value["warehouse"].pk, value["effective_from"])):
-        version = append_cost_version(
-            tenant=tenant, sku=item["sku"], warehouse=item["warehouse"], actor=actor,
-            status=ProductCostVersion.Status.CONFIRMED, source=ProductCostVersion.Source.IMPORT,
-            currency=item["currency"], purchase_cost=item["purchase_cost"], freight_cost=item["freight_cost"],
-            duty_cost=item["duty_cost"], packaging_cost=item["packaging_cost"], other_cost=item["other_cost"],
-            system_cost=None, confirmed_cost=item["confirmed_cost"], effective_from=item["effective_from"],
-            effective_to=item["effective_to"], reason=item["reason"],
+    planned = sorted(
+        (item for item in rows if item["row"] in valid_row_set),
+        key=lambda value: (value["sku"].pk, value["warehouse"].pk, value["effective_from"]),
+    )
+    sku_ids = sorted({item["sku"].pk for item in planned})
+    # Lock in a stable order. Manual edits lock the same SKU rows, while the
+    # tenant lock above serializes competing imports for the idempotency key.
+    list(ProductSKU.objects.select_for_update().filter(tenant=tenant, pk__in=sku_ids).order_by("pk").values_list("pk", flat=True))
+    existing = list(ProductCostVersion.objects.filter(tenant=tenant, sku_id__in=sku_ids))
+    existing_by_key = {}
+    version_numbers = {}
+    for version in existing:
+        version_numbers[version.sku_id] = max(version_numbers.get(version.sku_id, 0), version.version_no)
+        if version.status == ProductCostVersion.Status.CONFIRMED:
+            existing_by_key.setdefault((version.sku_id, version.warehouse_id), []).append(version)
+    closing = {}
+    versions = []
+    for item in planned:
+        sku_id, warehouse_id = item["sku"].pk, item["warehouse"].pk
+        start, end = item["effective_from"], item["effective_to"]
+        overlaps = [version for version in existing_by_key.get((sku_id, warehouse_id), [])
+                    if _overlaps(start, end, version.effective_from, version.effective_to)]
+        closable = [version for version in overlaps if version.effective_to is None and version.effective_from < start]
+        if len(overlaps) != len(closable) or len(closable) > 1:
+            raise ValidationError({"effective_from": "Cost effective interval changed; preview the file again."})
+        if closable:
+            closable[0].effective_to = start
+            closing[closable[0].pk] = closable[0]
+        version_numbers[sku_id] = version_numbers.get(sku_id, 0) + 1
+        version = ProductCostVersion(
+            tenant=tenant, sku=item["sku"], warehouse=item["warehouse"], created_by=actor,
+            version_no=version_numbers[sku_id], status=ProductCostVersion.Status.CONFIRMED,
+            source=ProductCostVersion.Source.IMPORT, currency=item["currency"],
+            purchase_cost=item["purchase_cost"], freight_cost=item["freight_cost"],
+            duty_cost=item["duty_cost"], packaging_cost=item["packaging_cost"],
+            other_cost=item["other_cost"], system_cost=None,
+            confirmed_cost=item["confirmed_cost"], effective_from=start,
+            effective_to=end, reason=item["reason"],
         )
-        created.append({"id": version.pk, "sku_code": item["sku_code"], "warehouse_code": item["warehouse_code"], "version_no": version.version_no})
+        versions.append((item, version))
+    if closing:
+        ProductCostVersion.objects.bulk_update(list(closing.values()), ["effective_to"], batch_size=500)
+    ProductCostVersion.objects.bulk_create([version for _, version in versions], batch_size=500)
+    # MySQL does not guarantee primary-key hydration after bulk_create.
+    # Resolve the imported SKU/version pairs inside the same transaction so
+    # the response and idempotency ledger contain real, replayable IDs.
+    if any(version.pk is None for _, version in versions):
+        inserted_ids = {
+            (sku_id, version_no): pk
+            for sku_id, version_no, pk in ProductCostVersion.objects.filter(
+                tenant=tenant, sku_id__in=sku_ids, source=ProductCostVersion.Source.IMPORT,
+            ).values_list("sku_id", "version_no", "pk")
+        }
+        for _, version in versions:
+            version.pk = inserted_ids[(version.sku_id, version.version_no)]
+    created = [
+        {"id": version.pk, "sku_code": item["sku_code"],
+         "warehouse_code": item["warehouse_code"], "version_no": version.version_no}
+        for item, version in versions
+    ]
     failed_count = len({item["row"] for item in errors if isinstance(item.get("row"), int) and item["row"] > 1})
     total_count = len(valid_rows) + failed_count
     result = {"created": len(created), "skipped": failed_count, "versions": created, "digest": digest, "replayed": False}

@@ -4,7 +4,10 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from django.db import connection
+from django.db.models.query import QuerySet
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -100,6 +103,31 @@ def test_csv_preview_confirm_and_idempotent_replay():
 
 
 @pytest.mark.django_db
+def test_cost_import_returns_real_version_ids_when_bulk_insert_does_not_hydrate_pks(monkeypatch):
+    tenant, sku, user = make_context("mysql-pks")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    original = QuerySet.bulk_create
+
+    def simulate_mysql_bulk_create(queryset, objects, **kwargs):
+        result = original(queryset, objects, **kwargs)
+        if queryset.model is ProductCostVersion:
+            for obj in objects:
+                obj.pk = None
+        return result
+
+    monkeypatch.setattr(QuerySet, "bulk_create", simulate_mysql_bulk_create)
+    client = client_for(user)
+    raw = csv_file(sku.sku_code)
+    detail = client.post("/api/internal/products/costs/import/preview/",
+                         {"file": upload(raw)}, format="multipart").json()["data"]
+    response = client.post("/api/internal/products/costs/import/confirm/",
+                           {"file": upload(raw), "token": detail["token"]}, format="multipart",
+                           HTTP_IDEMPOTENCY_KEY="mysql-pks-0001")
+    assert response.status_code == 201
+    assert response.json()["data"]["versions"][0]["id"] == ProductCostVersion.objects.get(tenant=tenant).pk
+
+
+@pytest.mark.django_db
 def test_cost_import_confirms_only_valid_rows_and_preserves_invalid_source_content():
     tenant, sku, user = make_context("partial")
     grant(user, "products.cost.backfill", "products.cost.approve")
@@ -129,6 +157,36 @@ def test_cost_import_confirms_only_valid_rows_and_preserves_invalid_source_conte
     assert (log.status, log.total_count, log.success_count, log.failed_count) == (DataImportLog.Status.PARTIAL_SUCCESS, 2, 1, 1)
     assert log.error_summary["error_rows"] == detail["error_rows"]
     assert log.error_summary["source_headers"] == detail["source_headers"]
+
+
+@pytest.mark.django_db
+def test_large_partial_cost_import_uses_bounded_database_queries():
+    tenant, sku, user = make_context("large-batch")
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    others = [ProductSKU(tenant=tenant, spu=sku.spu, sku_code=f"SKU-BATCH-{index}",
+                         product_name="Imported product") for index in range(3417)]
+    ProductSKU.objects.bulk_create(others)
+    codes = [sku.sku_code] + [item.sku_code for item in others]
+    raw = (HEADERS + "".join(
+        f"{code},WH-CN,2026-07-01,2026-08-01,CNY,10,0,0,0,0,10,batch\n"
+        for code in codes
+    ) + "UNKNOWN-SKU,WH-CN,2026-07-01,2026-08-01,CNY,10,0,0,0,0,10,invalid\n").encode()
+    client = client_for(user)
+    with CaptureQueriesContext(connection) as preview_queries:
+        detail = client.post("/api/internal/products/costs/import/preview/",
+                             {"file": upload(raw)}, format="multipart").json()["data"]
+    assert (detail["valid"], len(detail["errors"])) == (3418, 1)
+    assert len(preview_queries) < 40
+    with CaptureQueriesContext(connection) as confirm_queries:
+        response = client.post(
+            "/api/internal/products/costs/import/confirm/",
+            {"file": upload(raw), "token": detail["token"]}, format="multipart",
+            HTTP_IDEMPOTENCY_KEY="large-batch-0001",
+        )
+    assert response.status_code == 201
+    assert (response.json()["data"]["created"], response.json()["data"]["skipped"]) == (3418, 1)
+    assert len(confirm_queries) < 160
+    assert ProductCostVersion.objects.filter(tenant=tenant, source=ProductCostVersion.Source.IMPORT).count() == 3418
 
 
 @pytest.mark.django_db
@@ -234,6 +292,41 @@ def test_cost_import_accepts_legacy_sku_code_without_current_sku_code():
     assert response.status_code == 200
     assert response.json()["data"]["errors"] == []
     assert response.json()["data"]["valid"] == 1
+
+
+@pytest.mark.django_db
+def test_cost_import_matches_current_and_legacy_sku_without_case_sensitivity():
+    tenant, sku, user = make_context("casefold")
+    sku.sku_code = "HYYL164-black-P"
+    sku.legacy_sku_code = "OLD-HYYL164-black-P"
+    sku.save(update_fields=["sku_code", "legacy_sku_code"])
+    grant(user, "products.cost.backfill", "products.cost.approve")
+    header = HEADERS.replace("sku_code,", "sku_code,legacy_sku_code,", 1)
+    raw = (header + "HYYL164-Black-P,old-hyyl164-BLACK-p,WH-CN,2026-07-01,,CNY,10,0,0,0,0,10,casefold\n").encode()
+    client = client_for(user)
+    detail = client.post("/api/internal/products/costs/import/preview/",
+                         {"file": upload(raw)}, format="multipart").json()["data"]
+    assert detail["valid"] == 1 and not detail["errors"]
+    result = client.post("/api/internal/products/costs/import/confirm/",
+                         {"file": upload(raw), "token": detail["token"]}, format="multipart",
+                         HTTP_IDEMPOTENCY_KEY="casefold-0001")
+    assert result.status_code == 201
+    assert result.json()["data"]["versions"][0]["sku_code"] == sku.sku_code
+    assert ProductCostVersion.objects.get(tenant=tenant, source=ProductCostVersion.Source.IMPORT).sku_id == sku.pk
+
+
+@pytest.mark.django_db
+def test_case_insensitive_sku_match_rejects_ambiguous_variants():
+    tenant, sku, user = make_context("casefold-ambiguous")
+    sku.sku_code = "SKU-Blue"
+    sku.save(update_fields=["sku_code"])
+    ProductSKU.objects.create(tenant=tenant, spu=sku.spu, sku_code="SKU-BLUE", product_name="Other variant")
+    grant(user, "products.cost.backfill")
+    raw = (HEADERS + "sku-blue,WH-CN,2026-07-01,,CNY,10,0,0,0,0,10,ambiguous\n").encode()
+    detail = client_for(user).post("/api/internal/products/costs/import/preview/",
+                                   {"file": upload(raw)}, format="multipart").json()["data"]
+    assert detail["valid"] == 0
+    assert any(item["field"] == "sku_code" and "不唯一" in item["message"] for item in detail["errors"])
 
 
 @pytest.mark.django_db
