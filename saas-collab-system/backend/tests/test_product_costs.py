@@ -147,6 +147,29 @@ def test_cost_api_is_tenant_isolated_and_requires_view_permission():
 
 
 @pytest.mark.django_db
+def test_cost_list_searches_current_and_legacy_sku_and_spu_codes():
+    tenant = Tenant.objects.create(name="Search tenant", code="cost-search")
+    user = make_user(tenant, "search")
+    grant(user, "products.cost.view")
+    sku = make_sku(tenant, "MATCH")
+    sku.legacy_sku_code = "OLD-SKU-MATCH"
+    sku.save(update_fields=["legacy_sku_code"])
+    sku.spu.legacy_spu_code = "OLD-SPU-MATCH"
+    sku.spu.save(update_fields=["legacy_spu_code"])
+    own = append_cost_version(tenant=tenant, sku=sku, actor=user, **values(timezone.now(), None))
+    other = make_sku(tenant, "OTHER")
+    append_cost_version(tenant=tenant, sku=other, actor=user, **values(timezone.now(), None))
+    for term in (sku.sku_code, sku.legacy_sku_code, sku.spu.spu_code, sku.spu.legacy_spu_code):
+        response = client_for(user).get("/api/internal/products/costs/", {"search": term})
+        assert response.status_code == 200
+        assert [row["id"] for row in response.json()["data"]] == [own.id]
+        row = response.json()["data"][0]
+        assert (row["sku_code"], row["legacy_sku_code"], row["spu_code"], row["legacy_spu_code"]) == (
+            sku.sku_code, sku.legacy_sku_code, sku.spu.spu_code, sku.spu.legacy_spu_code,
+        )
+
+
+@pytest.mark.django_db
 def test_create_confirmed_version_requires_manage_and_approve():
     tenant = Tenant.objects.create(name="API tenant", code="cost-api")
     manager = make_user(tenant, "manager")

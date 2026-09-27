@@ -29,8 +29,8 @@
 
     <div class="content-panel">
       <el-form class="filters" inline @submit.prevent="applyFilters">
-        <el-form-item label="商品 / SKU">
-          <el-input v-model="filters.search" clearable placeholder="输入商品名称、SPU 或 SKU" @keyup.enter="applyFilters" />
+        <el-form-item label="商品 / 编码">
+          <el-input v-model="filters.search" clearable placeholder="商品名称、新旧 SKU 或新旧 SPU" @keyup.enter="applyFilters" />
         </el-form-item>
         <el-form-item label="核对状态">
           <el-select v-model="filters.status" clearable placeholder="全部状态">
@@ -50,10 +50,13 @@
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="visibleRows" row-key="id" border empty-text="暂无商品成本数据">
-        <el-table-column prop="sku_code" label="SKU" min-width="170" fixed="left">
+      <el-table v-loading="loading" :data="pageRows" row-key="id" border empty-text="暂无商品成本数据">
+        <el-table-column prop="sku_code" label="新 SKU" min-width="170" fixed="left">
           <template #default="{ row }"><code>{{ row.sku_code }}</code></template>
         </el-table-column>
+        <el-table-column prop="legacy_sku_code" label="旧 SKU" min-width="170" show-overflow-tooltip><template #default="{ row }"><code>{{ row.legacy_sku_code || '-' }}</code></template></el-table-column>
+        <el-table-column prop="spu_code" label="新 SPU" min-width="160" show-overflow-tooltip><template #default="{ row }"><code>{{ row.spu_code || '-' }}</code></template></el-table-column>
+        <el-table-column prop="legacy_spu_code" label="旧 SPU" min-width="160" show-overflow-tooltip><template #default="{ row }"><code>{{ row.legacy_spu_code || '-' }}</code></template></el-table-column>
         <el-table-column prop="product_name" label="商品名称" min-width="210" show-overflow-tooltip />
         <el-table-column label="仓库 / 所在国家" min-width="180"><template #default="{ row }">{{ row.warehouse_name || row.warehouse_code || '未归属仓库（历史）' }}<small v-if="row.warehouse_country_code"> · {{ row.warehouse_country_code }}</small></template></el-table-column>
         <el-table-column label="采购价格" min-width="110" align="right">
@@ -89,11 +92,13 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination v-if="visibleRows.length > pageSize" v-model:current-page="page" class="cost-pagination" background layout="prev, pager, next, total" :page-size="pageSize" :total="visibleRows.length" />
     </div>
 
     <el-drawer v-model="drawerVisible" :title="drawerReadonly ? '成本构成' : '维护商品成本'" size="480px">
       <div class="sku-heading">
         <code>{{ form.sku_code }}</code>
+        <small>旧 SKU：{{ form.legacy_sku_code || '-' }} · 新 SPU：{{ form.spu_code || '-' }} · 旧 SPU：{{ form.legacy_spu_code || '-' }}</small>
         <strong>{{ form.product_name }}</strong>
         <span>{{ form.warehouse_name || form.warehouse_code || '未归属仓库（历史）' }} · {{ form.warehouse_country_code || '-' }}</span>
       </div>
@@ -211,6 +216,8 @@ const loading = ref(false);
 const saving = ref(false);
 const previewing = ref(false);
 const rows = ref([]);
+const page = ref(1);
+const pageSize = 50;
 const warehouses = ref([]);
 const filters = reactive({ search: '', status: '', warehouse: '' });
 const applied = reactive({ search: '', status: '', warehouse: '' });
@@ -237,11 +244,10 @@ const statusMeta = {
   confirmed: { label: '已确认', type: 'success' }
 };
 
-const visibleRows = computed(() => rows.value.filter((row) => {
-  const term = applied.search.trim().toLowerCase();
-  const matchesSearch = !term || [row.sku_code, row.spu_code, row.product_name].some((value) => String(value || '').toLowerCase().includes(term));
-  return matchesSearch && (!applied.status || row.status === applied.status) && (!applied.warehouse || row.warehouse === applied.warehouse);
-}));
+const visibleRows = computed(() => rows.value.filter((row) =>
+  (!applied.status || row.status === applied.status) && (!applied.warehouse || row.warehouse === applied.warehouse)
+));
+const pageRows = computed(() => visibleRows.value.slice((page.value - 1) * pageSize, page.value * pageSize));
 const calculatedFormCost = computed(() => money(['purchase_price', 'freight_cost', 'duty_cost', 'packaging_cost', 'other_cost'].reduce((sum, key) => sum + number(form[key]), 0)));
 const changeAmount = computed(() => number(form.confirmed_cost) - number(form.original_confirmed_cost));
 const changeRate = computed(() => number(form.original_confirmed_cost) ? `${changeAmount.value >= 0 ? '+' : ''}${(changeAmount.value / number(form.original_confirmed_cost) * 100).toFixed(2)}%` : '首个成本版本');
@@ -256,7 +262,7 @@ const differenceClass = (row) => Math.abs(number(row.confirmed_cost) - number(ro
 
 async function load() {
   loading.value = true;
-  const [response, warehouseResponse] = await Promise.all([fetchProductCosts(), fetchCostWarehouses()]);
+  const [response, warehouseResponse] = await Promise.all([fetchProductCosts({ search: applied.search.trim() }), fetchCostWarehouses()]);
   loading.value = false;
   if (!response.success) return ElMessage.error(response.message || '商品成本加载失败');
   if (!warehouseResponse.success) ElMessage.error(warehouseResponse.message || '仓库档案加载失败，无法选择仓库');
@@ -265,7 +271,7 @@ async function load() {
   const grouped = new Map();
   versions.forEach((version) => {
     const key = `${version.sku}:${version.warehouse || 'legacy'}`;
-    const item = grouped.get(key) || { id: key, sku_id: version.sku, sku_code: version.sku_code, product_name: version.product_name, warehouse: version.warehouse, warehouse_code: version.warehouse_code, warehouse_name: version.warehouse_name, warehouse_country_code: version.warehouse_country_code, versions: [] };
+    const item = grouped.get(key) || { id: key, sku_id: version.sku, sku_code: version.sku_code, legacy_sku_code: version.legacy_sku_code, spu_code: version.spu_code, legacy_spu_code: version.legacy_spu_code, product_name: version.product_name, warehouse: version.warehouse, warehouse_code: version.warehouse_code, warehouse_name: version.warehouse_name, warehouse_country_code: version.warehouse_country_code, versions: [] };
     item.versions.push({ ...version, cost: version.confirmed_cost, source: version.source === 'manual' ? '人工维护' : '系统生成' });
     grouped.set(key, item);
   });
@@ -275,7 +281,7 @@ async function load() {
     return { ...item, ...current, id: item.id, version_id: current.id, purchase_price: current.purchase_cost, version_no: `V${current.version_no}`, effective_date: String(current.effective_from || '').slice(0, 10), versions: item.versions.map((version) => ({ ...version, version_no: `V${version.version_no}`, effective_from: String(version.effective_from || '').slice(0, 10), effective_to: version.effective_to ? String(version.effective_to).slice(0, 10) : null })) };
   });
 }
-function applyFilters() { Object.assign(applied, filters); }
+function applyFilters() { const searchChanged = applied.search.trim() !== filters.search.trim(); Object.assign(applied, filters); page.value = 1; if (searchChanged) load(); }
 function resetFilters() { Object.assign(filters, { search: '', status: '', warehouse: '' }); applyFilters(); }
 function openDrawer(row, readonly) { Object.assign(form, row, { reason: '', original_confirmed_cost: row.confirmed_cost }); drawerReadonly.value = readonly; drawerVisible.value = true; }
 function inspect(row) { openDrawer(row, true); }
@@ -404,4 +410,5 @@ onMounted(load);
 .change-preview{display:grid;grid-template-columns:1fr auto 1fr 1fr;align-items:center;gap:12px;padding:14px;margin-bottom:18px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}.change-preview div{display:flex;flex-direction:column;gap:4px}.change-preview span,.change-preview small{color:#64748b;font-size:12px}.change-preview strong{font-size:17px}.change-preview .change-arrow{color:#94a3b8;font-size:20px}.change-preview .change-result{padding-left:12px;border-left:1px solid #dbe3ee}
 .template-guide{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:16px 0 12px;padding:16px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff}.template-guide div,.import-tips{display:flex;flex-direction:column;gap:5px}.template-guide span,.import-tips span{color:#64748b;font-size:13px}.import-tips{margin-bottom:12px}.import-preview{display:flex;flex-direction:column;gap:10px;margin-top:16px;padding:14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff}.template-guide+ .import-tips+ :deep(.el-upload) small{display:block;margin-top:8px;color:#94a3b8}
 .import-progress{margin-top:14px}.import-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:#475569;font-size:13px}
+.cost-pagination{justify-content:flex-end;padding:14px 16px}
 </style>

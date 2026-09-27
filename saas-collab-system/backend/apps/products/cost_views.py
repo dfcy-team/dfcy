@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.decorators import api_view, permission_classes
@@ -25,7 +26,7 @@ from .serializers import ProductCostVersionSerializer
 @api_view(["GET"])
 @permission_classes([IsProductCostViewer])
 def product_cost_collection(request):
-    queryset = ProductCostVersion.objects.filter(tenant=request.user.tenant).select_related("sku", "warehouse", "created_by")
+    queryset = ProductCostVersion.objects.filter(tenant=request.user.tenant).select_related("sku__spu", "warehouse", "created_by")
     warehouse_id = request.query_params.get("warehouse_id")
     if warehouse_id:
         warehouse = get_object_or_404(WarehouseMaster, tenant=request.user.tenant, pk=warehouse_id)
@@ -33,6 +34,16 @@ def product_cost_collection(request):
     sku_id = request.query_params.get("sku_id")
     if sku_id:
         queryset = queryset.filter(sku_id=sku_id)
+    search = str(request.query_params.get("search") or "").strip()
+    if search:
+        queryset = queryset.filter(
+            Q(sku__sku_code__icontains=search)
+            | Q(sku__legacy_sku_code__icontains=search)
+            | Q(sku__spu__spu_code__icontains=search)
+            | Q(sku__spu__legacy_spu_code__icontains=search)
+            | Q(sku__product_name__icontains=search)
+            | Q(sku__spu__product_name__icontains=search)
+        )
     occurred_at = request.query_params.get("occurred_at")
     if occurred_at and sku_id:
         parsed = parse_datetime(occurred_at)
