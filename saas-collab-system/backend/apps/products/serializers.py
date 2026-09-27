@@ -35,6 +35,9 @@ from .category_metadata import category_metadata_from_spu
 
 class ProductCostVersionSerializer(serializers.ModelSerializer):
     sku_code = serializers.CharField(source="sku.sku_code", read_only=True)
+    legacy_sku_code = serializers.CharField(source="sku.legacy_sku_code", read_only=True)
+    spu_code = serializers.CharField(source="sku.spu.spu_code", read_only=True)
+    legacy_spu_code = serializers.CharField(source="sku.spu.legacy_spu_code", read_only=True)
     warehouse_code = serializers.CharField(source="warehouse.code", read_only=True, allow_null=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True, allow_null=True)
     warehouse_country_code = serializers.CharField(source="warehouse.country_code", read_only=True, allow_null=True)
@@ -44,7 +47,7 @@ class ProductCostVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductCostVersion
         fields = (
-            "id", "sku", "sku_code", "product_name", "warehouse", "warehouse_code", "warehouse_name", "warehouse_country_code",
+            "id", "sku", "sku_code", "legacy_sku_code", "spu_code", "legacy_spu_code", "product_name", "warehouse", "warehouse_code", "warehouse_name", "warehouse_country_code",
             "version_no", "status", "source", "currency",
             "purchase_cost", "freight_cost", "duty_cost", "packaging_cost", "other_cost",
             "system_cost", "confirmed_cost", "effective_from", "effective_to", "reason",

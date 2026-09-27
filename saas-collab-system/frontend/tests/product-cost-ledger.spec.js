@@ -10,6 +10,13 @@ const api = read('src/api/productCosts.js');
 const samplePage = read('src/views/influencers/SampleFulfillmentList.vue');
 
 describe('商品成本菜单与页面契约', () => {
+  it('显示新旧 SKU/SPU，服务端检索并分页渲染成本行', () => {
+    expect(page).toContain('商品名称、新旧 SKU 或新旧 SPU');
+    for (const field of ['legacy_sku_code', 'spu_code', 'legacy_spu_code']) expect(page).toContain(field);
+    expect(page).toContain('fetchProductCosts({ search: applied.search.trim() })');
+    expect(page).toContain(':data="pageRows"');
+    expect(page).toContain('<el-pagination');
+  });
   it('在基础档案中提供独立菜单和受控路由', () => {
     expect(menu).toContain("{ path: '/products/costs', label: '商品成本', permissions: ['products.cost.view'] }");
     expect(menu).toContain("{ path: '/products/costs', permissions: ['products.cost.view'], userTypes: ['internal'] }");
