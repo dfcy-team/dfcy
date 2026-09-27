@@ -4,6 +4,8 @@ from urllib.parse import quote
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -167,6 +169,67 @@ def test_cost_list_searches_current_and_legacy_sku_and_spu_codes():
         assert (row["sku_code"], row["legacy_sku_code"], row["spu_code"], row["legacy_spu_code"]) == (
             sku.sku_code, sku.legacy_sku_code, sku.spu.spu_code, sku.spu.legacy_spu_code,
         )
+
+
+@pytest.mark.django_db
+def test_current_cost_list_is_paginated_and_keeps_history_out_of_status_filter():
+    tenant = Tenant.objects.create(name="Paged costs", code="cost-paged")
+    user = make_user(tenant, "paged")
+    grant(user, "products.cost.view")
+    sku = make_sku(tenant, "PAGED")
+    other = make_sku(tenant, "PAGED-OTHER")
+    cn = make_warehouse(tenant, "CN")
+    us = make_warehouse(tenant, "US")
+    start = timezone.now()
+    historical = append_cost_version(
+        tenant=tenant, sku=sku, warehouse=cn, actor=user,
+        **values(start, start + timedelta(days=1)),
+    )
+    pending = append_cost_version(
+        tenant=tenant, sku=sku, warehouse=cn, actor=user,
+        **values(start + timedelta(days=1), None, ProductCostVersion.Status.PENDING),
+    )
+    append_cost_version(tenant=tenant, sku=sku, warehouse=us, actor=user, **values(start, None))
+    append_cost_version(tenant=tenant, sku=other, warehouse=cn, actor=user, **values(start, None))
+    client = client_for(user)
+    response = client.get("/api/internal/products/costs/", {"view": "current", "page": 1, "page_size": 2})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 3 and len(data["items"]) == 2
+    assert data["summary"]["pending"] == 1 and data["summary"]["confirmed"] == 2
+    assert historical.id not in [item["id"] for item in data["items"]]
+    assert pending.id in [item["id"] for item in data["items"]]
+    second = client.get("/api/internal/products/costs/", {"view": "current", "page": 2, "page_size": 2}).json()["data"]
+    assert second["total"] == 3 and len(second["items"]) == 1
+    assert not {item["id"] for item in data["items"]} & {item["id"] for item in second["items"]}
+    confirmed = client.get("/api/internal/products/costs/", {"view": "current", "status": "confirmed"}).json()["data"]
+    assert confirmed["total"] == 2
+    assert historical.id not in [item["id"] for item in confirmed["items"]]
+
+
+@pytest.mark.django_db
+def test_current_cost_page_has_bounded_payload_and_queries_for_many_skus():
+    tenant = Tenant.objects.create(name="Many costs", code="cost-many")
+    user = make_user(tenant, "many")
+    grant(user, "products.cost.view")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SPU-MANY", product_name="Many products")
+    warehouse = make_warehouse(tenant, "CN")
+    skus = ProductSKU.objects.bulk_create([
+        ProductSKU(tenant=tenant, spu=spu, sku_code=f"SKU-MANY-{index:04d}", product_name="Many products")
+        for index in range(400)
+    ])
+    ProductCostVersion.objects.bulk_create([
+        ProductCostVersion(tenant=tenant, sku=sku, warehouse=warehouse, created_by=user,
+                           version_no=1, **values(timezone.now(), None))
+        for sku in skus
+    ])
+    with CaptureQueriesContext(connection) as queries:
+        response = client_for(user).get("/api/internal/products/costs/", {"view": "current", "page_size": 50})
+    assert response.status_code == 200
+    assert response.json()["data"]["total"] == 400
+    assert len(response.json()["data"]["items"]) == 50
+    assert len(response.content) < 100_000
+    assert len(queries) < 25
 
 
 @pytest.mark.django_db

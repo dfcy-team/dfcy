@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Case, Count, F, IntegerField, Q, Subquery, Value, When, Window
+from django.db.models.functions import RowNumber
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.decorators import api_view, permission_classes
@@ -60,6 +61,44 @@ def product_cost_collection(request):
             raise ValidationError({"warehouse_id": "Warehouse country must match store country."})
         item = effective_cost_for(tenant=request.user.tenant, sku=sku, warehouse=warehouse, occurred_at=parsed)
         return success_response(ProductCostVersionSerializer(item).data if item else None)
+    if request.query_params.get("view") == "current":
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            page_size = min(100, max(1, int(request.query_params.get("page_size", 50))))
+        except (ValueError, TypeError) as exc:
+            raise ValidationError({"page": "Use positive integer page and page_size values."}) from exc
+        open_first = Case(When(effective_to__isnull=True, then=Value(0)), default=Value(1), output_field=IntegerField())
+        current_ids = queryset.order_by().annotate(
+            cost_rank=Window(
+                expression=RowNumber(),
+                partition_by=[F("sku_id"), F("warehouse_id")],
+                order_by=[open_first.asc(), F("version_no").desc(), F("pk").desc()],
+            )
+        ).filter(cost_rank=1).values("pk")
+        current = ProductCostVersion.objects.filter(pk__in=Subquery(current_ids)).select_related(
+            "sku__spu", "warehouse", "created_by"
+        )
+        status = request.query_params.get("status")
+        difference = Q(status=ProductCostVersion.Status.CONFIRMED, system_cost__isnull=False) & ~Q(confirmed_cost=F("system_cost"))
+        if status == "difference":
+            current = current.filter(difference)
+        elif status in (ProductCostVersion.Status.PENDING, ProductCostVersion.Status.CONFIRMED):
+            current = current.filter(status=status)
+        elif status:
+            raise ValidationError({"status": "Use pending, difference, or confirmed."})
+        totals = current.aggregate(
+            total=Count("pk"),
+            pending=Count("pk", filter=Q(status=ProductCostVersion.Status.PENDING)),
+            difference=Count("pk", filter=difference),
+            confirmed=Count("pk", filter=Q(status=ProductCostVersion.Status.CONFIRMED)),
+        )
+        start = (page - 1) * page_size
+        items = current.order_by("sku_id", "warehouse_id", "pk")[start:start + page_size]
+        return success_response({
+            "items": ProductCostVersionSerializer(items, many=True).data,
+            "total": totals["total"], "page": page, "page_size": page_size,
+            "summary": totals,
+        })
     return success_response(ProductCostVersionSerializer(queryset, many=True).data)
 
 

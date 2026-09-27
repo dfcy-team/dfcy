@@ -13,8 +13,11 @@ describe('商品成本菜单与页面契约', () => {
   it('显示新旧 SKU/SPU，服务端检索并分页渲染成本行', () => {
     expect(page).toContain('商品名称、新旧 SKU 或新旧 SPU');
     for (const field of ['legacy_sku_code', 'spu_code', 'legacy_spu_code']) expect(page).toContain(field);
-    expect(page).toContain('fetchProductCosts({ search: applied.search.trim() })');
-    expect(page).toContain(':data="pageRows"');
+    expect(page).toContain("view: 'current', search: applied.search.trim()");
+    expect(page).toContain('page_size: pageSize');
+    expect(page).toContain(':data="rows"');
+    expect(page).toContain('@current-change="load"');
+    expect(page).toContain('fetchProductCosts({ sku_id: row.sku_id })');
     expect(page).toContain('<el-pagination');
   });
   it('在基础档案中提供独立菜单和受控路由', () => {
@@ -109,8 +112,8 @@ describe('商品成本菜单与页面契约', () => {
   it('按仓库所在地分组、维护、导入和回填', () => {
     expect(page).toContain('SKU × 仓库');
     expect(page).toContain('仓库 / 所在国家');
-    expect(page).toContain('version.warehouse ||');
-    expect(page).toContain('row.warehouse === applied.warehouse');
+    expect(page).toContain('warehouse_id: applied.warehouse');
+    expect(page).toContain('version.warehouse === row.warehouse');
     expect(page).toContain('warehouse: form.warehouse');
     expect(page).toContain('warehouse_id: backfill.warehouse');
     expect(page).toContain('每行指定仓库编码');
