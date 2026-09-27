@@ -21,13 +21,14 @@
     />
 
     <div class="summary-strip" aria-label="成本核对概览">
-      <div><span>SKU × 仓库</span><strong>{{ visibleRows.length }}</strong><small>当前查询范围</small></div>
+      <div><span>SKU × 仓库</span><strong>{{ loading && !totalRows ? '—' : totalRows }}</strong><small>当前查询范围</small></div>
       <div><span>待核对</span><strong class="warning">{{ statusCount('pending') }}</strong><small>系统生成未确认</small></div>
       <div><span>存在差异</span><strong class="danger">{{ statusCount('difference') }}</strong><small>需人工判断</small></div>
       <div><span>已确认</span><strong class="success">{{ statusCount('confirmed') }}</strong><small>已生效成本</small></div>
     </div>
 
     <div class="content-panel">
+      <el-alert v-if="loadError" :title="loadError" type="error" show-icon class="load-error"><el-button link type="primary" @click="load">重试</el-button></el-alert>
       <el-form class="filters" inline @submit.prevent="applyFilters">
         <el-form-item label="商品 / 编码">
           <el-input v-model="filters.search" clearable placeholder="商品名称、新旧 SKU 或新旧 SPU" @keyup.enter="applyFilters" />
@@ -50,7 +51,7 @@
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="pageRows" row-key="id" border empty-text="暂无商品成本数据">
+      <el-table v-loading="loading" :data="rows" row-key="id" border :empty-text="loading ? '正在加载商品成本' : '暂无商品成本数据'">
         <el-table-column prop="sku_code" label="新 SKU" min-width="170" fixed="left">
           <template #default="{ row }"><code>{{ row.sku_code }}</code></template>
         </el-table-column>
@@ -92,7 +93,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination v-if="visibleRows.length > pageSize" v-model:current-page="page" class="cost-pagination" background layout="prev, pager, next, total" :page-size="pageSize" :total="visibleRows.length" />
+      <el-pagination v-if="totalRows > pageSize" v-model:current-page="page" class="cost-pagination" background layout="prev, pager, next, total" :page-size="pageSize" :total="totalRows" @current-change="load" />
     </div>
 
     <el-drawer v-model="drawerVisible" :title="drawerReadonly ? '成本构成' : '维护商品成本'" size="480px">
@@ -156,7 +157,7 @@
 
     <el-dialog v-model="historyVisible" title="成本历史版本" width="min(720px, 94vw)">
       <p class="history-note">{{ historySku }} · {{ historyWarehouse }} · 已结束版本仍用于还原历史订单、利润及经营报表。</p>
-      <el-table :data="historyRows" border empty-text="暂无已生效历史版本">
+      <el-table v-loading="historyLoading" :data="historyRows" border empty-text="暂无已生效历史版本">
         <el-table-column prop="version_no" label="版本" width="90" />
         <el-table-column label="商品成本" width="130"><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
         <el-table-column prop="effective_from" label="生效开始" width="120" />
@@ -217,6 +218,9 @@ const loading = ref(false);
 const saving = ref(false);
 const previewing = ref(false);
 const rows = ref([]);
+const totalRows = ref(0);
+const summary = ref({ pending: 0, difference: 0, confirmed: 0 });
+const loadError = ref('');
 const page = ref(1);
 const pageSize = 50;
 const warehouses = ref([]);
@@ -227,6 +231,7 @@ const drawerReadonly = ref(true);
 const backfillVisible = ref(false);
 const historyVisible = ref(false);
 const historyRows = ref([]);
+const historyLoading = ref(false);
 const historySku = ref('');
 const historyWarehouse = ref('');
 const preview = ref(null);
@@ -246,10 +251,6 @@ const statusMeta = {
   confirmed: { label: '已确认', type: 'success' }
 };
 
-const visibleRows = computed(() => rows.value.filter((row) =>
-  (!applied.status || row.status === applied.status) && (!applied.warehouse || row.warehouse === applied.warehouse)
-));
-const pageRows = computed(() => visibleRows.value.slice((page.value - 1) * pageSize, page.value * pageSize));
 const calculatedFormCost = computed(() => money(['purchase_price', 'freight_cost', 'duty_cost', 'packaging_cost', 'other_cost'].reduce((sum, key) => sum + number(form[key]), 0)));
 const changeAmount = computed(() => number(form.confirmed_cost) - number(form.original_confirmed_cost));
 const changeRate = computed(() => number(form.original_confirmed_cost) ? `${changeAmount.value >= 0 ? '+' : ''}${(changeAmount.value / number(form.original_confirmed_cost) * 100).toFixed(2)}%` : '首个成本版本');
@@ -258,37 +259,59 @@ const number = (value) => Number(value || 0);
 const money = (value) => value === null || value === undefined || value === '' ? '-' : `¥${number(value).toFixed(2)}`;
 const signedMoney = (value) => `${value >= 0 ? '+' : '-'}¥${Math.abs(value).toFixed(2)}`;
 const extraCost = (row) => number(row.freight_cost) + number(row.duty_cost) + number(row.packaging_cost) + number(row.other_cost);
-const statusCount = (status) => visibleRows.value.filter((row) => row.status === status).length;
+const statusCount = (status) => summary.value[status] || 0;
 const difference = (row) => row.confirmed_cost === null ? '-' : `${number(row.confirmed_cost) - number(row.system_cost) >= 0 ? '+' : ''}${(number(row.confirmed_cost) - number(row.system_cost)).toFixed(2)}`;
 const differenceClass = (row) => Math.abs(number(row.confirmed_cost) - number(row.system_cost)) > 0.009 ? 'difference-value' : 'muted';
 
 async function load() {
   loading.value = true;
-  const [response, warehouseResponse] = await Promise.all([fetchProductCosts({ search: applied.search.trim() }), fetchCostWarehouses()]);
-  loading.value = false;
-  if (!response.success) return ElMessage.error(response.message || '商品成本加载失败');
-  if (!warehouseResponse.success) ElMessage.error(warehouseResponse.message || '仓库档案加载失败，无法选择仓库');
-  warehouses.value = warehouseResponse.success ? (Array.isArray(warehouseResponse.data) ? warehouseResponse.data : (warehouseResponse.data?.items || [])) : [];
-  const versions = Array.isArray(response.data) ? response.data : (response.data?.items || []);
-  const grouped = new Map();
-  versions.forEach((version) => {
-    const key = `${version.sku}:${version.warehouse || 'legacy'}`;
-    const item = grouped.get(key) || { id: key, sku_id: version.sku, sku_code: version.sku_code, legacy_sku_code: version.legacy_sku_code, spu_code: version.spu_code, legacy_spu_code: version.legacy_spu_code, product_name: version.product_name, warehouse: version.warehouse, warehouse_code: version.warehouse_code, warehouse_name: version.warehouse_name, warehouse_country_code: version.warehouse_country_code, versions: [] };
-    item.versions.push({ ...version, cost: version.confirmed_cost, source: version.source === 'manual' ? '人工维护' : '系统生成' });
-    grouped.set(key, item);
-  });
-  rows.value = [...grouped.values()].map((item) => {
-    item.versions.sort((a, b) => Number(b.version_no) - Number(a.version_no));
-    const current = item.versions.find((version) => !version.effective_to) || item.versions[0];
-    return { ...item, ...current, id: item.id, version_id: current.id, purchase_price: current.purchase_cost, version_no: `V${current.version_no}`, effective_date: String(current.effective_from || '').slice(0, 10), versions: item.versions.map((version) => ({ ...version, version_no: `V${version.version_no}`, effective_from: String(version.effective_from || '').slice(0, 10), effective_to: version.effective_to ? String(version.effective_to).slice(0, 10) : null })) };
-  });
+  loadError.value = '';
+  try {
+    const [response, warehouseResponse] = await Promise.all([
+      fetchProductCosts({ view: 'current', search: applied.search.trim(), status: applied.status, warehouse_id: applied.warehouse, page: page.value, page_size: pageSize }),
+      fetchCostWarehouses()
+    ]);
+    if (!response.success) {
+      loadError.value = response.message || '商品成本加载失败，请重试';
+      return;
+    }
+    if (!warehouseResponse.success) ElMessage.error(warehouseResponse.message || '仓库档案加载失败，无法选择仓库');
+    warehouses.value = warehouseResponse.success ? (Array.isArray(warehouseResponse.data) ? warehouseResponse.data : (warehouseResponse.data?.items || [])) : [];
+    totalRows.value = response.data?.total || 0;
+    summary.value = response.data?.summary || { pending: 0, difference: 0, confirmed: 0 };
+    rows.value = (response.data?.items || []).map((version) => ({
+      ...version, sku_id: version.sku, version_id: version.id, purchase_price: version.purchase_cost,
+      version_no: `V${version.version_no}`, effective_date: String(version.effective_from || '').slice(0, 10)
+    }));
+  } catch (error) {
+    loadError.value = error?.message || '商品成本加载超时，请重试';
+  } finally {
+    loading.value = false;
+  }
 }
-function applyFilters() { const searchChanged = applied.search.trim() !== filters.search.trim(); Object.assign(applied, filters); page.value = 1; if (searchChanged) load(); }
+function applyFilters() { Object.assign(applied, filters); page.value = 1; load(); }
 function resetFilters() { Object.assign(filters, { search: '', status: '', warehouse: '' }); applyFilters(); }
 function openDrawer(row, readonly) { Object.assign(form, row, { reason: '', original_confirmed_cost: row.confirmed_cost }); drawerReadonly.value = readonly; drawerVisible.value = true; }
 function inspect(row) { openDrawer(row, true); }
 function edit(row) { openDrawer(row, false); }
-function showHistory(row) { historySku.value = row.sku_code; historyWarehouse.value = `${row.warehouse_name || row.warehouse_code || '未归属仓库（历史）'}（${row.warehouse_country_code || '-'}）`; historyRows.value = row.versions || []; historyVisible.value = true; }
+async function showHistory(row) {
+  historySku.value = row.sku_code;
+  historyWarehouse.value = `${row.warehouse_name || row.warehouse_code || '未归属仓库（历史）'}（${row.warehouse_country_code || '-'}）`;
+  historyRows.value = [];
+  historyVisible.value = true;
+  historyLoading.value = true;
+  try {
+    const response = await fetchProductCosts({ sku_id: row.sku_id });
+    if (!response.success) return ElMessage.error(response.message || '成本历史加载失败');
+    historyRows.value = (Array.isArray(response.data) ? response.data : []).filter((version) => version.warehouse === row.warehouse)
+      .sort((a, b) => Number(b.version_no) - Number(a.version_no))
+      .map((version) => ({ ...version, cost: version.confirmed_cost, source: version.source === 'manual' ? '人工维护' : '系统生成',
+        version_no: `V${version.version_no}`, effective_from: String(version.effective_from || '').slice(0, 10),
+        effective_to: version.effective_to ? String(version.effective_to).slice(0, 10) : null }));
+  } finally {
+    historyLoading.value = false;
+  }
+}
 function adoptSystemCost() { form.confirmed_cost = number(calculatedFormCost.value.replace('¥', '')).toFixed(4); }
 async function save() {
   if (!String(form.reason || '').trim()) return ElMessage.warning('请填写调整原因');
