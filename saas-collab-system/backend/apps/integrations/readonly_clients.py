@@ -272,6 +272,22 @@ class LazadaReadonlyClient(ReadonlyClientBase):
             zone = UTC
         return datetime.fromtimestamp(int(value), tz=UTC).astimezone(zone).date().isoformat()
 
+    def validate_token(self):
+        """Use one order-list page to prove the refreshed token is readable."""
+        path = self._runtime_path("order_list_path", self.ORDER_LIST_PATH)
+        now = int(self.now().timestamp())
+        payload = self._request(path, {
+            "update_after": self._time(now - 3600),
+            "update_before": self._time(now),
+            "limit": 1,
+            "offset": 0,
+            "sort_direction": "ASC",
+        })
+        data = payload.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("orders"), list):
+            raise ValidationError("Lazada refreshed token readonly validation returned an invalid response.")
+        return {"validated": True}
+
     @staticmethod
     def _page(data, key, offset, page_size):
         records = _as_list(data.get(key))
