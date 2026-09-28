@@ -156,6 +156,33 @@ def test_wrong_store_does_not_consume_correct_callback(marketplace_callback):
     assert client.post(MANUAL, payload, format="json").status_code == 200
 
 
+def test_shopee_reauthorization_supplies_known_target_shop(marketplace_callback, monkeypatch):
+    from apps.integrations.marketplace_providers import SyntheticShopeeOAuthProvider
+
+    client, store, config, _, payload = marketplace_callback
+    if config.platform != "shopee":
+        pytest.skip("Shopee-only main account target")
+    assert client.post(MANUAL, payload, format="json").status_code == 200
+    authorization = MarketplaceStoreAuthorization.objects.get(store=store)
+    start = client.post(START, {
+        "platform": "shopee", "integration_config_id": config.pk,
+        "store_id": store.pk, "region": store.country_code,
+        "redirect_uri": config.callback_url, "scopes": [],
+    }, format="json")
+    assert start.status_code == 201
+    original = SyntheticShopeeOAuthProvider.validate_callback
+    contexts = []
+
+    def validate(provider, params, context):
+        contexts.append(context)
+        return original(provider, params, context)
+
+    monkeypatch.setattr(SyntheticShopeeOAuthProvider, "validate_callback", validate)
+    new_payload = {**payload, "callback_url": config.callback_url + "?" + urlencode(start.data["data"]["simulation_callback"])}
+    assert client.post(MANUAL, new_payload, format="json").status_code == 200
+    assert contexts[0]["target_shop_id"] == authorization.platform_store_id
+
+
 @pytest.mark.parametrize('reason,status', [('OAUTH_AUTH_REJECTED', 401), ('OAUTH_DATABASE_FAILURE', 503)])
 def test_callback_error_exposes_only_controlled_reason(marketplace_callback, monkeypatch, reason, status):
     from apps.integrations.oauth_errors import OAuthFlowError

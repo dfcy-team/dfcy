@@ -187,3 +187,63 @@ def test_private_custody_ca_is_loaded_only_for_exact_custody_endpoint(tmp_path, 
         context.loaded.clear()
         net_guard._default_transport("GET", "https://platform.example.test/api")
         assert context.loaded == []
+
+
+@pytest.mark.parametrize("proxy_url,custody,expected_host,expected_tunnel", [
+    ("http://127.0.0.1:7897", False, "127.0.0.1", ("platform.example.test", 443)),
+    ("", False, "platform.example.test", None),
+    ("http://127.0.0.1:7897", True, "platform.example.test", None),
+])
+def test_platform_transport_uses_only_explicit_loopback_https_proxy(
+    monkeypatch, proxy_url, custody, expected_host, expected_tunnel,
+):
+    created = []
+
+    class FakeResponse:
+        status = 200
+
+        def read(self, _limit):
+            return b"{}"
+
+        def getheaders(self):
+            return []
+
+    class FakeConnection:
+        def __init__(self, host, port, *, timeout, context):
+            self.host = host
+            self.port = port
+            self.tunnel = None
+            self.sock = None
+            created.append(self)
+
+        def set_tunnel(self, host, port):
+            self.tunnel = (host, port)
+
+        def request(self, *_args, **_kwargs):
+            return None
+
+        def getresponse(self):
+            return FakeResponse()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(net_guard.http.client, "HTTPSConnection", FakeConnection)
+    monkeypatch.setattr(net_guard, "_is_configured_custody_destination", lambda parsed: custody)
+    monkeypatch.setattr(net_guard, "_validated_custody_ca_file", lambda: None)
+    with override_settings(LIVE_HTTPS_PROXY_URL=proxy_url):
+        net_guard._default_transport("GET", "https://platform.example.test/api")
+    assert created[0].host == expected_host
+    assert created[0].port == (7897 if expected_tunnel else 443)
+    assert created[0].tunnel == expected_tunnel
+
+
+@pytest.mark.parametrize("proxy_url", [
+    "http://proxy.example.test:7897", "http://127.0.0.1:0",
+    "http://@127.0.0.1:7897", "http://demo:example@127.0.0.1:7897",
+    "https://127.0.0.1:7897", "http://127.0.0.1:7897/path",
+])
+def test_platform_transport_rejects_unapproved_https_proxy(proxy_url):
+    with override_settings(LIVE_HTTPS_PROXY_URL=proxy_url):
+        with pytest.raises(OAuthFlowError, match="approved loopback endpoint"):
+            net_guard._default_transport("GET", "https://platform.example.test/api")

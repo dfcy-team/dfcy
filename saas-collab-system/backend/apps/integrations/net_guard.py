@@ -94,6 +94,30 @@ def _is_configured_custody_destination(parsed):
     return parsed.scheme == "https" and (parsed.hostname.lower(), port) == endpoint
 
 
+def _configured_https_proxy():
+    raw_url = str(getattr(settings, "LIVE_HTTPS_PROXY_URL", "") or "").strip()
+    if not raw_url:
+        return None
+    try:
+        parsed = urllib.parse.urlparse(raw_url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        parsed, port = None, None
+    if (
+        parsed is None
+        or parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port is None or port < 1
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "HTTPS proxy configuration is not an approved loopback endpoint.")
+    return parsed.hostname, port
+
+
 def _validated_custody_ca_file():
     """Validate the optional custody CA path before handing it to SSL."""
     raw_path = str(get_runtime_setting("custody", "ca_file_path", default="") or "").strip()
@@ -156,12 +180,15 @@ def _default_transport(method, url, *, data=None, headers=None, connect_timeout=
             # Keep the public system trust store and add the private custody
             # CA only for this exact configured host/port.
             tls_context.load_verify_locations(cafile=ca_file)
+    custody_destination = _is_configured_custody_destination(parsed)
+    proxy = None if custody_destination else _configured_https_proxy()
     connection = http.client.HTTPSConnection(
-        parsed.hostname,
-        parsed.port or 443,
+        *(proxy or (parsed.hostname, parsed.port or 443)),
         timeout=connect_timeout,
         context=tls_context,
     )
+    if proxy:
+        connection.set_tunnel(parsed.hostname, parsed.port or 443)
     path = parsed.path or "/"
     if parsed.query:
         path = f"{path}?{parsed.query}"
