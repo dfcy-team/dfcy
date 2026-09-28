@@ -30,6 +30,45 @@ def provider(monkeypatch):
 PAYLOAD = {"code": "FAKE_CODE", "platform_store_id": "42", "merchant_subject_id": "42"}
 
 
+def test_shopee_main_account_callback_uses_selected_store(provider):
+    payload = provider.validate_callback(
+        {"code": "FAKE_CODE", "main_account_id": "1234", "state": "FAKE_STATE"},
+        {"target_shop_id": "42", "region": "PH"},
+    )
+    assert payload["platform_store_id"] == "42"
+    assert payload["main_account_id"] == "1234"
+    assert payload["merchant_subject_id"] == "1234"
+
+
+def test_shopee_main_account_requires_explicit_target_store(provider):
+    with pytest.raises(OAuthFlowError, match="平台店铺 ID"):
+        provider.validate_callback({"code": "FAKE_CODE", "main_account_id": "1234"}, {})
+    provider.http._transport.assert_not_called()
+
+
+def test_shopee_main_account_exchange_checks_authorized_shop_scope(provider):
+    provider.http._transport.side_effect = [response({
+        "access_token": "FAKE_ACCESS", "refresh_token": "FAKE_REFRESH",
+        "expire_in": 3600, "shop_id_list": [42, 99],
+    }), response({"response": {"shop_id": 42}})]
+    result = provider.exchange_authorization_code({**PAYLOAD, "main_account_id": "1234"})
+    body = json.loads(provider.http._transport.call_args_list[0].kwargs["data"])
+    assert body["main_account_id"] == 1234
+    assert "shop_id" not in body
+    assert result["platform_store_records"][0]["platform_store_id"] == "42"
+
+
+@pytest.mark.parametrize("scope", [None, [], [99], "42", [42, {}]])
+def test_shopee_main_account_cannot_bind_unproven_shop(provider, scope):
+    provider.http._transport.return_value = response({
+        "access_token": "FAKE_ACCESS", "refresh_token": "FAKE_REFRESH", "shop_id_list": scope,
+    })
+    with pytest.raises(OAuthFlowError, match="OAUTH_CALLBACK_REJECTED"):
+        provider.exchange_authorization_code({**PAYLOAD, "main_account_id": "1234"})
+    provider.custody.store_secrets.assert_not_called()
+    assert provider.http._transport.call_count == 1
+
+
 def response(data, status=200):
     return HttpResponse(status, {}, json.dumps(data))
 

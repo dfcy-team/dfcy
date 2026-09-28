@@ -232,6 +232,16 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
         _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED, OAUTH_CALLBACK_REJECTED)
         raise_oauth_error(OAUTH_CALLBACK_REJECTED, "Callback must not carry raw credential parameters.")
     context = {"state": state_plaintext, "region": session.region, "scopes": session.requested_scopes}
+    if session.platform == "shopee" and session.store_id:
+        context["target_shop_id"] = session.store.external_store_id
+        if not context["target_shop_id"]:
+            known_shop_ids = set(MarketplaceStoreAuthorization.objects.filter(
+                tenant_id=session.tenant_id, store_id=session.store_id,
+                platform=session.platform, region=session.region,
+                status=MarketplaceStoreAuthorization.Status.ACTIVE,
+            ).values_list("platform_store_id", flat=True))
+            if len(known_shop_ids) == 1:
+                context["target_shop_id"] = known_shop_ids.pop()
     try:
         with oauth_stage("validate_callback"):
             require_unchanged_configuration(session)
