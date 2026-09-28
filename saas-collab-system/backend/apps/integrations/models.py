@@ -422,8 +422,23 @@ def marketplace_identity_key(platform, region, platform_store_id):
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
-def marketplace_store_binding_key(tenant_id, platform, store_id):
+def marketplace_authorization_api_type(integration_config):
+    value = str((getattr(integration_config, "platform_config", None) or {}).get("api_type") or "marketplace")
+    return value.strip().lower() or "marketplace"
+
+
+def marketplace_active_identity_key(platform, region, platform_store_id, api_type="marketplace"):
+    identity = f"{str(platform).lower()}:{str(region).upper()}:{str(platform_store_id).strip()}"
+    normalized_api_type = str(api_type or "marketplace").strip().lower()
+    normalized = identity if normalized_api_type == "marketplace" else f"{identity}:{normalized_api_type}"
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def marketplace_store_binding_key(tenant_id, platform, store_id, api_type="marketplace"):
     normalized = f"{tenant_id}:{str(platform).lower()}:{store_id}"
+    normalized_api_type = str(api_type or "marketplace").strip().lower()
+    if normalized_api_type != "marketplace":
+        normalized = f"{normalized}:{normalized_api_type}"
     return hashlib.sha256(normalized.encode()).hexdigest()
 
 
@@ -511,12 +526,18 @@ class MarketplaceStoreAuthorization(models.Model):
             errors["shop_cipher"] = "TikTok Shop authorization requires shop_cipher."
         if self.platform_identity_key != marketplace_identity_key(self.platform, self.region, self.platform_store_id):
             errors["platform_identity_key"] = "Platform identity key does not match the platform store identity."
-        expected_store_binding = marketplace_store_binding_key(self.tenant_id, self.platform, self.store_id)
+        api_type = marketplace_authorization_api_type(self.integration_config)
+        expected_active_identity = marketplace_active_identity_key(
+            self.platform, self.region, self.platform_store_id, api_type
+        )
+        expected_store_binding = marketplace_store_binding_key(
+            self.tenant_id, self.platform, self.store_id, api_type
+        )
         if self.status == self.Status.REVOKED:
             if self.active_platform_identity_key or self.active_store_binding_key:
                 errors["status"] = "Revoked authorization cannot retain an active binding key."
         else:
-            if self.active_platform_identity_key != self.platform_identity_key:
+            if self.active_platform_identity_key != expected_active_identity:
                 errors["active_platform_identity_key"] = "Active platform binding key is invalid."
             if self.active_store_binding_key != expected_store_binding:
                 errors["active_store_binding_key"] = "Active internal-store binding key is invalid."

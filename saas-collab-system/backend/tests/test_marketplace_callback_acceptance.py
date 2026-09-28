@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 import pytest
 from rest_framework.test import APIClient
 
-from apps.integrations.models import MarketplaceStoreAuthorization, OAuthStateSession
+from apps.integrations.models import MarketplaceStoreAuthorization, OAuthStateSession, PlatformIntegrationConfig
 from tests.test_lazada_store_authorization import lazada_context
 
 
@@ -90,6 +90,61 @@ def test_shopee_root_registration_is_preserved_for_internal_callback(marketplace
     session = OAuthStateSession.objects.get()
     assert config.callback_url == "https://example.test/"
     assert session.redirect_uri == "https://example.test/"
+
+
+def test_shopee_marketplace_and_advertising_authorizations_can_coexist(lazada_context):
+    client, store, marketplace_config = lazada_context
+    store.platform.platform_type = "shopee"
+    store.platform.code = "shopee"
+    store.platform.name = "Shopee"
+    store.platform.save()
+    marketplace_config.platform = "shopee"
+    marketplace_config.account_alias = "Shopee marketplace"
+    marketplace_config.callback_url = "https://example.test/"
+    marketplace_config.contract_version = "v2"
+    marketplace_config.platform_config = {"api_type": "marketplace"}
+    marketplace_config.save()
+    advertising_config = PlatformIntegrationConfig.objects.create(
+        tenant=marketplace_config.tenant,
+        platform="shopee",
+        account_alias="Shopee advertising",
+        environment="production",
+        status="verified",
+        regions=[store.country_code],
+        contract_version="v2",
+        callback_url="https://example.test/",
+        scopes=[],
+        platform_config={"api_type": "advertising"},
+        created_by=marketplace_config.created_by,
+    )
+
+    for config in (marketplace_config, advertising_config):
+        start = client.post(START, {
+            "platform": "shopee", "integration_config_id": config.pk,
+            "store_id": store.pk, "region": store.country_code,
+            "redirect_uri": config.callback_url, "scopes": [],
+        }, format="json")
+        assert start.status_code == 201, start.data
+        callback_url = config.callback_url + "?" + urlencode(start.data["data"]["simulation_callback"])
+        completed = client.post(MANUAL, {
+            "store_id": store.pk,
+            "integration_config_id": config.pk,
+            "callback_url": callback_url,
+        }, format="json")
+        assert completed.status_code == 200, completed.data
+
+    authorizations = list(MarketplaceStoreAuthorization.objects.filter(store=store).order_by("integration_config_id"))
+    assert len(authorizations) == 2
+    assert {item.integration_config_id for item in authorizations} == {marketplace_config.id, advertising_config.id}
+    assert {item.status for item in authorizations} == {MarketplaceStoreAuthorization.Status.ACTIVE}
+    assert len({item.active_platform_identity_key for item in authorizations}) == 2
+    assert len({item.active_store_binding_key for item in authorizations}) == 2
+
+    access = client.get("/api/internal/integrations/subject-api-access/", {
+        "subject_type": "store", "subject_id": store.id,
+    })
+    assert access.status_code == 200, access.data
+    assert {item["api_type"] for item in access.data["data"]["bindings"]} == {"marketplace", "advertising"}
 
 
 def test_wrong_store_does_not_consume_correct_callback(marketplace_callback):

@@ -15,7 +15,11 @@ from apps.permissions.ui_p6_scopes import integration_values_allowed
 
 from .credential_service import RAW_CREDENTIAL_FIELDS
 from .marketplace_providers import get_oauth_provider
-from .models import marketplace_identity_key
+from .models import (
+    authorization_service_write,
+    marketplace_active_identity_key,
+    marketplace_authorization_api_type,
+)
 from .oauth_diagnostics import oauth_stage, failure_diagnostic
 from .oauth_state_service import require_unchanged_configuration
 
@@ -143,7 +147,8 @@ def _apply_exchange_result(session, exchange_result):
     )
     store_record = exchange_result["platform_store_records"][0]
     platform_store_id = store_record["platform_store_id"]
-    identity_key = marketplace_identity_key(session.platform, session.region, platform_store_id)
+    api_type = marketplace_authorization_api_type(session.integration_config)
+    identity_key = marketplace_active_identity_key(session.platform, session.region, platform_store_id, api_type)
     actor = session.initiated_by
     existing = MarketplaceStoreAuthorization.objects.filter(
         active_platform_identity_key=identity_key,
@@ -265,11 +270,11 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
 def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
     record = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk, tenant_id=actor.tenant_id)
     if expected_token_id is not None:
-        from .automatic_refresh import require_automatic_refresh
+        from .automatic_refresh import AUTO_REFRESH_VALIDATION_PENDING, require_automatic_refresh
         require_automatic_refresh(record, expected_token_id)
     provider = resolve_oauth_provider(record.platform, record.integration_config)
     result = provider.refresh_authorization(record)
-    return rotate_store_authorization_references(
+    refreshed = rotate_store_authorization_references(
         record,
         credential_id=result["credential_id"],
         token_id=result["token_id"],
@@ -282,6 +287,11 @@ def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
         new_reference_revoker=result.get("new_reference_revoker"),
         defer_previous_revocation=True,
     )
+    if expected_token_id is not None:
+        refreshed.last_error_code = AUTO_REFRESH_VALIDATION_PENDING
+        with authorization_service_write():
+            refreshed.save(update_fields=["last_error_code", "updated_at"])
+    return refreshed
 
 
 def revoke_marketplace_authorization(record, *, actor):
