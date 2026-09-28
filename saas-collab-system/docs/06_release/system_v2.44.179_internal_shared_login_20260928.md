@@ -4,8 +4,8 @@
 
 - 登记日期：2026-09-28（Asia/Shanghai）。
 - 状态：`REGISTERED_CANDIDATE`；仅登记本批候选改动，不代表合并、部署或生产可用。
-- 候选分支：`feat/internal-sso-redirect`；基线为 `origin/main` 提交 `1f04817c26bd4b7ffc5fd85c31eecbcd143737cc`（V2.44.177 候选已入主干）。最终发布 SHA 以受保护主干实际合并提交为准。
-- 版本占用核对：登记时未见 `V2.44.179` 发布文件、远端标签或同号 PR。V2.44.178 已由 PR #235“飞书身份映射支持手动 Open ID 验证”占用，当前仍为独立候选；179 不取代 178，合并/发布前须再次核对版本顺序与占用。
+- 候选分支：`feat/internal-sso-redirect`；审核基线为 `origin/main` 提交 `ba16e3cba9b4010de7f6d76ff09ebdda5b6851a8`（V2.44.178 已入主干并部署）。最终发布 SHA 以受保护主干实际合并提交为准。
+- 版本占用核对：审核时未见 `V2.44.179` 远端部署标签或同号 PR；虚拟机和双账本当前为 V2.44.178。179 不取代 178，合并/发布前须再次核对版本顺序与占用。
 - 发布目标与通道：待后续单独授权，本文不触发虚拟机或阿里云部署，不创建 `deployed` 标签，不写生产账本。
 
 ## 增量范围与边界
@@ -13,13 +13,14 @@
 1. “API 数据接入 → 内部系统数据接口”的调用方配置新增独立的“共用登录”开关与精确 HTTPS 回调地址列表，默认关闭。允许 SSO-only 调用方不选择数据块；数据读取能力不会因此扩大。配置新建或修改后沿用“停用、待另一位管理员审核、再启用”的现有闭环。
 2. 新增受保护的 `/sso/authorize` 前端页面。用户如未登录，先进入本系统登录页；调用方仅引导浏览器跳转，始终不接收、转发或存储用户密码。
 3. 本系统向精确登记的回调地址返回 90 秒有效、一次性、绑定调用方及 PKCE S256 的授权码。调用方服务端以自身 Basic 凭据、来源 CIDR、原回调地址和 PKCE 验证器兑换基础身份：`user_id`、`username`、`full_name`、`tenant_id`。不返回用户密码、哈希、角色、权限或本系统访问令牌。调用方自行创建会话和管理权限。
+   授权码申请按已登录用户限制为每分钟 20 次；令牌兑换仍受调用方原有分钟限流约束。
 4. 接入步骤与参数合同见 `docs/01_architecture/internal_shared_login.md`。本能力是受控的内部共享登录，不声明完整 OIDC 兼容。
 5. 调用系统列表新增“接入资料”，明确列出调用方需修改的 `CLIENT_ID`、`CLIENT_SECRET`、出口 IP、只读接口/资源以及可选的登录回调和 PKCE 参数；按配置生成可复制的 API/登录地址、回调地址、来源网段、已接入与待接入数据块及状态，复制内容不包含真实 Client Secret。仅创建或轮换后的“一次性凭据”窗口提供“复制密钥”按钮；关闭后不再重显。交接清单见 `docs/01_architecture/internal_system_connection_handoff.md`。
 
 ## 数据库和发布影响
 
 - 新增迁移 `integrations.0035_internal_sso_login`，依赖主干 `integrations.0034_authorization_api_type_slots`：调用方 SSO 开关/回调目录及授权码表。现有调用方的 SSO 开关默认 `false`；不迁移密码、不自动开启任何登录授权。
-- 主干 V2.44.177 已使用迁移 `0034`；本批不能使用旧的 `0034_internalapiclient_allow_sso_login_and_more` 文件。V2.44.178 PR #235 截至登记时不含迁移文件；合并前仍需重新确认迁移依赖。
+- 主干 V2.44.178 已使用迁移 `0034`；本批使用 `0035`，不得复用旧的 `0034_internalapiclient_allow_sso_login_and_more` 文件。
 - 新接口路径：`POST /api/internal/integrations/sso/authorize/`、`POST /api/internal-readonly/v1/auth/token/`。原有只读数据块接口与登录 API 保持原合同。
 - 真实调用方联调、HTTPS 回调可达性、来源地址和反向代理可信链均是上线验收项。调用方密钥仅服务端保存；不得嵌入浏览器。
 

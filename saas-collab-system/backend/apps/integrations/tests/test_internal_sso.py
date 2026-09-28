@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -13,6 +14,7 @@ from apps.tenants.models import Tenant
 
 class InternalSSOTests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.tenant = Tenant.objects.create(code="SSO1", name="SSO tenant")
         self.user = get_user_model().objects.create_user(
             username="sso-user", password="test-password", tenant=self.tenant,
@@ -104,3 +106,9 @@ class InternalSSOTests(APITestCase):
         self.machine.save(update_fields=["sso_redirect_uris", "approval_status"])
         self.assertEqual(self.authorize().status_code, 403)
         self.assertEqual(self.exchange(code).status_code, 401)
+
+    def test_authorize_is_rate_limited_per_user(self):
+        cache.clear()
+        for _ in range(20):
+            self.assertEqual(self.authorize().status_code, 200)
+        self.assertEqual(self.authorize().status_code, 429)

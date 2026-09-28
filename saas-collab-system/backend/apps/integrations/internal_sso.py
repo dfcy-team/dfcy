@@ -9,9 +9,10 @@ from urllib.parse import urlencode
 
 from django.db import transaction
 from django.utils import timezone
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 
 from apps.accounts.credential_auth import credential_lease_active
 from apps.accounts.models import CustomUser
@@ -26,6 +27,11 @@ _STATE_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{16,256}$")
 _VERIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 
 
+class SSOAuthorizeThrottle(UserRateThrottle):
+    scope = "sso_authorize"
+    rate = "20/minute"
+
+
 def _eligible(client):
     return (
         client is not None
@@ -38,6 +44,7 @@ def _eligible(client):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+@throttle_classes([SSOAuthorizeThrottle])
 def authorize(request):
     user = request.user
     if user.user_type != CustomUser.UserType.INTERNAL or not user.is_active or not credential_lease_active(user):
