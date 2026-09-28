@@ -257,12 +257,12 @@
   <el-dialog v-model="capabilityOpen" :title="`${selectedStore?.name || ''} · 连接能力矩阵`" width="min(980px, 96vw)">
     <el-alert v-if="!authorizationOptions.length && !capabilityLoading" title="该店铺尚无授权连接，不能配置同步能力。" type="warning" :closable="false" show-icon />
     <el-select v-if="authorizationOptions.length > 1" v-model="selectedAuthorizationId" placeholder="选择授权连接" @change="loadCapabilities">
-      <el-option v-for="item in authorizationOptions" :key="item.id" :label="`${item.platform} · ${item.status} · #${item.id}`" :value="item.id" />
+      <el-option v-for="item in authorizationOptions" :key="item.id" :label="authorizationSourceLabel(item)" :value="item.id" />
     </el-select>
     <el-alert v-if="selectedAuthorization && !capabilityEditAllowed" title="只有有效授权（active/authorized）且具备授权权限时可以保存能力矩阵；当前仅允许查看。" type="warning" :closable="false" show-icon />
     <el-alert v-if="capabilitySuggestions.length" :title="`检测到 ${capabilitySuggestions.length} 条能力建议；载入后只覆盖本地表单，仍需复核 scopes/evidence 并点击保存确认。`" type="info" :closable="false" show-icon />
     <el-table v-loading="capabilityLoading" :data="capabilityRows" border empty-text="暂无能力数据">
-      <el-table-column prop="capability_code" label="能力" min-width="150" />
+      <el-table-column label="能力代码 · 中文名称" min-width="180"><template #default="{ row }">{{ capabilityLabel(row.capability_code) }}</template></el-table-column>
       <el-table-column label="读取" width="90"><template #default="{ row }"><el-switch v-model="row.read_enabled" :disabled="!capabilityEditAllowed" /></template></el-table-column>
       <el-table-column label="写入" width="90"><template #default="{ row }"><el-switch :model-value="false" disabled /></template></el-table-column>
       <el-table-column label="同步方式" min-width="130"><template #default="{ row }"><el-select v-model="row.sync_mode" :disabled="!capabilityEditAllowed"><el-option label="定时" value="scheduled"/><el-option label="实时" value="realtime"/><el-option label="Webhook" value="webhook"/><el-option label="人工" value="manual"/></el-select></template></el-table-column>
@@ -291,6 +291,7 @@ import { fetchUsers } from '../../api/systemAdmin';
 import { fetchProductCategories } from '../../api/products';
 import { fetchConnectionCapabilities, fetchStoreAuthorizations, fetchSubjectApiAccess, updateConnectionCapabilities } from '../../api/integrations';
 import { getActionAccess } from '../../utils/actionAccess';
+import { authorizationSourceLabel, capabilityLabel } from '../../utils/integrationCapabilityLabels';
 import { useAuthStore } from '../../stores/auth';
 import { useRoute, useRouter } from 'vue-router';
 import {

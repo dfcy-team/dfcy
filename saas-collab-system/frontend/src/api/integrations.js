@@ -34,6 +34,7 @@ import {
   mockStartStoreAuthorizationOAuth,
   mockCompleteSyntheticStoreAuthorization,
   mockConnectionCapabilities,
+  mockStoreCapabilityMatrix,
   mockWarehouseAuthorizations,
   mockBindWarehouseAuthorization,
   mockRevokeWarehouseAuthorization,
@@ -537,6 +538,18 @@ export const updateConnectionCapabilities = (authorizationId, capabilities) => r
   { method: 'put', url: `/api/internal/integrations/store-authorizations/${authorizationId}/capabilities/`, data: { capabilities } },
   () => mockConnectionCapabilities(authorizationId, capabilities),
   'integrations.connection_capabilities.update'
+);
+
+export const fetchStoreCapabilityMatrix = (storeId) => requestWithMockFallback(
+  { method: 'get', url: `/api/internal/integrations/store-capability-matrix/${storeId}/` },
+  () => mockStoreCapabilityMatrix(storeId),
+  'integrations.store_capability_matrix'
+);
+
+export const updateStoreCapabilityMatrix = (storeId, capabilities) => requestWithMockFallback(
+  { method: 'put', url: `/api/internal/integrations/store-capability-matrix/${storeId}/`, data: { capabilities } },
+  () => mockStoreCapabilityMatrix(storeId, capabilities),
+  'integrations.store_capability_matrix.update'
 );
 
 export const fetchStoreMappings = (params = {}) => requestWithMockFallback(

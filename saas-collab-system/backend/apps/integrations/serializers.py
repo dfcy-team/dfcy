@@ -508,6 +508,8 @@ class CredentialClearSerializer(serializers.Serializer):
 
 
 class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
+    api_type = serializers.SerializerMethodField()
+    account_alias = serializers.CharField(source="integration_config.account_alias", read_only=True)
     tenant_id = serializers.IntegerField(read_only=True)
     integration_config_id = serializers.IntegerField(read_only=True)
     store_id = serializers.IntegerField(read_only=True)
@@ -523,6 +525,8 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "integration_config_id",
+            "api_type",
+            "account_alias",
             "store_id",
             "store_code",
             "store_name",
@@ -556,6 +560,10 @@ class MarketplaceStoreAuthorizationSerializer(serializers.ModelSerializer):
             "write_enabled": sum(item.write_enabled for item in items),
             "last_success_at": latest_success,
         }
+
+    def get_api_type(self, obj):
+        from .models import marketplace_authorization_api_type
+        return marketplace_authorization_api_type(obj.integration_config)
 
 
 class WarehouseAuthorizationSerializer(serializers.ModelSerializer):

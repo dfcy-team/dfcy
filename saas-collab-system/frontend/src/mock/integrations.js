@@ -1424,6 +1424,24 @@ export const mockStoreAuthorizations = (params = {}) => {
     && (!params.status || row.status === params.status)
     && (!params.store_id || String(row.store_id) === String(params.store_id))
   ));
+  if (String(params.group_by_store || '') === '1') {
+    const byStore = new Map();
+    for (const row of results) {
+      if (!byStore.has(row.store_id)) byStore.set(row.store_id, {
+        store_id: row.store_id, store_code: row.store_code, store_name: row.store_name,
+        platform: row.platform, authorizations: [],
+      });
+      byStore.get(row.store_id).authorizations.push({
+        id: row.id, integration_config_id: row.integration_config_id,
+        api_type: row.api_type || 'marketplace', account_alias: row.account_alias || '示例接入配置',
+        status: row.status,
+      });
+    }
+    const grouped = [...byStore.values()];
+    const page = Math.max(1, Number(params.page) || 1);
+    const size = Math.max(1, Number(params.page_size) || 20);
+    return successResponse({ count: grouped.length, results: grouped.slice((page - 1) * size, page * size) });
+  }
   return successResponse({ count: results.length, results: results.map((row) => ({ ...row })) });
 };
 
@@ -1457,3 +1475,17 @@ export const mockConnectionCapabilities = () => successResponse({
     { capability_code: 'PRODUCT', read_enabled: true, write_enabled: false, sync_mode: 'scheduled', source_priority: 5, status: 'active' }
   ]
 });
+
+const mockStoreCapabilityState = new Map();
+export const mockStoreCapabilityMatrix = (storeId, capabilities = null) => {
+  const grouped = mockStoreAuthorizations({ group_by_store: '1', store_id: storeId }).data?.results?.[0];
+  if (!grouped) return mockFailure('NOT_FOUND', '店铺能力矩阵不存在');
+  const availableCodes = ['PRODUCT', 'CATEGORY', 'LISTING', 'PRICE', 'ORDER', 'INVENTORY', 'FULFILLMENT', 'WAREHOUSE', 'RETURN_REFUND', 'SETTLEMENT', 'PAYMENT', 'AFFILIATE', 'REVIEW', 'REPORT', 'WEBHOOK'];
+  if (grouped.authorizations.some((item) => item.api_type === 'advertising')) availableCodes.push('ADVERTISING');
+  if (capabilities) mockStoreCapabilityState.set(String(storeId), capabilities.map((row) => ({ ...row, write_enabled: false })));
+  const fallback = mockConnectionCapabilities().data.results.map((row) => ({ ...row, authorization_id: grouped.authorizations[0].id }));
+  return successResponse({ ...grouped, available_codes: availableCodes,
+    results: mockStoreCapabilityState.get(String(storeId)) || fallback,
+    suggestions: [],
+  });
+};

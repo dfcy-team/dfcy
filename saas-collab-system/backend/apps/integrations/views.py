@@ -86,6 +86,7 @@ from .models import (
     SyncAlertIncident,
     SyncRun,
     WarehouseAuthorization,
+    marketplace_authorization_api_type,
 )
 from .platform_schema_service import get_platform_schema
 from .readiness_service import (
@@ -1196,10 +1197,10 @@ def rotate_integration_credentials(request, pk):
 @api_view(["GET"])
 @permission_classes([IsMarketplaceStoreViewer])
 def store_authorization_collection(request):
-    allowed_query = {"page", "page_size", "platform", "status", "store_id"}
+    allowed_query = {"page", "page_size", "platform", "status", "store_id", "group_by_store"}
     if set(request.query_params) - allowed_query:
         raise ValidationError("Unknown store authorization query parameter.")
-    queryset = MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store").prefetch_related("connection_capabilities")
+    queryset = MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store", "integration_config").prefetch_related("connection_capabilities")
     if request.query_params.get("platform"):
         platform = request.query_params["platform"]
         if platform not in {"lazada", "shopee", "tiktok"}:
@@ -1214,6 +1215,42 @@ def store_authorization_collection(request):
         queryset = queryset.filter(store_id=positive_int(request.query_params["store_id"], default=0))
     queryset = filter_store_authorizations(request.user, queryset, "integrations.store.view")
     page, page_size = pagination_query(request)
+    grouped = request.query_params.get("group_by_store")
+    if grouped not in (None, "", "0", "1"):
+        raise ValidationError({"group_by_store": "Expected 0 or 1."})
+    if grouped == "1":
+        store_ids = queryset.order_by("store_id").values_list("store_id", flat=True).distinct()
+        paginator = Paginator(store_ids, page_size)
+        if page > paginator.num_pages:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Requested page does not exist.")
+        page_obj = paginator.page(page)
+        selected_ids = list(page_obj.object_list)
+        grouped_rows = {}
+        for authorization in queryset.filter(store_id__in=selected_ids).order_by("store_id", "id"):
+            group = grouped_rows.setdefault(authorization.store_id, {
+                "store_id": authorization.store_id,
+                "store_name": authorization.store.name,
+                "store_code": authorization.store.code,
+                "platform": authorization.platform,
+                "authorizations": [],
+            })
+            group["authorizations"].append(_matrix_authorization_option(authorization))
+
+        def page_url(target):
+            if target is None:
+                return None
+            params = request.query_params.copy()
+            params["page"] = target
+            params["page_size"] = page_size
+            return request.build_absolute_uri(f"{request.path}?{params.urlencode()}")
+
+        return success_response({
+            "count": paginator.count,
+            "next": page_url(page_obj.next_page_number()) if page_obj.has_next() else None,
+            "previous": page_url(page_obj.previous_page_number()) if page_obj.has_previous() else None,
+            "results": [grouped_rows[store_id] for store_id in selected_ids],
+        })
     return success_response(
         paginated_data(
             request,
@@ -1225,12 +1262,135 @@ def store_authorization_collection(request):
     )
 
 
+def _matrix_authorization_option(authorization):
+    summary = MarketplaceStoreAuthorizationSerializer(authorization).data["capabilities_summary"]
+    return {
+        "id": authorization.id,
+        "api_type": marketplace_authorization_api_type(authorization.integration_config),
+        "account_alias": authorization.integration_config.account_alias,
+        "status": authorization.status,
+        "integration_config_id": authorization.integration_config_id,
+        "capabilities_summary": summary,
+    }
+
+
+def _matrix_allowed_codes(authorization):
+    api_type = marketplace_authorization_api_type(authorization.integration_config)
+    if api_type == "marketplace":
+        return set(ConnectionCapability.CapabilityCode.values) - {"ADVERTISING"}
+    if api_type == "advertising":
+        return {"ADVERTISING", "REPORT"}
+    return set()
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsMarketplaceCapabilityManager])
+def store_capability_matrix(request, store_id):
+    permission_code = "integrations.store.view" if request.method == "GET" else "integrations.store.authorize"
+    queryset = filter_store_authorizations(
+        request.user,
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant)
+        .select_related("store", "integration_config").prefetch_related("connection_capabilities"),
+        permission_code,
+    )
+    authorizations = list(queryset.filter(store_id=store_id).order_by("id"))
+    if not authorizations:
+        from rest_framework.exceptions import NotFound
+        raise NotFound("Store authorizations not found.")
+    by_id = {authorization.id: authorization for authorization in authorizations}
+
+    if request.method == "PUT":
+        if not isinstance(request.data, dict) or set(request.data) != {"capabilities"} or not isinstance(request.data["capabilities"], list):
+            raise ValidationError({"capabilities": "A capabilities list is required and no other fields are accepted."})
+        allowed_fields = {"capability_code", "authorization_id", "read_enabled", "write_enabled", "sync_mode", "source_priority", "status"}
+        rows = request.data["capabilities"]
+        if any(not isinstance(row, dict) or set(row) - allowed_fields or "authorization_id" not in row for row in rows):
+            raise ValidationError({"capabilities": "Unsupported or missing capability field."})
+        serializer = ConnectionCapabilityWriteSerializer(
+            data=[{key: value for key, value in row.items() if key != "authorization_id"} for row in rows], many=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        codes = [row["capability_code"] for row in serializer.validated_data]
+        if len(codes) != len(set(codes)):
+            raise ValidationError({"capabilities": "Capability codes must be unique within a request."})
+        validated = []
+        for raw, row in zip(rows, serializer.validated_data):
+            authorization_id = positive_int(raw["authorization_id"], default=0)
+            authorization = by_id.get(authorization_id)
+            if authorization is None:
+                raise ValidationError({"authorization_id": "Authorization is outside this store or data scope."})
+            if row["capability_code"] not in _matrix_allowed_codes(authorization):
+                raise ValidationError({"capability_code": "Capability is not supported by this API type."})
+            if row["status"] == ConnectionCapability.Status.ACTIVE and authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE:
+                raise ValidationError({"status": "An inactive authorization cannot activate capabilities."})
+            validated.append((authorization, row))
+        with transaction.atomic():
+            # Serialize changes to all sources of this store, then move each capability
+            # to the selected authorization without deleting historical records.
+            list(MarketplaceStoreAuthorization.objects.select_for_update().filter(id__in=by_id).order_by("id"))
+            for authorization, row in validated:
+                ConnectionCapability.objects.filter(
+                    authorization_id__in=by_id, capability_code=row["capability_code"],
+                ).exclude(authorization=authorization).update(
+                    read_enabled=False, write_enabled=False, status=ConnectionCapability.Status.DISABLED,
+                )
+                item, _ = ConnectionCapability.objects.get_or_create(
+                    authorization=authorization, capability_code=row["capability_code"],
+                )
+                for field in ("read_enabled", "write_enabled", "sync_mode", "source_priority", "status"):
+                    setattr(item, field, row[field])
+                item.full_clean()
+                item.save()
+        authorizations = list(queryset.filter(store_id=store_id).order_by("id"))
+
+    available_codes = set().union(*(_matrix_allowed_codes(item) for item in authorizations))
+    candidates = {}
+    for authorization in authorizations:
+        for item in authorization.connection_capabilities.all():
+            if item.capability_code in _matrix_allowed_codes(authorization):
+                candidates.setdefault(item.capability_code, []).append(item)
+    results = []
+    for code in ConnectionCapability.CapabilityCode.values:
+        if code not in available_codes:
+            continue
+        items = candidates.get(code, [])
+        if not items:
+            continue
+        selected = min(items, key=lambda item: (
+            not (item.read_enabled and item.status == ConnectionCapability.Status.ACTIVE),
+            not item.read_enabled, item.source_priority, item.id,
+        ))
+        results.append({
+            "capability_code": code,
+            "authorization_id": selected.authorization_id,
+            "read_enabled": selected.read_enabled,
+            "write_enabled": selected.write_enabled,
+            "sync_mode": selected.sync_mode,
+            "source_priority": selected.source_priority,
+            "status": selected.status,
+            "last_success_at": selected.last_success_at,
+        })
+    store = authorizations[0].store
+    return success_response({
+        "store_id": store.id,
+        "store_name": store.name,
+        "store_code": store.code,
+        "platform": authorizations[0].platform,
+        "authorizations": [_matrix_authorization_option(item) for item in authorizations],
+        "available_codes": [code for code in ConnectionCapability.CapabilityCode.values if code in available_codes],
+        "results": results,
+        "suggestions": [dict(item, authorization_id=authorization.id)
+                        for authorization in authorizations for item in capability_suggestions(authorization)
+                        if item["capability_code"] in _matrix_allowed_codes(authorization)],
+    })
+
+
 @api_view(["GET"])
 @permission_classes([IsMarketplaceStoreViewer])
 def store_authorization_detail(request, pk):
     queryset = filter_store_authorizations(
         request.user,
-        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store").prefetch_related("connection_capabilities"),
+        MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant).select_related("store", "integration_config").prefetch_related("connection_capabilities"),
         "integrations.store.view",
     )
     authorization = get_scoped_object_or_404(queryset, pk=pk)
@@ -1261,6 +1421,8 @@ def store_authorization_capabilities(request, pk):
         codes = [row["capability_code"] for row in serializer.validated_data]
         if len(codes) != len(set(codes)):
             raise ValidationError({"capabilities": "Capability codes must be unique within a request."})
+        if any(code not in _matrix_allowed_codes(authorization) for code in codes):
+            raise ValidationError({"capability_code": "Capability is not supported by this API type."})
         if authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE and any(
             row["status"] == ConnectionCapability.Status.ACTIVE for row in serializer.validated_data
         ):
@@ -1275,11 +1437,12 @@ def store_authorization_capabilities(request, pk):
                     setattr(item, field, row[field])
                 item.full_clean()
                 item.save()
-    queryset = ConnectionCapability.objects.filter(authorization=authorization)
+    allowed_codes = _matrix_allowed_codes(authorization)
+    queryset = ConnectionCapability.objects.filter(authorization=authorization, capability_code__in=allowed_codes)
     return success_response({
         "authorization_id": authorization.id,
-        "available_codes": list(ConnectionCapability.CapabilityCode.values),
-        "suggestions": capability_suggestions(authorization),
+        "available_codes": [code for code in ConnectionCapability.CapabilityCode.values if code in allowed_codes],
+        "suggestions": [item for item in capability_suggestions(authorization) if item["capability_code"] in allowed_codes],
         "results": ConnectionCapabilitySerializer(queryset, many=True).data,
     })
 
