@@ -45,6 +45,11 @@ describe('飞书协同工作台', () => {
     expect(page).toContain('row.match_reason');
     expect(page).toContain('candidateMessage');
     expect(page).toContain('请核对 Open ID 和匹配依据后绑定');
+    expect(page).toContain('验证 Open ID');
+    expect(page).toContain('manualOpenId');
+    expect(page).toContain('verifyManualOpenId');
+    expect(page).toContain('manual_open_id');
+    expect(api).toContain('data = {}');
     expect(page).toContain('@click="confirmIdentityBinding"');
     expect(api).toContain('fetchFeishuIdentityCandidates');
     expect(api).toContain('identities/system-users/${systemUserId}/candidates/');
