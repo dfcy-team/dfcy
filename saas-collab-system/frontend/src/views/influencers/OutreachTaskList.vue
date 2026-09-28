@@ -32,6 +32,16 @@
         <el-select v-model="filters.dispatcher" clearable filterable placeholder="全部下发人" @change="applyFilters">
           <el-option v-for="dispatcher in dispatcherOptions" :key="dispatcher.id" :label="dispatcher.name" :value="dispatcher.id" />
         </el-select>
+        <el-select v-model="filters.ordering" class="sort-select" aria-label="建联任务排序" placeholder="排序" @change="applyFilters">
+          <el-option label="创建时间：最新优先" value="-created_at" />
+          <el-option label="创建时间：最早优先" value="created_at" />
+          <el-option label="任务编号：升序" value="task_no" />
+          <el-option label="任务编号：降序" value="-task_no" />
+          <el-option label="任务名称：升序" value="task_name" />
+          <el-option label="任务名称：降序" value="-task_name" />
+          <el-option label="优先级：高到低" value="-priority" />
+          <el-option label="优先级：低到高" value="priority" />
+        </el-select>
         <el-checkbox v-model="filters.normalOnly" @change="applyFilters">正常任务</el-checkbox>
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
@@ -442,7 +452,7 @@ const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
+const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -583,7 +593,7 @@ const detailProgressLabel = computed(() => {
 
 async function load() {
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value };
+  const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
   if (filters.search.trim()) params.search = filters.search.trim();
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
@@ -604,7 +614,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
+  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
   applyFilters();
 }
 
@@ -1149,6 +1159,7 @@ onMounted(async () => {
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
 .toolbar .el-select { flex: 0 0 140px; width: 140px; }
+.toolbar .sort-select { flex-basis: 185px; width: 185px; }
 .toolbar .el-checkbox, .toolbar .el-button { flex: 0 0 auto; }
 .target-bar { display: flex; gap: 10px; margin-bottom: 14px; }
 .target-bar .el-input, .target-bar .el-select { max-width: 320px; flex: 1; }
