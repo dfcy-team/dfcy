@@ -2080,6 +2080,13 @@
       "exact": true
     },
     {
+      "path": "/sso/authorize",
+      "exact": true,
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
       "path": "/development/requirements",
       "permissions": [
         "development.requirement.view"
