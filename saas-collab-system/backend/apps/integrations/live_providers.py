@@ -189,12 +189,24 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
         self._reject_unknown(params, {"code", "shop_id", "main_account_id", "state"})
         code = str(params.get("code") or "").strip()
         shop_id = str(params.get("shop_id") or "").strip()
-        if not code or not shop_id:
+        main_account_id = str(params.get("main_account_id") or "").strip()
+        if not code or not (shop_id or main_account_id):
             raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shopee callback is missing required parameters.")
+        if main_account_id:
+            target_shop_id = str(context.get("target_shop_id") or "").strip()
+            if not target_shop_id:
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shopee 主账号授权需要先在当前店铺档案填写平台店铺 ID，再重新发起授权。")
+            if shop_id and shop_id != target_shop_id:
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shopee callback shop does not match the selected store.")
+            shop_id = target_shop_id
+        if any(not value.isascii() or not value.isdigit() or int(value) <= 0
+               for value in (shop_id, main_account_id) if value):
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shopee callback contains an invalid account or shop ID.")
         return {
             "code": code,
             "platform_store_id": shop_id,
-            "merchant_subject_id": str(params.get("main_account_id") or shop_id),
+            "main_account_id": main_account_id,
+            "merchant_subject_id": main_account_id or shop_id,
             "region": context.get("region", ""),
             "scopes": list(context.get("scopes") or []),
         }
@@ -205,11 +217,13 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
         path = _required(self.config.get("token_path"), "shopee.token_path")
         query = self._signed_public_query(path)
         shop_id = payload["platform_store_id"]
+        main_account_id = payload.get("main_account_id")
+        subject = {"main_account_id": int(main_account_id)} if main_account_id else {"shop_id": int(shop_id)}
         data = self._request_json(
             "POST",
             f"{self._host()}{path}",
             query=query,
-            json_body={"code": payload["code"], "shop_id": int(shop_id), "partner_id": int(self._app_id())},
+            json_body={"code": payload["code"], **subject, "partner_id": int(self._app_id())},
             retry=False,
         )
         if data.get("error"):
@@ -218,6 +232,12 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
         refresh_token = data.get("refresh_token")
         if not access_token or not refresh_token:
             raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "Shopee token response is incomplete.")
+        if main_account_id:
+            authorized_shops = data.get("shop_id_list")
+            if (not isinstance(authorized_shops, list)
+                    or any(type(value) not in (str, int) for value in authorized_shops)
+                    or str(shop_id) not in {str(value) for value in authorized_shops}):
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shopee 主账号返回的授权店铺列表不包含当前店铺，请核对平台店铺 ID 与授权范围。")
         expires_at = _expiry(data.get("expire_in"), default_seconds=0)
         stored = self._store_tokens(
             credential_type="shopee",
