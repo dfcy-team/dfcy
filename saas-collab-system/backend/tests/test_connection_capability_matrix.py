@@ -156,6 +156,14 @@ def test_store_matrix_groups_api_keys_and_moves_capability_source():
     assert row["authorization_id"] == advertising.id
     assert ConnectionCapability.objects.get(authorization=marketplace, capability_code="REPORT").read_enabled is False
     assert ConnectionCapability.objects.get(authorization=advertising, capability_code="REPORT").read_enabled is True
+    legacy_url = f"/api/internal/integrations/store-authorizations/{marketplace.id}/capabilities/"
+    legacy_move = client.put(legacy_url, {"capabilities": [{
+        "capability_code": "REPORT", "read_enabled": True, "write_enabled": False,
+        "status": "active",
+    }]}, format="json")
+    assert legacy_move.status_code == 200
+    assert ConnectionCapability.objects.get(authorization=marketplace, capability_code="REPORT").read_enabled is True
+    assert ConnectionCapability.objects.get(authorization=advertising, capability_code="REPORT").read_enabled is False
     assert client.put(url, {"capabilities": [{
         "capability_code": "ADVERTISING", "authorization_id": advertising.id,
         "read_enabled": True, "write_enabled": True, "status": "active",

@@ -1283,6 +1283,21 @@ def _matrix_allowed_codes(authorization):
     return set()
 
 
+def _lock_store_capability_sources(authorization, scoped_ids, rows):
+    """Serialize both capability editors and reject an active source outside the caller's scope."""
+    all_ids = list(MarketplaceStoreAuthorization.objects.select_for_update().filter(
+        tenant=authorization.tenant, store=authorization.store,
+    ).order_by("id").values_list("id", flat=True))
+    activating_codes = [row["capability_code"] for row in rows
+                        if row["read_enabled"] and row["status"] == ConnectionCapability.Status.ACTIVE]
+    if activating_codes and ConnectionCapability.objects.filter(
+        authorization_id__in=set(all_ids) - set(scoped_ids),
+        capability_code__in=activating_codes,
+        read_enabled=True, status=ConnectionCapability.Status.ACTIVE,
+    ).exists():
+        raise ValidationError({"capabilities": "Another active source is outside the authorized data scope."})
+
+
 @api_view(["GET", "PUT"])
 @permission_classes([IsMarketplaceCapabilityManager])
 def store_capability_matrix(request, store_id):
@@ -1327,7 +1342,7 @@ def store_capability_matrix(request, store_id):
         with transaction.atomic():
             # Serialize changes to all sources of this store, then move each capability
             # to the selected authorization without deleting historical records.
-            list(MarketplaceStoreAuthorization.objects.select_for_update().filter(id__in=by_id).order_by("id"))
+            _lock_store_capability_sources(authorizations[0], by_id, [row for _, row in validated])
             for authorization, row in validated:
                 ConnectionCapability.objects.filter(
                     authorization_id__in=by_id, capability_code=row["capability_code"],
@@ -1428,7 +1443,18 @@ def store_authorization_capabilities(request, pk):
         ):
             raise ValidationError({"capabilities": "A revoked, expired, pending or failed authorization cannot activate capabilities."})
         with transaction.atomic():
+            scoped_ids = set(filter_store_authorizations(
+                request.user,
+                MarketplaceStoreAuthorization.objects.filter(tenant=request.user.tenant, store=authorization.store),
+                permission_code,
+            ).values_list("id", flat=True))
+            _lock_store_capability_sources(authorization, scoped_ids, serializer.validated_data)
             for row in serializer.validated_data:
+                ConnectionCapability.objects.filter(
+                    authorization_id__in=scoped_ids, capability_code=row["capability_code"],
+                ).exclude(authorization=authorization).update(
+                    read_enabled=False, write_enabled=False, status=ConnectionCapability.Status.DISABLED,
+                )
                 item, _ = ConnectionCapability.objects.get_or_create(
                     authorization=authorization,
                     capability_code=row["capability_code"],
