@@ -117,9 +117,9 @@ class FeishuIdentityService:
             detail = ((self._payload(response, "未找到该飞书用户，或应用无权访问该用户。").get("data") or {}).get("user") or {})
         except OAuthFlowError as exc:
             raise ValidationError({"detail": f"飞书平台请求失败：{exc}"}) from exc
-        returned_open_id = str(detail.get("open_id") or open_id).strip()
+        returned_open_id = str(detail.get("open_id") or "").strip()
         if returned_open_id != open_id:
-            raise ValidationError({"open_id": "飞书返回的用户标识与输入不一致。"})
+            raise ValidationError({"open_id": "未找到该飞书用户，或应用无权访问该用户。"})
         return {
             "open_id": open_id,
             "user_id": str(detail.get("user_id") or ""),

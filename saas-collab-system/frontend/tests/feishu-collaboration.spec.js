@@ -48,6 +48,7 @@ describe('飞书协同工作台', () => {
     expect(page).toContain('验证 Open ID');
     expect(page).toContain('manualOpenId');
     expect(page).toContain('verifyManualOpenId');
+    expect(page).toContain('/^ou_[A-Za-z0-9_-]{1,128}$/');
     expect(page).toContain('manual_open_id');
     expect(api).toContain('data = {}');
     expect(page).toContain('@click="confirmIdentityBinding"');

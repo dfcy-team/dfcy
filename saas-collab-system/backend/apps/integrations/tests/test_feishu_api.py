@@ -211,6 +211,22 @@ class FeishuApiTests(APITestCase):
             )
         http.request.assert_not_called()
 
+    def test_manual_open_id_service_rejects_empty_feishu_user(self):
+        connection = FeishuConnection.objects.create(
+            tenant=self.tenant, app_id="cli_test", app_secret_ref="cred_test", enabled=True,
+            created_by=self.user, updated_by=self.user,
+        )
+        custody = type("Custody", (), {"retrieve_secret": lambda self, ref: "secret"})()
+        http = type("Http", (), {})()
+        http.request = Mock(side_effect=[
+            FakeResponse({"code": 0, "tenant_access_token": "token-value"}),
+            FakeResponse({"code": 0, "data": {"user": {}}}),
+        ])
+        with self.assertRaises(ValidationError):
+            FeishuIdentityService(http=http, custody=custody).find_candidate_by_open_id(
+                connection=connection, open_id="ou_missing",
+            )
+
     def test_feishu_candidate_service_uses_token_and_batch_lookup_and_masks_contacts(self):
         colleague = get_user_model().objects.create_user(
             username="operator-service", email="operator@example.com", phone="13800138000",
