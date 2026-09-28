@@ -132,7 +132,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
         model = InternalAPIClient
         fields = (
             "id", "name", "caller_type", "client_id", "secret_prefix", "secret_fingerprint",
-            "credential_configured", "resources", "allowed_cidrs", "rate_limit_per_minute",
+            "credential_configured", "resources", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
             "page_size_limit", "expires_at", "status", "approval_status", "approved_by", "approved_at", "reviewed_at", "rejection_reason", "config_version", "last_rotated_at",
             "created_at", "updated_at",
         )
@@ -151,7 +151,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         allowed = {
-            "name", "caller_type", "resources", "allowed_cidrs", "rate_limit_per_minute",
+            "name", "caller_type", "resources", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
             "page_size_limit", "expires_at",
         }
         if not isinstance(data, dict):
@@ -163,7 +163,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
 
     def validate_resources(self, value):
         if isinstance(value, list):
-            if not value or any(not isinstance(resource, str) for resource in value):
+            if any(not isinstance(resource, str) for resource in value):
                 raise serializers.ValidationError("Select at least one data block.")
             resource_codes = value
         elif isinstance(value, dict) and value:
@@ -179,12 +179,45 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError(
                             f"Unsupported fields for {resource}: {', '.join(sorted(unknown_fields))}."
                         )
+        elif value == {}:
+            resource_codes = []
         else:
             raise serializers.ValidationError("Select at least one data block.")
         unknown_resources = set(resource_codes) - set(INTERNAL_API_RESOURCE_FIELDS)
         if unknown_resources:
             raise serializers.ValidationError(f"Unsupported resources: {', '.join(sorted(unknown_resources))}.")
         return {resource: sorted(INTERNAL_API_RESOURCE_FIELDS[resource]) for resource in sorted(set(resource_codes))}
+
+    def validate_sso_redirect_uris(self, value):
+        from urllib.parse import urlsplit
+        if not isinstance(value, list) or len(value) > 10:
+            raise serializers.ValidationError("Provide at most ten exact callback URLs.")
+        normalized = []
+        for item in value:
+            if not isinstance(item, str) or len(item) > 2048 or item != item.strip():
+                raise serializers.ValidationError("Invalid callback URL.")
+            try:
+                parsed = urlsplit(item)
+                valid = parsed.scheme == "https" and bool(parsed.hostname) and parsed.port != 0
+            except ValueError:
+                raise serializers.ValidationError("Invalid callback URL.")
+            if (not valid or "*" in item or any(ord(char) < 32 for char in item)
+                    or parsed.username or parsed.password or parsed.fragment or parsed.query
+                    or parsed.path == "/" or not parsed.path.startswith("/")):
+                raise serializers.ValidationError("Callback URLs must be exact HTTPS URLs with a path and no query or fragment.")
+            normalized.append(item)
+        return sorted(set(normalized))
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        enabled = attrs.get("allow_sso_login", getattr(self.instance, "allow_sso_login", False))
+        uris = attrs.get("sso_redirect_uris", getattr(self.instance, "sso_redirect_uris", []))
+        resources = attrs.get("resources", getattr(self.instance, "resources", {}))
+        if enabled and not uris:
+            raise serializers.ValidationError({"sso_redirect_uris": "At least one callback URL is required for shared login."})
+        if not enabled and not resources:
+            raise serializers.ValidationError({"resources": "Select at least one data block or enable shared login."})
+        return attrs
 
     def validate_allowed_cidrs(self, value):
         if not isinstance(value, list) or not value:

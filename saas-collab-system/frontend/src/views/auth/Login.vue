@@ -55,6 +55,7 @@ import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
+import { safeLocalRedirect } from '../../utils/ssoRedirect';
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -75,7 +76,7 @@ async function handleLogin() {
     return;
   }
   ElMessage.success('登录成功');
-  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
+  const redirect = safeLocalRedirect(route.query.redirect);
   router.replace(redirect);
 }
 </script>

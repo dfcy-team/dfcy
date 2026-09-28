@@ -2,8 +2,10 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { pinia } from '../stores';
 import { canAccessPath } from './menu';
+import { safeLocalRedirect } from '../utils/ssoRedirect';
 const MainLayout = () => import('../layouts/MainLayout.vue');
 const Login = () => import('../views/auth/Login.vue');
+const SsoAuthorize = () => import('../views/auth/SsoAuthorize.vue');
 const Forbidden = () => import('../views/auth/Forbidden.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
 const BusinessOverview = () => import('../views/analytics/BusinessOverview.vue');
@@ -146,6 +148,7 @@ const ReleaseContractConsole = () => import('../views/releases/ReleaseContractCo
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
+  { path: '/sso/authorize', component: SsoAuthorize, meta: { sso: true } },
   {
     path: '/',
     component: MainLayout,
@@ -351,13 +354,13 @@ router.beforeEach(async (to) => {
   await auth.initialize();
 
   if (to.meta.public) {
-    if (to.path === '/login' && auth.isAuthenticated) return '/';
+    if (to.path === '/login' && auth.isAuthenticated) return safeLocalRedirect(to.query.redirect);
     return true;
   }
   if (!auth.isAuthenticated) {
     return { path: '/login', query: { redirect: to.fullPath } };
   }
-  if (to.path !== '/forbidden' && !canAccessPath(auth.currentUser, to.path)) {
+  if (!to.meta.sso && to.path !== '/forbidden' && !canAccessPath(auth.currentUser, to.path)) {
     return '/forbidden';
   }
   return true;

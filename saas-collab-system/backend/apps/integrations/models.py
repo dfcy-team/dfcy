@@ -1770,6 +1770,8 @@ class InternalAPIClient(models.Model):
     secret_prefix = models.CharField(max_length=16)
     secret_fingerprint = models.CharField(max_length=64)
     resources = models.JSONField(default=dict)
+    allow_sso_login = models.BooleanField(default=False)
+    sso_redirect_uris = models.JSONField(default=list)
     allowed_cidrs = models.JSONField(default=list)
     rate_limit_per_minute = models.PositiveIntegerField(default=60)
     page_size_limit = models.PositiveIntegerField(default=100)
@@ -1825,3 +1827,14 @@ class InternalAPIClientUsage(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["client", "window_start"], name="uniq_internal_api_client_minute")]
+
+
+class InternalSSOAuthorizationCode(models.Model):
+    client = models.ForeignKey(InternalAPIClient, on_delete=models.CASCADE, related_name="sso_codes")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    code_hash = models.CharField(max_length=64, unique=True)
+    redirect_uri = models.URLField(max_length=2048)
+    code_challenge = models.CharField(max_length=43)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
