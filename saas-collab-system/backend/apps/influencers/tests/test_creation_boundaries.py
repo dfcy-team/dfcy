@@ -1246,6 +1246,7 @@ def test_sample_list_orders_by_number_creation_and_linked_task_priority():
         assert response.json()["data"]["results"][0]["id"] == expected
     response = client.get(url, {"ordering": "-priority"})
     assert response.status_code == 200
+    assert response.json()["data"]["results"][0]["outreach_task_priority"] == "urgent"
     assert response.json()["data"]["results"][-1]["id"] == samples[2].pk
     assert client.get(url, {"ordering": "owner__password"}).status_code == 400
 

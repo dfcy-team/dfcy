@@ -63,6 +63,9 @@
             <small>{{ displayValue(row.task_name) }}</small>
           </template>
         </el-table-column>
+        <el-table-column label="创建时间" min-width="165">
+          <template #default="{ row }">{{ formatTaskTime(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column label="店铺 / 商品 ID" min-width="210">
           <template #default="{ row }">
             <b>{{ displayValue(row.store_name || row.store) }}</b>

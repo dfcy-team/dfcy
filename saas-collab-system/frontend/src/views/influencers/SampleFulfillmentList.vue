@@ -51,6 +51,12 @@
             <small v-if="hasValue(row.outreach_task_name)">{{ row.outreach_task_name }}</small>
           </template>
         </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" min-width="165">
+          <template #default="{ row }">{{ displayValue(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="建联优先级" min-width="105">
+          <template #default="{ row }">{{ statusLabel(OUTREACH_PRIORITY_LABELS, row.outreach_task_priority) }}</template>
+        </el-table-column>
         <el-table-column label="任务 ID" width="100">
           <template #default="{ row }">{{ displayValue(row.outreach_task) }}</template>
         </el-table-column>
@@ -265,6 +271,7 @@ import {
   formatInfluencerError,
   FULFILLMENT_LINK_TYPE_LABELS,
   FULFILLMENT_STATUS_LABELS,
+  OUTREACH_PRIORITY_LABELS,
   restoreSampleFulfillment,
   resolveOrCreateInfluencerNickname,
   sampleDuplicateWarning,

@@ -471,6 +471,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     items = SampleItemSerializer(many=True, required=False)
     outreach_task_no = serializers.CharField(source="outreach_task.task_no", read_only=True)
     outreach_task_name = serializers.CharField(source="outreach_task.task_name", read_only=True)
+    outreach_task_priority = serializers.CharField(source="outreach_task.priority", read_only=True)
     store_name = serializers.CharField(source="store.name", read_only=True)
     influencer_name = serializers.SerializerMethodField()
     influencer_display_name = serializers.SerializerMethodField()
@@ -573,7 +574,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SampleFulfillment
         fields = (
-            "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name",
+            "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name", "outreach_task_priority",
             "outreach_target", "influencer", "influencer_name", "influencer_display_name", "influencer_code",
             "influencer_handle", "influencer_platform", "store", "store_name", "owner", "owner_name",
             "source_owner_name_snapshot",
