@@ -7,9 +7,11 @@ from . import module_release_api
 from . import warehouse_credential_views
 from . import feishu_api
 from . import internal_api_clients
+from . import internal_sso
 
 
 urlpatterns = [
+    path("sso/authorize/", internal_sso.authorize, name="internal-sso-authorize"),
     path("internal-api-clients/", internal_api_clients.client_collection, name="internal-api-client-collection"),
     path("internal-api-clients/<int:pk>/", internal_api_clients.client_detail, name="internal-api-client-detail"),
     path("internal-api-clients/<int:pk>/status/", internal_api_clients.client_status, name="internal-api-client-status"),
