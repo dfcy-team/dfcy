@@ -89,7 +89,7 @@ describe('API 数据接入生产页面闭环', () => {
     expect(subjectAccess).toContain('refreshStoreAuthorization(binding.id, { confirmed: true })');
 
     const capabilities = read('src/views/integrations/IntegrationCapabilityMatrix.vue');
-    expect(capabilities).toContain("['active', 'authorized'].includes(selectedAuthorization.value?.status)");
+    expect(capabilities).toContain("authorizations.value.some((item) => ['active', 'authorized'].includes(item.status))");
     expect(capabilities).toContain('只有有效授权（active/authorized）可以保存能力矩阵');
     expect(capabilities).toContain('value="realtime"');
     expect(capabilities).toContain('value="webhook"');
