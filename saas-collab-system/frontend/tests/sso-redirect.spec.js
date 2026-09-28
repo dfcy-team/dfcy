@@ -29,7 +29,8 @@ describe('跳转式共用登录', () => {
     const router = read('src/router/index.js');
     const page = read('src/views/auth/SsoAuthorize.vue');
     expect(router).toContain("path: '/sso/authorize'");
-    expect(router).toContain('!to.meta.sso');
+    expect(read('src/router/menu.js')).toContain("{ path: '/sso/authorize', exact: true, userTypes: ['internal'] }");
+    expect(router).not.toContain('!to.meta.sso');
     expect(page).toContain('/api/internal/integrations/sso/authorize/');
     expect(page).toContain('target.searchParams.get(\'code\')');
     expect(page).not.toContain('form.password');

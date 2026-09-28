@@ -148,7 +148,7 @@ const ReleaseContractConsole = () => import('../views/releases/ReleaseContractCo
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
-  { path: '/sso/authorize', component: SsoAuthorize, meta: { sso: true } },
+  { path: '/sso/authorize', component: SsoAuthorize },
   {
     path: '/',
     component: MainLayout,
@@ -360,7 +360,7 @@ router.beforeEach(async (to) => {
   if (!auth.isAuthenticated) {
     return { path: '/login', query: { redirect: to.fullPath } };
   }
-  if (!to.meta.sso && to.path !== '/forbidden' && !canAccessPath(auth.currentUser, to.path)) {
+  if (to.path !== '/forbidden' && !canAccessPath(auth.currentUser, to.path)) {
     return '/forbidden';
   }
   return true;
