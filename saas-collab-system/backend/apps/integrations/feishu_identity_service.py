@@ -2,6 +2,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.exceptions import ValidationError
 from urllib.parse import urlencode
 import unicodedata
+import re
 
 from .custody import CustodyError, get_custody_backend
 from .net_guard import PlatformHttpClient
@@ -13,6 +14,7 @@ MAX_DIRECTORY_DEPARTMENTS = 100
 MAX_DIRECTORY_USERS = 1000
 MAX_NAME_CANDIDATES = 20
 PAGE_SIZE = 50
+OPEN_ID_PATTERN = re.compile(r"^ou_[A-Za-z0-9_-]{1,128}$")
 
 
 def _mask_email(value):
@@ -79,6 +81,56 @@ class FeishuIdentityService:
             if not data.get("has_more") or not data.get("page_token"):
                 break
             page_token = str(data["page_token"])
+
+    def _tenant_token(self, connection):
+        if not connection or not connection.enabled or not connection.app_id or not connection.app_secret_ref:
+            raise ValidationError({"detail": "请先启用并完成飞书应用连接配置。"})
+        try:
+            app_secret = self.custody.retrieve_secret(connection.app_secret_ref)
+            response = self.http.request(
+                "POST",
+                f"{FEISHU_BASE_URL}/open-apis/auth/v3/tenant_access_token/internal",
+                json_body={"app_id": connection.app_id, "app_secret": app_secret},
+                retry=False,
+                diagnostic_platform="feishu",
+            )
+            token = self._payload(response, "飞书应用认证失败。").get("tenant_access_token")
+            if not token:
+                raise ValidationError({"detail": "飞书应用认证未返回有效访问凭证。"})
+            return token
+        except CustodyError as exc:
+            raise ValidationError({"detail": "无法读取飞书应用凭据。"}) from exc
+        except OAuthFlowError as exc:
+            raise ValidationError({"detail": f"飞书平台请求失败：{exc}"}) from exc
+
+    def find_candidate_by_open_id(self, *, connection, open_id):
+        open_id = str(open_id or "").strip()
+        if not OPEN_ID_PATTERN.fullmatch(open_id):
+            raise ValidationError({"open_id": "请输入有效的飞书 Open ID（以 ou_ 开头）。"})
+        token = self._tenant_token(connection)
+        try:
+            response = self.http.request(
+                "GET",
+                f"{FEISHU_BASE_URL}/open-apis/contact/v3/users/{open_id}?user_id_type=open_id&department_id_type=open_department_id",
+                headers={"Authorization": f"Bearer {token}"}, retry=False, diagnostic_platform="feishu",
+            )
+            detail = ((self._payload(response, "未找到该飞书用户，或应用无权访问该用户。").get("data") or {}).get("user") or {})
+        except OAuthFlowError as exc:
+            raise ValidationError({"detail": f"飞书平台请求失败：{exc}"}) from exc
+        returned_open_id = str(detail.get("open_id") or "").strip()
+        if returned_open_id != open_id:
+            raise ValidationError({"open_id": "未找到该飞书用户，或应用无权访问该用户。"})
+        return {
+            "open_id": open_id,
+            "user_id": str(detail.get("user_id") or ""),
+            "union_id": str(detail.get("union_id") or ""),
+            "name": str(detail.get("name") or ""),
+            "department_ids": detail.get("department_ids") or [],
+            "email": _mask_email(detail.get("email") or ""),
+            "phone": _mask_phone(detail.get("mobile") or ""),
+            "match_reason": "手动 Open ID 验证通过",
+            "match_level": "manual_open_id",
+        }
 
     def _find_by_name(self, *, token, user):
         target_name = self._normalized(user.full_name)
@@ -147,21 +199,8 @@ class FeishuIdentityService:
         mobiles = [user.phone.strip()] if user.phone and user.phone.strip() else []
         if not emails and not mobiles and not str(user.full_name or "").strip():
             raise ValidationError({"reason": "missing_identity_fields", "message": "该系统用户未配置姓名、邮箱或手机号，无法查询飞书用户。"})
-        if not connection or not connection.enabled or not connection.app_id or not connection.app_secret_ref:
-            raise ValidationError({"detail": "请先启用并完成飞书应用连接配置。"})
         try:
-            app_secret = self.custody.retrieve_secret(connection.app_secret_ref)
-            token_response = self.http.request(
-                "POST",
-                f"{FEISHU_BASE_URL}/open-apis/auth/v3/tenant_access_token/internal",
-                json_body={"app_id": connection.app_id, "app_secret": app_secret},
-                retry=False,
-                diagnostic_platform="feishu",
-            )
-            token_payload = self._payload(token_response, "飞书应用认证失败。")
-            token = token_payload.get("tenant_access_token")
-            if not token:
-                raise ValidationError({"detail": "飞书应用认证未返回有效访问凭证。"})
+            token = self._tenant_token(connection)
             if emails or mobiles:
                 lookup_response = self.http.request(
                     "POST",
@@ -174,8 +213,6 @@ class FeishuIdentityService:
                 lookup_payload = self._payload(lookup_response, "飞书用户查询失败，请检查通讯录权限和应用可用范围。")
             else:
                 lookup_payload = {"data": {"user_list": []}}
-        except CustodyError as exc:
-            raise ValidationError({"detail": "无法读取飞书应用凭据。"}) from exc
         except OAuthFlowError as exc:
             raise ValidationError({"detail": f"飞书平台请求失败：{exc}"}) from exc
 

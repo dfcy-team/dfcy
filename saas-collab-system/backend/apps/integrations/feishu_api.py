@@ -137,7 +137,9 @@ def identity_collection(request):
 def identity_candidates(request, system_user_id):
     user = get_object_or_404(get_user_model(), pk=system_user_id, tenant=request.user.tenant)
     connection = FeishuConnection.objects.filter(tenant=request.user.tenant).first()
-    candidates = FeishuIdentityService().find_candidates(connection=connection, user=user)
+    open_id = str((request.data if isinstance(request.data, dict) else {}).get("open_id") or "").strip()
+    service = FeishuIdentityService()
+    candidates = [service.find_candidate_by_open_id(connection=connection, open_id=open_id)] if open_id else service.find_candidates(connection=connection, user=user)
     return success_response({"system_user_id": user.id, "candidates": candidates})
 
 
@@ -150,15 +152,7 @@ def identity_bind(request, system_user_id):
     if not open_id:
         raise ValidationError({"open_id": "open_id is required."})
     connection = FeishuConnection.objects.filter(tenant=request.user.tenant).first()
-    verified = next(
-        (
-            candidate for candidate in FeishuIdentityService().find_candidates(connection=connection, user=user)
-            if candidate["open_id"] == open_id
-        ),
-        None,
-    )
-    if verified is None:
-        raise ValidationError({"open_id": "该飞书用户不在当前系统用户的查询候选中，请重新查询。"})
+    verified = FeishuIdentityService().find_candidate_by_open_id(connection=connection, open_id=open_id)
     with transaction.atomic():
         # Serialize identity binding within one tenant so the duplicate check
         # and update cannot race for two different system users.

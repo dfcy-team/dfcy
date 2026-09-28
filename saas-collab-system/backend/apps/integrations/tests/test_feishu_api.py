@@ -120,13 +120,31 @@ class FeishuApiTests(APITestCase):
         self.assertEqual(response.json()["data"]["candidates"][0]["open_id"], "ou_candidate")
 
     @patch("apps.integrations.feishu_api.FeishuIdentityService")
+    def test_candidate_lookup_can_verify_manual_open_id(self, service_class):
+        colleague = get_user_model().objects.create_user(
+            username="operator-manual", tenant=self.tenant, user_type="internal", is_active=True,
+        )
+        service_class.return_value.find_candidate_by_open_id.return_value = {
+            "open_id": "ou_manual", "name": "手动用户", "user_id": "u_manual",
+            "union_id": "on_manual", "department_ids": ["od_1"],
+            "match_level": "manual_open_id", "match_reason": "手动 Open ID 验证通过",
+        }
+        response = self.client.post(
+            f"/api/internal/integrations/feishu/identities/system-users/{colleague.id}/candidates/",
+            {"open_id": "ou_manual"}, format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["data"]["candidates"][0]["match_level"], "manual_open_id")
+        service_class.return_value.find_candidate_by_open_id.assert_called_once()
+
+    @patch("apps.integrations.feishu_api.FeishuIdentityService")
     def test_confirm_binding_creates_then_updates_and_is_tenant_scoped(self, service_class):
         colleague = get_user_model().objects.create_user(
             username="operator-bind", tenant=self.tenant, user_type="internal", is_active=True,
         )
-        service_class.return_value.find_candidates.side_effect = [
-            [{"open_id": "ou_first", "user_id": "u1", "union_id": "", "department_ids": []}],
-            [{"open_id": "ou_second", "user_id": "", "union_id": "on_2", "department_ids": []}],
+        service_class.return_value.find_candidate_by_open_id.side_effect = [
+            {"open_id": "ou_first", "user_id": "u1", "union_id": "", "department_ids": []},
+            {"open_id": "ou_second", "user_id": "", "union_id": "on_2", "department_ids": []},
         ]
         path = f"/api/internal/integrations/feishu/identities/system-users/{colleague.id}/binding/"
         created = self.client.put(path, {"open_id": "ou_first", "user_id": "u1"}, format="json")
@@ -147,19 +165,67 @@ class FeishuApiTests(APITestCase):
         self.assertEqual(denied.status_code, 404)
 
     @patch("apps.integrations.feishu_api.FeishuIdentityService")
-    def test_confirm_binding_rejects_open_id_outside_current_candidates(self, service_class):
+    def test_confirm_binding_rejects_open_id_that_feishu_cannot_verify(self, service_class):
         colleague = get_user_model().objects.create_user(
             username="operator-tamper", tenant=self.tenant, user_type="internal", is_active=True,
         )
-        service_class.return_value.find_candidates.return_value = [{
-            "open_id": "ou_expected", "user_id": "u1", "union_id": "", "department_ids": [],
-        }]
+        service_class.return_value.find_candidate_by_open_id.side_effect = ValidationError(
+            {"open_id": "未找到该飞书用户，或应用无权访问该用户。"}
+        )
         response = self.client.put(
             f"/api/internal/integrations/feishu/identities/system-users/{colleague.id}/binding/",
             {"open_id": "ou_injected", "user_id": "attacker-controlled"}, format="json",
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(FeishuIdentity.objects.filter(user=colleague).exists())
+
+    def test_manual_open_id_service_fetches_and_masks_verified_user(self):
+        connection = FeishuConnection.objects.create(
+            tenant=self.tenant, app_id="cli_test", app_secret_ref="cred_test", enabled=True,
+            created_by=self.user, updated_by=self.user,
+        )
+        custody = type("Custody", (), {"retrieve_secret": lambda self, ref: "secret"})()
+        http = type("Http", (), {})()
+        http.request = Mock(side_effect=[
+            FakeResponse({"code": 0, "tenant_access_token": "token-value"}),
+            FakeResponse({"code": 0, "data": {"user": {
+                "open_id": "ou_manual123", "user_id": "u_123", "union_id": "on_123",
+                "name": "张三", "email": "zhangsan@example.com", "mobile": "13800138000",
+                "department_ids": ["od_1"],
+            }}}),
+        ])
+        candidate = FeishuIdentityService(http=http, custody=custody).find_candidate_by_open_id(
+            connection=connection, open_id="ou_manual123",
+        )
+        self.assertEqual(candidate["open_id"], "ou_manual123")
+        self.assertEqual(candidate["match_level"], "manual_open_id")
+        self.assertEqual(candidate["email"], "z*******@example.com")
+        self.assertEqual(candidate["phone"], "*******8000")
+        self.assertIn("users/ou_manual123", http.request.call_args_list[1].args[1])
+
+    def test_manual_open_id_service_rejects_invalid_format_without_request(self):
+        http = type("Http", (), {"request": Mock()})()
+        with self.assertRaises(ValidationError):
+            FeishuIdentityService(http=http, custody=object()).find_candidate_by_open_id(
+                connection=None, open_id="not-an-open-id",
+            )
+        http.request.assert_not_called()
+
+    def test_manual_open_id_service_rejects_empty_feishu_user(self):
+        connection = FeishuConnection.objects.create(
+            tenant=self.tenant, app_id="cli_test", app_secret_ref="cred_test", enabled=True,
+            created_by=self.user, updated_by=self.user,
+        )
+        custody = type("Custody", (), {"retrieve_secret": lambda self, ref: "secret"})()
+        http = type("Http", (), {})()
+        http.request = Mock(side_effect=[
+            FakeResponse({"code": 0, "tenant_access_token": "token-value"}),
+            FakeResponse({"code": 0, "data": {"user": {}}}),
+        ])
+        with self.assertRaises(ValidationError):
+            FeishuIdentityService(http=http, custody=custody).find_candidate_by_open_id(
+                connection=connection, open_id="ou_missing",
+            )
 
     def test_feishu_candidate_service_uses_token_and_batch_lookup_and_masks_contacts(self):
         colleague = get_user_model().objects.create_user(

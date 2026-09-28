@@ -28,8 +28,8 @@ export const fetchFeishuResources = (resource, params = {}) => requestWithMockFa
   { method: 'get', url: `${base}/${resources[resource]}/`, params }, emptyList, `integrations.feishu.${resource}`
 );
 
-export const fetchFeishuIdentityCandidates = (systemUserId) => requestWithMockFallback(
-  { method: 'post', url: `${base}/identities/system-users/${systemUserId}/candidates/` },
+export const fetchFeishuIdentityCandidates = (systemUserId, data = {}) => requestWithMockFallback(
+  { method: 'post', url: `${base}/identities/system-users/${systemUserId}/candidates/`, data },
   () => ok({ system_user_id: systemUserId, candidates: [] }), 'integrations.feishu.identities.candidates'
 );
 
