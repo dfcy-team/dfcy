@@ -145,6 +145,8 @@ def validate_manual_sync_job(sync_job, *, live_only=False):
     if mode == "live_readonly":
         authorization = sync_job.store_authorization or sync_job.warehouse_authorization
         if authorization:
+            if authorization.last_error_code in {"AUTO_REFRESH_VALIDATION_PENDING", "AUTO_REFRESH_VALIDATION_FAILED"}:
+                raise ValidationError("新令牌尚未通过只读验证，请先重新验证新令牌；不要重复刷新。")
             expires_at = (getattr(authorization, "expires_at", None)
                           or getattr(authorization, "oauth_expires_at", None))
             if expires_at and expires_at <= timezone.now():

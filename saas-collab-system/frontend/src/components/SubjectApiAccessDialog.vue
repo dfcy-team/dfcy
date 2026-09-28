@@ -87,7 +87,7 @@
                   :disabled="storeRefreshAccess.disabled"
                   :title="storeRefreshAccess.reason"
                   @click="refreshStoreBinding(binding)"
-                >刷新令牌</el-button>
+                >{{ needsTokenValidation(binding) ? '重新验证新令牌' : '刷新令牌' }}</el-button>
                 <el-button
                   v-if="readonlyCheckAccess.visible"
                   :loading="busy === `check-${binding.id}`"
@@ -221,7 +221,7 @@
             >{{ primaryBinding(apiType) ? '重新授权' : '授权' }}</el-button>
             <el-button v-if="subjectType === 'warehouse' && primaryBinding(apiType)?.bootstrap_consumed_at && warehouseAuthorizeAccess.visible"
               :disabled="warehouseAuthorizeAccess.disabled || Boolean(busy)"
-              @click="refreshWarehouseAuthorization(primaryBinding(apiType))">刷新仓库授权</el-button>
+              @click="refreshWarehouseAuthorization(primaryBinding(apiType))">{{ needsTokenValidation(primaryBinding(apiType)) ? '重新验证新令牌' : '刷新仓库授权' }}</el-button>
             <el-button v-if="subjectType === 'warehouse' && primaryBinding(apiType)?.oauth_token_available && warehouseAuthorizeAccess.visible"
               :disabled="warehouseAuthorizeAccess.disabled || Boolean(busy)"
               :loading="busy === 'warehouse-discovery'"
@@ -242,7 +242,7 @@
               :disabled="storeRefreshAccess.disabled"
               :title="storeRefreshAccess.reason"
               @click="refreshStoreBinding(primaryBinding(apiType))"
-            >刷新令牌</el-button>
+            >{{ needsTokenValidation(primaryBinding(apiType)) ? '重新验证新令牌' : '刷新令牌' }}</el-button>
             <el-button
               v-if="primaryBinding(apiType)"
               @click="openAuthorizationDetail(primaryBinding(apiType))"
@@ -313,7 +313,7 @@
             <div class="history-heading">
               <div>
                 <h4>授权历史</h4>
-                <p>保留待处理、已过期、已撤销和异常记录，便于定位失败原因；历史记录不可直接恢复。</p>
+                <p>保留待处理、已过期、已撤销和异常记录；刷新后验证失败的记录可重新验证已保存的新令牌。</p>
               </div>
               <el-tag type="info" effect="plain">{{ historyBindings(apiType).length }} 条</el-tag>
             </div>
@@ -336,9 +336,12 @@
                 <el-table-column label="最近错误" min-width="220" show-overflow-tooltip>
                   <template #default="{ row: historyRow }">{{ errorLabel(historyRow) }}</template>
                 </el-table-column>
-                <el-table-column label="操作" width="100" fixed="right">
+                <el-table-column label="操作" width="180" fixed="right">
                   <template #default="{ row: historyRow }">
                     <el-button link type="primary" @click="openAuthorizationDetail(historyRow)">查看详情</el-button>
+                    <el-button v-if="needsTokenValidation(historyRow) && (subjectType === 'store' ? storeRefreshAccess.allowed : warehouseAuthorizeAccess.allowed)"
+                      link type="primary" :loading="busy === `refresh-${historyRow.id}`"
+                      @click="subjectType === 'store' ? refreshStoreBinding(historyRow) : refreshWarehouseAuthorization(historyRow)">重新验证新令牌</el-button>
                   </template>
                 </el-table-column>
               </el-table>
@@ -584,7 +587,8 @@ async function refreshWarehouseAuthorization(binding) {
     const response = await refreshJifengWarehouse(binding.id);
     if (!response?.success) throw new Error(response?.message || '刷新失败');
     changed = true;
-    ElMessage.success('仓库授权已刷新，请重新执行只读校验后启用同步任务。');
+    if (needsTokenValidation(response.data?.authorization)) ElMessage.warning(errorLabel(response.data.authorization));
+    else ElMessage.success(needsTokenValidation(binding) ? '新令牌验证通过；请确认后手动恢复同步任务。' : '仓库授权已刷新，请重新执行只读校验后启用同步任务。');
   } catch (reason) {
     ElMessage.error(reason?.message || '刷新失败，请检查仓库授权。');
   } finally {
@@ -743,7 +747,8 @@ function isMultipleAdvertising(apiType) {
 
 function bindingStatus(apiType) {
   const bindings = activeBindings(apiType);
-  if (!bindings.length) return '未绑定';
+  if (!bindings.length) return historyBindings(apiType).some(needsTokenValidation) ? '已绑定·验证失败' : '未绑定';
+  if (bindings.some(needsTokenValidation)) return '已绑定·待验证';
   if (isMultipleAdvertising(apiType)) return `已绑定 ${bindings.length} 个`;
   return statusLabel(bindings[0].status);
 }
@@ -772,8 +777,14 @@ function expirationDate(binding) {
   return binding?.expires_at || binding?.token_expires_at || null;
 }
 
+function needsTokenValidation(binding) {
+  return ['AUTO_REFRESH_VALIDATION_PENDING', 'AUTO_REFRESH_VALIDATION_FAILED'].includes(binding?.last_error_code);
+}
+
 function errorLabel(binding) {
   const code = binding?.last_error_code || '';
+  if (code === 'AUTO_REFRESH_VALIDATION_PENDING') return '新令牌已保存，网络校验未完成；请重新验证，不要重复刷新。';
+  if (code === 'AUTO_REFRESH_VALIDATION_FAILED') return '新令牌已保存但校验失败；请核对诊断后重新验证，仅确认认证失效时重新授权。';
   const message = binding?.masked_error_message || binding?.last_error_message || '';
   return [code, message].filter(Boolean).join('：') || '无脱敏错误';
 }
@@ -1057,9 +1068,9 @@ async function refreshStoreBinding(binding) {
   }
   try {
     await ElMessageBox.confirm(
-      '将向平台刷新当前店铺授权令牌，操作结果会写入集成审计。是否继续？',
-      '确认刷新令牌',
-      { type: 'warning', confirmButtonText: '确认刷新', cancelButtonText: '取消' },
+      needsTokenValidation(binding) ? '仅使用已保存的新令牌执行只读验证，不会再次刷新令牌，也不会自动启用同步任务。是否继续？' : '将向平台刷新当前店铺授权令牌，操作结果会写入集成审计。是否继续？',
+      needsTokenValidation(binding) ? '重新验证新令牌' : '确认刷新令牌',
+      { type: 'warning', confirmButtonText: needsTokenValidation(binding) ? '重新验证' : '确认刷新', cancelButtonText: '取消' },
     );
   } catch (_reason) {
     return;
@@ -1068,7 +1079,8 @@ async function refreshStoreBinding(binding) {
   try {
     const response = await refreshStoreAuthorization(binding.id, { confirmed: true });
     if (!response?.success) throw new Error(response?.message || '令牌刷新失败');
-    ElMessage.success('令牌已刷新');
+    if (needsTokenValidation(response.data)) ElMessage.warning(errorLabel(response.data));
+    else ElMessage.success(needsTokenValidation(binding) ? '新令牌验证通过；请确认后手动恢复同步任务。' : '令牌已刷新');
     await load();
     emit('changed');
   } catch (reason) {
