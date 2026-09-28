@@ -191,6 +191,11 @@ urlpatterns = [
         views.store_authorization_capabilities,
         name="store-authorization-capabilities",
     ),
+    path(
+        "store-capability-matrix/<int:store_id>/",
+        views.store_capability_matrix,
+        name="store-capability-matrix",
+    ),
     path("store-mappings/options/", views.store_mapping_options, name="store-mapping-options"),
     path("store-mappings/", views.store_mapping_collection, name="store-mapping-collection"),
     path("store-mappings/<int:pk>/", views.store_mapping_detail, name="store-mapping-detail"),
