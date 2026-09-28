@@ -126,6 +126,25 @@ async function mountDialog(subjectType = 'store') {
 }
 
 describe('SubjectApiAccessDialog runtime closures', () => {
+  it('revalidates a saved token without claiming a new rotation or automatic task recovery', async () => {
+    const wrapper = await mountDialog('store');
+    const binding = { id: 101, last_error_code: 'AUTO_REFRESH_VALIDATION_FAILED' };
+    api.refreshStoreAuthorization.mockResolvedValue({ success: true, data: { id: 101, last_error_code: '' } });
+    await wrapper.vm.refreshStoreBinding(binding);
+    expect(api.refreshStoreAuthorization).toHaveBeenCalledWith(101, { confirmed: true });
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('不会再次刷新令牌'), '重新验证新令牌', expect.any(Object));
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('验证通过'));
+  });
+
+  it('does not report validation success when the saved token remains pending', async () => {
+    const wrapper = await mountDialog('store');
+    const binding = { id: 101, last_error_code: 'AUTO_REFRESH_VALIDATION_PENDING' };
+    api.refreshStoreAuthorization.mockResolvedValue({ success: true, data: binding });
+    await wrapper.vm.refreshStoreBinding(binding);
+    expect(ElMessage.success).not.toHaveBeenCalled();
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('不要重复刷新'));
+  });
+
   it('submits a callback for the current store and clears the sensitive input', async () => {
     const wrapper = await mountDialog('store');
     api.completeManualStoreCallback.mockResolvedValue({ success: true });

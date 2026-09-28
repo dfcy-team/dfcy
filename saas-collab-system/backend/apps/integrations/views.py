@@ -1581,7 +1581,13 @@ def refresh_store_authorization(request, pk):
     )
     if record.platform == PlatformChoices.TIKTOK and request.data.get("confirmed") is not True:
         raise ValidationError({"confirmed": "TikTok Shop token refresh requires explicit confirmation."})
-    record = refresh_marketplace_authorization(record, actor=request.user)
+    from .automatic_refresh import (
+        AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED, revalidate_saved_authorization,
+    )
+    if record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}:
+        record = revalidate_saved_authorization(record, actor=request.user)
+    else:
+        record = refresh_marketplace_authorization(record, actor=request.user)
     return success_response(MarketplaceStoreAuthorizationSerializer(record).data)
 
 

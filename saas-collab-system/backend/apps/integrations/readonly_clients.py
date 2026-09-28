@@ -166,6 +166,10 @@ class ReadonlyClientBase:
         return str(value or fallback)
 
     def preflight(self):
+        if getattr(self.authorization, "last_error_code", "") in {
+            "AUTO_REFRESH_VALIDATION_PENDING", "AUTO_REFRESH_VALIDATION_FAILED",
+        }:
+            raise ValidationError("新令牌尚未通过只读验证，请先重新验证新令牌；不要重复刷新。")
         if not is_module_enabled("api_integrations"):
             raise ValidationError("API data integration module is disabled.")
         require_live_mode(f"{self.config.platform} readonly synchronization")

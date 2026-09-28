@@ -226,6 +226,102 @@ def test_validation_business_error_does_not_retry(monkeypatch):
     assert not job.is_enabled
 
 
+def test_exhausted_network_validation_remains_pending_and_retries_without_rotation(monkeypatch):
+    _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
+    validate = Mock(side_effect=TimeoutError("FAKE_SECRET_DO_NOT_LOG"))
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+    assert service.refresh_due_authorizations()["failed"] == 1
+    record.refresh_from_db()
+    job.refresh_from_db()
+    assert record.last_error_code == service.AUTO_REFRESH_VALIDATION_PENDING
+    assert record.validation_status == "pending"
+    assert not job.is_enabled
+    assert AutomaticRefreshAttempt.objects.get().status == "token_saved"
+    audit = IntegrationAuditLog.objects.get(action="automatic_refresh")
+    assert audit.masked_detail["reauthorization_required"] is False
+    assert "FAKE_SECRET" not in str(audit.masked_detail)
+    validate.side_effect = None
+    validate.return_value = {"records": []}
+    assert service.refresh_due_authorizations()["success"] == 1
+    assert refresh.call_count == 1
+    job.refresh_from_db()
+    assert not job.is_enabled
+
+
+def test_manual_revalidation_uses_saved_token_and_does_not_enable_tasks(monkeypatch):
+    actor, record, job, refresh = _automatic_warehouse_job(monkeypatch)
+    monkeypatch.setattr(service, "validate_refreshed_authorization", Mock(side_effect=TimeoutError()))
+    service.refresh_due_authorizations()
+    record.refresh_from_db()
+    saved_token = record.token_id
+    validate = Mock(return_value={"records": []})
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+    result = service.revalidate_saved_authorization(record, actor=actor)
+    assert result.token_id == saved_token
+    assert result.last_error_code == ""
+    assert result.validation_status == "verified"
+    assert refresh.call_count == 1
+    validate.assert_called_once()
+    job.refresh_from_db()
+    assert not job.is_enabled
+
+
+def test_failed_store_validation_can_recover_without_refreshing(marketplace_callback, monkeypatch):
+    from apps.integrations.models import MarketplaceStoreAuthorization, authorization_service_write
+    client, store, _, _, payload = marketplace_callback
+    assert client.post(MANUAL, payload, format="json").status_code == 200
+    record = MarketplaceStoreAuthorization.objects.get(store=store)
+    token_id = record.token_id
+    record.status = "error"
+    record.last_error_code = service.AUTO_REFRESH_VALIDATION_FAILED
+    with authorization_service_write():
+        record.save()
+    validate = Mock(return_value=[{"platform_store_id": record.platform_store_id}])
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+    refresh = Mock()
+    monkeypatch.setattr("apps.integrations.marketplace_oauth_service.refresh_marketplace_authorization", refresh)
+    result = service.revalidate_saved_authorization(record, actor=record.updated_by)
+    assert result.status == "active" and result.last_error_code == ""
+    assert result.token_id == token_id
+    assert validate.call_args.args[0].status == "active"
+    refresh.assert_not_called()
+    audit = IntegrationAuditLog.objects.get(action="revalidate_saved_token")
+    assert audit.result == "success" and audit.masked_detail["token_refreshed"] is False
+
+
+def test_store_refresh_endpoint_revalidates_failed_saved_token(marketplace_callback, monkeypatch):
+    from apps.integrations.models import MarketplaceStoreAuthorization, authorization_service_write
+    client, store, _, _, payload = marketplace_callback
+    assert client.post(MANUAL, payload, format="json").status_code == 200
+    record = MarketplaceStoreAuthorization.objects.get(store=store)
+    record.status = "error"
+    record.last_error_code = service.AUTO_REFRESH_VALIDATION_FAILED
+    with authorization_service_write():
+        record.save()
+    validate = Mock(return_value=[])
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+    refresh = Mock()
+    monkeypatch.setattr("apps.integrations.views.refresh_marketplace_authorization", refresh)
+    response = client.post(f"/api/internal/integrations/store-authorizations/{record.pk}/refresh/", {"confirmed": True}, format="json")
+    assert response.status_code == 200
+    assert response.data["data"]["last_error_code"] == ""
+    validate.assert_called_once()
+    refresh.assert_not_called()
+
+
+def test_revoked_saved_reference_cannot_be_revalidated(monkeypatch):
+    from rest_framework.exceptions import ValidationError as APIValidationError
+    actor, record = due_warehouse(monkeypatch)
+    record.status = "revoked"
+    record.last_error_code = service.AUTO_REFRESH_VALIDATION_FAILED
+    record.save()
+    validate = Mock()
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+    with pytest.raises(APIValidationError, match="没有待验证"):
+        service.revalidate_saved_authorization(record, actor=actor)
+    validate.assert_not_called()
+
+
 def test_pending_new_token_resumes_validation_without_refreshing_again(monkeypatch):
     _, record, _, refresh = _automatic_warehouse_job(monkeypatch)
     record.token_id = "synthetic-already-saved-token-reference"

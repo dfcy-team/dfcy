@@ -1,8 +1,10 @@
 """Approved, expiry-driven renewal of existing marketplace/WMS custody references."""
 from datetime import timedelta
 from hashlib import sha256
+from copy import copy
 import time
 
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -82,12 +84,15 @@ def _mark_validation_pending(record):
             last_verified_at=None,
             last_error_code=AUTO_REFRESH_VALIDATION_PENDING,
         )
+        record.validation_status = WarehouseAuthorization.ValidationStatus.PENDING
+        record.last_verified_at = None
     else:
         from .models import authorization_service_write
 
         record.last_error_code = AUTO_REFRESH_VALIDATION_PENDING
+        record.status = MarketplaceStoreAuthorization.Status.ACTIVE
         with authorization_service_write():
-            record.save(update_fields=["last_error_code", "updated_at"])
+            record.save(update_fields=["status", "last_error_code", "updated_at"])
     record.last_error_code = AUTO_REFRESH_VALIDATION_PENDING
 
 
@@ -105,19 +110,21 @@ def _mark_validation_success(record):
         from .models import authorization_service_write
 
         record.last_error_code = ""
+        record.status = MarketplaceStoreAuthorization.Status.ACTIVE
         with authorization_service_write():
-            record.save(update_fields=["last_error_code", "updated_at"])
+            record.save(update_fields=["status", "last_error_code", "updated_at"])
     record.last_error_code = ""
 
 
-def _mark_validation_failed(record):
+def _mark_validation_failed(record, message="刷新接口成功，但新令牌只读校验失败；请核对权限和店铺绑定后重新验证。"):
     if isinstance(record, WarehouseAuthorization):
         WarehouseAuthorization.objects.filter(pk=record.pk, token_id=record.token_id).update(
             validation_status=WarehouseAuthorization.ValidationStatus.FAILED,
             last_verified_at=None,
             last_error_code=AUTO_REFRESH_VALIDATION_FAILED,
         )
-        jobs = SyncJob.objects.filter(warehouse_authorization_id=record.pk)
+        record.last_error_code = AUTO_REFRESH_VALIDATION_FAILED
+        record.validation_status = WarehouseAuthorization.ValidationStatus.FAILED
     else:
         from .models import authorization_service_write
 
@@ -125,7 +132,12 @@ def _mark_validation_failed(record):
         record.last_error_code = AUTO_REFRESH_VALIDATION_FAILED
         with authorization_service_write():
             record.save(update_fields=["status", "last_error_code", "updated_at"])
-        jobs = SyncJob.objects.filter(store_authorization_id=record.pk)
+    _pause_validation_jobs(record, AUTO_REFRESH_VALIDATION_FAILED, message)
+
+
+def _pause_validation_jobs(record, error_code, message):
+    binding = "warehouse_authorization_id" if isinstance(record, WarehouseAuthorization) else "store_authorization_id"
+    jobs = SyncJob.objects.filter(**{binding: record.pk})
     affected_jobs = list(jobs.select_related("tenant", "integration_config__created_by"))
     jobs.update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
     from .sync_alerts import upsert_sync_failure_alert
@@ -134,8 +146,8 @@ def _mark_validation_failed(record):
         try:
             upsert_sync_failure_alert(
                 job,
-                error_code=AUTO_REFRESH_VALIDATION_FAILED,
-                message="刷新接口成功，但新令牌只读校验失败；任务已暂停。",
+                error_code=error_code,
+                message=message + "关联同步任务已暂停。",
             )
         except Exception:
             # Alert delivery must not undo authorization quarantine or expose
@@ -147,6 +159,8 @@ def validate_refreshed_authorization(record):
     """Perform one real, minimal read using the newly persisted token."""
     from .net_guard import PlatformHttpClient
 
+    record = copy(record)
+    record.last_error_code = ""
     http_client = PlatformHttpClient(max_retries=0)
     if isinstance(record, WarehouseAuthorization):
         from .readonly_clients import JifengWmsReadonlyClient
@@ -196,8 +210,52 @@ def _validate_with_retries(record):
             try:
                 delay = next(delays)
             except StopIteration:
-                raise
+                raise exc from None
             time.sleep(delay)
+
+
+def _record_validation_error(record, exc):
+    if _retryable_validation_failure(exc) and not _definitive_authorization_failure(exc):
+        _mark_validation_pending(record)
+        message = "新令牌已保存，但网络校验未完成；请重新验证，不要重复刷新令牌。"
+        _pause_validation_jobs(record, AUTO_REFRESH_VALIDATION_PENDING, message)
+        return {"error_code": AUTO_REFRESH_VALIDATION_PENDING, "reason": message,
+                "reauthorization_required": False, "validation_category": "network_uncertain"}
+    rejected = _definitive_authorization_failure(exc)
+    message = ("刷新接口成功，但新令牌只读校验失败：平台拒绝认证，请重新授权。" if rejected else
+               "刷新接口成功，但新令牌只读校验失败；请核对权限、配置和店铺绑定后重新验证。")
+    _mark_validation_failed(record, message)
+    return {"error_code": AUTO_REFRESH_VALIDATION_FAILED, "reason": message,
+            "reauthorization_required": rejected,
+            "validation_category": "authorization_rejected" if rejected else "readonly_validation_failed"}
+
+
+@transaction.atomic
+def revalidate_saved_authorization(record, *, actor):
+    """Validate the current saved reference, never rotate it or enable jobs."""
+    record = type(record).objects.select_for_update().get(pk=record.pk, tenant_id=actor.tenant_id)
+    if (record.status not in {"active", "error"} or not record.token_id
+            or record.last_error_code not in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}):
+        raise ValidationError("当前授权没有待验证的新令牌。")
+    binding = "warehouse_authorization" if isinstance(record, WarehouseAuthorization) else "store_authorization"
+    if SyncRun.objects.filter(**{f"sync_job__{binding}_id": record.pk}, status="running").exists():
+        raise ValidationError("关联同步正在运行，请结束后再验证令牌。")
+    candidate = copy(record)
+    candidate.status = "active"
+    detail = {"token_refreshed": False}
+    try:
+        _validate_with_retries(candidate)
+        _mark_validation_success(record)
+        result = "success"
+    except Exception as exc:
+        detail.update(_record_validation_error(record, exc))
+        result = "failed"
+    IntegrationAuditLog.objects.create(
+        tenant_id=record.tenant_id, integration_config=record.integration_config,
+        store_authorization=record if isinstance(record, MarketplaceStoreAuthorization) else None,
+        actor=actor, action="revalidate_saved_token", result=result, masked_detail=detail,
+    )
+    return record
 
 
 def refresh_due_authorizations(limit=100):
@@ -258,18 +316,15 @@ def refresh_due_authorizations(limit=100):
                 _validate_with_retries(record)
                 _mark_validation_success(record)
                 result = "success"
-            except Exception:
+            except Exception as exc:
                 # Provider payloads/URLs can include credentials. Never stringify
                 # the exception here, and never replay an ambiguous rotation.
                 if attempt.status in {"token_saved", "validating"} or validation_only:
-                    _mark_validation_failed(record)
-                    detail.update(
-                        error_code=AUTO_REFRESH_VALIDATION_FAILED,
-                        reason="刷新接口成功，但新令牌只读校验失败；关联同步任务已暂停，请重新授权并校验后恢复。",
-                    )
+                    detail.update(_record_validation_error(record, exc))
                 else:
                     detail.update(error_code="AUTO_REFRESH_FAILED", reason="自动续期未完成；请检查授权、权限、准入及网络，手动刷新或重新授权后恢复。")
-            attempt.status, attempt.finished_at = result, timezone.now()
+            attempt.status = "token_saved" if record.last_error_code == AUTO_REFRESH_VALIDATION_PENDING else result
+            attempt.finished_at = timezone.now()
             attempt.save(update_fields=["status", "finished_at"])
             IntegrationAuditLog.objects.create(
                 tenant_id=record.tenant_id, integration_config=record.integration_config,

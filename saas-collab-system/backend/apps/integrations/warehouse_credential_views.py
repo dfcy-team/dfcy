@@ -95,6 +95,8 @@ def warehouse_readonly_check(request, pk):
         raise PermissionDenied("该仓库超出只读连接校验的数据范围。")
     # No job is needed: validation must precede task creation. Do not exchange
     # or consume the bootstrap token here. Only the inventory read is allowed.
+    if record.last_error_code in {"AUTO_REFRESH_VALIDATION_PENDING", "AUTO_REFRESH_VALIDATION_FAILED"}:
+        raise ValidationError("请使用重新验证新令牌入口，不要重复刷新；验证通过后再恢复同步任务。")
     try:
         client = JifengWmsReadonlyClient(config, record)
         page = client.fetch_inventory(None, {"page_size": 1})
@@ -124,5 +126,11 @@ def warehouse_readonly_check(request, pk):
 @permission_classes([IsWarehouseAuthorizationAuthorizer])
 def warehouse_refresh_authorization(request, pk):
     record = get_scoped_object_or_404(_warehouse_authorization_queryset(request, "integrations.warehouse.authorize"), pk=pk)
-    record = refresh_warehouse_authorization(actor=request.user, authorization=record)
+    from .automatic_refresh import (
+        AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED, revalidate_saved_authorization,
+    )
+    if record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}:
+        record = revalidate_saved_authorization(record, actor=request.user)
+    else:
+        record = refresh_warehouse_authorization(actor=request.user, authorization=record)
     return success_response({"authorization": WarehouseAuthorizationSerializer(record).data, "connected": False})
