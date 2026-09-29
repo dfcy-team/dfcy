@@ -215,34 +215,62 @@ def _validate_with_retries(record):
 
 
 def _record_validation_error(record, exc):
+    diagnostic = {}
+    for key, allowed in (
+        ("stage", {"verify_store", "read_developer_secret", "save_token", "exchange_token"}),
+        ("controlled_code", {"OAUTH_AUTH_REJECTED", "OAUTH_PROVIDER_ERROR", "OAUTH_PROVIDER_UNAVAILABLE", "OAUTH_CALLBACK_REJECTED"}),
+        ("identity_evidence", {"shop_id_missing", "shop_id_mismatch", "invalid_shop_response", "invalid_token_scope", "token_scope_mismatch"}),
+    ):
+        value = getattr(exc, key, None)
+        if isinstance(value, str) and value in allowed:
+            diagnostic[key] = value
+    status = getattr(exc, "http_status", None)
+    if type(status) is int and 100 <= status <= 599:
+        diagnostic["http_status"] = status
     if _retryable_validation_failure(exc) and not _definitive_authorization_failure(exc):
         _mark_validation_pending(record)
         message = "新令牌已保存，但网络校验未完成；请重新验证，不要重复刷新令牌。"
         _pause_validation_jobs(record, AUTO_REFRESH_VALIDATION_PENDING, message)
-        return {"error_code": AUTO_REFRESH_VALIDATION_PENDING, "reason": message,
+        return {**diagnostic, "error_code": AUTO_REFRESH_VALIDATION_PENDING, "reason": message,
                 "reauthorization_required": False, "validation_category": "network_uncertain"}
     rejected = _definitive_authorization_failure(exc)
     message = ("刷新接口成功，但新令牌只读校验失败：平台拒绝认证，请重新授权。" if rejected else
                "刷新接口成功，但新令牌只读校验失败；请核对权限、配置和店铺绑定后重新验证。")
     _mark_validation_failed(record, message)
-    return {"error_code": AUTO_REFRESH_VALIDATION_FAILED, "reason": message,
+    return {**diagnostic, "error_code": AUTO_REFRESH_VALIDATION_FAILED, "reason": message,
             "reauthorization_required": rejected,
             "validation_category": "authorization_rejected" if rejected else "readonly_validation_failed"}
 
 
 @transaction.atomic
 def revalidate_saved_authorization(record, *, actor):
-    """Validate the current saved reference, never rotate it or enable jobs."""
+    """Revalidate a saved token, renewing it first only when it has expired."""
+    expected_token_id = record.token_id
     record = type(record).objects.select_for_update().get(pk=record.pk, tenant_id=actor.tenant_id)
+    if record.token_id != expected_token_id:
+        raise ValidationError("授权令牌已变化，请刷新页面后重试。")
     if (record.status not in {"active", "error"} or not record.token_id
             or record.last_error_code not in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}):
         raise ValidationError("当前授权没有待验证的新令牌。")
     binding = "warehouse_authorization" if isinstance(record, WarehouseAuthorization) else "store_authorization"
     if SyncRun.objects.filter(**{f"sync_job__{binding}_id": record.pk}, status="running").exists():
         raise ValidationError("关联同步正在运行，请结束后再验证令牌。")
+    detail = {"token_refreshed": False}
+    expiry = record.oauth_expires_at if isinstance(record, WarehouseAuthorization) else record.expires_at
+    if expiry is not None and expiry <= timezone.now():
+        if isinstance(record, WarehouseAuthorization):
+            from .warehouse_credential_service import refresh_warehouse_authorization
+
+            record = refresh_warehouse_authorization(actor=actor, authorization=record)
+        else:
+            from .marketplace_oauth_service import refresh_marketplace_authorization
+
+            record = refresh_marketplace_authorization(record, actor=actor)
+        # Commit the new reference even when the subsequent read fails.
+        _mark_validation_pending(record)
+        detail["token_refreshed"] = True
     candidate = copy(record)
     candidate.status = "active"
-    detail = {"token_refreshed": False}
     try:
         _validate_with_retries(candidate)
         _mark_validation_success(record)
@@ -288,14 +316,17 @@ def refresh_due_authorizations(limit=100):
             attempt, created = AutomaticRefreshAttempt.objects.get_or_create(
                 request_key=key, defaults={"tenant_id": record.tenant_id},
             )
-            validation_only = record.last_error_code == AUTO_REFRESH_VALIDATION_PENDING
+            expiry = record.oauth_expires_at if isinstance(record, WarehouseAuthorization) else record.expires_at
+            validation_only = record.last_error_code == AUTO_REFRESH_VALIDATION_PENDING and (
+                expiry is None or expiry > timezone.now()
+            )
             if not created and attempt.status not in {"token_saved", "validating"}:
                 continue
             counts["attempted"] += 1
             result = "failed"
             detail = {"automatic": True, "platform": platform, "authorization_id": record.pk}
             try:
-                if created and not validation_only:
+                if not validation_only and (created or (expiry is not None and expiry <= timezone.now())):
                     if platform in {"lazada", "shopee", "tiktok"}:
                         record = refresh_marketplace_authorization(
                             record, actor=record.updated_by, expected_token_id=record.token_id,
