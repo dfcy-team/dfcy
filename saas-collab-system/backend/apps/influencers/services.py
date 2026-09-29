@@ -21,7 +21,6 @@ from apps.audit.services import write_operation_log
 from apps.audit.models import NotificationMessage
 from apps.masterdata.models import StatusChoices, StoreMaster, WarehouseMaster
 from apps.products.models import ProductSKU, ProductSPU
-from apps.products.cost_services import effective_cost_for
 from apps.tenants.models import Tenant
 
 from .models import (
@@ -42,6 +41,7 @@ from .models import (
 )
 from .attribution import create_sample_attribution_snapshot
 from .bd_config import sample_video_overdue_days
+from .sample_costs import confirmed_sample_cost_for
 
 
 TERMINAL_OUTREACH_TASK_STATUSES = frozenset(
@@ -1109,12 +1109,12 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
             payload.pop(field_name, None)
         normalized_sku, cost_sku, cost_status = _purchase_cost_for_payload(user.tenant, payload)
         quantity = payload.get("quantity", 1)
-        cost_version = (
-            effective_cost_for(tenant=user.tenant, sku=cost_sku, warehouse=payload["warehouse"], occurred_at=occurred_at)
-            if cost_sku and payload["warehouse"] is not None else None
+        cost_version, cost_source = (
+            confirmed_sample_cost_for(
+                tenant=user.tenant, sku=cost_sku, warehouse=payload["warehouse"], occurred_at=occurred_at,
+            )
+            if cost_sku and payload["warehouse"] is not None else (None, "")
         )
-        if cost_version is not None and cost_version.confirmed_cost is None:
-            cost_version = None
         unit_cost = cost_version.confirmed_cost if cost_version else None
         cost_amount = unit_cost * quantity if unit_cost is not None else None
         if cost_sku and cost_version is None:
@@ -1130,7 +1130,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
             cost_amount=cost_amount,
             currency=cost_version.currency if cost_version else "",
             cost_match_status=cost_status,
-            cost_source="product_cost_version" if cost_version else "product_cost_version_unmatched",
+            cost_source=cost_source if cost_version else "product_cost_version_unmatched",
             cost_snapshot_at=snapshot_time,
             **payload,
         )

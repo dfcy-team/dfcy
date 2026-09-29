@@ -1,12 +1,14 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
+from io import StringIO
 
 import pytest
+from django.core.management import call_command
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.accounts.models import CustomUser
-from apps.influencers.models import Influencer, SampleFulfillment
+from apps.influencers.models import Influencer, SampleFulfillment, SampleItem
 from apps.influencers.services import _recalculate_sample_costs
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
@@ -16,9 +18,11 @@ from apps.tenants.models import Tenant
 pytestmark = pytest.mark.django_db
 
 
-def _records(code):
+def _records(code, sampled_at=None):
     tenant = Tenant.objects.create(name=code, code=code)
-    user = CustomUser.objects.create_user(username=f"{code}-user", tenant=tenant)
+    user = CustomUser.objects.create_user(
+        username=f"{code}-user", tenant=tenant, user_type=CustomUser.UserType.INTERNAL,
+    )
     platform = PlatformMaster.objects.create(
         tenant=tenant,
         code=f"platform-{code}",
@@ -50,7 +54,7 @@ def _records(code):
         sku_code=f"SKU-{code}",
         purchase_price=Decimal("99.0000"),
     )
-    sampled_at = timezone.now() - timedelta(days=2)
+    sampled_at = sampled_at or timezone.now() - timedelta(days=2)
     fulfillment = SampleFulfillment.objects.create(
         tenant=tenant,
         fulfillment_no=f"FUL-{code}",
@@ -132,6 +136,110 @@ def test_sample_item_without_effective_version_is_explicitly_unmatched():
     assert item.cost_snapshot_at is not None
     fulfillment.refresh_from_db()
     assert fulfillment.calculated_cost is None
+
+
+def test_sample_item_falls_back_to_latest_confirmed_version_in_previous_calendar_month():
+    sent_at = timezone.make_aware(datetime(2026, 9, 15, 12))
+    tenant, user, sku, fulfillment, _, warehouse = _records("cost-previous-month", sent_at)
+    for number, day, status, amount in (
+        (1, 5, ProductCostVersion.Status.CONFIRMED, "10.0000"),
+        (2, 20, ProductCostVersion.Status.CONFIRMED, "12.0000"),
+        (3, 25, ProductCostVersion.Status.PENDING, "99.0000"),
+    ):
+        ProductCostVersion.objects.create(
+            tenant=tenant, sku=sku, warehouse=warehouse, version_no=number,
+            status=status, source=ProductCostVersion.Source.MANUAL,
+            currency="CNY", confirmed_cost=Decimal(amount),
+            effective_from=timezone.make_aware(datetime(2026, 8, day, 12)), created_by=user,
+            effective_to=timezone.make_aware(datetime(2026, 9, 1)),
+        )
+
+    _recalculate_sample_costs(
+        user=user, fulfillment=fulfillment,
+        item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 2}],
+    )
+
+    item = fulfillment.items.get()
+    assert item.cost_version.version_no == 2
+    assert item.cost_amount == Decimal("24.0000")
+    assert item.cost_source == "product_cost_version_previous_month"
+
+
+def test_sample_item_does_not_fall_back_beyond_previous_month():
+    tenant, user, sku, fulfillment, _, warehouse = _records(
+        "cost-old-month", timezone.make_aware(datetime(2026, 9, 15, 12)),
+    )
+    ProductCostVersion.objects.create(
+        tenant=tenant, sku=sku, warehouse=warehouse, version_no=1,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL, currency="CNY",
+        confirmed_cost=Decimal("10.0000"),
+        effective_from=timezone.make_aware(datetime(2026, 7, 20, 12)),
+        effective_to=timezone.make_aware(datetime(2026, 8, 1)), created_by=user,
+    )
+
+    _recalculate_sample_costs(
+        user=user, fulfillment=fulfillment,
+        item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
+    )
+    assert fulfillment.items.get().cost_match_status == "cost_unmatched"
+
+
+def test_backfill_dry_run_then_apply_only_unmatched_sample():
+    tenant, user, sku, fulfillment, sampled_at, warehouse = _records("cost-backfill")
+    _recalculate_sample_costs(
+        user=user, fulfillment=fulfillment,
+        item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 2}],
+    )
+    item = fulfillment.items.get()
+    version = ProductCostVersion.objects.create(
+        tenant=tenant, sku=sku, warehouse=warehouse, version_no=1,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL, currency="CNY",
+        confirmed_cost=Decimal("8.0000"), effective_from=sampled_at - timedelta(days=1), created_by=user,
+    )
+    output = StringIO()
+    call_command("backfill_sample_confirmed_costs", tenant_id=tenant.pk, actor_id=user.pk, stdout=output)
+    assert "matched=1 applied=0" in output.getvalue()
+    item.refresh_from_db()
+    assert item.cost_amount is None
+
+    output = StringIO()
+    call_command("backfill_sample_confirmed_costs", tenant_id=tenant.pk, actor_id=user.pk, apply=True, stdout=output)
+    assert "matched=1 applied=1" in output.getvalue()
+    item.refresh_from_db()
+    fulfillment.refresh_from_db()
+    assert item.cost_version_id == version.pk
+    assert item.cost_amount == Decimal("16.0000")
+    assert fulfillment.calculated_cost == Decimal("16.0000")
+
+    output = StringIO()
+    call_command("backfill_sample_confirmed_costs", tenant_id=tenant.pk, actor_id=user.pk, apply=True, stdout=output)
+    assert "scanned=0" in output.getvalue()
+
+
+def test_backfill_skips_ambiguous_warehouse_without_writing():
+    tenant, user, sku, fulfillment, sampled_at, _warehouse = _records("cost-backfill-ambiguous")
+    item = SampleItem.objects.create(
+        tenant=tenant, fulfillment=fulfillment, requested_sku=sku.sku_code,
+        site_code="PH", cost_match_status="cost_unmatched",
+        cost_source="product_cost_version_unmatched",
+    )
+    second = WarehouseMaster.objects.create(
+        tenant=tenant, code="wh-second-ambiguous", name="Other PH warehouse",
+        country_code="PH", warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    ProductCostVersion.objects.create(
+        tenant=tenant, sku=sku, warehouse=second, version_no=1,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL, currency="CNY",
+        confirmed_cost=Decimal("8.0000"), effective_from=sampled_at - timedelta(days=1), created_by=user,
+    )
+    output = StringIO()
+    call_command("backfill_sample_confirmed_costs", tenant_id=tenant.pk, actor_id=user.pk, apply=True, stdout=output)
+    assert "warehouse_ambiguous=1" in output.getvalue()
+    item.refresh_from_db()
+    assert item.cost_amount is None
 
 
 def test_sample_item_requires_explicit_warehouse_even_with_same_country_candidates():
