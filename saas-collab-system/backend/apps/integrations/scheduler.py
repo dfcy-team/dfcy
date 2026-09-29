@@ -2,7 +2,9 @@ from copy import copy
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
@@ -13,6 +15,40 @@ from .sync_alerts import upsert_sync_failure_alert
 # The dispatcher ticks every minute. Older slots are missed, not new executions.
 MISFIRE_GRACE_SECONDS = 60
 DISPATCH_START_TIMEOUT = timedelta(minutes=5)
+
+
+def recover_expired_running_jobs(now, limit):
+    """Reconcile lost workers, including manually triggered jobs."""
+    from .sync_services import _has_expired_lease, _recover_expired_lease
+
+    fallback = now - timedelta(seconds=settings.SYNC_JOB_LEASE_SECONDS)
+    runtime_deadline = now - timedelta(seconds=settings.SYNC_JOB_MAX_RUNTIME_SECONDS)
+    expired = Q(lock_expires_at__lte=now) | Q(
+        lock_expires_at__isnull=True,
+        last_run_at__lte=fallback,
+    ) | Q(lock_expires_at__isnull=True, last_run_at__isnull=True) | Q(last_run_at__lte=runtime_deadline)
+    ids = list(SyncJob.objects.filter(status=SyncJob.Status.RUNNING).filter(expired)
+               .order_by('id').values_list('id', flat=True)[:limit])
+    recovered = 0
+    for pk in ids:
+        with transaction.atomic():
+            job = SyncJob.objects.select_for_update().get(pk=pk)
+            lease_expired = _has_expired_lease(job, now)
+            runtime_expired = bool(job.last_run_at and job.last_run_at <= runtime_deadline)
+            if not lease_expired and not runtime_expired:
+                continue
+            if runtime_expired and not lease_expired:
+                _recover_expired_lease(
+                    job, now, error_code='RUN_TIMEOUT',
+                    message='Sync run exceeded the worker hard time limit without completion.',
+                )
+            else:
+                _recover_expired_lease(job, now)
+            job.schedule_dispatches.filter(status='running').update(
+                status='failed', reason='执行锁已过期，旧执行已终止。', finished_at=now,
+            )
+            recovered += 1
+    return recovered
 
 
 def recover_unstarted_dispatches(now, limit):
@@ -97,6 +133,7 @@ def next_after_missed(job, due, now):
 def dispatch_due_jobs(enqueue, now=None, limit=20):
     now = now or timezone.now()
     SyncSchedulerHeartbeat.objects.update_or_create(key="readonly", defaults={"last_seen_at": now})
+    recovered = recover_expired_running_jobs(now, limit)
     recover_unstarted_dispatches(now, limit)
     initialized = dispatched = failed = skipped = 0
     ids = list(SyncJob.objects.filter(is_enabled=True).exclude(schedule_type__in=["manual", "cron"])
@@ -159,7 +196,8 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
                 status="dispatch_failed", reason="队列提交结果无法确认，请检查队列；未重复派发。", finished_at=now)
             upsert_sync_failure_alert(job, error_code="SCHEDULER_ENQUEUE_FAILED", message="队列提交结果无法确认，请检查队列；此计划未重复派发。")
             failed += 1
-    return {"initialized": initialized, "dispatched": dispatched, "failed": failed, "skipped": skipped}
+    return {"initialized": initialized, "dispatched": dispatched, "failed": failed, "skipped": skipped,
+            "recovered": recovered}
 
 
 def scheduler_health():

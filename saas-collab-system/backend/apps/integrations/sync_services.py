@@ -43,15 +43,15 @@ def _has_expired_lease(sync_job, now):
     return True
 
 
-def _recover_expired_lease(sync_job, now):
+def _recover_expired_lease(sync_job, now, *, error_code="LEASE_EXPIRED", message="Sync run lease expired before completion."):
     for run in SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING):
         SyncRun.objects.filter(pk=run.pk).update(
             status=SyncRun.Status.FAILED,
             finished_at=now,
             failed_count=F("failed_count") + 1,
-            error_code="LEASE_EXPIRED",
-            masked_error_message="Sync run lease expired before completion.",
-            masked_log={**(run.masked_log or {}), "error": "lease_expired"},
+            error_code=error_code,
+            masked_error_message=message,
+            masked_log={**(run.masked_log or {}), "error": error_code.lower()},
         )
     sync_job.status = SyncJob.Status.FAILED
     sync_job.lock_token = ""
@@ -68,8 +68,8 @@ def _recover_expired_lease(sync_job, now):
     )
     upsert_sync_failure_alert(
         sync_job,
-        error_code="LEASE_EXPIRED",
-        message="Sync run lease expired before completion.",
+        error_code=error_code,
+        message=message,
     )
 
 
