@@ -581,7 +581,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         return params
 
     @oauth_stage("verify_store", operation="get_authorized_shops")
-    def _authorized_shops(self, token_id):
+    def _fetch_authorized_shops_all(self, token_id):
         path = _required(self.config.get("authorized_shops_path"), "tiktok.authorized_shops_path")
         access_token = self.custody.retrieve_access_token(token_id)
         payload = self._request_json(
@@ -592,16 +592,44 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         )
         if payload.get("code") != 0:
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok authorized-shop discovery failed.")
-        shops = (payload.get("data") or {}).get("shops") or []
+        shops = (payload.get("data") or {}).get("shops")
+        if not isinstance(shops, list) or not shops:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop list is empty or invalid.")
+        result = []
+        for shop in shops:
+            if not isinstance(shop, dict):
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
+            shop_id = str(shop.get("id") or "").strip()
+            cipher = str(shop.get("cipher") or "").strip()
+            region = str(shop.get("region") or "").strip().upper()
+            if not shop_id or not cipher or not region:
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
+            result.append({"platform_store_id": shop_id, "shop_cipher": cipher, "region": region})
+        return result
+
+    def _authorized_shops(self, token_id):
+        shops = self._fetch_authorized_shops_all(token_id)
         if len(shops) != 1:
             raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Exactly one approved TikTok shop is required.")
-        shop = shops[0]
-        shop_id = str(shop.get("id") or "").strip()
-        cipher = str(shop.get("cipher") or "").strip()
-        region = str(shop.get("region") or "").upper()
-        if not shop_id or not cipher or not region:
-            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
-        return {"platform_store_id": shop_id, "shop_cipher": cipher, "region": region}
+        return shops[0]
+
+    def select_imported_pilot_shop(self, token_id, *, platform_store_id, region, expected_cipher):
+        """Verify one preexisting token's exact pilot identity without starting OAuth."""
+        require_live_mode("tiktok pilot token import")
+        if not self.config.get("contract_approved"):
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "TikTok platform contract is not approved.")
+        self._app_id()
+        self._open_host()
+        expected_id = str(platform_store_id or "").strip()
+        expected_region = str(region or "").strip().upper()
+        expected_cipher = str(expected_cipher or "").strip()
+        if not expected_id or not expected_region or not expected_cipher:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Exact pilot shop identity is required.")
+        shops = self._fetch_authorized_shops_all(token_id)
+        matches = [shop for shop in shops if shop["platform_store_id"] == expected_id]
+        if len(matches) != 1 or matches[0]["region"] != expected_region or matches[0]["shop_cipher"] != expected_cipher:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Pilot shop identity did not match the authorized token.")
+        return matches[0]
 
     @oauth_stage("exchange_token")
     def exchange_authorization_code(self, payload):
