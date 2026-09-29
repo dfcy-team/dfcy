@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.accounts.models import CustomUser
@@ -19,6 +19,7 @@ from apps.tenants.models import Tenant
 MODULE = "apps.integrations.management.commands.import_tiktok_ads_live_pilot"
 
 
+@override_settings(LIVE_TIKTOK_ADS_APP_ID="7651554890895851537")
 class AdsPilotImportTests(TestCase):
     def setUp(self):
         self.tenant = Tenant.objects.create(id=1, code="tenant-1", name="YXJ")
@@ -112,7 +113,7 @@ class AdsPilotImportTests(TestCase):
             ids = self.payload["shops"][code]["advertiser_ids"]
             path = urlparse(url).path
             if path.endswith("/oauth2/advertiser/get/"):
-                assert parse_qs(urlparse(url).query)["app_id"] == ["app-id"]
+                assert parse_qs(urlparse(url).query)["app_id"] == ["7651554890895851537"]
                 listed = ids[:-1] if bad_auth else ids
                 if overlap and code == "TKKJ1PH":
                     listed = listed + ["100"]

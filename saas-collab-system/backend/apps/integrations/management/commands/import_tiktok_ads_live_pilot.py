@@ -10,6 +10,7 @@ import sys
 from urllib.parse import urlencode
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
@@ -117,7 +118,8 @@ class Command(BaseCommand):
         if not isinstance(custody, HttpCustodyBackend):
             raise CommandError("Independent HTTP custody is required.")
         runtime = get_runtime_platform_config("tiktok")
-        if not runtime.get("contract_approved") or not runtime.get("app_id"):
+        ads_app_id = str(getattr(settings, "LIVE_TIKTOK_ADS_APP_ID", "") or "").strip()
+        if not runtime.get("contract_approved") or not re.fullmatch(r"[0-9]+", ads_app_id):
             raise CommandError("Approved TikTok Ads app ID and contract are required.")
         try:
             payload = json.load(sys.stdin)
@@ -155,7 +157,7 @@ class Command(BaseCommand):
                 authorized_by_shop = {}
                 for code in CODES:
                     authorized_by_shop[code] = _verify(
-                        http, runtime["app_id"], payload["app_secret"], payload["shops"][code], locked[code],
+                        http, ads_app_id, payload["app_secret"], payload["shops"][code], locked[code],
                     )
                 if authorized_by_shop[CODES[0]].intersection(authorized_by_shop[CODES[1]]):
                     raise CommandError("The two Ads authorizations overlap across shops.")
@@ -164,7 +166,7 @@ class Command(BaseCommand):
                     config = PlatformIntegrationConfig.objects.create(
                         tenant=tenant, platform="tiktok", account_alias=f"live-ads-pilot-{code.lower()}",
                         environment="pilot", status="verified", created_by=actor,
-                        platform_config={"api_type": "advertising", "app_key": runtime["app_id"]},
+                        platform_config={"api_type": "advertising", "app_key": ads_app_id},
                         network_enabled=True, sync_read_enabled=False, sync_write_enabled=False,
                     )
                     stored = custody.store_secrets(
