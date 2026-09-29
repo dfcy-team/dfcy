@@ -70,8 +70,14 @@
 
       <div class="incident-link"><span>待处理异常：{{ (summary.open_sync_incident_count || 0) + (summary.acknowledged_sync_incident_count || 0) }}</span><el-button link type="primary" @click="router.push('/integrations/incidents')">前往同步异常</el-button></div>
 
+      <div v-if="auth.hasPermission('integrations.manage')" class="batch-toolbar">
+        <span>已勾选 {{ selectedJobs.length }} 个任务（仅当前页）</span>
+        <el-button type="primary" :disabled="!selectedJobs.length || !!actionLoading" @click="openBatchPolicy">批量修改策略</el-button>
+      </div>
+
       <el-empty v-if="state === 'empty'" description="暂无同步任务" />
-      <el-table v-else v-loading="loading" :data="rows" border stripe empty-text="暂无同步任务">
+      <el-table v-else ref="jobsTable" v-loading="loading" :data="rows" row-key="id" border stripe empty-text="暂无同步任务" @selection-change="selectedJobs = $event">
+        <el-table-column v-if="auth.hasPermission('integrations.manage')" type="selection" width="48" fixed="left" />
         <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}</template></el-table-column>
         <el-table-column prop="platform" label="平台" min-width="110" />
         <el-table-column prop="subject_name" label="业务主体" min-width="150">
@@ -155,6 +161,7 @@
     <el-dialog v-model="previewOpen" title="检查缺失任务" width="min(1000px, 94vw)" destroy-on-close>
       <MissingSyncJobsPreview v-if="previewOpen" />
     </el-dialog>
+    <BulkSyncJobPolicyDialog v-model="batchPolicyOpen" :jobs="batchPolicyJobs" @saved="load" />
     <el-drawer v-model="configOpen" title="任务配置与定时" size="min(560px, 94vw)">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="任务">#{{ configRow.id }} · {{ resourceLabel(configRow.resource_type) }}</el-descriptions-item>
@@ -195,6 +202,7 @@ import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
 import { syncTime, syncError, runStates, schedules } from '../../utils/syncPresentation';
 import { syncRequestId } from '../../utils/syncRequestId';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
+import BulkSyncJobPolicyDialog from '../../components/BulkSyncJobPolicyDialog.vue';
 import { useMock } from '../../api/request';
 
 import {
@@ -238,6 +246,15 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const rows = ref([]);
+const jobsTable = ref(null);
+const selectedJobs = ref([]);
+const batchPolicyJobs = ref([]);
+const batchPolicyOpen = ref(false);
+function openBatchPolicy() {
+  if (!auth.hasPermission('integrations.manage') || !selectedJobs.value.length || actionLoading.value) return;
+  batchPolicyJobs.value = [...selectedJobs.value];
+  batchPolicyOpen.value = true;
+}
 const createOpen = ref(false), previewOpen = ref(false), configOpen = ref(false), configRow = ref({});
 const page = ref(1), total = ref(0), options = ref({});
 const filters = reactive({ platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' });
@@ -374,6 +391,8 @@ function openStoreApiConfig() {
 }
 
 async function load() {
+  jobsTable.value?.clearSelection();
+  selectedJobs.value = [];
   state.value = 'loading';
   loading.value = true;
   errorMessage.value = '';
@@ -513,6 +532,7 @@ onMounted(() => {
 .task-filters :deep(.el-form-item__label) { margin-bottom: 8px; color: #475569; line-height: 20px; }
 .task-filters :deep(.el-select__placeholder) { color: #64748b; }
 .incident-link { display: flex; align-items: center; gap: 16px; margin: 12px 0; }
+.batch-toolbar { display: flex; align-items: center; gap: 16px; margin: 12px 0; color: #475569; font-size: 13px; }
 
 .sync-summary {
   display: grid;
