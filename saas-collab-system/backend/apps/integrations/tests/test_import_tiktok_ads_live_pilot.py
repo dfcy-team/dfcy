@@ -196,7 +196,7 @@ class AdsPilotImportTests(TestCase):
             tenant_id=1, platform_config__api_type="advertising",
         ).update(sync_read_enabled=True)
         lease = TikTokAdsSyncLease.objects.create(
-            tenant_id=1, owner_token="active-owner", generation=1,
+            tenant_id=1, owner_token="test-active-owner", generation=1,
             lease_expires_at=timezone.now() + timedelta(minutes=5),
         )
         with self.assertRaisesMessage(CommandError, "active Ads sync lease"):
@@ -224,7 +224,7 @@ class AdsPilotImportTests(TestCase):
             tenant_id=1, platform_config__api_type="advertising",
         ).update(sync_read_enabled=True)
         TikTokAdsSyncLease.objects.create(
-            tenant_id=1, owner_token="interrupted-owner", generation=1,
+            tenant_id=1, owner_token="test-interrupted-owner", generation=1,
             lease_expires_at=timezone.now() - timedelta(seconds=1),
         )
         call_command("run_tiktok_ads_live_pilot", tenant_id=1, actor="yxj",
@@ -241,11 +241,11 @@ class AdsPilotImportTests(TestCase):
 
         def overtaken(**kwargs):
             lease = TikTokAdsSyncLease.objects.create(
-                tenant_id=1, owner_token="old-owner", generation=1,
+                tenant_id=1, owner_token="test-old-owner", generation=1,
                 lease_expires_at=timezone.now() + timedelta(minutes=5),
             )
             kwargs["on_lease_claim"]("old-owner", 1)
-            lease.owner_token = "new-owner"
+            lease.owner_token = "test-new-owner"
             lease.generation = 2
             lease.save(update_fields=["owner_token", "generation"])
             return [{"days_written": 0, "missing_days": []} for _ in range(12)]

@@ -244,7 +244,7 @@ def test_campaign_page_metadata_must_be_consistent_and_bounded():
 
 def test_real_zero_campaign_rows_are_not_empty_pages():
     mapping = SimpleNamespace(advertiser_id="101")
-    token = "synthetic-secret"
+    token = "test-synthetic-secret"
     day = datetime(2026, 9, 28, tzinfo=timezone.utc).date()
     assert pilot._campaign_spend_for_day(FakeHttp(zero=True), mapping, token, day) == Decimal("0")
     assert pilot._campaign_spend_for_day(FakeHttp(missing=True), mapping, token, day) is None
