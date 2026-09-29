@@ -56,7 +56,7 @@ describe('店铺档案 API 接入操作闭环', () => {
   });
 
   it('sends the exact store authorization to readonly checks and never falls through to another store/config', () => {
-    expect(subjectAccessSource).toContain('{ store_authorization_id: binding.id }');
+    expect(subjectAccessSource).toContain('{ authorization_id: binding.id }');
     const passed = mockCheckIntegrationReadonlyConnection(1, { store_authorization_id: 201 });
     expect(passed).toMatchObject({ success: true, data: { store_authorization_id: 201, sync_job_id: 1 } });
     const wrongConfig = mockCheckIntegrationReadonlyConnection(2, { store_authorization_id: 201 });
@@ -83,13 +83,13 @@ describe('店铺档案 API 接入操作闭环', () => {
   it('makes external readonly checks explicit and keeps sensitive actions recoverable', () => {
     expect(subjectAccessSource).toContain('平台只读检查');
     expect(subjectAccessSource).toContain('不会刷新或替换 Token');
-    expect(subjectAccessSource).toContain('确认平台只读检查');
+    expect(subjectAccessSource).toContain('openCapabilityMatrix(binding)');
     expect(subjectAccessSource).toContain('撤销授权');
     expect(subjectAccessSource).toContain('确认撤销');
     expect(subjectAccessSource).toContain('确认刷新令牌');
     expect(subjectAccessSource).toContain('refreshStoreAuthorization(binding.id, { confirmed: true })');
     expect(subjectAccessSource).toMatch(/async function refreshStoreBinding\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
-    expect(subjectAccessSource).toMatch(/async function checkToken\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
+    expect(subjectAccessSource).toContain("router.push({ path: '/integrations/capabilities', query })");
     expect(subjectAccessSource).toMatch(/async function disableStoreBinding\(binding\)[\s\S]*?finally \{\s+busy\.value = '';/);
     expect(subjectAccessSource).toContain('credentialMaintenanceAccess');
   });

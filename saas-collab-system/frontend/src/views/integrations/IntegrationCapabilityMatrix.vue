@@ -2,14 +2,14 @@
   <AppPage
     eyebrow="API DATA INTEGRATION"
     title="能力矩阵"
-    subtitle="每个店铺只显示一次；为各项只读能力选择商城或广告 API 接入配置。"
+    subtitle="店铺按能力选择商城或广告 API；仓库按共享接入配置管理只读检查。"
     boundary-note="生产阶段只允许读取能力。写入能力在页面和请求两侧均保持关闭，任何 write_enabled=true 都会被后端拒绝。"
     :capability="capability"
   >
     <template #action>
-      <el-button :loading="loading" @click="loadAuthorizations">刷新</el-button>
+      <el-button :loading="loading" @click="subjectKind === 'warehouse' ? warehouseMatrix?.load() : loadAuthorizations()">刷新</el-button>
       <el-button
-        v-if="selectedStore && canManage"
+        v-if="subjectKind === 'store' && selectedStore && canManage"
         type="primary"
         :loading="saving"
         :disabled="!canSave"
@@ -18,6 +18,14 @@
       >保存只读能力</el-button>
     </template>
 
+    <section class="toolbar" aria-label="主体类型">
+      <el-radio-group v-model="subjectKind" aria-label="店铺或仓库">
+        <el-radio-button value="store">店铺</el-radio-button>
+        <el-radio-button value="warehouse">仓库</el-radio-button>
+      </el-radio-group>
+    </section>
+    <WarehouseCapabilityMatrix v-if="subjectKind === 'warehouse'" ref="warehouseMatrix" />
+    <template v-else>
     <section class="toolbar" aria-label="店铺选择">
       <el-select v-model="selectedStoreId" filterable clearable placeholder="选择店铺" @change="loadCapabilities">
         <el-option
@@ -102,6 +110,12 @@
         <el-table-column prop="last_success_at" label="最近成功" min-width="180">
           <template #default="{ row }">{{ row.last_success_at || '尚未运行' }}</template>
         </el-table-column>
+        <el-table-column label="只读检查" min-width="160">
+          <template #default="{ row }">
+            <el-button v-if="checkResources[row.capability_code]" :disabled="!canCheck || !row.read_enabled || row.status !== 'active' || !sourceIsUsable(row) || Boolean(checking)" :loading="checking === row.capability_code" @click="checkCapability(row)">检查连接</el-button>
+            <span v-else>尚未接入检查</span>
+          </template>
+        </el-table-column>
       </el-table>
 
       <section v-if="suggestions.length" class="suggestions" aria-label="平台能力建议">
@@ -119,20 +133,26 @@
       </section>
     </template>
     <el-empty v-else description="请选择店铺后维护能力矩阵" />
+    </template>
   </AppPage>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
+import WarehouseCapabilityMatrix from '../../components/WarehouseCapabilityMatrix.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
-import { fetchStoreAuthorizations, fetchStoreAuthorizationDetail, fetchStoreCapabilityMatrix, updateStoreCapabilityMatrix } from '../../api/integrations';
+import { fetchStoreAuthorizations, fetchStoreAuthorizationDetail, fetchStoreCapabilityMatrix, updateStoreCapabilityMatrix, checkIntegrationReadonlyConnection } from '../../api/integrations';
 import { authorizationSourceLabel, capabilityLabel } from '../../utils/integrationCapabilityLabels';
 
 const route = useRoute();
+const subjectKind = ref(route.query.subject_type === 'warehouse' ? 'warehouse' : 'store');
+const warehouseMatrix = ref(null);
+const checking = ref('');
+const checkResources = { PRODUCT: 'platform_product', ORDER: 'sales_order', RETURN_REFUND: 'refund_return', SETTLEMENT: 'settlement_bill' };
 const auth = useAuthStore();
 const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
@@ -140,7 +160,7 @@ const saving = ref(false);
 const error = ref('');
 const stores = ref([]);
 const authorizations = ref([]);
-const requestedAuthorizationId = String(route.query.authorization_id || '').trim();
+let requestedAuthorizationId = String(route.query.authorization_id || '').trim();
 const pendingDeepLink = ref(Boolean(requestedAuthorizationId));
 const selectedStoreId = ref(null);
 const authorizationPage = ref(1);
@@ -152,6 +172,7 @@ const suggestions = ref([]);
 
 const selectedStore = computed(() => stores.value.find((item) => String(item.store_id) === String(selectedStoreId.value)) || null);
 const canManage = computed(() => auth.hasPermission('integrations.store.authorize'));
+const canCheck = computed(() => auth.hasPermission('integrations.run_live_readonly'));
 const canSave = computed(() => canManage.value && authorizations.value.some((item) => ['active', 'authorized'].includes(item.status)));
 
 function responseRows(response) {
@@ -281,7 +302,26 @@ async function save() {
   await loadCapabilities();
 }
 
-onMounted(loadAuthorizations);
+async function checkCapability(row) {
+  if (!canCheck.value || !row.read_enabled || row.status !== 'active' || checking.value || !checkResources[row.capability_code]) return;
+  const source = authorizations.value.find((item) => String(item.id) === String(row.authorization_id));
+  if (!source || !sourceIsUsable(row)) return;
+  try { await ElMessageBox.confirm('按已保存的能力和授权调用只读接口；不会保存表单、刷新令牌或启用任务。是否继续？', '确认只读检查', { type: 'warning' }); } catch { return; }
+  checking.value = row.capability_code;
+  try {
+    const response = await checkIntegrationReadonlyConnection(source.integration_config_id, { store_authorization_id: source.id, resource_type: checkResources[row.capability_code] });
+    if (!response?.success) throw new Error(response?.message || '只读检查失败');
+    ElMessage.success('只读检查通过，任务启停状态未改变。');
+  } catch (reason) { ElMessage.error(reason?.message || '只读检查失败'); }
+  finally { checking.value = ''; }
+}
+watch(() => route.query.subject_type, (value) => { subjectKind.value = value === 'warehouse' ? 'warehouse' : 'store'; });
+watch(() => route.query.authorization_id, (value) => {
+  requestedAuthorizationId = String(value || '').trim();
+  if (requestedAuthorizationId) { pendingDeepLink.value = true; loadAuthorizations(); }
+});
+watch(subjectKind, (value) => { if (value === 'store' && !stores.value.length) loadAuthorizations(); });
+onMounted(() => { if (subjectKind.value === 'store') loadAuthorizations(); });
 </script>
 
 <style scoped>

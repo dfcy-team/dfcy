@@ -4,7 +4,7 @@ import { requestApi, requestWithMockFallback } from './request';
 export const authorizeJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/authorize/`, data: { confirmed: true } });
 export const discoverJifengWarehouses = (id, data = {}) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/warehouses/`, data });
 export const refreshJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/refresh/`, data: {} });
-export const checkJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/readonly-check/`, data: {} });
+export const checkJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/readonly-check/`, data: {}, timeout: 60000 });
 export const completeManualStoreCallback = (data) => requestApi({
   method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/manual-callback/', data,
 });
@@ -251,7 +251,7 @@ export const checkIntegrationConsistency = (id) =>
 
 export const checkIntegrationReadonlyConnection = (id, payload = {}) =>
   requestWithMockFallback(
-    { method: 'post', url: `/api/internal/integrations/configs/${id}/readonly-check/`, data: payload },
+    { method: 'post', url: `/api/internal/integrations/configs/${id}/readonly-check/`, data: payload, timeout: 60000 },
     () => mockCheckIntegrationReadonlyConnection(id, payload),
     'integrations.configs.readonly_check'
   );

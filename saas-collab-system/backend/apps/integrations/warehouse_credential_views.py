@@ -17,6 +17,7 @@ from .serializers import WarehouseAuthorizationSerializer
 from .views import _warehouse_authorization_queryset, _get_config_for_user
 from .warehouse_credential_service import save_warehouse_credentials, authorize_warehouse, refresh_warehouse_authorization
 from .warehouse_discovery_service import discover_warehouse
+from .warehouse_readiness import warehouse_config_blockers
 
 
 class WarehouseCredentialsInput(serializers.Serializer):
@@ -93,12 +94,19 @@ def warehouse_readonly_check(request, pk):
             environment=config.environment, regions=[record.external_warehouse_region], config_id=config.pk,
             resource_type="inventory_snapshot", warehouse_id=record.warehouse_id):
         raise PermissionDenied("该仓库超出只读连接校验的数据范围。")
+    # Reuse existing shared configuration gates; no per-check approval is added.
+    # Reject before constructing a client or accessing custody/platform APIs.
+    blockers = warehouse_config_blockers(config)
+    if blockers:
+        from .readiness_service import BLOCKER_LABELS
+        raise ValidationError("仓库只读检查条件未满足：" + "、".join(BLOCKER_LABELS[code] for code in blockers))
     # No job is needed: validation must precede task creation. Do not exchange
     # or consume the bootstrap token here. Only the inventory read is allowed.
-    if record.last_error_code in {"AUTO_REFRESH_VALIDATION_PENDING", "AUTO_REFRESH_VALIDATION_FAILED"}:
-        raise ValidationError("请使用重新验证新令牌入口，不要重复刷新；验证通过后再恢复同步任务。")
+    # An explicit capability-matrix check may recover a historical validation error.
+    record.last_error_code = ""
     try:
         client = JifengWmsReadonlyClient(config, record)
+        client.preflight()
         page = client.fetch_inventory(None, {"page_size": 1})
     except Exception as exc:
         WarehouseAuthorization.objects.filter(pk=record.pk, bootstrap_credential_id=record.bootstrap_credential_id,
@@ -126,11 +134,5 @@ def warehouse_readonly_check(request, pk):
 @permission_classes([IsWarehouseAuthorizationAuthorizer])
 def warehouse_refresh_authorization(request, pk):
     record = get_scoped_object_or_404(_warehouse_authorization_queryset(request, "integrations.warehouse.authorize"), pk=pk)
-    from .automatic_refresh import (
-        AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED, revalidate_saved_authorization,
-    )
-    if record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}:
-        record = revalidate_saved_authorization(record, actor=request.user)
-    else:
-        record = refresh_warehouse_authorization(actor=request.user, authorization=record)
+    record = refresh_warehouse_authorization(actor=request.user, authorization=record)
     return success_response({"authorization": WarehouseAuthorizationSerializer(record).data, "connected": False})

@@ -265,13 +265,15 @@ def test_archive_creation_without_api_fields_does_not_create_authorization():
     assert not WarehouseAuthorization.objects.exists()
 
 
-def test_refresh_uses_only_warehouse_refresh_token_and_requires_recheck(monkeypatch):
+@pytest.mark.parametrize("last_error", ["", "AUTO_REFRESH_VALIDATION_FAILED"])
+def test_refresh_uses_only_warehouse_refresh_token_without_read_validation(monkeypatch, last_error):
     from apps.integrations.readonly_clients import JifengWmsReadonlyClient
     from apps.integrations.warehouse_credential_service import refresh_warehouse_authorization
     actor, record = binding()
     record.email = "demo@example.test"
     record.oauth_user_id = "456"
     record.token_id = "warehouse-oauth"
+    record.last_error_code = last_error
     record.validation_status = "verified"
     record.last_verified_at = timezone.now()
     record.save()
@@ -286,12 +288,21 @@ def test_refresh_uses_only_warehouse_refresh_token_and_requires_recheck(monkeypa
     http.request.return_value.status_code = 200
     http.request.return_value.json.return_value = {"code": 0, "data": {
         "accessToken": "FAKE_ACCESS", "refreshToken": "FAKE_NEW_REFRESH", "userId": 456}}
-    monkeypatch.setattr(JifengWmsReadonlyClient, "preflight", lambda self: None)
+    def preflight(client):
+        assert client.authorization.last_error_code == ""
+    monkeypatch.setattr(JifengWmsReadonlyClient, "preflight", preflight)
     refreshed = refresh_warehouse_authorization(actor=actor, authorization=record, http=http, custody=custody)
     custody.retrieve_refresh_token.assert_called_once_with("warehouse-oauth")
     assert refreshed.token_id == "new-warehouse-oauth"
     assert refreshed.validation_status == "pending"
     assert refreshed.last_verified_at is None
+    assert refreshed.last_error_code == ""
+    from apps.integrations.warehouse_credential_service import require_verified_warehouse
+    refreshed.bootstrap_credential_id = "synthetic-bootstrap"
+    refreshed.external_warehouse_code = "TEST-WAREHOUSE"
+    with pytest.raises(ValidationError, match="能力矩阵"):
+        require_verified_warehouse(refreshed)
+    http.request.assert_called_once()
     assert "/api/oauth/refreshToken?" in http.request.call_args.args[1]
     assert "email=" not in http.request.call_args.args[1]
     metadata = custody.store_secrets.call_args.kwargs["metadata"]
@@ -304,6 +315,8 @@ def test_failed_readonly_check_never_marks_connected(monkeypatch):
     from rest_framework.test import APIClient
     from apps.integrations.readonly_clients import JifengWmsReadonlyClient
     actor, record = binding()
+    monkeypatch.setattr("apps.integrations.warehouse_credential_views.warehouse_config_blockers", lambda config: [])
+    monkeypatch.setattr(JifengWmsReadonlyClient, "preflight", lambda self: None)
     monkeypatch.setattr("apps.integrations.readonly_clients.get_custody_backend", lambda: Mock())
     def rejected(*args, **kwargs):
         raise ValidationError("极风认证失败。")
