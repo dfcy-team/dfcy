@@ -430,6 +430,8 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
             return False
 
     def validate_service_platform_id(self, value):
+        if value is None:
+            return None
         request = self.context["request"]
         if value.tenant_id != request.user.tenant_id:
             raise serializers.ValidationError("仓储服务平台必须属于当前租户。")

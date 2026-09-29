@@ -121,7 +121,7 @@ def test_automatic_warehouse_refresh_preserves_verification_and_schedule(monkeyp
         http=http, custody=custody, automatic=True, expected_token_id=record.token_id)
     assert refreshed.validation_status == "pending"
     assert refreshed.last_verified_at is None
-    assert refreshed.last_error_code == service.AUTO_REFRESH_VALIDATION_PENDING
+    assert refreshed.last_error_code == ""
     assert refreshed.token_id == "synthetic-renewed"
     job.refresh_from_db()
     assert job.is_enabled and job.next_run_at == next_run and job.status == "idle"
@@ -156,100 +156,81 @@ def _automatic_warehouse_job(monkeypatch):
     return actor, record, job, refresh
 
 
-def test_refresh_success_but_readonly_401_fails_and_pauses_jobs(monkeypatch):
+def test_refresh_success_does_not_perform_readonly_401_check(monkeypatch):
     _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
-    rejected = OAuthFlowError(OAUTH_AUTH_REJECTED, "FAKE_TOKEN_MUST_NOT_BE_LOGGED")
-    validate = Mock(side_effect=rejected)
+    validate = Mock(side_effect=OAuthFlowError(OAUTH_AUTH_REJECTED, "FAKE_TOKEN_MUST_NOT_BE_LOGGED"))
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-
-    assert service.refresh_due_authorizations() == {"attempted": 1, "success": 0, "failed": 1}
-    assert refresh.call_count == 1
-    assert validate.call_count == 1
-    record.refresh_from_db()
-    job.refresh_from_db()
-    assert record.validation_status == "failed"
-    assert record.last_error_code == service.AUTO_REFRESH_VALIDATION_FAILED
-    assert not job.is_enabled and job.status == SyncJob.Status.DISABLED and job.next_run_at is None
-    attempt = AutomaticRefreshAttempt.objects.get()
-    assert attempt.status == "failed"
-    audit = IntegrationAuditLog.objects.get(action="automatic_refresh")
-    assert audit.result == "failed"
-    assert audit.masked_detail["error_code"] == service.AUTO_REFRESH_VALIDATION_FAILED
-    assert "FAKE_TOKEN" not in str(audit.masked_detail)
-    incident = SyncAlertIncident.objects.get(sync_job=job)
-    assert incident.last_error_code == service.AUTO_REFRESH_VALIDATION_FAILED
-    assert "新令牌只读校验失败" in incident.masked_message
-
-
-def test_refresh_and_readonly_validation_success_preserve_enabled_job(monkeypatch):
-    _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
-    validate = Mock(return_value={"records": []})
-    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-
     assert service.refresh_due_authorizations() == {"attempted": 1, "success": 1, "failed": 0}
-    assert refresh.call_count == 1
-    assert validate.call_count == 1
-    record.refresh_from_db()
+    refresh.assert_called_once()
+    validate.assert_not_called()
     job.refresh_from_db()
-    assert record.validation_status == "verified"
-    assert record.last_verified_at is not None
-    assert record.last_error_code == ""
-    assert job.is_enabled and job.status == SyncJob.Status.IDLE and job.next_run_at is not None
+    assert job.is_enabled and job.next_run_at is not None
+    audit = IntegrationAuditLog.objects.get(action="automatic_refresh")
+    assert audit.masked_detail["readonly_validation_performed"] is False
+    assert audit.masked_detail["token_saved"] is True
+    assert not SyncAlertIncident.objects.filter(sync_job=job).exists()
+
+
+
+def test_refresh_only_success_preserves_enabled_job(monkeypatch):
+    _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
+    validate = Mock()
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+    assert service.refresh_due_authorizations()["success"] == 1
+    refresh.assert_called_once()
+    validate.assert_not_called()
+    job.refresh_from_db()
+    assert job.is_enabled and job.status == SyncJob.Status.IDLE
     assert AutomaticRefreshAttempt.objects.get().status == "success"
 
 
-def test_validation_timeout_retries_only_new_token_validation(monkeypatch):
+
+def test_refresh_does_not_wait_for_validation_retries(monkeypatch):
     _, _, _, refresh = _automatic_warehouse_job(monkeypatch)
-    timeout = OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "synthetic timeout")
-    timeout.category = "timeout_uncertain"
-    validate = Mock(side_effect=[timeout, timeout, timeout, {"records": []}])
+    validate = Mock(side_effect=TimeoutError())
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-
     assert service.refresh_due_authorizations()["success"] == 1
-    assert refresh.call_count == 1
-    assert validate.call_count == 4
-    assert service.time.sleep.call_args_list == [call(2), call(5), call(15)]
+    refresh.assert_called_once()
+    validate.assert_not_called()
+    service.time.sleep.assert_not_called()
 
 
-def test_validation_business_error_does_not_retry(monkeypatch):
-    _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
+
+def test_explicit_validation_business_error_does_not_retry(monkeypatch):
+    _, record, _, _ = _automatic_warehouse_job(monkeypatch)
     validate = Mock(side_effect=ValidationError("invalid readonly response"))
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-
-    assert service.refresh_due_authorizations()["failed"] == 1
-    refresh.assert_called_once()
+    with pytest.raises(ValidationError):
+        service._validate_with_retries(record)
     validate.assert_called_once()
     service.time.sleep.assert_not_called()
-    record.refresh_from_db()
-    job.refresh_from_db()
-    assert record.last_error_code == service.AUTO_REFRESH_VALIDATION_FAILED
-    assert not job.is_enabled
 
 
-def test_exhausted_network_validation_remains_pending_and_retries_without_rotation(monkeypatch):
-    _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
+
+def test_explicit_validation_timeout_does_not_rotate(monkeypatch):
+    actor, record, job, refresh = _automatic_warehouse_job(monkeypatch)
+    record.last_error_code = service.AUTO_REFRESH_VALIDATION_PENDING
+    record.save()
     validate = Mock(side_effect=TimeoutError("FAKE_SECRET_DO_NOT_LOG"))
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-    assert service.refresh_due_authorizations()["failed"] == 1
-    record.refresh_from_db()
+    service.revalidate_saved_authorization(record, actor=actor)
+    refresh.assert_not_called()
+    assert validate.call_count == 4
+    assert service.time.sleep.call_args_list == [call(2), call(5), call(15)]
     job.refresh_from_db()
-    assert record.last_error_code == service.AUTO_REFRESH_VALIDATION_PENDING
-    assert record.validation_status == "pending"
     assert not job.is_enabled
-    assert AutomaticRefreshAttempt.objects.get().status == "token_saved"
-    audit = IntegrationAuditLog.objects.get(action="automatic_refresh")
-    assert audit.masked_detail["reauthorization_required"] is False
+    audit = IntegrationAuditLog.objects.get(action="revalidate_saved_token")
     assert "FAKE_SECRET" not in str(audit.masked_detail)
-    validate.side_effect = None
-    validate.return_value = {"records": []}
-    assert service.refresh_due_authorizations()["success"] == 1
-    assert refresh.call_count == 1
-    job.refresh_from_db()
-    assert not job.is_enabled
+
 
 
 def test_manual_revalidation_uses_saved_token_and_does_not_enable_tasks(monkeypatch):
     actor, record, job, refresh = _automatic_warehouse_job(monkeypatch)
+    record.last_error_code = service.AUTO_REFRESH_VALIDATION_PENDING
+    record.save()
+    job.is_enabled = False
+    job.status = SyncJob.Status.DISABLED
+    job.save()
     monkeypatch.setattr(service, "validate_refreshed_authorization", Mock(side_effect=TimeoutError()))
     service.refresh_due_authorizations()
     record.refresh_from_db()
@@ -300,13 +281,14 @@ def test_store_refresh_endpoint_revalidates_failed_saved_token(marketplace_callb
         record.save()
     validate = Mock(return_value=[])
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-    refresh = Mock()
+    refresh = Mock(return_value=record)
+    record.last_error_code = ""
     monkeypatch.setattr("apps.integrations.views.refresh_marketplace_authorization", refresh)
     response = client.post(f"/api/internal/integrations/store-authorizations/{record.pk}/refresh/", {"confirmed": True}, format="json")
     assert response.status_code == 200
     assert response.data["data"]["last_error_code"] == ""
-    validate.assert_called_once()
-    refresh.assert_not_called()
+    validate.assert_not_called()
+    refresh.assert_called_once()
 
 
 def test_revoked_saved_reference_cannot_be_revalidated(monkeypatch):
@@ -359,106 +341,6 @@ def test_expired_saved_token_is_refreshed_then_validated(monkeypatch, validation
     assert audit.result == ("failed" if validation_failure else "success")
 
 
-def _real_warehouse_refresh_context(monkeypatch, error_code, *, expired=True):
-    from apps.integrations import readonly_clients, warehouse_credential_service
-    from apps.integrations.models import authorization_service_write
-
-    actor, record = due_warehouse(monkeypatch)
-    config = record.integration_config
-    config.platform_config = {"api_host": "https://example.test", "client_id": "TEST_CLIENT"}
-    with authorization_service_write():
-        config.save()
-    record.oauth_expires_at = timezone.now() + timedelta(seconds=-1 if expired else 3600)
-    record.last_error_code = error_code
-    record.save()
-    monkeypatch.setattr(readonly_clients, "is_module_enabled", lambda name: True)
-    monkeypatch.setattr(readonly_clients, "require_live_mode", lambda reason: None)
-    monkeypatch.setattr(readonly_clients, "get_runtime_setting", lambda *args, **kwargs: True)
-    monkeypatch.setattr("apps.integrations.warehouse_readiness.warehouse_config_blockers", lambda config: [])
-    custody = Mock()
-    custody.retrieve_secret.return_value = "test-client-secret"
-    custody.retrieve_refresh_token.return_value = "test-refresh-token"
-    custody.store_secrets.return_value = {"token_id": "synthetic-renewed-reference"}
-    http = Mock()
-    http.request.return_value.status_code = 200
-    http.request.return_value.json.return_value = {"code": "0", "data": {
-        "accessToken": "test-access-token", "refreshToken": "test-new-refresh-token", "userId": record.oauth_user_id,
-    }}
-    monkeypatch.setattr(warehouse_credential_service, "get_custody_backend", lambda: custody)
-    monkeypatch.setattr(warehouse_credential_service, "PlatformHttpClient", lambda **kwargs: http)
-    return actor, record, http, custody
-
-
-@pytest.mark.parametrize("mode", ["manual_pending", "manual_failed", "scheduled_pending"])
-@pytest.mark.parametrize("validation_failure", [False, True])
-def test_expired_warehouse_recovery_uses_real_refresh_service(monkeypatch, mode, validation_failure):
-    error_code = (service.AUTO_REFRESH_VALIDATION_FAILED if mode == "manual_failed"
-                  else service.AUTO_REFRESH_VALIDATION_PENDING)
-    actor, record, http, custody = _real_warehouse_refresh_context(monkeypatch, error_code)
-    old_token_id = record.token_id
-    job = SyncJob.objects.create(tenant=record.tenant, integration_config=record.integration_config,
-        warehouse_authorization=record, resource_type="inventory_snapshot", is_enabled=False,
-        status=SyncJob.Status.DISABLED)
-    validate = Mock(side_effect=OAuthFlowError(OAUTH_AUTH_REJECTED, "synthetic rejected")
-                    if validation_failure else None)
-    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-    if mode == "scheduled_pending":
-        key = service.sha256(f"jifeng_wms:{record.tenant_id}:{record.pk}:{record.token_id}".encode()).hexdigest()
-        AutomaticRefreshAttempt.objects.create(request_key=key, tenant=record.tenant, status="token_saved")
-        counts = service.refresh_due_authorizations()
-        assert counts["attempted"] == 1
-        assert counts["failed" if validation_failure else "success"] == 1
-    else:
-        service.revalidate_saved_authorization(record, actor=actor)
-    record.refresh_from_db()
-    job.refresh_from_db()
-    http.request.assert_called_once()
-    custody.retrieve_refresh_token.assert_called_once_with(old_token_id)
-    assert record.token_id == "synthetic-renewed-reference"
-    validate.assert_called_once()
-    assert validate.call_args.args[0].token_id == record.token_id
-    assert not job.is_enabled and job.status == SyncJob.Status.DISABLED
-    assert record.last_error_code == (service.AUTO_REFRESH_VALIDATION_FAILED if validation_failure else "")
-
-
-@pytest.mark.parametrize("error_code", [service.AUTO_REFRESH_VALIDATION_PENDING, service.AUTO_REFRESH_VALIDATION_FAILED])
-def test_warehouse_recovery_keeps_ordinary_read_guard(monkeypatch, error_code):
-    from apps.integrations.readonly_clients import JifengWmsReadonlyClient
-    from rest_framework.exceptions import ValidationError as APIValidationError
-
-    _, record, http, custody = _real_warehouse_refresh_context(monkeypatch, error_code)
-    with pytest.raises(APIValidationError, match="尚未通过只读验证"):
-        JifengWmsReadonlyClient(record.integration_config, record, http_client=http, custody=custody).preflight()
-    http.request.assert_not_called()
-
-
-def test_unexpired_warehouse_recovery_never_rotates(monkeypatch):
-    actor, record, http, custody = _real_warehouse_refresh_context(
-        monkeypatch, service.AUTO_REFRESH_VALIDATION_PENDING, expired=False)
-    old_token_id = record.token_id
-    monkeypatch.setattr(service, "validate_refreshed_authorization", Mock())
-    service.revalidate_saved_authorization(record, actor=actor)
-    record.refresh_from_db()
-    assert record.token_id == old_token_id
-    http.request.assert_not_called()
-    custody.retrieve_refresh_token.assert_not_called()
-
-
-def test_expired_warehouse_recovery_preserves_network_approval_gate(monkeypatch):
-    from rest_framework.exceptions import ValidationError as APIValidationError
-
-    actor, record, http, custody = _real_warehouse_refresh_context(monkeypatch, service.AUTO_REFRESH_VALIDATION_FAILED)
-    old_token_id = record.token_id
-    monkeypatch.setattr("apps.integrations.warehouse_readiness.warehouse_config_blockers",
-                        lambda config: ["network_not_approved"])
-    with pytest.raises(APIValidationError, match="网络访问未审批"):
-        service.revalidate_saved_authorization(record, actor=actor)
-    record.refresh_from_db()
-    assert record.token_id == old_token_id and record.last_error_code == service.AUTO_REFRESH_VALIDATION_FAILED
-    http.request.assert_not_called()
-    custody.retrieve_refresh_token.assert_not_called()
-
-
 def test_validation_audit_records_only_closed_schema_diagnostics(monkeypatch):
     actor, record = due_warehouse(monkeypatch)
     record.last_error_code = service.AUTO_REFRESH_VALIDATION_FAILED
@@ -503,9 +385,8 @@ def test_expired_store_recovery_refreshes_once_before_read(marketplace_callback,
     record.refresh_from_db()
     assert record.token_id == "tok_fake_recovered" and record.status == "active"
     provider.refresh_authorization.assert_called_once()
-    provider.fetch_authorized_stores.assert_called_once()
-    audit = IntegrationAuditLog.objects.get(action="revalidate_saved_token")
-    assert audit.result == "success" and audit.masked_detail["token_refreshed"] is True
+    provider.fetch_authorized_stores.assert_not_called()
+    assert not IntegrationAuditLog.objects.filter(action="revalidate_saved_token").exists()
 
 
 def test_stale_recovery_reference_does_not_refresh_or_validate(monkeypatch):
@@ -539,9 +420,9 @@ def test_pending_new_token_resumes_validation_without_refreshing_again(monkeypat
     validate = Mock(return_value={"records": []})
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
 
-    assert service.refresh_due_authorizations()["success"] == 1
+    assert service.refresh_due_authorizations()["attempted"] == 0
     refresh.assert_not_called()
-    validate.assert_called_once()
+    validate.assert_not_called()
 
 
 def test_pending_validation_that_expires_renews_instead_of_repeating_old_read(monkeypatch):
@@ -553,10 +434,9 @@ def test_pending_validation_that_expires_renews_instead_of_repeating_old_read(mo
     AutomaticRefreshAttempt.objects.create(request_key=key, tenant=record.tenant, status="token_saved")
     validate = Mock(return_value={"records": []})
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-    assert service.refresh_due_authorizations()["success"] == 1
-    refresh.assert_called_once()
-    validate.assert_called_once()
-    assert validate.call_args.args[0].token_id == "synthetic-new-token-reference"
+    assert service.refresh_due_authorizations()["attempted"] == 0
+    refresh.assert_not_called()
+    validate.assert_not_called()
     assert service.refresh_due_authorizations()["attempted"] == 0
 
 
@@ -654,7 +534,7 @@ def test_shopee_and_tiktok_rotate_and_duplicate_scan_does_not_repeat(marketplace
         assert record.token_id == "tok_fake_renewed"
         assert record.expires_at > timezone.now() + timedelta(hours=3)
         assert record.status == "active"
-        provider.fetch_authorized_stores.assert_called_once()
+        provider.fetch_authorized_stores.assert_not_called()
         assert service.refresh_due_authorizations()["attempted"] == 0
         assert provider.refresh_authorization.call_count == 1
     else:

@@ -280,7 +280,7 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
 def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
     record = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk, tenant_id=actor.tenant_id)
     if expected_token_id is not None:
-        from .automatic_refresh import AUTO_REFRESH_VALIDATION_PENDING, require_automatic_refresh
+        from .automatic_refresh import require_automatic_refresh
         require_automatic_refresh(record, expected_token_id)
     provider = resolve_oauth_provider(record.platform, record.integration_config)
     result = provider.refresh_authorization(record)
@@ -297,10 +297,10 @@ def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
         new_reference_revoker=result.get("new_reference_revoker"),
         defer_previous_revocation=True,
     )
-    if expected_token_id is not None:
-        refreshed.last_error_code = AUTO_REFRESH_VALIDATION_PENDING
-        with authorization_service_write():
-            refreshed.save(update_fields=["last_error_code", "updated_at"])
+    refreshed.last_error_code = ""
+    refreshed.status = MarketplaceStoreAuthorization.Status.ACTIVE
+    with authorization_service_write():
+        refreshed.save(update_fields=["status", "last_error_code", "updated_at"])
     return refreshed
 
 

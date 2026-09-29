@@ -10,21 +10,21 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 describe('仓库 API 接入操作闭环', () => {
   it('exposes explicit bind, rebind, revoke, readonly and sync task actions', () => {
     const dialog = read('src/components/SubjectApiAccessDialog.vue');
-    for (const label of ['确认授权', '确认重新授权', '解除绑定', '执行只读检查', '创建库存同步任务', '查看同步任务', '维护接入凭据']) {
+    for (const label of ['确认授权', '确认重新授权', '解除绑定', '能力矩阵', '创建库存同步任务', '查看同步任务', '维护接入凭据']) {
       expect(dialog).toContain(label);
     }
     for (const permission of ['integrations.warehouse.view', 'integrations.warehouse.authorize', 'integrations.warehouse.revoke']) {
       expect(dialog).toContain(permission);
     }
     expect(dialog).toContain('warehouse_authorization_id: binding.id');
-    expect(dialog).toContain('{ warehouse_authorization_id: binding.id }');
+    expect(dialog).toContain("subject_type: 'warehouse', warehouse_id: access.value.subject.id");
     expect(dialog).toContain("resource_type: 'inventory_snapshot'");
     expect(dialog).toContain("subject: access.value.subject.name");
     expect(dialog).not.toContain('has_sync_job === false');
     expect(dialog).not.toContain('请先创建库存同步任务，再执行只读检查。');
-    expect(dialog).toContain('response.data?.simulated === true');
-    expect(dialog).toContain('response.data?.external_api_called === false');
-    expect(dialog).toContain('模拟检查完成，未调用真实平台。');
+    expect(dialog).not.toContain('async function checkToken');
+    expect(dialog).toContain('openCapabilityMatrix');
+    expect(dialog).toContain('/integrations/capabilities');
     expect(dialog).toContain('authorization-history-table');
     expect(dialog).toContain('min-width: 0; max-width: 100%;');
     expect(dialog).toContain('overflow-x: auto;');
@@ -36,7 +36,7 @@ describe('仓库 API 接入操作闭环', () => {
     const warehouseActionOrder = [
       '@click="authorizeWarehouse(apiType)"',
       '@click="createInventorySyncJob(primaryBinding(apiType))"',
-      '@click="checkToken(primaryBinding(apiType))"',
+      '@click="openCapabilityMatrix(primaryBinding(apiType))"',
       '@click="viewSyncJobs(apiType)"',
       '@click="revokeWarehouseBinding(primaryBinding(apiType))"',
     ].map((marker) => dialog.indexOf(marker));

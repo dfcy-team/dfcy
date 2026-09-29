@@ -578,6 +578,11 @@ class WarehouseAuthorizationSerializer(serializers.ModelSerializer):
     created_by_id = serializers.IntegerField(read_only=True)
     updated_by_id = serializers.IntegerField(read_only=True)
     token_configured = serializers.SerializerMethodField()
+    read_enabled = serializers.BooleanField(source="integration_config.sync_read_enabled", read_only=True)
+    oauth_token_available = serializers.SerializerMethodField()
+
+    def get_oauth_token_available(self, obj):
+        return bool(obj.token_id)
 
     def get_token_configured(self, obj):
         return bool(obj.bootstrap_credential_id)
@@ -594,6 +599,7 @@ class WarehouseAuthorizationSerializer(serializers.ModelSerializer):
             "country_code",
             "provider",
             "email", "token_configured", "validation_status", "bootstrap_consumed_at",
+            "read_enabled", "oauth_token_available", "oauth_expires_at",
             "external_warehouse_code",
             "external_warehouse_region",
             "status",

@@ -71,6 +71,8 @@
               <div class="binding-grid">
                 <div><span>接入配置</span><strong>{{ binding.account_alias || '—' }}</strong></div>
                 <div><span>授权时间</span><strong>{{ formatDate(binding.authorized_at) }}</strong></div>
+                <div><span>令牌更新时间</span><strong>{{ formatDate(binding.refreshed_at) }}</strong></div>
+                <div><span>令牌到期时间</span><strong>{{ formatDate(expirationDate(binding)) }}</strong></div>
                 <div><span>最近同步</span><strong>{{ formatDate(binding.last_run_at) }}</strong></div>
               </div>
               <div class="section-actions">
@@ -87,14 +89,14 @@
                   :disabled="storeRefreshAccess.disabled"
                   :title="storeRefreshAccess.reason"
                   @click="refreshStoreBinding(binding)"
-                >{{ needsTokenValidation(binding) ? '重新验证新令牌' : '刷新令牌' }}</el-button>
+                >刷新令牌</el-button>
                 <el-button
                   v-if="readonlyCheckAccess.visible"
                   :loading="busy === `check-${binding.id}`"
                   :disabled="readonlyCheckAccess.disabled || !binding.integration_config_id"
                   :title="readonlyCheckAccess.disabled ? readonlyCheckAccess.reason : '调用一次平台只读接口，不会刷新或替换 Token'"
-                  @click="checkToken(binding)"
-                >平台只读检查</el-button>
+                  @click="openCapabilityMatrix(binding)"
+                >能力矩阵</el-button>
                 <el-button
                   v-if="storeRevokeAccess.visible"
                   :loading="busy === `disable-${binding.id}`"
@@ -117,6 +119,8 @@
               <strong>{{ primaryBinding(apiType).external_warehouse_code || '未填写' }}</strong>
             </div>
             <div><span>授权时间</span><strong>{{ formatDate(primaryBinding(apiType).authorized_at) }}</strong></div>
+            <div><span>令牌更新时间</span><strong>{{ formatDate(primaryBinding(apiType).refreshed_at) }}</strong></div>
+            <div><span>令牌到期时间</span><strong>{{ formatDate(expirationDate(primaryBinding(apiType))) }}</strong></div>
             <div v-if="subjectType === 'warehouse'"><span>连接校验</span><strong>{{ warehouseValidationLabel(primaryBinding(apiType)) }}</strong></div>
             <div><span>最近同步</span><strong>{{ formatDate(primaryBinding(apiType).last_run_at) }}</strong></div>
           </div>
@@ -221,7 +225,7 @@
             >{{ primaryBinding(apiType) ? '重新授权' : '授权' }}</el-button>
             <el-button v-if="subjectType === 'warehouse' && primaryBinding(apiType)?.bootstrap_consumed_at && warehouseAuthorizeAccess.visible"
               :disabled="warehouseAuthorizeAccess.disabled || Boolean(busy)"
-              @click="refreshWarehouseAuthorization(primaryBinding(apiType))">{{ needsTokenValidation(primaryBinding(apiType)) ? '重新验证新令牌' : '刷新仓库授权' }}</el-button>
+              @click="refreshWarehouseAuthorization(primaryBinding(apiType))">刷新仓库令牌</el-button>
             <el-button v-if="subjectType === 'warehouse' && primaryBinding(apiType)?.oauth_token_available && warehouseAuthorizeAccess.visible"
               :disabled="warehouseAuthorizeAccess.disabled || Boolean(busy)"
               :loading="busy === 'warehouse-discovery'"
@@ -242,7 +246,7 @@
               :disabled="storeRefreshAccess.disabled"
               :title="storeRefreshAccess.reason"
               @click="refreshStoreBinding(primaryBinding(apiType))"
-            >{{ needsTokenValidation(primaryBinding(apiType)) ? '重新验证新令牌' : '刷新令牌' }}</el-button>
+            >刷新令牌</el-button>
             <el-button
               v-if="primaryBinding(apiType)"
               @click="openAuthorizationDetail(primaryBinding(apiType))"
@@ -269,7 +273,7 @@
             <el-button
               v-if="subjectType === 'warehouse' && apiType === 'inventory' && primaryBinding(apiType) && warehouseSyncCreateAccess.visible"
               :loading="busy === `warehouse-sync-${primaryBinding(apiType).id}`"
-              :disabled="warehouseSyncCreateAccess.disabled || primaryBinding(apiType).validation_status !== 'verified'"
+              :disabled="warehouseSyncCreateAccess.disabled || !primaryBinding(apiType).oauth_token_available"
               :title="warehouseSyncCreateAccess.disabled ? warehouseSyncCreateAccess.reason : '创建一个库存快照只读同步任务；重复点击不会创建重复任务'"
               @click="createInventorySyncJob(primaryBinding(apiType))"
             >创建库存同步任务</el-button>
@@ -278,8 +282,8 @@
               :loading="busy === `check-${primaryBinding(apiType).id}`"
               :disabled="readonlyCheckAccess.disabled || readonlyCheckBlocked(primaryBinding(apiType)) || !primaryBinding(apiType).integration_config_id"
               :title="readonlyCheckTitle(primaryBinding(apiType))"
-              @click="checkToken(primaryBinding(apiType))"
-            >{{ subjectType === 'warehouse' && apiType === 'inventory' ? '执行只读检查' : '平台只读检查' }}</el-button>
+              @click="openCapabilityMatrix(primaryBinding(apiType))"
+            >能力矩阵</el-button>
             <el-button
               v-if="subjectType === 'store' && primaryBinding(apiType) && !isMultipleAdvertising(apiType) && storeRevokeAccess.visible"
               :loading="busy === `disable-${primaryBinding(apiType).id}`"
@@ -313,7 +317,7 @@
             <div class="history-heading">
               <div>
                 <h4>授权历史</h4>
-                <p>保留待处理、已过期、已撤销和异常记录；刷新后验证失败的记录可重新验证已保存的新令牌。</p>
+                <p>保留待处理、已过期、已撤销和异常记录；只读检查统一在能力矩阵管理。</p>
               </div>
               <el-tag type="info" effect="plain">{{ historyBindings(apiType).length }} 条</el-tag>
             </div>
@@ -341,7 +345,7 @@
                     <el-button link type="primary" @click="openAuthorizationDetail(historyRow)">查看详情</el-button>
                     <el-button v-if="needsTokenValidation(historyRow) && (subjectType === 'store' ? storeRefreshAccess.allowed : warehouseAuthorizeAccess.allowed)"
                       link type="primary" :loading="busy === `refresh-${historyRow.id}`"
-                      @click="subjectType === 'store' ? refreshStoreBinding(historyRow) : refreshWarehouseAuthorization(historyRow)">重新验证新令牌</el-button>
+                      @click="openCapabilityMatrix(historyRow)">前往能力矩阵</el-button>
                   </template>
                 </el-table-column>
               </el-table>
@@ -395,6 +399,7 @@
       <el-descriptions-item v-if="selectedAuthorizationDetail.external_warehouse_code" label="服务商外部仓库编码">{{ selectedAuthorizationDetail.external_warehouse_code }}</el-descriptions-item>
       <el-descriptions-item label="授权范围">{{ scopesLabel(selectedAuthorizationDetail) }}</el-descriptions-item>
       <el-descriptions-item label="授权时间">{{ formatDate(selectedAuthorizationDetail.authorized_at) }}</el-descriptions-item>
+      <el-descriptions-item :label="subjectType === 'warehouse' ? '授权记录更新时间' : '令牌更新时间'">{{ formatDate(subjectType === 'warehouse' ? selectedAuthorizationDetail.updated_at : selectedAuthorizationDetail.refreshed_at) }}</el-descriptions-item>
       <el-descriptions-item label="到期时间">{{ formatDate(expirationDate(selectedAuthorizationDetail)) }}</el-descriptions-item>
       <el-descriptions-item label="撤销时间">{{ formatDate(selectedAuthorizationDetail.revoked_at) }}</el-descriptions-item>
       <el-descriptions-item label="最近错误">{{ errorLabel(selectedAuthorizationDetail) }}</el-descriptions-item>
@@ -407,7 +412,7 @@
 </template>
 
 <script setup>
-import { authorizeJifengWarehouse, refreshJifengWarehouse, checkJifengWarehouse, discoverJifengWarehouses } from '../api/integrations';
+import { authorizeJifengWarehouse, refreshJifengWarehouse, discoverJifengWarehouses } from '../api/integrations';
 import { computed, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
@@ -588,7 +593,7 @@ async function refreshWarehouseAuthorization(binding) {
     if (!response?.success) throw new Error(response?.message || '刷新失败');
     changed = true;
     if (needsTokenValidation(response.data?.authorization)) ElMessage.warning(errorLabel(response.data.authorization));
-    else ElMessage.success(needsTokenValidation(binding) ? '新令牌验证通过；请确认后手动恢复同步任务。' : '仓库授权已刷新，请重新执行只读校验后启用同步任务。');
+    else ElMessage.success('仓库令牌已刷新并保存，未执行只读检查，任务启停状态未改变。');
   } catch (reason) {
     ElMessage.error(reason?.message || '刷新失败，请检查仓库授权。');
   } finally {
@@ -681,7 +686,7 @@ const subtitle = computed(() => props.subjectType === 'store'
 const tokenPolicyLabel = computed(() => ({
   'tiktok-split-policy': '商城不自动刷新；广告独立长期 Token',
   'oauth-auto-refresh': 'OAuth Token 到期前自动刷新',
-  'auto-refresh': '到期前自动刷新；检查时调用只读 API',
+  'auto-refresh': '到期前自动刷新；只读检查在能力矩阵管理',
   'manual-refresh': '不自动刷新；可手动刷新令牌',
   'manual-no-expiry-block': '不自动刷新，不设到期拦截',
   'manual-replace': '仅手动绑定或替换',
@@ -783,8 +788,8 @@ function needsTokenValidation(binding) {
 
 function errorLabel(binding) {
   const code = binding?.last_error_code || '';
-  if (code === 'AUTO_REFRESH_VALIDATION_PENDING') return '新令牌已保存，网络校验未完成；请重新验证，不要重复刷新。';
-  if (code === 'AUTO_REFRESH_VALIDATION_FAILED') return '新令牌已保存但校验失败；请核对诊断后重新验证，仅确认认证失效时重新授权。';
+  if (code === 'AUTO_REFRESH_VALIDATION_PENDING') return '历史只读校验未完成；请到能力矩阵检查连接。';
+  if (code === 'AUTO_REFRESH_VALIDATION_FAILED') return '历史只读校验失败；请到能力矩阵检查连接，令牌过期可手动刷新。';
   const message = binding?.masked_error_message || binding?.last_error_message || '';
   return [code, message].filter(Boolean).join('：') || '无脱敏错误';
 }
@@ -1009,52 +1014,13 @@ async function authorizeStore(apiType) {
   }
 }
 
-async function checkToken(binding) {
-  if (!readonlyCheckAccess.value.allowed) {
-    ElMessage.warning(readonlyCheckAccess.value.reason || '当前角色无权执行平台只读检查');
-    return;
-  }
-  if (!binding?.integration_config_id) {
-    ElMessage.warning('当前授权缺少接入配置，无法执行平台只读检查');
-    return;
-  }
-  if (readonlyCheckBlocked(binding)) {
-    ElMessage.warning('仓库授权已失效，请先重新绑定。');
-    return;
-  }
-  try {
-    await ElMessageBox.confirm(
-      '将调用一次平台只读接口，仅验证当前授权连接；不会刷新或替换 Token。是否继续？',
-      '确认平台只读检查',
-      { type: 'warning', confirmButtonText: '确认检查', cancelButtonText: '取消' },
-    );
-  } catch (_reason) {
-    return;
-  }
-  busy.value = `check-${binding.id}`;
-  try {
-    const response = props.subjectType === 'warehouse' ? await checkJifengWarehouse(binding.id) : await checkIntegrationReadonlyConnection(
-      binding.integration_config_id,
-      props.subjectType === 'warehouse'
-        ? { warehouse_authorization_id: binding.id }
-        : { store_authorization_id: binding.id },
-    );
-    if (!response?.success) throw new Error(response?.message || '平台只读检查失败');
-    if (response.data?.simulated === true && response.data?.external_api_called === false) {
-      ElMessage.info('模拟检查完成，未调用真实平台。');
-    } else {
-      ElMessage.success('只读 API 检查通过，授权凭据可用于当前同步任务。');
-    }
-    if (props.subjectType !== 'warehouse') await load();
-  } catch (reason) {
-    ElMessage.error(reason?.message || '平台只读检查失败');
-  } finally {
-    if (props.subjectType === 'warehouse') {
-      await load();
-      emit('changed');
-    }
-    busy.value = '';
-  }
+function openCapabilityMatrix(binding) {
+  if (!readonlyCheckAccess.value.allowed) return;
+  const query = props.subjectType === 'warehouse'
+    ? { subject_type: 'warehouse', warehouse_id: access.value.subject.id }
+    : { authorization_id: binding.id };
+  emit('update:modelValue', false);
+  router.push({ path: '/integrations/capabilities', query });
 }
 
 async function refreshStoreBinding(binding) {
@@ -1068,9 +1034,9 @@ async function refreshStoreBinding(binding) {
   }
   try {
     await ElMessageBox.confirm(
-      needsTokenValidation(binding) ? '仅使用已保存的新令牌执行只读验证，不会再次刷新令牌，也不会自动启用同步任务。是否继续？' : '将向平台刷新当前店铺授权令牌，操作结果会写入集成审计。是否继续？',
-      needsTokenValidation(binding) ? '重新验证新令牌' : '确认刷新令牌',
-      { type: 'warning', confirmButtonText: needsTokenValidation(binding) ? '重新验证' : '确认刷新', cancelButtonText: '取消' },
+      '仅调用平台刷新接口并保存新令牌，不执行只读检查、不自动启用任务。是否继续？',
+      '确认刷新令牌',
+      { type: 'warning', confirmButtonText: '确认刷新', cancelButtonText: '取消' },
     );
   } catch (_reason) {
     return;
@@ -1080,7 +1046,7 @@ async function refreshStoreBinding(binding) {
     const response = await refreshStoreAuthorization(binding.id, { confirmed: true });
     if (!response?.success) throw new Error(response?.message || '令牌刷新失败');
     if (needsTokenValidation(response.data)) ElMessage.warning(errorLabel(response.data));
-    else ElMessage.success(needsTokenValidation(binding) ? '新令牌验证通过；请确认后手动恢复同步任务。' : '令牌已刷新');
+    else ElMessage.success('令牌已刷新并保存，未执行只读检查，任务启停状态未改变。');
     await load();
     emit('changed');
   } catch (reason) {
@@ -1378,7 +1344,7 @@ function readonlyCheckTitle(binding) {
   if (readonlyCheckBlocked(binding)) return '仓库授权已失效，请先重新绑定。';
   if (readonlyCheckAccess.value.disabled) return readonlyCheckAccess.value.reason;
   if (!binding?.integration_config_id) return '当前授权缺少接入配置，无法执行平台只读检查';
-  return '调用一次平台只读接口，不会刷新或替换 Token';
+  return '前往能力矩阵管理只读开关及连接检查，不会刷新或替换 Token';
 }
 
 function goToConfigs(apiType, options = {}) {

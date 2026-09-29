@@ -42,9 +42,9 @@ describe('API 数据接入菜单与按钮闭环', () => {
 
     expect(app).toContain('<el-config-provider :locale="zhCn">');
     expect(app).toContain("import zhCn from 'element-plus/es/locale/lang/zh-cn';");
-    expect(apiAccessDialog).toContain("needsTokenValidation(primaryBinding(apiType)) ? '重新验证新令牌' : '刷新令牌'");
+    expect(apiAccessDialog).toContain("'确认刷新令牌'");
     expect(apiAccessDialog).toContain('>撤销授权</el-button>');
-    expect(apiAccessDialog).toContain('>平台只读检查</el-button>');
+    expect(apiAccessDialog).toContain('>能力矩阵</el-button>');
     expect(apiAccessDialog).not.toContain('>刷新授权</el-button>');
   });
 });

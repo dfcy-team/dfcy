@@ -36,8 +36,10 @@ def require_verified_warehouse(record):
         missing.append("服务商外部仓库编码")
     if missing:
         raise ValidationError("仓库授权待补充：" + "、".join(missing))
-    if record.validation_status != "verified" or not record.last_verified_at:
-        raise ValidationError("仓库尚未通过只读连接校验，不能启用库存同步。")
+    if record.validation_status != WarehouseAuthorization.ValidationStatus.VERIFIED or not record.last_verified_at:
+        raise ValidationError("当前仓库令牌尚未通过只读检查，请到能力矩阵检查连接后再同步。")
+    if record.last_error_code:
+        raise ValidationError("仓库授权存在异常，请到能力矩阵检查连接或刷新授权。")
 
 
 @transaction.atomic
@@ -200,13 +202,10 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
     if record.provider != "jifeng_wms" or record.status != "active" or not record.oauth_user_id or not record.token_id:
         raise ValidationError("请先完成该仓库的首次授权。")
     custody = custody or get_custody_backend()
-    refresh_candidate = record
-    if (record.last_error_code in {"AUTO_REFRESH_VALIDATION_PENDING", "AUTO_REFRESH_VALIDATION_FAILED"}
-            and record.oauth_expires_at is not None and record.oauth_expires_at <= timezone.now()):
-        # Expired-token renewal is not an ordinary read; retain every other
-        # preflight gate and leave the persisted quarantine unchanged.
-        refresh_candidate = copy(record)
-        refresh_candidate.last_error_code = ""
+    # A legacy read-validation result must not block the refresh endpoint.
+    # Keep persisted state unchanged unless rotation and custody storage succeed.
+    refresh_candidate = copy(record)
+    refresh_candidate.last_error_code = ""
     client = JifengWmsReadonlyClient(config, refresh_candidate,
         http_client=http if http is not None else PlatformHttpClient(max_retries=0), custody=custody)
     client.preflight()
@@ -235,8 +234,6 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
     record.oauth_expires_at = timezone.now() + timedelta(hours=24)
     record.validation_status = "pending"
     record.last_verified_at = None
-    record.last_error_code = "AUTO_REFRESH_VALIDATION_PENDING" if automatic else ""
+    record.last_error_code = ""
     record.save(update_fields=["token_id", "oauth_expires_at", "validation_status", "last_verified_at", "last_error_code", "updated_at"])
-    if not automatic:
-        SyncJob.objects.filter(warehouse_authorization=record).update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
     return record

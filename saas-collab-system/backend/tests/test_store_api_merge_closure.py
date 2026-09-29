@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.integrations.models import (
+    ConnectionCapability,
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
     PlatformIntegrationConfig,
@@ -118,6 +119,9 @@ def _context():
                 updated_by=user,
             )
         authorizations.append(authorization)
+        for code in ("ORDER", "PRODUCT", "SETTLEMENT"):
+            ConnectionCapability.objects.create(authorization=authorization, capability_code=code,
+                read_enabled=True, write_enabled=False, status="active")
     jobs = [
         SyncJob.objects.create(
             tenant=tenant,
