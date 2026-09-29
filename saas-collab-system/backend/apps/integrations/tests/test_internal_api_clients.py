@@ -11,8 +11,8 @@ from apps.tenants.models import Tenant
 
 from apps.integrations.models import InternalAPIClient, InternalAPIClientAudit
 from apps.integrations.serializers import INTERNAL_API_RESOURCE_FIELDS
-from apps.integrations.internal_readonly_api import _source_ip
-from apps.products.models import ProductSPU
+from apps.integrations.internal_readonly_api import READY, _source_ip
+from apps.products.models import ProductColor, ProductSPU
 
 
 class InternalAPIClientTests(APITestCase):
@@ -246,6 +246,57 @@ class InternalAPIClientTests(APITestCase):
         data = response.json()["data"]
         self.assertIn("products", [item["code"] for item in data["ready_resources"]])
         self.assertIn("advertising_performance", data["pending_resources"])
+
+    def test_new_read_blocks_have_explicit_tenant_scoped_projections(self):
+        for code, (model, fields) in READY.items():
+            self.assertTrue(any(field.name == "tenant" for field in model._meta.fields), code)
+            available = {name for field in model._meta.fields for name in (field.name, field.attname)}
+            self.assertTrue(set(fields) <= available, code)
+            self.assertEqual(fields[0], "id", code)
+            self.assertFalse({"secret_hash", "contact_phone", "contact_email", "payload_hash"} & set(fields), code)
+        self.assertIn("product_mappings", READY)
+        self.assertIn("inventory_snapshots", READY)
+        self.assertNotIn("advertising_performance", READY)
+        self.assertNotIn("product_costs", READY)
+
+    def test_new_read_block_enforces_tenant_authorization_and_get_only(self):
+        self.payload["resources"] = ["product_colors"]
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = "approved"
+        obj.status = "active"
+        obj.save()
+        ProductColor.objects.create(tenant=self.tenant, code="RED", name="Red")
+        ProductColor.objects.create(tenant=self.other_tenant, code="BLUE", name="Blue")
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        url = "/api/internal-readonly/v1/product_colors/"
+        response = self.client.get(url, **header)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([row["code"] for row in response.json()["data"]["items"]], ["RED"])
+        self.assertEqual(self.client.get("/api/internal-readonly/v1/product_attributes/", **header).status_code, 403)
+        self.assertEqual(self.client.post(url, {}, format="json", **header).status_code, 405)
+
+    def test_each_new_read_block_has_a_working_authorized_route(self):
+        new_codes = [
+            "product_attributes", "product_colors", "product_mappings", "product_bundles",
+            "platform_products", "product_research", "development_projects", "purchase_orders",
+            "sales_orders", "sales_returns", "inventory_snapshots", "influencers",
+            "outreach_tasks", "sample_fulfillments",
+        ]
+        self.payload["resources"] = new_codes
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = "approved"
+        obj.status = "active"
+        obj.save()
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        for code in new_codes:
+            with self.subTest(code=code):
+                response = self.client.get(f"/api/internal-readonly/v1/{code}/", **header)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(response.json()["data"]["resource"], code)
 
     def test_forwarded_ip_only_from_explicitly_trusted_proxy(self):
         request = type("Request", (), {"META": {"REMOTE_ADDR": "8.8.8.8", "HTTP_X_FORWARDED_FOR": "10.10.1.2"}})()

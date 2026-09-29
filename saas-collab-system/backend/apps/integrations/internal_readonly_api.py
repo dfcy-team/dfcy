@@ -18,10 +18,15 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.common.responses import success_response
+from apps.commerce.models import InventorySnapshot, RefundReturn, SalesOrder
+from apps.development.models import DevelopmentProject
+from apps.influencers.models import Influencer, OutreachTask, SampleFulfillment
+from apps.listings.models import PlatformProductDetail
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, StoreMaster, SupplierMaster, WarehouseMaster
-from apps.products.models import ProductCategory, ProductSKU, ProductSPU
+from apps.products.models import ProductAttribute, ProductBundleComponent, ProductCategory, ProductColor, ProductResearch, ProductSKU, ProductSPU
+from apps.purchasing.models import PurchaseOrder
 
-from .models import InternalAPIClient, InternalAPIClientUsage
+from .models import InternalAPIClient, InternalAPIClientUsage, MarketplaceProductMapping
 from .serializers import INTERNAL_API_RESOURCE_FIELDS
 
 
@@ -36,6 +41,20 @@ READY = {
     "suppliers": (SupplierMaster, ("id", "code", "name", "status", "updated_at")),
     "stores": (StoreMaster, ("id", "platform_id", "platform_site_id", "code", "name", "country_code", "currency", "status", "updated_at")),
     "warehouses": (WarehouseMaster, ("id", "code", "name", "country_code", "warehouse_type", "status", "updated_at")),
+    "product_attributes": (ProductAttribute, ("id", "code", "name", "is_active", "updated_at")),
+    "product_colors": (ProductColor, ("id", "code", "name", "is_active", "updated_at")),
+    "product_mappings": (MarketplaceProductMapping, ("id", "platform", "store_mapping_id", "platform_product_id", "platform_variant_id", "platform_sku", "product_id", "sku_id", "status", "updated_at")),
+    "product_bundles": (ProductBundleComponent, ("id", "bundle_sku_id", "component_sku_id", "quantity", "updated_at")),
+    "platform_products": (PlatformProductDetail, ("id", "platform", "store_id", "site_id", "platform_product_id", "platform_variant_id", "platform_sku", "internal_sku_id", "title", "sales_status", "updated_at")),
+    "product_research": (ProductResearch, ("id", "research_no", "product_name", "platform", "approval_status", "updated_at")),
+    "development_projects": (DevelopmentProject, ("id", "project_no", "product_name", "stage", "status", "updated_at")),
+    "purchase_orders": (PurchaseOrder, ("id", "po_no", "sku_code", "supplier_id", "quantity", "delivery_date", "status", "updated_at")),
+    "sales_orders": (SalesOrder, ("id", "platform_id", "store_id", "external_order_id", "normalized_status", "business_date", "currency", "order_total_amount", "updated_at_utc")),
+    "sales_returns": (RefundReturn, ("id", "platform_id", "store_id", "sales_order_id", "external_return_id", "normalized_status", "currency", "refund_amount", "updated_at")),
+    "inventory_snapshots": (InventorySnapshot, ("id", "site_code", "warehouse_id", "internal_sku_id", "source_sku", "available_qty", "reserved_qty", "snapshot_at_utc")),
+    "influencers": (Influencer, ("id", "code", "name", "platform", "handle", "cooperation_status", "status", "updated_at")),
+    "outreach_tasks": (OutreachTask, ("id", "task_no", "task_name", "influencer_id", "store_id", "spu_id", "owner_id", "status", "updated_at")),
+    "sample_fulfillments": (SampleFulfillment, ("id", "fulfillment_no", "outreach_task_id", "influencer_id", "store_id", "status", "shipped_at", "updated_at")),
 }
 
 
