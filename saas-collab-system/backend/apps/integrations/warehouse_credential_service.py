@@ -36,6 +36,8 @@ def require_verified_warehouse(record):
         missing.append("服务商外部仓库编码")
     if missing:
         raise ValidationError("仓库授权待补充：" + "、".join(missing))
+    if record.validation_status != WarehouseAuthorization.ValidationStatus.VERIFIED or not record.last_verified_at:
+        raise ValidationError("当前仓库令牌尚未通过只读检查，请到能力矩阵检查连接后再同步。")
     if record.last_error_code:
         raise ValidationError("仓库授权存在异常，请到能力矩阵检查连接或刷新授权。")
 

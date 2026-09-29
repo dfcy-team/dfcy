@@ -297,6 +297,11 @@ def test_refresh_uses_only_warehouse_refresh_token_without_read_validation(monke
     assert refreshed.validation_status == "pending"
     assert refreshed.last_verified_at is None
     assert refreshed.last_error_code == ""
+    from apps.integrations.warehouse_credential_service import require_verified_warehouse
+    refreshed.bootstrap_credential_id = "synthetic-bootstrap"
+    refreshed.external_warehouse_code = "TEST-WAREHOUSE"
+    with pytest.raises(ValidationError, match="能力矩阵"):
+        require_verified_warehouse(refreshed)
     http.request.assert_called_once()
     assert "/api/oauth/refreshToken?" in http.request.call_args.args[1]
     assert "email=" not in http.request.call_args.args[1]
@@ -310,6 +315,8 @@ def test_failed_readonly_check_never_marks_connected(monkeypatch):
     from rest_framework.test import APIClient
     from apps.integrations.readonly_clients import JifengWmsReadonlyClient
     actor, record = binding()
+    monkeypatch.setattr("apps.integrations.warehouse_credential_views.warehouse_config_blockers", lambda config: [])
+    monkeypatch.setattr(JifengWmsReadonlyClient, "preflight", lambda self: None)
     monkeypatch.setattr("apps.integrations.readonly_clients.get_custody_backend", lambda: Mock())
     def rejected(*args, **kwargs):
         raise ValidationError("极风认证失败。")
