@@ -14,7 +14,7 @@ pytestmark = pytest.mark.django_db
 def manager_client():
     tenant = Tenant.objects.create(name="Archive create test", code="archive-create-test")
     user = CustomUser.objects.create_user(
-        username="archive-create-manager", password="unused", tenant=tenant,
+        username="archive-create-manager", password=None, tenant=tenant,
         user_type=CustomUser.UserType.INTERNAL,
     )
     role = Role.objects.create(tenant=tenant, code="archive-manager", name="Archive manager")
