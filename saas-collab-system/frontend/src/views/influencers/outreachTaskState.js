@@ -8,6 +8,11 @@ export function fulfillmentCount(row = {}) {
   return Number(row?.sample_fulfillment_count ?? row?.sample_status_summary?.total ?? 0);
 }
 
+export function sampleStatusSummaryEntries(row = {}) {
+  const counts = row?.sample_status_summary?.status_counts ?? row?.sample_fulfillment_status_summary ?? {};
+  return Object.entries(counts).filter(([status, count]) => status !== 'blacklisted' || Number(count) > 0);
+}
+
 export function sampledInfluencerCount(row = {}) {
   return Number(
     row?.sample_fulfillment_influencer_count

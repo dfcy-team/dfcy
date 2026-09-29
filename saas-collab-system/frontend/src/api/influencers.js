@@ -36,6 +36,7 @@ export const FULFILLMENT_STATUS_LABELS = Object.freeze({
   published: '已发布',
   live_creator: '达人直播中',
   overdue: '已逾期',
+  blacklisted: '已拉黑',
   blank: '空白'
 });
 

@@ -1183,6 +1183,74 @@ def test_sample_list_rejects_legacy_status_filters(legacy_status):
     assert "status" in response.data["data"]
 
 
+def test_outreach_list_orders_before_pagination_and_rejects_unknown_fields():
+    tenant, user, store, _ = _records("outreach-list-ordering")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.outreach.view")
+    first = OutreachTask.objects.create(
+        tenant=tenant, task_no="DRJL0002", task_name="Alpha", priority="low",
+        store=store, dispatcher=user, owner=user,
+    )
+    second = OutreachTask.objects.create(
+        tenant=tenant, task_no="DRJL0001", task_name="Zulu", priority="urgent",
+        store=store, dispatcher=user, owner=user,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    url = "/api/internal/influencers/outreach-tasks/"
+
+    for ordering, expected in (
+        ("created_at", first.pk), ("-created_at", second.pk),
+        ("task_no", second.pk), ("-task_no", first.pk),
+        ("task_name", first.pk), ("-task_name", second.pk),
+        ("priority", first.pk), ("-priority", second.pk),
+    ):
+        response = client.get(url, {"ordering": ordering, "page_size": 1})
+        assert response.status_code == 200
+        assert response.json()["data"]["results"][0]["id"] == expected
+    assert client.get(url, {"ordering": "owner__password"}).status_code == 400
+
+
+def test_sample_list_orders_by_number_creation_and_linked_task_priority():
+    tenant, user, store, influencer = _records("sample-list-ordering")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.view")
+    low_task = OutreachTask.objects.create(
+        tenant=tenant, task_no="DRJL0002", task_name="Alpha", priority="low",
+        store=store, dispatcher=user, owner=user,
+    )
+    urgent_task = OutreachTask.objects.create(
+        tenant=tenant, task_no="DRJL0001", task_name="Zulu", priority="urgent",
+        store=store, dispatcher=user, owner=user,
+    )
+    samples = []
+    for number, task in (("DRJL0002", low_task), ("DRJL0001", urgent_task), ("DRJL0003", None)):
+        samples.append(SampleFulfillment.objects.create(
+            tenant=tenant, fulfillment_no=number, request_key=f"key-{number}",
+            request_hash=f"hash-{number}", outreach_task=task,
+            influencer=influencer, store=store, owner=user,
+        ))
+    client = APIClient()
+    client.force_authenticate(user)
+    url = "/api/internal/influencers/sample-fulfillments/"
+
+    for ordering, expected in (
+        ("created_at", samples[0].pk), ("-created_at", samples[2].pk),
+        ("fulfillment_no", samples[1].pk), ("-fulfillment_no", samples[2].pk),
+        ("outreach_task__task_name", samples[0].pk),
+        ("-outreach_task__task_name", samples[1].pk),
+        ("priority", samples[0].pk), ("-priority", samples[1].pk),
+    ):
+        response = client.get(url, {"ordering": ordering, "page_size": 1})
+        assert response.status_code == 200
+        assert response.json()["data"]["results"][0]["id"] == expected
+    response = client.get(url, {"ordering": "-priority"})
+    assert response.status_code == 200
+    assert response.json()["data"]["results"][0]["outreach_task_priority"] == "urgent"
+    assert response.json()["data"]["results"][-1]["id"] == samples[2].pk
+    assert client.get(url, {"ordering": "owner__password"}).status_code == 400
+
+
 def test_target_creation_reads_influencer_before_identity_group_lock(monkeypatch):
     _, user, store, influencer = _records("target-lock-order")
     influencer.handle = "shared.creator"
