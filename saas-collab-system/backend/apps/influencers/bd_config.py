@@ -8,6 +8,7 @@ BD_PERFORMANCE_CONFIG_DEFAULTS = {
     "daily_attribution_reconciliation_enabled": True,
     "sample_video_overdue_days": 20,
     "sample_overdue_notification_enabled": False,
+    "outreach_task_number_edit_enabled": False,
 }
 SAMPLE_VIDEO_OVERDUE_DAYS_MIN = 1
 SAMPLE_VIDEO_OVERDUE_DAYS_MAX = 365
@@ -39,6 +40,9 @@ def bd_performance_settings(tenant_id):
     notification_enabled = value.get("sample_overdue_notification_enabled")
     if isinstance(notification_enabled, bool):
         settings["sample_overdue_notification_enabled"] = notification_enabled
+    number_edit_enabled = value.get("outreach_task_number_edit_enabled")
+    if isinstance(number_edit_enabled, bool):
+        settings["outreach_task_number_edit_enabled"] = number_edit_enabled
     overdue_days = value.get("sample_video_overdue_days")
     # bool is an int subclass, but must never be accepted as a duration.
     if isinstance(overdue_days, int) and not isinstance(overdue_days, bool):

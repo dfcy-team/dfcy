@@ -19,6 +19,7 @@ def test_bd_performance_settings_allow_only_supported_values(version_objects):
             "daily_attribution_reconciliation_enabled": False,
             "sample_video_overdue_days": 30,
             "sample_overdue_notification_enabled": True,
+            "outreach_task_number_edit_enabled": True,
             "ignored": "value",
         }
     )
@@ -28,6 +29,7 @@ def test_bd_performance_settings_allow_only_supported_values(version_objects):
         "daily_attribution_reconciliation_enabled": False,
         "sample_video_overdue_days": 30,
         "sample_overdue_notification_enabled": True,
+        "outreach_task_number_edit_enabled": True,
     }
 
 
@@ -39,6 +41,7 @@ def test_bd_performance_settings_reject_invalid_values(version_objects):
             "daily_attribution_reconciliation_enabled": "false",
             "sample_video_overdue_days": 0,
             "sample_overdue_notification_enabled": "false",
+            "outreach_task_number_edit_enabled": "true",
         }
     )
 

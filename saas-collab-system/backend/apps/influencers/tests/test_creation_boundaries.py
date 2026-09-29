@@ -42,6 +42,7 @@ from apps.influencers.serializers import (
     InfluencerSerializer,
     OutreachTargetSerializer,
     OutreachTaskSerializer,
+    OutreachTaskUpdateSerializer,
     SampleFulfillmentSerializer,
 )
 from apps.influencers.services import (
@@ -170,6 +171,66 @@ def test_outreach_task_number_is_server_owned_and_collision_retry_is_safe(monkey
     )
     assert serializer.is_valid(), serializer.errors
     assert "task_no" not in serializer.validated_data
+
+
+def test_outreach_task_number_edit_requires_effective_switch_and_unique_number(monkeypatch):
+    tenant, user, store, influencer = _records("task-number-edit")
+    task = _task(user, store, influencer)
+    other = _task(user, store, influencer)
+    QuerySet.update(OutreachTask.objects.filter(pk=other.pk), is_deleted=True)
+
+    serializer = OutreachTaskUpdateSerializer(data={"task_no": "  DRJL-NEW  "}, partial=True)
+    assert serializer.is_valid(), serializer.errors
+    assert serializer.validated_data["task_no"] == "DRJL-NEW"
+
+    monkeypatch.setattr(
+        influencer_services,
+        "bd_performance_settings",
+        lambda tenant_id: {"outreach_task_number_edit_enabled": False},
+    )
+    with pytest.raises(ValidationError, match="disabled"):
+        influencer_services.update_outreach_task(
+            user=user, task=task, validated_data={"task_no": "DRJL-NEW"}, expected_version=task.version
+        )
+    task.refresh_from_db()
+    assert task.task_no != "DRJL-NEW"
+
+    monkeypatch.setattr(
+        influencer_services,
+        "bd_performance_settings",
+        lambda tenant_id: {"outreach_task_number_edit_enabled": True},
+    )
+    with pytest.raises(ValidationError, match="already exists"):
+        influencer_services.update_outreach_task(
+            user=user, task=task, validated_data={"task_no": other.task_no}, expected_version=task.version
+        )
+    updated = influencer_services.update_outreach_task(
+        user=user, task=task, validated_data=serializer.validated_data, expected_version=task.version
+    )
+    assert updated.task_no == "DRJL-NEW"
+    assert updated.task_no_manual_override is True
+    assert updated.version == task.version + 1
+    assert OutreachTask.objects.filter(tenant=tenant, task_no="DRJL-NEW").count() == 1
+
+
+def test_outreach_task_number_edit_rejects_blank_and_accepts_other_tenant_number(monkeypatch):
+    _, user, store, _ = _records("task-number-other-tenant")
+    task = _task(user, store)
+    _, foreign_user, foreign_store, _ = _records("task-number-foreign")
+    foreign_task = _task(foreign_user, foreign_store)
+    monkeypatch.setattr(
+        influencer_services,
+        "bd_performance_settings",
+        lambda tenant_id: {"outreach_task_number_edit_enabled": True},
+    )
+    with pytest.raises(ValidationError, match="1-80"):
+        influencer_services.update_outreach_task(
+            user=user, task=task, validated_data={"task_no": "  "}, expected_version=task.version
+        )
+    updated = influencer_services.update_outreach_task(
+        user=user, task=task, validated_data={"task_no": foreign_task.task_no}, expected_version=task.version
+    )
+    assert updated.task_no == foreign_task.task_no
 
 
 def test_outreach_task_can_use_manual_store_when_product_is_not_matched():

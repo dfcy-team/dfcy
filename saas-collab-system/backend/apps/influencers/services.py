@@ -41,7 +41,7 @@ from .models import (
     influencer_identity_queryset,
 )
 from .attribution import create_sample_attribution_snapshot
-from .bd_config import sample_video_overdue_days
+from .bd_config import bd_performance_settings, sample_video_overdue_days
 
 
 TERMINAL_OUTREACH_TASK_STATUSES = frozenset(
@@ -1408,6 +1408,23 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         data["owner"] = owners[0]
 
     changes = {}
+    if "task_no" in data:
+        task_no = str(data["task_no"] or "").strip()
+        if not task_no or len(task_no) > 80:
+            raise ValidationError({"task_no": "Task number must be 1-80 characters."})
+        if task_no != task.task_no:
+            if not bd_performance_settings(user.tenant_id)["outreach_task_number_edit_enabled"]:
+                raise ValidationError(
+                    {"task_no": "Task number editing is disabled in BD settings."},
+                    code="forbidden",
+                )
+            if OutreachTask.objects.filter(tenant=user.tenant, task_no=task_no).exclude(pk=task.pk).exists():
+                raise ValidationError(
+                    {"task_no": "Task number already exists in this tenant."},
+                    code="conflict",
+                )
+            changes["task_no"] = task_no
+            changes["task_no_manual_override"] = True
     if "task_name" in data:
         changes["task_name"] = str(data["task_name"] or "").strip()
     if "priority" in data:
@@ -1453,6 +1470,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
 
     before = {
+        "task_no": task.task_no,
         "task_name": task.task_name,
         "priority": task.priority,
         "store": task.store_id,
@@ -1463,6 +1481,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         "version": task.version,
     }
     after = {
+        "task_no": changes.get("task_no", task.task_no),
         "task_name": changes.get("task_name", task.task_name),
         "priority": changes.get("priority", task.priority),
         "store": _pk(changes.get("store", task.store_id)),
@@ -1474,15 +1493,26 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
     }
     now = timezone.now()
     changes.update(version=task.version + 1, updated_at=now)
-    updated = QuerySet.update(
-        OutreachTask.objects.filter(
-            pk=task.pk,
-            tenant=user.tenant,
-            is_deleted=False,
-            version=expected_version,
-        ),
-        **changes,
-    )
+    try:
+        with transaction.atomic():
+            updated = QuerySet.update(
+                OutreachTask.objects.filter(
+                    pk=task.pk,
+                    tenant=user.tenant,
+                    is_deleted=False,
+                    version=expected_version,
+                ),
+                **changes,
+            )
+    except IntegrityError as exc:
+        if "task_no" not in changes or not OutreachTask.objects.filter(
+            tenant=user.tenant, task_no=changes["task_no"]
+        ).exclude(pk=task.pk).exists():
+            raise
+        raise ValidationError(
+            {"task_no": "Task number already exists in this tenant."},
+            code="conflict",
+        ) from exc
     if updated != 1:
         raise ValidationError(
             {"version": "Task was changed by another request."},
@@ -3335,7 +3365,7 @@ def import_outreach_task_snapshot(
         parsed_dispatch = locked_task.dispatch_time
 
     source_values = {
-        "task_no": task_no,
+        "task_no": locked_task.task_no if locked_task is not None and locked_task.task_no_manual_override else task_no,
         "task_name": task_name,
         "store": store,
         "owner": owner,
@@ -3429,7 +3459,7 @@ def import_outreach_task_snapshot(
             locked_task.owners.values_list("id", flat=True)
         )
         desired_facts = {
-            "task_no": task_no,
+            "task_no": locked_task.task_no if locked_task.task_no_manual_override else task_no,
             "task_name": task_name,
             "store_id": store.pk,
             "owner_id": owner.pk,

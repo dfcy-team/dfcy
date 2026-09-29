@@ -434,6 +434,45 @@ def test_task_snapshot_adopts_approved_legacy_business_number(sample_records):
     assert legacy.status == OutreachTask.Status.IN_PROGRESS
 
 
+def test_task_snapshot_preserves_manual_number_override(sample_records):
+    records = sample_records
+    task = _legacy_task(
+        records,
+        task_no="DRJL-CUSTOM-NUMBER",
+        external_id="SOURCE-TASK-EXTERNAL",
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+    )
+    task.task_no_manual_override = True
+    task.save(update_fields=["task_no_manual_override"])
+
+    imported, created = import_outreach_task_snapshot(
+        status="进行中",
+        event={"source": FEISHU_FULL_SAMPLE_STATUS_SOURCE, "external_id": "SOURCE-TASK-EXTERNAL"},
+        user=records["user"],
+        tenant=records["tenant"],
+        source=FEISHU_FULL_SAMPLE_STATUS_SOURCE,
+        source_row={
+            "source": "飞书",
+            "external_id": "SOURCE-TASK-EXTERNAL",
+            "task_no": "DRJL-SOURCE-NUMBER",
+            "dispatch_time": datetime(2026, 2, 1, 8, 0, tzinfo=dt_timezone.utc),
+        },
+        validated_data={
+            "store": records["store"],
+            "owner": records["user"],
+            "dispatcher": records["executor"],
+        },
+        **_personnel_kwargs(records["user"], records["executor"]),
+        actor=records["user"],
+    )
+
+    task.refresh_from_db()
+    assert created is False
+    assert imported.pk == task.pk
+    assert task.task_no == "DRJL-CUSTOM-NUMBER"
+    assert task.task_no_manual_override is True
+
+
 def test_task_snapshot_task_no_fallback_rejects_current_source_identity_change(sample_records):
     records = sample_records
     current = _legacy_task(

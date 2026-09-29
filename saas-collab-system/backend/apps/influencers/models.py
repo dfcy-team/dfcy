@@ -403,6 +403,7 @@ class OutreachTask(StateMachineTenantModel):
         CANCELLED = "cancelled", "Cancelled"
 
     task_no = models.CharField(max_length=80)
+    task_no_manual_override = models.BooleanField(default=False)
     task_name = models.CharField(max_length=160, blank=True)
     influencer = models.ForeignKey(
         Influencer,
