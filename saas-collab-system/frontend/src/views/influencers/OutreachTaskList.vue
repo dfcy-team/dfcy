@@ -343,7 +343,7 @@
               <span>{{ sampledInfluencerCount(detailTask) }} / {{ detailTask.target_count || 0 }}</span>
               <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
-            <div class="status-summary"><span v-for="(count, status) in (detailTask.sample_status_summary?.status_counts || detailTask.sample_fulfillment_status_summary || {})" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
+            <div class="status-summary"><span v-for="[status, count] in sampleStatusSummaryEntries(detailTask)" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
             <div class="detail-note"><span>任务履约反馈</span><p>{{ displayValue(detailTask.notes) }}</p></div>
           </section>
 
@@ -411,7 +411,7 @@ import {
 } from '../../api/influencers';
 import { applyProductCandidate } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
-import { fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel } from './outreachTaskState';
+import { fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel, sampleStatusSummaryEntries } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
