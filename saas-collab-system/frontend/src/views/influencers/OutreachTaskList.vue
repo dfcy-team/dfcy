@@ -32,6 +32,16 @@
         <el-select v-model="filters.dispatcher" clearable filterable placeholder="全部下发人" @change="applyFilters">
           <el-option v-for="dispatcher in dispatcherOptions" :key="dispatcher.id" :label="dispatcher.name" :value="dispatcher.id" />
         </el-select>
+        <el-select v-model="filters.ordering" class="sort-select" aria-label="建联任务排序" placeholder="排序" @change="applyFilters">
+          <el-option label="创建时间：最新优先" value="-created_at" />
+          <el-option label="创建时间：最早优先" value="created_at" />
+          <el-option label="任务编号：升序" value="task_no" />
+          <el-option label="任务编号：降序" value="-task_no" />
+          <el-option label="任务名称：升序" value="task_name" />
+          <el-option label="任务名称：降序" value="-task_name" />
+          <el-option label="优先级：高到低" value="-priority" />
+          <el-option label="优先级：低到高" value="priority" />
+        </el-select>
         <el-checkbox v-model="filters.normalOnly" @change="applyFilters">正常任务</el-checkbox>
         <el-checkbox v-model="filters.deletedOnly" @change="applyFilters">只显示删除的</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
@@ -52,6 +62,9 @@
             <b>{{ displayValue(row.task_no) }}</b>
             <small>{{ displayValue(row.task_name) }}</small>
           </template>
+        </el-table-column>
+        <el-table-column label="创建时间" min-width="165">
+          <template #default="{ row }">{{ formatTaskTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column label="店铺 / 商品 ID" min-width="210">
           <template #default="{ row }">
@@ -343,7 +356,7 @@
               <span>{{ sampledInfluencerCount(detailTask) }} / {{ detailTask.target_count || 0 }}</span>
               <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
-            <div class="status-summary"><span v-for="(count, status) in (detailTask.sample_status_summary?.status_counts || detailTask.sample_fulfillment_status_summary || {})" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
+            <div class="status-summary"><span v-for="[status, count] in sampleStatusSummaryEntries(detailTask)" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
             <div class="detail-note"><span>任务履约反馈</span><p>{{ displayValue(detailTask.notes) }}</p></div>
           </section>
 
@@ -411,7 +424,7 @@ import {
 } from '../../api/influencers';
 import { applyProductCandidate } from './outreachProductMatch';
 import { creatorDisplayName, creatorHandleFirst, creatorOptionLabel } from './creatorLabel';
-import { fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel } from './outreachTaskState';
+import { fulfillmentCount, outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel, sampleStatusSummaryEntries } from './outreachTaskState';
 import { formatTaskDateTime } from './taskDateTime';
 import { collectionRows, collectionTotal, detailData } from '../../utils/businessResponse';
 
@@ -442,7 +455,7 @@ const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
+const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -583,7 +596,7 @@ const detailProgressLabel = computed(() => {
 
 async function load() {
   loading.value = true;
-  const params = { page: page.value, page_size: pageSize.value };
+  const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
   if (filters.search.trim()) params.search = filters.search.trim();
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
@@ -604,7 +617,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false });
+  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
   applyFilters();
 }
 
@@ -1149,6 +1162,7 @@ onMounted(async () => {
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
 .toolbar .el-select { flex: 0 0 140px; width: 140px; }
+.toolbar .sort-select { flex-basis: 185px; width: 185px; }
 .toolbar .el-checkbox, .toolbar .el-button { flex: 0 0 auto; }
 .target-bar { display: flex; gap: 10px; margin-bottom: 14px; }
 .target-bar .el-input, .target-bar .el-select { max-width: 320px; flex: 1; }

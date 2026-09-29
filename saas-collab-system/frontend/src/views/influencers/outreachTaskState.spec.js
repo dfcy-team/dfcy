@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel } from './outreachTaskState';
+import { outreachProgressLabel, requiresCancellationConfirmation, sampledInfluencerCount, sampleProgressLabel, sampleStatusSummaryEntries } from './outreachTaskState';
 
 describe('outreach task state presentation', () => {
   it('uses unique sampled influencers for task progress', () => {
@@ -26,5 +26,14 @@ describe('outreach task state presentation', () => {
     expect(requiresCancellationConfirmation('in_progress', 'cancelled')).toBe(true);
     expect(requiresCancellationConfirmation('in_progress', 'completed')).toBe(false);
     expect(requiresCancellationConfirmation('cancelled', 'cancelled')).toBe(false);
+  });
+
+  it('hides an empty blacklist bucket but preserves a real blacklist count', () => {
+    expect(sampleStatusSummaryEntries({ sample_status_summary: { status_counts: { pending: 0, blacklisted: 0 } } }))
+      .toEqual([['pending', 0]]);
+    expect(sampleStatusSummaryEntries({ sample_status_summary: { status_counts: { blacklisted: 2 } } }))
+      .toEqual([['blacklisted', 2]]);
+    expect(sampleStatusSummaryEntries({ sample_fulfillment_status_summary: { blacklisted: 0 } }))
+      .toEqual([]);
   });
 });

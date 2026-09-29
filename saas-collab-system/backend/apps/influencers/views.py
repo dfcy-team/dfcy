@@ -776,7 +776,24 @@ class OutreachTaskCollectionView(APIView):
                 | Q(owners__username__icontains=search)
             )
             queryset = queryset.distinct()
-        queryset = queryset.order_by("-created_at", "-id")
+        ordering = request.query_params.get("ordering", "-created_at").strip() or "-created_at"
+        allowed_ordering = {
+            "created_at", "-created_at", "task_no", "-task_no",
+            "task_name", "-task_name", "priority", "-priority",
+        }
+        if ordering not in allowed_ordering:
+            raise ValidationError({"ordering": "Unsupported ordering field."})
+        if ordering.lstrip("-") == "priority":
+            queryset = queryset.annotate(_priority_rank=Case(
+                When(priority="low", then=1),
+                When(priority="normal", then=2),
+                When(priority="high", then=3),
+                When(priority="urgent", then=4),
+                default=0,
+                output_field=models.IntegerField(),
+            ))
+            ordering = "-_priority_rank" if ordering.startswith("-") else "_priority_rank"
+        queryset = queryset.order_by(ordering, "-id")
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size))
 
@@ -1262,7 +1279,40 @@ class SampleFulfillmentCollectionView(APIView):
             if is_valid_tiktok_username(normalized_handle):
                 search_filter |= Q(influencer__handle__icontains=normalized_handle)
             queryset = queryset.filter(search_filter)
-        queryset = queryset.order_by("-created_at", "-id")
+        ordering = request.query_params.get("ordering", "-created_at").strip() or "-created_at"
+        allowed_ordering = {
+            "created_at", "-created_at", "fulfillment_no", "-fulfillment_no",
+            "outreach_task__task_name", "-outreach_task__task_name",
+            "priority", "-priority",
+        }
+        if ordering not in allowed_ordering:
+            raise ValidationError({"ordering": "Unsupported ordering field."})
+        if ordering.lstrip("-") in {"priority", "outreach_task__task_name"}:
+            queryset = queryset.annotate(
+                _without_task=Case(
+                    When(outreach_task__isnull=True, then=1),
+                    default=0,
+                    output_field=models.IntegerField(),
+                ),
+            )
+        if ordering.lstrip("-") == "priority":
+            queryset = queryset.annotate(
+                _priority_rank=Case(
+                    When(outreach_task__priority="low", then=1),
+                    When(outreach_task__priority="normal", then=2),
+                    When(outreach_task__priority="high", then=3),
+                    When(outreach_task__priority="urgent", then=4),
+                    default=0,
+                    output_field=models.IntegerField(),
+                ),
+            )
+            rank_order = "-_priority_rank" if ordering.startswith("-") else "_priority_rank"
+            queryset = queryset.order_by("_without_task", rank_order, "-id")
+        else:
+            fields = (ordering, "-id")
+            if ordering.lstrip("-") == "outreach_task__task_name":
+                fields = ("_without_task", *fields)
+            queryset = queryset.order_by(*fields)
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
