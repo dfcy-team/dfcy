@@ -1,5 +1,6 @@
 """Warehouse-owned OMS bootstrap credentials; never shared-config tokens."""
 
+from copy import copy
 from datetime import timedelta
 from urllib.parse import urlencode, urlsplit
 
@@ -199,7 +200,14 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
     if record.provider != "jifeng_wms" or record.status != "active" or not record.oauth_user_id or not record.token_id:
         raise ValidationError("请先完成该仓库的首次授权。")
     custody = custody or get_custody_backend()
-    client = JifengWmsReadonlyClient(config, record,
+    refresh_candidate = record
+    if (record.last_error_code in {"AUTO_REFRESH_VALIDATION_PENDING", "AUTO_REFRESH_VALIDATION_FAILED"}
+            and record.oauth_expires_at is not None and record.oauth_expires_at <= timezone.now()):
+        # Expired-token renewal is not an ordinary read; retain every other
+        # preflight gate and leave the persisted quarantine unchanged.
+        refresh_candidate = copy(record)
+        refresh_candidate.last_error_code = ""
+    client = JifengWmsReadonlyClient(config, refresh_candidate,
         http_client=http if http is not None else PlatformHttpClient(max_retries=0), custody=custody)
     client.preflight()
     endpoint = jifeng_api_url(config.platform_config.get("api_host"), "/api/oauth/refreshToken")
