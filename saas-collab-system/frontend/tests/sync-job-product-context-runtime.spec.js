@@ -107,6 +107,24 @@ describe('平台商品同步任务上下文闭环', () => {
     wrapper.unmount();
   });
 
+  it('shows batch policy controls on the active sync task page and enables them after selection', async () => {
+    api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'mock', summary: {}, results: [
+      { id: 25, platform: 'shopee', resource_type: 'sales_order', status: 'idle', schedule_state: 'manual' },
+    ] } });
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    const batchButton = () => wrapper.findAll('button').find(button => button.text().includes('批量修改策略'));
+    expect(batchButton().exists()).toBe(true);
+    expect(batchButton().attributes('disabled')).toBeDefined();
+    wrapper.vm.selectedJobs = [wrapper.vm.rows[0]];
+    await wrapper.vm.$nextTick();
+    expect(batchButton().attributes('disabled')).toBeUndefined();
+    await batchButton().trigger('click');
+    expect(wrapper.vm.batchPolicyOpen).toBe(true);
+    expect(wrapper.vm.batchPolicyJobs.map(row => row.id)).toEqual([25]);
+    wrapper.unmount();
+  });
+
   it('enables an existing job only after confirmation, without running it', async () => {
     api.toggleSyncJob.mockResolvedValue({ success: true });
     const wrapper = mount(SyncJobList, { global: { stubs } });
