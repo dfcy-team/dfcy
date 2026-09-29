@@ -76,8 +76,9 @@ describe('基础档案交接包界面契约', () => {
     }
     expect(access).toContain('fetchSubjectApiAccess(props.subjectType, props.row.id)');
     expect(access).toContain("'manual-refresh': '不自动刷新；可手动刷新令牌'");
-    expect(access).toContain('checkIntegrationReadonlyConnection(');
-    expect(access).toContain("{ warehouse_authorization_id: binding.id }");
+    expect(access).not.toContain('checkIntegrationReadonlyConnection(');
+    expect(access).toContain('openCapabilityMatrix(binding)');
+    expect(access).toContain("path: '/integrations/capabilities'");
     expect(access).toContain("path: '/integrations/sync-jobs'");
   });
 
