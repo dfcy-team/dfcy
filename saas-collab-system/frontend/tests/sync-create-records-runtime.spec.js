@@ -8,7 +8,7 @@ vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: navigation.query }), useRouter: () => navigation }));
 import CreateSyncJob from '../src/components/CreateSyncJob.vue';
 import SyncExecutionRecords from '../src/views/integrations/SyncExecutionRecords.vue';
-const item = { platform: 'tiktok', config_name: 'Test', integration_config_id: 6, subject_type: 'store', authorization_id: 2, subject_name: 'Test shop', resource_type: 'sales_order', blockers: [], existing_job_id: null };
+const item = { platform: 'tiktok', config_name: 'Test', integration_config_id: 6, subject_type: 'store', subject_id: 3, authorization_id: 2, subject_name: 'Test shop', resource_type: 'sales_order', blockers: [], existing_job_id: null };
 beforeEach(() => {
   vi.clearAllMocks();
   api.requestApi.mockResolvedValue({ success: true, data: { items: [item] } });
@@ -18,18 +18,48 @@ beforeEach(() => {
 it('preview and precheck never create, confirmation creates disabled manual only', async () => {
   const wrapper = shallowMount(CreateSyncJob);
   await flushPromises();
-  wrapper.vm.configId = 6; wrapper.vm.subjectKey = 'store:2'; wrapper.vm.selected = item;
+  wrapper.vm.subjectKey = 'store:3'; wrapper.vm.selectedResources = ['sales_order'];
   await wrapper.vm.check();
   expect(api.createSyncJob).not.toHaveBeenCalled();
   await Promise.all([wrapper.vm.create(), wrapper.vm.create()]);
   expect(api.createSyncJob).toHaveBeenCalledTimes(1);
   expect(api.createSyncJob).toHaveBeenCalledWith({ integration_config_id: 6, store_authorization_id: 2, resource_type: 'sales_order', schedule_type: 'manual', is_enabled: false });
-  expect(wrapper.emitted('created')).toEqual([[7]]);
+  expect(wrapper.emitted('created')).toEqual([[{ count: 1, ids: [7] }]]);
 });
 it.each([{ existing_job_id: 7 }, { blockers: ['授权过期'] }])('blocks existing or unready creation: %j', async override => {
+  api.requestApi.mockResolvedValue({ success: true, data: { items: [{ ...item, ...override }] } });
   const wrapper = shallowMount(CreateSyncJob); await flushPromises();
-  wrapper.vm.selected = { ...item, ...override }; wrapper.vm.checked = true;
+  wrapper.vm.subjectKey = 'store:3'; wrapper.vm.selectedResources = ['sales_order']; wrapper.vm.checked = true;
   await wrapper.vm.create(); expect(api.createSyncJob).not.toHaveBeenCalled();
+});
+it('creates multiple contents for one store with their own API sources', async () => {
+  const product = { ...item, resource_type: 'platform_product' };
+  const order = { ...item, resource_type: 'sales_order', config_name: 'Sales API', authorization_id: 4, integration_config_id: 9 };
+  api.requestApi.mockResolvedValue({ success: true, data: { items: [product, order] } });
+  api.createSyncJob.mockResolvedValueOnce({ success: true, data: { id: 7 } }).mockResolvedValueOnce({ success: true, data: { id: 8 } });
+  const wrapper = shallowMount(CreateSyncJob); await flushPromises();
+  expect(wrapper.vm.subjects).toHaveLength(1);
+  wrapper.vm.subjectKey = 'store:3'; wrapper.vm.selectedResources = ['platform_product', 'sales_order'];
+  await wrapper.vm.check();
+  await wrapper.vm.create();
+  expect(api.createSyncJob).toHaveBeenCalledTimes(2);
+  expect(api.createSyncJob).toHaveBeenNthCalledWith(1, expect.objectContaining({ integration_config_id: 6, store_authorization_id: 2, resource_type: 'platform_product' }));
+  expect(api.createSyncJob).toHaveBeenNthCalledWith(2, expect.objectContaining({ integration_config_id: 9, store_authorization_id: 4, resource_type: 'sales_order' }));
+  expect(wrapper.emitted('created')).toEqual([[{ count: 2, ids: [7, 8] }]]);
+});
+it('requires an explicit API source when one store has multiple connections for a content', async () => {
+  const other = { ...item, integration_config_id: 9, authorization_id: 4, config_name: 'Other API' };
+  api.requestApi.mockResolvedValue({ success: true, data: { items: [item, other] } });
+  const wrapper = shallowMount(CreateSyncJob); await flushPromises();
+  wrapper.vm.subjectKey = 'store:3'; wrapper.vm.selectedResources = ['sales_order'];
+  await wrapper.vm.check();
+  expect(wrapper.vm.checked).toBe(false);
+  expect(api.createSyncJob).not.toHaveBeenCalled();
+  wrapper.vm.sourceIds.sales_order = 4;
+  await wrapper.vm.check();
+  expect(wrapper.vm.checked).toBe(true);
+  await wrapper.vm.create();
+  expect(api.createSyncJob).toHaveBeenCalledWith(expect.objectContaining({ integration_config_id: 9, store_authorization_id: 4 }));
 });
 it('records retain task filter and current page during refresh', async () => {
   const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
