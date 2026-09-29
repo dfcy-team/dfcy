@@ -1,4 +1,4 @@
-# 内部系统只读 API v1（基础档案首批）
+# 内部系统只读 API v1
 
 本接口只允许内部系统查询，不接受业务写入。管理页面仍展示全部可配置数据块，但只有 `GET /api/internal-readonly/v1/capabilities/` 返回的 `ready_resources` 可实际读取；`pending_resources` 不对应业务数据路由。
 
@@ -20,4 +20,4 @@ Authorization: Basic base64(client_id:client_secret)
 
 返回 `data.resource`、`data.items`、`data.next_cursor`、`data.has_more`；有下一页时将 `next_cursor` 传入下一次请求。字段以能力目录中各数据块的 `fields` 为准。不提供任意字段查询、跨租户查询、删除传播或历史增量水位保证。
 
-首批实际接入：`products`（SPU）、`product_details`（SKU）、`product_categories`、`platforms`、`country_sites`（国家档案）、`suppliers`、`stores`、`warehouses`。商品成本、商品映射、广告以及其他目录数据块仍待接入。业务路由不提供 POST、PUT、PATCH、DELETE。
+服务端显式发布的数据块以实时 `capabilities/` 为准。基础档案首批 8 块之外，增量接入商品属性、颜色、映射、组合关系、平台商品、产品市调、开发项目、采购订单、销售订单、退款退货、库存快照、达人档案、建联任务和送样履约，共 22 块。每块只返回服务端公布的字段；联系电话、邮箱、请求负载、密钥、成本分摊等字段不随模型整表输出。商品成本、广告及其他没有安全只读合同的目录项仍待接入。业务路由不提供 POST、PUT、PATCH、DELETE。完整盘点见 [数据块接入审计](internal_readonly_resource_audit_20260929.md)。
