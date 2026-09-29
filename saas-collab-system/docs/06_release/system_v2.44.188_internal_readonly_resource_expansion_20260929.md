@@ -16,6 +16,7 @@
 
 ## 本地验收
 
-- `python manage.py test apps.integrations.tests.test_internal_api_clients --keepdb`：17 项通过。
+- 建联任务与寄样履约只读集合在游标分页前排除 `is_deleted=True`，与现有业务列表一致，不返回无法辨识的已删除记录。
+- `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py test apps.integrations.tests.test_internal_api_clients`：18 项通过，含两种资源的软删除、租户隔离和分页回归。
 - 新增投影模型字段及租户字段静态检查：22 块均通过。
 - `npm test -- tests/internal-api-handoff.spec.js`：3 项通过；前端 `npm run build` 通过。

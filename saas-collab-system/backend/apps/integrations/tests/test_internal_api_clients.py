@@ -13,6 +13,8 @@ from apps.integrations.models import InternalAPIClient, InternalAPIClientAudit
 from apps.integrations.serializers import INTERNAL_API_RESOURCE_FIELDS
 from apps.integrations.internal_readonly_api import READY, _source_ip
 from apps.products.models import ProductColor, ProductSPU
+from apps.influencers.models import Influencer, OutreachTask, SampleFulfillment
+from apps.masterdata.models import PlatformMaster, StoreMaster
 
 
 class InternalAPIClientTests(APITestCase):
@@ -297,6 +299,36 @@ class InternalAPIClientTests(APITestCase):
                 response = self.client.get(f"/api/internal-readonly/v1/{code}/", **header)
                 self.assertEqual(response.status_code, 200, response.content)
                 self.assertEqual(response.json()["data"]["resource"], code)
+
+    def test_outreach_and_fulfillment_reads_exclude_deleted_before_pagination(self):
+        self.payload["resources"] = ["outreach_tasks", "sample_fulfillments"]
+        created = self.create_client().json()["data"]
+        client = InternalAPIClient.objects.get(pk=created["id"])
+        client.approval_status = "approved"
+        client.status = "active"
+        client.save()
+        platform = PlatformMaster.objects.create(tenant=self.tenant, code="READ", name="Read", platform_type="tiktok")
+        store = StoreMaster.objects.create(tenant=self.tenant, platform=platform, code="READ", name="Read", country_code="PH", currency="PHP")
+        influencer = Influencer.objects.create(tenant=self.tenant, code="READ", name="Read", platform="tiktok")
+        task = OutreachTask.objects.create(tenant=self.tenant, task_no="READ-1", store=store, owner=self.user, dispatcher=self.user)
+        other_task = OutreachTask.objects.create(tenant=self.other_tenant, task_no="READ-X", store=StoreMaster.objects.create(tenant=self.other_tenant, platform=PlatformMaster.objects.create(tenant=self.other_tenant, code="OTHER", name="Other", platform_type="tiktok"), code="OTHER", name="Other", country_code="PH", currency="PHP"), owner=self.other_user, dispatcher=self.other_user)
+        deleted_task = OutreachTask.objects.create(tenant=self.tenant, task_no="READ-2", store=store, owner=self.user, dispatcher=self.user)
+        OutreachTask._base_manager.filter(pk=deleted_task.pk).update(is_deleted=True)
+        live_task = OutreachTask.objects.create(tenant=self.tenant, task_no="READ-3", store=store, owner=self.user, dispatcher=self.user)
+        samples = [
+            SampleFulfillment.objects.create(tenant=self.tenant, fulfillment_no=f"READ-{i}", request_key=f"READ-{i}", request_hash="a" * 64, influencer=influencer, store=store, owner=self.user)
+            for i, deleted in enumerate((False, True, False), start=1)
+        ]
+        SampleFulfillment._base_manager.filter(pk=samples[1].pk).update(is_deleted=True)
+        SampleFulfillment.objects.create(tenant=self.other_tenant, fulfillment_no="READ-X", request_key="READ-X", request_hash="b" * 64, influencer=Influencer.objects.create(tenant=self.other_tenant, code="OTHER", name="Other", platform="tiktok"), store=other_task.store, owner=self.other_user)
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        headers = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        for resource, expected in (("outreach_tasks", [task.pk, live_task.pk]), ("sample_fulfillments", [samples[0].pk, samples[2].pk])):
+            with self.subTest(resource=resource):
+                first = self.client.get(f"/api/internal-readonly/v1/{resource}/?limit=1", **headers).json()["data"]
+                second = self.client.get(f"/api/internal-readonly/v1/{resource}/?limit=1&cursor={first['next_cursor']}", **headers).json()["data"]
+                self.assertEqual([first["items"][0]["id"], second["items"][0]["id"]], expected)
+                self.assertFalse(second["has_more"])
 
     def test_forwarded_ip_only_from_explicitly_trusted_proxy(self):
         request = type("Request", (), {"META": {"REMOTE_ADDR": "8.8.8.8", "HTTP_X_FORWARDED_FOR": "10.10.1.2"}})()

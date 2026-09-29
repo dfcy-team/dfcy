@@ -152,8 +152,10 @@ def resource_collection(request, resource):
     if not _consume_limit(client):
         return Response({"detail": "Rate limit exceeded."}, status=429)
     model, fields = READY[resource]
-    rows = list(model.objects.filter(tenant_id=client.tenant_id, id__gt=cursor)
-                .order_by("id").values(*fields)[:limit + 1])
+    queryset = model.objects.filter(tenant_id=client.tenant_id, id__gt=cursor)
+    if resource in {"outreach_tasks", "sample_fulfillments"}:
+        queryset = queryset.filter(is_deleted=False)
+    rows = list(queryset.order_by("id").values(*fields)[:limit + 1])
     has_more = len(rows) > limit
     items = rows[:limit]
     return success_response({
