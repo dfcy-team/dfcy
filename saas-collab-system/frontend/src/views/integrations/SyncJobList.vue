@@ -76,9 +76,9 @@
       </div>
 
       <el-empty v-if="state === 'empty'" description="暂无同步任务" />
-      <el-table v-else ref="jobsTable" v-loading="loading" :data="rows" row-key="id" border stripe empty-text="暂无同步任务" @selection-change="selectedJobs = $event">
+      <p v-else class="grouping-note">当前页按平台、业务主体归集；每条同步内容仍是独立任务。</p>
+      <el-table v-if="state !== 'empty'" ref="jobsTable" v-loading="loading" :data="groupedRows" :span-method="groupSpan" row-key="id" border stripe empty-text="暂无同步任务" @selection-change="selectedJobs = $event">
         <el-table-column v-if="auth.hasPermission('integrations.manage')" type="selection" width="48" fixed="left" />
-        <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}</template></el-table-column>
         <el-table-column prop="platform" label="平台" min-width="110" />
         <el-table-column prop="subject_name" label="业务主体" min-width="150">
           <template #default="{ row }">
@@ -86,6 +86,7 @@
             <small>{{ row.subject_code || '-' }}</small>
           </template>
         </el-table-column>
+        <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}</template></el-table-column>
         <el-table-column prop="resource_type" label="资源类型" min-width="150">
           <template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template>
         </el-table-column>
@@ -201,6 +202,7 @@ import CreateSyncJob from '../../components/CreateSyncJob.vue';
 import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
 import { syncTime, syncError, runStates, schedules } from '../../utils/syncPresentation';
 import { syncRequestId } from '../../utils/syncRequestId';
+import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
 import BulkSyncJobPolicyDialog from '../../components/BulkSyncJobPolicyDialog.vue';
 import { useMock } from '../../api/request';
@@ -246,6 +248,10 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const rows = ref([]);
+const groupedRows = computed(() => groupSyncJobsForDisplay(rows.value));
+function groupSpan({ column, rowIndex }) {
+  return syncJobGroupSpan(groupedRows.value, rowIndex, column.property);
+}
 const jobsTable = ref(null);
 const selectedJobs = ref([]);
 const batchPolicyJobs = ref([]);
@@ -533,6 +539,7 @@ onMounted(() => {
 .task-filters :deep(.el-select__placeholder) { color: #64748b; }
 .incident-link { display: flex; align-items: center; gap: 16px; margin: 12px 0; }
 .batch-toolbar { display: flex; align-items: center; gap: 16px; margin: 12px 0; color: #475569; font-size: 13px; }
+.grouping-note { margin: 12px 0 8px; color: #475569; font-size: 13px; }
 
 .sync-summary {
   display: grid;
