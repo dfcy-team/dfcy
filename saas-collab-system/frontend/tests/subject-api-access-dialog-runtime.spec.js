@@ -132,8 +132,8 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     api.refreshStoreAuthorization.mockResolvedValue({ success: true, data: { id: 101, last_error_code: '' } });
     await wrapper.vm.refreshStoreBinding(binding);
     expect(api.refreshStoreAuthorization).toHaveBeenCalledWith(101, { confirmed: true });
-    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('不会再次刷新令牌'), '重新验证新令牌', expect.any(Object));
-    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('验证通过'));
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('不执行只读检查'), '确认刷新令牌', expect.any(Object));
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('未执行只读检查'));
   });
 
   it('does not report validation success when the saved token remains pending', async () => {
@@ -142,7 +142,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     api.refreshStoreAuthorization.mockResolvedValue({ success: true, data: binding });
     await wrapper.vm.refreshStoreBinding(binding);
     expect(ElMessage.success).not.toHaveBeenCalled();
-    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('不要重复刷新'));
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('能力矩阵'));
   });
 
   it('submits a callback for the current store and clears the sensitive input', async () => {
@@ -486,25 +486,25 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(wrapper.vm.busy).toBe('');
   });
 
-  it('allows readonly validation before a sync job exists', async () => {
+  it('navigates warehouse checks to the capability matrix without any API call', async () => {
     const wrapper = await mountDialog('warehouse');
     api.checkJifengWarehouse.mockResolvedValue({ success: true, data: { connected: true } });
-    await wrapper.vm.checkToken({ id: 202, integration_config_id: 3, status: 'active', has_sync_job: false });
-    expect(api.checkJifengWarehouse).toHaveBeenCalledWith(202);
+    wrapper.vm.openCapabilityMatrix({ id: 202, integration_config_id: 3, status: 'active', has_sync_job: false });
+    expect(api.checkJifengWarehouse).not.toHaveBeenCalled();
     expect(api.createSyncJob).not.toHaveBeenCalled();
     expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
-    expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(2);
-    expect(wrapper.emitted('changed')).toHaveLength(1);
+    expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
   });
 
-  it('reloads and emits changed when a warehouse readonly failure may persist failed status', async () => {
+  it('does not invoke a readonly check from the warehouse dialog', async () => {
     const wrapper = await mountDialog('warehouse');
     api.checkJifengWarehouse.mockResolvedValue({ success: false, message: '连接校验失败' });
-    await wrapper.vm.checkToken({ id: 202, integration_config_id: 3, status: 'active', has_sync_job: false });
-    expect(api.checkJifengWarehouse).toHaveBeenCalledWith(202);
-    expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(2);
-    expect(wrapper.emitted('changed')).toHaveLength(1);
-    expect(ElMessage.error).toHaveBeenCalledWith('连接校验失败');
+    wrapper.vm.openCapabilityMatrix({ id: 202, integration_config_id: 3, status: 'active', has_sync_job: false });
+    expect(api.checkJifengWarehouse).not.toHaveBeenCalled();
+    expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted('changed')).toBeUndefined();
+    expect(ElMessage.error).not.toHaveBeenCalled();
   });
 
   it('refreshes the warehouse authorization without using the bootstrap endpoint', async () => {
@@ -513,7 +513,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     await wrapper.vm.refreshWarehouseAuthorization({ id: 202 });
     expect(api.refreshJifengWarehouse).toHaveBeenCalledWith(202);
     expect(api.authorizeJifengWarehouse).not.toHaveBeenCalled();
-    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('重新执行只读校验'));
+    expect(ElMessage.success).toHaveBeenCalledWith(expect.stringContaining('未执行只读检查'));
     expect(api.fetchSubjectApiAccess).toHaveBeenCalledTimes(2);
     expect(wrapper.emitted('changed')).toHaveLength(1);
   });

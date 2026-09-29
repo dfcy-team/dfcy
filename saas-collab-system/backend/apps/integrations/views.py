@@ -1581,13 +1581,7 @@ def refresh_store_authorization(request, pk):
     )
     if record.platform == PlatformChoices.TIKTOK and request.data.get("confirmed") is not True:
         raise ValidationError({"confirmed": "TikTok Shop token refresh requires explicit confirmation."})
-    from .automatic_refresh import (
-        AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED, revalidate_saved_authorization,
-    )
-    if record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}:
-        record = revalidate_saved_authorization(record, actor=request.user)
-    else:
-        record = refresh_marketplace_authorization(record, actor=request.user)
+    record = refresh_marketplace_authorization(record, actor=request.user)
     return success_response(MarketplaceStoreAuthorizationSerializer(record).data)
 
 
@@ -2390,7 +2384,7 @@ def check_integration_consistency(request, pk):
 def check_integration_readonly_connection(request, pk):
     if not isinstance(request.data, dict):
         raise ValidationError("只读检查请求必须是 JSON 对象。")
-    if set(request.data) - {"warehouse_authorization_id", "store_authorization_id"}:
+    if set(request.data) - {"warehouse_authorization_id", "store_authorization_id", "resource_type"}:
         raise ValidationError("只读检查请求包含不支持的字段。")
     warehouse_authorization_id = request.data.get("warehouse_authorization_id")
     store_authorization_id = request.data.get("store_authorization_id")
@@ -2408,6 +2402,11 @@ def check_integration_readonly_connection(request, pk):
         raise ValidationError("只读检查请求必须指定一个具体的店铺授权或仓库授权。")
 
     config = _get_config_for_user(request, pk, "integrations.run_live_readonly")
+    resource_type = request.data.get("resource_type")
+    if resource_type is not None and resource_type not in {
+        "platform_product", "sales_order", "refund_return", "settlement_bill", "inventory_snapshot",
+    }:
+        raise ValidationError({"resource_type": "该资源尚未支持只读检查。"})
     warehouse_authorization = None
     store_authorization = None
     if warehouse_authorization_id is not None:
@@ -2472,6 +2471,7 @@ def check_integration_readonly_connection(request, pk):
                 SyncJob.ResourceType.PLATFORM_PRODUCT,
                 SyncJob.ResourceType.SALES_ORDER,
                 SyncJob.ResourceType.REFUND_RETURN,
+                SyncJob.ResourceType.SETTLEMENT_BILL,
             ),
         )
     # Subject authorization is complete only after the concrete binding and
@@ -2482,9 +2482,13 @@ def check_integration_readonly_connection(request, pk):
         job_queryset.select_related("integration_config"),
         "integrations.run_live_readonly",
     )
+    if resource_type is not None:
+        job_queryset = job_queryset.filter(resource_type=resource_type)
     job = job_queryset.first()
     if job is None:
         raise ValidationError("当前配置没有可用于只读检查的已授权同步任务。")
+    from .capability_gate import require_sync_read_capability
+    require_sync_read_capability(job, "live_readonly")
     if get_runtime_setting("network", "mode", default="") != "approved-live-test":
         raise ValidationError("系统尚未启用生产平台只读网络模式；请由运维确认网络白名单后再检查。")
     if not get_runtime_setting("network", "readonly_sync_enabled", default=False):

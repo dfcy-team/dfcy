@@ -5,7 +5,6 @@ from copy import copy
 import time
 
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -64,8 +63,7 @@ def automatic_refresh_allowed(record):
     if not warehouse and record.platform not in {"lazada", "shopee", "tiktok"}:
         return False
     expiry = record.oauth_expires_at if warehouse else record.expires_at
-    validation_pending = record.last_error_code == AUTO_REFRESH_VALIDATION_PENDING
-    if (not expiry or (not validation_pending and expiry > timezone.now() + timedelta(minutes=15))
+    if (not expiry or expiry > timezone.now() + timedelta(minutes=15)
             or not _actor_allowed(record)):
         return False
     binding = "warehouse_authorization" if warehouse else "store_authorization"
@@ -294,12 +292,11 @@ def refresh_due_authorizations(limit=100):
         key="credential-refresh", defaults={"last_seen_at": timezone.now()},
     )
     due = timezone.now() + timedelta(minutes=15)
-    pending = Q(last_error_code=AUTO_REFRESH_VALIDATION_PENDING)
     sources = (
-        ("lazada", MarketplaceStoreAuthorization.objects.filter(Q(expires_at__lte=due) | pending, platform="lazada", status="active")),
-        ("shopee", MarketplaceStoreAuthorization.objects.filter(Q(expires_at__lte=due) | pending, platform="shopee", status="active")),
-        ("tiktok", MarketplaceStoreAuthorization.objects.filter(Q(expires_at__lte=due) | pending, platform="tiktok", status="active")),
-        ("jifeng_wms", WarehouseAuthorization.objects.filter(Q(oauth_expires_at__lte=due) | pending, provider="jifeng_wms", status="active")),
+        ("lazada", MarketplaceStoreAuthorization.objects.filter(expires_at__lte=due, platform="lazada", status="active")),
+        ("shopee", MarketplaceStoreAuthorization.objects.filter(expires_at__lte=due, platform="shopee", status="active")),
+        ("tiktok", MarketplaceStoreAuthorization.objects.filter(expires_at__lte=due, platform="tiktok", status="active")),
+        ("jifeng_wms", WarehouseAuthorization.objects.filter(oauth_expires_at__lte=due, provider="jifeng_wms", status="active")),
     )
     counts = {"attempted": 0, "success": 0, "failed": 0}
     for platform, queryset in sources:
@@ -316,45 +313,29 @@ def refresh_due_authorizations(limit=100):
             attempt, created = AutomaticRefreshAttempt.objects.get_or_create(
                 request_key=key, defaults={"tenant_id": record.tenant_id},
             )
-            expiry = record.oauth_expires_at if isinstance(record, WarehouseAuthorization) else record.expires_at
-            validation_only = record.last_error_code == AUTO_REFRESH_VALIDATION_PENDING and (
-                expiry is None or expiry > timezone.now()
-            )
-            if not created and attempt.status not in {"token_saved", "validating"}:
+            if not created:
                 continue
             counts["attempted"] += 1
             result = "failed"
-            detail = {"automatic": True, "platform": platform, "authorization_id": record.pk}
+            detail = {"automatic": True, "platform": platform, "authorization_id": record.pk,
+                      "readonly_validation_performed": False, "token_saved": False}
             try:
-                if not validation_only and (created or (expiry is not None and expiry <= timezone.now())):
-                    if platform in {"lazada", "shopee", "tiktok"}:
-                        record = refresh_marketplace_authorization(
-                            record, actor=record.updated_by, expected_token_id=record.token_id,
-                        )
-                    else:
-                        record = refresh_warehouse_authorization(
-                            actor=record.updated_by, authorization=record,
-                            automatic=True, expected_token_id=record.token_id,
-                        )
-                    _mark_validation_pending(record)
-                    attempt.status = "token_saved"
-                    attempt.save(update_fields=["status"])
-                elif created:
-                    attempt.status = "token_saved"
-                    attempt.save(update_fields=["status"])
-                attempt.status = "validating"
-                attempt.save(update_fields=["status"])
-                _validate_with_retries(record)
-                _mark_validation_success(record)
+                if platform in {"lazada", "shopee", "tiktok"}:
+                    record = refresh_marketplace_authorization(
+                        record, actor=record.updated_by, expected_token_id=record.token_id,
+                    )
+                else:
+                    record = refresh_warehouse_authorization(
+                        actor=record.updated_by, authorization=record,
+                        automatic=True, expected_token_id=record.token_id,
+                    )
+                detail["token_saved"] = True
                 result = "success"
             except Exception as exc:
                 # Provider payloads/URLs can include credentials. Never stringify
                 # the exception here, and never replay an ambiguous rotation.
-                if attempt.status in {"token_saved", "validating"} or validation_only:
-                    detail.update(_record_validation_error(record, exc))
-                else:
-                    detail.update(error_code="AUTO_REFRESH_FAILED", reason="自动续期未完成；请检查授权、权限、准入及网络，手动刷新或重新授权后恢复。")
-            attempt.status = "token_saved" if record.last_error_code == AUTO_REFRESH_VALIDATION_PENDING else result
+                detail.update(error_code="AUTO_REFRESH_FAILED", reason="自动续期未完成；请检查授权、权限、准入及网络，手动刷新或重新授权后恢复。")
+            attempt.status = result
             attempt.finished_at = timezone.now()
             attempt.save(update_fields=["status", "finished_at"])
             IntegrationAuditLog.objects.create(
