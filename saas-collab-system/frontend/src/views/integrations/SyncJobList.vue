@@ -246,7 +246,7 @@ function viewRuns(row, detail = false) { router.push({ path: '/integrations/sync
 function openSubjectConfig(row) { router.push({ path: row.subject_type === 'warehouse' ? '/master-data/warehouses' : '/master-data/stores', query: { ...(row.store_id ? { store_id: String(row.store_id) } : {}), ...(row.warehouse_id ? { warehouse_id: String(row.warehouse_id) } : {}), panel: 'api' } }); }
 function showExisting(id) { createOpen.value = false; Object.assign(filters, { platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' }); router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(id) } }); }
 async function created(result) {
-  ElMessage.success(`已创建 ${result?.count || 1} 个任务：手动、停用，尚未执行。`);
+  ElMessage.success(`任务已创建：共 ${result?.count || 1} 个，手动、停用，尚未执行。`);
   createOpen.value = false;
   Object.assign(filters, { platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' });
   await router.push({ path: '/integrations/sync-jobs', query: {} });
