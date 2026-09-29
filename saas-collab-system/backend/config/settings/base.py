@@ -399,6 +399,7 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
+SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "1200")))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.
 UI_P4_COLLABORATION_MODE = os.getenv("UI_P4_COLLABORATION_MODE", "mock")
