@@ -17,6 +17,28 @@ from tests.test_mock_sync_isolation import context, assert_no_execution
 pytestmark = pytest.mark.django_db
 
 
+@pytest.mark.parametrize('budget', [True, 30, 59, 721, 60.5, 'bad'])
+def test_runtime_budget_policy_rejects_invalid_or_unsafe_values(budget):
+    from apps.integrations.views import _validated_job_policy
+    with pytest.raises(ValidationError):
+        _validated_job_policy({'execution_budget_seconds': budget})
+
+
+def test_runtime_budget_update_preserves_query_cursor_enablement_and_schedule(context):
+    from apps.integrations.models import SyncCursor
+    client, job = context
+    job.sync_scope = {'schedule': {'interval_minutes': 120}, 'query': {'lookback_days': 3}}
+    job.save(update_fields=['sync_scope'])
+    SyncCursor.objects.create(tenant=job.tenant, sync_job=job, cursor_key='default', cursor_value='saved-page')
+    response = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/',
+                            {'execution_budget_seconds': 300}, format='json')
+    assert response.status_code == 200
+    job.refresh_from_db()
+    assert job.is_enabled and job.sync_scope['query'] == {'lookback_days': 3}
+    assert job.sync_scope['schedule'] == {'interval_minutes': 120, 'execution_budget_seconds': 300}
+    assert job.cursors.get(cursor_key='default').cursor_value == 'saved-page'
+
+
 def grant_live(job):
     permission, _ = Permission.objects.get_or_create(code='integrations.run_live_readonly',
         defaults={'name': 'Live readonly', 'module': 'integrations', 'action': 'run_live_readonly'})

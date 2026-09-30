@@ -30,10 +30,11 @@
       <p v-else>该任务不使用采集时间范围，库存读取当前快照。</p>
       <el-form-item label="执行方式"><el-select v-model="form.schedule_type"><el-option label="手动" value="manual" /><el-option label="每隔 N 分钟" value="interval" /><el-option label="每天" value="daily" /><el-option label="每周" value="weekly" /></el-select></el-form-item>
       <el-form-item v-if="form.schedule_type === 'interval'" label="间隔（分钟，15～10080）"><el-input-number v-model="form.interval_minutes" :min="15" :max="10080" /></el-form-item>
-      <el-form-item v-if="['daily','weekly'].includes(form.schedule_type)" label="执行时间（所选时区）"><el-time-select v-model="form.local_time" start="00:00" step="00:15" end="23:45" /></el-form-item>
+      <el-form-item v-if="['daily','weekly'].includes(form.schedule_type)" label="执行时间（所选时区）"><el-time-select v-model="form.local_time" start="00:00" step="00:01" end="23:59" /></el-form-item>
       <el-form-item v-if="form.schedule_type === 'weekly'" label="星期"><el-checkbox-group v-model="form.weekdays"><el-checkbox v-for="(day, i) in days" :key="day" :label="i + 1">{{ day }}</el-checkbox></el-checkbox-group></el-form-item>
       <el-form-item label="计划时区"><el-select v-model="form.timezone"><el-option label="北京时间 UTC+8" value="Asia/Shanghai" /><el-option label="菲律宾时间 UTC+8" value="Asia/Manila" /><el-option label="协调世界时 UTC" value="UTC" /><el-option v-if="!['Asia/Shanghai','Asia/Manila','UTC'].includes(form.timezone)" :label="form.timezone" :value="form.timezone" /></el-select></el-form-item>
-      <el-form-item label="错过执行（超出计划时点 60 秒）"><el-radio-group v-model="form.catch_up"><el-radio label="skip">跳过</el-radio><el-radio label="run_once">恢复后补跑一次</el-radio></el-radio-group></el-form-item>
+      <el-form-item label="错过执行（超出计划时点 180 秒）"><el-radio-group v-model="form.catch_up"><el-radio label="skip">跳过</el-radio><el-radio label="run_once">恢复后补跑一次</el-radio></el-radio-group></el-form-item>
+      <el-form-item label="单段执行预算（秒，0 表示关闭分段）"><el-input-number v-model="form.execution_budget_seconds" :min="0" :max="720" :step="60" :precision="0" /><p>预算到达后完成当前页并保存进度，释放执行名额后自动续跑；整次采集完成才计为成功。</p></el-form-item>
       <el-form-item label="暂停至（含时区，可留空）"><el-input v-model="form.pause_until" clearable placeholder="例如 2026-09-15T09:00:00+08:00" /></el-form-item>
     </el-form>
     <p>失败重试：最多 {{ job.max_retry_count ?? '—' }} 次，指数退避（基础 {{ job.backoff_base_seconds ?? '—' }} 秒）；不改变正常计划。</p>
@@ -70,7 +71,7 @@ const collectionBasis = computed(() => {
 const collectionRange = ref(null);
 const form = reactive({}), times = ref([]), previewed = ref(false), previewing = ref(false), saving = ref(false), error = ref('');
 const days = ['周一','周二','周三','周四','周五','周六','周日'];
-watch(() => props.job, job => { Object.assign(form, { schedule_type: job.schedule_type === 'hourly' ? 'interval' : job.schedule_type === 'cron' ? 'manual' : job.schedule_type || 'manual', interval_minutes: job.interval_minutes || 60, local_time: job.local_time || '02:00', weekdays: [...(job.weekdays || [1])], timezone: job.timezone || 'Asia/Shanghai', catch_up: job.catch_up || 'skip', pause_until: job.pause_until || '' }); }, { immediate: true });
+watch(() => props.job, job => { Object.assign(form, { schedule_type: job.schedule_type === 'hourly' ? 'interval' : job.schedule_type === 'cron' ? 'manual' : job.schedule_type || 'manual', interval_minutes: job.interval_minutes || 60, local_time: job.local_time || '02:00', weekdays: [...(job.weekdays || [1])], timezone: job.timezone || 'Asia/Shanghai', catch_up: job.catch_up || 'skip', pause_until: job.pause_until || '', execution_budget_seconds: job.execution_budget_seconds ?? 0 }); }, { immediate: true });
 watch(() => props.job, job => {
   if (job.resource_type === 'platform_product') form.product_full_sync = job.product_full_sync !== false;
   else delete form.product_full_sync;

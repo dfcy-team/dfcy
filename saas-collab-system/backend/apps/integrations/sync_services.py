@@ -5,7 +5,9 @@ from contextlib import contextmanager
 from datetime import timedelta
 from threading import Event, Thread
 from time import sleep as default_retry_wait
+from time import monotonic
 
+from billiard.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import DatabaseError, close_old_connections, connection, connections, transaction
 from django.db.models import F
@@ -210,7 +212,7 @@ def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
         return None
     run.status = SyncRun.Status.FAILED
     run.finished_at = timezone.now()
-    run.failed_count = 1
+    run.failed_count += 1
     run.error_code = error_code
     run.masked_error_message = sanitize_text(message)
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "error": run.masked_error_message})
@@ -220,7 +222,7 @@ def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
     return run
 
 
-def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None):
+def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None, resume_sequence=0):
     retry_wait = retry_wait or default_retry_wait
     adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
     if getattr(adapter, "execution_mode", "unsupported") not in {"mock", "live_readonly"}:
@@ -253,7 +255,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             locked_dispatch = SyncScheduleDispatch.objects.select_for_update().get(
                 pk=dispatch.pk, sync_job=locked_job,
             )
-            if locked_dispatch.status != "running" or locked_dispatch.sync_run_id:
+            if locked_dispatch.status != "running":
                 raise ValidationError("派发已终止或已创建执行，不能重复执行。")
 
         checkpoint = SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
@@ -272,6 +274,17 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         ).first()
         if existing and existing.status != SyncRun.Status.QUEUED:
             return existing, False
+        continuation = (existing.masked_log or {}).get("runtime_budget", {}) if existing else {}
+        if resume_sequence and existing is None:
+            raise ValidationError("续跑对应的运行记录不存在，不能创建新执行。")
+        if int(continuation.get("sequence", 0)) != resume_sequence:
+            return existing, False
+        if resume_sequence and not isinstance(continuation.get("resolved_scope"), dict):
+            raise ValidationError("续跑缺少已保存的查询范围，请检查原运行记录。")
+        if locked_job.runs.filter(status=SyncRun.Status.QUEUED).exclude(pk=existing.pk if existing else None).exists():
+            raise ValidationError("任务正在排队或等待续跑，请勿创建其他执行。")
+        if dispatch and locked_dispatch.sync_run_id not in (None, existing.pk if existing else None):
+            raise ValidationError("派发已关联其他执行，不能重复执行。")
 
         run_id = existing.run_id if existing else _run_id()
         lease_expires_at = now + _lease_duration()
@@ -302,7 +315,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         if existing:
             run = existing
             run.status = SyncRun.Status.RUNNING
-            run.started_at = now
+            run.started_at = run.started_at or now
             run.finished_at = None
             run.error_code = ""
             run.masked_error_message = ""
@@ -329,6 +342,32 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
 
     sync_job = locked_job
     adapter.bind_run(run)
+    schedule = (sync_job.sync_scope or {}).get("schedule", {})
+    budget_seconds = int(schedule.get("execution_budget_seconds") or 0)
+    budget_seconds = max(60, min(budget_seconds, 720)) if budget_seconds else 0
+    runtime_budget = dict((run.masked_log or {}).get("runtime_budget") or {})
+    # A resumed provider cursor must address the identical query window, even
+    # when the continuation starts after midnight or the policy was refreshed.
+    if resume_sequence:
+        frozen_scope = runtime_budget.get("resolved_scope")
+        if hasattr(adapter, "scope"):
+            adapter.scope = dict(frozen_scope)
+    adapter_scope = getattr(adapter, "scope", {})
+    # Live clients expose only these provider-neutral query controls. Never
+    # archive arbitrary adapter fields (which could contain credentials).
+    frozen_query = {
+        key: adapter_scope[key]
+        for key in ("time_from", "time_to", "page_size", "product_full_sync", "time_basis", "statuses")
+        if isinstance(adapter_scope, dict) and key in adapter_scope
+    }
+    runtime_budget.update({
+        "sequence": resume_sequence, "pending": False,
+        "budget_seconds": budget_seconds, "slice_started_at": now.isoformat(),
+        "resolved_scope": frozen_query,
+    })
+    run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": runtime_budget})
+    run.save(update_fields=["masked_log"])
+    slice_deadline = monotonic() + budget_seconds if budget_seconds else None
     # Record the actual resolved query, not the mutable job policy. This is
     # diagnostic evidence only: cursor exhaustion does not certify coverage.
     decision_source = None
@@ -397,6 +436,11 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                             "failed_count",
                         ]
                     )
+                    if slice_deadline is not None and monotonic() >= slice_deadline:
+                        # Cursor, page writes, counts, and the durable continuation
+                        # are committed together before this process is released.
+                        _yield_sync_slice(sync_job, run)
+                        return run, True
                     continue
                 finalize_run = getattr(adapter, "finalize_run", None)
                 if callable(finalize_run):
@@ -442,6 +486,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         }} if decision_source else {}),
                     }
                 )
+                run.masked_log["runtime_budget"] = {
+                    **runtime_budget, "pending": False, "completed_at": run.finished_at.isoformat(),
+                }
                 sync_job.status = SyncJob.Status.IDLE
                 sync_job.lock_token = ""
                 sync_job.lock_expires_at = None
@@ -468,7 +515,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             last_retry_error = sanitize_text(
                 " ".join(str(item) for item in exc.detail) if configuration_error else str(exc)
             )
-            if not configuration_error and run.retry_count < sync_job.max_retry_count:
+            timed_out = isinstance(exc, SoftTimeLimitExceeded)
+            if not configuration_error and not timed_out and run.retry_count < sync_job.max_retry_count:
                 with transaction.atomic():
                     delay_seconds = calculate_backoff_seconds(
                         run.retry_count,
@@ -503,7 +551,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 continue
 
             with transaction.atomic():
-                run.error_code = "SYNC_CONFIGURATION_MISSING" if configuration_error else "MAX_RETRY_EXCEEDED"
+                run.error_code = "RUN_TIMEOUT" if timed_out else "SYNC_CONFIGURATION_MISSING" if configuration_error else "MAX_RETRY_EXCEEDED"
                 run.masked_error_message = last_retry_error
                 run.status = SyncRun.Status.FAILED
                 run.failed_count += 1
@@ -531,6 +579,32 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 run.save()
                 upsert_sync_failure_alert(sync_job, sync_run=run)
             return run, True
+
+
+def _yield_sync_slice(sync_job, run):
+    """Called inside the page transaction; completion watermark stays unchanged."""
+    if not _owns_lease(sync_job, run):
+        raise ValidationError("Sync job run lease was lost.")
+    now = timezone.now()
+    budget = dict((run.masked_log or {}).get("runtime_budget") or {})
+    budget.update({
+        "sequence": int(budget.get("sequence", 0)) + 1,
+        "pending": True, "ready_at": (now + timedelta(seconds=60)).isoformat(),
+        "submitted_at": None, "last_page_committed_at": now.isoformat(),
+    })
+    run.status = SyncRun.Status.QUEUED
+    run.finished_at = None
+    run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": budget})
+    run.save()
+    sync_job.status = SyncJob.Status.IDLE
+    sync_job.lock_token = ""
+    sync_job.lock_expires_at = None
+    sync_job.lock_heartbeat_at = now
+    sync_job.save(update_fields=["status", "lock_token", "lock_expires_at", "lock_heartbeat_at", "updated_at"])
+    if hasattr(run, "schedule_dispatch"):
+        SyncScheduleDispatch.objects.filter(sync_run=run).update(
+            status="queued", finished_at=None, reason="本段时间预算已用完，分页进度已保存，等待续跑。",
+        )
 
 
 def record_retry_failure(sync_job, error_message, retry_count):

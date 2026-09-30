@@ -45,6 +45,7 @@
         <el-descriptions-item label="读取／落库／失败">{{ syncCount(detail.fetched_count) }} / {{ syncCount(written(detail)) }} / {{ syncCount(detail.failed_count) }}</el-descriptions-item>
         <el-descriptions-item label="实际采集范围（北京时间）">{{ syncActualRange(detail.masked_log?.decision_source || {}) }}</el-descriptions-item>
         <el-descriptions-item label="执行参数">{{ detail.execution_mode || '—' }}；重试次数 {{ detail.retry_count ?? '—' }}；检查点 {{ detail.checkpoint_version ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item v-if="detail.execution_budget_seconds" label="分段续跑">单段 {{ detail.execution_budget_seconds }} 秒；续跑序号 {{ detail.continuation_count || 0 }}；{{ detail.continuation_pending ? '进度已保存，等待自动续跑' : '本段执行中或已结束' }}</el-descriptions-item>
         <el-descriptions-item label="失败阶段">{{ detail.masked_log?.failure_stage || '—' }}</el-descriptions-item>
         <el-descriptions-item label="错误码">{{ detail.error_code || '—' }}</el-descriptions-item>
         <el-descriptions-item label="原因和建议">{{ syncError(detail.masked_error_message, detail.error_code) }}</el-descriptions-item>

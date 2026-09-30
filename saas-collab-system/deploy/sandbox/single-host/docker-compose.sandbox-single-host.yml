@@ -91,7 +91,21 @@ services:
     image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
     env_file:
       - ${SANDBOX_ENV_FILE:-.env.sandbox}
-    command: celery -A config worker --loglevel=info
+    command: celery -A config worker --queues=sync,celery --concurrency=2 --prefetch-multiplier=1 --hostname=business@%h --loglevel=info
+    restart: unless-stopped
+    networks:
+      - sandbox-app-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-control:
+    image: ${SANDBOX_BACKEND_IMAGE:?Set the immutable backend image from the approved CI manifest}
+    env_file:
+      - ${SANDBOX_ENV_FILE:-.env.sandbox}
+    command: celery -A config worker --queues=sync-control --concurrency=1 --prefetch-multiplier=1 --hostname=control@%h --loglevel=info
     restart: unless-stopped
     networks:
       - sandbox-app-internal
