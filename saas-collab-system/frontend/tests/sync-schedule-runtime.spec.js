@@ -29,6 +29,18 @@ it('editing invalidates preview and blocks save', async () => {
   await wrapper.vm.save();
   expect(api.updateSyncJob).not.toHaveBeenCalled();
 });
+it('loads and saves the page-boundary runtime budget with the selected job', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 22, is_enabled: false, schedule_type: 'daily', local_time: '16:21', execution_budget_seconds: 480 } });
+  expect(wrapper.vm.form.execution_budget_seconds).toBe(480);
+  expect(wrapper.vm.form.local_time).toBe('16:21');
+  wrapper.vm.form.execution_budget_seconds = 300;
+  await wrapper.vm.preview();
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(22, expect.objectContaining({ execution_budget_seconds: 300 }));
+  await wrapper.setProps({ job: { id: 23, schedule_type: 'manual' } });
+  expect(wrapper.vm.form.execution_budget_seconds).toBe(0);
+});
 it('readonly users cannot preview or save a schedule', async () => {
   const wrapper = mount();
   await wrapper.setProps({ canManage: false });

@@ -2648,7 +2648,7 @@ def _set_job_scope(job, values):
         scope["execution_mode"] = values["execution_mode"]
     if "product_full_sync" in values:
         scope["product_full_sync"] = values["product_full_sync"]
-    for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until"):
+    for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until", "execution_budget_seconds"):
         if key in values:
             schedule[key] = values[key]
     query_fields = {
@@ -2678,6 +2678,7 @@ def _validated_job_policy(data):
     allowed = {
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
         "product_full_sync",
+        "execution_budget_seconds",
         "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
         "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
@@ -2706,11 +2707,12 @@ def _validated_job_policy(data):
         "query_page_size": (1, 100),
         "max_pages": (1, 1000),
         "max_records": (1, 100000),
+        "execution_budget_seconds": (0, 720),
     }
     for key, (minimum, maximum) in limits.items():
         if key not in values:
             continue
-        if key == "lookback_days" and isinstance(values[key], (bool, float)):
+        if key in {"lookback_days", "execution_budget_seconds"} and isinstance(values[key], (bool, float)):
             raise ValidationError({key: "必须为整数。"})
         try:
             values[key] = int(values[key])
@@ -2718,6 +2720,8 @@ def _validated_job_policy(data):
             raise ValidationError({key: "必须为整数。"})
         if not minimum <= values[key] <= maximum:
             raise ValidationError({key: f"必须在 {minimum} 到 {maximum} 之间。"})
+        if key == "execution_budget_seconds" and 0 < values[key] < 60:
+            raise ValidationError({key: "单段预算至少 60 秒；0 表示关闭分段。"})
     if "weekdays" in values:
         if not isinstance(values["weekdays"], list):
             raise ValidationError({"weekdays": "每周执行日必须为数组。"})

@@ -9,11 +9,11 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
 
-from .models import SyncJob, SyncScheduleDispatch, SyncSchedulerHeartbeat
+from .models import SyncJob, SyncRun, SyncScheduleDispatch, SyncSchedulerHeartbeat
 from .sync_alerts import upsert_sync_failure_alert
 
 # The dispatcher ticks every minute. Older slots are missed, not new executions.
-MISFIRE_GRACE_SECONDS = 60
+MISFIRE_GRACE_SECONDS = 180
 DISPATCH_START_TIMEOUT = timedelta(minutes=5)
 
 
@@ -168,6 +168,8 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
                 completed.save(update_fields=["status", "finished_at"])
             if job.schedule_dispatches.filter(status__in=["queued", "running"]).exists():
                 continue
+            if job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
+                continue
             due = job.next_run_at
             missed = (now - due).total_seconds() > MISFIRE_GRACE_SECONDS
             skip = missed and schedule_policy(job).get("catch_up", "skip") != "run_once"
@@ -198,6 +200,48 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
             failed += 1
     return {"initialized": initialized, "dispatched": dispatched, "failed": failed, "skipped": skipped,
             "recovered": recovered}
+
+
+def resume_due_sync_runs(enqueue, now=None, limit=20):
+    """Durable continuation outbox; sequence fencing makes broker retries safe."""
+    now = now or timezone.now()
+    candidates = list(SyncRun.objects.filter(
+        status=SyncRun.Status.QUEUED, masked_log__runtime_budget__pending=True,
+        sync_job__is_enabled=True,
+    ).exclude(sync_job__status=SyncJob.Status.DISABLED)
+      .order_by("id").values_list("id", "sync_job_id")[:max(100, limit * 5)])
+    submitted = 0
+    for pk, job_id in candidates:
+        if submitted >= limit:
+            break
+        with transaction.atomic():
+            job = SyncJob.objects.select_for_update().get(pk=job_id)
+            run = SyncRun.objects.select_for_update().get(pk=pk)
+            budget = dict((run.masked_log or {}).get("runtime_budget") or {})
+            if run.status != SyncRun.Status.QUEUED or not budget.get("pending"):
+                continue
+            ready = parse_datetime(str(budget.get("ready_at") or ""))
+            last = parse_datetime(str(budget.get("submitted_at") or ""))
+            if (ready and ready > now) or (last and last > now - timedelta(seconds=180)):
+                continue
+            pause = paused_until(job)
+            if not job.is_enabled or job.status == "disabled" or (pause and pause > now):
+                continue
+            if job.status == "running" or (job.lock_expires_at and job.lock_expires_at > now):
+                continue
+            budget["submitted_at"] = now.isoformat()
+            run.masked_log = {**(run.masked_log or {}), "runtime_budget": budget}
+            run.save(update_fields=["masked_log"])
+            key, sequence = run.idempotency_key, int(budget["sequence"])
+        try:
+            enqueue(job_id, key, sequence)
+            submitted += 1
+        except Exception:
+            # Retain the committed page/outbox. A later control tick resubmits
+            # this sequence; a late duplicate cannot claim an already-started slice.
+            upsert_sync_failure_alert(job, sync_run=run, error_code="SYNC_CONTINUATION_ENQUEUE_FAILED",
+                                      message="分页进度已保存，续跑提交暂未确认；巡检将重新提交同一续跑序号。")
+    return submitted
 
 
 def scheduler_health():

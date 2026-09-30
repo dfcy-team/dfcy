@@ -48,6 +48,8 @@ services:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
   celery:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+  celery-control:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
   celery-beat:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
   frontend:
@@ -151,7 +153,7 @@ fi
 migration_service=${PRODUCTION_MIGRATION_SERVICE:-migrate}
 migration_timeout_seconds=${PRODUCTION_MIGRATION_TIMEOUT_SECONDS:-1200}
 redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
-required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
+required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-control,celery-beat,frontend}
 [[ "$migration_service" =~ ^[A-Za-z0-9_.-]+$ && "$redis_service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'Compose service names are invalid.'
 [[ "$migration_timeout_seconds" =~ ^[0-9]+$ ]] || die 'migration timeout must be an integer number of seconds.'
 (( migration_timeout_seconds >= 60 && migration_timeout_seconds <= 3600 )) || die 'migration timeout must be between 60 and 3600 seconds.'
