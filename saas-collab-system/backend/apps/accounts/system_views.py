@@ -37,6 +37,7 @@ from apps.permissions.ui_p2_scopes import (
     require_department_create_scope,
     require_user_create_scope,
 )
+from apps.permissions.ui_p6_scopes import PLATFORM_DETAIL_INCOMPATIBLE_SCOPE_MESSAGE
 from apps.masterdata.models import (
     CountrySiteMaster,
     PlatformMaster,
@@ -1143,6 +1144,23 @@ class RolePermissionView(APIView):
                 metadata__registry_status="inactive",
             ).values_list("code", flat=True)
         ))
+
+        # A platform detail has platform, site and store FKs, but no warehouse
+        # or supplier relation.  Reject new incompatible grants instead of
+        # dropping either restriction from a shared business role.
+        platform_detail_codes = {
+            "menu.listings.products_platform_details.view",
+            "listings.product_detail.view",
+            "listings.product_detail.manage",
+            "listings.product_detail.import",
+        }
+        scope_config = serializer.validated_data["scope_config"]
+        if (
+            serializer.validated_data["scope_type"] == DataScope.ScopeType.CUSTOM
+            and platform_detail_codes.intersection(permission_codes)
+            and {"warehouse_ids", "supplier_ids"}.intersection(scope_config)
+        ):
+            raise ValidationError({"scope_config": PLATFORM_DETAIL_INCOMPATIBLE_SCOPE_MESSAGE})
 
         # A role manager may delegate only permissions already granted to the
         # actor through an all-tenant role.  Existing grants that were not

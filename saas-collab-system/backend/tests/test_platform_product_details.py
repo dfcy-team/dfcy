@@ -273,6 +273,150 @@ def test_platform_product_detail_collection_is_paginated():
     assert too_large.status_code == 400
 
 
+def test_platform_detail_scope_uses_platform_site_store_and_never_leaks_tenants():
+    tenant, platform, store, sku = fixture_data()
+    site = CountrySiteMaster.objects.get(tenant=tenant, country_code="TH")
+    other_store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="shop-other", name="Other", country_code="TH", currency="THB",
+    )
+    included = PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=store, site=site, platform_variant_id="in-scope",
+    )
+    PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=other_store, site=site, platform_variant_id="other-store",
+    )
+    foreign_tenant = Tenant.objects.create(name="Foreign detail", code="foreign-detail")
+    foreign_platform = PlatformMaster.objects.create(
+        tenant=foreign_tenant, code="foreign", name="Foreign", platform_type="other",
+    )
+    foreign_store = StoreMaster.objects.create(
+        tenant=foreign_tenant, platform=foreign_platform, code="foreign-store", name="Foreign", country_code="TH", currency="THB",
+    )
+    PlatformProductDetail.objects.create(
+        tenant=foreign_tenant, platform=foreign_platform, store=foreign_store, platform_variant_id="foreign-detail",
+    )
+    user = CustomUser.objects.get(username="detail-user")
+    role = Role.objects.create(tenant=tenant, code="detail-custom", name="Detail custom")
+    role.permissions.add(Permission.objects.get(code="listings.product_detail.view"))
+    menu = Permission.objects.create(
+        code="menu.listings.products_platform_details.view", name="平台商品明细数据",
+        module="listings", action="products_platform_details.view",
+        permission_type=Permission.PermissionType.MENU,
+        metadata={"action_codes": ["listings.product_detail.view", "integrations.product_mapping.view"]},
+    )
+    role.permissions.add(menu)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    scope = DataScope.objects.create(
+        tenant=tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"platform_ids": [platform.pk], "site_ids": [site.pk], "store_ids": [store.pk]},
+    )
+    client = APIClient(); client.force_authenticate(user=user)
+    url = "/api/internal/listings/product-details/"
+    response = client.get(url)
+    assert response.status_code == 200
+    assert response.json()["data"]["count"] == 1
+    assert response.json()["data"]["results"][0]["id"] == included.pk
+    detail_response = client.get(f"{url}{included.pk}/")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["data"]["mapping"] is None
+    assert client.get(url, {"mapping_status": "mapped"}).status_code == 403
+
+    scope.config = {"platform_ids": [platform.pk], "store_ids": [other_store.pk]}
+    scope.save(update_fields=["config"])
+    response = client.get(url)
+    assert response.status_code == 200 and response.json()["data"]["count"] == 1
+
+    # A second role is an independent grant.  Its matching store is ORed with
+    # the first role; within each role platform/site/store remain ANDed.
+    another = Role.objects.create(tenant=tenant, code="detail-second", name="Detail second")
+    another.permissions.add(Permission.objects.get(code="listings.product_detail.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=another)
+    DataScope.objects.create(
+        tenant=tenant, role=another, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"platform_ids": [platform.pk], "site_ids": [site.pk], "store_ids": [store.pk]},
+    )
+    response = client.get(url)
+    assert response.status_code == 200 and response.json()["data"]["count"] == 2
+
+    scope.config = {"platform_ids": []}
+    scope.save(update_fields=["config"])
+    another.data_scopes.update(config={"site_ids": []})
+    response = client.get(url)
+    assert response.status_code == 200 and response.json()["data"]["count"] == 0
+
+
+def test_platform_detail_warehouse_only_history_is_actionable_and_fails_closed():
+    tenant, platform, store, sku = fixture_data()
+    PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=store, platform_variant_id="warehouse-history",
+    )
+    user = CustomUser.objects.get(username="detail-user")
+    role = Role.objects.create(tenant=tenant, code="detail-warehouse", name="Detail warehouse")
+    role.permissions.add(Permission.objects.get(code="listings.product_detail.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    scope = DataScope.objects.create(
+        tenant=tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"warehouse_ids": [2, 3, 4]},
+    )
+    unrelated = Role.objects.create(tenant=tenant, code="unrelated-all", name="Unrelated all")
+    unrelated.permissions.add(Permission.objects.get(code="reports.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=unrelated)
+    DataScope.objects.create(tenant=tenant, role=unrelated, scope_type=DataScope.ScopeType.ALL, config={})
+    client = APIClient(); client.force_authenticate(user=user)
+    url = "/api/internal/listings/product-details/"
+    response = client.get(url)
+    assert response.status_code == 403
+    assert response.json()["code"] == "DATA_SCOPE_INVALID"
+    assert "请管理员" in str(response.json()) and "仓库" in str(response.json())
+
+    scope.config = {"platform_ids": [platform.pk], "warehouse_ids": [2]}
+    scope.save(update_fields=["config"])
+    assert client.get(url).status_code == 403
+    scope.config = {"unexpected_key": [1]}
+    scope.save(update_fields=["config"])
+    assert client.get(url).status_code == 403
+    scope.config = {"supplier_ids": [1]}
+    scope.save(update_fields=["config"])
+    assert client.get(url).status_code == 403
+
+
+def test_platform_detail_create_uses_manage_scope_independently_of_view():
+    tenant, platform, store, sku = fixture_data()
+    site = CountrySiteMaster.objects.get(tenant=tenant, country_code="TH")
+    user = CustomUser.objects.get(username="detail-user")
+    view_role = Role.objects.create(tenant=tenant, code="detail-view-all", name="Detail view all")
+    view_role.permissions.add(Permission.objects.get(code="listings.product_detail.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=view_role)
+    DataScope.objects.create(tenant=tenant, role=view_role, scope_type=DataScope.ScopeType.ALL, config={})
+    manage_role = Role.objects.create(tenant=tenant, code="detail-manage-site", name="Detail manage site")
+    manage_role.permissions.add(Permission.objects.get(code="listings.product_detail.manage"))
+    UserRole.objects.create(tenant=tenant, user=user, role=manage_role)
+    scope = DataScope.objects.create(
+        tenant=tenant, role=manage_role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"platform_ids": [platform.pk], "site_ids": [site.pk], "store_ids": [store.pk]},
+    )
+    client = APIClient(); client.force_authenticate(user=user)
+    url = "/api/internal/listings/product-details/"
+    payload = {
+        "platform": platform.pk, "store": store.pk, "platform_variant_id": "manage-site",
+        "source_old_sku_code": "OLD-1",
+    }
+    assert client.post(url, payload, format="json").status_code == 403
+    payload["site"] = site.pk
+    created = client.post(url, payload, format="json")
+    assert created.status_code == 201, created.json()
+    assert client.get(url).status_code == 200
+    other_store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="other-manage", name="Other manage", country_code="TH", currency="THB",
+    )
+    moved = client.patch(f"{url}{created.json()['data']['id']}/", {"store": other_store.pk}, format="json")
+    assert moved.status_code == 403
+    scope.config = {"warehouse_ids": [1]}
+    scope.save(update_fields=["config"])
+    payload["platform_variant_id"] = "manage-warehouse"
+    assert client.post(url, payload, format="json").status_code == 403
+
+
 def test_platform_product_detail_collection_checks_mapping_permission_once(monkeypatch):
     tenant, platform, store, sku = fixture_data()
     PlatformProductDetail.objects.create(
