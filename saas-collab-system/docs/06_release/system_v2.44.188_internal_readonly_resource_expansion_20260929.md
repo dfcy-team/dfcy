@@ -16,6 +16,8 @@
 
 ## 本地验收
 
+2026-09-30 补充同一候选的图片与旧编码读取：商品明细新增 `image_url`、`legacy_sku_code`，商品主数据新增 `legacy_spu_code`。站内图片路径转换为完整地址；无效地址不返回。现有商品数据块授权自动包含这些字段，无数据库迁移。构件仅存放虚拟机，阿里云等待后续累计发布。
+
 - 建联任务与寄样履约只读集合在游标分页前排除 `is_deleted=True`，与现有业务列表一致，不返回无法辨识的已删除记录。
 - `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py test apps.integrations.tests.test_internal_api_clients`：18 项通过，含两种资源的软删除、租户隔离和分页回归。
 - 新增投影模型字段及租户字段静态检查：22 块均通过。
