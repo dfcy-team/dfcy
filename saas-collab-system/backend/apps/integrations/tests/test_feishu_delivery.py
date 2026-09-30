@@ -135,6 +135,17 @@ class FeishuDeliveryTests(APITestCase):
         self.assertEqual(execute_delivery(FeishuDelivery.objects.get().pk, service=sender), "success")
         self.assertIn(f"/workflow/approvals/{approval.pk}", str(sender.send.call_args))
 
+    def test_persisted_approval_signals_enqueue_pending_and_result_after_commit(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            approval = self.approval()
+        self.assertEqual(FeishuDelivery.objects.get().user_id, self.recipient.pk)
+        FeishuIdentity.objects.create(tenant=self.tenant, user=self.owner, open_id="ou_test_owner")
+        with self.captureOnCommitCallbacks(execute=True):
+            approval.status = "approved"; approval.save()
+        result = FeishuDelivery.objects.get(payload__approval_status="approved")
+        self.assertEqual(result.user_id, self.owner.pk)
+        self.assertEqual(FeishuDelivery.objects.count(), 2)
+
     def test_scheduled_daily_dispatch_deduplicates(self):
         self.rule.kind = "report"
         self.rule.config = {"report_type": "comprehensive", "recipient_user_ids": [self.recipient.pk], "schedule": "daily", "hour": 0}
