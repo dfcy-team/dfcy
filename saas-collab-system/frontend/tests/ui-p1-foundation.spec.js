@@ -191,7 +191,6 @@ describe('UI-P1 action permission convergence', () => {
       'src/views/alerts/BusinessAlertList.vue': 'alerts.manage',
       'src/views/settings/ConfigCenterList.vue': 'config.manage',
       'src/views/settings/ConfigVersionHistory.vue': 'config.rollback',
-      'src/views/reports/ReportExportCenter.vue': 'reports.export',
       'src/views/finance/ReconciliationMatchList.vue': 'finance.reconcile',
       'src/views/finance/ReconciliationMatchDetail.vue': 'finance.reconcile',
       'src/views/products/ProductStatusRecommendationDetail.vue': 'products.status.confirm',
@@ -200,6 +199,12 @@ describe('UI-P1 action permission convergence', () => {
     for (const [path, permission] of Object.entries(expectedContracts)) {
       expect(read(path), path).toContain(`permission: '${permission}'`);
     }
+
+    const reportExports = read('src/views/reports/ReportExportCenter.vue');
+    expect(reportExports).toContain("auth.hasPermission?.('reports.export')");
+    expect(reportExports).toContain("auth.hasPermission?.('reports.download')");
+    expect(reportExports).toContain('v-if="canExport"');
+    expect(reportExports).toContain('v-if="canDownload"');
 
     for (const component of ['src/components/Phase2DataPage.vue', 'src/components/Phase3DecisionPage.vue']) {
       const source = read(component);
