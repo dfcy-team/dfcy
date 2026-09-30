@@ -18,6 +18,15 @@
         <p>请使用企业为您分配的账号登录。</p>
       </div>
 
+      <section v-if="feishuEnabled" class="feishu-login" aria-label="飞书扫码登录">
+        <h3>飞书扫码登录</h3>
+        <div v-show="!qrError" id="feishu-qr-login" ref="qrContainer" class="feishu-qr" />
+        <el-alert v-if="qrError" :title="qrError" type="warning" :closable="false" show-icon />
+        <el-button v-if="qrError || qrExpired" text type="primary" :loading="qrLoading" @click="refreshQr">刷新二维码</el-button>
+        <p v-if="!qrError">使用飞书扫描二维码登录</p>
+      </section>
+      <el-alert v-if="configError || (!feishuEnabled && qrError)" :title="configError || qrError" type="warning" :closable="false" show-icon />
+
       <el-alert
         v-if="auth.errorMessage"
         :title="auth.errorMessage"
@@ -51,16 +60,27 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue';
+import { onMounted, onBeforeUnmount, nextTick, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import { safeLocalRedirect } from '../../utils/ssoRedirect';
+import { getFeishuLoginConfig, startFeishuLogin } from '../../api/auth';
+import { feishuErrorMessages, mountFeishuQr, validateAuthorizeUrl } from '../../utils/feishuQrLogin';
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const formRef = ref();
+const qrContainer = ref();
+const feishuEnabled = ref(false);
+const qrError = ref('');
+const qrExpired = ref(false);
+const qrLoading = ref(false);
+const configError = ref('');
+let stopQr = null;
+let qrSequence = 0;
+let disposed = false;
 const form = reactive({ username: '', password: '' });
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -79,6 +99,63 @@ async function handleLogin() {
   const redirect = safeLocalRedirect(route.query.redirect);
   router.replace(redirect);
 }
+
+async function refreshQr() {
+  if (qrLoading.value || disposed) return;
+  qrLoading.value = true;
+  const sequence = ++qrSequence;
+  stopQr?.();
+  qrError.value = '';
+  qrExpired.value = false;
+  try {
+    await nextTick();
+    if (qrContainer.value) qrContainer.value.replaceChildren();
+    const started = await startFeishuLogin();
+    if (disposed || sequence !== qrSequence) return;
+    const authorizeUrl = validateAuthorizeUrl(started?.data?.authorize_url);
+    if (!started?.success || !authorizeUrl) {
+      qrError.value = feishuErrorMessages[started?.code] || feishuErrorMessages.provider_error;
+      return;
+    }
+    await nextTick();
+    if (disposed || sequence !== qrSequence || !qrContainer.value) return;
+    stopQr = await mountFeishuQr({ id: 'feishu-qr-login', container: qrContainer.value, authorizeUrl: authorizeUrl.toString(), isActive: () => !disposed && sequence === qrSequence, onError: (code) => {
+      qrExpired.value = code === 'expired';
+      qrError.value = feishuErrorMessages[code] || feishuErrorMessages.config_unavailable;
+    } });
+  } finally {
+    if (sequence === qrSequence) qrLoading.value = false;
+  }
+}
+
+onMounted(async () => {
+  const query = route.query;
+  if (query.feishu || query.feishu_error) {
+    const redirectAfterLogin = query.redirect;
+    const error = typeof query.feishu_error === 'string' ? query.feishu_error : '';
+    const cleanQuery = { ...query };
+    delete cleanQuery.feishu;
+    delete cleanQuery.feishu_error;
+    await router.replace({ path: '/login', query: cleanQuery });
+    if (error) {
+      qrError.value = feishuErrorMessages[error] || feishuErrorMessages.provider_error;
+    } else {
+      const result = await auth.completeFeishuLogin();
+      if (result.success) {
+        await router.replace(safeLocalRedirect(redirectAfterLogin));
+        return;
+      }
+      configError.value = feishuErrorMessages[result.code] || feishuErrorMessages.provider_error;
+    }
+  }
+  if (disposed) return;
+  const config = await getFeishuLoginConfig();
+  if (disposed) return;
+  feishuEnabled.value = Boolean(config?.success && config.data?.enabled === true);
+  if (!config?.success) configError.value = feishuErrorMessages[config?.code] || feishuErrorMessages.config_unavailable;
+  if (feishuEnabled.value && !query.feishu && !query.feishu_error) await refreshQr();
+});
+onBeforeUnmount(() => { disposed = true; qrSequence += 1; stopQr?.(); });
 </script>
 
 <style scoped>
@@ -157,6 +234,10 @@ async function handleLogin() {
 .login-panel :deep(.el-form) { margin-top: 24px; }
 .login-submit { width: 100%; min-height: 42px; }
 .login-panel__boundary { margin-top: 22px; font-size: 12px; line-height: 1.6; }
+.feishu-login { margin-top: 20px; padding: 18px; text-align: center; border: 1px solid #dbe3ec; border-radius: 8px; background: #fff; }
+.feishu-login h3 { margin: 0 0 12px; font-size: 16px; color: #172033; }
+.feishu-login p { margin: 8px 0 0; color: #64748b; font-size: 13px; }
+.feishu-qr { width: 300px; min-width: 300px; min-height: 300px; margin: 0 auto; }
 
 @media (max-width: 760px) {
   .login-page { grid-template-columns: 1fr; }

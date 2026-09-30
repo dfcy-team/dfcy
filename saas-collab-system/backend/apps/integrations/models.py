@@ -1710,6 +1710,21 @@ class FeishuIdentity(models.Model):
         constraints = [models.UniqueConstraint(fields=["tenant", "user"], name="uniq_feishu_identity_user")]
 
 
+class FeishuLoginSession(models.Model):
+    """One-use browser-bound login; only digests, never provider credentials."""
+
+    state_digest = models.CharField(max_length=64, unique=True)
+    browser_digest = models.CharField(max_length=64)
+    configuration_digest = models.CharField(max_length=64)
+    identity_digest = models.CharField(max_length=64, blank=True)
+    handoff_digest = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    connection = models.ForeignKey(FeishuConnection, on_delete=models.CASCADE)
+    identity = models.ForeignKey(FeishuIdentity, on_delete=models.CASCADE, null=True, blank=True)
+    stage = models.CharField(max_length=16, default="pending")
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class FeishuConfigRule(models.Model):
     class Kind(models.TextChoices):
         NOTIFICATION = "notification", "Notification"
