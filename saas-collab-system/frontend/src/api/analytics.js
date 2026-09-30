@@ -35,7 +35,7 @@ export const fetchSalesAnalysis = (params = {}) =>
 
 export const fetchInventoryAnalysis = async (params = {}, { signal } = {}) =>
   normalizeInventoryAnalysisResponse(await requestWithMockFallback(
-    { method: 'get', url: '/api/internal/analytics/inventory/', params: buildAnalyticsQuery(params), signal },
+    { method: 'get', url: '/api/internal/analytics/inventory/', params: buildAnalyticsQuery(params), signal, timeout: 30000 },
     mockInventoryAnalysis,
     'analytics.inventory'
   ));
