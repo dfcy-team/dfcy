@@ -16,8 +16,8 @@ export const internalReadonlyModules = [
 ];
 
 export const internalReadonlyResources = [
-  { module: 'master_data', code: 'products', label: '商品主数据', fields: ['id', 'sku', 'name', 'status', 'updated_at'] },
-  { module: 'master_data', code: 'product_details', label: '商品明细数据', fields: ['id', 'product_id', 'sku', 'name', 'specification', 'status', 'updated_at'] },
+  { module: 'master_data', code: 'products', label: '商品主数据', fields: ['id', 'sku', 'legacy_spu_code', 'name', 'status', 'updated_at'] },
+  { module: 'master_data', code: 'product_details', label: '商品明细数据', fields: ['id', 'product_id', 'sku', 'legacy_sku_code', 'name', 'specification', 'image_url', 'status', 'updated_at'] },
   { module: 'master_data', code: 'product_mappings', label: '商品映射数据', fields: ['id', 'product_id', 'platform', 'store_id', 'platform_sku', 'status', 'updated_at'] },
   { module: 'master_data', code: 'product_costs', label: '商品成本', fields: ['id', 'product_id', 'sku', 'currency', 'amount', 'effective_at', 'updated_at'] },
   { module: 'master_data', code: 'product_bundles', label: '组合商品', fields: ['id', 'product_id', 'sku', 'component_sku', 'quantity', 'status', 'updated_at'] },

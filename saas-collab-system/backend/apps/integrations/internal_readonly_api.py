@@ -7,6 +7,7 @@ an ORM model or fields from a caller-supplied resource name.
 import base64
 import binascii
 import ipaddress
+from urllib.parse import urlsplit
 
 from django.contrib.auth.hashers import check_password
 from django.conf import settings
@@ -33,8 +34,8 @@ from .serializers import INTERNAL_API_RESOURCE_FIELDS
 # Published fields, deliberately smaller than the configuration catalog's
 # historical placeholder field lists. No credential, contact or cost columns.
 READY = {
-    "products": (ProductSPU, ("id", "spu_code", "product_name", "brand", "category", "lifecycle_status", "sales_status", "updated_at")),
-    "product_details": (ProductSKU, ("id", "spu_id", "sku_code", "product_name", "color_code", "specification", "size", "material", "is_active", "updated_at")),
+    "products": (ProductSPU, ("id", "spu_code", "legacy_spu_code", "product_name", "brand", "category", "lifecycle_status", "sales_status", "updated_at")),
+    "product_details": (ProductSKU, ("id", "spu_id", "sku_code", "legacy_sku_code", "product_name", "color_code", "specification", "size", "material", "image_url", "is_active", "updated_at")),
     "product_categories": (ProductCategory, ("id", "parent_id", "level", "code", "name", "english_name", "is_active", "updated_at")),
     "platforms": (PlatformMaster, ("id", "code", "name", "platform_type", "status", "updated_at")),
     "country_sites": (CountrySiteMaster, ("id", "code", "name", "country_code", "currency", "timezone", "status", "updated_at")),
@@ -60,6 +61,21 @@ READY = {
 
 def _denied(status=401):
     return Response({"detail": "Read access denied."}, status=status)
+
+
+def _image_url(request, value):
+    """Expose a usable image reference without fetching arbitrary remote URLs."""
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme in {"http", "https"} and parsed.netloc and not parsed.username and not parsed.password:
+            return value
+        if not parsed.scheme and not parsed.netloc and parsed.path.startswith("/media/product-images/") and ".." not in parsed.path.split("/"):
+            return request.build_absolute_uri(value)
+    except ValueError:
+        pass
+    return None
 
 
 def _authenticate(request):
@@ -158,6 +174,9 @@ def resource_collection(request, resource):
     rows = list(queryset.order_by("id").values(*fields)[:limit + 1])
     has_more = len(rows) > limit
     items = rows[:limit]
+    if resource == "product_details":
+        for item in items:
+            item["image_url"] = _image_url(request, item["image_url"])
     return success_response({
         "resource": resource,
         "items": items,

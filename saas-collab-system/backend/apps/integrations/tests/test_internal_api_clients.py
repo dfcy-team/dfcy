@@ -12,7 +12,7 @@ from apps.tenants.models import Tenant
 from apps.integrations.models import InternalAPIClient, InternalAPIClientAudit
 from apps.integrations.serializers import INTERNAL_API_RESOURCE_FIELDS
 from apps.integrations.internal_readonly_api import READY, _source_ip
-from apps.products.models import ProductColor, ProductSPU
+from apps.products.models import ProductColor, ProductSKU, ProductSPU
 from apps.influencers.models import Influencer, OutreachTask, SampleFulfillment
 from apps.masterdata.models import PlatformMaster, StoreMaster
 
@@ -248,6 +248,36 @@ class InternalAPIClientTests(APITestCase):
         data = response.json()["data"]
         self.assertIn("products", [item["code"] for item in data["ready_resources"]])
         self.assertIn("advertising_performance", data["pending_resources"])
+
+    def test_product_images_return_absolute_urls_with_tenant_isolation(self):
+        self.payload["resources"] = ["products", "product_details"]
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = "approved"
+        obj.status = "active"
+        obj.save()
+        own = ProductSPU.objects.create(tenant=self.tenant, spu_code="IMAGE", legacy_spu_code="OLD-SPU", product_name="Image")
+        other = ProductSPU.objects.create(tenant=self.other_tenant, spu_code="OTHERIMAGE", product_name="Other")
+        ProductSKU.objects.bulk_create([
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="LOCAL", legacy_sku_code="OLD-SKU", image_url="/media/product-images/example.jpg"),
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="REMOTE", image_url="https://images.example.com/product.jpg"),
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="EMPTY", image_url=None),
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="INVALID", image_url="file:///etc/passwd"),
+            ProductSKU(tenant=self.other_tenant, spu=other, sku_code="OTHER", image_url="/media/product-images/other.jpg"),
+        ])
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        url = "/api/internal-readonly/v1/product_details/"
+        response = self.client.get(url, secure=True, **header)
+        self.assertEqual(response.status_code, 200, response.content)
+        images = {row["sku_code"]: row["image_url"] for row in response.json()["data"]["items"]}
+        self.assertEqual(images, {"LOCAL": "https://testserver/media/product-images/example.jpg", "REMOTE": "https://images.example.com/product.jpg", "EMPTY": None, "INVALID": None})
+        self.assertEqual(next(row for row in response.json()["data"]["items"] if row["sku_code"] == "LOCAL")["legacy_sku_code"], "OLD-SKU")
+        products = self.client.get("/api/internal-readonly/v1/products/", **header).json()["data"]["items"]
+        self.assertEqual([(row["spu_code"], row["legacy_spu_code"]) for row in products], [("IMAGE", "OLD-SPU")])
+        capabilities = self.client.get("/api/internal-readonly/v1/capabilities/").json()["data"]["ready_resources"]
+        self.assertIn("image_url", next(row["fields"] for row in capabilities if row["code"] == "product_details"))
+        self.assertEqual(self.client.get(url).status_code, 401)
 
     def test_new_read_blocks_have_explicit_tenant_scoped_projections(self):
         for code, (model, fields) in READY.items():

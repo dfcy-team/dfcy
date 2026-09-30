@@ -20,4 +20,8 @@ Authorization: Basic base64(client_id:client_secret)
 
 返回 `data.resource`、`data.items`、`data.next_cursor`、`data.has_more`；有下一页时将 `next_cursor` 传入下一次请求。字段以能力目录中各数据块的 `fields` 为准。不提供任意字段查询、跨租户查询、删除传播或历史增量水位保证。
 
+商品图片由 `product_details`（商品明细数据）的 `image_url` 返回。站内 `/media/product-images/` 路径转换为当前接口站点的完整 URL；外部 HTTP(S) 图片地址保持原值，无图片或无效地址返回 `null`。调用方取得地址后自行 GET 图片。图片元数据沿用商品明细数据授权，现有站内图片服务的访问规则保持不变；接口不代理下载外部图片，也不触发图片上传或修改。
+
+旧编码随商品数据返回：`products` 提供 `legacy_spu_code`（旧 SPU 编码），`product_details` 提供 `legacy_sku_code`（旧 SKU 编码）。SKU 的 `spu_id` 对应商品主数据的 `id`，调用方可据此关联旧 SPU；旧编码未登记时返回空字符串，不用新编码代填。
+
 服务端显式发布的数据块以实时 `capabilities/` 为准。基础档案首批 8 块之外，增量接入商品属性、颜色、映射、组合关系、平台商品、产品市调、开发项目、采购订单、销售订单、退款退货、库存快照、达人档案、建联任务和送样履约，共 22 块。每块只返回服务端公布的字段；联系电话、邮箱、请求负载、密钥、成本分摊等字段不随模型整表输出。商品成本、广告及其他没有安全只读合同的目录项仍待接入。业务路由不提供 POST、PUT、PATCH、DELETE。完整盘点见 [数据块接入审计](internal_readonly_resource_audit_20260929.md)。
