@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { requestApi, requestWithMockFallback } from './request';
 
 const base = '/api/internal/integrations/feishu';
 
@@ -13,6 +13,15 @@ const mockConnection = () => ok({
 export const fetchFeishuConnection = () => requestWithMockFallback(
   { method: 'get', url: `${base}/connection/` }, mockConnection, 'integrations.feishu.connection'
 );
+
+// These actions can contact real Feishu recipients, so they always use the API
+// and never report fixture data as a successful delivery.
+export const testFeishuConnection = () => requestApi({ method: 'post', url: `${base}/connection/test/`, data: {} });
+export const runFeishuNotification = (id, idempotency_key) => requestApi({ method: 'post', url: `${base}/notifications/${id}/run/`, data: { idempotency_key } });
+export const previewFeishuReport = (id) => requestApi({ method: 'post', url: `${base}/reports/${id}/preview/`, data: {} });
+export const runFeishuReport = (id, idempotency_key) => requestApi({ method: 'post', url: `${base}/reports/${id}/run/`, data: { idempotency_key } });
+export const retryFeishuOperation = (id) => requestApi({ method: 'post', url: `${base}/operations/${id}/retry/`, data: {} });
+export const notifyFeishuApproval = (approvalId) => requestApi({ method: 'post', url: `${base}/approvals/requests/${approvalId}/notify/`, data: {} });
 
 export const updateFeishuConnection = (data) => requestWithMockFallback(
   { method: 'put', url: `${base}/connection/`, data },

@@ -8,6 +8,12 @@ from .sync_services import fail_queued_sync_run, run_sync_job, validate_manual_s
 from .sync_alerts import upsert_sync_failure_alert
 
 
+@shared_task(soft_time_limit=540, time_limit=600)
+def dispatch_feishu_deliveries():
+    from .feishu_delivery import dispatch_feishu
+    return dispatch_feishu()
+
+
 @shared_task
 def refresh_due_integration_credentials():
     from .automatic_refresh import refresh_due_authorizations
