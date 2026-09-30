@@ -225,7 +225,7 @@
           <el-table-column label="SaaS 数据目标" min-width="190"><template #default="{ row }"><el-link type="primary">{{ row.data_destination }}</el-link><small class="cell-sub">{{ row.data_table }}</small></template></el-table-column>
           <el-table-column label="运行模式" min-width="110"><template #default="{ row }"><status-tag :value="row.execution_mode" /></template></el-table-column>
           <el-table-column label="状态" min-width="90"><template #default="{ row }"><status-tag :value="row.status" /></template></el-table-column>
-          <el-table-column label="开始时间" min-width="170"><template #default="{ row }">{{ date(row.started_at) }}</template></el-table-column>
+          <el-table-column label="开始日期（北京时间）" min-width="170"><template #default="{ row }">{{ date(row.started_at) }}</template></el-table-column>
           <el-table-column label="耗时" min-width="75"><template #default="{ row }">{{ row.duration_seconds === null ? '—' : `${row.duration_seconds}s` }}</template></el-table-column>
           <el-table-column label="抓取" prop="fetched_count" min-width="70" />
           <el-table-column label="新增" prop="created_count" min-width="70" />
@@ -387,8 +387,8 @@
           <div class="dialog-grid">
             <el-form-item label="同步范围 *"><el-select v-model="jobForm.query_mode"><el-option label="按上次进度继续同步（推荐）" value="incremental" /><el-option label="指定时间范围" value="range" /></el-select></el-form-item>
             <el-form-item v-if="jobForm.query_mode === 'incremental'" label="首次同步最近多少天 *"><el-input-number v-model="jobForm.lookback_days" :min="1" :max="3650" controls-position="right" /><small>只在任务第一次运行时使用，推荐 30 天。</small></el-form-item>
-            <el-form-item v-if="jobForm.query_mode === 'range'" label="开始时间 *"><el-date-picker v-model="jobForm.range_start_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
-            <el-form-item v-if="jobForm.query_mode === 'range'" label="结束时间 *"><el-date-picker v-model="jobForm.range_end_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+            <el-form-item v-if="jobForm.query_mode === 'range'" label="开始日期（北京时间） *"><el-date-picker v-model="jobForm.range_start_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+            <el-form-item v-if="jobForm.query_mode === 'range'" label="结束日期（北京时间，含当天） *"><el-date-picker v-model="jobForm.range_end_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
           </div>
           <details class="job-policy-advanced">
             <summary>高级设置（一般无需修改）</summary>
@@ -441,8 +441,8 @@
           <template v-if="batchPolicyFields.includes('query')">
             <el-form-item label="采集方式"><el-select v-model="batchPolicy.query_mode"><el-option label="按进度增量" value="incremental" /><el-option label="指定时间范围" value="range" /></el-select></el-form-item>
             <el-form-item v-if="batchPolicy.query_mode === 'incremental'" label="首次回看天数"><el-input-number v-model="batchPolicy.lookback_days" :min="1" :max="3650" /></el-form-item>
-            <el-form-item v-if="batchPolicy.query_mode === 'range'" label="开始时间"><el-date-picker v-model="batchPolicy.range_start_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
-            <el-form-item v-if="batchPolicy.query_mode === 'range'" label="结束时间"><el-date-picker v-model="batchPolicy.range_end_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+            <el-form-item v-if="batchPolicy.query_mode === 'range'" label="开始日期（北京时间）"><el-date-picker v-model="batchPolicy.range_start_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+            <el-form-item v-if="batchPolicy.query_mode === 'range'" label="结束日期（北京时间，含当天）"><el-date-picker v-model="batchPolicy.range_end_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
           </template>
         </div>
       </el-form>

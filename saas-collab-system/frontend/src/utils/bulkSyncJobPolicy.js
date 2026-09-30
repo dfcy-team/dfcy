@@ -12,6 +12,11 @@ export function classifyBulkSyncJobs(jobs) {
   return { eligible, skipped };
 }
 
+function rangeValue(value) {
+  // Legacy datetime inputs represent Beijing time; preserve explicit offsets and date-only ranges.
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value) ? `${value}+08:00` : value;
+}
+
 export function buildBulkSyncJobPayload(fields, policy) {
   const payload = {};
   for (const key of ['max_retry_count', 'backoff_base_seconds', 'query_page_size', 'max_pages', 'max_records', 'overlap_minutes', 'collection_time_basis']) {
@@ -27,7 +32,7 @@ export function buildBulkSyncJobPayload(fields, policy) {
   if (fields.includes('query')) {
     payload.query_mode = policy.query_mode;
     if (policy.query_mode === 'incremental') payload.lookback_days = policy.lookback_days;
-    else Object.assign(payload, { range_start_at: policy.range_start_at, range_end_at: policy.range_end_at });
+    else Object.assign(payload, { range_start_at: rangeValue(policy.range_start_at), range_end_at: rangeValue(policy.range_end_at) });
   }
   return payload;
 }

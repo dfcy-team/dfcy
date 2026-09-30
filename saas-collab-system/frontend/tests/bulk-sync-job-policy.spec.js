@@ -29,7 +29,15 @@ describe('批量同步策略', () => {
     expect(result).toEqual({
       schedule_type: 'weekly', timezone: 'Asia/Shanghai', catch_up: 'skip',
       local_time: '02:00', weekdays: [1, 3], query_mode: 'range',
-      range_start_at: '2026-08-01T00:00:00', range_end_at: '2026-08-31T23:59:59',
+      range_start_at: '2026-08-01T00:00:00+08:00', range_end_at: '2026-08-31T23:59:59+08:00',
     });
+  });
+  it('preserves Beijing date ranges and explicitly zoned timestamps', () => {
+    for (const range of [
+      { range_start_at: '2026-08-01', range_end_at: '2026-08-31' },
+      { range_start_at: '2026-08-01T00:00:00Z', range_end_at: '2026-08-31T23:59:59+08:00' },
+    ]) {
+      expect(buildBulkSyncJobPayload(['query'], { query_mode: 'range', ...range })).toEqual({ query_mode: 'range', ...range });
+    }
   });
 });
