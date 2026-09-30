@@ -442,3 +442,8 @@ COMPETITOR_REPORT_TIMEOUT_SECONDS = max(
 )
 COMPETITOR_REPORT_API_BASE_URL = COMPETITOR_REPORT_BASE_URL
 COMPETITOR_REPORT_API_TIMEOUT_SECONDS = COMPETITOR_REPORT_TIMEOUT_SECONDS
+
+# Independent employee delegation requires both switches and explicit existing field policies.
+EMPLOYEE_READONLY_ENABLED = os.getenv("EMPLOYEE_READONLY_ENABLED", "false").lower() == "true"
+EMPLOYEE_READONLY_CLIENT_IDS = [value.strip() for value in os.getenv("EMPLOYEE_READONLY_CLIENT_IDS", "").split(",") if value.strip()]
+EMPLOYEE_READONLY_FIELD_POLICIES = __import__("json").loads(os.getenv("EMPLOYEE_READONLY_FIELD_POLICIES", "{}"))
