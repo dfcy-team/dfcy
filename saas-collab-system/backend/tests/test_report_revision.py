@@ -65,10 +65,45 @@ def test_sales_dataset_obeys_custom_store_scope():
     create_order(tenant, visible, "visible")
     create_order(tenant, hidden, "hidden")
     viewer = user_for(tenant, "report-scope-viewer")
+    grant(viewer, "reports.view")
     grant(viewer, "sales_management.view", DataScope.ScopeType.CUSTOM, {"store_ids": [str(visible.id)]})
     response = client_for(viewer).post(QUERY, _config("sales", ["store_id"], ["order_count"]), format="json")
     assert response.status_code == 200
     assert [row["store_id"] for row in response.json()["data"]["rows"]] == [visible.id]
+
+
+@pytest.mark.parametrize("dataset,permission,metric", [
+    ("sales", "sales_management.view", "order_count"),
+    ("finance", "finance.view", "transaction_count"),
+])
+def test_dataset_api_requires_report_view_permission(dataset, permission, metric):
+    tenant, _, _, _ = create_scope(f"report-no-view-{dataset}")
+    viewer = user_for(tenant, f"report-no-view-{dataset}")
+    grant(viewer, permission)
+    client = client_for(viewer)
+    assert client.get("/api/report/datasets/").status_code == 403
+    assert client.post(QUERY, _config(dataset, ["currency"], [metric]), format="json").status_code == 403
+
+
+@pytest.mark.parametrize("dataset,permission,metric", [
+    ("sales", "sales_management.view", "order_count"),
+    ("finance", "finance.view", "transaction_count"),
+])
+def test_dataset_api_filters_report_types_before_cached_queries(dataset, permission, metric):
+    tenant, _, _, _ = create_scope(f"report-type-scope-{dataset}")
+    viewer = user_for(tenant, f"report-type-scope-{dataset}")
+    _report_access(viewer, permission)
+    client = client_for(viewer)
+    config = _config(dataset, ["currency"], [metric])
+    assert client.post(QUERY, config, format="json").status_code == 200
+    scope = DataScope.objects.get(role__user_roles__user=viewer, role__permissions__code="reports.view")
+    scope.scope_type = DataScope.ScopeType.CUSTOM
+    scope.config = {"report_types": ["analytics_summary"]}
+    scope.save(update_fields=["scope_type", "config"])
+    catalog = client.get("/api/report/datasets/")
+    assert catalog.status_code == 200
+    assert dataset not in {entry["id"] for entry in catalog.json()["data"]["datasets"]}
+    assert client.post(QUERY, config, format="json").status_code == 403
 
 
 def test_inventory_uses_latest_as_of_and_excludes_latest_virtual_by_default():
@@ -205,6 +240,7 @@ def test_self_service_export_file_and_download_recheck_source_scope(tmp_path, se
 
 def test_finance_scope_limits_transaction_collection_and_report_drillthrough():
     tenant, user, store, config, authorization = _lazada_scope("report-finance-scope")
+    grant(user, "reports.view")
     role = Role.objects.create(tenant=tenant, name="Finance scoped", code=f"finance-scope-{user.id}")
     permission, _ = Permission.objects.get_or_create(code="finance.view", defaults={"name": "Finance view", "module": "finance", "action": "view"})
     role.permissions.add(permission)

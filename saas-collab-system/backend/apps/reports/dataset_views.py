@@ -4,7 +4,6 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.responses import success_response
-from apps.permissions.api_permissions import IsInternalUser
 from apps.permissions.ui_p6_scopes import report_type_allowed
 from .datasets import DATASETS, dataset_catalog, normalize_config, query_dataset, selected_permission
 from .dashboard_config import authorize_dashboard, normalize_dashboard
@@ -13,7 +12,7 @@ from .permissions import IsReportViewer
 
 
 @api_view(["GET"])
-@permission_classes([IsInternalUser])
+@permission_classes([IsReportViewer])
 def report_datasets(request):
     return success_response({"datasets": dataset_catalog(request.user), "pending": [
         {"name": "广告分析与广告对账", "module": "经营分析 / 财务中心", "reason": "尚未接入广告数据"},
@@ -24,7 +23,7 @@ def report_datasets(request):
 
 
 @api_view(["POST"])
-@permission_classes([IsInternalUser])
+@permission_classes([IsReportViewer])
 def report_query(request):
     return success_response(query_dataset(request, request.data))
 

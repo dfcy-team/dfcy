@@ -13,7 +13,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.commerce.models import InventorySnapshot, RefundReturn, SalesOrder, SalesOrderItem
 from apps.finance.models import PlatformFinanceTransaction
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
-from apps.permissions.ui_p6_scopes import analytics_dimension_configs, filter_finance_queryset, permission_scope_configs
+from apps.permissions.ui_p6_scopes import analytics_dimension_configs, filter_finance_queryset, permission_scope_configs, report_type_allowed
 from apps.products.models import ProductCostVersion
 from apps.sales_management.scopes import filter_sales_queryset
 from apps.sales_management.views import _apply_dimensions, _inventory_latest, _inventory_source
@@ -68,6 +68,10 @@ DATASET_FILTERS = {
 def selected_permission(user, dataset):
     if not user or not user.is_authenticated or not user.is_active or user.user_type != "internal":
         raise PermissionDenied("需要内部用户权限。")
+    if not check_user_permission(user, "reports.view") or not get_permission_data_scopes(user, "reports.view"):
+        raise PermissionDenied("需要报表查看权限及数据范围。")
+    if not report_type_allowed(user, "reports.view", dataset["report_type"]):
+        raise PermissionDenied("此报表类型不在授权范围内。")
     for code in dataset.get("extra_permissions", []):
         if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
             raise PermissionDenied(f"需要 {code} 权限及数据范围。")
