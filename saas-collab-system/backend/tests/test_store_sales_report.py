@@ -61,7 +61,8 @@ def test_store_report_uses_full_scope_for_summary_and_trend_before_pagination():
     assert metrics["valid_order_count"] == 2
     assert metrics["cancelled_amount"] == 50
     assert sum(row['order_count'] for row in data['metric_daily']) == 3
-    assert sum(row['units_sold'] for row in data['metric_daily']) == 6
+    # Two units per valid order; cancelled units are excluded from sold units.
+    assert sum(row['units_sold'] for row in data['metric_daily']) == 4
     assert sum(Decimal(str(row['cancelled_amount'])) for row in data['metric_daily']) == 50
     assert sum(Decimal(row["gross_sales"]["PHP"]) for row in data["trend"]) == 1000
     page2 = client.get(path, {"page_size": 1, "page": 2, "ordering": "-gross_sales"}).json()["data"]
