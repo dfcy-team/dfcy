@@ -17,7 +17,7 @@ describe('auth store login actions', () => {
     const auth = useAuthStore();
     const feishu = await auth.completeFeishuLogin();
     expect(feishu.success).toBe(false);
-    const password = await auth.login({ username: 'synthetic-user', password: 'synthetic-password' });
+    const password = await auth.login({ username: 'synthetic-user', password: 'test-password' });
     expect(password.success).toBe(true);
     expect(auth.isAuthenticated).toBe(true);
     expect(auth.currentUser.username).toBe('synthetic-user');

@@ -31,7 +31,7 @@ def configure_login():
 @pytest.fixture
 def bound_user(db):
     tenant = Tenant.objects.create(name="Company", code="login")
-    user = CustomUser.objects.create_user(username="bound", password="existing-password",
+    user = CustomUser.objects.create_user(username="bound", password="test-password",
                                           tenant=tenant, user_type="internal")
     connection = FeishuConnection.objects.create(tenant=tenant, app_id="cli_login", enabled=True,
                                                   app_secret_ref="opaque-reference", created_by=user,
@@ -95,7 +95,7 @@ def test_unbound_identity_preserves_password_login(bound_user, provider):
     assert callback(client, start(client))["Location"] == "/login?feishu_error=unbound"
     assert not client.cookies.get(login.HANDOFF_COOKIE).value
     response = client.post("/api/internal/auth/login/", {
-        "username": "bound", "password": "existing-password"}, format="json")
+        "username": "bound", "password": "test-password"}, format="json")
     assert response.status_code == 200
     assert CustomUser.objects.count() == 1
     assert FeishuIdentity.objects.count() == 1
