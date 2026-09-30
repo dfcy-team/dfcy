@@ -34,8 +34,8 @@
         <template v-if="chosenFields.includes('query')">
           <el-form-item label="采集方式"><el-select v-model="policy.query_mode"><el-option label="按进度增量" value="incremental" /><el-option label="指定时间范围" value="range" /></el-select></el-form-item>
           <el-form-item v-if="policy.query_mode === 'incremental'" label="首次回看天数"><el-input-number v-model="policy.lookback_days" :min="1" :max="3650" /></el-form-item>
-          <el-form-item v-if="policy.query_mode === 'range'" label="开始时间"><el-date-picker v-model="policy.range_start_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
-          <el-form-item v-if="policy.query_mode === 'range'" label="结束时间"><el-date-picker v-model="policy.range_end_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+          <el-form-item v-if="policy.query_mode === 'range'" label="开始日期（北京时间）"><el-date-picker v-model="policy.range_start_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+          <el-form-item v-if="policy.query_mode === 'range'" label="结束日期（北京时间，含当天）"><el-date-picker v-model="policy.range_end_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
         </template>
       </div>
     </el-form>
