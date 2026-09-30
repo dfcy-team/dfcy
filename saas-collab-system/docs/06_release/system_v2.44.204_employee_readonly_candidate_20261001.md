@@ -8,7 +8,7 @@
 
 原 `/sso/authorize` 页面增加显式 purpose/audience 委托模式与本人确认文案，未新增菜单或路由。租户管理员自动目录同步/初始化排除新增委托 FIELD 自动分配，保留既有显式授予。
 
-迁移：`integrations.0036_employee_readonly_grant` 新增委托表；`integrations.0037_employee_readonly_field_catalog` 新增 38 项 FIELD 目录定义，不自动分配角色。Feishu 202 已占用 `0036_feishuloginsession`，员工委托 0036/0037 与该迁移序列均从 0035 分叉；正式接续 203 前必须执行迁移图谱检查与 merge migration 门禁，业务迁移文件不在本次修改范围内。首批资源仅 products/product_details/stores/warehouses；sales_orders/purchase_orders/inventory_snapshots/financial_aggregates 明确待接入。全局关闭、调用方允许配置为空、字段策略为空；未授权字段与资源不可读，不用机器接口兜底。生产不执行候选迁移。
+迁移：`integrations.0036_employee_readonly_grant` 新增委托表；`integrations.0037_employee_readonly_field_catalog` 新增 37 项 FIELD 目录定义（products 9、product_details 12、stores 9、warehouses 7），不自动分配角色。Feishu 202 已占用 `0036_feishuloginsession`，员工委托 0036/0037 与该迁移序列均从 0035 分叉；正式接续 203 前必须执行迁移图谱检查与 merge migration 门禁，业务迁移文件不在本次修改范围内。首批资源仅 products/product_details/stores/warehouses；sales_orders/purchase_orders/inventory_snapshots/financial_aggregates 明确待接入。全局关闭、调用方允许配置为空、字段策略为空；未授权字段与资源不可读，不用机器接口兜底。生产尚未执行候选迁移；正式部署仅执行已审阅并验证的最终迁移清单。
 
 合同与 NAS 接入步骤：`docs/03_api/employee_readonly_nas_integration_20261001.md`；OpenAPI：`docs/03_api/employee_readonly_v1.openapi.yaml`；安全审阅与回滚：`docs/06_release/employee_readonly_security_review_20261001.md`。
 
