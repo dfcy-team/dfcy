@@ -109,10 +109,13 @@ describe('UI-P6 API and analytics contract', () => {
   it('renders contract fields, pagination and no finance fund actions', () => {
     const page = read('src/components/Phase3AnalyticsPage.vue');
     const finance = read('src/views/finance/FinanceAnalyticsOverview.vue');
+    const workbench = read('src/views/reports/ReportWorkbench.vue');
     expect(page).toContain('<el-pagination');
-    expect(finance).toContain("prop: 'statement_amount'");
-    expect(finance).toContain("prop: 'account_mask'");
-    expect(finance).not.toContain('<el-button');
-    expect(finance).not.toMatch(/submitPayment|transferFunds|withdrawFunds/);
+    expect(finance).toContain('<ReportWorkbench :dataset="tab" />');
+    expect(finance).toContain("name=\"inventory_value\"");
+    expect(finance).toContain('v-show="canAccessPath(auth.currentUser, link.path)"');
+    expect(workbench).toContain("allowed('reports.export')");
+    expect(workbench).toContain("allowed('finance.export')");
+    expect([finance, workbench].join('\n')).not.toMatch(/submitPayment|transferFunds|withdrawFunds|createPayment|initiateTransfer/);
   });
 });

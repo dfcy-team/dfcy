@@ -5,7 +5,7 @@ const api = vi.hoisted(() => ({ fetchSalesPage: vi.fn(), fetchSalesFilters: vi.f
 const priceApi = vi.hoisted(() => ({ fetchPrices: vi.fn() }));
 vi.mock('../src/api/salesManagement', () => api);
 vi.mock('../src/api/pricing', () => priceApi);
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), useRoute: () => ({ query: {} }) }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] } }) }));
 import SalesWorkspace from '../src/views/sales-management/SalesWorkspace.vue';
 import PriceList from '../src/views/pricing/PriceList.vue';
