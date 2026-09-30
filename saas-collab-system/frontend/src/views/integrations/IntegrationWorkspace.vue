@@ -133,6 +133,7 @@
         <div>
           <el-button size="small" :disabled="!integrationManageAccess.allowed || operating" :title="integrationManageAccess.allowed ? '批量启用同步任务' : integrationManageAccess.reason" @click="batchToggle(true)">批量启用</el-button>
           <el-button size="small" :disabled="!integrationManageAccess.allowed || operating" :title="integrationManageAccess.allowed ? '批量停用同步任务' : integrationManageAccess.reason" @click="batchToggle(false)">批量停用</el-button>
+          <el-button size="small" :disabled="!integrationManageAccess.allowed || operating" @click="openBatchPolicy">批量修改策略</el-button>
           <el-button size="small" :disabled="!mockRunAccess.allowed || operating" :title="mockRunAccess.allowed ? '批量运行本地模拟任务' : mockRunAccess.reason" @click="batchRunMock">运行模拟任务</el-button>
         </div>
       </div>
@@ -405,6 +406,55 @@
       <template #footer><el-button @click="jobEditDialog = false">取消</el-button><el-button type="primary" :loading="operating" @click="saveJob">保存策略</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="batchPolicyDialog" title="批量修改同步策略" width="min(760px, 94vw)" :close-on-click-modal="false">
+      <p class="safe-note">仅修改勾选的设置。选择同平台、同资源类型的任务；运行中或排队中的任务将跳过。</p>
+      <el-form label-position="top" class="job-policy-form">
+        <div class="dialog-grid">
+          <el-form-item label="修改项目" class="wide">
+            <el-checkbox-group v-model="batchPolicyFields">
+              <el-checkbox label="重试次数" value="max_retry_count" />
+              <el-checkbox label="重试间隔" value="backoff_base_seconds" />
+              <el-checkbox label="每页条数" value="query_page_size" />
+              <el-checkbox label="最大页数" value="max_pages" />
+              <el-checkbox label="最大记录数" value="max_records" />
+              <el-checkbox label="重叠分钟数" value="overlap_minutes" />
+              <el-checkbox label="定时计划" value="schedule" />
+              <el-checkbox label="采集范围" value="query" />
+              <el-checkbox v-if="batchPolicyJobs[0]?.resource_type === 'sales_order'" label="订单时间口径" value="collection_time_basis" />
+            </el-checkbox-group>
+          </el-form-item>
+          <el-form-item v-if="batchPolicyFields.includes('max_retry_count')" label="最大重试次数"><el-input-number v-model="batchPolicy.max_retry_count" :min="0" :max="10" /></el-form-item>
+          <el-form-item v-if="batchPolicyFields.includes('backoff_base_seconds')" label="重试间隔基数（秒）"><el-input-number v-model="batchPolicy.backoff_base_seconds" :min="1" :max="5" /></el-form-item>
+          <el-form-item v-if="batchPolicyFields.includes('query_page_size')" label="每页条数"><el-input-number v-model="batchPolicy.query_page_size" :min="1" :max="100" /></el-form-item>
+          <el-form-item v-if="batchPolicyFields.includes('max_pages')" label="单次最大页数"><el-input-number v-model="batchPolicy.max_pages" :min="1" :max="1000" /></el-form-item>
+          <el-form-item v-if="batchPolicyFields.includes('max_records')" label="单次最大记录数"><el-input-number v-model="batchPolicy.max_records" :min="1" :max="100000" /></el-form-item>
+          <el-form-item v-if="batchPolicyFields.includes('overlap_minutes')" label="重叠查询分钟数"><el-input-number v-model="batchPolicy.overlap_minutes" :min="0" :max="1440" /></el-form-item>
+          <el-form-item v-if="batchPolicyFields.includes('collection_time_basis')" label="订单时间口径"><el-select v-model="batchPolicy.collection_time_basis"><el-option label="创建时间" value="created" /><el-option label="更新时间" value="updated" /></el-select></el-form-item>
+          <template v-if="batchPolicyFields.includes('schedule')">
+            <el-form-item label="调度方式"><el-select v-model="batchPolicy.schedule_type"><el-option label="手动" value="manual" /><el-option label="每小时" value="hourly" /><el-option label="固定间隔" value="interval" /><el-option label="每日" value="daily" /><el-option label="每周" value="weekly" /></el-select></el-form-item>
+            <el-form-item v-if="batchPolicy.schedule_type === 'interval'" label="间隔分钟"><el-input-number v-model="batchPolicy.interval_minutes" :min="15" :max="10080" /></el-form-item>
+            <el-form-item v-if="['daily', 'weekly'].includes(batchPolicy.schedule_type)" label="执行时间"><el-time-picker v-model="batchPolicy.local_time" value-format="HH:mm" format="HH:mm" /></el-form-item>
+            <el-form-item v-if="batchPolicy.schedule_type === 'weekly'" label="每周执行日" class="wide"><el-checkbox-group v-model="batchPolicy.weekdays"><el-checkbox-button v-for="day in weekdayOptions" :key="day.value" :value="day.value">{{ day.label }}</el-checkbox-button></el-checkbox-group></el-form-item>
+            <el-form-item label="执行时区"><el-input v-model="batchPolicy.timezone" /></el-form-item>
+            <el-form-item label="漏跑策略"><el-select v-model="batchPolicy.catch_up"><el-option label="跳过" value="skip" /><el-option label="补跑一次" value="run_once" /></el-select></el-form-item>
+          </template>
+          <template v-if="batchPolicyFields.includes('query')">
+            <el-form-item label="采集方式"><el-select v-model="batchPolicy.query_mode"><el-option label="按进度增量" value="incremental" /><el-option label="指定时间范围" value="range" /></el-select></el-form-item>
+            <el-form-item v-if="batchPolicy.query_mode === 'incremental'" label="首次回看天数"><el-input-number v-model="batchPolicy.lookback_days" :min="1" :max="3650" /></el-form-item>
+            <el-form-item v-if="batchPolicy.query_mode === 'range'" label="开始时间"><el-date-picker v-model="batchPolicy.range_start_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+            <el-form-item v-if="batchPolicy.query_mode === 'range'" label="结束时间"><el-date-picker v-model="batchPolicy.range_end_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+          </template>
+        </div>
+      </el-form>
+      <el-alert v-if="batchPolicyFields.includes('query')" title="修改采集范围会按现有规则重置对应任务的同步游标；历史数据和运行记录保留。" type="warning" :closable="false" show-icon />
+      <p>预览：可修改 {{ batchPolicyPreview.eligible.length }} 个，跳过 {{ batchPolicyPreview.skipped.length }} 个。</p>
+      <p v-if="batchPolicyFields.length" class="safe-note">将修改：{{ batchPolicyChangeSummary }}</p>
+      <ul class="batch-preview-list"><li v-for="item in batchPolicyPreview.skipped" :key="item.id">任务 #{{ item.id }}：{{ item.reason }}</li></ul>
+      <el-alert v-if="batchPolicyOutcome" :title="batchPolicyOutcome.summary" type="info" :closable="false" show-icon />
+      <ul v-if="batchPolicyOutcome?.failed.length" class="batch-preview-list"><li v-for="item in batchPolicyOutcome.failed" :key="item.id">任务 #{{ item.id }}：{{ item.reason }}</li></ul>
+      <template #footer><el-button @click="batchPolicyDialog = false">取消</el-button><el-button type="primary" :loading="operating" :disabled="!batchPolicyFields.length || !batchPolicyPreview.eligible.length" @click="saveBatchPolicy">确认批量修改</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="runDetailDialog" width="min(860px, 94vw)" class="run-detail-dialog">
       <template #header>
         <div class="run-detail-heading"><strong>同步运行详情</strong><small>展示脱敏后的调用、处理和写入结果</small></div>
@@ -451,6 +501,7 @@ import {
 } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
+import { buildBulkSyncJobPayload, classifyBulkSyncJobs } from '../../utils/bulkSyncJobPolicy';
 
 const props = defineProps({
   mode: { type: String, required: true },
@@ -476,6 +527,10 @@ const schedulerHistoryOpen = ref(false);
 const credentialDialog = ref(false);
 const jobDetailDialog = ref(false);
 const jobEditDialog = ref(false);
+const batchPolicyDialog = ref(false);
+const batchPolicyFields = ref([]);
+const batchPolicyJobs = ref([]);
+const batchPolicyOutcome = ref(null);
 const runDetailDialog = ref(false);
 const operating = ref(false);
 const configActionLoading = ref('');
@@ -514,6 +569,16 @@ const jobForm = reactive({
   query_mode: 'incremental', lookback_days: 30, overlap_minutes: 5, query_page_size: 50, max_pages: 100, max_records: 50000,
   range_start_at: null, range_end_at: null, query_statuses: ''
 });
+const batchPolicy = reactive({
+  max_retry_count: 3, backoff_base_seconds: 1, query_page_size: 50, max_pages: 100, max_records: 50000,
+  overlap_minutes: 5, collection_time_basis: 'created',
+  schedule_type: 'manual', interval_minutes: 60, local_time: '02:00', weekdays: [1, 2, 3, 4, 5, 6, 7],
+  timezone: 'Asia/Shanghai', catch_up: 'skip', query_mode: 'incremental', lookback_days: 30,
+  range_start_at: null, range_end_at: null
+});
+const batchPolicyPreview = computed(() => classifyBulkSyncJobs(batchPolicyJobs.value));
+const batchPolicyChangeSummary = computed(() => Object.entries(batchPolicyPayload())
+  .map(([key, value]) => `${key} = ${Array.isArray(value) ? value.join(',') : value}`).join('；'));
 const weekdayOptions = [{ label: '一', value: 1 }, { label: '二', value: 2 }, { label: '三', value: 3 }, { label: '四', value: 4 }, { label: '五', value: 5 }, { label: '六', value: 6 }, { label: '日', value: 7 }];
 const liveRunAccess = computed(() => getActionAccess(auth, { permission: props.runPermission }));
 const mockRunAccess = computed(() => getActionAccess(auth, { permission: props.mockRunPermission }));
@@ -1004,6 +1069,49 @@ async function batchToggle(enabled) {
     let succeeded = 0;
     for (const row of selectedJobs.value) { const response = await toggleSyncJob(row.id, enabled); if (response.success) succeeded += 1; }
     ElMessage.success(`批量操作完成：成功 ${succeeded} 个，失败 ${selectedJobs.value.length - succeeded} 个。`);
+    await load();
+  } finally {
+    operating.value = false;
+  }
+}
+function openBatchPolicy() {
+  if (actionDenied(integrationManageAccess.value) || operating.value || !selectedJobs.value.length) return;
+  batchPolicyJobs.value = [...selectedJobs.value];
+  batchPolicyFields.value = [];
+  batchPolicyOutcome.value = null;
+  batchPolicyDialog.value = true;
+}
+function batchPolicyPayload() {
+  return buildBulkSyncJobPayload(batchPolicyFields.value, batchPolicy);
+}
+async function saveBatchPolicy() {
+  if (actionDenied(integrationManageAccess.value) || operating.value || !batchPolicyFields.value.length) return;
+  const payload = batchPolicyPayload();
+  if (batchPolicyFields.value.includes('schedule') && (!payload.timezone?.trim()
+    || (['daily', 'weekly'].includes(payload.schedule_type) && !payload.local_time)
+    || (payload.schedule_type === 'weekly' && !payload.weekdays.length))) {
+    ElMessage.warning('请填写完整的定时计划。'); return;
+  }
+  if (payload.query_mode === 'range' && (!payload.range_start_at || !payload.range_end_at
+    || payload.range_start_at > payload.range_end_at)) {
+    ElMessage.warning('请填写有效的采集开始和结束时间。'); return;
+  }
+  if (batchPolicyFields.value.includes('query')) {
+    try {
+      await ElMessageBox.confirm('采集范围变化可能重置所选任务的同步游标。确认继续？', '确认批量修改', { type: 'warning' });
+    } catch (reason) { if (reason === 'cancel' || reason === 'close') return; throw reason; }
+  }
+  operating.value = true;
+  const failed = [...batchPolicyPreview.value.skipped];
+  let succeeded = 0;
+  try {
+    for (const row of batchPolicyPreview.value.eligible) {
+      const response = await updateSyncJob(row.id, payload);
+      if (response.success) succeeded += 1;
+      else failed.push({ id: row.id, reason: response.message || '保存失败' });
+    }
+    batchPolicyOutcome.value = { summary: `成功 ${succeeded} 个，跳过或失败 ${failed.length} 个。`, failed };
+    ElMessage[failed.length ? 'warning' : 'success'](`批量修改完成：成功 ${succeeded} 个，跳过或失败 ${failed.length} 个。${failed.slice(0, 3).map(item => `#${item.id} ${item.reason}`).join('；')}`);
     await load();
   } finally {
     operating.value = false;

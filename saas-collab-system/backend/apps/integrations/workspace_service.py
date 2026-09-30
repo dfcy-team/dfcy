@@ -620,7 +620,16 @@ def integration_workspace(user, mode, params):
         if mode == "sync-jobs"
         else _run_rows(runs, job_rows) + _unexecuted_plan_rows(user, job_rows)
     )
-    all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("enqueued_at") or row.get("scheduled_at") or row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
+    if mode == "sync-jobs":
+        all_rows.sort(key=lambda row: (
+            str(row.get("platform") or "").casefold(),
+            str(row.get("subject_name") or "").casefold(),
+            str(row.get("subject_key") or ""),
+            str(row.get("resource_type") or ""),
+            int(row.get("id") or 0),
+        ))
+    else:
+        all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("enqueued_at") or row.get("scheduled_at") or row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
     filtered = [row for row in all_rows if _matches(row, params, mode)]
     page_size = min(max(int(params.get("page_size", 50)), 1), 100)
     page_count = max(1, (len(filtered) + page_size - 1) // page_size)
