@@ -8,6 +8,7 @@
       <el-tag effect="plain">{{ loading ? '读取中' : result ? '业务数据' : '请选择报表' }}</el-tag>
     </header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
+    <ReportFieldDesigner v-if="selected" :dataset="selected" :config="config" @change="applyFields" />
     <el-form label-position="top" class="report-editor" @submit.prevent="run">
       <el-form-item v-if="!dataset" label="数据集"
         ><el-select v-model="config.dataset" @change="chooseDataset"
@@ -17,29 +18,13 @@
             :label="`${item.module} · ${item.name}`"
             :value="item.id" /></el-select
       ></el-form-item>
-      <el-form-item label="分组维度"
-        ><el-select v-model="config.dimensions" multiple :multiple-limit="6" collapse-tags collapse-tags-tooltip
-          ><el-option
-            v-for="item in selected?.dimensions || []"
-            :key="item.key"
-            :label="item.label"
-            :value="item.key" /></el-select
-      ></el-form-item>
-      <el-form-item label="指标"
-        ><el-select v-model="config.metrics" multiple collapse-tags collapse-tags-tooltip
-          ><el-option
-            v-for="item in selected?.metrics || []"
-            :key="item.key"
-            :label="item.label"
-            :value="item.key" /></el-select
-      ></el-form-item>
       <el-form-item label="展示方式"
         ><el-select v-model="config.chart"
           ><el-option label="明细表" value="table" /><el-option label="柱状图" value="bar" /><el-option
             label="折线图"
             value="line" /><el-option label="透视表" value="pivot" /></el-select
       ></el-form-item>
-      <el-form-item v-if="config.chart === 'pivot'" label="透视列"
+      <el-form-item v-if="config.chart === 'pivot' && !config.field_layout?.columns?.length" label="透视列"
         ><el-select v-model="config.pivot"
           ><el-option v-for="key in config.dimensions" :key="key" :label="label(key)" :value="key" /></el-select
       ></el-form-item>
@@ -68,7 +53,7 @@
       </div>
     </el-form>
     <el-form v-if="selected" class="report-filters" inline>
-      <el-form-item v-for="key in availableFilters" :key="key" :label="filterLabels[key]">
+      <el-form-item v-for="key in visibleFilters.filter(key => key !== 'include_virtual')" :key="key" :label="filterLabels[key] || key">
         <el-date-picker
           v-if="key.startsWith('date_')"
           v-model="config.filters[key]"
@@ -83,7 +68,7 @@
           :placeholder="key === 'currency' ? '如 PHP、CNY' : '全部'"
         />
       </el-form-item>
-      <el-checkbox v-if="config.dataset.startsWith('inventory')" v-model="config.filters.include_virtual"
+      <el-checkbox v-if="visibleFilters.includes('include_virtual')" v-model="config.filters.include_virtual"
         >包含虚拟商品</el-checkbox
       >
     </el-form>
@@ -102,77 +87,7 @@
         ><span>来源更新时间：{{ result.refreshed_at || '未提供' }}</span>
       </div>
       <p class="note">{{ result.note }} 点击分组可在有权限的业务页面核对明细。</p>
-      <template v-if="applied.chart === 'pivot' && applied.pivot">
-        <p class="note">透视表按原币分行，不跨币种汇总；选择一个指标查看。缺失单元格不补零。</p>
-        <table class="pivot-table">
-          <thead>
-            <tr>
-              <th>分组</th>
-              <th v-for="value in pivot.headings" :key="value">{{ value }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in pivot.rows" :key="row.label">
-              <th>{{ row.label }}</th>
-              <td v-for="value in pivot.headings" :key="value">{{ formatCell(row.cells[value], displayMetric) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </template>
-      <template v-else-if="['bar', 'line'].includes(applied.chart)">
-        <p class="note">图表展示前 40 个分组，保留币种标签，缺失值不绘制。完整分组见下方明细表。</p>
-        <svg
-          v-if="result.rows.length"
-          class="report-chart"
-          viewBox="0 0 900 280"
-          role="img"
-          :aria-label="label(displayMetric)"
-        >
-          <line x1="45" y1="230" x2="890" y2="230" stroke="#cbd5e1" />
-          <polyline
-            v-for="(series, index) in applied.chart === 'line' ? chartSeries : []"
-            :key="index"
-            :points="series.map((p) => `${p.x},${p.y}`).join(' ')"
-            fill="none"
-            stroke="#5941c6"
-            stroke-width="2"
-          />
-          <g v-for="(point, index) in chartPoints" :key="index">
-            <rect
-              v-if="applied.chart === 'bar'"
-              :x="point.x - 7"
-              :y="Math.min(point.y, 140)"
-              width="14"
-              :height="Math.max(1, Math.abs(140 - point.y))"
-              fill="#6952d9"
-            />
-            <circle v-else :cx="point.x" :cy="point.y" r="3" fill="#5941c6" />
-            <title>{{ point.label }}：{{ point.value }}</title>
-            <text
-              v-if="index % Math.ceil(chartPoints.length / 8) === 0"
-              :x="point.x"
-              y="252"
-              text-anchor="middle"
-              font-size="10"
-            >
-              {{ point.label.slice(0, 24) }}
-            </text>
-          </g>
-          <line x1="45" y1="140" x2="890" y2="140" stroke="#94a3b8" stroke-dasharray="3 3" />
-          <text x="8" y="144" font-size="11">0</text>
-        </svg>
-      </template>
-      <el-table :data="result.rows" stripe max-height="620" @row-click="drill">
-        <el-table-column
-          v-for="column in result.columns"
-          :key="column.key"
-          :prop="column.key"
-          :label="column.label"
-          min-width="145"
-          ><template #default="{ row }">{{ formatCell(row[column.key], column.key) }}</template></el-table-column
-        >
-      </el-table>
-      <el-empty v-if="!result.rows.length" description="当前授权范围和筛选条件下暂无数据。" />
+      <ReportResult :result="result" :config="applied" :dataset="selected" @drill="drill" />
     </div>
     <el-empty v-else-if="!loading && !selected" description="当前角色没有可用数据集，请核对业务权限和数据范围。" />
     <el-dialog v-model="saveOpen" title="保存报表视图" width="min(440px, 92vw)"
@@ -190,7 +105,10 @@ import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import { fetchReportDatasets, queryReport, saveReportView } from '../../api/reporting';
 import { createReportExport } from '../../api/reportExports';
-import { filterLabels, drillQuery, money, pivotRows, present } from './reportPresentation';
+import { filterLabels, drillQuery } from './reportPresentation';
+import { datasetFilters, fieldLayout } from './biLayout';
+import ReportFieldDesigner from './ReportFieldDesigner.vue';
+import ReportResult from './ReportResult.vue';
 const props = defineProps({
   dataset: { type: String, default: '' },
   title: { type: String, default: '' },
@@ -235,51 +153,16 @@ const canExport = computed(
         : true)
 );
 const dirty = computed(() => applied.value && JSON.stringify(config) !== JSON.stringify(applied.value));
-const availableFilters = computed(() => [
-  ...(selected.value?.filters || []),
-  ...(!config.dataset.startsWith('inventory') ? ['platforms', 'store_ids'] : [])
-]);
+const availableFilters = computed(() => datasetFilters(selected.value));
+const visibleFilters = computed(() => config.field_layout?.filters || availableFilters.value);
 const label = (key) =>
   [...(selected.value?.dimensions || []), ...(selected.value?.metrics || [])].find((item) => item.key === key)?.label ||
   key;
-const formatCell = (value, key) =>
-  selected.value?.metrics.find((item) => item.key === key)?.kind === 'money' ? money(value) : present(value);
-const displayMetric = computed(() => applied.value?.chart_metric || applied.value?.metrics?.[0] || config.chart_metric);
-const pivot = computed(() =>
-  pivotRows(result.value?.rows || [], applied.value?.dimensions || [], applied.value?.pivot, displayMetric.value)
-);
-const chartPoints = computed(() => {
-  const rows = (result.value?.rows || []).slice(0, 40);
-  const valid = (row) =>
-    row[displayMetric.value] != null &&
-    row[displayMetric.value] !== '' &&
-    Number.isFinite(Number(row[displayMetric.value]));
-  const max = Math.max(1, ...rows.filter(valid).map((row) => Math.abs(Number(row[displayMetric.value]))));
-  return rows.flatMap((row, i) =>
-    valid(row)
-      ? [
-          {
-            index: i,
-            currency: row.currency,
-            x: 60 + (i * 810) / Math.max(1, rows.length - 1),
-            y: 140 - (Number(row[displayMetric.value]) / max) * 100,
-            value: row[displayMetric.value],
-            label: applied.value.dimensions.map((k) => present(row[k])).join(' · ')
-          }
-        ]
-      : []
-  );
-});
-const chartSeries = computed(() => {
-  const series = [];
-  for (const point of chartPoints.value) {
-    const previous = series.at(-1)?.at(-1);
-    if (!previous || previous.currency !== point.currency || previous.index + 1 !== point.index) series.push([]);
-    series.at(-1).push(point);
-  }
-  return series;
-});
+function applyFields(next) { Object.assign(config, next); }
 function chooseDataset() {
+  sequence++;
+  controller?.abort();
+  loading.value = false;
   if (!selected.value) return;
   Object.assign(config, {
     dataset: selected.value.id,
@@ -291,6 +174,7 @@ function chooseDataset() {
     pivot: '',
     ordering: ''
   });
+  config.field_layout = fieldLayout({ ...config, field_layout: undefined }, selected.value);
   result.value = null;
   applied.value = null;
 }
@@ -303,6 +187,10 @@ async function run() {
   if (!config.metrics.includes(config.chart_metric)) config.chart_metric = config.metrics[0];
   const snapshot = JSON.parse(JSON.stringify(config));
   snapshot.filters = Object.fromEntries(Object.entries(snapshot.filters).filter(([, v]) => v !== '' && v != null));
+  if (snapshot.chart === 'pivot' && snapshot.pivot && !snapshot.field_layout.columns.length) {
+    snapshot.field_layout.columns = [snapshot.pivot];
+    snapshot.field_layout.rows = snapshot.dimensions.filter(key => key !== snapshot.pivot);
+  }
   try {
     const response = await queryReport(snapshot, controller.signal);
     if (current !== sequence) return;
@@ -334,6 +222,7 @@ function drill(row) {
       chart_metric: 'inventory_value',
       pivot: ''
     });
+    config.field_layout = fieldLayout({ ...config, field_layout: undefined }, selected.value);
     run();
     return;
   }
@@ -382,7 +271,10 @@ async function initialize() {
     datasets.value = response.data.datasets || [];
     config.dataset = props.dataset || props.viewConfig?.dataset || route.query.dataset || datasets.value[0]?.id || '';
     chooseDataset();
-    if (props.viewConfig) Object.assign(config, JSON.parse(JSON.stringify(props.viewConfig)));
+    if (props.viewConfig) {
+      Object.assign(config, JSON.parse(JSON.stringify(props.viewConfig)));
+      config.field_layout = fieldLayout(props.viewConfig, selected.value);
+    }
     else for (const key of availableFilters.value) if (route.query[key]) config.filters[key] = String(route.query[key]);
     if (selected.value) await run();
   } catch (failure) {
@@ -394,6 +286,7 @@ watch(
   (value) => {
     if (value) {
       Object.assign(config, JSON.parse(JSON.stringify(value)));
+      config.field_layout = fieldLayout(value, selected.value);
       run();
     }
   }
@@ -426,7 +319,7 @@ onBeforeUnmount(() => {
   sequence++;
   controller?.abort();
 });
-defineExpose({ config, run, drill, result });
+defineExpose({ config, run, drill, result, chooseDataset });
 </script>
 <style scoped>
 .report-workbench {

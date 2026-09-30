@@ -77,7 +77,7 @@ def selected_permission(user, dataset):
     raise PermissionDenied("没有此数据集的业务查看权限及数据范围。")
 
 def normalize_config(raw):
-    if not isinstance(raw, dict) or set(raw) - {"dataset", "dimensions", "metrics", "filters", "chart", "chart_metric", "pivot", "ordering"} or not isinstance(raw.get("dataset"), str):
+    if not isinstance(raw, dict) or set(raw) - {"dataset", "dimensions", "metrics", "filters", "chart", "chart_metric", "pivot", "ordering", "field_layout"} or not isinstance(raw.get("dataset"), str):
         raise ValidationError("报表配置格式不正确。")
     dataset = DATASETS.get(raw.get("dataset"))
     if not dataset:
@@ -131,6 +131,23 @@ def normalize_config(raw):
         config["dimensions"] = [*config["dimensions"], "currency"]
     if len(config["dimensions"]) > 6:
         raise ValidationError({"dimensions": "最多选择 6 个维度，金额报表须预留币种维度。"})
+    if raw.get("field_layout") is not None:
+        layout = raw["field_layout"]
+        if not isinstance(layout, dict) or set(layout) != {"rows", "columns", "filters"}:
+            raise ValidationError({"field_layout": "字段布局格式不正确。"})
+        rows, columns, layout_filters = layout["rows"], layout["columns"], layout["filters"]
+        if any(not isinstance(values, list) or any(not isinstance(value, str) for value in values) for values in (rows, columns, layout_filters)):
+            raise ValidationError({"field_layout": "字段布局必须为字段列表。"})
+        rows, columns, layout_filters = list(rows), list(columns), list(layout_filters)
+        # normalize_config may have just inserted currency for a monetary metric;
+        # preserve the user's column selection and place that required segment on rows.
+        if "currency" in config["dimensions"] and "currency" not in rows and "currency" not in columns:
+            rows.append("currency")
+        if len(columns) > 3 or len(set(rows)) != len(rows) or len(set(columns)) != len(columns) or set(rows) & set(columns) or set(rows) | set(columns) != set(config["dimensions"]):
+            raise ValidationError({"field_layout": "行列维度必须不重复、覆盖全部维度，且列最多 3 个。"})
+        if len(set(layout_filters)) != len(layout_filters) or set(layout_filters) - allowed_filters:
+            raise ValidationError({"field_layout": "存在不支持的布局筛选字段。"})
+        config["field_layout"] = {"rows": rows, "columns": columns, "filters": layout_filters}
     return config
 
 def scope_fingerprint(user, dataset, permission):
@@ -278,10 +295,13 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     params.update({k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in config["filters"].items()})
     proxy = SimpleNamespace(user=request.user, query_params=params)
     fingerprint = scope_fingerprint(request.user, dataset, permission)
-    key = "report:" + hashlib.sha256(json.dumps([VERSION, request.user.tenant_id, request.user.pk, fingerprint, config, limit], sort_keys=True, default=str).encode()).hexdigest()
+    # Dragging a field between rows/columns or changing chart type does not change facts.
+    # Reuse the scoped aggregate while always returning the caller's current presentation.
+    data_config = {key: config[key] for key in ("dataset", "dimensions", "metrics", "filters", "ordering")}
+    key = "report:" + hashlib.sha256(json.dumps([VERSION, "bi-cache-v1", request.user.tenant_id, request.user.pk, fingerprint, data_config, limit], sort_keys=True, default=str).encode()).hexdigest()
     result = cache.get(key) if use_cache else None
     if result is not None:
-        return {**result, "cached": True}
+        return {**result, "config": config, "cached": True}
     qs = source_queryset(proxy, config, permission)
     if export_scope:
         if config["dataset"] == "finance":

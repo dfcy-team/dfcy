@@ -2,7 +2,7 @@
   <section class="report-library">
     <header>
       <h1>报表中心</h1>
-      <p>业务报表保留在对应模块；在这里选择数据集、保存个人视图或查看共享配置。</p>
+      <p>拖动字段做透视分析，组合图表搭建看板；业务入口保留在销售、库存、财务和经营分析模块。</p>
     </header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-tabs v-model="tab">
@@ -20,7 +20,7 @@
         ><div class="catalog">
           <article v-for="view in views.filter((v) => v.is_owner)" :key="view.id">
             <h2>{{ view.name }}</h2>
-            <p>{{ view.is_shared ? '已共享配置' : '个人视图' }} · {{ view.updated_at }}</p>
+            <p>{{ view.config.kind === 'dashboard' ? `${view.config.module} · 组合看板` : '自助分析' }} · {{ view.is_shared ? '已共享配置' : '个人视图' }} · {{ view.updated_at }}</p>
             <el-button @click="openView(view)">打开</el-button><el-button @click="remove(view.id)">删除视图</el-button>
           </article>
         </div>
@@ -38,6 +38,9 @@
       <el-tab-pane label="自助分析" name="analysis"
         ><ReportWorkbench v-if="tab === 'analysis'" :key="workbenchKey" :view-config="viewConfig" @saved="loadViews"
       /></el-tab-pane>
+      <el-tab-pane label="组合看板" name="dashboard">
+        <ReportDashboard v-if="tab === 'dashboard'" :key="workbenchKey" :view-config="dashboardConfig" :module="dashboardModule" :name="viewName" @saved="loadViews" />
+      </el-tab-pane>
       <el-tab-pane label="待接入报表" name="pending"
         ><el-table :data="pending"
           ><el-table-column prop="name" label="报表" min-width="180" /><el-table-column
@@ -50,14 +53,21 @@
 </template>
 <script setup>
 import { onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { fetchReportDatasets, fetchSavedReportViews, deleteReportView } from '../../api/reporting';
 import ReportWorkbench from './ReportWorkbench.vue';
+import ReportDashboard from './ReportDashboard.vue';
+import { dashboardModules } from './biDashboard';
+const route = useRoute();
 const tab = ref('catalog'),
   datasets = ref([]),
   pending = ref([]),
   views = ref([]),
   error = ref(''),
   viewConfig = ref(null),
+  dashboardConfig = ref(null),
+  dashboardModule = ref(dashboardModules.includes(route.query.module) ? route.query.module : '经营分析'),
+  viewName = ref(''),
   workbenchKey = ref(0);
 async function loadViews() {
   const response = await fetchSavedReportViews();
@@ -71,9 +81,13 @@ function openDataset(id) {
   tab.value = 'analysis';
 }
 function openView(view) {
-  viewConfig.value = view.config;
+  if (view.config.kind === 'dashboard') {
+    dashboardConfig.value = view.config;
+    dashboardModule.value = view.config.module;
+    viewName.value = view.name;
+  } else viewConfig.value = view.config;
   workbenchKey.value++;
-  tab.value = 'analysis';
+  tab.value = view.config.kind === 'dashboard' ? 'dashboard' : 'analysis';
 }
 async function remove(id) {
   const response = await deleteReportView(id);
@@ -86,6 +100,7 @@ onMounted(async () => {
     if (!response.success) throw new Error(response.message);
     datasets.value = response.data.datasets || [];
     pending.value = response.data.pending || [];
+    if (route.query.tab === 'dashboard') tab.value = 'dashboard';
   } catch (failure) {
     error.value = failure.message;
   }

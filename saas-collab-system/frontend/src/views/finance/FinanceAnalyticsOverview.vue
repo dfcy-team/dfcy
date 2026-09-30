@@ -2,7 +2,7 @@
   <section>
     <header class="finance-links">
       <span>财务分析</span
-      ><el-button
+      ><BusinessDashboardLink module="财务中心" /><el-button
         v-for="link in links"
         :key="link.path"
         v-show="canAccessPath(auth.currentUser, link.path)"
@@ -25,6 +25,7 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import ReportWorkbench from '../reports/ReportWorkbench.vue';
+import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 const tab = ref('finance'),
   router = useRouter(),
   auth = useAuthStore();

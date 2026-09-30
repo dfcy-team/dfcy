@@ -17,6 +17,7 @@
     :table-note="asOf ? '穿透模式：每个仓库、来源 SKU 取截止日期之前的最后快照，保留未在截止当天同步的 SKU。' : '每个仓库、来源 SKU 显示所选日期范围内的最新快照；点击行查看快照与成本版本，点击表头可对全部结果排序。'"
   >
     <template #table-actions="{ search, loading }">
+      <BusinessDashboardLink module="库存管理" />
       <el-checkbox v-model="includeVirtual" :disabled="loading" @change="search"
         title="同时控制明细、库存汇总、风险统计和历史趋势；未设置属性或未关联的 SKU 仍保留。">
         包含虚拟商品
@@ -53,6 +54,7 @@ export function buildInventoryCostLocation(row, valuationAt) {
 </script>
 
 <script setup>
+import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Phase3AnalyticsPage from '../../components/Phase3AnalyticsPage.vue';

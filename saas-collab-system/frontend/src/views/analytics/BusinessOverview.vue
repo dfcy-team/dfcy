@@ -5,7 +5,7 @@
         <h1>经营总览</h1>
         <p>查看核心摘要和数据缺口，点击指标进入对应业务模块。</p>
       </div>
-      <el-tag effect="plain">{{ loading ? '读取中' : '业务数据摘要' }}</el-tag>
+      <BusinessDashboardLink module="经营分析" /><el-tag effect="plain">{{ loading ? '读取中' : '业务数据摘要' }}</el-tag>
     </header>
     <el-form inline @submit.prevent="search">
       <el-form-item label="平台"
@@ -101,6 +101,7 @@
   </section>
 </template>
 <script setup>
+import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';

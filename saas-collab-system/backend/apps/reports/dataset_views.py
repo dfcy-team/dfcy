@@ -7,6 +7,7 @@ from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsInternalUser
 from apps.permissions.ui_p6_scopes import report_type_allowed
 from .datasets import DATASETS, dataset_catalog, normalize_config, query_dataset, selected_permission
+from .dashboard_config import authorize_dashboard, normalize_dashboard
 from .models import SavedReportView
 from .permissions import IsReportViewer
 
@@ -43,8 +44,13 @@ def validate_view(request):
     name = str(data.get("name") or "").strip()
     if not name or len(name) > 100:
         raise ValidationError({"name": "请输入 1 至 100 个字符的名称。"})
-    config = normalize_config(data.get("config"))
-    selected_permission(request.user, DATASETS[config["dataset"]])
+    raw_config = data.get("config")
+    if isinstance(raw_config, dict) and raw_config.get("kind") == "dashboard":
+        config = normalize_dashboard(raw_config)
+        authorize_dashboard(request.user, config)
+    else:
+        config = normalize_config(raw_config)
+        selected_permission(request.user, DATASETS[config["dataset"]])
     shared = data.get("is_shared", False)
     if not isinstance(shared, bool):
         raise ValidationError({"is_shared": "请选择是否共享。"})
@@ -56,18 +62,24 @@ def validate_view(request):
 def report_view_collection(request):
     if request.method == "POST":
         values = validate_view(request)
-        if not report_type_allowed(request.user, "reports.view", DATASETS[values["config"]["dataset"]]["report_type"]):
+        if values["config"].get("kind") == "dashboard":
+            authorize_dashboard(request.user, values["config"])
+        elif not report_type_allowed(request.user, "reports.view", DATASETS[values["config"]["dataset"]]["report_type"]):
             raise PermissionDenied("此报表类型不在授权范围内。")
         view = SavedReportView.objects.create(tenant=request.user.tenant, owner=request.user, **values)
         return success_response(view_data(view, request.user), status=201)
     allowed = []
     for view in visible_views(request.user)[:100]:
         try:
-            dataset = DATASETS[view.config["dataset"]]
-            selected_permission(request.user, dataset)
-            if report_type_allowed(request.user, "reports.view", dataset["report_type"]):
+            if view.config.get("kind") == "dashboard":
+                authorize_dashboard(request.user, view.config)
                 allowed.append(view_data(view, request.user))
-        except (PermissionDenied, KeyError):
+            else:
+                dataset = DATASETS[view.config["dataset"]]
+                selected_permission(request.user, dataset)
+                if report_type_allowed(request.user, "reports.view", dataset["report_type"]):
+                    allowed.append(view_data(view, request.user))
+        except (PermissionDenied, ValidationError, KeyError):
             continue
     return success_response(allowed)
 
@@ -80,7 +92,9 @@ def report_view_detail(request, pk):
         view.delete()
         return success_response({"deleted": True})
     values = validate_view(request)
-    if not report_type_allowed(request.user, "reports.view", DATASETS[values["config"]["dataset"]]["report_type"]):
+    if values["config"].get("kind") == "dashboard":
+        authorize_dashboard(request.user, values["config"])
+    elif not report_type_allowed(request.user, "reports.view", DATASETS[values["config"]["dataset"]]["report_type"]):
         raise PermissionDenied("此报表类型不在授权范围内。")
     for key, value in values.items():
         setattr(view, key, value)

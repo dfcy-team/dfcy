@@ -85,4 +85,15 @@ describe('ReportWorkbench', () => {
     expect(wrapper.findAll('rect').length).toBe(0);
     expect(wrapper.text()).toContain('—');
   });
+  it('does not restore an old dataset after switching while its request is pending', async () => {
+    let complete;
+    api.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [dataset, { ...dataset, id: 'refunds' }] } });
+    api.queryReport.mockImplementationOnce(config => new Promise(resolve => { complete = () => resolve(result(config)); }));
+    const wrapper = mountPage(); await flushPromises();
+    wrapper.vm.config.dataset = 'refunds'; wrapper.vm.chooseDataset();
+    complete(); await flushPromises();
+    expect(wrapper.vm.config.dataset).toBe('refunds');
+    expect(wrapper.vm.result).toBeNull();
+    wrapper.unmount();
+  });
 });

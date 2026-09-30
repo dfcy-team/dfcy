@@ -7,6 +7,7 @@
         <p>{{ contract.description }}</p>
       </div>
       <div class="sales-header__actions">
+        <BusinessDashboardLink v-if="isReport" module="销售管理" />
         <el-tag :type="sourceTagType" effect="plain">{{ sourceStatusLabel }}</el-tag>
         <el-button v-if="canExport" :disabled="isReport && (loading || !appliedOverviewFilters)" @click="openExportDialog">{{ isReport ? '按已查询条件申请导出' : '按当前筛选申请导出' }}</el-button>
       </div>
@@ -230,6 +231,7 @@
 </template>
 
 <script setup>
+import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import { computed, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
