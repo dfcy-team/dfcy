@@ -60,6 +60,9 @@
               <el-option label="TikTok Shop" value="tiktok" />
             </el-select>
           </el-form-item>
+          <el-form-item label="平台范围"><el-input v-model.trim="filters.platforms" placeholder="多个平台用逗号分隔" maxlength="120" clearable /></el-form-item>
+          <el-form-item label="店铺 ID"><el-input v-model.trim="filters.store_ids" placeholder="多个 ID 用逗号分隔" maxlength="500" clearable /></el-form-item>
+          <el-form-item label="原始费用名称"><el-input v-model.trim="filters.raw_fee_name" placeholder="精确匹配" maxlength="191" clearable /></el-form-item>
           <el-form-item label="订单号"><el-input v-model.trim="filters.external_order_id" placeholder="平台订单号" clearable /></el-form-item>
           <el-form-item label="币种"><el-input v-model.trim="filters.currency" placeholder="如 MYR" maxlength="8" clearable /></el-form-item>
           <el-form-item label="费用分类">
@@ -119,18 +122,21 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { fetchFinanceTransactions, fetchLazadaFinanceWide, fetchPlatformStatements } from '../../api/financeReconciliation';
 
 const activeTab = ref('transactions');
+const route = useRoute();
 const loading = ref(false);
+let requestSequence = 0;
 const loaded = ref(false);
 const loadError = ref('');
 const transactions = ref([]);
 const wideRows = ref([]);
 const statements = ref([]);
 const pagination = reactive({ page: 1, page_size: 50, total: 0 });
-const filters = reactive({ period: [], platform: '', external_order_id: '', seller_sku: '', currency: '', fee_category: '', match_status: '' });
+const filters = reactive({ period: [], platform: '', store_id: '', store_ids: '', platforms: '', raw_fee_name: '', external_order_id: '', seller_sku: '', currency: '', fee_category: '', match_status: '' });
 const wideAmountColumns = [
   ['sales_amount', '销售收入'], ['refund_amount', '退款金额'], ['commission', '佣金'], ['payment_fee', '支付手续费'],
   ['payment_fee_credit', '支付手续费返还'], ['reversal_commission', '佣金冲销'], ['free_shipping_max_fee', '包邮费用'],
@@ -176,25 +182,32 @@ function wideParams() {
 }
 
 async function loadWide() {
+  const sequence = ++requestSequence;
   loading.value = true;
   loaded.value = false;
   loadError.value = '';
   try {
     const response = await fetchLazadaFinanceWide(wideParams());
+    if (sequence !== requestSequence) return;
     if (!response.success) throw new Error(response.message || 'Lazada 财务宽表加载失败');
     wideRows.value = response.data?.items || [];
     Object.assign(pagination, response.data?.pagination || { page: 1, page_size: 50, total: 0 });
     loaded.value = true;
   } catch (error) {
+    if (sequence !== requestSequence) return;
     wideRows.value = [];
     loadError.value = error?.message || 'Lazada 财务宽表加载失败';
-  } finally { loading.value = false; }
+  } finally { if (sequence === requestSequence) loading.value = false; }
 }
 
 function transactionParams() {
   return {
     page: pagination.page, page_size: pagination.page_size,
     platform: filters.platform || undefined,
+    platforms: filters.platforms || undefined,
+    store_id: filters.store_id || undefined,
+    store_ids: filters.store_ids || undefined,
+    raw_fee_name: filters.raw_fee_name || undefined,
     period_start: filters.period?.[0] || undefined, period_end: filters.period?.[1] || undefined,
     external_order_id: filters.external_order_id || undefined,
     currency: filters.currency?.toUpperCase() || undefined,
@@ -203,34 +216,40 @@ function transactionParams() {
 }
 
 async function loadTransactions() {
+  const sequence = ++requestSequence;
   loading.value = true;
   loaded.value = false;
   loadError.value = '';
   try {
     const response = await fetchFinanceTransactions(transactionParams());
+    if (sequence !== requestSequence) return;
     if (!response.success) throw new Error(response.message || '财务流水加载失败');
     transactions.value = response.data?.items || [];
     Object.assign(pagination, response.data?.pagination || { page: 1, page_size: 50, total: 0 });
     loaded.value = true;
   } catch (error) {
+    if (sequence !== requestSequence) return;
     transactions.value = [];
     loadError.value = error?.message || '财务流水加载失败';
-  } finally { loading.value = false; }
+  } finally { if (sequence === requestSequence) loading.value = false; }
 }
 
 async function loadStatements() {
+  const sequence = ++requestSequence;
   loading.value = true;
   loaded.value = false;
   loadError.value = '';
   try {
     const response = await fetchPlatformStatements();
+    if (sequence !== requestSequence) return;
     if (!response.success) throw new Error(response.message || '平台账单加载失败');
     statements.value = Array.isArray(response.data) ? response.data : (response.data?.items || []);
     loaded.value = true;
   } catch (error) {
+    if (sequence !== requestSequence) return;
     statements.value = [];
     loadError.value = error?.message || '平台账单加载失败';
-  } finally { loading.value = false; }
+  } finally { if (sequence === requestSequence) loading.value = false; }
 }
 
 function searchTransactions() { pagination.page = 1; loadTransactions(); }
@@ -240,7 +259,7 @@ function resetWide() {
   searchWide();
 }
 function resetTransactions() {
-  Object.assign(filters, { period: [], platform: '', external_order_id: '', currency: '', fee_category: '', match_status: '' });
+  Object.assign(filters, { period: [], platform: '', store_id: '', store_ids: '', platforms: '', raw_fee_name: '', external_order_id: '', currency: '', fee_category: '', match_status: '' });
   searchTransactions();
 }
 function changePageSize() {
@@ -251,7 +270,14 @@ function loadActiveTab(name) {
   pagination.page = 1;
   if (name === 'wide') loadWide(); else if (name === 'transactions') loadTransactions(); else loadStatements();
 }
-onMounted(loadTransactions);
+function applyRouteFilters() {
+  const query = route?.query || {};
+  for (const key of ['platform','store_id','store_ids','platforms','raw_fee_name','external_order_id','currency','fee_category','match_status']) filters[key] = query[key] ? (Array.isArray(query[key]) ? query[key].join(',') : String(query[key])) : '';
+  filters.period = query.period_start && query.period_end ? [String(query.period_start),String(query.period_end)] : [];
+  activeTab.value = 'transactions'; pagination.page = 1; loadTransactions();
+}
+watch(() => route?.query, applyRouteFilters);
+onMounted(applyRouteFilters);
 </script>
 
 <style scoped>

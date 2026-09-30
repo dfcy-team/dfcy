@@ -71,6 +71,11 @@ REPORT_CATALOG = {
         "required_permission": "sales_management.export",
         "contains_sensitive_data": False,
     },
+    ReportExportRequest.ReportType.SELF_SERVICE: {
+        "name": "自助报表",
+        "required_permission": "reports.view",
+        "contains_sensitive_data": False,
+    },
 }
 
 REPORT_FILTERS = {
@@ -125,7 +130,7 @@ def report_catalog_for_user(user):
         {
             "report_type": report_type,
             **metadata,
-            "mode": "file_export" if report_type == ReportExportRequest.ReportType.SALES_DETAILS else "placeholder_export",
+            "mode": "file_export" if report_type in {ReportExportRequest.ReportType.SALES_DETAILS, ReportExportRequest.ReportType.SELF_SERVICE} else "placeholder_export",
         }
         for report_type, metadata in REPORT_CATALOG.items()
         if report_type_allowed(user, "reports.view", report_type)
@@ -344,6 +349,8 @@ def create_export_request(*, user, report_type, filters, permission_code="report
     sanitized_filters = sanitize_sensitive_data(filters or {})
     if sanitized_filters != (filters or {}):
         raise ValidationError("Sensitive credentials are not allowed in report filters.")
+    if report_type == ReportExportRequest.ReportType.SELF_SERVICE:
+        return _create_self_service_export(user, sanitized_filters, permission_code, file_format)
     scope_snapshot = _scope_snapshot(user, permission_code)
     queryset = _apply_filters(_source_queryset(user, report_type), report_type, sanitized_filters)
     limited_count = queryset.values_list("pk", flat=True)[: MAX_EXPORT_ROWS + 1].count()
@@ -433,7 +440,10 @@ def create_download_grant(*, export_request, actor):
             PermissionDenied("The selected report type requires additional permission."),
         )
     try:
-        _apply_filters(_source_queryset(actor, export_request.report_type), export_request.report_type, export_request.filters)
+        if export_request.report_type == ReportExportRequest.ReportType.SELF_SERVICE:
+            _validate_self_service_source(export_request, actor)
+        else:
+            _apply_filters(_source_queryset(actor, export_request.report_type), export_request.report_type, export_request.filters)
     except (DataScopeDenied, PermissionDenied) as exc:
         _reject_download(export_request, actor, "denied_source_scope", exc)
     if not export_request.storage_key:
@@ -472,6 +482,11 @@ def resolve_export_file(*, export_request, actor, token):
     }
     if any(payload.get(key) != value for key, value in expected.items()):
         raise PermissionDenied("Download grant does not match the current user and tenant.")
+    # Recheck after grant issuance as well: role changes invalidate file access.
+    if not check_user_permission(actor, "reports.download") or not report_type_allowed(actor, "reports.download", export_request.report_type):
+        raise PermissionDenied("Report download permission is required.")
+    if export_request.report_type == ReportExportRequest.ReportType.SELF_SERVICE:
+        _validate_self_service_source(export_request, actor)
     if export_request.expires_at and export_request.expires_at <= timezone.now():
         raise ValidationError("Export file has expired.")
     root = Path(settings.REPORT_EXPORT_ROOT).resolve()
@@ -481,3 +496,73 @@ def resolve_export_file(*, export_request, actor, token):
     if hashlib.sha256(target.read_bytes()).hexdigest() != export_request.file_sha256:
         raise ValidationError("Export file integrity check failed.")
     return target
+
+
+def _self_service_access(user, config):
+    from .datasets import DATASETS, normalize_config, selected_permission
+    normalized = normalize_config(config)
+    dataset = DATASETS[normalized["dataset"]]
+    source_permission = selected_permission(user, dataset)
+    export_permission = "finance.export" if normalized["dataset"] in {"finance", "inventory_value"} else "sales_management.export" if normalized["dataset"] in {"sales", "sales_skus", "refunds"} else None
+    codes = sorted(set(["reports.view", "reports.export", source_permission, *dataset.get("extra_permissions", []), *([export_permission] if export_permission else [])]))
+    for code in codes:
+        if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
+            raise PermissionDenied(f"需要 {code} 权限及数据范围。")
+    if not report_type_allowed(user, "reports.view", dataset["report_type"]):
+        raise PermissionDenied("此业务报表类型不在查看权限范围内。")
+    return normalized, export_permission, {code: _scope_snapshot(user, code) for code in codes}
+
+
+def _validate_self_service_source(export_request, actor):
+    _, _, current = _self_service_access(actor, export_request.filters["config"])
+    if current != export_request.source_scope:
+        raise PermissionDenied("业务数据权限已变更，请按当前权限重新导出。")
+
+
+def _create_self_service_export(user, filters, permission_code, file_format):
+    from types import SimpleNamespace
+    from .datasets import query_dataset
+    if set(filters) != {"config"} or permission_code != "reports.export":
+        raise ValidationError("自助导出需提供已查询的报表配置。")
+    config, export_scope, source_scope = _self_service_access(user, filters["config"])
+    result = query_dataset(SimpleNamespace(user=user), config, limit=MAX_EXPORT_ROWS, use_cache=False, export_scope=export_scope)
+    rejected = result["truncated"]
+    export_request = ReportExportRequest(tenant=user.tenant, report_type=ReportExportRequest.ReportType.SELF_SERVICE, requested_by=user,
+        data_scope=_scope_snapshot(user, permission_code), source_scope=source_scope, filters={"config": result["config"]},
+        status=ReportExportRequest.Status.REJECTED if rejected else ReportExportRequest.Status.COMPLETED,
+        row_count=len(result["rows"]), file_format=file_format, rejection_reason="row_limit_exceeded" if rejected else "", finished_at=timezone.now())
+    export_request._export_service_write = True
+    export_request.save()
+    if not rejected:
+        if file_format == "txt":
+            content = ("\ufeff" + json.dumps(result, ensure_ascii=False, default=str, indent=2)).encode("utf-8")
+        else:
+            stream = io.StringIO(newline="")
+            writer = csv.writer(stream, lineterminator="\r\n")
+            columns = result["columns"]
+            writer.writerow([column["label"] for column in columns])
+            for row in result["rows"]:
+                writer.writerow([_safe_csv_value(row.get(column["key"])) for column in columns])
+            content = ("\ufeff" + stream.getvalue()).encode("utf-8")
+        root = Path(settings.REPORT_EXPORT_ROOT).resolve()
+        directory = (root / str(user.tenant_id)).resolve()
+        if root not in directory.parents:
+            raise ValidationError("Export storage path is invalid.")
+        directory.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.{file_format}"
+        target = directory / filename
+        temporary = directory / f".{filename}.tmp"
+        try:
+            temporary.write_bytes(content)
+            os.replace(temporary, target)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        export_request.storage_key = f"{user.tenant_id}/{filename}"
+        export_request.file_sha256 = hashlib.sha256(content).hexdigest()
+        export_request.masked_file_reference = f"export://report-export/{export_request.pk}"
+        export_request.expires_at = timezone.now() + timedelta(seconds=settings.REPORT_EXPORT_TTL_SECONDS)
+        export_request._export_service_write = True
+        export_request.save(update_fields=["storage_key", "file_sha256", "masked_file_reference", "expires_at"])
+    _write_audit(export_request, user, ReportExportAuditLog.Action.REQUEST, "rejected_row_limit" if rejected else "file_completed")
+    return export_request

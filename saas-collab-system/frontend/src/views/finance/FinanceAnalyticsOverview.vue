@@ -1,38 +1,54 @@
 <template>
-  <Phase3AnalyticsPage
-    eyebrow="财务分析"
-    title="财务经营分析"
-    subtitle="查看脱敏后的账单、到账、对账差异与利润占位。"
-    boundary-note="本页仅提供授权后的只读聚合分析，不执行付款、转账、提现或自动确认对账。"
-    :loader="fetchFinanceAnalyticsOverview"
-    :filters="filters"
-    :columns="columns"
-    trend-title="月度对账完成度"
-    trend-note="演示指数用于观察财务数据完整性"
-    trend-unit="指数"
-    table-title="月度财务摘要"
-    table-note="金额与银行账号默认聚合或掩码展示"
-  />
+  <section>
+    <header class="finance-links">
+      <span>财务分析</span
+      ><el-button
+        v-for="link in links"
+        :key="link.path"
+        v-show="canAccessPath(auth.currentUser, link.path)"
+        @click="router.push(link.path)"
+        >{{ link.label }}</el-button
+      >
+    </header>
+    <el-tabs v-model="tab"
+      ><el-tab-pane label="平台流水与费用" name="finance" /><el-tab-pane
+        label="库存估值与成本覆盖"
+        name="inventory_value"
+    /></el-tabs>
+    <ReportWorkbench :dataset="tab" />
+    <p class="note">订单利润、结算利润和实际回款将在相应数据链路完整后开放；当前流水净额与库存货值不能代替利润。</p>
+  </section>
 </template>
-
 <script setup>
-import Phase3AnalyticsPage from '../../components/Phase3AnalyticsPage.vue';
-import { fetchFinanceAnalyticsOverview } from '../../api/financeAnalytics';
-
-const filters = [
-  { key: 'date_range', label: '日期', type: 'daterange' },
-  { key: 'currency', label: '币种', options: [{ label: 'CNY', value: 'CNY' }, { label: 'USD', value: 'USD' }, { label: 'EUR', value: 'EUR' }] }
-];
-const columns = [
-  { prop: 'period_start', label: '开始日期' },
-  { prop: 'period_end', label: '结束日期' },
-  { prop: 'platform', label: '平台' },
-  { prop: 'currency', label: '币种' },
-  { prop: 'statement_amount', label: '账单金额', width: 140 },
-  { prop: 'receipt_amount', label: '到账金额', width: 140 },
-  { prop: 'difference_amount', label: '差异金额', width: 140 },
-  { prop: 'exception_count', label: '异常数' },
-  { prop: 'account_mask', label: '账号掩码', width: 130 },
-  { prop: 'quality_status', label: '质量', type: 'status' }
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { useAuthStore } from '../../stores/auth';
+import { canAccessPath } from '../../router/menu';
+import ReportWorkbench from '../reports/ReportWorkbench.vue';
+const tab = ref('finance'),
+  router = useRouter(),
+  auth = useAuthStore();
+const links = [
+  { path: '/finance/statements', label: '平台账单' },
+  { path: '/finance/reconciliation/matches', label: '对账差异' },
+  { path: '/finance/reconciliation/exceptions', label: '对账异常' }
 ];
 </script>
+<style scoped>
+.finance-links {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.finance-links span {
+  font-size: 18px;
+  margin-right: auto;
+}
+.note {
+  font-size: 12px;
+  color: #526177;
+  line-height: 1.7;
+}
+</style>

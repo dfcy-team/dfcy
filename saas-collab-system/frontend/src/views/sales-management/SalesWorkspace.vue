@@ -35,6 +35,9 @@
 
     <p v-if="quality.checked_rows > 0 && !isReport" class="field-note">质量检查覆盖 {{ formatField(quality.checked_rows, { numeric: true }) }} 条事实记录，发现 {{ formatField(quality.problem_rows, { numeric: true }) }} 条问题。评分不代表同步成功率或 SKU 关联率。</p>
 
+    <nav v-if="isReport && reportTabs.length" class="overview-detail-switch" aria-label="销售报表导航">
+      <el-button v-for="tab in reportTabs" :key="tab.path" :type="tab.mode === mode ? 'primary' : 'default'" :aria-current="tab.mode === mode ? 'page' : undefined" @click="navigateReport(tab.path)">{{ tab.label }}</el-button>
+    </nav>
     <div v-if="mode === 'skus'" class="overview-detail-switch" role="group" aria-label="SKU 汇总方式"><el-button :type="skuGrouping === 'store' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'store'" @click="changeSkuGrouping('store')">按店铺 SKU 汇总</el-button><el-button :type="skuGrouping === 'product' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'product'" @click="changeSkuGrouping('product')">按商品 SKU 汇总</el-button></div>
     <el-form v-if="resolvedFilters.length" class="sales-filters" :class="{ 'order-filters': mode === 'orders' }" :model="query" label-position="top" @submit.prevent="applyFilters">
       <div class="filter-grid">
@@ -114,6 +117,9 @@
       </details>
 
       <section v-if="mode === 'data-quality'" class="sales-panel table-panel">
+        <h2>数据关联缺口</h2>
+        <p class="field-note">销售商品行未关联：{{ quality.linkage?.unmapped_order_items ?? '未评估' }} / {{ quality.linkage?.order_item_count ?? '未评估' }}；退款未关联订单：{{ quality.linkage?.unlinked_refunds ?? '未评估' }} / {{ quality.linkage?.refund_count ?? '未评估' }}；退款商品行未关联：{{ quality.linkage?.unmapped_refund_items ?? '未评估' }}。</p>
+        <el-button v-if="canAccessPath(auth.currentUser, '/products/platform-details')" @click="router.push('/products/platform-details')">检查平台商品关联</el-button>
         <div class="panel-heading"><div><h2>同步来源</h2><p>展示接口返回的授权范围内任务，最多 100 条；查看本页不会启动同步。</p></div></div>
         <el-table :data="sources" stripe empty-text="尚无可见同步来源，或当前角色没有同步查看权限。">
           <el-table-column v-for="column in sourceColumns" :key="column.prop" :label="column.label" :min-width="column.width || 140" :align="column.numeric ? 'right' : 'left'" show-overflow-tooltip>
@@ -147,9 +153,10 @@
               <span v-else :class="{ 'numeric-value': column.numeric }">{{ formatField(valueAt(row, column.prop) ?? valueAt(row, column.fallback), column) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" :width="mode === 'orders' ? 150 : 100" fixed="right">
+          <el-table-column label="操作" :width="mode === 'orders' ? 150 : (mode === 'stores' || mode === 'skus' ? 190 : 100)" fixed="right">
             <template #default="{ row }">
               <el-button text type="primary" @click.stop="selectRow(row)">查看详情</el-button>
+              <el-button v-if="(mode === 'stores' || mode === 'skus') && canAccessPath(auth.currentUser, '/sales-management/orders')" text type="primary" @click.stop="drillToOrders(row)">查看订单</el-button>
               <el-button v-if="mode === 'orders'" text @click.stop="copyReference(row.external_order_id)">复制</el-button>
             </template>
           </el-table-column>
@@ -224,7 +231,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage } from '../../api/salesManagement';
 import { formatApiError } from '../../api/request';
@@ -234,9 +241,11 @@ import { formatField, formatMetric, statusLabel, statusType } from './display';
 import SalesOverviewPanel from './SalesOverviewPanel.vue';
 import SalesReportTable from './SalesReportTable.vue';
 import { completedDateRange } from './overviewTrend';
+import { canAccessPath } from '../../router/menu';
 
 const props = defineProps({ mode: { type: String, required: true } });
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const UI_STATES = ['loading', 'empty', 'error', 'pending', 'stale', 'partial'];
 const contract = computed(() => salesPageContracts[props.mode] || salesPageContracts.overview);
@@ -316,6 +325,12 @@ const exportTypes = [
 
 const permissions = computed(() => new Set(auth.currentUser?.permissions || []));
 const canExport = computed(() => auth.currentUser?.is_superuser || permissions.value.has('sales_management.export'));
+const reportTabs = computed(() => [
+  { mode: 'overview', path: '/sales-management/overview', label: '总览' },
+  { mode: 'stores', path: '/sales-management/stores', label: '门店' },
+  { mode: 'skus', path: '/sales-management/skus', label: 'SKU' },
+  { mode: 'returns', path: '/sales-management/returns', label: '退款退货' }
+].filter(tab => canAccessPath(auth.currentUser, tab.path)));
 const pageState = computed(() => loading.value ? 'loading' : errorMessage.value ? 'error' : rows.value.length ? 'success' : 'empty');
 const sourceStatusLabel = computed(() => errorMessage.value ? '读取失败' : loading.value ? '正在读取' : props.mode === 'exports' && sourceStatus.value !== 'mock' ? '任务列表已读取' : ({
   pending: '等待首批数据', stale: '数据已过期', partial: '部分数据可用', ready: '数据已更新', mock: '模拟数据'
@@ -348,12 +363,56 @@ async function loadFilterOptions() {
   Object.keys(filterData).forEach((key) => { filterData[key] = response.data?.[key] || []; });
 }
 
-function isMultiFilter(key) { return isReport.value && ['platform', 'store_id'].includes(key); }
+function isMultiFilter(key) { return (isReport.value || ['orders', 'returns'].includes(props.mode)) && ['platform', 'store_id'].includes(key); }
 
 function initializeFilters() {
   Object.keys(query).forEach((key) => delete query[key]);
   contract.value.filters.forEach((filter) => { query[filter.key] = filter.type === 'daterange' ? (isReport.value ? completedDateRange(30) : recentThirtyDays()) : isMultiFilter(filter.key) ? [] : ''; });
+  applyRouteFilters(route.query, false);
   page.value = 1;
+}
+
+function queryArray(value) { return Array.isArray(value) ? value.flatMap(item => String(item).split(',')).filter(Boolean) : value == null || value === '' ? [] : String(value).split(',').filter(Boolean); }
+function applyRouteFilters(routeQuery, load = true) {
+  const from = routeQuery.date_from, to = routeQuery.date_to;
+  if (from && to && Object.hasOwn(query, 'date_range')) query.date_range = [String(from), String(to)];
+  if (Object.hasOwn(query, 'platform')) {
+    const platforms = queryArray(routeQuery.platforms ?? routeQuery.platform);
+    query.platform = isMultiFilter('platform') ? platforms : (platforms[0] || '');
+  }
+  if (Object.hasOwn(query, 'store_id')) {
+    const stores = queryArray(routeQuery.store_ids ?? routeQuery.store_id).map(value => /^\d+$/.test(value) ? Number(value) : value);
+    query.store_id = isMultiFilter('store_id') ? stores : (stores[0] || '');
+  }
+  for (const key of ['currency', 'sku', 'external_order_id']) if (routeQuery[key] != null && Object.hasOwn(query, key)) query[key] = String(routeQuery[key]);
+  if (Object.hasOwn(query, 'status')) query.status = String((props.mode === 'returns' ? routeQuery.refund_status : routeQuery.order_status) || routeQuery.status || '');
+  for (const key of ['region','sku_exact','order_exact','exclude_cancelled','unmapped_only']) {
+    if (routeQuery[key] != null) query[key] = String(routeQuery[key]); else delete query[key];
+  }
+  if (routeQuery.currency_basis === 'CNY' && Object.hasOwn(query, 'currency')) query.currency = '__AUTO_CNY__';
+  if (load) { page.value = 1; loadData(); }
+}
+
+function routeFilters() {
+  const params = appliedOverviewFilters.value || requestParams();
+  const filters = {};
+  for (const key of ['date_from', 'date_to', 'platforms', 'store_ids', 'currency', 'currency_basis', 'sku', 'external_order_id']) {
+    if (params[key] != null && params[key] !== '') filters[key] = params[key];
+  }
+  if (params.currency_basis === 'CNY') filters.currency = 'CNY';
+  return filters;
+}
+function navigateReport(path) { router.push({ path, query: routeFilters() }); }
+function drillToOrders(row) {
+  if (!canAccessPath(auth.currentUser, '/sales-management/orders')) return;
+  const filters = routeFilters();
+  if (row?.store_id != null) filters.store_ids = String(row.store_id);
+  if (row?.currency || row?.source_currency) filters.currency = row.source_currency || row.currency;
+  if (props.mode === 'skus') {
+    const sku = row?.source_sku || row?.seller_sku || row?.sku;
+    if (sku) filters.sku = sku;
+  }
+  router.push({ path: '/sales-management/orders', query: filters });
 }
 
 function formatDate(date) {
@@ -373,6 +432,7 @@ function recentThirtyDays() {
 function requestParams() {
   const params = { page: page.value, page_size: pageSize };
   if (props.mode === 'skus') Object.assign(params, { report: 'true', grouping: skuGrouping.value, ordering: skuOrdering.value });
+  if (['orders', 'returns'].includes(props.mode)) params.include_summary = 'false';
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
   if (props.mode === 'orders' && orderOrdering.value) params.ordering = orderOrdering.value;
   Object.entries(query).forEach(([key, value]) => {
@@ -550,6 +610,10 @@ async function submitExport() {
 }
 
 watch(() => props.mode, () => { ++detailSequence; detailOpen.value = false; detailLoading.value = false; selectedRow.value = null; clearData(); initializeFilters(); loadFilterOptions(); loadData(); }, { immediate: true });
+watch(() => route.query, (next, previous) => {
+  if (JSON.stringify(next) === JSON.stringify(previous)) return;
+  applyRouteFilters(next);
+}, { deep: true });
 void UI_STATES;
 </script>
 

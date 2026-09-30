@@ -202,3 +202,15 @@ def test_sku_search_does_not_resurrect_an_old_mapping(inventory):
     assert current["count"] == 1
     assert current["results"][0]["on_hand_qty"] == 8
     assert current["trend"][0]["total"] == 8
+
+
+def test_as_of_drill_keeps_last_snapshot_before_cutoff_even_without_same_day_sync(inventory):
+    client, _, snapshot = inventory
+    snapshot('OLDER-SKU', NOW - timedelta(days=2), 7)
+    params = {'period_start': '2026-08-17', 'period_end': '2026-08-17', 'as_of': 'true', 'include_virtual': 'false'}
+    response = client.get('/api/internal/analytics/inventory/', params)
+    assert response.status_code == 200
+    rows = {row['source_sku']: row['on_hand_qty'] for row in response.json()['data']['results']}
+    assert rows == {'FAKE-SKU': 12, 'OLDER-SKU': 7}
+    params.pop('as_of')
+    assert client.get('/api/internal/analytics/inventory/', params).json()['data']['count'] == 1
