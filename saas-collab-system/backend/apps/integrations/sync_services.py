@@ -352,10 +352,18 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         frozen_scope = runtime_budget.get("resolved_scope")
         if hasattr(adapter, "scope"):
             adapter.scope = dict(frozen_scope)
+    adapter_scope = getattr(adapter, "scope", {})
+    # Live clients expose only these provider-neutral query controls. Never
+    # archive arbitrary adapter fields (which could contain credentials).
+    frozen_query = {
+        key: adapter_scope[key]
+        for key in ("time_from", "time_to", "page_size", "product_full_sync", "time_basis", "statuses")
+        if isinstance(adapter_scope, dict) and key in adapter_scope
+    }
     runtime_budget.update({
         "sequence": resume_sequence, "pending": False,
         "budget_seconds": budget_seconds, "slice_started_at": now.isoformat(),
-        "resolved_scope": dict(getattr(adapter, "scope", {}) or {}),
+        "resolved_scope": frozen_query,
     })
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": runtime_budget})
     run.save(update_fields=["masked_log"])
