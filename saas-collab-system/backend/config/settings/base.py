@@ -350,6 +350,14 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_DEFAULT_QUEUE = "celery"
+CELERY_TASK_DEFAULT_PRIORITY = 5
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "priority"}
+CELERY_TASK_ROUTES = {
+    "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
+    "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
+}
 CELERY_BEAT_SCHEDULE = {
     "activate-due-config-versions": {
         "task": "configcenter.activate_due_config_versions",
@@ -399,7 +407,7 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
-SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "1200")))
+SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "960")))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.
 UI_P4_COLLABORATION_MODE = os.getenv("UI_P4_COLLABORATION_MODE", "mock")

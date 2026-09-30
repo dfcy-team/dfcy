@@ -12,6 +12,7 @@
             <el-checkbox label="最大记录数" value="max_records" />
             <el-checkbox label="重叠分钟数" value="overlap_minutes" />
             <el-checkbox label="定时计划" value="schedule" />
+            <el-checkbox label="单段执行预算" value="execution_budget_seconds" />
             <el-checkbox label="采集范围" value="query" />
             <el-checkbox v-if="jobs[0]?.resource_type === 'sales_order'" label="订单时间口径" value="collection_time_basis" />
           </el-checkbox-group>
@@ -22,6 +23,7 @@
         <el-form-item v-if="chosenFields.includes('max_pages')" label="单次最大页数"><el-input-number v-model="policy.max_pages" :min="1" :max="1000" /></el-form-item>
         <el-form-item v-if="chosenFields.includes('max_records')" label="单次最大记录数"><el-input-number v-model="policy.max_records" :min="1" :max="100000" /></el-form-item>
         <el-form-item v-if="chosenFields.includes('overlap_minutes')" label="重叠查询分钟数"><el-input-number v-model="policy.overlap_minutes" :min="0" :max="1440" /></el-form-item>
+        <el-form-item v-if="chosenFields.includes('execution_budget_seconds')" label="单段预算（秒）"><el-input-number v-model="policy.execution_budget_seconds" :min="60" :max="720" :step="60" :precision="0" /></el-form-item>
         <el-form-item v-if="chosenFields.includes('collection_time_basis')" label="订单时间口径"><el-select v-model="policy.collection_time_basis"><el-option label="创建时间" value="created" /><el-option label="更新时间" value="updated" /></el-select></el-form-item>
         <template v-if="chosenFields.includes('schedule')">
           <el-form-item label="调度方式"><el-select v-model="policy.schedule_type"><el-option label="手动" value="manual" /><el-option label="每小时" value="hourly" /><el-option label="固定间隔" value="interval" /><el-option label="每日" value="daily" /><el-option label="每周" value="weekly" /></el-select></el-form-item>
@@ -63,6 +65,7 @@ const outcome = ref(null);
 const policy = reactive({
   max_retry_count: 3, backoff_base_seconds: 1, query_page_size: 50, max_pages: 100, max_records: 50000,
   overlap_minutes: 5, collection_time_basis: 'created', schedule_type: 'manual', interval_minutes: 60,
+  execution_budget_seconds: 300,
   local_time: '02:00', weekdays: [1, 2, 3, 4, 5, 6, 7], timezone: 'Asia/Shanghai', catch_up: 'skip',
   query_mode: 'incremental', lookback_days: 30, range_start_at: null, range_end_at: null,
 });

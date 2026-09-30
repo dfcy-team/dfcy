@@ -30,7 +30,7 @@ init_compose
 
 backend_service=${PRODUCTION_BACKEND_SERVICE:-backend}
 frontend_service=${PRODUCTION_FRONTEND_SERVICE:-frontend}
-required_services_csv=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
+required_services_csv=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-control,celery-beat,frontend}
 
 is_running() {
   local service=$1 container status health

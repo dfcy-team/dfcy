@@ -169,14 +169,14 @@ frontend_revision=$(docker image inspect "$frontend_image" --format '{{ index .C
 [ "$backend_revision" = "$git_sha" ] || fail "Backend OCI revision does not match SANDBOX_RELEASE_GIT_SHA."
 [ "$frontend_revision" = "$git_sha" ] || fail "Frontend OCI revision does not match SANDBOX_RELEASE_GIT_SHA."
 
-docker compose --env-file "$env_file" -f "$compose_file" create redis backend celery celery-beat frontend
+docker compose --env-file "$env_file" -f "$compose_file" create redis backend celery celery-control celery-beat frontend
 [ -x "$network_script" ] || fail "Missing executable network policy script: $network_script"
 run_privileged "$network_script" "$network_policy_file"
 
 docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 redis
 docker compose --env-file "$env_file" -f "$compose_file" run --rm migrate
 "$script_dir/register-sandbox-environment.sh"
-docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 backend celery celery-beat frontend
+docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 backend celery celery-control celery-beat frontend
 docker compose --env-file "$env_file" -f "$compose_file" ps
 
 "$script_dir/verify-sandbox.sh"

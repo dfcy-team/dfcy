@@ -19,7 +19,7 @@ function rangeValue(value) {
 
 export function buildBulkSyncJobPayload(fields, policy) {
   const payload = {};
-  for (const key of ['max_retry_count', 'backoff_base_seconds', 'query_page_size', 'max_pages', 'max_records', 'overlap_minutes', 'collection_time_basis']) {
+  for (const key of ['max_retry_count', 'backoff_base_seconds', 'query_page_size', 'max_pages', 'max_records', 'overlap_minutes', 'collection_time_basis', 'execution_budget_seconds']) {
     if (fields.includes(key)) payload[key] = policy[key];
   }
   if (fields.includes('schedule')) {

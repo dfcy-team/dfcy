@@ -61,7 +61,29 @@ services:
     image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
     env_file:
       - ${PILOT_ENV_FILE:-.env.pilot}
-    command: celery -A config worker --loglevel=info
+    command: celery -A config worker --queues=sync,celery --concurrency=2 --prefetch-multiplier=1 --hostname=business@%h --loglevel=info
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
+      PILOT_RUNNER_URL: ${PILOT_RUNNER_URL:?Set PILOT_RUNNER_URL in .env.pilot}
+      PILOT_RUNNER_ALLOWED_HOSTS: ${PILOT_RUNNER_ALLOWED_HOSTS:?Set PILOT_RUNNER_ALLOWED_HOSTS in .env.pilot}
+      PILOT_RUNNER_TOKEN_FILE: /run/secrets/pilot-runner.token
+      PILOT_RUNNER_CA_FILE: /run/secrets/pilot-runner-ca.pem
+    volumes:
+      - ${PILOT_OPENAI_API_KEY_PATH:?Set PILOT_OPENAI_API_KEY_PATH in .env.pilot}:/run/secrets/openai-api.key:ro
+      - ${PILOT_RUNNER_TOKEN_PATH:?Set PILOT_RUNNER_TOKEN_PATH in .env.pilot}:/run/secrets/pilot-runner.token:ro
+      - ${PILOT_RUNNER_CA_PATH:?Set PILOT_RUNNER_CA_PATH in .env.pilot}:/run/secrets/pilot-runner-ca.pem:ro
+    networks:
+      - pilot-internal
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  celery-control:
+    image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
+    env_file:
+      - ${PILOT_ENV_FILE:-.env.pilot}
+    command: celery -A config worker --queues=sync-control --concurrency=1 --prefetch-multiplier=1 --hostname=control@%h --loglevel=info
     restart: unless-stopped
     environment:
       OPENAI_API_KEY_FILE: /run/secrets/openai-api.key

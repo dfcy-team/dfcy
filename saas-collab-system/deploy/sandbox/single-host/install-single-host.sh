@@ -170,7 +170,7 @@ frontend_revision=$(docker image inspect "$frontend_image" --format '{{ index .C
 [ "$frontend_revision" = "$git_sha" ] || fail "Frontend OCI revision does not match SANDBOX_RELEASE_GIT_SHA."
 
 # create first so both bridge networks exist before either host firewall policy is applied
-docker compose --env-file "$env_file" -f "$compose_file" create mysql redis backend celery celery-beat frontend
+docker compose --env-file "$env_file" -f "$compose_file" create mysql redis backend celery celery-control celery-beat frontend
 [ -x "$network_dir/apply-db-policy.sh" ] || fail "Missing executable database network policy script."
 [ -x "$network_dir/apply-app-policy.sh" ] || fail "Missing executable application network policy script."
 run_privileged "$network_dir/apply-db-policy.sh" "$network_policy_file"
@@ -180,7 +180,7 @@ docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-tim
 docker compose --env-file "$env_file" -f "$compose_file" run --rm migrate
 [ -x "$register_environment" ] || fail "Missing Sandbox environment registration script."
 SANDBOX_RUNTIME_ENV_FILE="$env_file" SANDBOX_RUNTIME_COMPOSE_FILE="$compose_file" "$register_environment"
-docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 backend celery celery-beat frontend
+docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 backend celery celery-control celery-beat frontend
 [ -x "$network_verify" ] || fail "Missing executable network verification script."
 run_privileged "$network_verify" db "$network_policy_file"
 

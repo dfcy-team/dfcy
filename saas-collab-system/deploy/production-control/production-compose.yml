@@ -98,7 +98,47 @@ services:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
     env_file:
       - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
-    command: celery -A config worker --loglevel=info
+    command: celery -A config worker --queues=sync,celery --concurrency=2 --prefetch-multiplier=1 --hostname=business@%h --loglevel=info
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
+      PILOT_RUNNER_URL: ${PRODUCTION_RUNNER_URL:?PRODUCTION_RUNNER_URL is required}
+      PILOT_RUNNER_ALLOWED_HOSTS: ${PRODUCTION_RUNNER_ALLOWED_HOSTS:?PRODUCTION_RUNNER_ALLOWED_HOSTS is required}
+      PILOT_RUNNER_TOKEN_FILE: /run/secrets/pilot-runner.token
+      PILOT_RUNNER_CA_FILE: /run/secrets/pilot-runner-ca.pem
+      LIVE_CUSTODY_BACKEND: http
+      LIVE_CUSTODY_SERVICE_URL: https://custody-sidecar:8443
+      LIVE_CUSTODY_SERVICE_HOST: custody-sidecar
+      LIVE_CUSTODY_SERVICE_TOKEN_FILE: /run/secrets/custody-service.token
+      LIVE_CUSTODY_CA_FILE: /run/secrets/custody-ca.pem
+      PLATFORM_NETWORK_MODE: approved-live-test
+      LIVE_PLATFORM_SECURITY_APPROVED: "true"
+      LIVE_PLATFORM_ALLOWED_HOSTS: partner.shopeemobile.com,open.feishu.cn
+      LIVE_READONLY_SYNC_ENABLED: "true"
+      LIVE_OAUTH_REDIRECT_ALLOWLIST: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_REDIRECT_URI: https://xtsy.dingfengchuangyu.com/api/internal/integrations/store-authorizations/oauth/callback/shopee/
+      LIVE_SHOPEE_CONTRACT_APPROVED: "true"
+    volumes:
+      - ${PRODUCTION_OPENAI_API_KEY_PATH:?PRODUCTION_OPENAI_API_KEY_PATH is required}:/run/secrets/openai-api.key:ro
+      - ${PRODUCTION_RUNNER_TOKEN_PATH:?PRODUCTION_RUNNER_TOKEN_PATH is required}:/run/secrets/pilot-runner.token:ro
+      - ${PRODUCTION_RUNNER_CA_PATH:?PRODUCTION_RUNNER_CA_PATH is required}:/run/secrets/pilot-runner-ca.pem:ro
+      - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
+      - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
+    networks:
+      - production-internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      custody-sidecar:
+        condition: service_healthy
+
+  celery-control:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+    env_file:
+      - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
+    command: celery -A config worker --queues=sync-control --concurrency=1 --prefetch-multiplier=1 --hostname=control@%h --loglevel=info
     restart: unless-stopped
     environment:
       OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
