@@ -737,6 +737,7 @@ REPORT_TYPES = {
     "business_alerts",
     "finance_summary",
     "sales_details",
+    "self_service",
 }
 
 

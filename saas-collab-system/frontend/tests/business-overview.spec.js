@@ -1,7 +1,9 @@
 import { mount, flushPromises } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({ fetchBusinessOverview: vi.fn(), fetchBusinessFilters: vi.fn() }));
 vi.mock('../src/api/analytics', () => api);
+vi.mock('../src/api/reporting', () => ({ queryReport: vi.fn().mockResolvedValue({success:true,data:{rows:[],refreshed_at:null}}) }));
 import BusinessOverview from '../src/views/analytics/BusinessOverview.vue';
 
 const group = (currency, count, cancelled) => ({ currency, metrics: [
@@ -20,6 +22,7 @@ const render = () => mount(BusinessOverview, { global: { directives: { loading: 
   'el-empty': { props: ['description'], template: '<p>{{ description }}</p>' }
 } } });
 beforeEach(() => {
+  setActivePinia(createPinia());
   vi.clearAllMocks();
   api.fetchBusinessFilters.mockResolvedValue({ success: true, data: { platforms: ['shopee','tiktok'], stores: [{id:1,platform:'shopee'}, {id:2,platform:'tiktok'}] } });
   api.fetchBusinessOverview.mockResolvedValue({ success: true, data: { api_status:'connected', currency_groups:[group('PHP',100,5),group('THB',0,0)], results:[], count:0 } });

@@ -1,4 +1,5 @@
 import { mount, flushPromises } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { computed } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { normalizeInventoryAnalysisResponse } from '../src/api/uiP6Adapters';
@@ -25,6 +26,7 @@ const stubs = {
 
 describe('库存分析真实页面', () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     fetchInventoryAnalysis.mockReset();
     fetchInventoryAnalysis.mockResolvedValue(normalizeInventoryAnalysisResponse({ success: true, data: {
       api_status: 'connected', count: 965, warehouse_options: [{ value: 11, label: '测试仓（THCS）' }],
@@ -55,7 +57,7 @@ describe('库存分析真实页面', () => {
     page.vm.query.risk = 'low';
     await wrapper.find('form').trigger('submit');
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low' }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     wrapper.unmount();
   });
 
@@ -70,19 +72,19 @@ describe('库存分析真实页面', () => {
     const wrapper = mount(InventoryAnalysis, { global: { stubs } });
     await flushPromises();
     const checkbox = wrapper.find('.table-actions input[type="checkbox"]');
-    expect(checkbox.element.checked).toBe(true);
+    expect(checkbox.element.checked).toBe(false);
     const page = wrapper.findComponent(Phase3AnalyticsPage);
     page.vm.currentPage = 7;
     page.vm.query.risk = 'low';
-    await checkbox.setValue(false);
-    await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', include_virtual: false }));
-    page.vm.changePage(2);
-    await flushPromises();
-    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(false);
     await checkbox.setValue(true);
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, include_virtual: true }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', include_virtual: true }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    page.vm.changePage(2);
+    await flushPromises();
+    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(true);
+    await checkbox.setValue(false);
+    await flushPromises();
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, include_virtual: false }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     wrapper.unmount();
   });
 
@@ -95,10 +97,10 @@ describe('库存分析真实页面', () => {
     page.vm.query.risk = 'low';
     wrapper.findComponent(stubs['el-table']).vm.$emit('sort-change', { prop: 'on_hand_qty', order: 'descending' });
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', ordering: '-on_hand_qty' }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, risk: 'low', ordering: '-on_hand_qty' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     page.vm.changePage(2);
     await flushPromises();
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, ordering: '-on_hand_qty' }));
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, ordering: '-on_hand_qty' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     page.vm.changeSort({ prop: 'on_hand_qty', order: 'ascending' });
     await flushPromises();
     expect(fetchInventoryAnalysis.mock.lastCall[0].ordering).toBe('on_hand_qty');

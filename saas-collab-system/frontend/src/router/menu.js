@@ -670,9 +670,16 @@ export function filterMenuItems(user, items = menuItems) {
       const canSeeParent = moduleEnabled && (canAccessMenuItem(user, item) || children.length > 0);
       return children.length && canSeeParent ? [{ ...item, children }] : [];
     }
+    if (pendingReportPaths.includes(item.path)) return [];
     return canAccessMenuItem(user, item) ? [item] : [];
   });
 }
+
+export const pendingReportPaths = [
+  '/analytics/advertising-overview',
+  '/analytics/advertising-performance',
+  '/finance/advertising-reconciliation'
+];
 
 export function findMenuLabel(path, items = menuItems) {
   for (const item of items) {

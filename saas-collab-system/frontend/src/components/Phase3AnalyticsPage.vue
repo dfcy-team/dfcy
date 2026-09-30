@@ -91,7 +91,7 @@
             <el-tag effect="plain">{{ items.length }} 条</el-tag>
           </div>
         </div>
-        <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort">
+        <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort" @row-click="row => emit('row-click', row, appliedFilters)">
           <el-table-column
             v-for="column in columns"
             :key="column.prop"
@@ -126,7 +126,8 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { formatApiError } from '../api/request';
 
 const props = defineProps({
@@ -146,9 +147,11 @@ const props = defineProps({
   tableNote: { type: String, default: '' },
   emptyText: { type: String, default: '当前筛选条件下暂无数据' }
 });
-const emit = defineEmits(['reset']);
+const emit = defineEmits(['reset', 'row-click']);
+const appliedFilters = ref({});
 
 const query = reactive({});
+const route = useRoute();
 const loading = ref(false);
 const errorMessage = ref('');
 const apiStatus = ref('mock');
@@ -198,6 +201,11 @@ const maxTrendValue = computed(() => Math.max(...trend.value.map((point) => Numb
 function initializeFilters() {
   props.filters.forEach((filter) => {
     query[filter.key] = filter.defaultValue ?? (filter.type === 'daterange' ? [] : '');
+    const routeQuery = route?.query || {};
+    if (filter.type === 'daterange' && routeQuery.as_of === 'true' && routeQuery.date_to) query[filter.key] = [String(routeQuery.date_to), String(routeQuery.date_to)];
+    else if (filter.type === 'daterange' && (routeQuery.date_from || routeQuery.period_start) && (routeQuery.date_to || routeQuery.period_end)) query[filter.key] = [String(routeQuery.date_from || routeQuery.period_start), String(routeQuery.date_to || routeQuery.period_end)];
+    else if (routeQuery[filter.key] != null) query[filter.key] = String(routeQuery[filter.key]);
+    else if (filter.key === 'warehouse' && routeQuery.warehouse_id != null) query[filter.key] = String(routeQuery.warehouse_id);
   });
   currentPage.value = 1;
 }
@@ -314,6 +322,7 @@ async function loadData() {
   activeRequest = new AbortController();
   const controller = activeRequest;
   const sequence = ++loadSequence;
+  const submittedFilters = JSON.parse(JSON.stringify(query));
   loading.value = true;
   errorMessage.value = '';
   trendMessage.value = '';
@@ -335,6 +344,7 @@ async function loadData() {
       return;
     }
     const data = response.data || {};
+    appliedFilters.value = submittedFilters;
     reportData.value = data;
     apiStatus.value = data.api_status || data.status || 'mock';
     quality.value = data.quality || {};
@@ -363,6 +373,7 @@ async function loadData() {
 
 initializeFilters();
 onMounted(loadData);
+watch(() => route?.query, () => { initializeFilters(); loadData(); });
 onBeforeUnmount(() => activeRequest?.abort());
 </script>
 

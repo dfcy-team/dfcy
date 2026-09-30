@@ -151,6 +151,7 @@ class MetricAggregateQuerySerializer(PaginationQuerySerializer):
 
 
 class ReportExportRequestSerializer(serializers.ModelSerializer):
+    has_file = serializers.SerializerMethodField()
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     requested_by_id = serializers.IntegerField(source="requested_by.id", read_only=True)
     audit_count = serializers.IntegerField(source="audit_logs.count", read_only=True)
@@ -160,9 +161,12 @@ class ReportExportRequestSerializer(serializers.ModelSerializer):
         fields = (
             "id", "tenant_id", "report_type", "requested_by_id", "data_scope", "filters",
             "status", "row_count", "masked_file_reference", "rejection_reason", "requested_at",
-            "finished_at", "audit_count",
+            "finished_at", "audit_count", "has_file",
         )
         read_only_fields = fields
+
+    def get_has_file(self, obj):
+        return bool(obj.storage_key)
 
 
 class ReportExportCreateSerializer(serializers.Serializer):

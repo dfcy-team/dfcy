@@ -275,10 +275,10 @@ def test_overview_never_combines_currencies_and_refund_comes_from_refund_fact():
     assert next(metric for metric in selected["metrics"] if metric["code"] == "gross_sales")["value"] == "100"
     assert next(metric for metric in selected["metrics"] if metric["code"] == "cancelled_order_count")["value"] == "1"
     metrics = {metric["code"]: metric for metric in selected["metrics"]}
-    assert metrics["gross_sales"]["label"] == "销售额"
+    assert metrics["gross_sales"]["label"] == "非取消订单销售额"
     assert metrics["valid_order_count"]["label"] == "有效订单数"
-    assert metrics["average_order_value"]["label"] == "平均订单金额"
-    assert metrics["average_order_value"]["value"] == "45"
+    assert metrics["average_order_value"]["label"] == "非取消订单均额"
+    assert metrics["average_order_value"]["value"] == "100"
     assert metrics["refund_rate"]["label"] == "退款率"
 
 

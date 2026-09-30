@@ -182,6 +182,7 @@ class SalesOrderDetailSerializer(SalesOrderSerializer):
 
 
 class InventorySnapshotSerializer(serializers.ModelSerializer):
+    internal_sku_id = serializers.IntegerField(read_only=True)
     warehouse_id = serializers.IntegerField()
     warehouse_code = serializers.CharField(source="warehouse.code", read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
@@ -199,6 +200,7 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
             "warehouse_code",
             "warehouse_name",
             "internal_sku",
+            "internal_sku_id",
             "product_name",
             "source_sku",
             "platform_product_id",

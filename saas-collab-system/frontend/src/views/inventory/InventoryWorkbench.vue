@@ -5,7 +5,7 @@
         <h1>库存工作台</h1>
         <p>按业务视角核查极风 WMS 库存；所有数量均来自有权查看的最新快照。</p>
       </div>
-      <el-button :loading="loading" @click="load">刷新数据</el-button>
+      <BusinessDashboardLink module="库存管理" /><el-button :loading="loading" @click="load">刷新数据</el-button>
     </header>
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="workbench-message" />
@@ -97,6 +97,7 @@
 </template>
 
 <script setup>
+import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
 import { formatApiError } from '../../api/request';

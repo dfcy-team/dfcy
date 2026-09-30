@@ -409,6 +409,25 @@ class MetricAggregateLineage(models.Model):
         return f"{self.aggregate_id}:{self.source_table}:{self.source_batch}"
 
 
+class SavedReportView(models.Model):
+    """A view shares configuration only; every query rechecks the viewer's scope."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="saved_report_views")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_report_views")
+    name = models.CharField(max_length=100)
+    config = models.JSONField(default=dict)
+    is_shared = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-id"]
+        indexes = [models.Index(fields=["tenant", "owner"], name="idx_saved_report_owner")]
+
+    def clean(self):
+        if self.owner_id and self.owner.tenant_id != self.tenant_id:
+            raise ValidationError("Report owner must belong to the same tenant.")
+
+
 class ReportExportRequestQuerySet(models.QuerySet):
     def update(self, **kwargs):
         raise ValidationError("Report exports require the audited export service.")
@@ -432,6 +451,7 @@ class ReportExportRequest(models.Model):
         BUSINESS_ALERTS = "business_alerts", "Business alerts"
         FINANCE_SUMMARY = "finance_summary", "Finance summary"
         SALES_DETAILS = "sales_details", "Sales details"
+        SELF_SERVICE = "self_service", "Self-service report"
 
     class Status(models.TextChoices):
         COMPLETED = "completed", "Completed"
@@ -445,6 +465,7 @@ class ReportExportRequest(models.Model):
         related_name="report_export_requests",
     )
     data_scope = models.JSONField(default=list, blank=True)
+    source_scope = models.JSONField(default=dict, blank=True)
     filters = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices)
     row_count = models.PositiveIntegerField(default=0)

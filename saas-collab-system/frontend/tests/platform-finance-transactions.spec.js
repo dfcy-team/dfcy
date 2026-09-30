@@ -19,6 +19,11 @@ describe('平台账单财务流水展示', () => {
     expect(api).toContain('requestApi');
     expect(page).toContain('period_start:');
     expect(page).toContain('external_order_id:');
+    expect(page).toContain('platforms: filters.platforms || undefined');
+    expect(page).toContain('store_ids: filters.store_ids || undefined');
+    expect(page).toContain('raw_fee_name: filters.raw_fee_name || undefined');
+    expect(page).toContain('if (sequence !== requestSequence) return;');
+    expect(page).toContain("'store_ids','platforms','raw_fee_name'");
     expect(page).toContain('v-model:current-page="pagination.page"');
   });
 });

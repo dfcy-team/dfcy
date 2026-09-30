@@ -86,9 +86,9 @@ def test_reports_count_orders_once_and_do_not_mix_cancelled_or_foreign_facts():
     assert len(overview['order_daily']) == 1
     daily = overview['order_daily'][0]
     assert daily['order_count'] == 2 and daily['valid_order_count'] == 1
-    assert Decimal(str(daily['average_order_value'])) == 75
+    assert Decimal(str(daily['average_order_value'])) == 100
     business = business_daily_rows(SalesOrder.objects.filter(tenant=tenant), RefundReturn.objects.filter(tenant=tenant))[0]
-    assert business['units_sold'] == 5
+    assert business['units_sold'] == 3
     assert business['order_count'] == 2
     assert business['cancellation_rate'] == Decimal('0.5')
     assert business['refund_rate'] == Decimal('0.2')
