@@ -90,6 +90,7 @@
         <el-table-column prop="resource_type" label="资源类型" min-width="150">
           <template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template>
         </el-table-column>
+        <el-table-column label="当前计划摘要" min-width="310"><template #default="{ row }"><div>{{ syncPlanSummary(row) }}</div><small class="schedule-rule">下次执行（北京时间）：{{ syncBeijingTime(row.next_run_at) }}</small></template></el-table-column>
         <el-table-column prop="health_state" label="任务健康" min-width="120">
           <template #default="{ row }">
             <el-tag :type="stateTagType(row.health_state)" effect="plain">{{ stateLabel(row.health_state) }}</el-tag>
@@ -101,7 +102,6 @@
           </template>
         </el-table-column>
         <el-table-column label="启停状态" width="100"><template #default="{ row }">{{ row.is_enabled ? '启用' : '停用' }}</template></el-table-column>
-        <el-table-column label="定时规则" min-width="185"><template #default="{ row }">{{ schedules[row.schedule_type] || '—' }}<small v-if="row.schedule_type !== 'manual'" class="schedule-rule">{{ row.schedule_type === 'interval' || row.schedule_type === 'hourly' ? `每 ${row.interval_minutes} 分钟` : `${row.local_time} · ${row.timezone}` }}{{ row.schedule_type === 'weekly' ? ` · 周 ${row.weekdays.join('、')}` : '' }}</small></template></el-table-column>
         <el-table-column label="调度状态" min-width="110"><template #default="{ row }">{{ { disabled: '已停用', paused: '已暂停', queued: '排队中', running: '运行中', retry_waiting: '等待重试', blocked: '配置阻塞', due: '等待派发', scheduled: '等待执行', unscheduled: '未安排', manual: '手动', retry_exhausted: '重试耗尽' }[row.schedule_state] || '—' }}</template></el-table-column>
         <el-table-column label="最近结果" width="110"><template #default="{ row }"><el-button v-if="row.latest_run_pk" link type="primary" @click="viewRuns(row, true)">{{ runStates[row.latest_run_status] || '—' }}</el-button><span v-else>尚未运行</span></template></el-table-column>
         <el-table-column label="最近真实成功（UTC）" min-width="185"><template #default="{ row }">{{ syncTime(row.last_success_at) }}</template></el-table-column>
@@ -109,9 +109,6 @@
           <template #default="{ row }">{{ row.blocked_reason || '—' }}<el-button v-if="row.blocked_reason" link type="primary" @click="configRow = row; configOpen = true">检查配置</el-button></template>
         </el-table-column>
 
-        <el-table-column prop="next_run_at" label="下次执行（UTC）" min-width="180">
-          <template #default="{ row }">{{ syncTime(row.next_run_at) }}</template>
-        </el-table-column>
         <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button
@@ -200,7 +197,7 @@ import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import CreateSyncJob from '../../components/CreateSyncJob.vue';
 import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
-import { syncTime, syncError, runStates, schedules, resources } from '../../utils/syncPresentation';
+import { syncTime, syncBeijingTime, syncPlanSummary, syncError, runStates, schedules, resources } from '../../utils/syncPresentation';
 import { syncRequestId } from '../../utils/syncRequestId';
 import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
