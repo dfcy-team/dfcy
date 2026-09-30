@@ -2,8 +2,8 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import Case, Count, F, Max, OuterRef, Q, Subquery, Sum, Value, When, Window
-from django.db.models.functions import Coalesce, RowNumber, TruncDate
+from django.db.models import Case, Count, F, Max, OuterRef, Q, Subquery, Sum, Value, When
+from django.db.models.functions import Coalesce, TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -1073,14 +1073,16 @@ def inventory_workbench_payload(request, permission_code):
         source_run_id__in=source_run_ids,
     )
     source = filter_inventory_queryset(request.user, permission_code, source)
-    latest_ids = source.annotate(
-        snapshot_rank=Window(
-            expression=RowNumber(),
-            partition_by=[F("site_code"), F("warehouse_id"), F("source_sku")],
-            order_by=[F("snapshot_at_utc").desc(), F("id").desc()],
-        )
-    ).filter(snapshot_rank=1).values("pk")
-    latest = source.filter(pk__in=Subquery(latest_ids))
+    # The composite identity index can find one latest row per SKU without
+    # materializing and sorting every historical snapshot in a window query.
+    latest_snapshot = InventorySnapshot.objects.filter(
+        tenant=request.user.tenant,
+        source_run_id__in=source_run_ids,
+        site_code=OuterRef("site_code"),
+        warehouse_id=OuterRef("warehouse_id"),
+        source_sku=OuterRef("source_sku"),
+    ).order_by("-snapshot_at_utc", "-id")
+    latest = source.filter(pk=Subquery(latest_snapshot.values("pk")[:1]))
     if include_virtual == "false":
         latest = latest.exclude(internal_sku__inventory_type="virtual")
 
@@ -1128,22 +1130,35 @@ def inventory_workbench_payload(request, permission_code):
         for row in warehouse_rows
     ]
 
-    daily_ids = source.annotate(
-        date=TruncDate("snapshot_at_utc", tzinfo=UTC),
-        snapshot_rank=Window(
-            expression=RowNumber(),
-            partition_by=[F("site_code"), F("warehouse_id"), F("source_sku"), F("date")],
-            order_by=[F("snapshot_at_utc").desc(), F("id").desc()],
-        ),
-    ).filter(snapshot_rank=1).values("pk")
-    daily = source.filter(pk__in=Subquery(daily_ids))
-    if include_virtual == "false":
-        daily = daily.exclude(internal_sku__inventory_type="virtual")
-    daily_rows = list(daily.annotate(date=TruncDate("snapshot_at_utc", tzinfo=UTC)).values("date").annotate(
-        total=Coalesce(Sum("on_hand_qty"), 0),
-        available=Coalesce(Sum("available_qty"), 0),
-        reserved=Coalesce(Sum("reserved_qty"), 0),
-    ).order_by("-date")[:14])
+    observed_days = []
+    day_upper_bound = None
+    for _ in range(14):
+        dated_source = source.filter(snapshot_at_utc__lt=day_upper_bound) if day_upper_bound else source
+        last_snapshot_at = dated_source.order_by("-snapshot_at_utc").values_list(
+            "snapshot_at_utc", flat=True
+        ).first()
+        if last_snapshot_at is None:
+            break
+        observed_day = last_snapshot_at.astimezone(UTC).date()
+        observed_days.append(observed_day)
+        day_upper_bound = datetime.combine(observed_day, time.min, tzinfo=UTC)
+    daily_rows = []
+    if observed_days:
+        # Bound the daily calculation before selecting each SKU's final row.
+        # Sparse histories still retain the last 14 observed UTC days.
+        daily = source.filter(
+            snapshot_at_utc__gte=datetime.combine(observed_days[-1], time.min, tzinfo=UTC)
+        ).annotate(date=TruncDate("snapshot_at_utc", tzinfo=UTC))
+        daily = daily.filter(
+            pk=Subquery(latest_snapshot.filter(snapshot_at_utc__date=OuterRef("date")).values("pk")[:1])
+        )
+        if include_virtual == "false":
+            daily = daily.exclude(internal_sku__inventory_type="virtual")
+        daily_rows = list(daily.values("date").annotate(
+            total=Coalesce(Sum("on_hand_qty"), 0),
+            available=Coalesce(Sum("available_qty"), 0),
+            reserved=Coalesce(Sum("reserved_qty"), 0),
+        ).order_by("-date")[:14])
     trend = [
         {"date": row["date"].isoformat(), "total": row["total"], "available": row["available"], "reserved": row["reserved"]}
         for row in reversed(daily_rows)
